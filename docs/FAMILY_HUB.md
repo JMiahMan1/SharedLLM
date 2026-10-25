@@ -21,7 +21,7 @@ This page reuses existing systems and must not grow parallel copies:
 | Chores & rewards | Skylight integration (`/api/integrations/skylight/*`) |
 
 The Family page's **Announce** tab (timers and spoken announcements) hosts no
-chat, calendar or notes of its own — timers and announcements are the whole
+chat, calendar or notes of its own - timers and announcements are the whole
 panel. Its tests assert the old copies are gone (its notes editor appended the
 whole note to itself on every save; its calendar only printed "Loaded N
 events"), and the tab no longer links out to `/calendar` or `/notes` either.
@@ -43,8 +43,8 @@ events"), and the tab no longer links out to `/calendar` or `/notes` either.
   (`jarvis:talk:answered:<token>:<id>`); the gateway's Talk monitor answers
   `@jarvis` typed in other Talk apps (rooms the system account is in) and
   skips claimed messages. Either path leads with a live snapshot of the room's
-  recent messages — Jarvis's own replies come back as plain answers, everyone
-  else as "Name: what they said" — so answers follow the conversation;
+  recent messages - Jarvis's own replies come back as plain answers, everyone
+  else as "Name: what they said" - so answers follow the conversation;
   the stored per-room transcript (last ten turns, two hours) is the fallback
   when the conversation cannot be read, and personal chat history stays separate.
 - **Phone notifications** for new family messages (no outside push service):
@@ -154,7 +154,7 @@ earned, only when `FAMILY_CHAT_TOKEN` names a room.
 - `src/test/ChatFeatures.test.tsx`: envelopes, replies, edits, attachments,
   "Show earlier messages".
 - `src/components/family/AnnouncementsPanel.test.tsx`: timers and announcements
-  only — no calendar, notes or chat copies anywhere in the panel.
+  only - no calendar, notes or chat copies anywhere in the panel.
 - `services/gateway/tests/test_talk_monitor.py`: the monitor answers other
   Talk apps and skips questions the app already claimed.
 - `services/execution/tests/test_family_games.py` and `test_talk_games.py` for games;
@@ -195,7 +195,7 @@ never wanders off mid-game:
   time. A pair stays up; a miss flips back.
 
 The roster is locked when a session starts, taken from the room's participant
-list — the bot and anyone joining later sit the session out, and a display name
+list - the bot and anyone joining later sit the session out, and a display name
 and an account id resolve to the same player. One game per room, a leaderboard
 in every card, and `FAMILY_GAMES_ENABLED` must be set or the bot refuses to
 start; compose enables it by default (`FAMILY_GAMES_ENABLED=1`) and an operator
@@ -277,7 +277,7 @@ Because notes resolve to the caller's own account, an admin can flip the same
 other member keeps their own. Non-admins never see the control.
 
 The first 120 imported recipes are level-tagged notes (`#level-1` … `#level-3`).
-A recipe can be shared straight into a family chat — the message is a short
+A recipe can be shared straight into a family chat - the message is a short
 `🍽 title: excerpt` with an optional note, sent through the same sheet the
 Bible reader uses. The header's **Teach Jarvis** button runs the notes RAG sync
 over `Recipes/` so Jarvis can answer from the shelf. A **Week plan** button
@@ -288,7 +288,7 @@ week's ingredients into `Recipes/Shopping list.md`, a tickable checklist that ke
 already ticked when it is rebuilt. **Import a link** reads a recipe page's published
 schema.org data: paste the URL, preview the ingredients and steps, and **Save to Recipes**
 adds it with guessed level labels and a source line. When a link is not to hand, the same
-panel **searches recipes** — the built-in offline index over the whole CC0 Food.com corpus
+panel **searches recipes** - the built-in offline index over the whole CC0 Food.com corpus
 answers instantly and a pick reads its full ingredients and steps locally; TheMealDB fills
 in the rest with photos, saved with attribution to themealdb.com. A name filter above the
 shelf narrows the list as you type; the week plan, shopping list and import all pick from

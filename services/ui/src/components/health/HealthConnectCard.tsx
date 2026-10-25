@@ -171,7 +171,7 @@ export default function HealthConnectCard() {
         <div className="space-y-2 text-xs text-slate-300">
           <p>
             Bring in sleep, resting heart rate, HRV, weight and walks, runs and rides from a watch, scale or other app
-            through Health Connect. Steps are not imported — this phone already counts them.
+            through Health Connect. Steps are not imported - this phone already counts them.
           </p>
           <button
             type="button"

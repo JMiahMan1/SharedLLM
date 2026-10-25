@@ -16,7 +16,7 @@ const BODY = [
   '- [ ] beans',
   '',
   '## Nutrition',
-  '*Per serving, as stated by the submitter — foodcom:* 400 kcal · 10 g fat · 600 mg sodium · 50 g carbs · 8 g fiber · 4 g sugar · 20 g protein',
+  '*Per serving, as stated by the submitter - foodcom:* 400 kcal · 10 g fat · 600 mg sodium · 50 g carbs · 8 g fiber · 4 g sugar · 20 g protein',
 ].join('\n');
 
 const wrap = (ui: ReactElement) =>
@@ -83,7 +83,7 @@ describe('LogRecipeSheet', () => {
       <LogRecipeSheet
         title="Soup"
         path="Recipes/Soup.md"
-        body={'## Nutrition\n*Per serving — foodcom:* 200 kcal · 4 g fat'}
+        body={'## Nutrition\n*Per serving - foodcom:* 200 kcal · 4 g fat'}
         onClose={vi.fn()}
       />,
     );

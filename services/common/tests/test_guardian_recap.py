@@ -22,8 +22,8 @@ def test_a_full_week():
         _usage("2026-10-20", 180, [("com.google.android.youtube", 100)]),
     ]
     events = [
-        {"feature": "media", "item": "Lecrae — Blessings", "at": "2026-10-19T20:00:00Z"},
-        {"feature": "media", "item": "Lecrae — Blessings", "at": "2026-10-20T20:00:00Z"},
+        {"feature": "media", "item": "Lecrae - Blessings", "at": "2026-10-19T20:00:00Z"},
+        {"feature": "media", "item": "Lecrae - Blessings", "at": "2026-10-20T20:00:00Z"},
         {"feature": "web", "item": "tiktok.com", "at": "2026-10-20T21:00:00Z", "detail": {"visits": 0, "blocked": 3}},
         {"feature": "web", "item": "khanacademy.org", "at": "2026-10-20T21:00:00Z", "detail": {"visits": 12, "blocked": 0}},
         {"feature": "sms", "item": "Grandma", "at": "2026-10-21T10:00:00Z", "detail": {"body": "secret text"}},
@@ -41,7 +41,7 @@ def test_a_full_week():
     assert r["screen"] == {"total_min": 300, "daily_avg_min": 150, "days_reported": 2, "prev_total_min": 60,
                            "change_pct": 400, "busiest_day": "2026-10-20", "busiest_min": 180, "late_nights": 0}
     assert r["top_apps"][0] == {"package": "com.google.android.youtube", "minutes": 170}
-    assert r["media"] == [{"title": "Lecrae — Blessings", "count": 2}]
+    assert r["media"] == [{"title": "Lecrae - Blessings", "count": 2}]
     assert r["web"] == {"top": [{"domain": "khanacademy.org", "visits": 12}], "blocked": [{"domain": "tiktok.com", "count": 3}]}
     assert r["comms"] == {"calls": 1, "call_contacts": 1, "messages": 2, "message_contacts": 1}
     assert "secret text" not in str(r["comms"])

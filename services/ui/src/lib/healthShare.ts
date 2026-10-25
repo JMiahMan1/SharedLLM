@@ -25,7 +25,7 @@ export function healthDayLines({ summary, steps }: ShareableDay): string[] {
   }
   if (on('steps') && steps !== null && steps > 0) lines.push(`👟 ${steps.toLocaleString()} steps so far`);
   if (on('water') && summary.water.logged) {
-    lines.push(`💧 ${summary.water.ml.toLocaleString()} ml of water${summary.water.percent !== null && summary.water.percent >= 100 ? ' — goal reached' : ''}`);
+    lines.push(`💧 ${summary.water.ml.toLocaleString()} ml of water${summary.water.percent !== null && summary.water.percent >= 100 ? ' - goal reached' : ''}`);
   }
   const energy = summary.checkin?.energy;
   if (on('checkin') && energy) lines.push(`⚡ Feeling ${CHECKIN_WORDS[energy].toLowerCase()}`);

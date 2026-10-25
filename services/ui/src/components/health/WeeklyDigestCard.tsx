@@ -62,7 +62,7 @@ export default function WeeklyDigestCard() {
         </h3>
         {data && (
           <span className="text-[10px] text-slate-500">
-            {formatDayLabel(data.start)} – {formatDayLabel(data.end)}
+            {formatDayLabel(data.start)} - {formatDayLabel(data.end)}
           </span>
         )}
       </div>

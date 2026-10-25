@@ -5,10 +5,10 @@ Assistant, the desktop GPU box). When one of them wedges, every caller sees a
 different failure: a hang, a 502, an empty body. These helpers turn all of that
 into one classified answer an admin notice or a diagnostics script can print:
 
-* ``OK``         — answered with an expected status.
-* ``UNAVAILABLE`` — no URL is configured for this service.
-* ``UNREACHABLE`` — timed out or the connection failed (DNS, refused, reset).
-* ``ERROR``       — answered HTTP with an unexpected status.
+* ``OK``         - answered with an expected status.
+* ``UNAVAILABLE`` - no URL is configured for this service.
+* ``UNREACHABLE`` - timed out or the connection failed (DNS, refused, reset).
+* ``ERROR``       - answered HTTP with an unexpected status.
 
 A probe never raises: a bad service must not take the caller down with it.
 """

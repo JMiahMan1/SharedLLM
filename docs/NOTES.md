@@ -25,7 +25,7 @@ grid of colour-coded cards with checklists, search, and a full editor.
 Recipes (`pages/Recipes.tsx`, `Recipes/` folder) use the same actions. The
 dashboard `QuickNotesWidget` shows recent titles. The Announce panel's old
 second editor (whose Save called `append`) is gone, and its notes shortcut went
-with it — Notes lives here and in the nav.
+with it - Notes lives here and in the nav.
 
 ## Actions
 

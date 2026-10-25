@@ -83,7 +83,7 @@ describe('formatting', () => {
     expect(formatMinutes(450)).toBe('7h 30m');
     expect(formatMinutes(60)).toBe('1h');
     expect(formatMinutes(45)).toBe('45m');
-    expect(formatMinutes(null)).toBe('—');
+    expect(formatMinutes(null)).toBe('-');
   });
 
   it('formats a sleep window', () => {

@@ -35,7 +35,7 @@ export default function GuidanceCard({ username, name }: { username: string; nam
             <li key={p.signal} className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-1.5" data-testid={`guidance-${p.signal}`}>
               <p className="text-xs font-semibold text-white">{p.title}</p>
               <p className="text-xs text-slate-300">{p.prayer}</p>
-              <p className="text-[11px] italic text-amber-200/90">“{p.verse}” — {p.ref}</p>
+              <p className="text-[11px] italic text-amber-200/90">“{p.verse}” - {p.ref}</p>
               <p className="text-[11px] text-slate-400">Try: “{p.starter}”</p>
               <button
                 type="button"

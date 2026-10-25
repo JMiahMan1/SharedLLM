@@ -10,7 +10,7 @@ child, sexual exploitation) pages both parents at once; ``high`` (bullying,
 drugs, sexual content, secrecy with someone) and ``medium`` (alcohol,
 vaping, gambling) wait for the weekly recap. A parent's per-child
 sensitivity decides what pages them: ``all`` (high and severe), ``severe``
-(the default) or ``off`` — severe self-harm and exploitation always page.
+(the default) or ``off`` - severe self-harm and exploitation always page.
 
 Phrases match on word boundaries, case-insensitively; a hit returns a short
 excerpt around it so a parent sees the context, not just a label. A local

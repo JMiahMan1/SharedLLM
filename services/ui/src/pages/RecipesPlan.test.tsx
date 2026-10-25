@@ -203,7 +203,7 @@ describe('Recipes week plan', () => {
         }
         return {
           status: 'SUCCESS' as const,
-          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving — foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
+          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving - foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
           service: 'note_read',
         };
       }) as never,
@@ -229,7 +229,7 @@ describe('Recipes week plan', () => {
         }
         return {
           status: 'SUCCESS' as const,
-          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving — foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
+          message: '# Pancakes\nCategory: Recipes\n\n## Nutrition\n*Per serving - foodcom:* 300 kcal · 9 g fat · 45 g carbs · 8 g protein',
           service: 'note_read',
         };
       }) as never,

@@ -64,7 +64,7 @@ function usage(username: string) {
 const ACTIVITY = {
   status: 'SUCCESS',
   events: [
-    { user: 'sam', feature: 'media', item: 'Lecrae — Blessings', action: 'play', at: new Date(Date.now() - 20 * 60000).toISOString() },
+    { user: 'sam', feature: 'media', item: 'Lecrae - Blessings', action: 'play', at: new Date(Date.now() - 20 * 60000).toISOString() },
     { user: 'sam', feature: 'web', item: 'khanacademy.org', action: 'visit', at: new Date(Date.now() - 50 * 60000).toISOString(), detail: { visits: 4 } },
     { user: 'sam', feature: 'web', item: 'tiktok.com', action: 'blocked', at: new Date(Date.now() - 70 * 60000).toISOString(), detail: { blocked: 1 } },
     { user: 'sam', feature: 'bible', item: 'Psalm 23', action: 'read', at: new Date(Date.now() - 26 * 3600000).toISOString() },

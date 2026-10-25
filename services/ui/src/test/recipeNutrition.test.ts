@@ -16,7 +16,7 @@ const IMPORTED = [
   '- [ ] 2 lb beef',
   '',
   '## Nutrition',
-  '*Per serving, as stated by the submitter — foodcom:* 350.2 kcal · 12 g fat · 3.1 g sat fat · 45 mg cholesterol · 600 mg sodium · 30 g carbs · 2 g fiber · 5 g sugar · 25 g protein',
+  '*Per serving, as stated by the submitter - foodcom:* 350.2 kcal · 12 g fat · 3.1 g sat fat · 45 mg cholesterol · 600 mg sodium · 30 g carbs · 2 g fiber · 5 g sugar · 25 g protein',
   '',
 ].join('\n');
 
@@ -38,13 +38,13 @@ describe('parseRecipeNutrition', () => {
   });
 
   it('does not take saturated fat for fat', () => {
-    const body = '## Nutrition\n*Per serving — foodcom:* 3 g sat fat · 200 kcal · 9 g fat · 10 g carbs · 4 g protein';
+    const body = '## Nutrition\n*Per serving - foodcom:* 3 g sat fat · 200 kcal · 9 g fat · 10 g carbs · 4 g protein';
     const result = parseRecipeNutrition(body);
     expect(result.status === 'ok' && result.perServing.fat_g).toBe(9);
   });
 
   it('tolerates units repeated from page data and leaves unstated extras null', () => {
-    const body = '## Nutrition\n*Per serving, as stated by the submitter — foodcom:* 410 kcal · 15.5 g g fat · 40 g g carbs · 22 g g protein';
+    const body = '## Nutrition\n*Per serving, as stated by the submitter - foodcom:* 410 kcal · 15.5 g g fat · 40 g g carbs · 22 g g protein';
     const result = parseRecipeNutrition(body);
     expect(result).toMatchObject({ status: 'ok', perServing: { calories: 410, fat_g: 15.5, carbs_g: 40, protein_g: 22 } });
     expect(result.status === 'ok' && result.perServing.fiber_g).toBeNull();
@@ -56,14 +56,14 @@ describe('parseRecipeNutrition', () => {
   });
 
   it('names what is absent instead of filling a zero', () => {
-    expect(parseRecipeNutrition('## Nutrition\n*Per serving — foodcom:* 300 kcal · 10 g fat')).toEqual({
+    expect(parseRecipeNutrition('## Nutrition\n*Per serving - foodcom:* 300 kcal · 10 g fat')).toEqual({
       status: 'incomplete',
       missing: ['protein', 'carbs'],
     });
   });
 
   it('stops at the next heading', () => {
-    const body = '## Nutrition\n\n## Notes\n*Per serving — foodcom:* 300 kcal · 10 g fat · 5 g carbs · 3 g protein';
+    const body = '## Nutrition\n\n## Notes\n*Per serving - foodcom:* 300 kcal · 10 g fat · 5 g carbs · 3 g protein';
     expect(parseRecipeNutrition(body)).toEqual({ status: 'missing' });
   });
 });

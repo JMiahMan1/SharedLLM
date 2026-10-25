@@ -44,7 +44,7 @@ export default function OfflineCodeSetting() {
           inputMode="numeric"
           autoComplete="new-password"
           aria-label="New offline unlock code"
-          placeholder={data.set ? 'New code' : '6–12 digits'}
+          placeholder={data.set ? 'New code' : '6-12 digits'}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 12))}
           className="w-32 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"

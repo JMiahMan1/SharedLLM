@@ -29,7 +29,7 @@ describe('familyChallenge', () => {
     const text = challengeShareText(challenge(), (id) => (id === 'kid' ? 'Sam' : id), 'Go team');
     const lines = text.split('\n');
     expect(lines[0]).toBe('Go team');
-    expect(lines[2]).toMatch(/^🏆 Family challenge: Water goal days — 5 days this week/);
+    expect(lines[2]).toMatch(/^🏆 Family challenge: Water goal days - 5 days this week/);
     expect(lines[3]).toBe('1. Sam · 5 of 5 days ✓');
     expect(lines[4]).toBe('2. dad · 2 of 5 days');
     expect(lines[5]).toBe('Join it on Health → Today.');

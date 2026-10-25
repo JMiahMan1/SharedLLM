@@ -53,7 +53,7 @@ const Health = () => {
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold text-white sm:text-2xl">Health</h1>
             <p className="mt-0.5 text-xs text-slate-400">
-              Readiness, sleep, food and the activity your phone records — one day, one screen.
+              Readiness, sleep, food and the activity your phone records - one day, one screen.
             </p>
           </div>
         </div>

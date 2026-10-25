@@ -15,7 +15,7 @@ const PAGE_FEATURES: Record<string, string> = {
   '/settings': 'settings',
 };
 
-/** The feature name a path belongs to — first segment when it is not mapped. */
+/** The feature name a path belongs to - first segment when it is not mapped. */
 export function featureForPath(pathname: string): string {
   const base = (pathname.split('?')[0].replace(/\/+$/, '') || '/').toLowerCase();
   if (PAGE_FEATURES[base]) return PAGE_FEATURES[base];

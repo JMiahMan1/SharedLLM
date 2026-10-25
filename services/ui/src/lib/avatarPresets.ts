@@ -3,7 +3,7 @@
  *
  * Each preset carries a custom, multi-layered inline SVG illustration drawn on
  * a 100×100 canvas (plus its signature emoji/badge metadata), so every character
- * renders crisply at any size on every device—including inside Leaflet map pins—
+ * renders crisply at any size on every device-including inside Leaflet map pins-
  * with zero image files to fetch. Identity stores only the id ("preset:<id>"),
  * so artwork can be refined without touching anyone's account.
  */

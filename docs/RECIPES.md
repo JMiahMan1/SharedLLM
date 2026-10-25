@@ -1,6 +1,6 @@
 # Recipes and meal planning
 
-Status: **Phases 0–1 built** — the importer (`scripts/import_recipes.py`) renders the
+Status: **Phases 0-1 built** - the importer (`scripts/import_recipes.py`) renders the
 first level-balanced note set; everything app-side (Phases 2+) is still planned.
 Last live app commit `d766a19f` (v1.5.1).
 
@@ -11,21 +11,21 @@ and Jarvis memory all work with no new format.
 
 ## Ground rules
 
-- Notes keep the standard header the app writes — `# Title`, `Category: Recipes`, blank
-  line — with labels as inline `#tags`. Nextcloud Notes compatibility stays intact.
+- Notes keep the standard header the app writes - `# Title`, `Category: Recipes`, blank
+  line - with labels as inline `#tags`. Nextcloud Notes compatibility stays intact.
 - Imported recipes carry: `#level-1`, `#level-2`, `#level-3`, `#slow-cooker`,
   `#instant-pot`, `#30-minutes`, `#5-ingredients`.
 - All quantities are scaled to **7 servings** (family of 7; tweak per recipe in the note).
 - Every imported recipe ends with a one-line source and licence note
-  (Food.com — CC0, or Wikibooks Cookbook — CC BY-SA).
+  (Food.com - CC0, or Wikibooks Cookbook - CC BY-SA).
 
 ## Level rules (proposed)
 
 | Level | Ages | Shape of the recipe | Source tags used |
 | --- | --- | --- | --- |
-| `#level-1` | 7–10 | No-cook / assembly / microwave, no sharp knives or heat | `no-cook`, `5-ingredients-or-less`, `easy` + short steps |
-| `#level-2` | 11–14 | Stovetop and oven basics, simple knife work, ≤ 30 min | `easy`, `beginner-cook`, `30-minutes-or-less` |
-| `#level-3` | 15–18 | Full meals: oven roasts, pressure cooker, multi-step | remainder, `crock-pot-slow-cooker`, pressure cooker titles |
+| `#level-1` | 7-10 | No-cook / assembly / microwave, no sharp knives or heat | `no-cook`, `5-ingredients-or-less`, `easy` + short steps |
+| `#level-2` | 11-14 | Stovetop and oven basics, simple knife work, ≤ 30 min | `easy`, `beginner-cook`, `30-minutes-or-less` |
+| `#level-3` | 15-18 | Full meals: oven roasts, pressure cooker, multi-step | remainder, `crock-pot-slow-cooker`, pressure cooker titles |
 
 Appliance tags: `crock-pot-slow-cooker` → `#slow-cooker`; "instant pot" / "pressure cooker"
 in title or keywords → `#instant-pot`; `30-minutes-or-less` or total time ≤ 35 → `#30-minutes`;
@@ -41,7 +41,7 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - **The Food.com corpus already carries per-recipe nutrition** (Calories, Fat,
   SaturatedFat, Cholesterol, Sodium, Carbohydrate, Fiber, Sugar, Protein, plus
   RecipeServings), so the import writes a per-serving nutrition line into each
-  note, tagged `foodcom` — "as stated by the submitter", not lab ground truth.
+  note, tagged `foodcom` - "as stated by the submitter", not lab ground truth.
   Confirm on first download whether those panels are per-serving or per-recipe
   and rescale to the note's 7 servings.
 - **Computed nutrition is the fallback** (paste-a-link imports, edited recipes,
@@ -55,11 +55,11 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
 ---
 
-## Phase 0 — decisions
+## Phase 0 - decisions
 
 - [x] Importer home: `scripts/import_recipes.py`, a one-off workstation script
-      (repo convention — `tools/` is reserved for execution-image subprocess tools).
-- [x] Dataset access: `kagglehub`'s anonymous download works — no Kaggle account or
+      (repo convention - `tools/` is reserved for execution-image subprocess tools).
+- [x] Dataset access: `kagglehub`'s anonymous download works - no Kaggle account or
       token needed; `kagglehub.dataset_download("irkaal/foodcom-recipes-and-reviews")`
       (~723 MB) caches under `~/.cache/kagglehub/`, kept out of the repo. Nutrition
       columns are **per serving**: recipe #38's 170.9 kcal matches the live food.com
@@ -67,7 +67,7 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [ ] Confirm the level rules, staple list and household serving count (7).
 - [ ] Confirm the meal-plan note format below.
 
-## Phase 1 — recipe importer
+## Phase 1 - recipe importer
 
 - [x] Download the dataset once via anonymous `kagglehub` (~723 MB, cached under
       `~/.cache/kagglehub/`); kept out of the repo.
@@ -92,20 +92,20 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
       ingredient/step bounds → 188,908 no alcohol; pools L1 2,253 / L2 56,171 /
       L3 88,426).
 
-## Phase 2 — Recipes page touchpoints
+## Phase 2 - Recipes page touchpoints
 
-- [x] **Share to chat** on recipe cards and in the editor — reuses the Bible
+- [x] **Share to chat** on recipe cards and in the editor - reuses the Bible
       reader's `ShareToChatSheet`, generalized with an optional title, icon and
       message builder. The chat message is a short `🍽 title: excerpt` with an
       optional intro note, never the whole file.
 - [x] Family tab: Recipes is reachable today (Family → Create renders the
       page); a dedicated link can come with the meal-plan view.
-- [x] "Teach Jarvis" RAG sync over `Recipes/` — a header button on the Recipes
+- [x] "Teach Jarvis" RAG sync over `Recipes/` - a header button on the Recipes
       page calls the notes `sync_rag` route for the recipes folder.
 
-## Phase 3 — weekly meal plan (shipped)
+## Phase 3 - weekly meal plan (shipped)
 
-- [x] Format: `Recipes/Meal plan.md` — header + `#meal-plan` + one checklist line per day,
+- [x] Format: `Recipes/Meal plan.md` - header + `#meal-plan` + one checklist line per day,
       e.g. `- [ ] Mon · Chicken Chili`. Ticking a day marks it cooked.
 - [x] Plan view on the Recipes page (`Week plan`): 7 slots, pick a recipe per day from the
       shelf; **Save plan** writes the note like any other edit.
@@ -113,7 +113,7 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
       and a warning when a recipe repeats in the week. Appliance chips
       (`#slow-cooker`/`#instant-pot`) still open.
 
-## Phase 4 — shopping list (shipped)
+## Phase 4 - shopping list (shipped)
 
 - [x] Generated from the plan's recipes: the ingredients of each planned dinner are
       aggregated and duplicates are merged. Imported notes are already scaled to 7 servings.
@@ -123,16 +123,16 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [x] A **Build shopping list** button sits on the week plan and the list closes with a line
       pointing back at the plan that made it.
 
-## Phase 5 — Jarvis and sharing polish
+## Phase 5 - Jarvis and sharing polish
 
-- [x] Share the plan and the shopping list to a family chat in one tap — Share plan and
+- [x] Share the plan and the shopping list to a family chat in one tap - Share plan and
       Share list buttons on the week plan open the same chat sheet recipes use; the message
       is a short summary (`🍽 This week's dinners:` / `🛒 Shopping list:`, capped at 25 items).
 - [ ] Jarvis answers from the set: "what can a 12-year-old make tonight?", "add a slow-cooker
       meal to Tuesday". Reading works through Teach Jarvis (the notes RAG sync over
       `Recipes/`); the write action needs assistant tooling and is still open.
 
-## Phase 6 — tests, docs, deploy
+## Phase 6 - tests, docs, deploy
 
 - [ ] Unit tests for filtering, staple ranking, scaling, plan parsing and list merging
       (backend pytest where pure; UI vitest for the plan/list generators).
@@ -141,7 +141,7 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [ ] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc; commit; deploy
       `execution gateway ui` as needed; verify live.
 
-## Phase 7 — Skylight integration
+## Phase 7 - Skylight integration
 
 The family's Skylight Calendar has its own meal planning (Meals tab + Recipe
 Box + grocery list). Skylight has no official API, but its mobile app's API is
@@ -149,75 +149,75 @@ reverse-engineered and documented by the community (JSON:API on
 `api.ourskylight.com`). This phase is optional and fail-safe: when no Skylight
 account is connected, everything above still works.
 
-- [ ] **Connect** — Settings card: Skylight email + password. Sign in with
+- [ ] **Connect** - Settings card: Skylight email + password. Sign in with
       `POST /sessions` (`User-Agent: SkylightMobile (web)`) and keep the
       token with the user's credentials; list frames with `GET /frames` and
       let the family pick one (default: the only frame).
-- [ ] **Connector** — small fail-safe module wrapping the endpoints: create a
+- [ ] **Connector** - small fail-safe module wrapping the endpoints: create a
       Recipe Box recipe (`POST /frames/{id}/meals/recipes` with
       `meal_category_id`, `summary`, `description` = `Ingredients:` block +
       `Instructions:` block); plan a meal (`POST /frames/{id}/meals/sittings`
-      — when `meal_recipe_id` is set, leave `summary` blank or the API
+      - when `meal_recipe_id` is set, leave `summary` blank or the API
       returns 422); read the week (`GET .../meals/sittings?date_min&date_max`);
       push a recipe's ingredients to the Skylight grocery list
       (`POST .../add_to_grocery_list`), or write items directly
       (`POST .../lists/{listId}/items`; delete only via
       `DELETE .../list_items/bulk_destroy`).
-- [ ] **Recipes → Skylight** — "Send to Skylight" on a recipe card and in the
+- [ ] **Recipes → Skylight** - "Send to Skylight" on a recipe card and in the
       editor pushes it to the Recipe Box under Dinner (or the picked meal
       category); sending again updates the same recipe instead of duplicating.
-- [ ] **Meal plan → Skylight** — "Push week" writes each planned day as a
+- [ ] **Meal plan → Skylight** - "Push week" writes each planned day as a
       dinner sitting (`add_to_grocery_list` off by default); shows what
       landed and surfaces failures as a toast, never a broken page.
-- [ ] **Shopping list → Skylight** — optional "Send to Skylight list" mirrors
+- [ ] **Shopping list → Skylight** - optional "Send to Skylight list" mirrors
       the shopping list onto the frame's grocery list so it is tickable on the
       display too.
-- [ ] **Fallback without credentials** — publish the week's dinners as
+- [ ] **Fallback without credentials** - publish the week's dinners as
       calendar events into a calendar Skylight already syncs (Google/iCloud or
       a public ICS feed); the Skylight's unique email can also receive events.
-- [ ] **Tests** — fake-HTTP tests for sessions, frames, recipes, sittings
+- [ ] **Tests** - fake-HTTP tests for sessions, frames, recipes, sittings
       (blank-`summary` 422, array `data`, `instances` lagging) and grocery
       list bulk delete; UI tests for connect, send-to-Skylight and push-week.
-- [ ] **Note** — the API is unofficial and may change with app updates: keep
+- [ ] **Note** - the API is unofficial and may change with app updates: keep
       the connector optional, conservative on rate, and never block the local
       flows on it.
 
-## Phase 8 — search and import (paste-a-link + TheMealDB shipped)
+## Phase 8 - search and import (paste-a-link + TheMealDB shipped)
 
 - [x] Search sources: the offline index over the CC0 Food.com corpus first (SQLite FTS
-      over name, keywords and ingredients — instant, no network; built by
+      over name, keywords and ingredients - instant, no network; built by
       `scripts/build_recipe_seed.py` into `data/recipes/recipe-seed.db`), TheMealDB's free
       API for looks with photos, and "paste a link" import that reads a page's schema.org
       `Recipe` JSON-LD. All three are built (`/execute/recipes` behind
       `/api/recipes/import`, `/api/recipes/search` and `/api/recipes/fetch`); the Recipes
       page filters the shelf by name as you type.
-- [x] Backend: `url_import` lives in `services/execution/handlers/recipe_import.py` — it
+- [x] Backend: `url_import` lives in `services/execution/handlers/recipe_import.py` - it
       fetches the page (http/https only, 25 s timeout, 1.5 MB cap) and reads the first
       `Recipe` node (arrays and `@graph` included), returning title, ingredients, ordered
       steps (sections flattened), prep/cook/total minutes, yield, image and the source URL;
       pages without recipe data get a plain message instead of a guess. `themealdb_search`
-      reads the free TheMealDB API (`search.php`) and maps each meal into the same shape —
+      reads the free TheMealDB API (`search.php`) and maps each meal into the same shape -
       measured ingredient pairs, steps split on line breaks, source URL `/meal/{id}`.
       `recipe_search` answers from the offline index first (TheMealDB only fills what is
       left, and either can fail without taking the page down) and `shelf_fetch` reads one
       full recipe from the index by id.
-- [x] UI: **Import a link** on the Recipes page — paste, read, preview (title, site, time,
+- [x] UI: **Import a link** on the Recipes page - paste, read, preview (title, site, time,
       yield, counts) and **Save to Recipes** writes the note with the standard header, guessed
       labels (`#level-…` from time and ingredient count, `#slow-cooker`/`#instant-pot` from
       the title, `#30-minutes`, `#5-ingredients`) and the source URL line. The same panel
-      searches recipes — Food.com hits read their full ingredients and steps from the
+      searches recipes - Food.com hits read their full ingredients and steps from the
       offline index, TheMealDB hits show a photo; both pick into the same preview and save
       (source lines point back at food.com or themealdb.com). A name filter above the shelf
       narrows the list as you type.
 - [ ] Duplicate guard: skip a result whose source URL is already imported. (The paste-a-link
       save stamps the source URL into the note and refuses a same-title save; the search
       results guard arrives with the search slice.)
-- [x] Tests: JSON-LD parsing and the handler (pytest, fixture page —
+- [x] Tests: JSON-LD parsing and the handler (pytest, fixture page -
       `services/execution/tests/test_recipe_import.py`), label guessing and note rendering
       (`src/test/recipeImport.test.ts`) and paste → read → preview → save
       (`src/pages/Recipes.test.tsx`). Index search tests come with the index.
 
-## Phase 9 — photo and handwriting import
+## Phase 9 - photo and handwriting import
 
 - [ ] Capture: `<input type="file" accept="image/*" capture="environment">` for now (no
       Capacitor camera plugin is installed; it can come later for a nicer native flow).
@@ -225,15 +225,15 @@ account is connected, everything above still works.
       and link it from the note, so the original page stays with the recipe.
 - [ ] Vision: the family's **Alpaca** server (`/Users/jeremiahsummers/Code/alpaca`, the
       Ollama-compatible `llama.cpp` proxy behind `llm_local_url`) already has vision. Use
-      its document-AI OCR endpoint — `POST /api/vision/ocr` on the Alpaca web backend
-      (port 5000, Qwen2.5-VL with automatic VL fallback) — which is built for exactly this
+      its document-AI OCR endpoint - `POST /api/vision/ocr` on the Alpaca web backend
+      (port 5000, Qwen2.5-VL with automatic VL fallback) - which is built for exactly this
       (photos of pages, headlines/structure, handwriting). The Ollama-compatible
       `/api/chat` also passes a message `images` array through to `llama.cpp` as
       `image_data` when a VL model with an `mmproj` projector is loaded (those models
       report `capabilities: ['vision']`; `alpaca-puller` wires `*mmproj*.gguf` companions
       automatically, and a Qwen3VL-8B mmproj companion is already present). A
       `vision_model` setting (empty = feature off) can name the VL model when going
-      through `llm_local_url` — that path needs the gateway `OllamaProvider` extended to
+      through `llm_local_url` - that path needs the gateway `OllamaProvider` extended to
       send images. No cloud key is required; an OpenRouter key remains an optional cloud
       alternative, with a clear note that photos would leave the house.
 - [ ] Pipeline: photo → prompt for strict JSON (title, servings, prep/cook/total time,
@@ -245,10 +245,10 @@ account is connected, everything above still works.
 - [ ] Tests: stub the vision provider with a fixed sample page (and a handwriting-style
       response); UI draft edit + save test.
 
-## Phase 10 — Health tab connection
+## Phase 10 - Health tab connection
 
 - [ ] Carry per-serving nutrition from the dataset into each imported recipe note
-      (calories, protein, carbs, fat, fiber, sugar, sodium — rescaling the corpus
+      (calories, protein, carbs, fat, fiber, sugar, sodium - rescaling the corpus
       panel to the note's 7 servings) and show it on the recipe preview/editor.
       Edited or computed recipes fall back to the USDA-seed pipeline.
 - [ ] Health tab: a **Meals** card showing today's planned meals from
@@ -269,7 +269,7 @@ account is connected, everything above still works.
       `RecipesPlan.test.tsx`); the card is not built.
 - [ ] Docs and deploy.
 
-## Phase 11 — calorie budget and logging (Noom-style)
+## Phase 11 - calorie budget and logging (Noom-style)
 
 - [ ] Per-person nutrition profile in the Health tab: age, height, weight, sex and
       activity level. Adults get a daily calorie budget from Mifflin-St Jeor BMR ×

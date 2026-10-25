@@ -1,7 +1,7 @@
 """Music style matching for the recommendations layer (Phase 11, step 3).
 
 Jarvis reads a person's recent listening (the activity feed) and suggests a
-Christian artist with a similar style — genre, era, energy — instead of an
+Christian artist with a similar style - genre, era, energy - instead of an
 artist whose lyrics are not appropriate. Matching works on themes and styles,
 not names: a small reviewed map of lanes, each lane carrying one vetted
 recommendation with a plain-language reason.
@@ -17,7 +17,7 @@ from typing import Any
 
 # A "lane" is a (genre, era, energy) bucket. Each lane maps to one vetted
 # recommendation. Keys are lower-case, trimmed; matching is by substring so a
-# lane covers the artists and genres that fall into it. Reviewed by hand — add
+# lane covers the artists and genres that fall into it. Reviewed by hand - add
 # a lane only after listening to both sides.
 LANES: dict[str, dict[str, str]] = {
     "pop dance": {

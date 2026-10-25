@@ -402,7 +402,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                 <div className="mt-2 divide-y divide-white/5" data-testid="food-search-results">
                   {offlineSources.includes('openfoodfacts') && (
                     <p className="py-2 text-[10px] text-amber-300" data-testid="food-search-offline">
-                      Branded products are offline right now — generic foods still work.
+                      Branded products are offline right now - generic foods still work.
                     </p>
                   )}
                   {results.length === 0 ? (
@@ -743,7 +743,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
 
       {nutrition && !nutrition.logged && (
         <p className="px-1 text-center text-[11px] text-slate-500">
-          Nothing logged for this day. Adding food here never infers a zero-calorie day — it records
+          Nothing logged for this day. Adding food here never infers a zero-calorie day - it records
           what you enter.
         </p>
       )}

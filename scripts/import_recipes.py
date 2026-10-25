@@ -2,7 +2,7 @@
 """Import kid-tiered family recipe notes from the CC0 Food.com corpus.
 
 Selection uses the ``irkaal/foodcom-recipes-and-reviews`` dataset (Kaggle,
-CC0) — 522,517 recipes with categories, keyword tags, times, ratings and
+CC0) - 522,517 recipes with categories, keyword tags, times, ratings and
 per-serving nutrition. The dataset strips units from ingredient quantities,
 so each chosen finalist is fetched from its food.com page and rendered from
 the page's schema.org JSON-LD instead (full ingredient lines with units,
@@ -511,7 +511,7 @@ def nutrition_line(jsonld: dict, cand: Candidate) -> str:
     if not parts:
         return "*Nutrition was not stated by the submitter.*"
     return (
-        "*Per serving, as stated by the submitter — foodcom:* "
+        "*Per serving, as stated by the submitter - foodcom:* "
         + " · ".join(parts)
     )
 
@@ -571,7 +571,7 @@ def render_note(cand: Candidate, level: int, jsonld: dict | None) -> str:
         f"Tags: {tags}",
         f"Times: {times_line}",
         "",
-        f"Source: {source_url} — Food.com, CC0 dataset ({DATASET_URL})",
+        f"Source: {source_url} - Food.com, CC0 dataset ({DATASET_URL})",
         "",
         "## Ingredients",
         *ings,

@@ -200,7 +200,7 @@ export default function HealthSleep() {
               className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border ${tone.border} ${tone.bg}`}
             >
               <span className={`text-2xl font-bold tabular-nums ${tone.text}`}>
-                {score?.score ?? '—'}
+                {score?.score ?? '-'}
               </span>
               <span className="text-[9px] uppercase tracking-wider text-slate-500">of 100</span>
             </div>
@@ -228,7 +228,7 @@ export default function HealthSleep() {
         ) : (
           <p className="mt-2 text-xs text-slate-400">
             Nothing logged for {formatDayLabel(night)}. Use the form below, or connect a device
-            later — the store accepts both.
+            later - the store accepts both.
           </p>
         )}
       </section>

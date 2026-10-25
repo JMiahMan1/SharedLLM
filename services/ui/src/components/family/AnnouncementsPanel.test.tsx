@@ -18,7 +18,7 @@ describe('Announcements panel', () => {
     expect(await screen.findByText('Active Timers')).toBeInTheDocument();
     // The old notes editor (Save appended the note to itself), the calendar
     // panel that only printed "Loaded N events", and the cards that linked
-    // out to /calendar and /notes are all gone — timers and announcements
+    // out to /calendar and /notes are all gone - timers and announcements
     // are the whole panel.
     expect(screen.queryByPlaceholderText('Note title')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Calendar selection')).not.toBeInTheDocument();

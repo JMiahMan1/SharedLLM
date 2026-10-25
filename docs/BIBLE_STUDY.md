@@ -1379,8 +1379,8 @@ Ordinary PDF/EPUB books are imported separately from Bible translations:
   extractor; PDF uses one page per section because a scanned or typeset page
   is the natural reading unit.
 - Books marked **Daily Devotions** become a `book:<id>` work. The rotation
-  starts on Day 1 of the year at the book's first printed devotion — front
-  matter (contents, introduction) never takes a day — and each book carries
+  starts on Day 1 of the year at the book's first printed devotion - front
+  matter (contents, introduction) never takes a day - and each book carries
   a Daily or Weekly cadence. Weekly steps once a week, so Oct 21 (week 42)
   reads devotion 42. The Devotional books shelf on Bible › Today shows each
   imported devotional, lets you switch its cadence, and opens it in the

@@ -1,6 +1,6 @@
 """The offline recipe index: a read-only SQLite over the whole CC0 Food.com set.
 
-The Recipes page searches this index first — instant and fully offline — and a
+The Recipes page searches this index first - instant and fully offline - and a
 pick saves without touching the network. The file lives in the server data dir
 (``data/recipes/recipe-seed.db``) and is built by ``scripts/build_recipe_seed.py``.
 

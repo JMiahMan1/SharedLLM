@@ -54,7 +54,7 @@ describe('recipeImport', () => {
     const note = buildRecipeNote(RECIPE);
     expect(note).toContain('Tags: #level-1 #30-minutes #5-ingredients');
     expect(note).toContain('Times: prep 15 min · total 25 min · 6 servings');
-    expect(note).toContain('Source: https://example.com/recipes/lemonade — imported from example.com');
+    expect(note).toContain('Source: https://example.com/recipes/lemonade - imported from example.com');
     expect(note).toContain('## Ingredients');
     expect(note).toContain('- [ ] 4 cups water');
     expect(note).toContain('1. Juice the lemons.');

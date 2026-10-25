@@ -515,7 +515,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     # 1. Retrieve Memory
     # A queued chat turn has no request transcript to carry: the worker
-    # attaches the recent turns to the payload — per-user history for chat
+    # attaches the recent turns to the payload - per-user history for chat
     # jobs, the room's own transcript for Nextcloud Talk turns. Jobs dispatched
     # directly, and jobs queued before the worker started attaching history,
     # fall back to the per-user history store. Missions are autonomous and keep

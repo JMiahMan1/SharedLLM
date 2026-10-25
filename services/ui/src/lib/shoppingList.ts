@@ -89,7 +89,7 @@ export function buildShoppingList(previousBody: string, ingredientTexts: string[
 
   const lines = ['#shopping-list', ''];
   for (const row of rows) lines.push(`- [${row.checked ? 'x' : ' '}] ${row.text}`);
-  if (rows.length === 0) lines.push('Nothing to buy yet — plan some dinners first.');
+  if (rows.length === 0) lines.push('Nothing to buy yet - plan some dinners first.');
   lines.push('');
   lines.push("Made from the week's plan (`Meal plan`).");
   return lines.join('\n');

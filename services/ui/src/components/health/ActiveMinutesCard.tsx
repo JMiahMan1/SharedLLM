@@ -39,7 +39,7 @@ export default function ActiveMinutesCard() {
           <Zap size={13} className="text-amber-300" />
           Active minutes this week
         </h3>
-        {data && <span className="text-[10px] text-slate-500">{formatDayLabel(data.week_start)} – {formatDayLabel(data.week_end)}</span>}
+        {data && <span className="text-[10px] text-slate-500">{formatDayLabel(data.week_start)} - {formatDayLabel(data.week_end)}</span>}
       </div>
 
       {isError || !data ? (
@@ -71,7 +71,7 @@ export default function ActiveMinutesCard() {
                 )}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-xl font-bold tabular-nums text-white">{data.total_minutes ?? '—'}</span>
+                <span className="text-xl font-bold tabular-nums text-white">{data.total_minutes ?? '-'}</span>
                 <span className="text-[9px] uppercase tracking-wider text-slate-500">min</span>
               </div>
             </div>

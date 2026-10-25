@@ -1,8 +1,8 @@
 """Alert admins once when a stored login stops being accepted.
 
 Background flows (home alerts, telemetry ingestion, media probes, discovery
-sweeps) call external services with stored logins. When one is rejected — an
-expired Home Assistant long-lived token is the classic case — every attempt
+sweeps) call external services with stored logins. When one is rejected - an
+expired Home Assistant long-lived token is the classic case - every attempt
 logs the same line forever and nobody notices. This module keeps one flag per
 (service, account): the first rejection logs a line and sends a single admin
 notice through telemetry, repeats stay quiet, and the first accepted call
@@ -66,7 +66,7 @@ async def _redis_client():
 
 async def _load(r) -> dict:
     """The persisted state, best effort: an unreadable store just means a
-    fresh start (the alert repeats once after a crash — the safe direction)."""
+    fresh start (the alert repeats once after a crash - the safe direction)."""
     global _mirror
     if _mirror is None:
         _mirror = {"flagged": {}, "outbox": [], "quiet": {}}

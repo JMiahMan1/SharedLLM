@@ -7,11 +7,11 @@ pick saves without touching the network.
 
 Two sources, joined on recipe name + author:
 
-* **Spine** — the irkaal "Food.com - Recipes and Reviews" dataset (522,517
+* **Spine** - the irkaal "Food.com - Recipes and Reviews" dataset (522,517
   recipes, CC0): instructions, times, taxonomy, ratings, images. It drops
   ingredient units ("4" + "blueberries"), so its lines are bare when the join
   misses.
-* **Ingredient mirror** — the community parsed mirror of the same corpus
+* **Ingredient mirror** - the community parsed mirror of the same corpus
   (Karo8870 on Hugging Face; the fields were parsed from the raw recipe text):
   ingredient lines with their units and notes ("4 cups blueberries, fresh or
   frozen"), 82% of lines carry a unit.
@@ -26,7 +26,7 @@ Usage (one-off, workstation):
 The seed ships to the server data dir (``data/recipes/recipe-seed.db``), not
 into any image; the execution service opens it read-only from
 ``RECIPE_SEED_PATH`` (default ``/data/recipes/recipe-seed.db``). A missing
-file only ever loses the offline results — search falls back to TheMealDB.
+file only ever loses the offline results - search falls back to TheMealDB.
 """
 
 from __future__ import annotations

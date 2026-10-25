@@ -25,7 +25,7 @@ export const MEAL_LABELS: Record<Meal, string> = {
 };
 
 /** The local calendar day, not the UTC day. */
-/** The 1–5 check-in answers in words (index 0 unused), for energy and mood. */
+/** The 1-5 check-in answers in words (index 0 unused), for energy and mood. */
 export const CHECKIN_WORDS = ['', 'Rough', 'Low', 'Okay', 'Good', 'Great'];
 
 export function localDay(date = new Date()): string {
@@ -53,7 +53,7 @@ export function formatDayLabel(day: string): string {
 
 /** `7h 30m`, `45m`, or an em dash when there is no reading. */
 export function formatMinutes(minutes: number | null | undefined): string {
-  if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return '—';
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return '-';
   const total = Math.max(0, Math.round(minutes));
   const hours = Math.floor(total / 60);
   const rest = total % 60;
@@ -64,7 +64,7 @@ export function formatMinutes(minutes: number | null | undefined): string {
 
 /** `10:30 PM` from an ISO instant or a bare `HH:MM`. */
 export function formatClockTime(value: string | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   const bare = /^\d{1,2}:\d{2}(:\d{2})?$/.test(value);
   if (bare) {
     const parsed = new Date(`2000-01-01T${value}`);
@@ -86,13 +86,13 @@ export function formatClockTime(value: string | null | undefined): string {
   return parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
-/** `10:30 PM – 6:30 AM`, or null when either end is unknown. */
+/** `10:30 PM - 6:30 AM`, or null when either end is unknown. */
 export function sleepWindowLabel(
   bedtime: string | null | undefined,
   wake: string | null | undefined,
 ): string | null {
   if (!bedtime || !wake) return null;
-  return `${formatClockTime(bedtime)} – ${formatClockTime(wake)}`;
+  return `${formatClockTime(bedtime)} - ${formatClockTime(wake)}`;
 }
 
 export interface ScoreTone {
@@ -151,7 +151,7 @@ export function scoreTone(score: number | null | undefined): ScoreTone {
 export function confidenceLabel(score: HealthScore | null | undefined): string | null {
   if (!score || score.confidence === 'high') return null;
   if (score.confidence === 'medium') return 'Based on part of your usual signals.';
-  return 'Early estimate — a few more days of data will sharpen it.';
+  return 'Early estimate - a few more days of data will sharpen it.';
 }
 
 export interface NutritionProgress {
@@ -238,13 +238,13 @@ export function macroPercent(consumed: number, target: number | null | undefined
   return Math.min(100, Math.round((Math.max(0, consumed) / target) * 100));
 }
 
-/** `1,850–2,050 kcal`, `Guidance: 2,100–2,500 kcal`, or the missing fields. */
+/** `1,850-2,050 kcal`, `Guidance: 2,100-2,500 kcal`, or the missing fields. */
 export function targetLabel(target: NutritionTarget | null | undefined): string {
   if (!target || target.kind === 'unavailable' || target.min === null || target.max === null) {
     return 'Set up your profile for a range';
   }
   const prefix = target.kind === 'teen_guidance' ? 'Guidance' : 'Range';
-  return `${prefix}: ${target.min.toLocaleString()}–${target.max.toLocaleString()} kcal`;
+  return `${prefix}: ${target.min.toLocaleString()}-${target.max.toLocaleString()} kcal`;
 }
 
 /** A compact, honest description of a day's calorie state. */
@@ -254,9 +254,9 @@ export function calorieSummary(nutrition: NutritionDay): string {
   const progress = nutritionProgress(nutrition.totals.calories, nutrition.target);
   if (!progress.available) return `${totals} kcal logged`;
   if (progress.over && progress.max !== null) {
-    return `${totals} kcal — above the ${progress.max.toLocaleString()} guide`;
+    return `${totals} kcal - above the ${progress.max.toLocaleString()} guide`;
   }
-  return `${totals} kcal — ${progress.remaining?.toLocaleString()} left of the guide`;
+  return `${totals} kcal - ${progress.remaining?.toLocaleString()} left of the guide`;
 }
 
 /** Age from a birth year, or null when it is not known. */

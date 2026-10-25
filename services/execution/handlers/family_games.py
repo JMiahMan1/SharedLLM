@@ -24,7 +24,7 @@ FENCE = "```jarvis-envelope"
 CARD_KINDS = ("game",)
 
 # Trivia sessions: a room plays a fixed number of questions, easy first, and
-# the dial moves with the room — rounds it answers correctly raise it, a round
+# the dial moves with the room - rounds it answers correctly raise it, a round
 # that closes without a correct answer lowers it. A round also expires so one
 # quiet player cannot stall the whole session.
 SESSION_LENGTH = 10
@@ -488,7 +488,7 @@ class GameRegistry:
         roster_names: dict[str, str] | None = None,
         session_length: int | None = None,
     ) -> GameState:
-        """Start a session. `roster` locks the players — only aliases listed in
+        """Start a session. `roster` locks the players - only aliases listed in
         it (normalized alias -> canonical key) can answer. Without a roster the
         room stays open and anyone who answers joins, which direct unit tests
         and hand-started games use."""
@@ -542,7 +542,7 @@ registry = GameRegistry()
 
 def trivia_prompt(state: GameState, hint: bool = False) -> str:
     if state.session_len > 1 and state.question_number:
-        title = f"🧠 Trivia — question {state.question_number} of {state.session_len}"
+        title = f"🧠 Trivia - question {state.question_number} of {state.session_len}"
     else:
         title = "🧠 Trivia time"
     lines = [title, state.question]

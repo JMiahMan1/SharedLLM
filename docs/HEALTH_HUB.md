@@ -1,7 +1,7 @@
 # Health Hub: the best of the health apps in one
 
-Status: **live, partially built (updated 2026-10-24): phases 1–5 core, opt-in cycle tracking, family sharing/export and the USDA food seed are deployed; Phases 10–11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
-Companion plans: `docs/RECIPES.md` (Phases 10–11 carry the recipe-nutrition and
+Status: **live, partially built (updated 2026-10-24): phases 1-5 core, opt-in cycle tracking, family sharing/export and the USDA food seed are deployed; Phases 10-11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
+Companion plans: `docs/RECIPES.md` (Phases 10-11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
 
@@ -33,7 +33,7 @@ Built in this pass:
   whose sex is `female`. Period dates, flow, symptoms, mood/energy, BBT
   and ovulation-test logs are stored per person; phase, cycle day, next-period
   estimate and confidence are computed from logged dates (explicit averages or
-  observed 15–90 day gaps). Irregular cycles are described, not diagnosed.
+  observed 15-90 day gaps). Irregular cycles are described, not diagnosed.
   Fertile windows are deliberately not predicted: every surface says estimates
   only, not contraception or medical advice. The family projection shares at
   most phase/next-period, never flow, symptoms, notes, period dates or the
@@ -74,7 +74,7 @@ Not built yet, and not pretended otherwise: a veg-servings challenge (a logged f
 food category to count from; see Phase 7). Step goal days are a challenge kind since 2026-10-24.
 
 The goal: one local, family-first Health tab that pulls the strengths of the apps
-the family has used — Noom, Google Health (formerly Fitbit), MyFitnessPal and friends —
+the family has used - Noom, Google Health (formerly Fitbit), MyFitnessPal and friends -
 into the app that already has steps, recipes, a calendar, a chat coach and a family hub.
 
 ## Strengths worth copying
@@ -83,7 +83,7 @@ into the app that already has steps, recipes, a calendar, a chat coach and a fam
 | --- | --- | --- |
 | **Noom** | Psychology-first habit building: bite-sized daily lessons, a personalized calorie range, green/yellow/orange calorie-density colours, water tracking, step goals that ramp up, check-ins with a coach, weekly commitments | Daily micro-lessons on the Health tab; Mifflin-St Jeor calorie range with an optional gentle deficit for adults; density colours as *guides, not verdicts*; water log; weekly goals; Jarvis chat as the coach, grounded in the day's data |
 | **Google Health (Fitbit)** | Clear four-tab layout (Today / Fitness / Sleep / Health), customizable metric dashboards, Sleep Score, Daily Readiness (HRV + sleep + recent activity), Active Zone Minutes, a flexible **weekly** cardio target instead of rigid daily goals, aggregation through Health Connect, family leaderboards, AI coach | Same tab shape, per-user pinned metric cards; Sleep and Readiness cards from Health Connect data when a phone or watch provides it (manual morning check-in otherwise); weekly activity targets; Android Health Connect import; family leaderboards and challenges |
-| **MyFitnessPal** | The 14M+ food database and fast search, barcode scanning, Meal Scan (camera), voice logging, recipe importer + recipe builder (bulk-paste ingredients to per-serving macros), meal planner, macro goals by gram/percent and per day, per-meal macro breakdowns, fasting tracker, weekly digests, data export | Recipe-first logging: the imported `Recipes/` already carry per-serving macros — a planned dinner logs in one tap with portions; barcode lookup via OpenFoodFacts; photo logging through the family's Alpaca vision (recipes Phase 9 pattern); voice logging through the existing assistant; weekly digest card; macro goals by day with per-meal breakdown |
+| **MyFitnessPal** | The 14M+ food database and fast search, barcode scanning, Meal Scan (camera), voice logging, recipe importer + recipe builder (bulk-paste ingredients to per-serving macros), meal planner, macro goals by gram/percent and per day, per-meal macro breakdowns, fasting tracker, weekly digests, data export | Recipe-first logging: the imported `Recipes/` already carry per-serving macros - a planned dinner logs in one tap with portions; barcode lookup via OpenFoodFacts; photo logging through the family's Alpaca vision (recipes Phase 9 pattern); voice logging through the existing assistant; weekly digest card; macro goals by day with per-meal breakdown |
 | **Apple Health** | The aggregation hub: everything in one store, sharing with family, medical records, cycle and medication tracking | One health store per person with family sharing toggles; medical documents are a later, opt-in phase |
 | **Strava** | Social motivation: kudos, clubs, segments, challenges | Family cheers and a weekly family challenge (water, sleep, cook nights and step goal days); share a health card to a family chat in one tap |
 | **Garmin / Whoop** | Training load, training status, recovery/strain and journal behaviours | Simple fitness-fatigue and readiness once heart-rate data flows in; a "how do you feel" journal when it does not |
@@ -92,10 +92,10 @@ into the app that already has steps, recipes, a calendar, a chat coach and a fam
 
 ## Ground rules
 
-- **Local and free.** No subscription, no ads, no data leaving the house — the same
+- **Local and free.** No subscription, no ads, no data leaving the house - the same
   promise the rest of Jarvis makes.
 - **Adults and kids are different.** Calorie budgets and deficits are adult-only,
-  opt-in tools. Kids and teens get balance, habits and guidance ranges — never
+  opt-in tools. Kids and teens get balance, habits and guidance ranges - never
   weight-loss targets, weigh-in pressure or moral colouring of food.
 - **Guides, not judgements.** Density colours and scores are framing aids; the copy
   must never turn food or a missed day into a failure.
@@ -126,7 +126,7 @@ MyFitnessPal, plus UX award winners and published case studies.
    gap for you. WHOOP's Recovery ring and Oura's Readiness give a colour, a number
    and one plain sentence; 300+ App Store reviews of Apple Health keep repeating
    "I have all this data but I don't know what it means." The Today screen opens
-   with a check-in or score and a one-line reading — not a chart.
+   with a check-in or score and a one-line reading - not a chart.
 2. **Layers: glance → focus → explore.** Oura's award-winning framework
    (at-a-glance rings/bars → focused metric views → interactive charts) and the
    Apple Health redesign (daily summary → personal baselines → weekly recap).
@@ -134,7 +134,7 @@ MyFitnessPal, plus UX award winners and published case studies.
    "Designing for moments, not metrics."
 3. **Colour as meaning, tuned to the person.** Semantic hues per domain (Oura's
    teal/indigo/amber), thresholds against **your** baseline ("within your range"),
-   never population averages. Colour appears only when it carries information —
+   never population averages. Colour appears only when it carries information -
    restraint over alarmism; the LabViz award win was specifically about moving
    away from red/green good/bad semaphore.
 4. **Five-second design.** ~70% of tracker interactions are sub-5-second glances.
@@ -143,7 +143,7 @@ MyFitnessPal, plus UX award winners and published case studies.
    respected) as a satisfying reveal.
 5. **Forgiving by default.** Case studies agree: "failed" days and red warnings
    cause deletion. Forgiving streaks, rest-day states and recovery coaching beat
-   guilt — gently suggesting a 10-minute walk after two skipped days lifted return
+   guilt - gently suggesting a 10-minute walk after two skipped days lifted return
    rates by 31% in one project. Rings celebrate consistency; they never punish.
 6. **Friction is the enemy.** Quick-log bottom sheets for one-handed entry; smart
    defaults (last night's portion, the usual bedtime); oversized targets (56px+)
@@ -151,7 +151,7 @@ MyFitnessPal, plus UX award winners and published case studies.
    that ends with a first log, not a form.
 7. **Tell me what to do next.** The 2026 differentiator: WHOOP's strain target and
    Google's Coach feed answer "what now?" on the first screen. Jarvis is already a
-   coach — the Health tab should ask it ("given your sleep, a walk beats a hard
+   coach - the Health tab should ask it ("given your sleep, a walk beats a hard
    workout today"), grounded in the user's own data, never a black box.
 8. **Close the loop (journal → insight).** WHOOP's Journal and Oura's Tags turn
    logged behaviours into personal cause-and-effect ("reading before bed → +8%
@@ -162,7 +162,7 @@ MyFitnessPal, plus UX award winners and published case studies.
 10. **Family and friends, kindly.** Achievement beats competition (case-study
     finding); family/partner streaks with a shared stake motivate; cheers for kids;
     leaderboards opt-in and never about weight.
-11. **Customizable, but composed.** Pinnable/reorderable cards (Google Health) —
+11. **Customizable, but composed.** Pinnable/reorderable cards (Google Health) -
     yet a small, deliberate set: every card earns its place, empty ones hide, so
     the tab never reads like a spreadsheet.
 12. **Accessible and calm.** WCAG contrast, font scaling, screen-reader labels on
@@ -173,16 +173,16 @@ MyFitnessPal, plus UX award winners and published case studies.
 
 ## Ties into the rest of Jarvis
 
-- **Recipes** — planned meals log into the day; the shopping list knows what is
+- **Recipes** - planned meals log into the day; the shopping list knows what is
   planned; `#level-1/2/3` recipes make "what can a 12-year-old cook tonight?"
   answerable in chat.
-- **Chat** — Jarvis is the coach: "how much protein is left today?", "plan a lighter
-  dinner", "did we hit the step challenge?" — grounded in the user's own data.
-- **Calendar** — workout plans and challenges get real slots; sleep/bedtime reminders
+- **Chat** - Jarvis is the coach: "how much protein is left today?", "plan a lighter
+  dinner", "did we hit the step challenge?" - grounded in the user's own data.
+- **Calendar** - workout plans and challenges get real slots; sleep/bedtime reminders
   reuse the reminder pipeline.
-- **Dashboard & widgets** — a today card (steps, readiness, next meal) for the
+- **Dashboard & widgets** - a today card (steps, readiness, next meal) for the
   dashboard and the Android home screen.
-- **Family hub** — challenges, cheers and shared goals live where the family already is.
+- **Family hub** - challenges, cheers and shared goals live where the family already is.
 
 ## Food data sources (decided 2026-10-22)
 
@@ -198,9 +198,9 @@ Nutrition today is live OpenFoodFacts only: one source, rate-limited (10 searche
 | Food.com dataset | 522k recipes + nutrition | CC0 | allowed | **recipe corpus** (see [RECIPES.md](RECIPES.md)) |
 | TheMealDB | 793 meals, no nutrition | dev key, attribution | cacheable | parser test set only |
 | Nutritionix | 1.27M items | $499/mo | caching prohibited | reject |
-| Edamam | per-ingredient analysis | $14–$299/mo | 4-macro cap, delete on cancel | reject |
+| Edamam | per-ingredient analysis | $14-$299/mo | 4-macro cap, delete on cancel | reject |
 | FatSecret | food + diary | free 5k calls/day | 24 h / IDs only; bans private-network apps | reject |
-| Spoonacular | recipes + ingredients | $29–$149/mo | 1 h cache cap | reject |
+| Spoonacular | recipes + ingredients | $29-$149/mo | 1 h cache cap | reject |
 | API Ninjas (CalorieNinjas) | nutrition | $99/mo for storage | no caching below Business | reject |
 | CNF / CoFID / AFCD | national food tables | OGL / CC BY | allowed | optional, later |
 
@@ -212,7 +212,7 @@ How it lands:
   (395 / 7,793 / 5,432) and writes a `meta` table with release, source URLs,
   licence and build time. FTS5 over names; the NDB number / FNDDS food code are
   the stable keys (FDC_ID churns on every record change). Missing nutrients stay
-  NULL — rendered "not reported", never zero.
+  NULL - rendered "not reported", never zero.
 - `/food/search` serves seed hits first (each with household portions, e.g.
   "1 cup, chopped" → grams) then appends OpenFoodFacts results once per
   submitted query; every result carries `source` (`usda_fdc` | `openfoodfacts`)
@@ -222,7 +222,7 @@ How it lands:
   OFF product endpoint (still v2 there: it normalizes `*_100g` values and keeps
   `serving_quantity`, which the v3 payload drops), then cache forever. OFF and
   USDA rows are never mixed in one record. Unknown barcodes arrive as HTTP 200
-  with `status: 0` — the body decides, not the status.
+  with `status: 0` - the body decides, not the status.
 - Attribution "Contains data from Open Food Facts, ODbL" (and USDA FDC, public
   domain) lives in the nutrition About surface.
 
@@ -232,13 +232,13 @@ live search is the ecosystem-standard pattern.
 
 ## Phases
 
-### Phase 0 — decisions
+### Phase 0 - decisions
 
 - [x] Confirm profiles: one per family member; age, height, sex, weight and activity are optional; kid mode is explicit.
 - [x] Decide data sources: an open, source-tagged ingestion API now (manual, Health Connect, watches, scales), with manual logging always available. No device is required.
-- [x] Decide the first slice: all of the dependency-ordered core — profiles, sleep, readiness and nutrition — while reusing the existing activity stack.
+- [x] Decide the first slice: all of the dependency-ordered core - profiles, sleep, readiness and nutrition - while reusing the existing activity stack.
 
-### Phase 1 — people and profiles
+### Phase 1 - people and profiles
 
 - [x] Health profile per user (age, height, sex, activity level, goal, units), stored in the health service; kid mode flags.
 - [x] Health settings page: turn metrics on/off, family sharing toggles. **Cards on your Health page**
@@ -250,7 +250,7 @@ live search is the ecosystem-standard pattern.
   coach off the subject; data and family grants are untouched. Fasting starts off and is adults
   only: a profile in kid mode or under 18 cannot turn it on and always reads it as off.
 
-### Phase 2 — data in
+### Phase 2 - data in
 
 - [ ] Health Connect import on Android (steps already sync; add sleep sessions, heart rate/HRV, weight and workouts) with a native bridge.
   **Built 2026-10-24, not yet confirmed on a phone** (box stays open until it is).
@@ -294,7 +294,7 @@ live search is the ecosystem-standard pattern.
   - **Known limits:** an edit made later in Health Connect to an already-imported record is not
     re-sent (same id, answered as a duplicate); records older than 30 days before connecting are
     not read (Health Connect's history permission is not requested).
-  - **Check on a real phone** (Android 14+ with Health Connect built in, and one Android 9–13 phone
+  - **Check on a real phone** (Android 14+ with Health Connect built in, and one Android 9-13 phone
     with the Health Connect app): Connect shows Health Connect's sheet listing the six data types
     (and background reading on 14+); its "privacy policy" link opens the Jarvis text; after
     granting, Health → Sleep shows last night from the watch and Health → Today shows resting HR /
@@ -318,23 +318,23 @@ live search is the ecosystem-standard pattern.
   log. Too little data returns nothing rather than a guess.
 - [x] A health store the gateway can read per user, with every reading carrying its source.
 
-### Phase 3 — scores and targets
+### Phase 3 - scores and targets
 
 - [x] Sleep score from duration + interruptions (or manual quality), with confidence and missing-signal notes.
 - [x] Readiness from resting HR/sleep when available, else the morning check-in. Recent activity is not yet included.
 - [x] Weekly cardio target and Active-Zone-like minutes from step/heart-rate data. `ActiveMinutesCard`
-  on Health → Today rings the Monday–Sunday week against the profile's weekly active minutes (no
+  on Health → Today rings the Monday-Sunday week against the profile's weekly active minutes (no
   target: the minutes only, and a prompt naming the guidelines rather than assuming one), with a bar
   per day. The gateway composes `GET /api/health/active-minutes?day=` from geo (hourly steps,
   workouts) and the health store (`heart_rate` readings, a new metric, and device
   `active_minutes`) through the pure `services/common/active_minutes.py`: a device's own daily
-  total wins its day; otherwise each hour counts the largest of heart-rate zone minutes (64–76 % of
+  total wins its day; otherwise each hour counts the largest of heart-rate zone minutes (64-76 % of
   220 − age once, 77 %+ twice; no birth year, no heart-rate minutes, said so), workout minutes in
   that hour, and brisk-walking minutes (steps beyond 1,000 in the hour at 100 a minute, labelled an
   estimate). Overlapping step devices take the highest, never a sum. A day with nothing recorded is
   missing, not zero; geo being down is named in `unavailable`.
 
-### Phase 4 — nutrition logging
+### Phase 4 - nutrition logging
 
 - [x] Recipe-first logging: a cooked planned meal logs its per-serving macros with a portion picker.
   **Log to Health** on an open recipe (Recipes page) and **Log tonight's dinner** on today's row of
@@ -359,24 +359,24 @@ live search is the ecosystem-standard pattern.
   records through the shared `useAudioRecorder` hook (also the chat composer's), transcribes with
   the assistant's `/api/stt/transcribe`, keeps the transcript editable, splits it into foods and
   spoken counts (`src/lib/voiceFood.ts`: "two eggs and a slice of toast" → eggs ×2, toast ×1),
-  looks each up in the food search and shows a draft row per food — match, portion and servings
-  all changeable, any row droppable — and logs only on "Log N foods" (source `voice`). Both
+  looks each up in the food search and shows a draft row per food - match, portion and servings
+  all changeable, any row droppable - and logs only on "Log N foods" (source `voice`). Both
   scale portions through the one `src/lib/foodEntry.ts` the search add uses. On the phone the
   photo input (`accept="image/*" capture`) opens the camera through Capacitor's WebView (the
   app holds `CAMERA` and a `FileProvider`), so no native work is needed.
 - [x] Food data depth: the read-only USDA seed is mirrored on the server (13,620 foods, per-100 g plus portions like "1 cup, chopped" = 91 g) and searched before OpenFoodFacts; barcode results are cached permanently. The seed is optional at runtime (`FDC_SEED_PATH`): absent → OFF-only, one log line, never an error.
 - [x] Water tracking.
 - [x] Fasting window indicator (adults only, off until switched on in Cards). The person starts a
-  fast (now, or at a time earlier today/last night) with an optional 12/14/16 h or any 8–24 h
+  fast (now, or at a time earlier today/last night) with an optional 12/14/16 h or any 8-24 h
   target and ends it; nothing is inferred from food logs, whose times are when they were typed.
   `FastingCard` on Health → Today shows the elapsed time, the time left to the target and the
   last week's fasts, with neutral copy. `GET /fasting`, `POST /fasting/start`, `POST
   /fasting/stop`, `DELETE /fasting/{id}` (`services/health/fasting.py`, `FastingSession`;
   gateway `/api/health/fasting…`). A profile in kid mode or under 18 gets `allowed: false` and 403s.
 
-### Phase 5 — budget and day view
+### Phase 5 - budget and day view
 
-- [x] Calorie range for adults (Mifflin-St Jeor with optional gentle deficit); guidance ranges for kids — never deficits.
+- [x] Calorie range for adults (Mifflin-St Jeor with optional gentle deficit); guidance ranges for kids - never deficits.
 - [x] Day view: eaten vs range, protein/carbs/fat, per-meal breakdown, density colours.
 - [x] Weekly digest card: averages, best night's sleep, what changed. `GET /weekly?end=` in the
   health service (`services/health/weekly.py`, gateway `/api/health/weekly`) composes the seven
@@ -386,7 +386,7 @@ live search is the ecosystem-standard pattern.
   150 kcal, 250 ml, half a point of energy or mood); calories are left out in kid mode. The card
   (`WeeklyDigestCard`) sits on Health → Today.
 
-### Phase 6 — habits and coaching
+### Phase 6 - habits and coaching
 
 - [x] Micro-lessons: a small library (nutrition basics, sleep, movement, stress) shown one card at a time.
   `src/lib/healthLessons.ts` holds 24 reviewed cards across food, sleep, movement, calm and water,
@@ -414,7 +414,7 @@ live search is the ecosystem-standard pattern.
   picks each time, nothing is preset. All three sit on `CoachCard` (Health → Today) with the chat
   examples.
 
-### Phase 7 — family
+### Phase 7 - family
 
 - [x] Weekly family challenge with a leaderboard. The kinds are the ones the health store can
   measure honestly from what people log: **water goal days** (water logged reaches the member's
@@ -429,17 +429,17 @@ live search is the ecosystem-standard pattern.
   week older than geo's 30-day read) stays `unavailable` and the card says "not available right
   now" instead of showing zero days. Only the days that reached the goal are shown, never step
   counts; joining is the member's own choice, as for the other kinds. **Veg servings are not a
-  kind, on purpose:** a logged food keeps no link to a food category — a USDA seed food is saved by
+  kind, on purpose:** a logged food keeps no link to a food category - a USDA seed food is saved by
   name, grams and nutrients only (the seed's `category` column is never copied onto the
-  `FoodEntry`), and OpenFoodFacts, recipe and hand-typed entries have no category at all — so a
+  `FoodEntry`), and OpenFoodFacts, recipe and hand-typed entries have no category at all - so a
   veg count would have to guess from food names. It needs the seed key or category stored on new
-  entries first, and even then only seed-logged foods could count. A challenge runs Monday–Sunday, one per kind per week, with a target of 1–7 days
+  entries first, and even then only seed-logged foods could count. A challenge runs Monday-Sunday, one per kind per week, with a target of 1-7 days
   (`FamilyChallenge`, `ChallengeMember`; pure rules in `services/health/challenges.py`). Only an
   adult starts one: the gateway asks Identity whether the caller's family role is a minor's
   (`X-User-Is-Minor`; Identity unreachable counts as a minor) and the health service also refuses
   a profile in kid mode or under 18; admins may always. Anyone joins or leaves; the starter (or an
-  admin) can end it. Progress is computed on every read from members' own logs — a day with
-  nothing logged is not counted — and a member with no goal of their own is measured against the
+  admin) can end it. Progress is computed on every read from members' own logs - a day with
+  nothing logged is not counted - and a member with no goal of their own is measured against the
   guideline goal, labelled as such. No kind involves calories or weight. Routes: `GET/POST
   /challenges`, `POST/DELETE /challenges/{id}/join`, `DELETE /challenges/{id}` (gateway
   `/api/health/challenges…`). `FamilyChallengeCard` on Health → Today shows the standings, Join/
@@ -454,10 +454,10 @@ live search is the ecosystem-standard pattern.
   day"). A cheer reveals nothing about the day. `CheersCard` on Health → Today lists today's cheers
   and the buttons, and hides when there is nobody to cheer. **Share my day** on Today opens the
   same `ShareToChatSheet` the recipes and challenge use, with sleep, steps, water and energy from
-  the cards the person has on (`src/lib/healthShare.ts`) — never calories, weight or cycle data,
+  the cards the person has on (`src/lib/healthShare.ts`) - never calories, weight or cycle data,
   since a family chat includes the kids.
 
-### Phase 8 — integrations everywhere
+### Phase 8 - integrations everywhere
 
 - [x] Dashboard widget (today card). **Health today** (`health_today`, `HealthTodayWidget`) shows
   readiness, last night, water, food (kid mode: what was logged, never calories), the week's
@@ -468,9 +468,9 @@ live search is the ecosystem-standard pattern.
   identity's `WIDGET_DEFAULT_SIZES`; not in `CHILD_WIDGETS`, so a child's starting board is
   unchanged and they can add it themselves.
 - [ ] Android home-screen widget (today card). **Built 2026-10-24, not yet confirmed on a phone.**
-  *Health today* (`HealthTodayWidget`, 3×2, resizable) shows four tiles —
+  *Health today* (`HealthTodayWidget`, 3×2, resizable) shows four tiles -
   steps (geo, against the goal), readiness, last night's sleep score with its length, and water
-  in the profile's units (fl oz for imperial, litres otherwise) — from the same reads the Today tab
+  in the profile's units (fl oz for imperial, litres otherwise) - from the same reads the Today tab
   uses (`/api/geo/steps?days=1`, `/api/health/summary`), with the signed-in person's own key the
   way the other widgets read it (TokenBridge → `WidgetApi`). A missing reading prints a dash and
   why ("Check in", "Not logged", "None logged"), never a zero; one failed read leaves the other
@@ -490,7 +490,7 @@ live search is the ecosystem-standard pattern.
   through the same add the Calendar page uses (`src/lib/workoutPlan.ts`).
 - [x] Family hub entry point: the existing Health nav item now opens the hub.
 
-### Phase 9 — tests, docs, deploy
+### Phase 9 - tests, docs, deploy
 
 - [x] Pure tests: BMR/budget maths, scores, portion scaling, density mapping and water.
 - [x] Streaks, forgiving by design (the rule in `services/common/streaks.py`, which geo's strict
@@ -516,10 +516,10 @@ live search is the ecosystem-standard pattern.
 - [x] `npm run typecheck`, `npm run lint`, full UI suite (191 files / 1538 tests), `npm run build`, backend health tests (108), identity family-role tests and docs.
 - [x] Deploy `health gateway ui`, then verify `/health/ready`, the version endpoint and an authenticated `/api/health/profile` (health live since `d766a19f`).
 
-### Phase 10 — digital wellbeing (planned 2026-10-23)
+### Phase 10 - digital wellbeing (planned 2026-10-23)
 
 - [x] Phone usage on Android: the built `PhoneUsagePlugin` (mirroring `StepCounterPlugin`) reads
-      `UsageStatsManager` — the first brick is in (daily total, first and last use, session
+      `UsageStatsManager` - the first brick is in (daily total, first and last use, session
       count land on the profile via the Usage Access permission, which the member grants once
       in Android Settings). Per-app foreground time for the day now follows on the same engine:
       `getToday()` also returns the top twenty apps by foreground time, merged per package in
@@ -528,7 +528,7 @@ live search is the ecosystem-standard pattern.
       surface (step 7).
       Android-only: the card hides everywhere else, exactly like the steps sensor.
 - [x] Ingestion mirrors the steps pipeline: the phone owns the day arithmetic, uploads batched,
-      idempotent payloads (`source: phone`), coalesced — stored per user, every reading source-tagged.
+      idempotent payloads (`source: phone`), coalesced - stored per user, every reading source-tagged.
       Phone usage (`PhoneUsageSync`, 5-min) and per-app foreground time land this way; media
       sessions, calls and SMS reuse the activity pipeline.
 - [x] Digital wellbeing card in the hub (`DigitalWellbeingCard`, Health → Today): first use, last
@@ -536,36 +536,36 @@ live search is the ecosystem-standard pattern.
       An adult sees their own; a parent switches to each child; a minor sees no card. A per-session
       timeline needs the phone to report sessions (it reports first/last use and a count today).
 - [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
-      verses) — no permission needed — and show what each person does most inside Jarvis.
+      verses) - no permission needed - and show what each person does most inside Jarvis.
 - [x] Visibility follows Phase 11's rule, enforced on the server: identity's
       `may_view_raw_data` (`GET /api/internal/may-view-raw`) opens a minor's usage to an admin,
       the father and the linked mother (any mother when none is linked) and to no one else, an
       adult's to themselves; `GET /api/usage/{user}` answers 403 otherwise (any signed-in member
       could read anyone's before). An adult's opt-in `digital` family scope is still to come.
 
-### Phase 11 — family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
+### Phase 11 - family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
 
-The whole feature set of the parental-control apps — **surveillance included** — kept on our
+The whole feature set of the parental-control apps - **surveillance included** - kept on our
 own server: no cloud account, no subscription, nothing leaves the house. On top of the
 watching sits a discipleship layer those apps do not have (prayer grounded in real life, a
 voice for the quiet ones): the goal is not just knowing what a child does but guiding and
 praying for them well. Our Android app is sideloaded, so calls, SMS, media sessions and
-usage stats are all ours to read — the mechanisms Qustodio gets from its sideloaded APK,
+usage stats are all ours to read - the mechanisms Qustodio gets from its sideloaded APK,
 without Play-policy limits.
 
 **The focus is the digital profile.** Everything below collects from the mobile devices
-first and lands in one living per-person profile — what they listen to, play, watch and
+first and lands in one living per-person profile - what they listen to, play, watch and
 browse, when and for how long, and the patterns across a week. Jarvis then reads that
 profile to make recommendations and give positive, Biblical direction (music first: an
 artist whose lyrics are not appropriate becomes a Christian artist with a similar style;
-video themes get the same treatment — redeemed or redirected).
+video themes get the same treatment - redeemed or redirected).
 The guarding mechanics are the collection substrate; the profile and the guidance are the
 point.
 
 ### Collection
 
-- [ ] **The digital profile (the point of all of it).** Every signal below — device usage,
-      music, media sessions, calls and SMS, web, in-app activity — lands on one per-person
+- [ ] **The digital profile (the point of all of it).** Every signal below - device usage,
+      music, media sessions, calls and SMS, web, in-app activity - lands on one per-person
       profile: a living picture of what they listen to, play, watch and browse, when and for
       how long, and the week's patterns. This is the data model Jarvis reads for
       recommendations and for the discipleship surfaces further down.
@@ -597,9 +597,9 @@ point.
       masked in settings reads from the UI, and OAuth codes are masked in request logs.
 - [x] **YouTube and every external app (the phone pulls it).** First brick: a
       notification-access media-session reader on the phone pulls what YouTube
-      and any other external app publishes while playing — title and creator
+      and any other external app publishes while playing - title and creator
       where provided, tracks and artists in music apps, podcast episodes,
-      browser media — and posts it to the activity feed (`feature: media`,
+      browser media - and posts it to the activity feed (`feature: media`,
       `source: external`) for the family profile. Deeper metadata and per-app
       foreground time follow on the same engine.
 - [x] **Device usage (Android).** First brick: daily screen time with when the day started and
@@ -617,7 +617,7 @@ point.
 
 - [ ] **Time budgets and routines (Family Link / Qustodio).** Daily limits per device, bedtime
       and school weekly schedules, pause/grace, bonus time, child extension requests a parent
-      grants — with Qustodio's semantics (midnight reset, "always allowed" list, lock
+      grants - with Qustodio's semantics (midnight reset, "always allowed" list, lock
       navigation vs lock device).
       **4a built (server + app, 2026-10-24):** a parent sets a child's daily and weekend limits,
       bedtime and school hours, pauses the phone and adds bonus minutes; the child asks for more
@@ -629,7 +629,7 @@ point.
       read theirs); the gateway serves `GET /api/screen-time/{user}/status` from the rules plus
       today's reported use, and sends the notices. Screens: `ScreenTimeCard` (the child, Health →
       Today) and `ScreenTimeControls` (a parent, under the child in the phone-use card).
-      **4b (next): enforcement on the phone** — the Android app reads the status and locks
+      **4b (next): enforcement on the phone** - the Android app reads the status and locks
       everything but the always-allowed apps; this needs an Accessibility service and a device
       check, and pairs with tamper resistance below.
 - [x] **App control.** Block apps, per-app daily limits, install approvals, per-permission
@@ -686,8 +686,8 @@ point.
       Known gaps: a browser set to its own secure DNS (DoH) or Android's strict Private DNS
       bypasses a DNS filter; categories are Cloudflare's (no per-category choice).
       **"Ask a parent" built (2026-10-24, needs the next APK and a device check):** when the filter
-      blocks a site — the parent's block list, or the family-safe resolver's 0.0.0.0 answer, now
-      also counted as `blocked` in the web activity — the phone shows "… is blocked" with an "Ask
+      blocks a site - the parent's block list, or the family-safe resolver's 0.0.0.0 answer, now
+      also counted as `blocked` in the web activity - the phone shows "… is blocked" with an "Ask
       a parent" button (once per site every half hour; an ordinary Jarvis notice whose button is
       the push callback `guard_ask`, the same path as the route). A child can also ask from Health → Today (`AskForSiteCard`, shown when their
       phone filters websites; it lists only their own waiting requests). A parent allows the site
@@ -739,7 +739,7 @@ point.
       trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
       one-device-at-a-time live view.
 - [ ] **Tamper resistance.** Device-admin uninstall protection, restart on boot
-      (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents —
+      (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents -
       with a parent access code as the offline unlock/verify escape hatch.
       **Layer 1 built (2026-10-24, needs a device check):** on a minor's phone
       (`status.protected`), `GuardAdminReceiver` (device admin: no plain uninstall) and
@@ -756,7 +756,7 @@ point.
       Setup is the `PhoneProtectionCard` on the child's Health page (device admin, then
       Accessibility; Android 13+ first needs App info ⋮ → Allow restricted settings for a
       sideloaded app). Needs APK 437 or later on the phone. **Offline parent code (2026-10-24,
-      APK after 437):** a parent sets 6–12 digits (`PUT /api/guard/offline-code`, shown under the
+      APK after 437):** a parent sets 6-12 digits (`PUT /api/guard/offline-code`, shown under the
       child's controls); identity keeps only a PBKDF2-SHA256 verifier (`GuardOfflineCode`), which
       reaches a child's phone only inside a successful online parent unlock (never through the
       child's own reads). With no connection the guard screen takes the code, checks it on the
@@ -777,13 +777,13 @@ point.
 ### Watching (Bark parity)
 
 - [x] **Content monitoring, local models only.** Analyze the collected streams (messages,
-      calls, web, music, app usage) for what a parent needs to know — self-harm, bullying,
-      isolation, secret-keeping patterns — classified by concern level with per-child
+      calls, web, music, app usage) for what a parent needs to know - self-harm, bullying,
+      isolation, secret-keeping patterns - classified by concern level with per-child
       sensitivity (all / severe / none); serious categories always on.
       **Built (2026-10-24), local and deterministic:** every activity event recorded for a minor
       is scanned as it lands (`services/common/concern_monitor.py`, run from telemetry's
       activity route): text messages sent and received, media titles, sites and page names,
-      against a small reviewed phrase list (whole words, case-insensitive) in levels — severe
+      against a small reviewed phrase list (whole words, case-insensitive) in levels - severe
       (self-harm, sexual exploitation and grooming, threats), high (bullying, sexual content,
       drugs, secrecy) and medium (alcohol and vaping, gambling). Hits are kept for the recap
       (`tel:concerns:{child}`) with a short excerpt; the child's sensitivity
@@ -806,7 +806,7 @@ point.
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.
       **Weekly recap built (2026-10-24):** `services/common/guardian_recap.py` builds a child's
-      Monday–Sunday from what was reported — screen time (daily average, change from last week,
+      Monday-Sunday from what was reported - screen time (daily average, change from last week,
       late nights after 22:00 household time), top apps, what they played and watched, sites
       visited and blocked, how many calls and messages with how many people (never content),
       Bible days and the week's concerns, plus a few highlights. Telemetry sends it to both
@@ -821,8 +821,8 @@ point.
 - [ ] **Recommendations and positive, Biblical direction.** Jarvis reads the digital profile
       and suggests rather than scolds: an artist whose lyrics are not appropriate maps to a
       Christian artist with a similar style (genre, era, energy); a **YouTube video or
-      creator** with a negative theme is first *redeemed* — the same theme told well, by a
-      creator who lifts people up — and only redirected when redeeming is not possible; a
+      creator** with a negative theme is first *redeemed* - the same theme told well, by a
+      creator who lifts people up - and only redirected when redeeming is not possible; a
       show becomes a better-fit alternative, a game a family pick, and the devotional library
       answers what the week actually showed. Matching works on themes and styles, not names:
       music first (a small reviewed genre map), then video (topic and creator themes), then
@@ -839,50 +839,50 @@ point.
       listening, and a suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Second brick (video): a reviewed theme/creator map (`services/common/video_recommendations.py`)
       plus `GET /api/recommendations/video` returning a suggestion derived from the member's
-      watching — themes first redeemed (wholesome creator, same kind of content), then
-      redirected to a wholesome activity when no redeemed equivalent exists — and a
+      watching - themes first redeemed (wholesome creator, same kind of content), then
+      redirected to a wholesome activity when no redeemed equivalent exists - and a
       suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Third brick (podcasts): a reviewed theme/show map (`services/common/podcast_recommendations.py`)
       plus `GET /api/recommendations/podcast` returning a suggestion derived from the member's
-      listening — themes first redeemed (wholesome Christian shows, similar topic/style), then
-      redirected to an audio drama or family walk when no redeemed equivalent exists — and a
+      listening - themes first redeemed (wholesome Christian shows, similar topic/style), then
+      redirected to an audio drama or family walk when no redeemed equivalent exists - and a
       suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Fourth brick (books): a reviewed theme/author map (`services/common/book_recommendations.py`)
       plus `GET /api/recommendations/book` returning a suggestion derived from the member's
-      reading — themes first redeemed (wholesome/classic literature, similar genre), then
-      redirected to uplifting family reading when no redeemed equivalent exists — and a
+      reading - themes first redeemed (wholesome/classic literature, similar genre), then
+      redirected to uplifting family reading when no redeemed equivalent exists - and a
       suggestion in the dashboard's For You widget. Raw feed stays parents-only.
       Fifth brick (games): `services/common/game_recommendations.py` places the week's games
-      (per-app foreground time plus media-session titles) into reviewed themes — shooter, horror,
-      mature open world, open sandbox, fighting, gambling-style — weighted by time played; the
+      (per-app foreground time plus media-session titles) into reviewed themes - shooter, horror,
+      mature open world, open sandbox, fighting, gambling-style - weighted by time played; the
       most-played one gets a like-for-like swap (Fortnite → Rocket League, GTA → LEGO City
       Undercover, Roblox → a family Minecraft world) or, for spins and loot boxes, a family board
       game night. Games already in good shape get nothing. `GET /api/recommendations/game`.
       Sixth brick (activities): `services/common/activity_recommendations.py` reads the week's
-      phone pattern in the household timezone — late nights (last use at or after 22:00 on two or
+      phone pattern in the household timezone - late nights (last use at or after 22:00 on two or
       more days) suggest a phone-free wind-down, long days (four hours or more on three days)
-      suggest time outside — and never repeats the numbers. `GET /api/recommendations/activity`.
+      suggest time outside - and never repeats the numbers. `GET /api/recommendations/activity`.
       All six kinds render in one `recommendations` dashboard widget ("For You",
       `RecommendationsWidget`), on by default for every role; it shows only what the server
       derived, an explicit empty state when there is nothing yet, and per-kind failures.
 - [ ] **Who sees what (the visibility rule).** The collected data is parents-only: a minor's
-      profile — every raw section — is open to both parents (including the linked mother
+      profile - every raw section - is open to both parents (including the linked mother
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
       and siblings never see each other. The member's own view is the *output*, not the
       collection: their suggestions, recommendations and their own lanes are theirs to see
-      and act on, never the stream behind them. A father–mother shared parents' page stays
+      and act on, never the stream behind them. A father-mother shared parents' page stays
       mutual and revocable for accountability; an adult child's data is their own to share
       or hold.
 - [x] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
       prayer prompts grounded in what actually happened, conversation starters from the
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
-      before sending — never sent automatically.
+      before sending - never sent automatically.
       **Built (2026-10-24):** the parents' page, since replaced by the **family member page**
       `/family/member/{child}` (docs/FAMILY_MEMBER_PAGE.md; Health → Family guardian, concern
       and recap notices open it on the child; `/guardian` redirects). Its Faith & growth section
       shows one child at a time: the week (`RecapCard`),
-      **Praying for …** (`services/common/guidance.py`: for each signal in the week — a concern,
-      late nights, more phone time, blocked sites, Bible reading — a prayer, a KJV verse and a
+      **Praying for …** (`services/common/guidance.py`: for each signal in the week - a concern,
+      late nights, more phone time, blocked sites, Bible reading - a prayer, a KJV verse and a
       conversation starter, most important first; a quiet week gets a blessing), a **talk
       journal** (identity `GuardianNote`, the writer's own unless shared with the other parent;
       the child never sees it); the timeline and every control have their own sections. "Write … a note" turns a
@@ -895,28 +895,28 @@ point.
       parents and an optional short note (`POST /api/guardian/talk`; only the caller's own
       parents can be reached); the parent gets a `family_safety` notice that opens the child's
       family member page. Private lanes are the family chat's direct conversations. **Burden signals:** when a
-      child's own morning check-ins show low mood or energy (1–2 of 5) on three of the last
+      child's own morning check-ins show low mood or energy (1-2 of 5) on three of the last
       five, both parents get one gentle notice that week ("… has had a few hard days"), never
       the answers (`services/common/burden.py`, checked when a check-in is saved).
 - [ ] **Sharing follows the family roles (`docs/ROLES.md`).** Minor rules stay circle-on and
       locked; children never see parents' private sections; kid mode respected throughout.
 
 **Build order (profile first):** (1) the digital profile store and the activity recorders
-around it — DONE (trivia wins, media plays, app pages, Bible chapters, imported devotional/
+around it - DONE (trivia wins, media plays, app pages, Bible chapters, imported devotional/
 study-book reads, external media sessions, general phone usage, per-app foreground time,
-calls and SMS all land on the profile); (2) the Android collection engine — usage,
+calls and SMS all land on the profile); (2) the Android collection engine - usage,
 media sessions, calls and SMS DONE (video covered by media sessions + per-app foreground
-time); (3) Jarvis recommendations from the profile — DONE (music style matching,
+time); (3) Jarvis recommendations from the profile - DONE (music style matching,
 video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
 bless/block per lane); (4) time budgets and routines;
-(5) app control and the web filter — app blocking, per-app limits, install approvals,
+(5) app control and the web filter - app blocking, per-app limits, install approvals,
 per-permission gating, the one-minute warning, the DNS web filter, "ask a parent" for a
 blocked site and the bypass blocks (apps around the filter, encrypted DNS, Private DNS, the VPN
 switched off, split screen, picture-in-picture, safe-mode starts reported) DONE (needs the next
 APK and a device check);
-(6) monitoring alerts and the weekly recap — DONE (local phrase monitoring with a local-model
+(6) monitoring alerts and the weekly recap - DONE (local phrase monitoring with a local-model
 second pass, Sunday recap);
-(7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
+(7) the parents' page and the discipleship surfaces - DONE (parents' page, prayer and
 guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap); the parents'
 page became the family member page (docs/FAMILY_MEMBER_PAGE.md): Aura's layout, every section,
 the father's technical Devices section, and the mother's view without technical data enforced

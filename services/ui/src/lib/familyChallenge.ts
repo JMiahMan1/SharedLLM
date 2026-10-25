@@ -26,7 +26,7 @@ export function standingLabel(row: HealthChallengeStanding, target: number, unit
 
 /** The chat message a shared challenge becomes. */
 export function challengeShareText(challenge: HealthChallenge, nameOf: NameOf = plainName, note?: string): string {
-  const head = `🏆 Family challenge: ${challenge.title} — ${challenge.target_days} ${challenge.unit} this week (${formatDayLabel(challenge.week_start)} – ${formatDayLabel(challenge.week_end)})`;
+  const head = `🏆 Family challenge: ${challenge.title} - ${challenge.target_days} ${challenge.unit} this week (${formatDayLabel(challenge.week_start)} - ${formatDayLabel(challenge.week_end)})`;
   const lines = challenge.leaderboard.map(
     (row, index) =>
       `${index + 1}. ${nameOf(row.user_id)} · ${standingLabel(row, challenge.target_days, challenge.unit)}${row.reached ? ' ✓' : ''}`,

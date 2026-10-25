@@ -85,8 +85,8 @@ export default function ScreenTimeCard() {
 
       {(rules.bedtime_start || rules.school_start) && !status.locked && (
         <p className="mt-1 text-xs text-slate-400">
-          {rules.bedtime_start ? `Bedtime ${rules.bedtime_start}–${rules.bedtime_end}. ` : ''}
-          {rules.school_start ? `School ${rules.school_start}–${rules.school_end}.` : ''}
+          {rules.bedtime_start ? `Bedtime ${rules.bedtime_start}-${rules.bedtime_end}. ` : ''}
+          {rules.school_start ? `School ${rules.school_start}-${rules.school_end}.` : ''}
         </p>
       )}
 

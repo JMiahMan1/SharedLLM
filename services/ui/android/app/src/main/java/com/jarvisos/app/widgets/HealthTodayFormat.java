@@ -26,7 +26,7 @@ public final class HealthTodayFormat {
         }
     }
 
-    public static final String DASH = "–";
+    public static final String DASH = "-";
     private static final double ML_PER_FL_OZ = 29.5735;
 
     private HealthTodayFormat() {}

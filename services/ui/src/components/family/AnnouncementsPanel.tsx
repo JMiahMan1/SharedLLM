@@ -49,7 +49,7 @@ function deviceLabel(deviceId: string): string {
 }
 
 /**
- * Timers, alarms, household reminders, and spoken announcements — the panel
+ * Timers, alarms, household reminders, and spoken announcements - the panel
  * behind the Family page's Announce tab.
  */
 const AnnouncementsPanel = () => {
@@ -367,8 +367,8 @@ const AnnouncementsPanel = () => {
                   >
                     <option value="">One-time</option>
                     <option value="daily">Daily</option>
-                    <option value="weekdays">Weekdays (Mon–Fri)</option>
-                    <option value="weekends">Weekends (Sat–Sun)</option>
+                    <option value="weekdays">Weekdays (Mon-Fri)</option>
+                    <option value="weekends">Weekends (Sat-Sun)</option>
                     <option value="weekly">Weekly</option>
                   </select>
                 </div>

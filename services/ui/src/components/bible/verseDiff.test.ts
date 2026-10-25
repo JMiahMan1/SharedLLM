@@ -14,7 +14,7 @@ const v = (n: number, text: string, chapter = 3): BibleVerse => ({
 
 describe('normaliseWords', () => {
   it('drops case, punctuation, accents, apostrophes and extra whitespace', () => {
-    expect(normaliseWords('  “Lord,” said Peter —   it’s GOOD; naïve!  ')).toEqual([
+    expect(normaliseWords('  “Lord,” said Peter -   it’s GOOD; naïve!  ')).toEqual([
       'lord', 'said', 'peter', 'its', 'good', 'naive',
     ]);
     expect(normaliseWords(' ,.; ')).toEqual([]);

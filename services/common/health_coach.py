@@ -148,7 +148,7 @@ def _goals(goals: dict[str, Any] | None) -> str:
     rows = (goals or {}).get("goals") or []
     if rows:
         parts = [f"{row['title']}: {row['count']} of {row['target_days']} {row['unit']}{' ✓' if row['reached'] else ''}" for row in rows]
-        return "This week's goals — " + "; ".join(parts) + "."
+        return "This week's goals - " + "; ".join(parts) + "."
     pick = (goals or {}).get("suggestion")
     if pick:
         return f"No goal set this week. A gentle one: {pick['title'].lower()}, {pick['target_days']} {pick['unit']}. {pick['reason']} Set it on Health → Today."

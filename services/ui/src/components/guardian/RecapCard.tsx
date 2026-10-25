@@ -29,7 +29,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
           <CalendarRange size={16} className="text-sky-300" /> {name}'s week
         </h2>
-        {recap && <span className="text-[10px] text-slate-500">{formatDayLabel(recap.week.start)} – {formatDayLabel(recap.week.end)}</span>}
+        {recap && <span className="text-[10px] text-slate-500">{formatDayLabel(recap.week.start)} - {formatDayLabel(recap.week.end)}</span>}
       </div>
 
       {isLoading ? (

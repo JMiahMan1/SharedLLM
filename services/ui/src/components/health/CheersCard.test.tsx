@@ -81,7 +81,7 @@ describe('the shared health card', () => {
   it('carries sleep, steps, water and energy, never calories', () => {
     const text = healthDayShareText({ summary, steps: 6200 }, 'Good day!');
     expect(text).toBe(
-      'Good day!\n\n💚 My day so far:\n😴 Slept 7h 30m (rested)\n👟 6,200 steps so far\n💧 2,100 ml of water — goal reached\n⚡ Feeling good',
+      'Good day!\n\n💚 My day so far:\n😴 Slept 7h 30m (rested)\n👟 6,200 steps so far\n💧 2,100 ml of water - goal reached\n⚡ Feeling good',
     );
     expect(text).not.toMatch(/kcal|calorie|1800|1,800/);
   });

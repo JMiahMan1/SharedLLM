@@ -3,8 +3,8 @@
 
 Most recipe sites publish their recipe as JSON-LD (``<script
 type="application/ld+json">`` with an ``@type: Recipe`` node) because Google's
-rich results demand it. That block carries everything the family shelf needs —
-ingredients with units, ordered steps, times, yield, an image — so the importer
+rich results demand it. That block carries everything the family shelf needs -
+ingredients with units, ordered steps, times, yield, an image - so the importer
 reads the page once and never has to scrape HTML. Sites that do not publish it
 get a plain "cannot read this page" answer instead of a guess.
 """
@@ -384,7 +384,7 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
     recipe = extract_recipe(raw.decode(encoding, errors="replace"), final_url)
     if not recipe:
         return ExecutionResult.fail(
-            "That page does not publish recipe data Jarvis can read — try a "
+            "That page does not publish recipe data Jarvis can read - try a "
             "different link or add the recipe by hand.",
             service="recipe_import",
         )

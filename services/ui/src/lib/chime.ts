@@ -208,7 +208,7 @@ export function startLoopingAlarm(sound?: string, emoji?: string, title?: string
       if (typeof ChatNotify?.ringAlarm === 'function') {
         void ChatNotify.ringAlarm({
           title: title ? `⏰ ${title}` : '⏰ Jarvis Alarm',
-          body: title ? `${title} is ringing — tap Stop to silence.` : 'Tap Stop to silence.',
+          body: title ? `${title} is ringing - tap Stop to silence.` : 'Tap Stop to silence.',
         }).catch(() => {});
       }
     })

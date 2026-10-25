@@ -137,7 +137,7 @@ function LogEditor({
             onChange={(event) => setMood(event.target.value)}
             className="glass-input mt-1 h-9 w-full px-2 text-xs pointer-coarse:h-10"
           >
-            <option value="">—</option>
+            <option value="">-</option>
             {[1, 2, 3, 4, 5].map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -152,7 +152,7 @@ function LogEditor({
             onChange={(event) => setEnergy(event.target.value)}
             className="glass-input mt-1 h-9 w-full px-2 text-xs pointer-coarse:h-10"
           >
-            <option value="">—</option>
+            <option value="">-</option>
             {[1, 2, 3, 4, 5].map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -179,7 +179,7 @@ function LogEditor({
             onChange={(event) => setOvulation(event.target.value)}
             className="glass-input mt-1 h-9 w-full px-2 text-xs pointer-coarse:h-10"
           >
-            <option value="">—</option>
+            <option value="">-</option>
             <option value="negative">Negative</option>
             <option value="positive">Positive</option>
             <option value="inconclusive">Inconclusive</option>
@@ -472,7 +472,7 @@ export default function HealthCycle() {
                 >
                   <span>
                     {formatDayLabel(period.start_day)}
-                    {period.end_day ? ` – ${formatDayLabel(period.end_day)}` : ''}
+                    {period.end_day ? ` - ${formatDayLabel(period.end_day)}` : ''}
                     <span className="ml-1.5 capitalize text-slate-500">{period.flow}</span>
                   </span>
                   <button
@@ -514,7 +514,7 @@ export default function HealthCycle() {
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
           <h4 className="text-[11px] font-semibold text-slate-300">Cycle settings</h4>
           <p className="mt-1 text-[10px] text-slate-500">
-            Optional. Without these the estimate learns from your logged periods in 15–90 day
+            Optional. Without these the estimate learns from your logged periods in 15-90 day
             range.
           </p>
           <div className="mt-2 grid grid-cols-2 gap-2">

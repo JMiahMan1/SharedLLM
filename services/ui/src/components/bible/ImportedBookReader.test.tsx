@@ -107,7 +107,7 @@ describe('imported book reader', () => {
     await vi.waitFor(() =>
       expect(apiMock.postActivity).toHaveBeenCalledWith({
         feature: 'bible',
-        item: 'Walk With Jesus PDF - 1st Edition — Page 1',
+        item: 'Walk With Jesus PDF - 1st Edition - Page 1',
         event: 'read',
       }),
     );
@@ -164,7 +164,7 @@ describe('imported book reader', () => {
     await waitFor(() => expect(apiMock.createNote).toHaveBeenCalledTimes(1));
     expect(apiMock.createNote).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Walk With Jesus PDF - 1st Edition — Page 1',
+        title: 'Walk With Jesus PDF - 1st Edition - Page 1',
         category: 'Bible',
         content: expect.stringContaining('This is the first paragraph'),
       }),

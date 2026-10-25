@@ -533,7 +533,7 @@ export default function Recipes() {
       {importOpen && (
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
           <span className="text-sm font-semibold text-slate-200">Add a recipe</span>
-          <p className="text-xs text-slate-400">Paste a recipe page — Jarvis reads its published recipe data.</p>
+          <p className="text-xs text-slate-400">Paste a recipe page - Jarvis reads its published recipe data.</p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               value={importUrl}

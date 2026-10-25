@@ -152,7 +152,7 @@ export default function BibleBooksPanel() {
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
         <div className="flex items-center gap-2 text-[11px] text-slate-500">
           <Folder size={12} />
-          <span className="truncate">{listing.data?.root || '—'}</span>
+          <span className="truncate">{listing.data?.root || '-'}</span>
           <span className="ml-auto">{entries.length} entries</span>
         </div>
         {path ? (

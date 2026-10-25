@@ -52,7 +52,7 @@ const recap: GuardianRecap = {
   week: { start: '2026-10-19', end: '2026-10-25' }, has_data: true,
   screen: { total_min: 600, daily_avg_min: 150, days_reported: 4, prev_total_min: 400, change_pct: 50, busiest_day: '2026-10-20', busiest_min: 200, late_nights: 3 },
   top_apps: [{ package: 'com.google.android.youtube', minutes: 300 }],
-  media: [{ title: 'Lecrae — Blessings', count: 2 }],
+  media: [{ title: 'Lecrae - Blessings', count: 2 }],
   web: { top: [{ domain: 'khanacademy.org', visits: 9 }], blocked: [{ domain: 'tiktok.com', count: 3 }] },
   comms: { calls: 2, call_contacts: 1, messages: 10, message_contacts: 3 },
   faith: { bible_days: 2 },

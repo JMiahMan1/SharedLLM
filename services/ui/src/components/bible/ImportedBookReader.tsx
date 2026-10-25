@@ -168,7 +168,7 @@ export default function ImportedBookReader({
   const saveNote = useMutation({
     mutationFn: (payload: { page: BookPage; label: string }) =>
       api.createNote({
-        title: `${book.title} — ${payload.label}`,
+        title: `${book.title} - ${payload.label}`,
         category: 'Bible',
         content: `${book.title}\n${payload.label}\n\n${
           [payload.page.heading, ...payload.page.paragraphs].filter(Boolean).join('\n\n')
@@ -210,7 +210,7 @@ export default function ImportedBookReader({
     void api
       .postActivity({
         feature: 'bible',
-        item: `${book.title} — ${pageLabel}`,
+        item: `${book.title} - ${pageLabel}`,
         event: 'read',
       })
       .catch(() => undefined);

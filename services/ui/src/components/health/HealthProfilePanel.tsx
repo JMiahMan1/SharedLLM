@@ -360,7 +360,7 @@ export default function HealthProfilePanel() {
               className="h-4 w-4 accent-purple-500 disabled:opacity-60"
             />
             <span>
-              Kid mode — guidance ranges only, never deficits or weight-loss targets
+              Kid mode - guidance ranges only, never deficits or weight-loss targets
               {profile?.kid_mode_locked && <span className="block text-[11px] text-slate-500">Always on for anyone under 18.</span>}
             </span>
           </label>
@@ -615,7 +615,7 @@ export default function HealthProfilePanel() {
           Your data
         </h3>
         <p className="mt-1 text-[11px] text-slate-500">
-          Everything this service stores for you — profile, readings, sleep, check-ins and food — in
+          Everything this service stores for you - profile, readings, sleep, check-ins and food - in
           one JSON file.
         </p>
         <button

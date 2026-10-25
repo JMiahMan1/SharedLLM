@@ -354,7 +354,7 @@ const Artifacts = () => {
             Previous
           </button>
           <p className="text-xs text-slate-500">
-            {offset + 1}–{Math.min(offset + limit, total)} of {total}
+            {offset + 1}-{Math.min(offset + limit, total)} of {total}
           </p>
           <button
             disabled={offset + limit >= total}

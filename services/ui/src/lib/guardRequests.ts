@@ -16,7 +16,7 @@ export const PERMISSION_WORDS: Record<PermissionGroup, string> = {
 
 /** What a request asks, in plain words. */
 export function requestLine(r: GuardRequest): string {
-  if (r.kind === 'app') return `Installed ${r.label || appName(r.target)} — waiting for your OK`;
+  if (r.kind === 'app') return `Installed ${r.label || appName(r.target)} - waiting for your OK`;
   if (r.kind === 'permission') {
     const [pkg, group] = r.target.split('|');
     return `${r.label || appName(pkg)} wants ${PERMISSION_WORDS[group as PermissionGroup] || group}`;

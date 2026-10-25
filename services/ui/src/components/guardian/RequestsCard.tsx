@@ -21,7 +21,7 @@ function historyLine(row: Row): string {
     return r.status === 'granted' ? `Asked for ${r.minutes} more minutes: given ${r.granted_minutes}` : `Asked for ${r.minutes} more minutes: not that day`;
   }
   const r = row.request as GuardRequest;
-  return `${requestLine(r).replace(' — waiting for your OK', '')}: ${r.status === 'approved' ? 'yes' : 'no'}${r.decided_by ? ` (${r.decided_by})` : ''}`;
+  return `${requestLine(r).replace(' - waiting for your OK', '')}: ${r.status === 'approved' ? 'yes' : 'no'}${r.decided_by ? ` (${r.decided_by})` : ''}`;
 }
 
 /**

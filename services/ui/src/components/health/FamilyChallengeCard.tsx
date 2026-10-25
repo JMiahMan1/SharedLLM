@@ -16,8 +16,8 @@ const TARGETS = [1, 2, 3, 4, 5, 6, 7];
  * The weekly family challenge (Health hub Phase 7) on Health → Today.
  *
  * An adult starts one for the week; anyone joins. Standings are the days each
- * member's own logs counted — water goal, sleep need, a recipe dinner or
- * their own daily step goal (steps come from geo, read by the gateway) — so a
+ * member's own logs counted - water goal, sleep need, a recipe dinner or
+ * their own daily step goal (steps come from geo, read by the gateway) - so a
  * day with nothing logged is simply not counted, and a member whose steps
  * could not be read says so instead of showing zero. No calories or weight,
  * so the card is the same for a child.
@@ -82,7 +82,7 @@ export default function FamilyChallengeCard() {
         </h3>
         {data && (
           <span className="text-[10px] text-slate-500">
-            {formatDayLabel(data.week_start)} – {formatDayLabel(data.week_end)}
+            {formatDayLabel(data.week_start)} - {formatDayLabel(data.week_end)}
           </span>
         )}
       </div>

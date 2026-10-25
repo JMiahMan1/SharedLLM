@@ -59,7 +59,7 @@ export default function Family() {
       {/* One compact row, so the conversations get the screen. */}
       {/* The tabs sit beside the title when they fit at full size and wrap to
           a full-width row of their own when they do not. On a phone five
-          labels never fit, so the row shows icons only — the labels return
+          labels never fit, so the row shows icons only - the labels return
           from sm up and the accessible name is the label at every size. */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-1">
         <h1 className="shrink-0 text-2xl font-bold tracking-tight text-white">Family</h1>

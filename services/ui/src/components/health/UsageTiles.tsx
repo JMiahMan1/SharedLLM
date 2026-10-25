@@ -2,7 +2,7 @@ import { duration } from '../../lib/phoneUsageFormat';
 import type { UsageDay } from '../../types/api';
 
 function clock(epochMs: number | null | undefined): string {
-  if (!epochMs) return '—';
+  if (!epochMs) return '-';
   return new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 

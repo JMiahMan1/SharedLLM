@@ -177,7 +177,7 @@ def test_a_successful_play_lands_on_the_activity_feed(monkeypatch):
 
 
 def test_a_failed_play_stays_off_the_activity_feed(monkeypatch):
-    """A failed play records nothing — the feed only holds what actually played."""
+    """A failed play records nothing - the feed only holds what actually played."""
     recorder = _CallRecorder()
     recorder.set("search", _empty_search())
     _patch_common(monkeypatch, recorder)

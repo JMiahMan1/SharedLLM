@@ -6,7 +6,7 @@ const STORED =
   'Category: Recipes\n' +
   'Tags: #level-1 #30-minutes\n' +
   'Times: prep 5 min · total 15 min · servings 7 (scaled from 4)\n' +
-  'Source: https://www.food.com/recipe/pancakes-123 — Food.com, CC0 dataset\n' +
+  'Source: https://www.food.com/recipe/pancakes-123 - Food.com, CC0 dataset\n' +
   '\n' +
   '## Ingredients\n' +
   '- [ ] 2 cups flour';

@@ -85,7 +85,7 @@ export function buildRecipeNote(recipe: ImportedRecipe): string {
   const lines = [`Tags: ${guessLabels(recipe).join(' ')}`];
   if (times) lines.push(`Times: ${times}`);
   lines.push(
-    `Source: ${recipe.source_url} — imported from ${recipe.site}`,
+    `Source: ${recipe.source_url} - imported from ${recipe.site}`,
     '',
     '## Ingredients',
     ...recipe.ingredients.map((item) => `- [ ] ${item}`),
