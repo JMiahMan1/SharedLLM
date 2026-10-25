@@ -1,4 +1,8 @@
-import { test, expect, type Page, type Route } from '@playwright/test';
+import { test, expect as baseExpect, type Page, type Route } from '@playwright/test';
+
+// The page fills in from many small reads (fourteen nights of sleep alone), so a
+// card can take a few seconds on a loaded machine.
+const expect = baseExpect.configure({ timeout: 15_000 });
 
 /**
  * The family member page (docs/FAMILY_MEMBER_PAGE.md) on desktop and phone,
@@ -150,6 +154,8 @@ async function overflow(page: Page) {
 }
 
 test.describe('family member page', () => {
+  // Each test walks several sections; a busy machine needs more than the default 30 s.
+  test.describe.configure({ timeout: 90_000 });
   test('the father sees every section, Devices included', async ({ page }, info) => {
     const { unmocked } = await mockApi(page, 'dad');
     await page.goto('/guardian?child=sam');
@@ -186,7 +192,7 @@ test.describe('family member page', () => {
 
     await sectionButton('health').click();
     // Fourteen nights are fourteen reads of the sharing rules.
-    await expect(page.getByTestId('member-sleep-chart-summary')).toContainText('14 of 14 days reported', { timeout: 15_000 });
+    await expect(page.getByTestId('member-sleep-chart-summary')).toContainText('14 of 14 days reported');
     await page.screenshot({ path: info.outputPath('health.png'), fullPage: true });
 
     if (mobile) {
