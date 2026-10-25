@@ -669,7 +669,7 @@ point.
       the same for the app in front when it has one minute of its own left (`LockWarning`,
       JVM-tested). Bedtime and school now also lock on the phone's clock the moment they start,
       without waiting for the next status.
-- [ ] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
+- [x] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
       safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
       blocks (unsupported browsers, split-screen, safe mode).
       **DNS filter built (2026-10-24, APK after 437, needs a device check):** a parent switches
@@ -694,8 +694,47 @@ point.
       for an hour (`web_filter.allow_until`, `{domain: ISO end}`, pruned when it runs out) or
       always (moved from the block list to the allow list), or says no. The status carries
       `web_allow` (the allow list in force now) and the phone checks the end time itself, so an
-      hour ends on time offline (`WebFilterRules.activeAllow`, JVM-tested). Still open:
-      Qustodio-style bypass blocks (unsupported browsers, split-screen, safe mode).
+      hour ends on time offline (`WebFilterRules.activeAllow`, JVM-tested).
+      **Bypass blocks built (2026-10-24, needs the next APK and a device check), without
+      device-owner rights:** *Apps that get around a DNS filter* (`FilterBypass`, JVM-tested): every
+      app that declares a VPN service (found on the phone, whatever its name), plus one reviewed
+      list in `FilterBypass.KNOWN` with the reason for each (Tor Browser, Orbot, the Opera
+      browsers with their built-in VPN or proxy, Puffin, Intra). While the parents have the
+      filter on, the guard closes them like a blocked app ("… is off while the web filter is on";
+      `GuardRules` `BLOCK_BYPASS`, after the screen-time lock and the parents' own blocks; a
+      parent unlock lifts it) and the parents hear once per app (`bypass_app`, with its name).
+      *Encrypted DNS*: the filter answers "no such site" for the DoH/DoT providers in
+      `WebFilterRules.ENCRYPTED_DNS_HOSTS` (Google, Cloudflare, Quad9, OpenDNS, NextDNS, AdGuard,
+      CleanBrowsing, Mullvad, Control D) and Firefox's canary name, so a browser set to its own
+      secure DNS falls back to the phone's DNS; no "Ask a parent" notice for these, and a parent
+      can still allow one. *Private DNS*: the phone reads Android's strict Private DNS hostname
+      (`LinkProperties`), reports it (`private_dns`, with the host) and shows it in the father's
+      Devices section; the guard covers Settings' Private DNS dialog while the filter is on
+      (`private_dns_attempt`; recognised by its English text). *The VPN switched off or replaced*:
+      `filter_disabled` as before, `other_vpn` when another VPN runs in its place, and every ten
+      minutes the guard puts Android's "allow this VPN" prompt back in front of the child while
+      consent is missing (`FilterBypass.shouldPrompt`). *Split screen and picture-in-picture*: the
+      guard checks every app window on screen (`TYPE_WINDOWS_CHANGED`), not only the one in front;
+      a blocked app beside another ends the split screen before going home, and one in
+      picture-in-picture is dismissed (`GuardRules.clearFor`). *Safe mode*: Android runs no
+      downloaded app there, so the guard cannot stop it; it compares Android's boot counter
+      (`Settings.Global.BOOT_COUNT`) with the one it last ran under and reports each start
+      without it at the next normal start (`boot_without_guard`, "safe mode, most likely";
+      `GuardRules.bootsWithoutGuard`). Tamper reports now wait on the phone until the server takes
+      them (offline, or straight after a start), carry an optional detail (gateway
+      `_TAMPER_EVENTS`, identity's `guard_tamper` device event), and the Devices section words
+      them (`lib/guardTamper.ts`). *What a family app cannot do without device owner, plainly:*
+      prevent safe mode (`DISALLOW_SAFE_BOOT`), keep the VPN always on with "block connections
+      without VPN" (only the child can say yes to the VPN prompt, and only from Settings), switch
+      Private DNS back itself, or close a VPN that keeps running in the background after its app
+      is closed (it is reported). Not caught at all: a browser given an encrypted-DNS provider by
+      bare IP address (no lookup to refuse), Private DNS changed from somewhere other than that
+      dialog (reported, not covered), and a mainstream browser's in-app proxy settings.
+      Categories stay Cloudflare's (adult and malware; no per-category choice). *Device checks
+      needed:* whether this Android build's picture-in-picture window accepts "dismiss" from an
+      accessibility service (if not, the cover shows but the small window stays), that ending a
+      split screen then going home clears both halves, that `BOOT_COUNT` advances in safe mode,
+      and the Private DNS dialog's wording on Samsung.
 - [ ] **Location guardian.** The geo service already holds live location, history, zones and
       trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
       one-device-at-a-time live view.
@@ -723,7 +762,10 @@ point.
       child's own reads). With no connection the guard screen takes the code, checks it on the
       phone (`OfflineCode`, five wrong tries then ten minutes), lifts the guard for ten minutes
       and reports `offline_unlock` to both parents once the phone is online again. Safe mode and
-      factory reset still get around Layer 1. Known gap to check on a device: pages
+      factory reset still get around Layer 1; a start in safe mode (or any start in which the
+      guard never ran) is now reported at the next normal start (`boot_without_guard`), and a
+      blocked app kept visible in split screen or picture-in-picture is closed (see Web
+      filtering). Known gap to check on a device: pages
       are recognised by the text "Jarvis OS", and the guard's own Accessibility page is labelled
       "Jarvis screen guard", so it may not be covered on every phone (`GuardRules.APP_LABEL`).
       **Layer 2 (planned, optional per phone): device owner.** Set once over USB on a phone with
@@ -868,8 +910,10 @@ time); (3) Jarvis recommendations from the profile — DONE (music style matchin
 video themes redeemed or redirected, podcasts, books, games and activities, and a parent's
 bless/block per lane); (4) time budgets and routines;
 (5) app control and the web filter — app blocking, per-app limits, install approvals,
-per-permission gating, the one-minute warning, the DNS web filter and "ask a parent" for a
-blocked site DONE (needs the next APK and a device check);
+per-permission gating, the one-minute warning, the DNS web filter, "ask a parent" for a
+blocked site and the bypass blocks (apps around the filter, encrypted DNS, Private DNS, the VPN
+switched off, split screen, picture-in-picture, safe-mode starts reported) DONE (needs the next
+APK and a device check);
 (6) monitoring alerts and the weekly recap — DONE (local phrase monitoring with a local-model
 second pass, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and

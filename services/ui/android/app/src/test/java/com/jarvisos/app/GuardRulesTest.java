@@ -96,4 +96,57 @@ public class GuardRulesTest {
         assertEquals(Action.ALLOW, decide(true, true, false, "", "", ""));
         assertEquals(Action.ALLOW, decide(true, true, false, null, null, null));
     }
+
+    private static final List<String> BYPASS = Arrays.asList("org.torproject.torbrowser", "ch.protonvpn.android");
+
+    private static Action withFilter(boolean filterOn, String pkg, String text) {
+        return GuardRules.decide(true, false, false, pkg, "", text, ALLOWED, LAUNCHER, BLOCKED, null, filterOn, BYPASS);
+    }
+
+    @Test
+    public void appsThatGetAroundTheFilterCloseOnlyWhileItIsOn() {
+        assertEquals(Action.BLOCK_BYPASS, withFilter(true, "org.torproject.torbrowser", ""));
+        assertEquals(Action.ALLOW, withFilter(false, "org.torproject.torbrowser", ""));
+        assertEquals(Action.ALLOW, withFilter(true, "com.android.chrome", ""));
+    }
+
+    @Test
+    public void aParentsBlockAndTheScreenTimeLockComeBeforeTheBypassBlock() {
+        assertEquals(Action.BLOCK_APP, GuardRules.decide(true, false, false, "com.roblox.client", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, true, Arrays.asList("com.roblox.client")));
+        assertEquals(Action.BLOCK_LOCKED, GuardRules.decide(true, true, false, "org.torproject.torbrowser", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, true, BYPASS));
+    }
+
+    @Test
+    public void thePrivateDnsDialogIsCoveredWhileTheFilterIsOn() {
+        String dialog = "Private DNS Off Automatic Private DNS provider hostname Save";
+        assertEquals(Action.BLOCK_TAMPER, withFilter(true, "com.android.settings", dialog));
+        assertEquals(Action.ALLOW, withFilter(false, "com.android.settings", dialog));
+    }
+
+    @Test
+    public void aParentUnlockLiftsTheBypassBlock() {
+        assertEquals(Action.ALLOW, GuardRules.decide(true, false, true, "org.torproject.torbrowser", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, true, BYPASS));
+    }
+
+    @Test
+    public void aBlockedWindowIsClearedTheWayItIsShown() {
+        assertEquals(GuardRules.Clear.HOME, GuardRules.clearFor(false, 1));
+        assertEquals(GuardRules.Clear.EXIT_SPLIT, GuardRules.clearFor(false, 2));
+        assertEquals(GuardRules.Clear.DISMISS_PIP, GuardRules.clearFor(true, 2));
+        assertEquals(GuardRules.Clear.DISMISS_PIP, GuardRules.clearFor(true, 1));
+    }
+
+    @Test
+    public void phoneStartsWithoutTheGuardAreCountedFromTheBootCounter() {
+        assertEquals(0, GuardRules.bootsWithoutGuard(41, 42)); // the next start: the guard ran each time
+        assertEquals(1, GuardRules.bootsWithoutGuard(41, 43)); // one start (safe mode) without it
+        assertEquals(3, GuardRules.bootsWithoutGuard(10, 14));
+        assertEquals(0, GuardRules.bootsWithoutGuard(42, 42)); // the guard reconnected in the same start
+        assertEquals(0, GuardRules.bootsWithoutGuard(0, 42)); // first run: nothing to compare
+        assertEquals(0, GuardRules.bootsWithoutGuard(42, 0)); // no counter on this phone
+        assertEquals(0, GuardRules.bootsWithoutGuard(50, 3)); // counter reset (factory reset)
+    }
 }

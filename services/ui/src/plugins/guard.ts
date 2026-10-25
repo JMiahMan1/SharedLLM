@@ -11,6 +11,10 @@ export interface GuardStatus {
   webFilterAllowed?: boolean;
   /** The web filter is running now. */
   webFilterActive?: boolean;
+  /** Android's strict Private DNS hostname, "" when none (it gets around the web filter). */
+  privateDnsHost?: string;
+  /** Names of installed apps that get around the web filter (a VPN, Tor, Opera...). */
+  bypassApps?: string[];
 }
 
 export interface GuardPluginInterface {

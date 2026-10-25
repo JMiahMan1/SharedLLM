@@ -129,6 +129,42 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
     assert "unlocked with a parent's offline code" in sent[-1]["body"]
 
 
+def test_ways_around_the_web_filter_are_reported_with_what_they_were(wired, monkeypatch):
+    client, calls, sent, _ = wired
+
+    async def _who(_request):
+        return {"user": "kid"}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+
+    class _Resp:
+        status = 200
+
+        async def json(self, content_type=None):
+            return {"parents": ["dad"], "display_name": "Zachary"}
+
+    class _Client:
+        async def post(self, url, **kw):
+            calls.append({"url": url, **kw})
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake():
+        yield _Client()
+
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
+
+    assert client.post("/api/guard/tamper", json={"event": "bypass_app", "detail": "Tor  Browser"}).status_code == 200
+    assert calls[-1]["json"] == {"event": "bypass_app", "device_key": "", "detail": "Tor Browser"}
+    assert "gets around the web filter (closed while the filter is on): Tor Browser." in sent[-1]["body"]
+    for event in ("private_dns", "private_dns_attempt", "other_vpn", "boot_without_guard"):
+        assert client.post("/api/guard/tamper", json={"event": event}).status_code == 200
+    assert "safe mode" in sent[-1]["body"]
+    # A long detail is cut, never passed whole.
+    client.post("/api/guard/tamper", json={"event": "private_dns", "detail": "x" * 500})
+    assert len(calls[-1]["json"]["detail"]) == 80
+
+
 def test_a_parent_unlock_is_never_silent(wired, monkeypatch):
     client, _, sent, answers = wired
 

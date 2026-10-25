@@ -5,15 +5,7 @@ import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
 import { relativeTime } from '../../../lib/wanderTrips';
 import type { MemberDevice, MemberGuardState } from '../../../types/api';
-
-const TAMPER_WORDS: Record<string, string> = {
-  admin_disabled: "Jarvis's device protection was turned off",
-  guard_disabled: "Jarvis's screen guard was turned off",
-  guard_missing: "Jarvis's screen guard was missing",
-  uninstall_attempt: 'Someone tried to remove Jarvis',
-  offline_unlock: "Unlocked with a parent's offline code",
-  filter_disabled: "Jarvis's web filter was turned off",
-};
+import { tamperText } from '../../../lib/guardTamper';
 
 const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'adminActive', label: 'Device admin (no plain uninstall)' },
@@ -78,6 +70,26 @@ function DeviceCard({ device }: { device: MemberDevice }) {
                 <State on={guard[row.key] as boolean | undefined} />
               </li>
             ))}
+            {guard.privateDnsHost !== undefined && (
+              <li className="flex justify-between gap-2">
+                <span className="text-slate-300">Private DNS provider</span>
+                {guard.privateDnsHost ? (
+                  <span className="min-w-0 break-words text-amber-300">{guard.privateDnsHost} (gets around the filter)</span>
+                ) : (
+                  <span className="text-emerald-300">none</span>
+                )}
+              </li>
+            )}
+            {guard.bypassApps !== undefined && (
+              <li className="flex justify-between gap-2" data-testid="member-device-bypass">
+                <span className="text-slate-300">Apps that get around the filter</span>
+                {guard.bypassApps.length ? (
+                  <span className="min-w-0 break-words text-right text-amber-300">{guard.bypassApps.join(', ')}</span>
+                ) : (
+                  <span className="text-emerald-300">none</span>
+                )}
+              </li>
+            )}
           </ul>
         ) : (
           <p className="text-slate-500">This phone has not reported its protection yet (it does from the next app update).</p>
@@ -123,7 +135,7 @@ export default function DevicesSection({ username, name }: { username: string; n
         <ul className="space-y-1.5 text-xs">
           {data.tamper.map((t, i) => (
             <li key={`${t.at}-${i}`} className="flex justify-between gap-2">
-              <span className="text-slate-200">{TAMPER_WORDS[t.extra?.event || ''] || t.extra?.event || 'Protection changed'}</span>
+              <span className="min-w-0 break-words text-slate-200">{tamperText(t.extra)}</span>
               <span className="shrink-0 text-[10px] text-slate-500">{relativeTime(t.at)}</span>
             </li>
           ))}

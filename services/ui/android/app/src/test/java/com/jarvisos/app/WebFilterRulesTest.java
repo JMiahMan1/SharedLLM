@@ -13,6 +13,28 @@ import org.junit.Test;
 
 public class WebFilterRulesTest {
 
+    @Test
+    public void encryptedDnsProvidersAreNoSuchSiteSoBrowsersFallBackToTheFilter() {
+        for (String n : new String[] {"dns.google", "mozilla.cloudflare-dns.com", "chrome.cloudflare-dns.com",
+                "abc123.dns.nextdns.io", "use-application-dns.net", "dns.quad9.net"}) {
+            Decision dec = d(n);
+            assertEquals(n, Kind.BLOCK, dec.kind);
+            assertEquals(n, WebFilterRules.ENCRYPTED_DNS, dec.target);
+        }
+        // The provider's ordinary site is not a resolver.
+        assertEquals(Kind.FORWARD, d("www.quad9.net").kind);
+    }
+
+    @Test
+    public void aParentCanStillAllowAnEncryptedDnsProvider() {
+        assertEquals(Kind.FORWARD, WebFilterRules.decide("dns.google", true, true, BLOCK, Arrays.asList("dns.google")).kind);
+    }
+
+    @Test
+    public void aParentsOwnBlockKeepsItsAskAParentOffer() {
+        assertNull(d("tiktok.com").target);
+    }
+
     private static final List<String> BLOCK = Arrays.asList("tiktok.com", "reddit.com");
     private static final List<String> ALLOW = Arrays.asList("khanacademy.org", "help.reddit.com");
 
