@@ -1,4 +1,5 @@
 import { test, expect as baseExpect, type Page, type Route } from '@playwright/test';
+import { isServerCall } from './fixtures/serverCalls';
 
 // The page fills in from many small reads (fourteen nights of sleep alone), so a
 // card can take a few seconds on a loaded machine.
@@ -90,7 +91,7 @@ async function mockApi(page: Page, viewer: Viewer) {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(profile));
   }, PROFILES[viewer]);
-  await page.route('**/api/**', async (route: Route) => {
+  await page.route(isServerCall, async (route: Route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });

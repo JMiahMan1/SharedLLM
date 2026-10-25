@@ -320,9 +320,11 @@ describe('AmbientTimerWidget', () => {
       vi.advanceTimersByTime(15000);
     });
 
+    // Generous waits: under a loaded full-suite run the first render can take
+    // over a second, which made the default 1 s waitFor fail now and then.
     await waitFor(() => {
       expect(screen.queryByText('Loading timers...')).not.toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     const durationInput = screen.getByPlaceholderText('Sec') as HTMLInputElement;
     fireEvent.change(durationInput, { target: { value: '60' } });
@@ -330,11 +332,9 @@ describe('AmbientTimerWidget', () => {
     const addButton = buttons[buttons.length - 1];
     fireEvent.click(addButton);
 
-    // Timer should appear (either remote or local fallback)
-    await waitFor(() => {
-      const timerElement = screen.getByText(/Timer 1|Loading timers/);
-      expect(timerElement).toBeInTheDocument();
-    }, { timeout: 3000 });
+    // The server refused, so the timer runs locally instead of being lost.
+    expect(await screen.findByText('Timer 1', undefined, { timeout: 5000 })).toBeInTheDocument();
+    expect(api.createTimer).toHaveBeenCalled();
   });
 
   it('decrements timer countdown', async () => {

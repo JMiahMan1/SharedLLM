@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Page, Route } from '@playwright/test';
+import { isServerCall } from './serverCalls';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -176,9 +177,6 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
     unmockedCalls.push(`${route.request().method()} ${url}`);
     return route.abort();
   };
-  // Match server paths only: a glob like `**/api/**` would also swallow the
-  // app's own source modules (src/features/media/api/*.ts) served by Vite.
-  const isServerCall = (url: URL) => url.pathname.startsWith('/api/') || url.pathname.startsWith('/execute/');
   await page.route(isServerCall, catchAll);
 
   const json = (fixtureName: string, upstream?: 'ma' | 'abs') =>
