@@ -4,6 +4,7 @@ import ListenNowPage from './ListenNowPage';
 import SearchPage from './SearchPage';
 import LibraryPage from './LibraryPage';
 import CollectionPage from './CollectionPage';
+import BookPage from './BookPage';
 
 /** The media section's routes (§4.1), all inside the shared `MediaScreen` frame. */
 export default function MediaRoutes() {
@@ -17,6 +18,7 @@ export default function MediaRoutes() {
         <Route path="album/:provider/:id" element={<CollectionPage key="album" kind="album" />} />
         <Route path="artist/:provider/:id" element={<CollectionPage key="artist" kind="artist" />} />
         <Route path="playlist/:provider/:id" element={<CollectionPage key="playlist" kind="playlist" />} />
+        <Route path="book/:id" element={<BookPage />} />
       </Route>
     </Routes>
   );

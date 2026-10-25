@@ -22,6 +22,16 @@ export type SheetName = 'nowPlaying' | 'queue' | 'output';
 
 export const MAX_RECENT_SEARCHES = 10;
 
+/** An Audiobookshelf book started from this app, whose progress is written back (§7.5). */
+export interface AbsSession {
+  itemId: string;
+  title: string;
+  outputId: OutputId;
+  /** The book's length from its detail, when known. */
+  durationSec: number | null;
+  startedAt: number;
+}
+
 export interface MediaStoreState extends PlayersState {
   activeOutputId: OutputId;
   /** Once the person picks an output the app stops following live speakers. */
@@ -34,6 +44,7 @@ export interface MediaStoreState extends PlayersState {
   recentSearches: string[];
   /** Another browser tab took this device's audio (tab lock, BUG-66). */
   playingInOtherTab: boolean;
+  absSession: AbsSession | null;
   actions: {
     selectOutput: (id: OutputId, opts?: { picked?: boolean }) => void;
     /** Fold the status poll in; follow a playing speaker until the person picks one. */
@@ -50,6 +61,7 @@ export interface MediaStoreState extends PlayersState {
     addRecentSearch: (q: string) => void;
     clearRecentSearches: () => void;
     setPlayingInOtherTab: (on: boolean) => void;
+    setAbsSession: (session: AbsSession | null) => void;
   };
 }
 
@@ -75,6 +87,7 @@ const INITIAL = {
   events: 'closed' as const,
   recentSearches: [] as string[],
   playingInOtherTab: false,
+  absSession: null as AbsSession | null,
 };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -130,6 +143,7 @@ export const useMediaStore = create<MediaStoreState>()(
         },
         clearRecentSearches: () => set({ recentSearches: [] }),
         setPlayingInOtherTab: (on) => set({ playingInOtherTab: on }),
+        setAbsSession: (absSession) => set({ absSession }),
       },
     }),
     {

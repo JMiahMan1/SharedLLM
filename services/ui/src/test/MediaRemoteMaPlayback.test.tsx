@@ -127,7 +127,7 @@ describe('Media page: remote Music Assistant speakers', () => {
   it('plays a library item on the remote speaker through the gateway', async () => {
     renderWithProviders(<Media />);
     await selectRemoteSpeaker();
-    await userEvent.click(await screen.findByRole('button', { name: /Remote Song/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Play Remote Song' }));
 
     await waitFor(() =>
       expect(commands).toContainEqual({

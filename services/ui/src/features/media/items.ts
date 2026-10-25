@@ -12,6 +12,7 @@ export interface ItemLike {
   uri: string;
   name: string;
   media_type: string;
+  duration?: number | null;
 }
 
 export type ItemKind = 'track' | 'album' | 'artist' | 'playlist' | 'radio' | 'audiobook' | 'podcast' | 'episode' | 'author' | 'chapter' | 'other';
@@ -45,7 +46,7 @@ export function playRequestFor(item: ItemLike): PlayRequest | null {
   if (absId) {
     // An Audiobookshelf podcast plays through its episodes (MA URIs).
     if (kind === 'podcast') return null;
-    return { kind: 'abs', id: absId, title: item.name };
+    return { kind: 'abs', id: absId, title: item.name, durationSec: item.duration ?? null };
   }
   return item.uri ? { kind: 'uri', uri: item.uri, title: item.name } : null;
 }
