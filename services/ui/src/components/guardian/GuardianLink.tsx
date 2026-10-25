@@ -18,7 +18,7 @@ export default function GuardianLink() {
   if (user?.is_minor || children.length === 0) return null;
   return (
     <Link
-      to="/guardian"
+      to="/family/member"
       className="glass-panel flex min-h-11 items-center gap-3 rounded-2xl border border-sky-500/20 p-4 text-left"
       data-testid="guardian-link"
     >

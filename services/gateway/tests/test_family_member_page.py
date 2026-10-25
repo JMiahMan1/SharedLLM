@@ -164,6 +164,7 @@ def test_the_status_drops_guard_and_approval_states_for_the_mother(identity):
     mine = client.get("/api/screen-time/kid/status").json()
     assert "protected" not in mine and "app_approvals" not in mine and "permission_approvals" not in mine
     assert mine["limit_min"] == 120 and mine["can_manage"] is True  # every control stays
+    assert (full["technical"], mine["technical"]) == (True, False)  # the page hides Devices for her
 
 
 def test_stripping_reaches_every_depth_and_keeps_personal_fields():

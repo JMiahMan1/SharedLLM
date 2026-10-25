@@ -38,7 +38,7 @@ import Remote from './pages/Remote';
 import Settings from './pages/Settings';
 import Wander from './pages/Wander';
 import Health from './pages/Health';
-import Guardian from './pages/Guardian';
+import FamilyMember, { GuardianRedirect } from './pages/FamilyMember';
 import Bible from './pages/Bible';
 import { initAppUpdater } from './lib/appUpdater';
 import { useSiteTheme } from './themes/siteTheme';
@@ -152,7 +152,9 @@ function App() {
             <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
-            <Route path="/guardian" element={<ProtectedRoute isMobile={isMobile}><Guardian /></ProtectedRoute>} />
+            <Route path="/family/member/:username?" element={<ProtectedRoute isMobile={isMobile}><FamilyMember /></ProtectedRoute>} />
+            {/* The parents' page moved into the family member page; old links and notices keep working. */}
+            <Route path="/guardian" element={<GuardianRedirect />} />
             <Route path="/bible" element={<ProtectedRoute isMobile={isMobile}><Bible /></ProtectedRoute>} />
             {/* Historic alias for the same page. Redirecting rather than
                 mounting a second copy keeps one URL per page, so the query

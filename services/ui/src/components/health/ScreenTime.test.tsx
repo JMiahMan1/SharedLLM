@@ -85,42 +85,40 @@ describe('ScreenTimeCard (the member)', () => {
   });
 });
 
-describe('ScreenTimeControls (a parent)', () => {
+describe('ScreenTimeControls (a parent): the weekly schedule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: true }));
-    vi.mocked(api.getScreenTimeRequests).mockResolvedValue({
-      requests: [{ id: 7, username: 'kid', minutes: 30, note: 'one more level' } as never, { id: 8, username: 'sib', minutes: 15 } as never],
-    });
-    vi.mocked(api.decideScreenTimeRequest).mockResolvedValue({ request: { id: 7 } as never });
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue(
+      status({ can_manage: true, rules: { daily_limit_min: 120, weekend_limit_min: 180, bedtime_start: '21:00', bedtime_end: '07:00', day_limits: { fri: 150 } } }),
+    );
     vi.mocked(api.setScreenRules).mockResolvedValue({ rules: {} });
   });
 
-  it("answers only this child's requests", async () => {
+  it('shows a row per day with what each day falls back to', async () => {
     wrap(<ScreenTimeControls username="kid" name="Zachary" />);
-    const requests = await screen.findAllByTestId('screen-time-request');
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toHaveTextContent('one more level');
-    fireEvent.click(screen.getByRole('button', { name: 'Grant' }));
-    await waitFor(() => expect(api.decideScreenTimeRequest).toHaveBeenCalledWith(7, true));
+    expect(await screen.findByLabelText('Monday limit in minutes')).toHaveAttribute('placeholder', '120 (2 h)');
+    expect(screen.getByLabelText('Saturday limit in minutes')).toHaveAttribute('placeholder', '180 (3 h)');
+    expect(screen.getByLabelText('Friday limit in minutes')).toHaveValue(150);
+    expect(screen.getByRole('button', { name: 'Saturday is a school day' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('saves edited rules, clearing what was emptied', async () => {
+  it('saves a day of its own, school days and cleared routines, keeping the rest', async () => {
     wrap(<ScreenTimeControls username="kid" name="Zachary" />);
-    fireEvent.change(await screen.findByLabelText('Daily limit (min)'), { target: { value: '90' } });
+    fireEvent.change(await screen.findByLabelText('Wednesday limit in minutes'), { target: { value: '60' } });
+    fireEvent.change(screen.getByLabelText('Every day (min)'), { target: { value: '90' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Friday is a school day' }));
     fireEvent.change(screen.getByLabelText('Bedtime starts'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('screen-time-save'));
     await waitFor(() => expect(api.setScreenRules).toHaveBeenCalled());
     const [who, rules] = vi.mocked(api.setScreenRules).mock.calls[0];
     expect(who).toBe('kid');
-    expect(rules.daily_limit_min).toBe(90);
+    expect(rules).toMatchObject({ daily_limit_min: 90, weekend_limit_min: 180, day_limits: { wed: 60, fri: 150 }, school_days: ['mon', 'tue', 'wed', 'thu'] });
     expect(rules.bedtime_start).toBeUndefined();
   });
 
-  it('renders nothing for someone who cannot manage the child', async () => {
+  it('says so to someone who cannot manage the child', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: false }));
-    const { container } = wrap(<ScreenTimeControls username="kid" name="Zachary" />);
-    await waitFor(() => expect(api.getScreenTimeStatus).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    wrap(<ScreenTimeControls username="kid" name="Zachary" />);
+    expect(await screen.findByTestId('screen-time-controls-empty')).toHaveTextContent('Only their parents');
   });
 });

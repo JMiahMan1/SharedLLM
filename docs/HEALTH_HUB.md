@@ -634,8 +634,9 @@ point.
       `GuardRequest` (`POST/GET /api/guard/requests`, `POST /api/guard/requests/{id}`; kinds `app`,
       `permission`, `site`; only the child's own parents answer, a request already waiting is
       returned without a second notice, an answered app or permission is not asked again). Both
-      parents get a `family_safety` notice that opens `/guardian?child=…`, where
-      `GuardRequestsCard` ("… is asking") approves or denies; the child hears the answer.
+      parents get a `family_safety` notice that opens the child's family member page
+      (`/family/member/…`, docs/FAMILY_MEMBER_PAGE.md; the old `/guardian?child=…` redirects),
+      where `RequestsCard` ("… is asking") approves or denies inline; the child hears the answer.
       *Install approvals* (rule `install_approval`, on unless a parent switches it off under the
       child's apps): the guard records the phone's user-installed apps the first time it runs on a
       protected phone (the baseline); an app installed later stays closed ("… needs a parent's
@@ -820,13 +821,15 @@ point.
       prayer prompts grounded in what actually happened, conversation starters from the
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews
       before sending — never sent automatically.
-      **Built (2026-10-24):** the parents' page `/guardian` (Health → Family guardian; concern and
-      recap notices open it on the child) shows one child at a time: the week (`RecapCard`),
+      **Built (2026-10-24):** the parents' page, since replaced by the **family member page**
+      `/family/member/{child}` (docs/FAMILY_MEMBER_PAGE.md; Health → Family guardian, concern
+      and recap notices open it on the child; `/guardian` redirects). Its Faith & growth section
+      shows one child at a time: the week (`RecapCard`),
       **Praying for …** (`services/common/guidance.py`: for each signal in the week — a concern,
       late nights, more phone time, blocked sites, Bible reading — a prayer, a KJV verse and a
       conversation starter, most important first; a quiet week gets a blessing), a **talk
       journal** (identity `GuardianNote`, the writer's own unless shared with the other parent;
-      the child never sees it), the activity feed and every control. "Write … a note" turns a
+      the child never sees it); the timeline and every control have their own sections. "Write … a note" turns a
       starter into an editable note the parent sends through the family chat themselves.
       The starters are reviewed text, not yet drawn from the devotional library.
 - [x] **A voice for the quiet ones.** One-tap "I need to talk", burden signals (reusing
@@ -834,8 +837,8 @@ point.
       loud first.
       **"I need to talk" built (2026-10-24):** a child's card on Health → Today picks one or both
       parents and an optional short note (`POST /api/guardian/talk`; only the caller's own
-      parents can be reached); the parent gets a `family_safety` notice that opens the parents'
-      page. Private lanes are the family chat's direct conversations. **Burden signals:** when a
+      parents can be reached); the parent gets a `family_safety` notice that opens the child's
+      family member page. Private lanes are the family chat's direct conversations. **Burden signals:** when a
       child's own morning check-ins show low mood or energy (1–2 of 5) on three of the last
       five, both parents get one gentle notice that week ("… has had a few hard days"), never
       the answers (`services/common/burden.py`, checked when a check-in is saved).
@@ -856,7 +859,10 @@ blocked site DONE (needs the next APK and a device check);
 (6) monitoring alerts and the weekly recap — DONE (local phrase monitoring with a local-model
 second pass, Sunday recap);
 (7) the parents' page and the discipleship surfaces — DONE (parents' page, prayer and
-guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap).
+guidance, talk journal, "I need to talk", burden signals, the Jarvis chat recap); the parents'
+page became the family member page (docs/FAMILY_MEMBER_PAGE.md): Aura's layout, every section,
+the father's technical Devices section, and the mother's view without technical data enforced
+by the server.
 
 ## Acceptance
 

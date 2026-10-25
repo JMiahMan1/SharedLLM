@@ -141,6 +141,8 @@ import type {
   HealthChallengeWeek,
   SleepEstimate,
   GuardianRecap,
+  GuardianConcern,
+  MemberDevices,
   GuardianPrompt,
   GuardianJournalNote,
   ActivityEvent,
@@ -1034,6 +1036,18 @@ export const api = {
 
   async clearOfflineCode(): Promise<{ set: boolean }> {
     const resp = await apiClient.delete('/api/guard/offline-code');
+    return resp.data;
+  },
+
+  /** A child's devices with their technical side: the father's and admins' only (403 for anyone else). */
+  async getMemberDevices(username: string): Promise<MemberDevices> {
+    const resp = await apiClient.get(`/api/family/member/${encodeURIComponent(username)}/devices`);
+    return resp.data;
+  },
+
+  /** What content monitoring found on a child's phone, newest first (parents only). */
+  async getGuardianConcerns(username: string, limit = 50): Promise<{ concerns: GuardianConcern[] }> {
+    const resp = await apiClient.get(`/api/guardian/concerns/${encodeURIComponent(username)}`, { params: { limit } });
     return resp.data;
   },
 

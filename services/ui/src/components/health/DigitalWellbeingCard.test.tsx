@@ -1,17 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AxiosError, AxiosHeaders } from 'axios';
 import DigitalWellbeingCard from './DigitalWellbeingCard';
 import { api } from '../../services/api';
-import type { FamilyRecord, UsageDay } from '../../types/api';
+import type { UsageDay } from '../../types/api';
 
 const auth = vi.hoisted(() => ({ user: { username: 'dad', family_role: 'father', is_minor: false } as Record<string, unknown> }));
 vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: auth.user }) }));
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn(), getFamily: vi.fn(), getScreenTimeStatus: vi.fn(), getScreenTimeRequests: vi.fn() } };
+  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn() } };
 });
 
 function today(): string {
@@ -32,10 +31,6 @@ const day = (overrides: Partial<UsageDay> = {}): UsageDay => ({
   ...overrides,
 });
 
-const kid: FamilyRecord = {
-  username: 'kid', display_name: 'Zachary', family_role: 'child', mother_username: 'mom',
-  is_minor: true, sharing_locked: true, is_admin: false, avatar: null,
-};
 
 const renderCard = () =>
   render(
@@ -48,10 +43,7 @@ describe('DigitalWellbeingCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.user = { username: 'dad', family_role: 'father', is_minor: false };
-    vi.mocked(api.getFamily).mockResolvedValue([]);
     vi.mocked(api.getUsage).mockResolvedValue({ status: 'SUCCESS', days: [day()] });
-    vi.mocked(api.getScreenTimeStatus).mockRejectedValue(new Error('not mocked here'));
-    vi.mocked(api.getScreenTimeRequests).mockResolvedValue({ requests: [] });
   });
 
   it("shows an adult's own day: screen time, first and last use, top apps by name", async () => {
@@ -60,7 +52,7 @@ describe('DigitalWellbeingCard', () => {
     expect(screen.getByTestId('wellbeing-sessions')).toHaveTextContent('23');
     const apps = screen.getByRole('list', { name: 'Top apps today' });
     expect(apps.textContent).toMatch(/YouTube.*50 min.*Spotify.*20 min/);
-    expect(api.getUsage).toHaveBeenCalledWith('dad', 7);
+    expect(api.getUsage).toHaveBeenCalledWith('dad', 14);
   });
 
   it('shows a minor nothing: their raw data is the parents’', () => {
@@ -68,22 +60,6 @@ describe('DigitalWellbeingCard', () => {
     const { container } = renderCard();
     expect(container).toBeEmptyDOMElement();
     expect(api.getUsage).not.toHaveBeenCalled();
-  });
-
-  it('lets a parent switch to a child', async () => {
-    vi.mocked(api.getFamily).mockResolvedValue([kid]);
-    renderCard();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Zachary' }));
-    await waitFor(() => expect(api.getUsage).toHaveBeenCalledWith('kid', 7));
-  });
-
-  it('says so when the server refuses', async () => {
-    const refused = new AxiosError('Forbidden', '403', undefined, undefined, {
-      status: 403, statusText: 'Forbidden', data: {}, headers: {}, config: { headers: new AxiosHeaders() },
-    });
-    vi.mocked(api.getUsage).mockRejectedValue(refused);
-    renderCard();
-    expect(await screen.findByTestId('digital-wellbeing-refused')).toBeInTheDocument();
   });
 
   it('says plainly when nothing was reported today', async () => {

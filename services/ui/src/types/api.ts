@@ -313,9 +313,13 @@ export interface WebFilterRules {
 export type PermissionGroup = 'location' | 'camera' | 'microphone' | 'contacts' | 'sms' | 'phone' | 'photos' | 'calendar' | 'nearby';
 
 /** A parent's screen-time rules for a member (all optional). */
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
 export interface ScreenRules {
   daily_limit_min?: number;
   weekend_limit_min?: number;
+  /** The weekly schedule: a day's own limit, over the daily and weekend ones. */
+  day_limits?: Partial<Record<Weekday, number>>;
   bedtime_start?: string;
   bedtime_end?: string;
   school_start?: string;
@@ -343,8 +347,10 @@ export interface ScreenTimeStatus {
   day: string;
   rules: ScreenRules;
   can_manage: boolean;
-  /** A minor's phone: Jarvis must stay installed and guarded. */
-  protected: boolean;
+  /** Whether the viewer sees the technical side (the father and admins; not the mother). */
+  technical?: boolean;
+  /** A minor's phone: Jarvis must stay installed and guarded (withheld from the mother). */
+  protected?: boolean;
   limit_min: number | null;
   used_min: number;
   bonus_min: number;
@@ -378,6 +384,56 @@ export interface SpotifyStatus {
   linked_at?: string;
   last_sync_at?: string | null;
   last_error?: string | null;
+}
+
+/** What a child's phone reported about Jarvis's protection (the father's and admins' only). */
+export interface MemberGuardState {
+  adminActive?: boolean;
+  deviceOwner?: boolean;
+  guardEnabled?: boolean;
+  webFilterAllowed?: boolean;
+  webFilterActive?: boolean;
+  usageAccess?: boolean;
+  healthConnect?: string;
+  reportedAt?: string;
+}
+
+/** One of a child's devices, with its technical side (family member page, Devices). */
+export interface MemberDevice {
+  device_key: string;
+  kind: string;
+  label: string;
+  model: string | null;
+  manufacturer: string | null;
+  os_version: string | null;
+  os_build: string | null;
+  app_version: string | null;
+  app_build: string | null;
+  last_ip_address: string | null;
+  last_seen_at: string | null;
+  first_seen_at: string | null;
+  capabilities: { guard?: MemberGuardState } & Record<string, unknown>;
+  battery: { at: string; pct: number | null; usb: boolean | null } | null;
+}
+
+export interface MemberDevices {
+  username: string;
+  devices: MemberDevice[];
+  tamper: Array<{ event: string; at: string; extra: { event?: string }; device_key: string | null }>;
+  /** Each parent: whether they set an offline unlock code. */
+  offline_code: Record<string, boolean>;
+}
+
+/** One thing content monitoring found on a child's phone. */
+export interface GuardianConcern {
+  category: string;
+  label: string;
+  level: ConcernLevel;
+  excerpt: string;
+  feature?: string;
+  action?: string;
+  at?: string;
+  review?: ConcernReview | null;
 }
 
 /** A child asking a parent first: a new app, an app's permission, or a blocked site. */

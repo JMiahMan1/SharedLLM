@@ -4,10 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppControls from './AppControls';
 import { api } from '../../services/api';
 import type { ScreenRules } from '../../types/api';
+import { localDay, shiftDay } from '../../lib/healthHub';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn(), setScreenRules: vi.fn() } };
+  return { ...actual, api: { ...(actual.api as Record<string, unknown>), getUsage: vi.fn(), setScreenRules: vi.fn(), getGuardRequests: vi.fn() } };
 });
 
 const YT = 'com.google.android.youtube';
@@ -26,11 +27,23 @@ describe('AppControls (a parent)', () => {
     vi.mocked(api.getUsage).mockResolvedValue({
       status: 'SUCCESS',
       days: [
-        { day: '2026-10-21', millis: 1, first_use: null, last_use: null, sessions: 1, apps: [{ package: YT, millis: 3_600_000 }, { package: 'com.jarvisos.app', millis: 60_000 }] },
-        { day: '2026-10-20', millis: 1, first_use: null, last_use: null, sessions: 1, apps: [{ package: YT, millis: 600_000 }] },
+        { day: localDay(), millis: 1, first_use: null, last_use: null, sessions: 1, apps: [{ package: YT, millis: 3_600_000 }, { package: 'com.jarvisos.app', millis: 60_000 }] },
+        { day: shiftDay(localDay(), -1), millis: 1, first_use: null, last_use: null, sessions: 1, apps: [{ package: YT, millis: 600_000 }] },
       ],
     });
     vi.mocked(api.setScreenRules).mockResolvedValue({ rules: {} });
+    vi.mocked(api.getGuardRequests).mockResolvedValue({ requests: [] });
+  });
+
+  it('shows each app with today, the week and its state', async () => {
+    vi.mocked(api.getGuardRequests).mockResolvedValue({
+      requests: [{ id: 1, username: 'kid', kind: 'app', target: 'com.mojang.minecraftpe', label: 'Minecraft', note: '', status: 'pending', until: null, decided_by: null, created_at: 'x', decided_at: null }],
+    });
+    wrap({ app_limits: { [YT]: 90 }, blocked_apps: [ROBLOX] });
+    await waitFor(() => expect(screen.getByTestId(`app-row-${YT}`)).toHaveTextContent('1 h today · 1 h 10 min this week'));
+    expect(screen.getByTestId(`app-state-${YT}`)).toHaveTextContent('limited to 90 min');
+    expect(screen.getByTestId(`app-state-${ROBLOX}`)).toHaveTextContent('blocked');
+    expect(await screen.findByTestId('app-state-com.mojang.minecraftpe')).toHaveTextContent('awaiting approval');
   });
 
   it('lists the apps the phone reported, not the always-allowed ones, plus apps with rules', async () => {

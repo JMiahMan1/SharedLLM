@@ -5779,6 +5779,8 @@ async def screen_time_status(request: Request, username: str):
         "day": day,
         "rules": body.get("rules") or {},
         "can_manage": bool(body.get("can_manage")),
+        # Whether this viewer sees the technical side (the page's Devices section).
+        "technical": bool(body.get("technical", True)),
         "protected": bool(body.get("protected")),
         # The parents' answers on new apps ({pkg: pending|approved|denied}) and
         # app permissions ({"pkg|group": ...}); the phone's guard enforces them.
