@@ -6,13 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha` **317efc50**,
-  APK **442** (verified 2026-10-24 after the last deploy: no new errors on touched services).
-  - Containers: ui, execution, bible **317efc50**; identity, telemetry **f26d3d0f**; health
-    **ede92227**; gateway at the commit that added this handover (an empty-body 500 on the new
-    notes routes, now a 422). Each deploy pins the touched services to the branch tip.
-  - APK 442 (built by CI from this session's code) carries this session's native work (the screen fix, the night
-    reader for sleep estimates, app blocking, the offline parent code, the web filter).
+- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha` **093b4294**
+  (2026-10-24 evening; every app service redeployed at that tip, 0 errors after). APK: CI builds one
+  per push under `services/ui/**`; the native work below needs the newest APK on the phones.
+  - The Family guard Phase 11 commits (`a1e682ab`…`7b562fe3`) and later land with the next deploy.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
 - Check anytime:
@@ -24,6 +21,41 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-24 evening session` (lead + parallel agents; every change cherry-picked onto
+  `microservices`, no other branches kept). Details in the docs named.
+  - **Media — playing on the phone works again** (BUG-74…79): play waits for MA to see the web
+    player; Next/Previous on a Cast TV go to its MA twin; playlists fill the right queue on every
+    target; Play next / Add to queue on every row; the output sheet shows MA groups, removes a
+    speaker, ungroups, sets group volume, and only offers speakers in the leader's
+    `can_group_with` (so grouped audio stays in sync). Gateway allows `players/cmd/set_members`
+    and `group_volume` with per-player scope checks.
+  - **Media — native background audio (P8-T2)**: swiping the app away hands the stream to
+    `NativeSendspinPlayer` (same player id, PCM, clock-synced AudioTrack); reopening reclaims it.
+    Emulator-verified against a mock server; **needs a real phone check**.
+  - **Media — signed media tokens everywhere** (`lib/mediaToken.ts`); `?token=<api key>` is
+    refused on `/api/media/*` (Sendspin/JSON-RPC sockets unchanged). Widget "null" title fixed.
+  - **Lint**: ruff is clean repo-wide (three cleanup branches merged).
+  - **Notes**: place reminders ("when I get home", fired by geo), attachments beside the note the
+    Nextcloud Notes way (photos, files, drawings, voice), offline edit queue with If-Match replay.
+  - **Bible**: side-by-side panes that scroll together by verse; reference-chip popover.
+  - **Health**: per-card switches, kid-mode hiding, **kid mode forced on for every minor**
+    (family role or birth year), fasting window (adults), weekly active-minutes ring, forgiving
+    streaks, a lesson a day, the coach (goals, reminders, chat answers from own data), cheers and
+    share-my-day, plan↔log↔shopping round trip, calendar workouts, a Health today dashboard card,
+    photo (nutrition label OCR) and voice food logging as editable drafts. Shared cycle now gives
+    phase and next period only (it leaked `cycle_day`).
+  - **Health on Android**: Health Connect import (sleep, resting HR, HRV, weight, workouts into
+    geo's store) and a Health today home-screen widget — **need a phone check**.
+  - **Family guard (Phase 11)**: install approvals, permission gating, the one-minute warning,
+    "ask a parent" for a blocked site, Spotify linking (needs a Spotify app registered and the
+    three `spotify_*` settings), and a local-model second pass on content monitoring (needs
+    `guardian_monitor_model`) — **need phone checks**.
+  - **In progress**: the per-child **family member page** (docs/FAMILY_MEMBER_PAGE.md, modelled on
+    Aura) replacing `/guardian`; media Phases 3 and 5–7 (foundations, screens, polish,
+    accessibility/performance).
+  - Shared helpers created while removing copies: `lib/focusTrap.ts`, `lib/base64.ts`,
+    `lib/blobUrlCache.ts`, `hooks/useAudioRecorder.ts`, `services/common/streaks.py`,
+    `services/common/links.py`, `lib/mealPlanStore.ts`, `withShareNote`.
 - `2026-10-24 session` Everything below up to "Suggestion lanes (server)" landed in this session; all
   deployed and smoke-checked unless noted. Details live in the docs named.
   - **Phone app: the screen no longer drifts under the bars** — the phone shell is `fixed inset-0`
@@ -579,21 +611,25 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 
 ## 4. Open small items
 
-- Notes still open (docs/NOTES.md, with reasons): place-based reminders, attachments/images/
-  drawings/audio, offline edit queue.
-- Media (docs/MEDIA_OVERHAUL.md, docs/PENDING_TASKS.md): **P8-T2 native background audio** —
-  playback stops when the app is swiped from recents because the WebView (and the Sendspin
-  `<audio>`) dies; surviving that needs a native player following MA's stream. Not attempted
-  without a phone to verify. Media phases 3 and 5–9 remain.
-- Bible (docs/PENDING_TASKS.md): synced-scroll comparison and the reference-chip popover.
-- Health: periodic cycle data never appears in family projections; watch family-card layout.
-- The family challenge measures a member with no water goal or sleep need against the app's
-  guideline defaults, labelled "guideline goal" on the card (same defaults `/summary` uses) —
-  confirm with Jeremiah that this is acceptable under the no-fallback rule.
+- Media: Phases 3 and 5–9 of docs/MEDIA_OVERHAUL.md (an agent was on 3 and 5–7 at handover); the version bump
+  and final release gate (Phase 9) come last.
+- Bible: per-pane font size and highlighting verses that differ between translations (planned).
+- Health: step and veg challenges; the family challenge's labelled "guideline goal" for members
+  with no goal of their own still needs Jeremiah's yes/no under the no-fallback rule.
+- A Windows Chrome tab at `http://192.168.2.205:8080` with an expired login polled
+  `/api/users/me/theme` + `/health/ready` every ~4.5 s from 2026-10-24 20:00 UTC (an old cached
+  bundle; the current code fetches the theme once per load). Ask Jeremiah to reload/sign in.
+- Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
+  Players.
 
 ## 5. Immediate next steps
 
 1. **Device checks (need a person with the phones; install the newest APK first):**
+   - background music: play on the phone, swipe the app away (music continues), reopen it;
+   - Health Connect connect/sync and the Health today widget (list in docs/HEALTH_HUB.md);
+   - Phase 11: install approval, camera permission gating, the one-minute warning, "ask a
+     parent" from a blocked site (list in docs/HEALTH_HUB.md Phase 11);
+   - Notes: a place reminder on arriving home, a voice note, drawing, an offline edit;
    - the screen fix: the app must not drag under the status bar or the Android buttons;
    - the Jarvis guard: uninstall attempt → parent-login screen; parent login and the **offline
      code** (airplane mode) unlock; bedtime/pause sends games home; calls and texts still work;
@@ -603,12 +639,9 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    - sleep estimate: after a night with the new APK, Sleep → "Estimate from my devices".
 2. **First live trivia game** on the new code (questions/verdicts from the `jarvis` account,
    arrival-order answers, late answers not burned).
-3. Phase 11 still open: install approvals, per-permission gating and the one-minute warning (app
-   control); an "ask a parent" flow for a blocked site; Spotify linking; a local-model second
-   pass for content monitoring.
-   Device-owner provisioning (Layer 2) and further anti-tamper work belong to the other tool.
-4. Health phases still documented as open: Health Connect import, photo/voice logging, fasting
-   windows, micro-lessons and the chat coach, the weekly cardio ring.
+3. Phase 11 still open: web-filter bypass blocks (unsupported browsers, split screen, safe
+   mode); device-owner provisioning (Layer 2) belongs to the other tool.
+4. Finish the family member page and media Phases 3 and 5–9, then the media release gate.
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
