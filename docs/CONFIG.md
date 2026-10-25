@@ -54,6 +54,7 @@ Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
 | `log_retention_days`, `log_max_entries`, `rag_retention_days` | | Retention (30 d, 10000 entries by default) |
 | `raven_max_total_seconds`, `raven_iteration_timeout`, `raven_heartbeat_interval`, `raven_hung_threshold`, `raven_error_threshold`, `raven_check_interval` | | Raven limits (1800 s, 600 s, 30 s, 600 s, 5, 300 s) |
 | `alert_error_spike_threshold`, `alert_error_repeat_threshold`, `alert_disk_free_percent`, `alert_desktop_down_minutes` | `ALERT_*` | Admin alerts (20 errors in 5 min, one error 10 times, 10% free, 10 min); see `docs/BACKGROUND_JOBS.md`. The gateway reads them live each pass, logging at startup, the control plane each hourly check |
+| `alert_tls_hosts`, `alert_tls_days` | `ALERT_TLS_HOSTS`, `ALERT_TLS_DAYS` | Public HTTPS names whose certificates the gateway checks every 6 hours (comma-separated; empty watches nothing) and how many days ahead admins are warned (14). See `docs/BACKGROUND_JOBS.md` |
 | `workspace_root`, `workspace_runtime_root` | | Workspaces |
 | `upstream_dns`, `dns_poll_interval` | | DNS |
 | `execution_external_host` | | Host used in links to execution media |
