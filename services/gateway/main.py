@@ -14611,7 +14611,8 @@ def _media_ma_children(raw: Any) -> list[dict]:
         item = _media_ma_item(entry)
         item.pop("favorite", None)
         item.pop("version", None)
-        item["index"] = entry.get("disc_number") or entry.get("track_number") if isinstance(entry, dict) else None
+        # The track's place on its album; disc_number is 1 for nearly every track.
+        item["index"] = (entry.get("track_number") or entry.get("position")) if isinstance(entry, dict) else None
         out.append(item)
     return out
 

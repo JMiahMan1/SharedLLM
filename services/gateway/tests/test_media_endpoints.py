@@ -258,6 +258,19 @@ def test_items_carry_artist_and_album_uris(client, ma):
     assert item["album_uri"] == "library://album/9"
 
 
+def test_album_tracks_are_numbered_by_track_not_disc(client, ma):
+    """An album's tracks carry their track number; every one is on disc 1."""
+    ma["responses"]["music/item_by_uri"] = {
+        "uri": "library://album/9", "name": "Debut", "media_type": "album", "item_id": 9, "provider": "library",
+    }
+    ma["responses"]["music/albums/album_tracks"] = [
+        {"uri": "library://track/1", "name": "One", "disc_number": 1, "track_number": 1},
+        {"uri": "library://track/2", "name": "Two", "disc_number": 1, "track_number": 2},
+    ]
+    children = client.get("/api/media/item", params={"uri": "library://album/9"}).json()["children"]
+    assert [c["index"] for c in children] == [1, 2]
+
+
 def test_item_abs_podcast_detail(client, upstream, ma):
     from conftest_media import TEST_ABS_URL
 
