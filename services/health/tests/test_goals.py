@@ -45,3 +45,10 @@ def test_goals_are_private_and_removable(client):
     assert client.get(f"/goals?day={MONDAY.isoformat()}", headers=other).json()["goals"] == []
     assert client.delete(f"/goals/{goal_id}", headers=other).status_code == 404
     assert client.delete(f"/goals/{goal_id}").status_code == 200
+
+
+def test_steps_are_not_a_personal_goal(client):
+    day = MONDAY.isoformat()
+    assert client.post("/goals", json={"kind": "step_days", "day": day, "target_days": 3}).status_code == 422
+    kinds = [row["kind"] for row in client.get(f"/goals?day={day}").json()["kinds"]]
+    assert kinds == ["water_days", "sleep_nights", "cook_nights"]

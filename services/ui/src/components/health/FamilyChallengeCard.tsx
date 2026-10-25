@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
 import { errorText } from '../../lib/errorText';
-import { challengeSharePreview, challengeShareText, standingText, type NameOf } from '../../lib/familyChallenge';
+import { challengeSharePreview, challengeShareText, standingLabel, type NameOf } from '../../lib/familyChallenge';
 import { useFamilyDirectory } from '../chat/familyDirectory';
 import ShareToChatSheet from '../bible/ShareToChatSheet';
 import type { HealthChallenge, HealthChallengeKind } from '../../types/api';
@@ -16,9 +16,11 @@ const TARGETS = [1, 2, 3, 4, 5, 6, 7];
  * The weekly family challenge (Health hub Phase 7) on Health → Today.
  *
  * An adult starts one for the week; anyone joins. Standings are the days each
- * member's own logs counted — water goal, sleep need or a recipe dinner — so
- * a day with nothing logged is simply not counted. No calories or weight, so
- * the card is the same for a child.
+ * member's own logs counted — water goal, sleep need, a recipe dinner or
+ * their own daily step goal (steps come from geo, read by the gateway) — so a
+ * day with nothing logged is simply not counted, and a member whose steps
+ * could not be read says so instead of showing zero. No calories or weight,
+ * so the card is the same for a child.
  */
 export default function FamilyChallengeCard() {
   const queryClient = useQueryClient();
@@ -120,7 +122,7 @@ export default function FamilyChallengeCard() {
                           {row.reached && <Check size={12} className="shrink-0 text-emerald-300" aria-label="reached" />}
                         </span>
                         <span className="shrink-0 tabular-nums text-slate-400">
-                          {standingText(row.count, challenge.target_days, challenge.unit)}
+                          {standingLabel(row, challenge.target_days, challenge.unit)}
                           {row.guideline_goal ? ' · guideline goal' : ''}
                         </span>
                       </div>

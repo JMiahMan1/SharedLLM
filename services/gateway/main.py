@@ -127,6 +127,7 @@ from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.skylight_scope import ChoreScopeError, resolve_chore_scope
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas, tool_catalog
+from services.health import challenges as _challenges
 from services.shared import ma_library
 from services.shared.info_endpoint import info_router
 from services.shared.media_token import sign, verify
@@ -13425,7 +13426,7 @@ async def export_health(request: Request):
 
 
 async def _geo_get(path: str, params: dict) -> dict | None:
-    """One read from geo for the active-minutes week; None when geo is down."""
+    """One internal read from geo (active-minutes week, step challenges); None when geo is down."""
     try:
         async with shared_http_client() as client:
             resp = await client.request(
@@ -13628,27 +13629,68 @@ async def _health_minor_flag(user: str) -> str:
 
 
 # Weekly family challenges: an adult starts one, anyone joins, progress comes
-# from what members logged. The minor flag decides who may start one.
+# from what members logged. The minor flag decides who may start one. Step
+# challenges are scored here from geo, since the health store holds no steps.
+
+# geo's daily step read covers at most this many days back from today.
+_GEO_STEP_WINDOW_DAYS = 30
+
+
+async def _step_member(user_id: str, start: date, days_back: int) -> dict:
+    """One member of a step challenge, scored from geo's daily steps and their own goal.
+
+    A member joined the challenge themselves, so the gateway reads geo as the
+    internal caller (no ``viewer``), exactly as the active-minutes week does;
+    only the days that reached the goal are shown, never step counts. When
+    geo cannot answer the member is ``unavailable`` rather than at zero days.
+    """
+    unread = {"user_id": user_id, "count": 0, "days": [], "guideline_goal": False, "unavailable": True}
+    if days_back < 1:
+        # The week has not started: nothing to read, and nothing missing.
+        return {**unread, "unavailable": False}
+    if days_back > _GEO_STEP_WINDOW_DAYS:
+        return unread
+    steps = await _geo_get("/steps", {"user_id": user_id, "days": days_back})
+    goal = (steps or {}).get("goal")
+    if steps is None or not goal:
+        return unread
+    scored = _challenges.step_progress(start, steps.get("daily_steps") or {}, goal)
+    return {**unread, **scored, "unavailable": False}
+
+
+async def _score_geo_challenge(challenge):
+    """Fill in a challenge whose kind the health store cannot measure (steps)."""
+    if not isinstance(challenge, dict) or challenge.get("kind") not in _challenges.GEO_KINDS:
+        return challenge
+    start = date.fromisoformat(challenge["week_start"])
+    days_back = (_household_now().date() - start).days + 1
+    members = await asyncio.gather(
+        *(_step_member(row["user_id"], start, days_back) for row in challenge.get("leaderboard") or [])
+    )
+    return {**challenge, "leaderboard": _challenges.leaderboard(list(members), challenge["target_days"])}
 
 
 @app.get("/api/health/challenges")
 async def get_health_challenges(request: Request, day: str | None = None):
-    return await _health_json("GET", "/challenges", request, params={"day": day})
+    listing = await _health_json("GET", "/challenges", request, params={"day": day})
+    if isinstance(listing, dict) and isinstance(listing.get("challenges"), list):
+        listing["challenges"] = [await _score_geo_challenge(row) for row in listing["challenges"]]
+    return listing
 
 
 @app.post("/api/health/challenges")
 async def post_health_challenge(request: Request):
-    return await _health_json("POST", "/challenges", request, body=await request.json())
+    return await _score_geo_challenge(await _health_json("POST", "/challenges", request, body=await request.json()))
 
 
 @app.post("/api/health/challenges/{challenge_id}/join")
 async def join_health_challenge(challenge_id: int, request: Request):
-    return await _health_json("POST", f"/challenges/{challenge_id}/join", request)
+    return await _score_geo_challenge(await _health_json("POST", f"/challenges/{challenge_id}/join", request))
 
 
 @app.delete("/api/health/challenges/{challenge_id}/join")
 async def leave_health_challenge(challenge_id: int, request: Request):
-    return await _health_json("DELETE", f"/challenges/{challenge_id}/join", request)
+    return await _score_geo_challenge(await _health_json("DELETE", f"/challenges/{challenge_id}/join", request))
 
 
 @app.delete("/api/health/challenges/{challenge_id}")

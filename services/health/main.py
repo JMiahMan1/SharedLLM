@@ -2115,6 +2115,11 @@ def _challenge_out(session: Session, row: FamilyChallenge, viewer: str) -> dict:
     ).all()
     scored = []
     for member in members:
+        if row.kind in challenges.GEO_KINDS:
+            # Steps live in geo: the gateway reads them and scores this member.
+            # Until it does, nothing is known -- said, never shown as zero days.
+            scored.append({"user_id": member.user_id, "count": 0, "days": [], "guideline_goal": False, "unavailable": True})
+            continue
         days, goals = _challenge_member_days(session, member.user_id, start)
         result = challenges.progress(
             row.kind,
@@ -2252,8 +2257,9 @@ class GoalIn(BaseModel):
     @field_validator("kind")
     @classmethod
     def _kind(cls, value: str) -> str:
-        if value not in challenges.KINDS:
-            raise ValueError(f"kind must be one of {', '.join(challenges.KINDS)}")
+        # Personal goals are scored here, so only the kinds this store measures.
+        if value not in challenges.STORE_KINDS:
+            raise ValueError(f"kind must be one of {', '.join(challenges.STORE_KINDS)}")
         return value
 
 
@@ -2264,7 +2270,7 @@ def _week_counts(session: Session, user: str, start: date) -> tuple[dict[str, di
         kind: challenges.progress(
             kind, days, water_goal_ml=measured["water_goal_ml"], sleep_need_minutes=measured["sleep_need_minutes"]
         )
-        for kind in challenges.KINDS
+        for kind in challenges.STORE_KINDS
     }
     return counts, measured
 
@@ -2301,7 +2307,7 @@ def list_goals(request: Request, day: str | None = None, session: Session = Depe
         "week_end": (start + timedelta(days=6)).isoformat(),
         "goals": out,
         "max_goals": goals.MAX_GOALS_PER_WEEK,
-        "kinds": [{"kind": kind, **meta, "taken": kind in taken} for kind, meta in challenges.KINDS.items()],
+        "kinds": [{"kind": kind, **meta, "taken": kind in taken} for kind, meta in challenges.STORE_KINDS.items()],
         "suggestion": goals.suggestion({kind: value["count"] for kind, value in last_counts.items()}, taken) if room else None,
     }
 

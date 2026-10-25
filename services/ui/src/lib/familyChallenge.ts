@@ -5,7 +5,7 @@
  * weight ever appear, so the same message is fine in a chat with the kids.
  */
 
-import type { HealthChallenge } from '../types/api';
+import type { HealthChallenge, HealthChallengeStanding } from '../types/api';
 import { formatDayLabel } from './healthHub';
 import { withShareNote } from './verseShare';
 
@@ -19,12 +19,17 @@ export function standingText(count: number, target: number, unit: string): strin
   return `${count} of ${target} ${unit}`;
 }
 
+/** One member's standing, or that it is not known when their steps could not be read. */
+export function standingLabel(row: HealthChallengeStanding, target: number, unit: string): string {
+  return row.unavailable ? 'not available right now' : standingText(row.count, target, unit);
+}
+
 /** The chat message a shared challenge becomes. */
 export function challengeShareText(challenge: HealthChallenge, nameOf: NameOf = plainName, note?: string): string {
   const head = `🏆 Family challenge: ${challenge.title} — ${challenge.target_days} ${challenge.unit} this week (${formatDayLabel(challenge.week_start)} – ${formatDayLabel(challenge.week_end)})`;
   const lines = challenge.leaderboard.map(
     (row, index) =>
-      `${index + 1}. ${nameOf(row.user_id)} · ${standingText(row.count, challenge.target_days, challenge.unit)}${row.reached ? ' ✓' : ''}`,
+      `${index + 1}. ${nameOf(row.user_id)} · ${standingLabel(row, challenge.target_days, challenge.unit)}${row.reached ? ' ✓' : ''}`,
   );
   const body = lines.length > 0 ? `${head}\n${lines.join('\n')}` : `${head}\nNobody has joined yet.`;
   const withJoin = `${body}\nJoin it on Health → Today.`;

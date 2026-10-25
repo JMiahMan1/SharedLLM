@@ -70,7 +70,8 @@ fasting window, weekly active minutes, streaks, micro-lessons, the coach (chat a
 goals, daily reminders), cheers and share-my-day, the dashboard's Health today card, plan ↔ log
 ↔ shopping list, calendar workouts, and photo and voice food logging.
 
-Not built yet, and not pretended otherwise: step and veg challenges.
+Not built yet, and not pretended otherwise: a veg-servings challenge (a logged food keeps no
+food category to count from; see Phase 7). Step goal days are a challenge kind since 2026-10-24.
 
 The goal: one local, family-first Health tab that pulls the strengths of the apps
 the family has used — Noom, Google Health (formerly Fitbit), MyFitnessPal and friends —
@@ -84,7 +85,7 @@ into the app that already has steps, recipes, a calendar, a chat coach and a fam
 | **Google Health (Fitbit)** | Clear four-tab layout (Today / Fitness / Sleep / Health), customizable metric dashboards, Sleep Score, Daily Readiness (HRV + sleep + recent activity), Active Zone Minutes, a flexible **weekly** cardio target instead of rigid daily goals, aggregation through Health Connect, family leaderboards, AI coach | Same tab shape, per-user pinned metric cards; Sleep and Readiness cards from Health Connect data when a phone or watch provides it (manual morning check-in otherwise); weekly activity targets; Android Health Connect import; family leaderboards and challenges |
 | **MyFitnessPal** | The 14M+ food database and fast search, barcode scanning, Meal Scan (camera), voice logging, recipe importer + recipe builder (bulk-paste ingredients to per-serving macros), meal planner, macro goals by gram/percent and per day, per-meal macro breakdowns, fasting tracker, weekly digests, data export | Recipe-first logging: the imported `Recipes/` already carry per-serving macros — a planned dinner logs in one tap with portions; barcode lookup via OpenFoodFacts; photo logging through the family's Alpaca vision (recipes Phase 9 pattern); voice logging through the existing assistant; weekly digest card; macro goals by day with per-meal breakdown |
 | **Apple Health** | The aggregation hub: everything in one store, sharing with family, medical records, cycle and medication tracking | One health store per person with family sharing toggles; medical documents are a later, opt-in phase |
-| **Strava** | Social motivation: kudos, clubs, segments, challenges | Family cheers and a weekly family challenge (steps, veg servings, cook nights); share a health card to a family chat in one tap |
+| **Strava** | Social motivation: kudos, clubs, segments, challenges | Family cheers and a weekly family challenge (water, sleep, cook nights and step goal days); share a health card to a family chat in one tap |
 | **Garmin / Whoop** | Training load, training status, recovery/strain and journal behaviours | Simple fitness-fatigue and readiness once heart-rate data flows in; a "how do you feel" journal when it does not |
 | **Cronometer** | Honest micronutrient tracking on verified data | Show a small set of micronutrients when the data exists, free, no paywall games |
 | **WW (WeightWatchers)** | Simplifying decisions with free/ZeroPoint foods | A "free foods" list for snacks and kids, so nobody counts carrot sticks |
@@ -404,8 +405,9 @@ live search is the ecosystem-standard pattern.
   switched off, or the coach switched off, falls through to the ordinary chat.
   **Goals:** `HealthGoal` (`services/health/goals.py`; `GET/POST /goals`, `DELETE /goals/{id}`,
   gateway `/api/health/goals…`) holds at most two of the person's own goals a week, of the
-  challenge kinds the store can measure (water goal days, sleep goal nights, cook nights), with
-  progress computed from their logs on every read. The suggestion is one small step: last week's
+  challenge kinds the store measures itself (`challenges.STORE_KINDS`: water goal days, sleep goal
+  nights, cook nights; step goal days are scored from geo by the gateway, so they are a challenge
+  kind but not a personal goal), with progress computed from their logs on every read. The suggestion is one small step: last week's
   count plus one, for the kind with the most room. **Reminders:** bedtime, water and movement-break
   reminders are ordinary daily reminders in the timers pipeline (`/api/communication/timers`,
   recurrence `daily`, opening the Health page), so they ring wherever reminders already do; the person
@@ -418,8 +420,20 @@ live search is the ecosystem-standard pattern.
   measure honestly from what people log: **water goal days** (water logged reaches the member's
   water goal), **sleep goal nights** (logged sleep reaches their sleep need) and **cook nights**
   (a dinner logged from a family recipe, i.e. a `FoodEntry` with `meal=dinner` and a
-  `recipe_path`). Steps stay in geo and veg servings are not recorded per food, so neither is a
-  kind yet. A challenge runs Monday–Sunday, one per kind per week, with a target of 1–7 days
+  `recipe_path`), plus **step goal days** (the member's daily steps reach their own daily step
+  goal). Steps stay in geo: the health service lists a step challenge's members (each marked
+  `unavailable` until scored) and the gateway reads each member's `GET /steps` daily totals and
+  goal from geo through `_geo_get`, the internal read the active-minutes week already uses, then
+  scores and ranks them with the same rules (`challenges.step_progress`, `leaderboard`). A day geo
+  has no steps for is missing, not zero; a member geo cannot answer for (geo down, no Redis, or a
+  week older than geo's 30-day read) stays `unavailable` and the card says "not available right
+  now" instead of showing zero days. Only the days that reached the goal are shown, never step
+  counts; joining is the member's own choice, as for the other kinds. **Veg servings are not a
+  kind, on purpose:** a logged food keeps no link to a food category — a USDA seed food is saved by
+  name, grams and nutrients only (the seed's `category` column is never copied onto the
+  `FoodEntry`), and OpenFoodFacts, recipe and hand-typed entries have no category at all — so a
+  veg count would have to guess from food names. It needs the seed key or category stored on new
+  entries first, and even then only seed-logged foods could count. A challenge runs Monday–Sunday, one per kind per week, with a target of 1–7 days
   (`FamilyChallenge`, `ChallengeMember`; pure rules in `services/health/challenges.py`). Only an
   adult starts one: the gateway asks Identity whether the caller's family role is a minor's
   (`X-User-Is-Minor`; Identity unreachable counts as a minor) and the health service also refuses
@@ -487,7 +501,7 @@ live search is the ecosystem-standard pattern.
   streak (it bridges, never counts); two misses in a week end it; today never breaks a streak while
   it is still today. The best run of the last 90 days is kept. `StreaksCard` on Health → Today
   never calls a day failed (`services/common/tests/test_streaks.py`, `StreaksCard.test.tsx`).
-- [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge standings, join, start and share are tested (`FamilyChallengeCard.test.tsx`, `services/health/tests/test_challenges.py`, `services/gateway/tests/test_health_challenges_gateway.py`).
+- [x] UI tests: log a meal (search + manual), day view, check-in, water and cycle opt-in/log/share. Challenge standings, join, start and share are tested (`FamilyChallengeCard.test.tsx`, `services/health/tests/test_challenges.py`, `services/gateway/tests/test_health_challenges_gateway.py`, `services/gateway/tests/test_health_step_challenge_gateway.py`).
 - [x] Kid-mode UI hiding: with kid mode on, Today's food card and the Nutrition day show what was
   logged (and the macros) but no calorie number, range, progress bar, per-food calories or density
   colour; the profile hides weight and the "lose" goal; fasting is off; a kid-mode viewer of a
