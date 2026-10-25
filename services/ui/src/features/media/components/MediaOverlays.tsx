@@ -1,3 +1,4 @@
+import { MotionConfig } from 'framer-motion';
 import MiniPlayer from './MiniPlayer';
 import NowPlayingSheet from './NowPlayingSheet';
 import QueueSheet from './QueueSheet';
@@ -18,8 +19,10 @@ export default function MediaOverlays() {
   const { openSheet, closeSheet } = useMediaStore((s) => s.actions);
   // A book's position is saved wherever it plays, on every page.
   useAbsProgressReporter(useOptionalWebPlayer());
+  // "user": with the system's reduced motion on, framer drops transform and
+  // layout animations (the sheets' springs, the shared cover) and keeps fades.
   return (
-    <>
+    <MotionConfig reducedMotion="user">
       <MiniPlayer onOpen={() => openSheet('nowPlaying')} />
       <NowPlayingSheet
         open={sheets.nowPlaying}
@@ -31,6 +34,6 @@ export default function MediaOverlays() {
         onOpenNowPlaying={() => openSheet('nowPlaying')}
         onOpenQueue={() => openSheet('queue')}
       />
-    </>
+    </MotionConfig>
   );
 }

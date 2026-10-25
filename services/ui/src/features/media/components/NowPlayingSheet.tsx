@@ -250,6 +250,7 @@ export default function NowPlayingSheet({
           aria-modal="true"
           aria-label="Now playing"
           data-testid="now-playing-sheet"
+          data-reduced-motion={reduceMotion ? 'true' : 'false'}
           style={accentVars}
           className="fixed inset-0 z-[60] overflow-hidden"
           initial={{ opacity: 0 }}
