@@ -26,6 +26,22 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-25 (small items, in review, uncommitted)`: the open small items this handover recorded.
+  - **Docs:** `/guardian` is no longer a redirect - it is its own top-level page (nav entry after
+    Family, offered to every role), Health keeps its digital-wellbeing card and links across, and
+    `/guardian?child=` opens the member page; the dead `GuardianRedirect` and the stale docs are gone.
+  - **Screen-time pause notice:** the gateway says "You paused your phone for now" when a grown
+    member pauses their own phone, "A parent paused your phone for now" when a parent pauses a
+    child's.
+  - **Recommendation lanes self-edit:** a grown member can turn their own suggestion lanes on or off
+    (`_may_edit_screen_time`, the same rule as their screen-time rules); a parent still controls a
+    minor's and nobody touches another member's.
+  - **App updater:** `services/ui/src/test/appUpdaterInit.test.ts` proves the native-build guard fix
+    (`0afd1da6`) clears the pending/rejected OTA SHAs on an APK upgrade and does not blacklist the
+    stale pending SHA.
+  - **Media docs:** P6-T5 and P7-T3 to P7-T5 of docs/MEDIA_OVERHAUL.md marked shipped (the open
+    Phase 6 rows and the unmeasured P7-T4 parts are named there); Phase 8 (device checklist) and
+    Phase 9 (release) stay open.
 - `2026-10-25 late` (the day's round: repo hygiene, integrations finished, a live identity outage
   fixed, and a broad Family-guard, digital-wellbeing and device push; every item below was verified
   by tests, a live deploy and a smoke test, and is on `origin/microservices` at `41115ca6`).
@@ -164,7 +180,8 @@ Every claim below was verified against the live system unless marked **planned**
     `guardian_monitor_model`) - **need phone checks**. The ways around the web filter
     (unsupported browsers, split screen, safe mode) are now blocked.
   - **Family member page** (docs/FAMILY_MEMBER_PAGE.md, modelled on Aura, the top-rated app):
-    `/family/member/<child>` replaces `/guardian` (which redirects); father/admin see Devices
+    `/family/member/<child>` replaces the single-column `/guardian` page (`/guardian` is now its
+    own top-level page); father/admin see Devices
     (technical), the mother gets everything else with technical fields stripped server-side
     (`gateway/member_page.py`, identity `may_view_technical_data`).
   - **Media phases 3, 5, 6 and 7 shipped** (docs/MEDIA_OVERHAUL.md): the
@@ -754,9 +771,9 @@ lock/wipe. **Not started.**
 
 ## 4. Open small items
 
-- Media: P6-T5 (UX ledger pass), P7-T3 to P7-T5 (screen-reader labels and the now-playing
-  announcement, performance budget, image sizing), the Phase 8 device checklist and Phase 9
-  (release, version bump) of docs/MEDIA_OVERHAUL.md remain.
+- Media: the Phase 8 device checklist and Phase 9 (release, version bump) of
+  docs/MEDIA_OVERHAUL.md remain; P6-T5 (UX ledger pass) and P7-T3 to P7-T5 (screen-reader labels
+  and the now-playing announcement, performance budget, image sizing) shipped 2026-10-25.
 - Health: the veg challenge (steps shipped as a family challenge); the family challenge's labelled
   "guideline goal" for members with no goal of their own still needs Jeremiah's yes/no under the
   no-fallback rule.
@@ -777,11 +794,6 @@ lock/wipe. **Not started.**
   push, install/uninstall control, remote lock/wipe).
 - Devices: the tablet/phone split is a screen-width heuristic, so a very large phone reads as a
   tablet (`72835c17`).
-- App updater: there is no dedicated regression test for the app-updater native-reset guard
-  (`0afd1da6`).
-- Family guard: the pause notice still says "A parent paused your phone" when an adult pauses their
-  own; recommendation lanes cannot yet be self-edited by a grown member; and the docs still describe
-  `/guardian` as a redirect (it is now its own top-level page, in review).
 - Family guard (device owner): the Layer 2 restrictions and the new Settings-page tamper matches only
   take effect on a phone provisioned as device owner
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`).
@@ -810,7 +822,7 @@ lock/wipe. **Not started.**
    (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`), which still belongs to
    the other tool. The web-filter bypass blocks (unsupported browsers, split screen, safe mode)
    shipped.
-4. Finish media P6-T5, P7-T3 to P7-T5, the Phase 8 device checklist and Phase 9 (release).
+4. Finish the media Phase 8 device checklist and Phase 9 (release).
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
