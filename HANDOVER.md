@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha` **093b4294**
-  (2026-10-24 evening; every app service redeployed at that tip, 0 errors after). APK: CI builds one
-  per push under `services/ui/**`; the native work below needs the newest APK on the phones.
-  - The Family guard Phase 11 commits (`a1e682ab`…`7b562fe3`) and later land with the next deploy.
+- Live: `https://jarvis.sumemail.com` — version **1.5.2**, OTA bundle `git_sha` **5457dcfe**
+  (2026-10-25 01:30 UTC; every app service redeployed at that tip, 0 new errors after). APK: CI
+  builds one per push under `services/ui/**`; the native work below needs the newest APK on the
+  phones. Family guard Phase 11 and the family member page (`/family/member/<child>`) are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
 - Check anytime:
@@ -50,8 +50,11 @@ Every claim below was verified against the live system unless marked **planned**
     "ask a parent" for a blocked site, Spotify linking (needs a Spotify app registered and the
     three `spotify_*` settings), and a local-model second pass on content monitoring (needs
     `guardian_monitor_model`) — **need phone checks**.
-  - **In progress**: the per-child **family member page** (docs/FAMILY_MEMBER_PAGE.md, modelled on
-    Aura) replacing `/guardian`; media Phases 3 and 5–7 (foundations, screens, polish,
+  - **Family member page** (docs/FAMILY_MEMBER_PAGE.md, modelled on Aura, the top-rated app):
+    `/family/member/<child>` replaces `/guardian` (which redirects); father/admin see Devices
+    (technical), the mother gets everything else with technical fields stripped server-side
+    (`gateway/member_page.py`, identity `may_view_technical_data`).
+  - **In progress**: media Phases 3 and 5–7 (foundations, screens, polish,
     accessibility/performance).
   - Shared helpers created while removing copies: `lib/focusTrap.ts`, `lib/base64.ts`,
     `lib/blobUrlCache.ts`, `hooks/useAudioRecorder.ts`, `services/common/streaks.py`,
@@ -643,7 +646,7 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
    arrival-order answers, late answers not burned).
 3. Phase 11 still open: web-filter bypass blocks (unsupported browsers, split screen, safe
    mode); device-owner provisioning (Layer 2) belongs to the other tool.
-4. Finish the family member page and media Phases 3 and 5–9, then the media release gate.
+4. Finish media Phases 3 and 5–9, then the media release gate.
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
