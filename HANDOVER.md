@@ -128,8 +128,8 @@ Every claim below was verified against the live system unless marked **planned**
   stream proxies borrowed a new `ClientSession` per track and per HLS segment; they now share one
   pooled session per event loop (`_PooledMediaSession`, no cookie jar). Left as-is on purpose:
   execution's MA search websocket (LAN, token auth, tens of ms) and webOS/ha_config websockets
-  (per-command, admin/TV paths). The gateway's one "Unclosed connection" (to `rag`) at every
-  restart is pre-existing and harmless.
+  (per-command, admin/TV paths). The gateway's "Unclosed connection" (to `rag`) at every
+  restart was the Raven warm-up never reading its response; fixed 2026-10-24.
 - `HEAD` Chat + trivia: **instant, fair, and Jarvis speaks as Jarvis.** Reviewed the live
   "Jeremiah & Michele's Chat" game (18:39–18:42 MST, which ran *before* the 18:44 deploy):
   Michele won all ten rounds because (1) late answers burned the next question's guess (fixed
@@ -616,9 +616,11 @@ activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23
 - Bible: per-pane font size and highlighting verses that differ between translations (planned).
 - Health: step and veg challenges; the family challenge's labelled "guideline goal" for members
   with no goal of their own still needs Jeremiah's yes/no under the no-fallback rule.
-- A Windows Chrome tab at `http://192.168.2.205:8080` with an expired login polled
-  `/api/users/me/theme` + `/health/ready` every ~4.5 s from 2026-10-24 20:00 UTC (an old cached
-  bundle; the current code fetches the theme once per load). Ask Jeremiah to reload/sign in.
+- A **headless Chrome on a Windows machine** (UA `HeadlessChrome/153`, Windows) runs the app from
+  its own dev server at `http://localhost:5288` proxied to `http://192.168.2.205:8080`, with an
+  expired API key: it polls `/api/users/me/theme` (401) and `/health/ready` every ~4.5 s, since
+  2026-10-24 20:00 UTC (~360 refused calls an hour). Not on the Mac; likely another tool's test
+  browser. Ask Jeremiah to stop it or give it a valid login.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
 

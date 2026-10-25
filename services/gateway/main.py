@@ -9446,13 +9446,16 @@ async def _warm_rag_lesson_cache() -> None:
     """
     try:
         await asyncio.sleep(2)  # let startup settle before hammering RAG
-        async with aiohttp.ClientSession() as c:
-            await c.post(
-                f"{RAG_SVC}/rag/search",
-                json={"collection_name": "system_learnings", "query": "warmup", "user_id": "default", "k": 1},
-                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
-                timeout=aiohttp.ClientTimeout(total=120.0),
-            )
+        # The response is read inside its own context so the connection goes
+        # back to the pool; a bare post() left it open ("Unclosed connection"
+        # to rag at every gateway start).
+        async with shared_http_client() as c, c.post(
+            f"{RAG_SVC}/rag/search",
+            json={"collection_name": "system_learnings", "query": "warmup", "user_id": "default", "k": 1},
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+            timeout=aiohttp.ClientTimeout(total=120.0),
+        ) as resp:
+            await resp.read()
         log.info("[Raven] RAG lesson cache warmed (first mission injection will be fast)")
     except Exception as e:  # non-fatal
         log.warning(f"[Raven] RAG warmup failed (non-fatal): {e}")
