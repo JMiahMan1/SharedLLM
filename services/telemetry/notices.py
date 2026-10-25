@@ -26,6 +26,9 @@ ADMIN_CATEGORY = "admin"
 DEFAULT_CATEGORY = "general"
 ACTION_TYPES = ("view", "callback", "reply")
 MAX_ACTIONS = 3
+#: Who a notice may reach: everyone, or parents only (never a minor).
+AUDIENCES = ("all", "parents")
+AUDIENCE_PARENTS = "parents"
 #: Preferences and the admin list are re-read from identity this often.
 CACHE_SECONDS = 60.0
 #: A person's ntfy topic is re-read this often, so a topic that changes in
@@ -41,6 +44,7 @@ _CALLBACK = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _prefs_cache: dict[str, tuple[float, dict[str, bool] | None]] = {}
 _topic_cache: dict[str, tuple[float, str]] = {}
 _admins_cache: tuple[float, list[str]] | None = None
+_minors_cache: tuple[float, set[str]] | None = None
 
 
 class NoticeError(ValueError):
@@ -92,6 +96,9 @@ def parse(body: dict[str, Any]) -> dict[str, Any]:
     category = str(body.get("category") or DEFAULT_CATEGORY).strip()
     if not _CATEGORY.match(category):
         raise NoticeError("category must be a lowercase name")
+    audience = str(body.get("audience") or "all").strip()
+    if audience not in AUDIENCES:
+        raise NoticeError(f"audience must be one of {list(AUDIENCES)}")
     priority = body.get("priority", 3)
     if isinstance(priority, bool) or not isinstance(priority, int) or not 1 <= priority <= 5:
         raise NoticeError("priority must be a whole number from 1 to 5")
@@ -106,6 +113,7 @@ def parse(body: dict[str, Any]) -> dict[str, Any]:
         "data": body.get("data") if isinstance(body.get("data"), dict) else {},
         "actions": _actions(body.get("actions")),
         "once": str(body.get("once") or "").strip()[:200],
+        "audience": audience,
     }
 
 
@@ -178,6 +186,28 @@ async def admins(session: aiohttp.ClientSession) -> list[str]:
     data = await _identity_get(session, "/api/internal/push/admins")
     names = [str(n).lower() for n in (data or {}).get("admins") or []]
     _admins_cache = (time.monotonic() + CACHE_SECONDS, names)
+    return names
+
+
+async def minors(session: aiohttp.ClientSession) -> set[str]:
+    """Every minor's username, from identity's user list (``is_minor``), cached.
+
+    A ``"audience": "parents"`` notice must never reach one of these. Identity
+    is the only source of roles; a lookup that fails raises, so the caller can
+    refuse rather than risk a parents-only notice reaching a child.
+    """
+    global _minors_cache
+    if _minors_cache and _minors_cache[0] > time.monotonic():
+        return _minors_cache[1]
+    rows = await _identity_get(session, "/api/users")
+    if not isinstance(rows, list):
+        raise RuntimeError("identity's user list was not a list")
+    names = {
+        str(u["username"]).lower()
+        for u in rows
+        if isinstance(u, dict) and u.get("username") and u.get("is_minor")
+    }
+    _minors_cache = (time.monotonic() + CACHE_SECONDS, names)
     return names
 
 

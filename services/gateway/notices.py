@@ -181,6 +181,7 @@ async def mission_needs_approval(mission: dict) -> bool:
             notify.callback_action("Reject", "raven_reject", params),
             notify.view_action("/admin/ops"),
         ],
+        audience="parents",
     ))
 
 
@@ -213,5 +214,6 @@ async def app_update_published(version_code: int, version_name: str | None, note
         await notify.family(),
         lambda user: notify.notice(
             user, "app_updates", f"Jarvis app {label} is available", body, url="/settings",
-            tag="app_update", once=f"apk:{version_code}", actions=[notify.view_action("/settings", "Update")]),
+            tag="app_update", once=f"apk:{version_code}", actions=[notify.view_action("/settings", "Update")],
+            audience="parents"),
     )

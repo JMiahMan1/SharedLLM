@@ -50,8 +50,8 @@ def sent(monkeypatch):
 
 @pytest.fixture
 def identity(monkeypatch):
-    """A fake identity: preferences per user, admins, topics."""
-    state = {"prefs": {}, "admins": ["jeremiah"], "calls": []}
+    """A fake identity: preferences per user, admins, topics, users/roles."""
+    state = {"prefs": {}, "admins": ["jeremiah"], "users": [], "calls": []}
 
     async def get(session, path, params=None):
         state["calls"].append(path)
@@ -62,6 +62,8 @@ def identity(monkeypatch):
             return {"topic": f"jarvis-{user}-secret"}
         if path == "/api/internal/push/admins":
             return {"admins": state["admins"]}
+        if path == "/api/users":
+            return state["users"]
         raise AssertionError(path)
 
     monkeypatch.setattr(notices, "_identity_get", get)
@@ -173,6 +175,50 @@ def test_a_system_notice_never_reaches_a_non_admin(client, rc, sent, identity):
 def test_admins_unresolvable_is_503(client, rc, sent):
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "@admins", "title": "x"})
     assert resp.status_code == 503
+
+
+def test_a_parents_only_notice_never_reaches_a_minor(client, rc, sent, identity):
+    """Updates, system and ops notices are for parents: a minor gets nothing."""
+    identity["users"] = [
+        {"username": "michele", "is_minor": False},
+        {"username": "leo", "is_minor": True},
+    ]
+    body = {"user": "leo", "category": "app_updates", "title": "Jarvis app 2.4.1 is available",
+            "audience": "parents"}
+    assert client.post("/api/telemetry/notify", headers=HEADERS, json=body).json() == {
+        "status": "SUCCESS", "dropped": "audience"}
+    assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "leo") == []
+
+    to_parent = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "michele"}).json()
+    assert "dropped" not in to_parent and sent["webpush"] == ["michele"]
+
+
+def test_a_parents_only_notice_to_admins_skips_a_minor(client, rc, sent, identity):
+    identity["admins"] = ["jeremiah", "teen_admin"]
+    identity["users"] = [
+        {"username": "jeremiah", "is_minor": False},
+        {"username": "teen_admin", "is_minor": True},
+    ]
+    body = {"user": "@admins", "category": "admin", "title": "The internet is down", "audience": "parents"}
+    recipients = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()["recipients"]
+    assert recipients["teen_admin"] == {"dropped": "audience"}
+    assert "dropped" not in recipients["jeremiah"]
+    assert sent["webpush"] == ["jeremiah"]
+
+
+def test_an_unknown_audience_is_refused(client, rc, sent):
+    resp = client.post("/api/telemetry/notify", headers=HEADERS,
+                       json={"user": "michele", "title": "x", "audience": "kids"})
+    assert resp.status_code == 422
+    assert sent == {"webpush": [], "ntfy": []}
+
+
+def test_a_parents_only_notice_is_refused_when_identity_cannot_say(client, rc, sent):
+    """Never deliver blind: an unreadable role list refuses the notice."""
+    resp = client.post("/api/telemetry/notify", headers=HEADERS,
+                       json={"user": "michele", "title": "x", "audience": "parents"})
+    assert resp.status_code == 503
+    assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "michele") == []
 
 
 def test_unreachable_identity_still_delivers_to_the_outbox(client, rc, sent):

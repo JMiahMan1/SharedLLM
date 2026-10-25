@@ -128,6 +128,12 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   `timers`, `bible`, `reports`, `home`, `jobs`, `raven`, `app_updates`,
   `health`, `admin` (admins only).
 - `priority` 1 to 5 (ntfy's scale; 5 = urgent, used for SOS and leaks).
+- `audience` is `"all"` (everyone, the default) or `"parents"`: a parents-only
+  notice is never delivered to a minor (`child` or `teen`, identity's
+  `MINOR_FAMILY_ROLES`). Telemetry resolves the household roles from identity's
+  user list (cached 60s) and drops the notice for a minor
+  (`"dropped": "audience"`); if identity cannot be read the notice is refused
+  (503), never delivered blind. Updates, system and ops notices use it.
 - `tag` groups and replaces: a newer notice with the same tag replaces the
   older one on the phone (timer countdowns, "N new messages").
 - `actions` (up to 3):
@@ -150,7 +156,7 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   attachment).
 - `priority` defaults to 3; `label` is 1 to 40 characters; a `view` needs
   `url`; `callback`/`reply` need a lowercase `callback` name and an object
-  `params`. Anything else is a 422.
+  `params`; `audience` must be `all` or `parents`. Anything else is a 422.
 - `"user": "@admins"` sends the notice to every admin (identity's
   `GET /api/internal/push/admins`, cached 60s), each with their own
   preference check and `once` key; the answer is
@@ -252,6 +258,15 @@ runs `PUSH_CALLBACKS[callback](request, params, reply)` from
 Adding one is a single function decorated with `@push_callback("name")`.
 `chat_reply` posts `reply` into Talk conversation `params.token` as the
 caller (the chat page's send).
+
+`guard_decide` and `more_time_decide` answer a child's request from the
+notification as the parent who tapped: `guard_decide` takes `{"id", "approve"}`
+and posts `POST /api/guard/requests/{id}`, `more_time_decide` takes
+`{"id", "grant"}` and posts `POST /api/screen-time/requests/{id}`, both as the
+caller (the same path as the routes), so identity's rule that only a parent may
+answer still applies and the child hears the answer. The two parents each get
+the notice with Approve and Disapprove (the recipients are identity's `notify`
+list, never hardcoded).
 
 `raven_approve` and `raven_reject` follow Execute and Delete in Raven Ops:
 admins only, whatever the mission type (a mission's owner is not enough), and
@@ -357,7 +372,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 |---|---|---|
 | chat | gateway `chat_notify` | new family message, Jarvis answer (Reply, Open); tag per conversation |
 | family_presence | geo `_notify_presence` | arrivals and departures (Map) |
-| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app; Find my phone from the watch (priority 5, rings the phone for a minute with a Stop action) |
+| family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app; Find my phone from the watch (priority 5, rings the phone for a minute with a Stop action); a child's ask (new app, permission, blocked site) and a request for more screen time reach both parents with Approve and Disapprove buttons (`guard_decide`, `more_time_decide`) |
 | leave_by | execution `leave_by` | time to leave for an event with a location (tag per event) |
 | calendar | execution `calendar_reminders` | event reminders, `reminder_minutes` before (calendar settings, default 30, 0 = off); all-day events at 8:00 on each of their days; in the person's `timezone` calendar setting, else the household's |
 | timers | automation / execution `notify_timer_done` | timer or alarm done, tag per timer (Stop, Snooze 5 min, +1 min: callbacks `timer_stop`, `timer_snooze`, `timer_add_minute`) |
@@ -366,7 +381,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 | home | execution `home_alerts` (Home Assistant) | doorbell, motion while nobody is home, garage open too long, door unlocked at night, washer or dryer done, water leak (priority 5); only entities mapped in the `home_alert_entities` setting, to everyone or the people listed |
 | jobs | gateway `notices` / execution | song generated, picture improved, audiobook converted (Open) |
 | raven | gateway `notices` | mission finished (to its owner), mission needs approval (to `@admins`: Approve, Reject) |
-| app_updates | gateway `notices` | new APK published (once per build) |
+| app_updates | gateway `notices` | new APK published (once per build; `audience: parents`) |
 | health | geo | daily step goal reached, weekly summary |
 | admin | gateway background worker, logging, control_plane, `deploy_remote.sh`, `scripts/notify_admins.sh` | service down (2 failed checks in a row) or back up; error spike (more than `alert_error_spike_threshold` errors in 5 min, or one error more than `alert_error_repeat_threshold` times, once per 30 min per error); deploy finished or failed (with the step); disk nearly full (below `alert_disk_free_percent`) or recovered; desktop GPU services unreachable for `alert_desktop_down_minutes` or back; an HTTPS certificate in `alert_tls_hosts` near expiry (`alert_tls_days`) or invalid, or renewed; home network (control_plane `router_monitor`, docs/NETWORK.md): internet down or back, router unreachable or restarted, one device crowding a Wi-Fi channel, a congested channel, a device reconnecting over and over, DHCP pool, connection table or router memory nearly full. Backup failed: the stack has no backup job; one added later calls `notify_admins.sh` on failure |
 

@@ -75,7 +75,7 @@ def test_asking_for_time_tells_the_parents(wired):
     client, calls, sent, answers = wired
     answers[("POST", "/screen-time/requests")] = (
         200,
-        {"request": {"username": "kid", "minutes": 30, "note": "one more level"}, "notify": ["dad", "mom"]},
+        {"request": {"id": 3, "username": "kid", "minutes": 30, "note": "one more level"}, "notify": ["dad", "mom"]},
     )
 
     r = client.post("/api/screen-time/requests", json={"minutes": 30, "note": "one more level"})
@@ -84,6 +84,10 @@ def test_asking_for_time_tells_the_parents(wired):
     assert calls[0]["json"]["day"] == "2026-10-21"  # the household's day, not the phone's
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "30 more minutes" in sent[0]["body"] and "one more level" in sent[0]["body"]
+    assert sent[0]["actions"] == [
+        {"label": "Approve", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": True}},
+        {"label": "Disapprove", "type": "callback", "callback": "more_time_decide", "params": {"id": 3, "grant": False}},
+    ]
 
 
 def test_a_refused_request_tells_nobody(wired):
@@ -234,14 +238,17 @@ def test_status_passes_the_parents_answers_and_the_next_lock_to_the_phone(wired)
 def test_asking_a_parent_first_tells_both_parents_once(wired):
     client, _, sent, answers = wired
     answers[("POST", "/guard/requests")] = (200, {
-        "request": {"username": "kid", "kind": "site", "target": "minecraft.net", "label": "", "note": "school project"},
+        "request": {"id": 7, "username": "kid", "kind": "site", "target": "minecraft.net", "label": "", "note": "school project"},
         "notify": ["dad", "mom"],
     })
     r = client.post("/api/guard/requests", json={"kind": "site", "target": "minecraft.net", "note": "school project"})
     assert r.status_code == 200 and "notify" not in r.json()
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert "kid asks to open minecraft.net" in sent[0]["body"] and "school project" in sent[0]["body"]
-    assert sent[0]["data"]["url"] == "/family/member/kid"
+    assert sent[0]["actions"] == [
+        {"label": "Approve", "type": "callback", "callback": "guard_decide", "params": {"id": 7, "approve": True}},
+        {"label": "Disapprove", "type": "callback", "callback": "guard_decide", "params": {"id": 7, "approve": False}},
+    ]
 
     sent.clear()
     answers[("POST", "/guard/requests")] = (200, {"request": {"username": "kid", "kind": "app", "target": "com.roblox.client"}, "notify": []})
@@ -264,3 +271,14 @@ def test_a_permission_request_reads_in_plain_words_and_the_answer_reaches_the_ch
     })
     assert client.post("/api/guard/requests/7", json={"approve": True, "minutes": 60}).status_code == 200
     assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "Website allowed"
+
+
+def test_a_parents_answer_to_a_more_time_request_reaches_the_child(wired):
+    client, calls, sent, answers = wired
+    answers[("POST", "/screen-time/requests/3")] = (
+        200, {"request": {"username": "kid", "status": "granted", "granted_minutes": 30}, "notify": ["kid"]})
+    r = client.post("/api/screen-time/requests/3", json={"grant": True})
+    assert r.status_code == 200
+    assert calls[-1]["url"].endswith("/api/screen-time/requests/3") and calls[-1]["json"] == {"grant": True}
+    assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "More time granted"
+    assert "30 more minutes" in sent[-1]["body"]
