@@ -14,4 +14,5 @@ def no_identity(monkeypatch):
     monkeypatch.setattr(notices, "_prefs_cache", {})
     monkeypatch.setattr(notices, "_topic_cache", {})
     monkeypatch.setattr(notices, "_admins_cache", None)
+    monkeypatch.setattr(notices, "_minors_cache", None)
     monkeypatch.setattr(ntfy, "_failing", False)

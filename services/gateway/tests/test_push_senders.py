@@ -168,6 +168,7 @@ async def test_a_new_apk_is_announced_to_everyone_once_per_build(sent):
     assert {n["user"] for n in sent} == {"jeremiah", "leo", "michele"}
     assert sent[0]["category"] == "app_updates" and sent[0]["title"] == "Jarvis app 2.4.1 (build 412) is available"
     assert sent[0]["body"] == "Faster maps" and sent[0]["data"]["url"] == "/settings"
+    assert sent[0]["audience"] == "parents"  # an update notice never goes to a child
 
 
 async def test_ci_placeholder_notes_are_not_shown_as_the_update_body(sent):
@@ -193,6 +194,7 @@ async def test_a_mission_waiting_for_approval_goes_to_admins_with_both_buttons(s
     assert notice["user"] == "@admins" and notice["category"] == "raven"
     assert [a.get("callback") for a in notice["actions"][:2]] == ["raven_approve", "raven_reject"]
     assert notice["actions"][0]["params"] == {"mission_id": 9}
+    assert notice["audience"] == "parents"
 
 
 def test_mission_notices_skip_the_system_account():
@@ -509,6 +511,11 @@ def test_notice_builder_caps_actions_and_priority():
     n = notify.notice("leo", "jobs", "t", priority=9, actions=[{}] * 5)
     assert n["priority"] == 5 and len(n["actions"]) == 3
     assert json.dumps(n)
+
+
+def test_notice_builder_only_sends_a_non_default_audience():
+    assert "audience" not in notify.notice("leo", "app_updates", "t")
+    assert notify.notice("leo", "app_updates", "t", audience="parents")["audience"] == "parents"
 
 
 # ------------------------------------------------------- gateway route hooks

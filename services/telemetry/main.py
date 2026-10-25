@@ -126,10 +126,22 @@ async def deliver_notice(body: dict[str, Any]) -> dict[str, Any]:
     except notices.NoticeError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     rc = _redis()
+    # A parents-only notice (updates, system and ops) is never delivered to a
+    # minor. Roles live in identity alone: an unreadable list refuses the
+    # notice (503) rather than risk one reaching a child.
+    parents_only = fields["audience"] == notices.AUDIENCE_PARENTS
+    minors: set[str] = set()
+    if parents_only:
+        try:
+            minors = await notices.minors(_client())
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Could not resolve the household roles: {e}") from None
     # System notices (outages, the network, errors, deploys, disks) reach admins
     # only, whoever a sender addressed them to.
     system = fields["category"] == notices.ADMIN_CATEGORY
     if fields["user"] != notices.ADMINS and not system:
+        if parents_only and fields["user"].lower() in minors:
+            return {"status": "SUCCESS", "dropped": "audience"}
         return {"status": "SUCCESS", **await notices.deliver(rc, _client(), fields["user"], fields)}
     try:
         names = await notices.admins(_client())
@@ -140,7 +152,12 @@ async def deliver_notice(body: dict[str, Any]) -> dict[str, Any]:
             log.warning("Dropped a system notice (%s) addressed to a non-admin", fields.get("tag"))
             return {"status": "SUCCESS", "dropped": "not_admin"}
         names = [fields["user"].lower()]
-    recipients = {name: await notices.deliver(rc, _client(), name, fields) for name in names}
+    recipients: dict[str, Any] = {}
+    for name in names:
+        if parents_only and name in minors:
+            recipients[name] = {"dropped": "audience"}
+        else:
+            recipients[name] = await notices.deliver(rc, _client(), name, fields)
     return {"status": "SUCCESS", "recipients": recipients}
 
 

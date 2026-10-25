@@ -5745,10 +5745,21 @@ async def _identity_as_caller(request: Request, method: str, path: str, **kwargs
     return resp.status, body
 
 
-async def _screen_time_notice(users: list[str], title: str, body: str, url: str) -> None:
+async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
+                              actions: list[dict] | None = None) -> None:
+    """Tell people about a screen-time or family-safety event.
+
+    ``actions`` replaces the tap on ``url`` with buttons when given (a parent's
+    Approve / Disapprove); without them the notice keeps its view behaviour. A
+    notice that fails never fails the request.
+    """
     for user in users or []:
         try:
-            await _notify.send(_notify.notice(user, "family_safety", title, body, url=url, tag=f"screen-time:{user}"))
+            if actions:
+                payload = _notify.notice(user, "family_safety", title, body, actions=actions, tag=f"screen-time:{user}")
+            else:
+                payload = _notify.notice(user, "family_safety", title, body, url=url, tag=f"screen-time:{user}")
+            await _notify.send(payload)
         except Exception as exc:  # a missed notice never fails the request
             log.warning("[screen-time] notice to %s failed: %s", user, exc)
 
@@ -5920,6 +5931,15 @@ def _guard_request_words(asked: dict) -> str:
     return str(asked.get("label") or asked.get("target") or "")
 
 
+def _decide_actions(callback: str, request_id: Any, field: str) -> list[dict]:
+    """Approve / Disapprove buttons a parent taps to answer a request from the
+    notification; ``field`` is the decision flag identity expects."""
+    return [
+        _notify.callback_action("Approve", callback, {"id": request_id, field: True}),
+        _notify.callback_action("Disapprove", callback, {"id": request_id, field: False}),
+    ]
+
+
 async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
     """A child asks a parent first (a new app, an app's permission, a blocked
     site), as the caller; both parents hear once. Shared by the route and the
@@ -5930,8 +5950,11 @@ async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
         child = str(asked.get("username") or "")
         title, line = _GUARD_ASK_TITLES[str(asked.get("kind"))]
         note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
+        request_id = asked.get("id")
         await _screen_time_notice(
-            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note), f"/family/member/{child}"
+            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note),
+            f"/family/member/{child}",
+            actions=_decide_actions("guard_decide", request_id, "approve") if request_id is not None else None,
         )
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
@@ -5948,10 +5971,11 @@ async def guard_requests(request: Request, status: str = "pending"):
     return JSONResponse(status_code=code, content=body)
 
 
-@app.post("/api/guard/requests/{request_id}")
-async def guard_decide(request: Request, request_id: int):
-    """A parent answers; the child hears the answer."""
-    status, body = await _identity_as_caller(request, "POST", f"/api/guard/requests/{request_id}", json=await request.json())
+async def decide_guard_request(request: Request, request_id: int, payload: dict) -> tuple[int, dict]:
+    """A parent answers a child's request, as the caller; the child hears the
+    answer. Shared by the route and the notification's Approve / Disapprove
+    buttons (push callback ``guard_decide``)."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/guard/requests/{request_id}", json=payload)
     if status == 200:
         decided = body.get("request") or {}
         what = _guard_request_words(decided)
@@ -5962,7 +5986,14 @@ async def guard_decide(request: Request, request_id: int):
         else:
             title, line = "Approved", f"A parent said yes to {what}."
         await _screen_time_notice(body.get("notify") or [], title, line, "/health")
-    return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+    return status, {k: v for k, v in (body or {}).items() if k != "notify"}
+
+
+@app.post("/api/guard/requests/{request_id}")
+async def guard_decide(request: Request, request_id: int):
+    """A parent answers; the child hears the answer."""
+    status, body = await decide_guard_request(request, request_id, await request.json())
+    return JSONResponse(status_code=status, content=body)
 
 
 # --- Spotify linking (Phase 11, music everywhere; services/common/spotify.py) ---
@@ -6090,18 +6121,22 @@ async def screen_time_ask(request: Request):
     if status == 200:
         asked = body.get("request") or {}
         note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
+        request_id = asked.get("id")
         await _screen_time_notice(
             body.get("notify") or [],
             "More screen time?",
             f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
             "/health",
+            actions=_decide_actions("more_time_decide", request_id, "grant") if request_id is not None else None,
         )
     return JSONResponse(status_code=status, content=body)
 
 
-@app.post("/api/screen-time/requests/{request_id}")
-async def screen_time_decide(request: Request, request_id: int):
-    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/requests/{request_id}", json=await request.json())
+async def decide_more_time(request: Request, request_id: int, payload: dict) -> tuple[int, dict]:
+    """A parent answers a request for more time, as the caller; the child hears
+    the answer. Shared by the route and the notification's Approve / Disapprove
+    buttons (push callback ``more_time_decide``)."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/requests/{request_id}", json=payload)
     if status == 200:
         decided = body.get("request") or {}
         granted = decided.get("status") == "granted"
@@ -6111,6 +6146,12 @@ async def screen_time_decide(request: Request, request_id: int):
             f"You have {decided.get('granted_minutes')} more minutes today." if granted else "A parent said not today.",
             "/health",
         )
+    return status, body
+
+
+@app.post("/api/screen-time/requests/{request_id}")
+async def screen_time_decide(request: Request, request_id: int):
+    status, body = await decide_more_time(request, request_id, await request.json())
     return JSONResponse(status_code=status, content=body)
 
 

@@ -42,8 +42,14 @@ def notice(
     once: str | None = None,
     data: dict | None = None,
     kind: str | None = None,
+    audience: str = "all",
 ) -> dict[str, Any]:
-    """The JSON body telemetry's notify takes. ``url`` is where a tap goes."""
+    """The JSON body telemetry's notify takes. ``url`` is where a tap goes.
+
+    ``audience`` is ``"all"`` (everyone, the default) or ``"parents"``: telemetry
+    refuses to deliver a parents-only notice (updates, system and ops notices)
+    to a minor. Any other value is rejected by telemetry.
+    """
     payload: dict[str, Any] = {
         "user": user,
         "category": category,
@@ -60,6 +66,8 @@ def notice(
         payload["actions"] = actions[:3]
     if once:
         payload["once"] = once
+    if audience and audience != "all":
+        payload["audience"] = audience
     return payload
 
 

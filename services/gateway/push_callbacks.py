@@ -152,3 +152,39 @@ async def guard_ask(request: Request, params: dict, reply: str | None) -> dict:
     if status != 200:
         raise HTTPException(status_code=status, detail=body.get("detail") or "Could not ask")
     return body
+
+
+@push_callback("guard_decide")
+async def guard_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """A parent taps Approve / Disapprove on a child's request, through the
+    same path as ``POST /api/guard/requests/{id}``, as the caller: ``params``
+    is ``{"id", "approve"}``. A parent who is not this child's parent gets
+    identity's own refusal."""
+    from services.gateway.main import decide_guard_request
+
+    try:
+        request_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="params.id is required") from None
+    status, body = await decide_guard_request(request, request_id, {"approve": bool(params.get("approve"))})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
+    return body
+
+
+@push_callback("more_time_decide")
+async def more_time_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """A parent taps Approve / Disapprove on a request for more screen time,
+    through the same path as ``POST /api/screen-time/requests/{id}``, as the
+    caller: ``params`` is ``{"id", "grant"}``. Identity checks that the caller
+    may answer."""
+    from services.gateway.main import decide_more_time
+
+    try:
+        request_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="params.id is required") from None
+    status, body = await decide_more_time(request, request_id, {"grant": bool(params.get("grant"))})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
+    return body
