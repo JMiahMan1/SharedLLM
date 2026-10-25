@@ -77,8 +77,11 @@ export function MediaCard({
         <button
           type="button"
           data-result
-          onClick={onPlay}
-          disabled={busy || !onPlay}
+          // Stays enabled while it starts: disabling the focused card would
+          // drop a keyboard user's focus to the page. A second tap is ignored.
+          onClick={busy ? undefined : onPlay}
+          disabled={!onPlay}
+          aria-busy={busy || undefined}
           aria-label={`Play ${title}`}
           className="block w-full rounded-[var(--radius-card)] text-left focus-visible:outline-2 focus-visible:outline-[var(--site-accent-focus)]"
         >

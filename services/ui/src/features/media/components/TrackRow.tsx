@@ -78,8 +78,9 @@ export function TrackRow({
         <button
           type="button"
           data-result
-          onClick={play}
-          disabled={!play || busy}
+          // Enabled while it starts, so keyboard focus stays on this row.
+          onClick={busy ? undefined : play}
+          disabled={!play}
           aria-label={`Play ${item.name}`}
           aria-busy={busy}
           className={`${row} min-w-0 flex-1 disabled:opacity-60`}

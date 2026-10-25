@@ -137,7 +137,10 @@ export default function NowPlayingSheet({
     window.history.pushState({ ...(previous ?? {}), jarvisSheet: 'now-playing' }, '');
     let listening = true;
     const onPop = () => {
-      if (!listening) return;
+      // Landing on another sheet entry is not "back out of the sheet": it is
+      // the stale back() of an earlier open (React's dev double-run of this
+      // effect), which used to close the sheet a moment after it opened.
+      if (!listening || window.history.state?.jarvisSheet === 'now-playing') return;
       listening = false;
       onCloseRef.current();
     };

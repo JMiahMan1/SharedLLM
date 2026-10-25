@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Keyboard, X } from 'lucide-react';
@@ -126,7 +126,9 @@ export default function MediaShortcuts({
   const openNowRef = useRef(onOpenNowPlaying);
   const openQueueRef = useRef(onOpenQueue);
   const triggerRef = useRef(trigger);
-  useEffect(() => {
+  // Before paint, not after: a key pressed the moment the screen shows a new
+  // track must act on that track, not the state from before it.
+  useLayoutEffect(() => {
     playerRef.current = player;
     helpRef.current = helpOpen;
     openNowRef.current = onOpenNowPlaying;
