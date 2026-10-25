@@ -261,9 +261,11 @@ export function useMAWebPlayer() {
           if (mFav !== undefined) next.mediaFavorite = mFav;
         }
         if (data?.volume_level !== undefined && data?.volume_level !== null) {
-          // MA reports 0..1, some providers 0..100: normalize to a 0..100 UI scale.
+          // MA reports 0..100, some providers 0..1: normalize to a 0..100 UI
+          // scale. Only a clear fraction (strictly between 0 and 1) is scaled,
+          // so a genuine 1% stays 1 rather than becoming 100%.
           const vl = data.volume_level as number;
-          next.volume = vl <= 1 ? Math.round(vl * 100) : Math.round(vl);
+          next.volume = vl > 0 && vl < 1 ? Math.round(vl * 100) : Math.round(vl);
         }
         if (data?.is_volume_muted !== undefined && data?.is_volume_muted !== null) {
           next.muted = Boolean(data.is_volume_muted);

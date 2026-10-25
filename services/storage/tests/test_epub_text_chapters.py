@@ -334,7 +334,7 @@ def test_entities_are_decoded():
         [("c", "c.xhtml", "")],
         ["c"],
     )
-    assert read_chapters(data)[0].text == "Faith & works — justified."
+    assert read_chapters(data)[0].text == "Faith & works \u2014 justified."
 
 
 def test_inline_markup_does_not_split_words():

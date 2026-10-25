@@ -102,7 +102,8 @@ describe('MediaEventStream', () => {
     await vi.advanceTimersByTimeAsync(0);
     latest().open();
     latest().drop();
-    expect(stream.current).toBe('closed');
+    // The browser is reconnecting on its own: reconnecting, not closed.
+    expect(stream.current).toBe('connecting');
     await vi.advanceTimersByTimeAsync(FALLBACK_AFTER_MS - 1);
     expect(poll).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -115,6 +116,17 @@ describe('MediaEventStream', () => {
     expect(stream.polling).toBe(false);
     await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 3);
     expect(poll).toHaveBeenCalledTimes(2);
+    stream.stop();
+  });
+
+  it('does not report the stream closed while the browser is reconnecting', async () => {
+    const { stream } = make();
+    stream.start();
+    await vi.advanceTimersByTimeAsync(0);
+    latest().open();
+    expect(stream.current).toBe('open');
+    latest().drop(); // readyState CONNECTING: the browser retries on its own
+    expect(stream.current).toBe('connecting');
     stream.stop();
   });
 

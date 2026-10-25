@@ -110,8 +110,13 @@ export class MediaEventStream {
       if (source.readyState === Impl.CLOSED) {
         this.closeSource();
         this.scheduleReopen();
+        this.down();
+      } else {
+        // The browser is reconnecting by itself: say so, and keep the
+        // fallback poll ready, rather than reporting the stream closed.
+        this.setState('connecting');
+        this.armFallback();
       }
-      this.down();
     };
     for (const type of EVENT_TYPES) {
       source.addEventListener(type, (message) => {

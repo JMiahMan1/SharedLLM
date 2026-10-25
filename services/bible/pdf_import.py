@@ -23,9 +23,9 @@ from pathlib import Path
 from services.bible.books import BOOK_BY_OSIS, BOOKS, resolve_book
 from services.bible.corpus import CorpusError
 
-_CHAPTER_LINE = re.compile(r"^(?:chapter\s+)?(\d{1,3})\b[\s.:—-]*(.*)$", re.IGNORECASE)
+_CHAPTER_LINE = re.compile(r"^(?:chapter\s+)?(\d{1,3})\b[\s.:\u2014-]*(.*)$", re.IGNORECASE)
 _VERSE_LINE = re.compile(r"^(\d{1,3})\s+(.+)$", re.DOTALL)
-_PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?[-\u2013—•\s]*\d{1,4}\s*[-\u2013—•]?\s*$", re.IGNORECASE)
+_PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?[-\u2013\u2014•\s]*\d{1,4}\s*[-\u2013\u2014•]?\s*$", re.IGNORECASE)
 _CHAPTER_WORD = re.compile(r"^chapter\s+(\d{1,3})\s*$", re.IGNORECASE)
 _BOOK_SUFFIX = re.compile(r"^(.*?)\s+(\d{1,3})$")
 
@@ -188,7 +188,7 @@ def _tidy(text: str) -> str:
 
 def _match_book_heading(line: str) -> tuple[str, int | None] | None:
     """A line that is (only) a book name, optionally followed by a chapter."""
-    stripped = line.strip().strip("·•—\u2013-— ")  # noqa: B005 - strips a set of dash and bullet characters
+    stripped = line.strip().strip("·•\u2014\u2013-\u2014 ")  # noqa: B005 - strips a set of dash and bullet characters
     if not stripped:
         return None
     suffix = _BOOK_SUFFIX.match(stripped)

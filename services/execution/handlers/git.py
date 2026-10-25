@@ -28,6 +28,7 @@ import os
 import re
 import shlex
 import traceback
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
@@ -291,6 +292,40 @@ async def _resolve_workspace_path(
     return WORKSPACE_ROOT
 
 
+#: Any https/http URL carrying credentials in its userinfo -- a bare token
+#: (`https://ghp_...@host`) or a username and token (`https://user:token@host`).
+#: Covers github_pat_/ghp_/glpat- and the generic git_token alike.
+_CREDENTIAL_URL_RE = re.compile(r"(https?://)[^/@\s]+@")
+
+
+def _redact_credentials(text: str) -> str:
+    """Strip userinfo (token, or user:token) from every URL in a log line."""
+    return _CREDENTIAL_URL_RE.sub(r"\1[REDACTED]@", text)
+
+
+def _authenticated_url(
+    remote_url: str, token: str, git_user: str | None = None, endpoint_url: str | None = None
+) -> str:
+    """An https remote URL with credentials embedded for one command.
+
+    ``https://user:token@host/path`` when the Private Git card supplied a
+    username, otherwise the existing token-only ``https://token@host/path``.
+    The repo path is kept from the workspace's origin remote; only the host and
+    port are taken from the configured Private Git endpoint when there is one
+    (a self-hosted server may listen on a non-standard port).
+    """
+    parsed = urlparse(remote_url)
+    host = parsed.hostname
+    port = parsed.port
+    if endpoint_url:
+        endpoint = urlparse(endpoint_url)
+        host = endpoint.hostname or host
+        port = endpoint.port or port
+    userinfo = f"{git_user}:{token}" if git_user else token
+    authority = f"{host}:{port}" if port else host
+    return f"https://{userinfo}@{authority}{parsed.path}"
+
+
 async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dict | None = None) -> dict:
     """
     Run a git command as a subprocess and return stdout/stderr/returncode.
@@ -298,15 +333,9 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
     """
     cmd = ["git", *args]
 
-    # Redact tokens from log output
-    safe_cmd = []
-    for arg in cmd:
-        if "github_pat_" in arg or "ghp_" in arg:
-            # Simple heuristic: if it looks like a token, redact it
-            redacted = re.sub(r"(https://)[^@]+(@)", r"\1[REDACTED]\2", arg)
-            safe_cmd.append(redacted)
-        else:
-            safe_cmd.append(arg)
+    # Redact credentials from every logged command, not just the ones whose
+    # token carries a known prefix.
+    safe_cmd = [_redact_credentials(arg) for arg in cmd]
 
     log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in safe_cmd)} in {cwd}")
     try:
@@ -324,18 +353,21 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
             env=env
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+        # git prints the credentialed remote in its own error text (for example
+        # "fatal: unable to access 'https://ghp_...@host/...'"), so strip
+        # userinfo from the captured output before it is logged or returned.
         return {
             "returncode": proc.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace").strip(),
-            "stderr": stderr.decode("utf-8", errors="replace").strip(),
+            "stdout": _redact_credentials(stdout.decode("utf-8", errors="replace").strip()),
+            "stderr": _redact_credentials(stderr.decode("utf-8", errors="replace").strip()),
         }
     except TimeoutError:
         tb_str = traceback.format_exc()
-        log.error(f"[GIT TIMEOUT] cmd={' '.join(cmd)} cwd={cwd}\n{tb_str}")
+        log.error(f"[GIT TIMEOUT] cmd={' '.join(safe_cmd)} cwd={cwd}\n{tb_str}")
         return {"returncode": -1, "stdout": "", "stderr": "Git command timed out after 60s."}
     except Exception as e:
         tb_str = traceback.format_exc()
-        log.error(f"[GIT ERROR] cmd={' '.join(cmd)} cwd={cwd}\n{tb_str}")
+        log.error(f"[GIT ERROR] cmd={' '.join(safe_cmd)} cwd={cwd}\n{tb_str}")
         return {"returncode": -1, "stdout": "", "stderr": f"{type(e).__name__}: {e}"}
 
 
@@ -620,7 +652,9 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
         # Determine the appropriate token for this host
         token = None
-        log.info(f"[Git] Resolving token for {remote_url} | user={getattr(user_context, 'user', 'unknown')}")
+        git_user = None
+        endpoint_url = None
+        log.info(f"[Git] Resolving token for {_redact_credentials(remote_url)} | user={getattr(user_context, 'user', 'unknown')}")
 
         if "github.com" in remote_url:
             token = getattr(user_context, "github_token", None)
@@ -629,17 +663,19 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             token = getattr(user_context, "gitlab_token", None)
             log.info(f"[Git] Selected GitLab token: {'[PRESENT]' if token else '[MISSING]'}")
 
-        # Fallback to generic git_token
+        # Fallback to generic git_token (the Private Git card): that card also
+        # carries the server endpoint and auth username, which are used for the
+        # injected URL when present.
         if not token:
             token = getattr(user_context, "git_token", None)
             if token:
                 log.info("[Git] Using generic git_token fallback.")
+                git_user = getattr(user_context, "git_user", None) or None
+                endpoint_url = getattr(user_context, "git_url", None) or None
 
         if token and remote_url.startswith("https://"):
-            # Inject token for HTTPS auth: https://<token>@host/...
-            from urllib.parse import urlparse
-            parsed = urlparse(remote_url)
-            auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+            # Inject credentials for HTTPS auth: https://<user>:<token>@host/...
+            auth_url = _authenticated_url(remote_url, token, git_user, endpoint_url)
             r = await _run_git([action, auth_url, branch], cwd=workspace_path)
         else:
             r = await _run_git([action, "origin", branch], cwd=workspace_path)
@@ -655,12 +691,17 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     elif action == "fetch":
         # Fetch supports token injection too
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
-        token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
+        token = getattr(user_context, "github_token", None) or getattr(user_context, "gitlab_token", None)
+        git_user = None
+        endpoint_url = None
+        if not token:
+            token = getattr(user_context, "git_token", None)
+            if token:
+                git_user = getattr(user_context, "git_user", None) or None
+                endpoint_url = getattr(user_context, "git_url", None) or None
 
         if token and remote_url.startswith("https://"):
-            from urllib.parse import urlparse
-            parsed = urlparse(remote_url)
-            auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+            auth_url = _authenticated_url(remote_url, token, git_user, endpoint_url)
             r = await _run_git(["fetch", auth_url, branch], cwd=workspace_path)
         else:
             r = await _run_git(["fetch", "origin", branch], cwd=workspace_path)
@@ -689,11 +730,15 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             return _fail("remote_add", {"error": "repo_url is required for 'remote_add' action."})
         # Token-inject HTTPS remotes so the first push authenticates.
         remote_url = remote_url_raw
-        token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
-        from urllib.parse import urlparse
+        token = getattr(user_context, "github_token", None) or getattr(user_context, "gitlab_token", None)
+        git_user = None
+        endpoint_url = None
+        if not token:
+            token = getattr(user_context, "git_token", None)
+            git_user = getattr(user_context, "git_user", None) or None
+            endpoint_url = getattr(user_context, "git_url", None) or None
         if token and remote_url.startswith("https://"):
-            parsed = urlparse(remote_url)
-            remote_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+            remote_url = _authenticated_url(remote_url, token, git_user, endpoint_url)
         # Replace existing remote if present (idempotent).
         await _run_git(["remote", "remove", remote_name], cwd=workspace_path)
         r = await _run_git(["remote", "add", remote_name, remote_url], cwd=workspace_path)

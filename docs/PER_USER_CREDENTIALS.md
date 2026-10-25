@@ -97,8 +97,8 @@ keys now:
   `Authorization: Bearer {mass_token}`. MA 2.10.4 answers 401 for a bad token,
   so this proves both reachability and the token.
 - **Audiobookshelf** with an API key: `GET {abs_url}/api/me` with the key as a
-  Bearer token (401 for a bad key). With only a username/password it still
-  posts to `/api/login`.
+  Bearer token (401 for a bad key). With only a username/password it posts to
+  the root `/login` (`/api/login` answers 401).
 
 Both were verified against the live services on 2026-09-28.
 

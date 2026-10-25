@@ -447,7 +447,7 @@ class KokoroTTSEngine:
         books = "|".join(sorted(BIBLE_BOOKS, key=len, reverse=True))
         return re.compile(
             rf"\b({books})\s+(\d{{1,3}})"
-            rf"(?::(\d{{1,3}})(?:[-–—](\d{{1,3}}))?([a-zA-Z]?))?"  # noqa: RUF001
+            rf"(?::(\d{{1,3}})(?:[-\u2013\u2014](\d{{1,3}}))?([a-zA-Z]?))?"
         )
 
     def _expand_scripture_refs(self, text: str) -> str:

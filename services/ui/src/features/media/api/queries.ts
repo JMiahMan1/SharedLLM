@@ -67,10 +67,12 @@ export function useMediaLibrary(tab: LibraryTab, libraryId?: string, enabled = t
     queryKey: mediaKeys.library(tab, libraryId),
     queryFn: ({ pageParam }) => getMediaLibrary(tab, { offset: pageParam, limit: LIBRARY_PAGE_SIZE, libraryId }),
     initialPageParam: 0,
-    // A short page is the last one. Audiobook libraries (and the list of
-    // libraries itself) come back in one page.
+    // A short page is the last one. The audiobook tab with no chosen library
+    // returns the list of libraries itself, which is always a single page.
     getNextPageParam: (last, pages) =>
-      tab === 'audiobooks' || last.items.length < LIBRARY_PAGE_SIZE ? undefined : pages.length * LIBRARY_PAGE_SIZE,
+      (tab === 'audiobooks' && !libraryId) || last.items.length < LIBRARY_PAGE_SIZE
+        ? undefined
+        : pages.length * LIBRARY_PAGE_SIZE,
     enabled,
     placeholderData: keepPreviousData,
     ...MEDIA_QUERY_DEFAULTS,

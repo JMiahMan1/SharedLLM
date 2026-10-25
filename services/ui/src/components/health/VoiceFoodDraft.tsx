@@ -56,7 +56,9 @@ export default function VoiceFoodDraft({
       toast.error(
         reason === 'denied'
           ? 'Microphone permission is needed to record.'
-          : 'Recording is not available here. Type what you ate instead.',
+          : reason === 'empty'
+            ? 'Nothing was recorded. Check the microphone and try again.'
+            : 'Recording is not available here. Type what you ate instead.',
       ),
   });
 

@@ -39,8 +39,10 @@ export function usePlayback(web: WebPlayerHandle) {
   const adapter = useCallback((id: OutputId) => adapterFor(id, webRef.current), []);
   const store = () => useMediaStore.getState();
 
-  /** Start `req` on the selected output; `key` names the row showing progress. */
-  const play = useCallback(async (req: PlayRequest, key: string) => {
+  /** Start `req` on the selected output; `key` names the row showing progress.
+   *  Resolves true when playback started, false when it failed (the error is
+   *  in `error`), so callers do not act on a play that never began. */
+  const play = useCallback(async (req: PlayRequest, key: string): Promise<boolean> => {
     void trigger('light');
     setBusy(key);
     setError(null);
@@ -56,8 +58,10 @@ export function usePlayback(web: WebPlayerHandle) {
         actions.setAbsSession(null);
       }
       if (outputKind(id) === 'ha') void refreshMediaStatus();
+      return true;
     } catch (err) {
       setError(errorText(err, 'Playback failed'));
+      return false;
     } finally {
       setBusy(null);
     }

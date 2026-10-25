@@ -5,6 +5,8 @@ import { useAudioRecorder } from './useAudioRecorder';
 class FakeRecorder {
   static isTypeSupported = (type: string) => type === 'audio/webm;codecs=opus';
   static last: FakeRecorder | null = null;
+  /** When true the take comes back empty (no data), as a muted microphone does. */
+  static empty = false;
   state = 'inactive';
   mimeType: string;
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
@@ -18,7 +20,7 @@ class FakeRecorder {
   }
   stop() {
     this.state = 'inactive';
-    this.ondataavailable?.({ data: new Blob(['abc'], { type: this.mimeType }) });
+    this.ondataavailable?.({ data: new Blob(FakeRecorder.empty ? [] : ['abc'], { type: this.mimeType }) });
     this.onstop?.();
   }
 }
@@ -29,6 +31,7 @@ describe('useAudioRecorder', () => {
   const saved = { recorder: window.MediaRecorder, devices: navigator.mediaDevices };
   beforeEach(() => {
     vi.useFakeTimers();
+    FakeRecorder.empty = false;
     (window as unknown as { MediaRecorder: unknown }).MediaRecorder = FakeRecorder;
     (navigator as unknown as { mediaDevices: unknown }).mediaDevices = {
       getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }),
@@ -69,5 +72,21 @@ describe('useAudioRecorder', () => {
       await result.current.start();
     });
     expect(onError).toHaveBeenCalledWith('denied');
+  });
+
+  it('settles an empty take through onError instead of hanging', async () => {
+    FakeRecorder.empty = true;
+    const onRecorded = vi.fn();
+    const onError = vi.fn();
+    const { result } = renderHook(() => useAudioRecorder({ onRecorded, onError }));
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      result.current.stop();
+    });
+    expect(onRecorded).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('empty');
+    expect(result.current.recording).toBe(false);
   });
 });

@@ -93,45 +93,55 @@ export function Scrubber({
 
 /**
  * Mute and volume (UX-10): the icon shows the state (no letters), the slider
- * reads "40 percent" or "muted". Callers debounce what they send.
+ * reads "40 percent" or "muted". Callers debounce what they send. A device
+ * that reports no volume (`null`) gets an explicit unknown state instead of a
+ * guessed level.
  */
 export function VolumeSlider({
   volume, muted, onChange, onToggleMute, label = 'Volume', className = '',
 }: {
-  volume: number;
+  volume: number | null;
   muted: boolean;
   onChange: (volume: number) => void;
   onToggleMute?: () => void;
   label?: string;
   className?: string;
 }) {
-  const level = muted ? 0 : Math.max(0, Math.min(100, Math.round(volume)));
-  const Icon = muted || level === 0 ? VolumeX : level < 50 ? Volume1 : Volume2;
+  // No reported volume: no slider to guess a level for, just "--".
+  const unknown = volume === null;
+  const level = unknown || muted ? 0 : Math.max(0, Math.min(100, Math.round(volume)));
+  const Icon = unknown ? (muted ? VolumeX : Volume1) : muted || level === 0 ? VolumeX : level < 50 ? Volume1 : Volume2;
+  const mute = onToggleMute ? (
+    <button
+      type="button"
+      onClick={onToggleMute}
+      aria-label={muted ? 'Unmute' : 'Mute'}
+      aria-pressed={muted}
+      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-[var(--site-text-muted)] hover:bg-[var(--site-card-bg-hover)] hover:text-[var(--site-text)]"
+    >
+      <Icon size={18} aria-hidden />
+    </button>
+  ) : <Icon size={16} className="shrink-0 text-[var(--site-text-muted)]" aria-hidden />;
+
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      {onToggleMute ? (
-        <button
-          type="button"
-          onClick={onToggleMute}
-          aria-label={muted ? 'Unmute' : 'Mute'}
-          aria-pressed={muted}
-          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-[var(--site-text-muted)] hover:bg-[var(--site-card-bg-hover)] hover:text-[var(--site-text)]"
-        >
-          <Icon size={18} aria-hidden />
-        </button>
-      ) : <Icon size={16} className="shrink-0 text-[var(--site-text-muted)]" aria-hidden />}
-      <input
-        type="range"
-        min={0}
-        max={100}
-        step={1}
-        value={level}
-        onChange={(e) => onChange(Number(e.target.value))}
-        aria-label={label}
-        aria-valuetext={muted ? 'muted' : `${level} percent`}
-        className="media-range h-11 min-w-0 flex-1 cursor-pointer"
-        style={{ ['--range-fill' as string]: `${level}%` }}
-      />
+      {mute}
+      {unknown ? (
+        <span className="min-w-0 flex-1 text-sm text-[var(--site-text-muted)]" aria-label={`${label} unknown`}>--</span>
+      ) : (
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={level}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label={label}
+          aria-valuetext={muted ? 'muted' : `${level} percent`}
+          className="media-range h-11 min-w-0 flex-1 cursor-pointer"
+          style={{ ['--range-fill' as string]: `${level}%` }}
+        />
+      )}
     </div>
   );
 }

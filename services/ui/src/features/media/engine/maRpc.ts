@@ -84,18 +84,29 @@ export class MaRpc {
         resolve();
         return;
       }
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(new Error('Music Assistant did not answer in time'));
-      }, this.connectTimeoutMs);
-      const onOpen = () => { cleanup(); resolve(); };
-      const onFail = () => { cleanup(); reject(new Error('Could not reach Music Assistant')); };
-      const cleanup = () => {
+      const removeHandlers = () => {
         clearTimeout(timer);
         ws.removeEventListener('open', onOpen);
         ws.removeEventListener('error', onFail);
         ws.removeEventListener('close', onFail);
       };
+      // A failed connect must not leave the half-open socket behind: the next
+      // connect() would open a second one and leak this.
+      const fail = () => {
+        removeHandlers();
+        if (this.ws === ws) {
+          this.ws = null;
+          ws.removeEventListener('message', this.handleMessage as EventListener);
+          ws.removeEventListener('close', this.handleClose as EventListener);
+          try { ws.close(); } catch { /* already gone */ }
+        }
+      };
+      const timer = setTimeout(() => {
+        fail();
+        reject(new Error('Music Assistant did not answer in time'));
+      }, this.connectTimeoutMs);
+      const onOpen = () => { removeHandlers(); resolve(); };
+      const onFail = () => { fail(); reject(new Error('Could not reach Music Assistant')); };
       ws.addEventListener('open', onOpen);
       ws.addEventListener('error', onFail);
       ws.addEventListener('close', onFail);

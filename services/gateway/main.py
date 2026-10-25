@@ -15007,7 +15007,16 @@ async def get_media_library(tab: str, request: Request, offset: int = 0, limit: 
     if tab == "audiobooks":
         try:
             if library_id:
-                detail = await _media_exec_audiobookshelf(creds, {"action": "list", "library_id": library_id, "limit": min(limit, 50)}, timeout=ABS_TIMEOUT)
+                # ABS pages its library listing with ``limit`` + a 0-based ``page``,
+                # and the execution request caps a page at 50, so translate the
+                # flat ``offset`` the UI sends into a page number instead of
+                # silently returning the first 50 books forever.
+                page_size = min(limit, 50)
+                detail = await _media_exec_audiobookshelf(
+                    creds,
+                    {"action": "list", "library_id": library_id, "limit": page_size, "page": offset // page_size},
+                    timeout=ABS_TIMEOUT,
+                )
                 items = [_media_abs_book_item(b) for b in detail.get("books") or []]
                 return MediaLibraryResponse(tab=tab, items=items, offset=offset, limit=limit, errors=errors).model_dump(by_alias=True)
             detail = await _media_exec_audiobookshelf(creds, {"action": "libraries"}, timeout=ABS_TIMEOUT)

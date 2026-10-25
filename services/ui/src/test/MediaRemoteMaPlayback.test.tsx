@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
 import { chooseOutput, mediaItem, serveHome } from './mediaScreens';
+import { useMediaStore } from '../features/media/store/mediaStore';
 
 // sendspin-js cannot be bundled by vitest, so stub the shared web player. The
 // remote path must never touch its connect()/maCommand() methods.
@@ -168,8 +169,20 @@ describe('Media page: remote Music Assistant speakers', () => {
     expect(player.state.maCommand).not.toHaveBeenCalled();
   });
 
+  it('shows an unknown volume, not a guessed one, until the speaker reports it', async () => {
+    renderWithProviders(<Media />);
+    await selectRemoteSpeaker();
+
+    // No reported volume: the card must not invent a level, so there is no
+    // slider and the control says the volume is unknown.
+    expect(screen.queryByLabelText('Volume')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Volume unknown')).toBeInTheDocument();
+  });
+
   it('sends volume and mute changes to the remote speaker', async () => {
     renderWithProviders(<Media />);
+    // The event stream reports the speaker's real volume (0-100 for MA).
+    useMediaStore.getState().actions.ingest({ type: 'player', output_id: 'ma:remote-1', volume: 40 });
     await selectRemoteSpeaker();
 
     fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '55' } });

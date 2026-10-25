@@ -16,16 +16,18 @@ function preferredType(): string | undefined {
  * the recording to `onRecorded` as one Blob (Opus WebM where offered, else
  * the recorder's own format: `audio/mp4` on Safari). `start(maxSeconds)` also
  * stops the take by itself after that long, counting down in `secondsLeft`.
- * An empty take is dropped. `onError` says why nothing was recorded: no
- * recorder here, or the microphone refused. A take still running when the
- * component goes away is stopped and its microphone released.
+ * An empty take is reported through `onError` ('empty'), so a caller waiting
+ * on `onRecorded`/`onError` always settles. `onError` says why nothing was
+ * recorded: no recorder here, the microphone refused, or the take came back
+ * empty. A take still running when the component goes away is stopped and its
+ * microphone released.
  */
 export function useAudioRecorder({
   onRecorded,
   onError,
 }: {
   onRecorded: (blob: Blob) => void;
-  onError: (reason: 'unavailable' | 'denied') => void;
+  onError: (reason: 'unavailable' | 'denied' | 'empty') => void;
 }) {
   const [recording, setRecording] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -86,7 +88,9 @@ export function useAudioRecorder({
     recorder.onstop = () => {
       stream.getTracks().forEach((track) => track.stop());
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || chunksRef.current[0]?.type || 'audio/webm' });
+      // Always settle: an empty take must not leave the caller waiting.
       if (blob.size > 0) handlers.current.onRecorded(blob);
+      else handlers.current.onError('empty');
     };
     recorderRef.current = recorder;
     recorder.start();

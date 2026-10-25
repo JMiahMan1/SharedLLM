@@ -31,6 +31,7 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
   const web = useOptionalWebPlayer();
   useMediaStatusFeed(web, { maPlayers: false });
   const loaded = useMediaStore((s) => s.statusReadAt !== null);
+  const statusError = useMediaStore((s) => s.statusReadError);
   const players = useMediaStore((s) => s.players);
   const { setVolume: storeVolume, setMuted: storeMuted, patchPlayer } = useMediaStore((s) => s.actions);
 
@@ -103,7 +104,7 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
           title: shown.item?.title || (shown.appName ? `Playing on ${shown.appName}` : 'Playing something'),
           artist: shown.item?.artist || '', device: shown.name, image: shown.item?.image ?? null,
           playing: shown.status === 'playing', position: remotePosition, duration: shown.item?.durationSec ?? 0,
-          volume: shown.volume ?? 50, muted: shown.muted, trackKey: shown.item?.uri || shown.item?.title || '',
+          volume: shown.volume, muted: shown.muted, trackKey: shown.item?.uri || shown.item?.title || '',
         }
       : null;
 
@@ -115,9 +116,15 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
       <div className="absolute right-2 top-2 z-10">{settingsButton}</div>
 
       {!loaded && !view ? (
-        <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading media">
-          <div className="skeleton h-12 w-full rounded-xl" />
-        </div>
+        statusError ? (
+          <div className="flex flex-1 items-center justify-center" role="status">
+            <p className="text-sm text-[var(--site-text-muted)]">Couldn’t load media</p>
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading media">
+            <div className="skeleton h-12 w-full rounded-xl" />
+          </div>
+        )
       ) : view ? (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
           <div className="flex items-center gap-3 pr-10">

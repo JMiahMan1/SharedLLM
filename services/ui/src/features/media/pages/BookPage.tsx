@@ -61,7 +61,9 @@ export default function BookPage() {
   }, 0);
 
   const playFrom = async (seconds: number) => {
-    if (!current) await playback.play(req, busyKey);
+    // `play` swallows a failure into the error state; only seek when it
+    // actually started, so a failed chapter does not jump whatever else is on.
+    if (!current && !(await playback.play(req, busyKey))) return;
     await playback.seek(seconds);
   };
   const markFinished = async () => {
