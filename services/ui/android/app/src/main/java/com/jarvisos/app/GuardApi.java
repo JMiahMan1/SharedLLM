@@ -144,6 +144,14 @@ final class GuardApi {
         return lastStatus(context).optBoolean("install_approval", false);
     }
 
+    /**
+     * Whether a parent queued a remote wipe (Phase 12 MDM). The status carries
+     * it; false unless one is live, so a stale flag can never erase the phone.
+     */
+    static boolean wipeRequested(Context context) {
+        return lastStatus(context).optBoolean("wipe_requested", false);
+    }
+
     /** The parents' answers on new apps: package to pending, approved or denied. */
     static Map<String, String> appApprovals(Context context) {
         return stringMap(lastStatus(context).optJSONObject("app_approvals"));

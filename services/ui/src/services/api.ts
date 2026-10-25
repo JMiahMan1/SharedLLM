@@ -143,6 +143,9 @@ import type {
   GuardianRecap,
   GuardianConcern,
   MemberDevices,
+  MdmFolder,
+  MdmInventory,
+  MdmSharedFile,
   GuardianPrompt,
   GuardianJournalNote,
   ActivityEvent,
@@ -163,6 +166,7 @@ import type {
   HealthCheer,
   HealthCheersDay,
   FoodLabelDraft,
+  RecipePhotoDraft,
   HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
@@ -1055,6 +1059,58 @@ export const api = {
   /** A child's devices with their technical side: the father's and admins' only (403 for anyone else). */
   async getMemberDevices(username: string): Promise<MemberDevices> {
     const resp = await apiClient.get(`/api/family/member/${encodeURIComponent(username)}/devices`);
+    return resp.data;
+  },
+
+  // --- Device management (MDM, HANDOVER.md Phase 12) -----------------------
+
+  /** Every family device in one list: the father's and admins' only. */
+  async getMdmDevices(): Promise<MdmInventory> {
+    const resp = await apiClient.get('/api/mdm/devices');
+    return resp.data;
+  },
+
+  /** Push an app-update notice to the owners of the selected devices (admin). */
+  async pushMdmAppUpdate(body: { device_keys?: string[]; usernames?: string[] }): Promise<{ sent: number; owners: string[]; version: string }> {
+    const resp = await apiClient.post('/api/mdm/devices/update', body);
+    return resp.data;
+  },
+
+  /** Queue a remote wipe on a device-owner phone; the phone erases itself on its next check-in. */
+  async wipeMdmDevice(deviceKey: string): Promise<{ status: string; delivery: string }> {
+    const resp = await apiClient.post(`/api/mdm/devices/${encodeURIComponent(deviceKey)}/wipe`, { confirm: true });
+    return resp.data;
+  },
+
+  /** The shared School and Library folders, their files and who each is pushed to (admin). */
+  async getMdmFiles(): Promise<{ folders: MdmFolder[] }> {
+    const resp = await apiClient.get('/api/mdm/files');
+    return resp.data;
+  },
+
+  /** Upload one file into a shared folder (admin). */
+  async uploadMdmFile(folder: string, file: File): Promise<{ file: MdmSharedFile }> {
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await apiClient.post(`/api/mdm/files/${encodeURIComponent(folder)}`, form);
+    return resp.data;
+  },
+
+  /** Remove one file from a shared folder (admin). */
+  async deleteMdmFile(folder: string, name: string): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/mdm/files/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`);
+    return resp.data;
+  },
+
+  /** Push a shared folder to selected people's devices (admin). */
+  async pushMdmFiles(folder: string, usernames: string[]): Promise<{ pushed_to: string[] }> {
+    const resp = await apiClient.post('/api/mdm/files/push', { folder, usernames });
+    return resp.data;
+  },
+
+  /** The shared folders pushed to the caller, for the device-facing list. */
+  async getMdmFilesForMe(): Promise<{ folders: Array<{ folder: string; files: MdmSharedFile[] }> }> {
+    const resp = await apiClient.get('/api/mdm/files/for-me');
     return resp.data;
   },
 
@@ -2658,6 +2714,18 @@ export const api = {
   async fetchRecipe(id: number): Promise<ExecutionResponse> {
     // One full recipe out of the offline index (search cards carry no body).
     const resp = await apiClient.post('/api/recipes/fetch', { id }, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /** A recipe photo (or handwriting) read by the vision OCR into a draft; nothing is saved. */
+  async readRecipePhoto(photo: Blob): Promise<RecipePhotoDraft> {
+    const form = new FormData();
+    form.append('image', photo, 'recipe.jpg');
+    const resp = await apiClient.post('/api/recipes/photo', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // The vision model runs locally and can take a minute or two.
+      timeout: 300_000,
+    });
     return resp.data;
   },
 

@@ -82,6 +82,21 @@ final class DeviceOwnerGuard {
         }
     }
 
+    /**
+     * Erase the phone (a factory reset) at a parent's explicit request. Only a
+     * device owner may; call only when {@link DeviceOwnerRules#shouldWipe} says
+     * so. This cannot be undone: the phone comes back to its out-of-box state.
+     */
+    static void wipeData(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        if (dpm == null) return;
+        try {
+            dpm.wipeData(0);
+        } catch (Exception ignored) {
+            // No longer device owner, or the platform refused: nothing else to do.
+        }
+    }
+
     private static DevicePolicyManager dpm(Context context) {
         return (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
     }
