@@ -1,9 +1,7 @@
 """Family calls are relayed in-app, not opened in Nextcloud Talk."""
 import pytest
-from fastapi.testclient import TestClient
 
 from services.gateway import calls
-from services.gateway.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +18,8 @@ def fresh_hub(monkeypatch):
     monkeypatch.setattr(calls, "_user_for_token", fake_user)
 
 
-def test_two_people_join_the_same_room_and_exchange_signals():
-    c = TestClient(app)
+def test_two_people_join_the_same_room_and_exchange_signals(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/communication/calls/ws?token=mom-token&room=family&name=Family") as mom:
         welcome = mom.receive_json()
@@ -64,8 +62,8 @@ def test_two_people_join_the_same_room_and_exchange_signals():
             assert left == {"type": "peer-left", "id": kid_welcome["self"]["id"]}
 
 
-def test_rooms_do_not_relay_between_each_other():
-    c = TestClient(app)
+def test_rooms_do_not_relay_between_each_other(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/communication/calls/ws?token=mom-token&room=family&name=Family") as mom:
         mom_welcome = mom.receive_json()
@@ -87,8 +85,8 @@ def test_rooms_do_not_relay_between_each_other():
             kid.close()
 
 
-def test_the_active_call_list_needs_a_signed_in_family_member():
-    c = TestClient(app)
+def test_the_active_call_list_needs_a_signed_in_family_member(one_loop_client):
+    c = one_loop_client
     assert c.get("/api/communication/calls").status_code == 401
 
     response = c.get("/api/communication/calls", headers={"Authorization": "Bearer mom-token"})
@@ -96,8 +94,8 @@ def test_the_active_call_list_needs_a_signed_in_family_member():
     assert response.json() == {"calls": []}
 
 
-def test_a_started_call_appears_in_the_list_with_its_people():
-    c = TestClient(app)
+def test_a_started_call_appears_in_the_list_with_its_people(one_loop_client):
+    c = one_loop_client
 
     with c.websocket_connect("/api/communication/calls/ws?token=mom-token&room=family&name=Family") as mom:
         mom.receive_json()
