@@ -13,11 +13,16 @@ export const MA_LIST_POLL_MS = 6000;
 export async function refreshMediaStatus(): Promise<void> {
   try {
     const resp = await api.mediaStatus({ silent: true });
-    if (resp.status !== 'SUCCESS' || !resp.detail) return;
+    if (resp.status !== 'SUCCESS' || !resp.detail) {
+      useMediaStore.getState().actions.setStatusReadError(true);
+      return;
+    }
     const detail = resp.detail as { active?: MediaStatus | null; all_players?: MediaStatus[] };
     useMediaStore.getState().actions.ingestStatus(detail.all_players ?? [], detail.active ?? null);
+    useMediaStore.getState().actions.setStatusReadError(false);
   } catch {
-    /* the next poll (or the event stream) catches up */
+    // The next poll (or the event stream) catches up; a view can stop loading.
+    useMediaStore.getState().actions.setStatusReadError(true);
   }
 }
 

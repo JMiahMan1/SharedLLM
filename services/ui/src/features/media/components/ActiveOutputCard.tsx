@@ -109,7 +109,7 @@ export function ActiveOutputCard() {
   return (
     <NowPlayingCard
       view={view}
-      volume={isWeb ? player.volume : remote?.volume ?? 50}
+      volume={isWeb ? player.volume : remote?.volume ?? null}
       muted={isWeb ? player.muted : remote?.muted ?? false}
       busy={playback.busy && TRANSPORT.includes(playback.busy) ? playback.busy : null}
       isFavorite={isFavorite}

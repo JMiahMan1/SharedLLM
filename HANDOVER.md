@@ -1,17 +1,21 @@
 # Jarvis OS / SharedLLM - session handover
 
-Updated 2026-10-24 for the next AI assistant taking over this repo.
+Updated 2026-10-25 for the next AI assistant taking over this repo.
 Every claim below was verified against the live system unless marked **planned**.
 
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` - version **1.5.2**, OTA bundle `git_sha` **5457dcfe**
+- Live: `https://jarvis.sumemail.com` - version **1.5.2**, OTA bundle `git_sha` **3e7fa71a**
   (2026-10-25 01:30 UTC; every app service redeployed at that tip, 0 new errors after). APK: CI
   builds one per push under `services/ui/**`; the native work below needs the newest APK on the
   phones. Family guard Phase 11 and the family member page (`/family/member/<child>`) are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
+  - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
+    valid certificate for `jarvis.sumemail.com` (issued 2026-10-25 03:10 UTC, valid to 2027-01-23). The previous
+    `*.sumemail.com` wildcard expired at 03:29 UTC and briefly failed verification for every endpoint through
+    that proxy; renewal is still handled on that proxy, not in this repo.
 - Check anytime:
   - `curl -fsS https://jarvis.sumemail.com/api/app-updates/version`
   - `.venv/bin/python scripts/check_service_urls.py` - probes Audiobookshelf,
@@ -21,6 +25,38 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-25` (live fix): the deployed identity service crash-looped on startup (`no such column:
+  user.forbidden_branches`) because a model change shipped without its migration, which also took the gateway
+  down (the site returned 502). Fixed by shipping the missing `_add_column` migration (commit `81a1ec12`) and
+  redeploying identity + gateway; `/health` and all four `check_service_urls.py` probes are green again.
+- `2026-10-25 early` (bug sweep, integration fixes and the missing integrations wired up).
+  - **Integrations hardened and completed** (docs/INTEGRATIONS.md): the Audiobookshelf connection test now
+    logs in at the root `/login` (it was hitting `/api/login`, which ABS rejects); the Nextcloud test uses the
+    user's own `/ocs/v2.php/cloud/user` and honours `ocs.meta.statuscode` instead of an admin-only endpoint that
+    returns HTTP 200 even on a permission error; Nextcloud/GitHub/GitLab tests have 5 s timeouts; GitHub and
+    GitLab are tested over a TLS-verifying client while self-signed hosts (Home Assistant, Nextcloud,
+    Audiobookshelf, Music Assistant, Skylight) keep the insecure one; connection failures return a short message
+    and never echo the exception; and no secret value (`*_token`, `*_pass`, `*_api_key`, `*_key`, `api_key`) is
+    written to the log.
+  - **GitHub "Protected Branches" is now saved**: the field is stored on the user and resolved to the workspace
+    runtime (it used to fall back to the defaults because nothing persisted it).
+  - **Private Git endpoint and username are used**: credentials are injected as
+    `https://<user>:<token>@host:port/...` from the configured endpoint, and every logged git command has its
+    credentials redacted (the timeout/error paths used to print the token).
+  - **Skylight**: a non-admin can now turn Skylight on/off for themselves from the Accounts page.
+  - **Media UI bug sweep**: an empty voice take no longer hangs the recorder panel; the tab-lock owner expires
+    after 6 s so a crashed tab cannot leave every other tab stuck on "Playing in another tab"; tapping a chapter
+    seeks only when playback actually started; the output sheet, output card and dashboard widget show an
+    explicit "unknown" volume instead of a made-up 50; a genuine MA `volume_level` of 1 is no longer shown as
+    100%; the status poll is silent (no repeated connectivity toast); the widget shows an error instead of an
+    endless skeleton; the event stream no longer reports "closed" while the browser is reconnecting; and a failed
+    JSON-RPC connect no longer leaks a WebSocket.
+  - **Audiobook library no longer capped at 50**: the gateway pages through ABS (`page`/`limit`) and the UI
+    fetches the next page, so a large library is fully browsable.
+  - **Repo-wide em/en dash removal**: no `U+2013`/`U+2014` characters remain in the source; the few functional
+    regexes use `\u2013`/`\u2014` escapes so behaviour is unchanged.
+  - **Not done (reported)**: OpenRouter's per-user tile is still a no-op; per-user credentials would be dead
+    storage because the only consumer is the global `llm_cloud_*` settings.
 - `2026-10-24 evening session` (lead + parallel agents; every change cherry-picked onto
   `microservices`, no other branches kept). Details in the docs named.
   - **Media - playing on the phone works again** (BUG-74…79): play waits for MA to see the web

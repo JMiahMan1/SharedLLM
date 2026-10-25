@@ -129,6 +129,12 @@ async def _assert_call(upstream, method, path_and_query):
             "/api/libraries/lib1/search?limit=10&q=hobbit",
         ),
         (
+            lambda: abs_client.get_library_items(ABS, KEY, "lib1", limit=50, page=1),
+            "GET",
+            # 0-based ``page`` so a >50-book library can be paged, not truncated.
+            "/api/libraries/lib1/items?limit=50&page=1",
+        ),
+        (
             lambda: abs_client.get_personalized_shelves(ABS, KEY, "lib1"),
             "GET",
             "/api/libraries/lib1/personalized",

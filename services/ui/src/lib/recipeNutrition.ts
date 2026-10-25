@@ -78,7 +78,7 @@ export function parseRecipeNutrition(body: string): RecipeNutritionResult {
   if (!line) return { status: 'missing' };
 
   // "*Per serving, as stated by the submitter - foodcom:* …": the tag before the colon.
-  const header = line.match(/per serving[^:]*?(?:-|-)\s*([a-z0-9_-]+)\s*:/i);
+  const header = line.match(/per serving[^:]*?(?:\u2014|-)\s*([a-z0-9_-]+)\s*:/i);
   const values = line.includes(':') ? line.slice(line.indexOf(':') + 1) : line;
   const found: Partial<Record<Field, number>> = {};
   for (const part of values.replace(/\*/g, '').split('·')) {

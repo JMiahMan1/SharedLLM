@@ -40,6 +40,8 @@ class ResolvedCredentials(BaseModel):
     github_token: str | None = None
     gitlab_token: str | None = None
     git_token: str | None = None
+    git_url: str | None = None
+    git_user: str | None = None
     nextcloud_url: str | None = None
     nextcloud_user: str | None = None
     nextcloud_pass: str | None = None
@@ -53,13 +55,15 @@ class ResolvedCredentials(BaseModel):
     mass_url: str | None = None
     mass_token: str | None = None
     is_admin: bool = False
+    #: Branch patterns the workspace runtime must never push to (from identity).
+    forbidden_branches: list[str] | None = None
     #: "voice" when the chat request's speaker was recognised by voice alone.
     identified_by: str | None = None
 
     @field_validator(
         "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass",
         "ha_url", "ha_token", "audiobookshelf_url", "audiobookshelf_user", "audiobookshelf_pass",
-        "openai_key", "mass_url", "mass_token", mode="before"
+        "openai_key", "mass_url", "mass_token", "git_url", "git_user", mode="before"
     )
     @classmethod
     def coerce_empty_to_none(cls, v: Any) -> str | None:

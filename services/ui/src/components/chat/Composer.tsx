@@ -117,7 +117,9 @@ export default function Composer({
       toast.error(
         reason === 'unavailable'
           ? 'Recording is not available on this device'
-          : 'Microphone permission is needed to record a voice message',
+          : reason === 'empty'
+            ? 'Nothing was recorded. Check the microphone and try again.'
+            : 'Microphone permission is needed to record a voice message',
       ),
   });
   const recording = recorder.recording;

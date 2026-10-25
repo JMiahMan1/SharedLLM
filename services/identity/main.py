@@ -16,6 +16,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from datetime import datetime as dt
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
@@ -110,6 +111,7 @@ from services.identity.schemas import (
     UserWidgetRead,
     UserWidgetUpdate,
     WidgetSettingsRead,
+    forbidden_branch_list,
 )
 from services.identity.seed import hash_password, seed_from_env, system_service_urls, verify_password
 from services.shared.info_endpoint import info_router
@@ -858,6 +860,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         git_token=None if household else (
             decrypt(user.git_token_enc) if user.git_token_enc else None
         ),
+        # Protected-branch patterns reach the workspace runtime through here
+        # (services/workspace_runtime/main.py reads identity["forbidden_branches"]).
+        forbidden_branches=[] if household else forbidden_branch_list(user.forbidden_branches),
         huggingface_token=None if household else (
             decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None
         ),
@@ -918,6 +923,10 @@ def _coerce_profile_value(key: str, value):
         if key == "audiobookshelf_url":
             return normalize_abs_url(value)
         return value
+    if key == "forbidden_branches" and isinstance(value, list):
+        # A JSON array string on the User row (UserWidget.pinned_devices does
+        # the same); an empty list is explicit and clears the patterns.
+        return json.dumps([str(item).strip() for item in value if str(item).strip()])
     return value
 
 START_TIME = time.time()
@@ -2508,6 +2517,40 @@ def change_password(body: ChangePasswordRequest, session: Session = Depends(get_
     session.commit()
     return {"status": "SUCCESS", "message": "Password updated"}
 
+def _is_secret_config_key(key: str) -> bool:
+    """A test-connection field whose value must never reach a log line.
+
+    Everything that holds a credential is masked: ``*_token``, ``*_pass``,
+    ``*_api_key``, ``*_key`` and a bare ``api_key``. A field that does not look
+    like a secret but was filled from a saved ``*_enc`` column is masked by the
+    caller as well.
+    """
+    lowered = key.lower()
+    return lowered == "api_key" or lowered.endswith(("_token", "_pass", "_api_key", "_key"))
+
+
+#: Public SaaS git hosts, whose TLS certificate must be verified. A self-hosted
+#: GitHub Enterprise / GitLab host keeps the insecure client for its own cert.
+_PUBLIC_GIT_HOSTS = {"github.com", "api.github.com", "gitlab.com"}
+
+
+def _test_connection_client(service: str, config: dict):
+    """The pooled client a connection test should use for ``service``.
+
+    GitHub and GitLab on their public SaaS hosts use the verifying
+    ``get_client()``; private self-hosted services (Home Assistant, Nextcloud,
+    Audiobookshelf, Music Assistant, Skylight) keep ``get_client_insecure()``
+    for their self-signed certificates (services/common/http.py).
+    """
+    url = {
+        "GitHub": config.get("github_url") or "https://api.github.com",
+        "GitLab": config.get("gitlab_url") or "https://gitlab.com",
+    }.get(service)
+    if url and (urlparse(url).hostname or "").lower() in _PUBLIC_GIT_HOSTS:
+        return get_client()
+    return get_client_insecure()
+
+
 @app.post("/api/auth/test-connection")
 async def test_connection(req: dict, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     """Test a connection before saving."""
@@ -2516,13 +2559,20 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     # Saved secrets are never sent to the browser, so "Test" on an already
     # connected integration arrives with the token/password blank. Test with
     # the caller's own saved value instead of failing "Token is required".
+    filled_from_saved: set[str] = set()
     for key in list(config):
         if not config.get(key) and isinstance(getattr(admin, f"{key}_enc", None), str):
             config[key] = _decrypt_field(getattr(admin, f"{key}_enc"))
-    log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
+            filled_from_saved.add(key)
+    # Never log a secret: mask anything named like one, plus anything just
+    # filled from a saved *_enc column (a decrypted value must not be logged).
+    log.info(
+        f"[test_connection] Testing {service} with config: "
+        f"{ {k: '***' if _is_secret_config_key(k) or k in filled_from_saved else v for k, v in config.items()} }"
+    )
 
     try:
-        async with get_client_insecure() as client:
+        async with _test_connection_client(service, config) as client:
             if service == "Home Assistant":
                 url = config.get("ha_url")
                 token = config.get("ha_token")
@@ -2547,15 +2597,28 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 if not url or not user or not password:
                     return {"status": "ERROR", "message": "URL, User, and Password are required"}
 
+                # /ocs/v1.php/cloud/users is admin-only provisioning and
+                # reports a permission failure as HTTP 200 with
+                # ocs.meta.statuscode 997/998, so read the caller's own account
+                # and check the OCS status code instead (the same parse as
+                # execution's nextcloud_client).
                 resp = await client.get(
-                    f"{url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
+                    f"{url.rstrip('/')}/ocs/v2.php/cloud/user?format=json",
                     headers={"OCS-APIRequest": "true"},
-                    auth=aiohttp.BasicAuth(user, password)
+                    auth=aiohttp.BasicAuth(user, password),
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
-                if resp.status == 200:
-                    return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
-                else:
+                if resp.status != 200:
                     return {"status": "ERROR", "message": f"Nextcloud returned {resp.status}"}
+                try:
+                    payload = await resp.json()
+                    meta = (payload.get("ocs") or {}).get("meta") or {}
+                    statuscode = int(meta.get("statuscode") or 0)
+                except (AttributeError, TypeError, ValueError):
+                    return {"status": "ERROR", "message": "Nextcloud returned an unexpected response"}
+                if statuscode in (100, 200):
+                    return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
+                return {"status": "ERROR", "message": f"Nextcloud returned OCS status {statuscode}"}
 
             elif service == "GitHub":
                 url = config.get("github_url") or "https://api.github.com"
@@ -2565,7 +2628,8 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
                 resp = await client.get(
                     f"{url.rstrip('/')}/user",
-                    headers={"Authorization": f"token {token}"}
+                    headers={"Authorization": f"token {token}"},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -2581,7 +2645,8 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
                 resp = await client.get(
                     f"{url.rstrip('/')}/api/v4/user",
-                    headers={"PRIVATE-TOKEN": token}
+                    headers={"PRIVATE-TOKEN": token},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -2612,9 +2677,12 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 if not username or not password:
                     return {"status": "ERROR", "message": "An API key, or username and password, are required"}
 
+                # ABS logs in at the root /login, not /api/login (verified
+                # live: /login -> 200, /api/login -> 401; see abs_client.py).
                 resp = await client.post(
-                    f"{url.rstrip('/')}/api/login",
-                    json={"username": username, "password": password}
+                    f"{url.rstrip('/')}/login",
+                    json={"username": username, "password": password},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
                 if resp.status == 200:
                     data = await resp.json()
@@ -2649,8 +2717,16 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
 
+    except aiohttp.InvalidURL:
+        # A URL with no scheme (or otherwise unparseable) reaches here; tell the
+        # user what to fix instead of echoing aiohttp's InvalidURL internals.
+        log.error(f"[test_connection] {service}: invalid URL")
+        return {"status": "ERROR", "message": "URL must start with http:// or https://"}
     except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+        # Log the detail server-side; never echo exception text (it can carry
+        # hosts, URLs or other request internals) back to the client.
+        log.error(f"[test_connection] {service} failed: {type(e).__name__}: {e}")
+        return {"status": "ERROR", "message": f"Could not connect to {service}. Check the URL and credentials."}
 
 # Credential Seeding
 

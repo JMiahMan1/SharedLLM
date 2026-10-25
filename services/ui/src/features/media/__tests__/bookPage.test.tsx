@@ -69,6 +69,16 @@ describe('BookPage (P5-T5)', () => {
     expect(web.state.play).toHaveBeenCalledTimes(1);
   });
 
+  it('does not seek when the chapter fails to start', async () => {
+    web.state = player({ play: vi.fn().mockRejectedValue(new Error('provider down')) });
+    renderAt('/media/book/book-1');
+    const chapters = within(await screen.findByRole('list', { name: 'Chapters' }));
+    await userEvent.click(chapters.getByRole('button', { name: 'Play Chapter 3' }));
+    await waitFor(() => expect(web.state.play).toHaveBeenCalled());
+    // The failed start must not jump whatever else is on this output.
+    expect(web.state.seek).not.toHaveBeenCalled();
+  });
+
   it('while it plays here: −15 s, +30 s and the speed', async () => {
     web.state = player({ isPlaying: true, position: 600, mediaTitle: 'Project Hail Mary' });
     useMediaStore.getState().actions.setAbsSession({ itemId: 'book-1', title: 'Project Hail Mary', outputId: '', durationSec: 58320, startedAt: 1 });

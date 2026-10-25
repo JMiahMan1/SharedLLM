@@ -3,6 +3,7 @@
 Pydantic schemas for the Identity Service API.
 """
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -60,6 +61,10 @@ class ResolvedCredentials(BaseModel):
     git_user: str | None = None
     git_token: str | None = None
     huggingface_token: str | None = None
+    #: Branch patterns the workspace runtime must never push to directly
+    #: (docs/INTEGRATIONS.md, GitHub > Protected Branches). Empty leaves the
+    #: runtime's own default patterns in force.
+    forbidden_branches: list[str] = []
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_pass: str | None = None
@@ -160,6 +165,9 @@ class UserUpdate(BaseModel):
     git_user: str | None = None
     git_token: str | None = None
     huggingface_token: str | None = None
+    #: Branch patterns Jarvis must never push to directly (GitHub > Protected
+    #: Branches). Stored as a JSON array string; sent as a list.
+    forbidden_branches: list[str] | None = None
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_pass: str | None = None
@@ -206,6 +214,26 @@ CREDENTIAL_COLUMNS: dict[str, str] = {
 }
 
 
+def forbidden_branch_list(raw: Any) -> list[str]:
+    """A user's protected-branch patterns, however they are stored.
+
+    The User row keeps them as a JSON array string (the same pattern as
+    ``UserWidget.pinned_devices``) so a list survives SQLite; this turns that
+    string, an already-parsed list, or a legacy comma-separated string into the
+    clean list the API, ``/api/resolve`` and the workspace runtime expect.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = [part.strip() for part in raw.split(",")]
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
 class UserRead(BaseModel):
     id: int
     username: str
@@ -240,6 +268,8 @@ class UserRead(BaseModel):
     mass_url: str | None = None
     git_url: str | None = None
     git_user: str | None = None
+    #: Branch patterns Jarvis must never push to directly (see ResolvedCredentials).
+    forbidden_branches: list[str] = []
     skylight_url: str | None = None
     skylight_email: str | None = None
     skylight_enabled: bool = True
@@ -265,11 +295,14 @@ class UserRead(BaseModel):
             # still there (and dropped below as unknown fields).
             if "saved_credentials" not in data:
                 data = {**data, "saved_credentials": [p for p, enc in CREDENTIAL_COLUMNS.items() if data.get(enc)]}
+            if "forbidden_branches" in data:
+                data = {**data, "forbidden_branches": forbidden_branch_list(data.get("forbidden_branches"))}
             return data
         saved = [plain for plain, enc in CREDENTIAL_COLUMNS.items() if getattr(data, enc, None)]
         values = {name: getattr(data, name, None) for name in cls.model_fields if name != "saved_credentials"}
         values = {k: v for k, v in values.items() if v is not None}
         values["saved_credentials"] = saved
+        values["forbidden_branches"] = forbidden_branch_list(getattr(data, "forbidden_branches", None))
         return values
 
 

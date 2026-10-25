@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import OutputSheet from './OutputSheet';
@@ -155,6 +155,40 @@ describe('OutputSheet', () => {
       player_id: 'kitchen',
       volume_level: 35,
     }));
+  });
+
+  it('reads the status silently so the poll never re-fires the connectivity toast', async () => {
+    renderSheet();
+    await screen.findByText('Kitchen Speaker');
+    expect(api.mediaStatus).toHaveBeenCalledWith({ silent: true });
+  });
+
+  it('shows no volume slider for a speaker that reports none', async () => {
+    vi.mocked(api.mediaStatus).mockResolvedValue(status([{ ...KITCHEN, volume_level: null }] as never) as never);
+    vi.mocked(sendMaRemoteCommand).mockResolvedValue([] as never);
+    renderSheet(player({ mediaTitle: null, isPlaying: false }));
+
+    await screen.findByText('Kitchen Speaker');
+    expect(screen.queryByRole('slider', { name: 'Volume for Kitchen Speaker' })).toBeNull();
+  });
+
+  it('reads a genuine 1% volume as 1, not 100', async () => {
+    vi.mocked(api.mediaStatus).mockResolvedValue(status([{ ...KITCHEN, volume_level: 1 }] as never) as never);
+    vi.mocked(sendMaRemoteCommand).mockResolvedValue([] as never);
+    renderSheet(player({ mediaTitle: null, isPlaying: false }));
+
+    await screen.findByText('Kitchen Speaker');
+    const slider = screen.getByRole('slider', { name: 'Volume for Kitchen Speaker' }) as HTMLInputElement;
+    expect(slider.value).toBe('1');
+  });
+
+  it('shows an unknown group volume rather than guessing a level', async () => {
+    withMa({ 'web-1': { group_members: ['web-1', 'office'], can_group_with: ['office'] } });
+    renderSheet();
+
+    const panel = await screen.findByTestId('group-members');
+    expect(within(panel).queryByRole('slider', { name: 'Group volume' })).toBeNull();
+    expect(within(panel).getByText('--')).toBeTruthy();
   });
 
   it('sets a Home Assistant-only speaker volume through the media transport API', async () => {

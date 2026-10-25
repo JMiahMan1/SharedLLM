@@ -47,10 +47,14 @@ export interface MediaStoreState extends PlayersState {
   absSession: AbsSession | null;
   /** When the full status was last read (null: not yet, so still loading). */
   statusReadAt: number | null;
+  /** True when the last full status read failed, so a view can stop its skeleton. */
+  statusReadError: boolean;
   actions: {
     selectOutput: (id: OutputId, opts?: { picked?: boolean }) => void;
     /** Fold the status poll in; follow a playing speaker until the person picks one. */
     ingestStatus: (players: MediaStatus[], active?: MediaStatus | null) => void;
+    /** Record whether the last full status read failed. */
+    setStatusReadError: (on: boolean) => void;
     ingest: (event: MediaEvent) => void;
     setVolume: (id: OutputId, volume: number) => void;
     setMuted: (id: OutputId, muted: boolean) => void;
@@ -91,6 +95,7 @@ const INITIAL = {
   playingInOtherTab: false,
   absSession: null as AbsSession | null,
   statusReadAt: null as number | null,
+  statusReadError: false as boolean,
 };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -112,6 +117,7 @@ export const useMediaStore = create<MediaStoreState>()(
           if (follow) set({ players: next.players, activeOutputId: active!.entity_id!, userPickedOutput: true, statusReadAt: now });
           else set({ players: next.players, statusReadAt: now });
         },
+        setStatusReadError: (on) => set({ statusReadError: on }),
         ingest: (event) => {
           const s = get();
           const next = ingest(s, event, Date.now());

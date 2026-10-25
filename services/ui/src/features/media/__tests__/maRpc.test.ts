@@ -134,6 +134,30 @@ describe('MaRpc', () => {
     await failed;
   });
 
+  it('closes the half-open socket on a failed connect so the next one does not leak it', async () => {
+    vi.useFakeTimers();
+    class NeverOpens extends TrackedSocket {
+      open() { /* stays connecting */ }
+    }
+    vi.stubGlobal('WebSocket', NeverOpens);
+    const rpc = new MaRpc({ connectTimeoutMs: 1000 });
+    const p = rpc.connect('ws://gw/x');
+    const failed = expect(p).rejects.toThrow('did not answer in time');
+    await vi.advanceTimersByTimeAsync(1001);
+    await failed;
+
+    const abandoned = sockets.at(-1)!;
+    expect(abandoned.readyState).toBe(FakeWebSocket.CLOSED);
+
+    // A fresh connect opens one new socket; the old one is not overwritten live.
+    const second = rpc.connect('ws://gw/x');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets).toHaveLength(2);
+    const failedSecond = expect(second).rejects.toThrow('did not answer in time');
+    await vi.advanceTimersByTimeAsync(1001);
+    await failedSecond;
+  });
+
   it('delivers pushed events with the envelope object id, and ignores junk', async () => {
     const { rpc, ws } = await open();
     const seen = vi.fn();

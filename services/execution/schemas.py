@@ -1035,6 +1035,7 @@ class AudiobookshelfRequest(BaseRequest):
     duration: float | None = Field(None, gt=0, description="Item duration in seconds for update_progress")
     is_finished: bool = Field(False, description="Mark the item finished for update_progress")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
+    page: int = Field(0, ge=0, description="0-based page for action=list (ABS /api/libraries/{id}/items)")
 
 
 class BibleRequest(BaseRequest):

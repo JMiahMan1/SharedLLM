@@ -48,7 +48,7 @@ export function NowPlayingCard({
   onSeek,
 }: {
   view: NowPlayingView;
-  volume: number;
+  volume: number | null;
   muted: boolean;
   /** The transport command in flight, if any (shows its spinner). */
   busy: string | null;

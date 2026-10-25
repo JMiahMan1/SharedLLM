@@ -91,21 +91,25 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const values = form as Record<string, unknown>;
   const labelOf = (key: string) => Object.keys(configKeys).find((label) => configKeys[label] === key) ?? key;
   const filled = (key: string) => String(values[key] ?? '').trim() !== '' || (isSecretKey(key) && savedSecrets.has(key));
-  // What still blocks saving. A known integration follows the shared rules
-  // (Audiobookshelf takes an API key *or* a username and password); anything
-  // else needs every field. An untouched card has nothing to save.
-  const missingList: string[] = known
-    ? inUse(known, values, savedSecrets, prefilled)
-      ? missingFields(known, values, savedSecrets, prefilled)
-      : known.complete[0].filter((k) => !filled(k)).map(labelOf)
-    : fieldKeys.filter((k) => k !== 'skylight_enabled' && !filled(k)).map(labelOf);
-  const queryClient = useQueryClient();
-
-  const connectionKey = Object.values(configKeys)[0];
   // Skylight is one household account kept on the system user; everyone else
   // only switches it on or off for themselves, so their own skylight_url is
   // always empty. Their status comes from Identity instead.
   const sharedSkylight = name === 'Skylight' && !userData?.is_system_default;
+  // What still blocks saving. A known integration follows the shared rules
+  // (Audiobookshelf takes an API key *or* a username and password); anything
+  // else needs every field. An untouched card has nothing to save. A non-admin's
+  // Skylight fields are read-only (the system account owns them), so only the
+  // enable toggle is saved and nothing there can be "missing".
+  const missingList: string[] = sharedSkylight
+    ? []
+    : known
+      ? inUse(known, values, savedSecrets, prefilled)
+        ? missingFields(known, values, savedSecrets, prefilled)
+        : known.complete[0].filter((k) => !filled(k)).map(labelOf)
+      : fieldKeys.filter((k) => k !== 'skylight_enabled' && !filled(k)).map(labelOf);
+  const queryClient = useQueryClient();
+
+  const connectionKey = Object.values(configKeys)[0];
   const skylightStatus = userData?.skylight_status ?? 'not_set_up';
   const isConnected = sharedSkylight
     ? skylightStatus === 'connected'

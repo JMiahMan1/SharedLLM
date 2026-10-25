@@ -138,6 +138,8 @@ export interface UserProfileRaw {
   gitlab_user?: string | null;
   git_url?: string | null;
   git_user?: string | null;
+  /** Branch patterns Jarvis must never push to directly (GitHub > Protected Branches). */
+  forbidden_branches?: string[] | null;
   audiobookshelf_url?: string | null;
   audiobookshelf_user?: string | null;
   audiobookshelf_api_key?: string | null;

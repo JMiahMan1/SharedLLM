@@ -58,11 +58,13 @@ function maPlayersFrom(raw: unknown): RawMaPlayer[] {
   return result.filter((entry): entry is RawMaPlayer => Boolean(entry && typeof entry === 'object'));
 }
 
-/** MA reports volume on either a 0..1 or a 0..100 scale. */
+/** MA reports volume on either a 0..1 or a 0..100 scale. Only a clear fraction
+ *  (strictly between 0 and 1) is scaled, so a genuine 1% stays 1. */
 function normalizeVolume(value: unknown): number | null {
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return null;
-  return Math.round(Math.min(100, Math.max(0, number <= 1 ? number * 100 : number)));
+  const scaled = number > 0 && number < 1 ? number * 100 : number;
+  return Math.round(Math.min(100, Math.max(0, scaled)));
 }
 
 function stringList(value: unknown): string[] {
@@ -128,7 +130,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
 
   const refresh = useCallback(async () => {
     const [statusResult, maResult] = await Promise.allSettled([
-      api.mediaStatus(),
+      api.mediaStatus({ silent: true }),
       sendMaRemoteCommand('players/all'),
     ]);
 
@@ -385,6 +387,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
   }, []);
   const [groupVolume, setGroupVolume] = useState<number | null>(null);
   const leaderGroupVolume = groupLeader?.maId ? normalizeVolume(maById.get(groupLeader.maId)?.group_volume) : null;
+  const shownGroupVolume = groupVolume ?? leaderGroupVolume;
 
   /** One volume for every speaker in the group, kept in proportion by MA. */
   const changeGroupVolume = (value: number) => {
@@ -408,17 +411,23 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
         <p className="text-[11px] text-slate-400">Playing in sync with</p>
         <div className="flex items-center gap-2">
           <Volume2 size={14} className="shrink-0 text-slate-500" aria-hidden />
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={groupVolume ?? leaderGroupVolume ?? 50}
-            onChange={(event) => changeGroupVolume(Number(event.target.value))}
-            aria-label="Group volume"
-            className="h-8 w-full cursor-pointer accent-[var(--site-accent)]"
-          />
-          <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{groupVolume ?? leaderGroupVolume ?? 50}</span>
+          {shownGroupVolume !== null ? (
+            <>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={shownGroupVolume}
+                onChange={(event) => changeGroupVolume(Number(event.target.value))}
+                aria-label="Group volume"
+                className="h-8 w-full cursor-pointer accent-[var(--site-accent)]"
+              />
+              <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{shownGroupVolume}</span>
+            </>
+          ) : (
+            <span className="min-w-0 flex-1 text-[11px] text-slate-500" aria-label="Group volume unknown">--</span>
+          )}
         </div>
         {members.map((id) => (
           <div key={id} className="flex items-center gap-2 text-xs text-slate-200">
@@ -448,13 +457,14 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
     );
   };
 
-  const volumeFor = (row: OutputRow): number => volumeOverrides[row.key] ?? row.volume ?? 50;
+  const volumeFor = (row: OutputRow): number | null => volumeOverrides[row.key] ?? row.volume;
 
   const rowVolumeVisible = (row: OutputRow): boolean =>
     row.online && row.volume !== null && (row.playing || isGrouped(row) || row.section === 'group');
 
   const renderRow = (row: OutputRow) => {
     const Icon = row.section === 'tv' ? Tv : row.section === 'group' ? Speaker : Speaker;
+    const rowVolume = volumeFor(row);
     const showGroup = Boolean(
       groupLeader && row.maId && row.key !== groupLeader.key && row.online && syncable.has(row.maId),
     );
@@ -500,7 +510,7 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
           )}
         </div>
 
-        {rowVolumeVisible(row) ? (
+        {rowVolumeVisible(row) && rowVolume !== null ? (
           <div className="mt-2 flex items-center gap-2 pl-[52px]">
             <Volume2 size={14} className="shrink-0 text-slate-500" aria-hidden />
             <input
@@ -508,12 +518,12 @@ export default function OutputSheet({ open, onClose, onTransferred }: { open: bo
               min={0}
               max={100}
               step={1}
-              value={volumeFor(row)}
+              value={rowVolume}
               onChange={(event) => changeVolume(row, Number(event.target.value))}
               aria-label={`Volume for ${row.name}`}
               className="h-8 w-full cursor-pointer accent-[var(--site-accent)]"
             />
-            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{volumeFor(row)}</span>
+            <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-slate-500">{rowVolume}</span>
           </div>
         ) : null}
 

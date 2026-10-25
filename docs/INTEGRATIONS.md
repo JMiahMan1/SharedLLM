@@ -66,8 +66,9 @@ Used for files, Talk (family chat), notes and calendars. Test performs an OCS AP
 - **API Key** *or* **Username** and **Password**. An API key alone is enough
   (Audiobookshelf → Settings → Users → your user → API token).
 
-Test calls `GET /api/me` with an API key, or `POST /api/login` with a
-username and password.
+Test calls `GET /api/me` with an API key, or `POST /login` with a
+username and password (Audiobookshelf logs in at the root `/login`; `/api/login`
+answers 401).
 
 ## Music Assistant
 

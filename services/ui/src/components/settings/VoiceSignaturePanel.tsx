@@ -37,7 +37,13 @@ function useRecorder() {
   const recorder = useAudioRecorder({
     onRecorded: (blob) => settle(blob),
     onError: (reason) => {
-      toast.error(reason === 'denied' ? 'Microphone access was denied' : 'Recording is not available here');
+      toast.error(
+        reason === 'denied'
+          ? 'Microphone access was denied'
+          : reason === 'empty'
+            ? 'Nothing was recorded. Check the microphone and try again.'
+            : 'Recording is not available here',
+      );
       settle(null);
     },
   });

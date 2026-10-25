@@ -15,7 +15,7 @@ export const HEARTBEAT_MS = 2000;
 export const LOCK_TTL_MS = 6000;
 
 type LockMessage =
-  | { type: 'claim'; tab: string }
+  | { type: 'claim'; tab: string; ts: number }
   | { type: 'heartbeat'; tab: string }
   | { type: 'release'; tab: string };
 
@@ -32,7 +32,11 @@ export class TabLock {
   private channel: ChannelLike | null;
   private owner: LockOwner = 'none';
   private otherSeenAt = 0;
+  /** When this tab last claimed; breaks a same-tick tie between two claims. */
+  private claimedAt = 0;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  /** Drops a stale other-tab owner once its heartbeats stop (BUG-66). */
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly lostListeners = new Set<() => void>();
   private readonly changeListeners = new Set<(owner: LockOwner) => void>();
 
@@ -53,8 +57,10 @@ export class TabLock {
   /** This tab starts playing: tell the others to let go. */
   claim(): void {
     if (this.owner === 'this') return;
+    this.clearExpiry();
+    this.claimedAt = Date.now();
     this.setOwner('this');
-    this.post({ type: 'claim', tab: this.tabId });
+    this.post({ type: 'claim', tab: this.tabId, ts: this.claimedAt });
     this.heartbeat = setInterval(() => this.post({ type: 'heartbeat', tab: this.tabId }), HEARTBEAT_MS);
   }
 
@@ -80,6 +86,7 @@ export class TabLock {
   dispose(): void {
     this.release();
     this.stopHeartbeat();
+    this.clearExpiry();
     this.channel?.close();
     this.channel = null;
   }
@@ -88,16 +95,25 @@ export class TabLock {
     const msg = data as LockMessage | null;
     if (!msg || typeof msg !== 'object' || msg.tab === this.tabId) return;
     if (msg.type === 'claim') {
+      // Two tabs claiming in the same tick: the newer claim wins; the tab id
+      // breaks an exact tie, so exactly one tab ends up owning the audio.
+      if (this.owner === 'this') {
+        const theirs = typeof msg.ts === 'number' ? msg.ts : 0;
+        if (theirs < this.claimedAt || (theirs === this.claimedAt && msg.tab < this.tabId)) return;
+      }
       const hadIt = this.owner === 'this';
       this.stopHeartbeat();
       this.otherSeenAt = Date.now();
       this.setOwner('other');
+      this.armExpiry();
       if (hadIt) for (const listener of this.lostListeners) listener();
     } else if (msg.type === 'heartbeat') {
       if (this.owner === 'this') return; // two owners only for an instant; the newer claim wins
       this.otherSeenAt = Date.now();
       this.setOwner('other');
+      this.armExpiry();
     } else if (msg.type === 'release' && this.owner === 'other') {
+      this.clearExpiry();
       this.setOwner('none');
     }
   }
@@ -117,5 +133,19 @@ export class TabLock {
   private stopHeartbeat(): void {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
+  }
+
+  /** (Re)arm the timer that drops an owner whose heartbeats have stopped. */
+  private armExpiry(): void {
+    this.clearExpiry();
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null;
+      if (this.owner === 'other' && Date.now() - this.otherSeenAt >= LOCK_TTL_MS) this.setOwner('none');
+    }, LOCK_TTL_MS);
+  }
+
+  private clearExpiry(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
   }
 }

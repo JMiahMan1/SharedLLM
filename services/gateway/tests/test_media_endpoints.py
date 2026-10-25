@@ -360,6 +360,33 @@ def test_library_audiobooks_returns_abs_libraries(client, upstream, ma):
     assert body["errors"] == {"ma": None, "abs": None}
 
 
+def test_library_audiobooks_pages_through_abs(client, upstream, ma):
+    """A >50-book library must page, not silently truncate at the first 50."""
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {"books": [{"id": "b1", "title": "Book", "author": "A"}]},
+        },
+    )
+
+    resp = client.get(
+        "/api/media/library/audiobooks",
+        params={"library_id": "lib-1", "offset": 50, "limit": 50},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [item["name"] for item in body["items"]] == ["Book"]
+    # offset 50 with a 50-book page must ask ABS for page 1, not page 0.
+    queries = [str(key[1]) for key in upstream.requests]
+    assert any(
+        "action=list" in q and "library_id=lib-1" in q and "page=1" in q for q in queries
+    ), queries
+
+
 def test_library_rejects_an_unknown_tab(client):
     resp = client.get("/api/media/library/movies")
     assert resp.status_code == 422

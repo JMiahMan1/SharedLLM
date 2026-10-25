@@ -308,7 +308,9 @@ export default function NoteAttachments({
       setError(
         reason === 'unavailable'
           ? 'Recording is not available on this device.'
-          : 'Microphone permission is needed to record a voice note.',
+          : reason === 'empty'
+            ? 'Nothing was recorded. Check the microphone and try again.'
+            : 'Microphone permission is needed to record a voice note.',
       ),
   });
   const recording = recorder.recording;

@@ -726,7 +726,7 @@ async def _handle_libraries(abs_url: str, abs_key: str) -> ExecutionResult:
 
 
 async def _handle_list(abs_url: str, abs_key: str, req) -> ExecutionResult:
-    result = await abs_client.get_library_items(abs_url, abs_key, req.library_id or "", limit=req.limit)
+    result = await abs_client.get_library_items(abs_url, abs_key, req.library_id or "", limit=req.limit, page=req.page)
     if "error" in result:
         return ExecutionResult(status="FAILURE", message=result["error"], service="audiobookshelf")
 
