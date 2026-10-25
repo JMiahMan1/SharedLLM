@@ -3,7 +3,7 @@ import { Library } from 'lucide-react';
 import { useMediaHome, useBooksInProgress } from '../api/queries';
 import type { MediaItem } from '../types';
 import { formatTimeLeft, normalizePlayedAt } from '../format';
-import { itemKind, itemSubtitle, playRequestFor } from '../items';
+import { detailPath, itemKind, itemSubtitle, playRequestFor } from '../items';
 import { ActiveOutputCard } from '../components/ActiveOutputCard';
 import { MediaCard } from '../components/MediaCard';
 import { OutputPicker } from '../components/OutputPicker';
@@ -83,6 +83,7 @@ export default function ListenNowPage() {
         subtitle={itemSubtitle(item)}
         image={item.image}
         kind={itemKind(item)}
+        to={detailPath(item)}
         progress={progress}
         label={label}
         busy={playback.busy === busyKey}
