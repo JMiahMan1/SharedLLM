@@ -52,7 +52,15 @@ def test_the_public_proxy_is_trusted_on_both_sides():
     assert "PUBLIC_PROXY_IP=${PUBLIC_PROXY_IP:-127.0.0.1}" in services["caddy"]["environment"]
     assert "NTFY_PROXY_TRUSTED_HOSTS=${PUBLIC_PROXY_IP:-127.0.0.1}" in services["ntfy"]["environment"]
     caddyfile = _read("Caddyfile")
-    assert re.search(r"servers :80 \{\s*trusted_proxies static \{\$PUBLIC_PROXY_IP\}\s*\}", caddyfile)
+    # The :80 server block is where the proxy is trusted. Assert the trust line is
+    # in that block rather than that the block contains nothing else: it also
+    # states the protocols it can serve, and matching the exact text made this
+    # fail the moment the block grew.
+    # Slice to the block's own closing brace (the trust line itself contains a
+    # brace, so a plain index("}") stops inside it).
+    block = re.search(r"servers :80 \{(.*?)\n    \}", caddyfile, re.S)
+    assert block is not None
+    assert "trusted_proxies static {$PUBLIC_PROXY_IP}" in block.group(1)
 
 
 def test_caddy_refuses_bodies_over_4096_bytes_on_the_push_path():

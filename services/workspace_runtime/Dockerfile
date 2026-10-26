@@ -38,20 +38,23 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://github.com/d
     rm /tmp/deno.zip
 
 # Install python language servers
+# Pinned to the versions the built image actually resolves (read from the running
+# container, 2026-10-26): an unpinned install let a rebuild of the same commit
+# drift, and ruff had already drifted a patch behind the base image's copy.
 RUN pip install --no-cache-dir \
-    pyright \
-    pylint \
-    flake8 \
-    black \
-    isort \
-    autopep8 \
-    mypy \
-    jedi \
-    python-lsp-server \
-    rope \
-    yappi \
-    memory-profiler \
-    line-profiler
+    pyright==1.1.414 \
+    pylint==4.1.3 \
+    flake8==7.4.1 \
+    black==26.10.1 \
+    isort==9.0.2 \
+    autopep8==2.3.2 \
+    mypy==2.4.0 \
+    jedi==0.20.1 \
+    python-lsp-server==1.15.0 \
+    rope==1.15.0 \
+    yappi==1.7.6 \
+    memory-profiler==0.61.0 \
+    line_profiler==5.1.0
 
 # ===========================================================================
 # WORKSPACE SANDBOX TOOLCHAIN
@@ -110,11 +113,11 @@ RUN set -eux; \
 
 # --- Python linters / checkers ---
 RUN pip install --no-cache-dir \
-    ruff \
-    bandit \
-    img2pdf \
-    vulture \
-    mccabe
+    ruff==0.17.2 \
+    bandit==1.9.4 \
+    img2pdf==0.6.3 \
+    vulture==2.16 \
+    mccabe==0.7.0
 
 # --- Node-based linters / formatters / language servers ---
 RUN npm install -g \
