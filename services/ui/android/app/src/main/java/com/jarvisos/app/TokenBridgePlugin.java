@@ -1,7 +1,9 @@
 package com.jarvisos.app;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.util.Log;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -15,6 +17,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  */
 @CapacitorPlugin(name = "TokenBridge")
 public class TokenBridgePlugin extends Plugin {
+
+    private static final String TAG = "TokenBridge";
 
     public static final String PREFS = "jarvis_widget";
     public static final String KEY_API_KEY = "jarvis_api_key";
@@ -38,9 +42,6 @@ public class TokenBridgePlugin extends Plugin {
     /** The outbox long poll's cursor while the push stream is unavailable (PushFallback). */
     public static final String KEY_POLL_CURSOR = "push_poll_cursor";
 
-    // zone.home from Home Assistant
-    public static final double DEFAULT_HOME_LAT = 33.16670697948413;
-    public static final double DEFAULT_HOME_LNG = -111.56466007232666;
 
     public static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -85,6 +86,13 @@ public class TokenBridgePlugin extends Plugin {
             // apps using Jarvis for UnifiedPush that their endpoints are gone.
             if (apiKey.isEmpty()) {
                 PushService.stop(getContext());
+                // Signing out has to stop the services that keep reporting, not
+                // just the push stream: they read this same key, so leaving them
+                // running kept uploading the previous person's location and
+                // steps, with their notifications still on screen.
+                stopBackgroundServices(getContext());
+                // The previous person's notices leave the shade with them.
+                PushNotifier.clearAll(getContext());
                 UnifiedPushDistributor.signOut(getContext(), previousServer, previousKey);
             } else {
                 if (accountChanged) {
@@ -101,6 +109,28 @@ public class TokenBridgePlugin extends Plugin {
             PushService.reconnect(getContext());
         }
         call.resolve();
+    }
+
+    /**
+     * Stop the location and step foreground services and clear their switches.
+     *
+     * They are started from the WebView, but a sign-out happens here, in native
+     * code, after the page that would have stopped them is gone.
+     */
+    private static void stopBackgroundServices(Context context) {
+        LocationTrackingService.setEnabled(context, false);
+        StepSyncService.setEnabled(context, false);
+        StepSyncService.setStepsEnabled(context, false);
+        Intent stopLocation = new Intent(context, LocationTrackingService.class);
+        stopLocation.setAction("stop");
+        Intent stopSteps = new Intent(context, StepSyncService.class);
+        stopSteps.setAction("stop");
+        try {
+            context.startService(stopLocation);
+            context.startService(stopSteps);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not stop the background services", e);
+        }
     }
 
     @PluginMethod

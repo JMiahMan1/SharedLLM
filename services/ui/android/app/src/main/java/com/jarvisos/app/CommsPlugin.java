@@ -34,6 +34,9 @@ public class CommsPlugin extends Plugin {
     private static final String KEY_SMS = "last_sms_ts";
     private static final int LIMIT = 200;
     private static final long FIRST_RUN_WINDOW_MS = 7L * 24 * 60 * 60 * 1000;
+    private static final int ACCESS_REQUEST_CODE = 0x10C0;
+    /** The call waiting on the permission dialog, resolved from its result. */
+    private PluginCall pendingAccessCall;
 
     @PluginMethod
     public void hasAccess(PluginCall call) {
@@ -56,8 +59,27 @@ public class CommsPlugin extends Plugin {
             needed.add(Manifest.permission.READ_CONTACTS);
         }
         if (!needed.isEmpty() && getActivity() != null) {
-            getActivity().requestPermissions(needed.toArray(new String[0]), 0x10C0);
+            // The answer arrives after the dialog closes. Resolving here
+            // reported the state from *before* it, so a caller could believe
+            // access was refused the moment after the person granted it.
+            pendingAccessCall = call;
+            getActivity().requestPermissions(needed.toArray(new String[0]), ACCESS_REQUEST_CODE);
+            return;
         }
+        resolveAccess(call);
+    }
+
+    @Override
+    public void handleRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.handleRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != ACCESS_REQUEST_CODE) return;
+        PluginCall call = pendingAccessCall;
+        pendingAccessCall = null;
+        if (call == null || call.isReleased()) return;
+        resolveAccess(call);
+    }
+
+    private void resolveAccess(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("calls", hasPerm(Manifest.permission.READ_CALL_LOG));
         ret.put("sms", hasPerm(Manifest.permission.READ_SMS));
