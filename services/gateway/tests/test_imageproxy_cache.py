@@ -4,10 +4,11 @@
   and forward the upstream ``ETag``;
 * the client's ``If-None-Match`` is forwarded upstream and an upstream 304
   is returned as 304 with no body;
-* optional ``w=`` is forwarded to Music Assistant's imageproxy as ``size=``
-  (param name confirmed from MA-generated production image URLs,
-  ``.../imageproxy/<id>?size=512&fmt=jpg``; full resize end-to-end still
-  (VERIFY); see docs/MEDIA_UPSTREAM_API_NOTES.md);
+* optional ``w=`` is snapped up to a ``size=`` Music Assistant's imageproxy
+  accepts (0/80/160/256/512/1024 - anything else is a 400) and forwarded;
+  the param name came from MA-generated production image URLs
+  (``.../imageproxy/<id>?size=512&fmt=jpg``; see
+  docs/MEDIA_UPSTREAM_API_NOTES.md);
 * the image body is streamed instead of buffered.
 """
 from services.gateway.tests.conftest_media import mock_upstream
@@ -79,4 +80,26 @@ def test_imageproxy_w_param_forwards_size_to_ma(client, upstream):
     assert resp.status_code == 200
     url, _call = _ma_call(upstream)
     assert url is not None, "MA upstream never contacted"
-    assert "size=128" in url
+    # MA only resizes to 0/80/160/256/512/1024 and refuses anything else with a
+    # 400 ("Unsupported size 128: ..."), so a requested width is snapped up to
+    # the next size it accepts.
+    assert "size=160" in url
+
+
+def test_imageproxy_ma_size_is_snapped_to_a_size_ma_accepts():
+    """Every width the UI asks for becomes one MA's imageproxy will serve."""
+    from services.gateway.main import _ma_image_size
+
+    assert _ma_image_size(1) == 80
+    assert _ma_image_size(44) == 80
+    assert _ma_image_size(80) == 80
+    assert _ma_image_size(81) == 160
+    assert _ma_image_size(96) == 160  # the width a production 400 was logged for
+    assert _ma_image_size(128) == 160
+    assert _ma_image_size(160) == 160
+    assert _ma_image_size(256) == 256
+    assert _ma_image_size(257) == 512
+    assert _ma_image_size(760) == 1024
+    assert _ma_image_size(1024) == 1024
+    assert _ma_image_size(4000) == 1024  # never above the largest MA offers
+    assert _ma_image_size(-5) == 80

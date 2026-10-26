@@ -16848,6 +16848,23 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
 
 
+# Music Assistant's imageproxy only resizes to these widths. Anything else is
+# refused with a 400 ("Unsupported size 96: must be one of 0, 80, 160, 256,
+# 512, 1024"), so the width the UI asks for is snapped UP to the next one MA
+# accepts - a cover never fails to load because of a size it does not offer.
+# (Verified against MA 2026-10-26; 0 means the original and is only used when
+# no width was asked for, in which case MA's own query is left alone.)
+_MA_IMAGE_SIZES = (80, 160, 256, 512, 1024)
+
+
+def _ma_image_size(width: int) -> int:
+    """The smallest width Music Assistant's imageproxy accepts for ``width``."""
+    for size in _MA_IMAGE_SIZES:
+        if width <= size:
+            return size
+    return _MA_IMAGE_SIZES[-1]
+
+
 @app.get("/api/media/imageproxy")
 async def media_imageproxy(path: str, request: Request, service: str = "", w: int | None = None):
     """Proxy image requests (entity pictures/covers) from Home Assistant, Music Assistant, or Audiobookshelf.
@@ -16971,7 +16988,7 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
     if w and svc == "ma":
         parts = urlparse(target_url)
         query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "size"]
-        query.append(("size", str(w)))
+        query.append(("size", str(_ma_image_size(w))))
         target_url = parts._replace(query=urlencode(query)).geturl()
 
     try:
@@ -16983,7 +17000,15 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
                 await resp.release()
                 return Response(status_code=304)
             if resp.status != 200:
-                log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
+                # A 404 means the cover simply is not there upstream (a library
+                # entry with no artwork) - normal, and common enough that logging
+                # it as an error drowns out real failures. Anything else (400
+                # from a bad request we built, 5xx from a broken upstream) stays
+                # an error.
+                if resp.status == 404:
+                    log.warning(f"[imageproxy] upstream {svc} has no image (404) for {redact_url(target_url)}")
+                else:
+                    log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
                 await resp.release()
                 raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
 

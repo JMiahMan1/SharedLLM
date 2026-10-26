@@ -133,6 +133,18 @@ def test_normalize_ma_player_and_queue_events():
     assert normalize_ma_event("something_else", {}) is None
 
 
+def test_a_bare_number_payload_never_raises():
+    """MA has sent queue_time_updated as a bare number, which used to raise
+    ``AttributeError: 'float' object has no attribute 'get'`` inside the
+    websocket callback on every position tick."""
+    assert normalize_ma_event("queue_time_updated", 12.5) is None
+    assert normalize_ma_event("queue_time_updated", None) is None
+    assert normalize_ma_event("queue_updated", 7) is None
+    assert normalize_ma_event("player_updated", 3.5) is None
+    assert normalize_ma_event("queue_time_updated", "12.5") is None
+    assert normalize_ma_event("queue_time_updated", []) is None
+
+
 async def test_subscribe_streams_retry_then_snapshot_then_events():
     source = FakeSource()
     hub = MediaEventHub("alice", sources=[source], heartbeat_interval=10)
