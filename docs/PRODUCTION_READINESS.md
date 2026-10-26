@@ -407,7 +407,10 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    geo followed, because neither writes anything at all, and rag followed them: it embeds whatever the
    family indexes, so it is the service most exposed to untrusted content, and its model cache now lives
    under `HOME` on the volumes it already shared with the gateway (which were chowned to the host user)
-   instead of under `/root`.
+   instead of under `/root`. Caddy followed too, and it is the one a stranger reaches directly: it runs
+   as the host user with `NET_BIND_SERVICE` (it still binds 80 and 443 inside the container, published on
+   high host ports) and its two state volumes, including the 600-mode `autosave.json`, were chowned to
+   match.
 8. The base image was built from a moving tag, so the same commit could produce a different image on
    a different day. `docker/Dockerfile.base` now pins the multi-arch index digest of
    `python:3.11-slim`, which fixes the interpreter and the system libraries while leaving both
@@ -466,9 +469,9 @@ would still be wrong in places,
 because state lives in the process - the gateway's live media push keeps a hub per user and a registry
 of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
 `apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
-too, all of which is harmless while exactly one replica runs each service; and telemetry, ui, dns and
-caddy still run as root - telemetry and dns because they read the Docker socket, and ui and caddy
-because a web server binding its port as an unprivileged user needs its own image variant.
+too, all of which is harmless while exactly one replica runs each service; and telemetry, ui and dns
+still run as root - telemetry and dns because they read the Docker socket, and ui because a web server
+binding its port as an unprivileged user needs its own image variant.
 
 **Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
