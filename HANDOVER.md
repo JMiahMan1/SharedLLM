@@ -29,6 +29,17 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-26` **Screen time: a full-screen lock on any phone, with a way out and a way to talk**
+  (`c47d90b6` + `f673e877`; details in docs/HEALTH_HUB.md, "Tamper resistance"). A phone that is
+  not a device owner now gets a full-screen `TYPE_ACCESSIBILITY_OVERLAY` lock (`GuardOverlay`,
+  owned by the Accessibility guard) that covers the **home screen too**, so Home and Back cannot
+  leave it and no extra permission is needed. The lock screen shows why it is locked and offers
+  "Ask for more time" and **"Message a parent"** (opens Jarvis on the family chat), and it scrolls
+  so a parent's login or offline code stays reachable with the keyboard up - the lock is never a
+  dead end. A lock is only logged (and only called "Locked" on Devices) when the phone can really
+  lock: `mdm.real_lock_reported` is true for a device owner (Android's own lock plus lock task) or
+  any phone with the Accessibility guard on; with the guard off it is only a notification. Needs a
+  new APK on the phone, and the guard still has to be switched on by hand on the tablet.
 - `2026-10-25 latest` (the round that closed the day: recipes, a real guard lock, media fixes, the
   MDM follow-ups, the 1.6.0 release and the Health phase; all on `origin/microservices`, tip
   `6932452c`).
@@ -45,8 +56,9 @@ Every claim below was verified against the live system unless marked **planned**
     set/clear the lock-task package, `GuardScreenActivity` enters kiosk while locked and releases it
     on destroy with a self-check); a parent's lock is immediate (the guard `tick()` plus a static
     `refreshNow()` the `PushService` calls on a screen-time notice); the false "Locked" success is
-    gone (Devices.tsx says "Locked" only when the phone reports `deviceOwner`, and the gateway
-    writes the `device_lock` audit only then); the protection card shows
+    gone (Devices.tsx says "Locked" only when the phone can really lock — a device owner, or any
+    phone with the Accessibility guard on — and the gateway writes the `device_lock` audit only
+    then, via `mdm.real_lock_reported`); the protection card shows
     `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` and the "no accounts
     signed in / factory reset" caveat. JVM 26 tests pass. **Caveat:** a real OS lock still needs the
     phone provisioned as **device owner** (a one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE`
@@ -915,8 +927,8 @@ device-owner phone; app install/uninstall stays the screen rules.
    - background music: play on the phone, swipe the app away (music continues), reopen it, and the
      home-screen widget's transport buttons on a real phone (media Phase 8);
    - the **real lock** (`613edbb0`): bedtime/pause enters kiosk lock-task mode on a device-owner
-     phone, a parent's lock is immediate, and Devices says "Locked" only when the phone reports
-     `deviceOwner`;
+     phone, a parent's lock is immediate, and Devices says "Locked" only when the phone can really
+     lock (a device owner, or any phone with the Accessibility guard on — the full-screen overlay);
    - Health Connect connect/sync and the Health today widget (list in docs/HEALTH_HUB.md);
    - Phase 11: install approval, camera permission gating, the one-minute warning, "ask a
      parent" from a blocked site (list in docs/HEALTH_HUB.md Phase 11);
@@ -925,7 +937,9 @@ device-owner phone; app install/uninstall stays the screen rules.
    - Notes: a place reminder on arriving home, a voice note, drawing, an offline edit;
    - the screen fix: the app must not drag under the status bar or the Android buttons;
    - the Jarvis guard: uninstall attempt → parent-login screen; parent login and the **offline
-     code** (airplane mode) unlock; bedtime/pause sends games home; calls and texts still work;
+     code** (airplane mode) unlock; bedtime/pause covers the whole screen (the home screen too)
+     with the overlay and cannot be left with Home or Back; calls and texts still work; the lock
+     screen offers "Ask for more time" and "Message a parent";
    - app blocking: a blocked app closes with "That app is off for now";
    - the **web filter**: Phone protection card → Web filter → Allow; a blocked site fails, Google
      search is SafeSearch, ordinary browsing keeps working (DNS-only VPN), Disconnect is covered;
@@ -936,7 +950,8 @@ device-owner phone; app install/uninstall stays the screen rules.
    `DISALLOW_SAFE_BOOT`/`FACTORY_RESET`/`USER_SWITCH`/`ADD_USER`/`DEBUGGING_FEATURES`/`CONFIG_VPN`/
    `CONFIG_PRIVATE_DNS`, a real `lockNow()` at lock onset, and the new Settings-page tamper matches),
    and a parent's lock is now a real lock (`613edbb0`: kiosk lock-task mode on a device-owner phone,
-   an immediate lock, and the false "Locked" success gone). All of it only takes effect on a phone
+   an immediate lock, and the false "Locked" success gone; a phone without the device owner gets the
+   full-screen Accessibility overlay instead). All of it only takes effect on a phone
    provisioned as device owner (`adb shell dpm set-device-owner
    com.jarvisos.app/.GuardAdminReceiver`, one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a
    factory reset, not implemented). The web-filter bypass blocks (unsupported browsers, split
