@@ -34,6 +34,12 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-26` **Repo hygiene**: two stale git worktrees (`.claude/worktrees/agent-a6df28f4bc42c1300`
+  and `.tmp/wt-nextcloud`) and their local branches were removed after proving their work was already
+  in `microservices` (`git diff --stat microservices <branch> -- <files>` empty; the second was a
+  straight ancestor), along with one stale stash and 16 inert `refs/cline/checkpoints/…` refs. The
+  repo is back to a single worktree, 6 refs (both heads, both remotes, `origin/HEAD`, one tag) and no
+  stashes. Keep it that way: branch, land, delete.
 - `2026-10-26` **Bug hunt (live gateway logs): every Music Assistant cover was a 400, and a websocket
   callback threw on every position tick.** MA's imageproxy only resizes to `0/80/160/256/512/1024`;
   the gateway forwarded the UI's width verbatim, so a cover asked for at 44/96/128/760 px came back
@@ -951,6 +957,11 @@ device-owner phone; app install/uninstall stays the screen rules.
 
 ## 4. Open small items
 
+- **`.tmp/` at the repo root is a 1.9 GB gitignored scratch directory and it contains secrets**
+  (`server_env_full.env`, `server_env_reconstructed.env`, `keystore_password.txt`, `keystore.b64`,
+  `nc-creds.txt`, `probe_key.txt`, `local_env_keys.txt`, plus old logs, probes, patches, epubs and
+  screenshots). It was deliberately **not** deleted - it needs Jeremiah's explicit go-ahead. Do not
+  commit it, and do not paste its contents anywhere.
 - **Noah's tablet still has the guard switched off, so nothing locks on it yet.** Device
   `81587280fd22d5e457c09a64e820e46e` (Samsung SM-X520, Android 16) reports device admin / device
   owner / Accessibility guard / usage access all **false**, and `screenrules.data` is `"{}"` (no
