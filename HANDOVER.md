@@ -6,16 +6,19 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `eca4d83f` (deploy 16); docs-only commits land on top of it, this file's own commits
-  included, so read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca4d83f**
-  (APK `versionCode` **462**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
-  `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
-  `1f59d07d`), **14** (gateway, `7a4f083d`), **15** (gateway + rag, `6604bd7a`) and **16**
-  (gateway + ui, `eca4d83f`), each verified with 0 ERROR lines in the touched services' logs since
-  the deploy. APK: CI builds one per push under `services/ui/**` and the APK `versionCode` rebuilds
-  per push (462 is current; 461 was the previous), so the native work below needs the newest APK on
-  the phones. **APK 462** carries the guard overlay that draws over a tablet's taskbar and
+  commit is `3269ac38`; docs-only commits land on top of it, this file's own commits included, so
+  read the tip from `git log` rather than from here.
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **c150385c**
+  (APK `versionCode` **482**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+  `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
+  its chat and override paths, the media artwork and artist fixes, the security gates, the health
+  fixes, the UI and accessibility pass, the family-comms fixes, and the ops hardening (nightly
+  backups, deploy rollback, SQLite WAL and additive migrations, per-loop worker leases, a
+  digest-pinned base image, and identity, health, bible, storage, logging and geo now running as the
+  host user rather than root). Every deploy was verified with 0 ERROR lines in the touched services'
+  logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK `versionCode`
+  rebuilds per push (482 is current; 481 was the previous), so the native work below needs the newest
+  APK on the phones. **APK 482** carries the guard overlay that draws over a tablet's taskbar and
   navigation strip, with "Ask for more time" and "Message a parent" painted over the lock as a sheet
   instead of taking it down. Family guard Phase 11, the family member page (`/family/member/<child>`),
   the Family Guardian page (`/guardian`) and the MDM/Devices work are live.
@@ -44,6 +47,41 @@ Every claim below was verified against the live system unless marked **planned**
     service calls need `X-Internal-Secret`, present as `INTERNAL_SECRET`).
 
 ### Recently shipped (newest first)
+
+- `2026-10-26` **Production-readiness program** (`docs/PRODUCTION_READINESS.md` is the record). The
+  whole app was audited against a written bar by five read-only audits (UI/UX, health hub, family
+  comms, backend readiness, security); every finding was graded BROKEN / ROUGH / FINE and then fixed.
+  **Media:** every Music Assistant cover 404'd, because the gateway fetched the provider's CDN URL and
+  the image proxy's SSRF allow-list rebased that onto Home Assistant; covers now use MA's own
+  `proxy_id`, book authors and narrators are kept out of Artists by `artist_type`, and an artist is
+  playable ("Play all"), because MA expands an artist URI into that artist's tracks. **Security:** the
+  note routes let any member read or overwrite files inside the execution container (paths are now
+  confined to `LOCAL_NOTES_ROOT`); `/api/dns`, `/api/config*`, `/api/models*`, `/api/generate`, the geo
+  vehicle and zone routes, Raven's mission routes, telemetry enrolment, the chat-job reads and the
+  admin test runners were anonymous or reachable by any member, and are now gated; sign-in is rate
+  limited (5 per username, 20 per source address, 15 minutes) and a password change rotates the
+  session key; the internal secret fails closed and is compared in constant time; the APK updater
+  refuses an update whose host is not the phone's own server; the image proxy no longer follows
+  redirects. **Health:** a metric is bucketed by the household's local day (a 6pm glass of water used
+  to count on tomorrow), the cycle, nutrition, steps and shared-with-you panels say what failed
+  instead of showing nothing, list reads are capped and say `truncated`, one manual sleep log per
+  night, no future-dated days, an export that carries the cheers you *sent*, and Measurements now
+  shows every measure with its history and a delete. **UI:** Android Back works, a catch-all route
+  replaces the blank page, dialogs trap and restore focus (a text field inside a dialog used to keep
+  only its first character), forms are labelled, the crash screen is readable by a child, a failed
+  chat load says so, all 24 destructive actions ask in the app's own dialog, phones can search pages,
+  the Dashboard's service status and build hash are admin-only, `/recipes` has a navigation entry,
+  Settings is grouped, and a failed request carries the server's own words instead of "Request failed
+  with status code 500". **Family comms:** an `@Jarvis` failure now speaks in the room, Trivia and
+  Memory start from the composer, the game player is the verified caller, an unanswered drop-in call
+  stops ringing after a minute, the calls tab admits a failed refresh, timer and place reminders open
+  the right screen, a sent bubble no longer blinks out (photos and voice notes included), and joining
+  a call pushes one notice to the room's other members. **Ops:** nightly database backups, a deploy
+  that rolls back to the running image IDs when its health check fails, SQLite WAL with a busy
+  timeout, additive column migrations for health, a 5-second identity timeout, no tracebacks or
+  upstream bodies returned to clients, per-loop Redis leases so a second worker cannot double-post, a
+  digest-pinned base image, and identity, health, bible, storage, logging and geo running as the host
+  user rather than root.
 
 - `2026-10-26` **Repo hygiene**: two stale git worktrees (`.claude/worktrees/agent-a6df28f4bc42c1300`
   and `.tmp/wt-nextcloud`) and their local branches were removed after proving their work was already
@@ -718,15 +756,15 @@ Every claim below was verified against the live system unless marked **planned**
   `-x`), then confirm it is gone. Never leave seeded artists/creators/calls in a real feed.
 - **UI gates**, run in `services/ui`: `npm run typecheck`, `npm run lint`
   (baseline 0 errors / 11 pre-existing warnings), `npx vitest run`
-  (288 files / 2192 tests), `npm run build` (also packages the OTA bundle).
+  (288 files / 2208 tests), `npm run build` (also packages the OTA bundle).
   After adding Tailwind colour classes run `npm run gen:theme-css` or
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` - `python` is not on
   PATH. Baselines verified 2026-10-26:
-  `services/gateway/tests services/common` -> **1836 passed**;
+  `services/gateway/tests services/common` -> **1860 passed**;
   `services/rag/tests` -> **117 passed / 14 skipped**;
   `services/health services/identity services/telemetry services/bible services/execution`
-  -> **2581 passed / 60 skipped**;
+  -> **2587 passed / 60 skipped**;
   `services/identity services/tests` -> **891 passed / 24 skipped**.
   A full `pytest services` run also passes - but note it does **not** collect
   `tests/unit/`, and CI does: run `.venv/bin/python -m pytest tests/unit -q` as

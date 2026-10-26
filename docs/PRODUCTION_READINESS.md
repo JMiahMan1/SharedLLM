@@ -410,16 +410,22 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
 10. Retries backed off exactly, so every request in flight when a dependency blinked came back at the
     same instant and hit it together again. `retry_http_request` now jitters its backoff by up to 50%
     (`_retry_delay`), with a test that two calls at the same attempt do not wait the same time.
+11. The base image installed about thirty-five Python packages unpinned, so a rebuild of the same
+    commit could silently jump a major version. Every package the Dockerfile names is now pinned to the
+    version the built image actually resolves (read from the image on 2026-10-26), so the interpreter,
+    the system libraries and the named libraries are all fixed.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
 (`services/common/logging_utils.py`'s `warn_periodically`, used by execution's media-player
 discovery and geo's zone cache).
 
-**Open, should fix before merge.** The base image's Python packages and apt tools are still installed
-unpinned (the `FROM` line itself is now digest-pinned, so the interpreter and system libraries cannot
-drift, but the ~35 pip packages can - pinning those needs a constraints file generated from a
-known-good build, not a blind edit); a second replica of a service would still be wrong in places,
+**Open, should fix before merge.** The base image's apt tools are still installed unpinned (the
+`FROM` line, every Python package the Dockerfile names, and the interpreter are pinned, but the
+Debian packages `apt-get install` resolves at build time can move - the digest fixes the release, not
+the tool versions - and the Python transitive dependencies are free to move too, which needs a
+constraints file reconciled with each service's own `requirements.txt`); a second replica of a service
+would still be wrong in places,
 because state lives in the process - the gateway's live media push keeps a hub per user and a registry
 of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
 `apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
