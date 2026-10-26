@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
@@ -17,35 +17,50 @@ import GuardWatch from './components/layout/GuardWatch';
 import MediaSessionSync from './components/layout/MediaSessionSync';
 import CommsSync from './components/layout/CommsSync';
 import AdminElevation from './components/auth/AdminElevation';
-import Dashboard from './pages/Dashboard';
-import Admin from './pages/Admin';
-import Identity from './pages/Identity';
-import Notes from './pages/Notes';
-import Recipes from './pages/Recipes';
-import Family from './pages/Family';
-import Calendar from './pages/Calendar';
-import JarvisLab, { JarvisLabAdmin } from './pages/JarvisLab';
-import KnowledgeHub from './pages/KnowledgeHub';
-import Workspaces from './pages/Workspaces';
-import Artifacts from './pages/Artifacts';
-import Docs from './pages/Docs';
-import Login from './pages/Login';
-import Media from './pages/Media';
-import Remote from './pages/Remote';
-import Settings from './pages/Settings';
-import Wander from './pages/Wander';
-import Health from './pages/Health';
-import Guardian from './pages/Guardian';
-import Devices from './pages/Devices';
-import FamilyMember from './pages/FamilyMember';
-import NotFound from './pages/NotFound';
-import Bible from './pages/Bible';
+// Every page is loaded on demand. The whole app used to be a single chunk, so a
+// phone downloaded all of it - the workspace IDE, the charts, the Bible reader -
+// before it could show the first screen.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Admin = lazy(() => import('./pages/Admin'));
+const Identity = lazy(() => import('./pages/Identity'));
+const Notes = lazy(() => import('./pages/Notes'));
+const Recipes = lazy(() => import('./pages/Recipes'));
+const Family = lazy(() => import('./pages/Family'));
+const Calendar = lazy(() => import('./pages/Calendar'));
+const JarvisLab = lazy(() => import('./pages/JarvisLab'));
+const JarvisLabAdmin = lazy(() =>
+  import('./pages/JarvisLab').then((m) => ({ default: m.JarvisLabAdmin })),
+);
+const KnowledgeHub = lazy(() => import('./pages/KnowledgeHub'));
+const Workspaces = lazy(() => import('./pages/Workspaces'));
+const Artifacts = lazy(() => import('./pages/Artifacts'));
+const Docs = lazy(() => import('./pages/Docs'));
+const Login = lazy(() => import('./pages/Login'));
+const Media = lazy(() => import('./pages/Media'));
+const Remote = lazy(() => import('./pages/Remote'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Wander = lazy(() => import('./pages/Wander'));
+const Health = lazy(() => import('./pages/Health'));
+const Guardian = lazy(() => import('./pages/Guardian'));
+const Devices = lazy(() => import('./pages/Devices'));
+const FamilyMember = lazy(() => import('./pages/FamilyMember'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const Bible = lazy(() => import('./pages/Bible'));
+
 import { initAppUpdater } from './lib/appUpdater';
 import { useSiteTheme } from './themes/siteTheme';
 
 import { Toaster } from 'react-hot-toast';
+import { Loader2 } from 'lucide-react';
 
 const queryClient = new QueryClient();
+
+const RouteFallback = () => (
+  <div className="flex min-h-[50vh] items-center justify-center" role="status">
+    <Loader2 className="animate-spin text-slate-500" size={22} aria-hidden />
+    <span className="sr-only">Loading this page…</span>
+  </div>
+);
 
 const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { children: React.ReactNode, requireAdmin?: boolean, isMobile?: boolean }) => {
   const { token, user, isLoading, initError } = useAuth();
@@ -131,6 +146,7 @@ function App() {
           <GuardWatch />
 <MediaSessionSync />
 <CommsSync />
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute isMobile={isMobile}><Dashboard /></ProtectedRoute>} />
@@ -179,6 +195,7 @@ function App() {
                 Without this the shell rendered with an empty page. */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
           <MediaOverlays />
         </Router>
         </MediaPlayerProvider>

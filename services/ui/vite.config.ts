@@ -43,6 +43,22 @@ export default defineConfig({
       output: {
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
+        // Vendor libraries get their own files: they change only when a
+        // dependency is upgraded, so a browser keeps them across deploys
+        // instead of re-downloading a single multi-megabyte bundle, and the
+        // phone can fetch them in parallel with the app's own code.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('/react-dom/') || id.includes('/react/') || id.includes('/scheduler/')) return 'vendor-react';
+          if (id.includes('react-router')) return 'vendor-router';
+          if (id.includes('@tanstack')) return 'vendor-query';
+          if (id.includes('framer-motion') || id.includes('motion-dom') || id.includes('motion-utils')) return 'vendor-motion';
+          if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts';
+          if (id.includes('lucide-react')) return 'vendor-icons';
+          if (id.includes('monaco')) return 'vendor-monaco';
+          if (id.includes('react-markdown') || id.includes('remark') || id.includes('rehype') || id.includes('micromark') || id.includes('mdast') || id.includes('hast')) return 'vendor-markdown';
+          if (id.includes('@capacitor')) return 'vendor-capacitor';
+        },
       },
     },
   },
