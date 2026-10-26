@@ -5,6 +5,11 @@ import { renderWithProviders } from '../test/render';
 import { api } from '../services/api';
 import { http, HttpResponse } from 'msw';
 import { server } from '../test/setup';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 // The Users & Devices tab has two entity dropdowns (device assignment and
 // entity protection), so the mock honours `testId`; `getByTestId` throws on
@@ -198,13 +203,12 @@ describe('Admin page', () => {
         return HttpResponse.json({ status: 'ok' });
       }),
     );
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirm);
+    confirmMock.mockResolvedValue(false);
     renderWithProviders(<Admin />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Delete leo' }));
-    expect(confirm).toHaveBeenCalled();
+    expect(confirmMock).toHaveBeenCalled();
     expect(deleted).toEqual([]);
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMock.mockResolvedValue(true);
   });
 });

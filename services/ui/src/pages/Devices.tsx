@@ -12,6 +12,7 @@ import { relativeTime } from '../lib/wanderTrips';
 import { deviceKindLabel } from '../lib/deviceKind';
 import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import type { MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
+import { confirmDialog } from '../components/ui/confirmDialog';
 
 /**
  * Device management (MDM, HANDOVER.md Phase 12).
@@ -213,8 +214,13 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
         <button
           type="button"
           disabled={wipe.isPending}
-          onClick={() => {
-            if (window.confirm(`Erase EVERYTHING on ${device.label || device.device_key}? This cannot be undone.`)) wipe.mutate();
+          onClick={async () => {
+            if (await confirmDialog({
+              title: 'Erase this device?',
+              body: `This erases EVERYTHING on ${device.label || device.device_key}. It cannot be undone.`,
+              confirmLabel: 'Erase',
+              danger: true,
+            })) wipe.mutate();
           }}
           className={`glass-button border-red-500/30 bg-red-600/20 px-3 text-xs text-red-200 ${TOUCH}`}
           data-testid={`mdm-wipe-${device.device_key}`}
