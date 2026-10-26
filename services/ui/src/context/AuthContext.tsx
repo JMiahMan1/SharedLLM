@@ -15,7 +15,7 @@ interface AuthContextType {
   /** Whether the signed-in user's roles (or admin) allow this, e.g. "devices.assign". */
   can: (permission: string) => boolean;
   login: (credentials: { username: string; password: string }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   isLoading: boolean;
   initError: string | null;
   refreshProfile: () => Promise<void>;
@@ -45,6 +45,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const profile = await api.getMe();
             setToken(storedToken);
             setUser(profile);
+            // A restore that succeeded must clear the timeout message: it was
+            // set once and never reset, so a slow first load left the app
+            // bouncing back to the login screen after a successful sign-in.
+            setInitError(null);
             queryClient.setQueryData(['me'], profile);
             await storageSet('jarvis_user', JSON.stringify(profile));
             // Register here too, not only on an explicit login. Registering
@@ -75,12 +79,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     initAuth();
   }, [queryClient]);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     setToken(null);
     setUser(null);
+    setInitError(null);
     queryClient.removeQueries({ queryKey: ['me'] });
-    storageRemove('jarvis_api_key');
-    storageRemove('jarvis_user');
+    // The native mirror is what the background services read, so the clear has
+    // to finish before the page goes away. Redirecting first left the previous
+    // person's key in place, and their location and step services kept running
+    // with it.
+    await Promise.all([
+      storageRemove('jarvis_api_key'),
+      storageRemove('jarvis_user'),
+      // These belong to the person, not the phone: on a shared phone the next
+      // person used to inherit "the guard was on" and someone else's sensor
+      // switches. The native services' own switches are cleared with the key.
+      storageRemove('jarvis_guard_seen_on'),
+      storageRemove('jarvis_location_tracking_enabled'),
+      storageRemove('jarvis_steps_backfilled_through'),
+    ]);
     window.location.href = '/login';
   }, [queryClient]);
 
@@ -99,7 +116,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await storageSet('jarvis_user', JSON.stringify(profile));
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
-        logout();
+        void logout();
       }
     }
   }, [logout, queryClient]);
@@ -113,11 +130,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     loadProfile();
   }, [token, refreshProfile]);
 
+  // A role change on the server used to reach this app only on the next full
+  // load, so a demoted member kept being offered actions the server refused.
+  // Re-reading the profile when the app comes back into view (and every few
+  // minutes while it stays open) keeps the menu honest.
+  useEffect(() => {
+    if (!token) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refreshProfile();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => void refreshProfile(), 5 * 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
+  }, [token, refreshProfile]);
+
   const login = useCallback(async (credentials: { username: string; password: string }) => {
     try {
       const data = await api.login(credentials.username, credentials.password);
       const authToken = data.api_key;
       setToken(authToken);
+      setInitError(null);
       await storageSet('jarvis_api_key', authToken);
       
       const profile = await api.getMe();
@@ -141,17 +176,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const canonical = profile.username || credentials.username;
       if (canonical) void mirrorIdentity(canonical);
     } catch (error: unknown) {
+      // The login page renders the server's own message inline, so a toast here
+      // reported the same failure twice.
       console.error('Login error:', error);
-      if (axios.isAxiosError(error)) {
-        toast.error(error.response?.data?.detail || `Login failed: ${error.message}`);
-      } else {
-        toast.error('Login failed');
-      }
       throw error;
     }
   }, [queryClient]);
 
-  const role = useMemo(() => user?.role || (user?.is_admin ? 'admin' : 'user'), [user]);
+  const role = useMemo(
+    () => (user ? user.role || (user.is_admin ? 'admin' : 'user') : null),
+    [user],
+  );
   const can = useCallback(
     (permission: string) => Boolean(user?.is_admin || user?.permissions?.includes(permission)),
     [user],

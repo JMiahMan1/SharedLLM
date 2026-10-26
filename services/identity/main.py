@@ -648,6 +648,11 @@ def admin_set_password(username: str, req: dict, request: Request, session: Sess
         raise HTTPException(status_code=404, detail="User not found")
 
     user.password_hash = hash_password(new_password)
+    # Rotate the session key, the same way changing your own password does.
+    # Without this a reset left the old phone signed in and still reporting:
+    # the whole point of a parent resetting a child's password is that the
+    # device that had the old one stops working.
+    _store_user_api_key(user, os.urandom(24).hex())
     session.add(user)
     session.commit()
     _audit(request, session, "user.password_reset", user.username, changes=[{"field": "password", "change": "changed", "secret": True}])
