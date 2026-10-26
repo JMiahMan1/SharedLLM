@@ -38,19 +38,41 @@ SCHOOL_DAYS_DEFAULT = ("mon", "tue", "wed", "thu", "fri")
 # Jarvis for more time. The Samsung and other OEM dialer/messaging packages are
 # here too, since the always-allowed list has to name the package the phone
 # actually shows for a call or a text.
-ALWAYS_ALLOWED_DEFAULT = (
+#
+# The core below is unremovable: a parent's own list adds to it, but can never
+# take away the ability to call for help or to ask for more time from the lock
+# screen itself. The messaging apps are only in the default, so a parent who
+# names their own list still decides whether texting is allowed.
+NEVER_BLOCKED_CORE = (
     "com.jarvisos.app",
     "com.google.android.dialer",
     "com.android.dialer",
     "com.samsung.android.dialer",
-    "com.google.android.apps.messaging",
-    "com.android.mms",
-    "com.samsung.android.messaging",
     "com.android.emergency",
     "com.android.incallui",
     "com.samsung.android.incallui",
     "com.android.server.telecom",
 )
+ALWAYS_ALLOWED_DEFAULT = NEVER_BLOCKED_CORE + (
+    "com.google.android.apps.messaging",
+    "com.android.mms",
+    "com.samsung.android.messaging",
+)
+
+
+def always_allowed(rules: dict[str, Any] | None) -> list[str]:
+    """The packages never blocked: a parent's list, plus the safety core.
+
+    A list a parent saved used to replace the default outright, so customising
+    it could drop the dialer and leave a locked phone unable to call 911. The
+    core is now always present; the parent's list adds to it.
+    """
+    listed = (rules or {}).get("always_allowed")
+    out = list(NEVER_BLOCKED_CORE)
+    for pkg in listed if isinstance(listed, (list, tuple)) else ():
+        if isinstance(pkg, str) and pkg and pkg not in out:
+            out.append(pkg)
+    return out
 
 
 def parse_hhmm(value: str | None) -> time | None:
@@ -145,7 +167,7 @@ def apps_state(rules: dict[str, Any], apps_used_ms: dict[str, int] | None) -> tu
 
     An always-allowed app is never blocked, whatever the lists say.
     """
-    allowed = set(rules.get("always_allowed") or ALWAYS_ALLOWED_DEFAULT)
+    allowed = set(always_allowed(rules))
     used = apps_used_ms or {}
     blocked = [pkg for pkg in rules.get("blocked_apps") or [] if pkg not in allowed]
     left: dict[str, int] = {}
@@ -230,7 +252,7 @@ def evaluate(
         "reason": reason,
         "until": until.isoformat() if until else None,
         "resets_at": midnight.isoformat(),
-        "always_allowed": list(rules.get("always_allowed") or ALWAYS_ALLOWED_DEFAULT),
+        "always_allowed": always_allowed(rules),
         "blocked_apps": blocked_apps,
         "app_minutes_left": app_minutes_left,
         "next_lock_at": lock_at.isoformat() if lock_at else None,

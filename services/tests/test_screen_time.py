@@ -87,6 +87,24 @@ def test_always_allowed_apps_are_never_blocked():
     assert s["blocked_apps"] == [] and s["app_minutes_left"] == {}
 
 
+def test_a_parents_own_always_allowed_list_cannot_drop_the_safety_core():
+    s = evaluate(
+        {"always_allowed": ["com.example.reader"], "blocked_apps": ["com.google.android.dialer"]},
+        used_ms=0,
+        bonus_min=0,
+        now=WED(16),
+    )
+    assert "com.example.reader" in s["always_allowed"]
+    assert "com.google.android.dialer" in s["always_allowed"], "calling for help is never removed"
+    assert "com.jarvisos.app" in s["always_allowed"], "nor is the lock screen's way to ask for more"
+    assert s["blocked_apps"] == [], "a locked phone can still call even if the parent listed the dialer"
+
+
+def test_a_parents_list_replaces_the_default_messaging_apps():
+    s = evaluate({"always_allowed": ["com.example.reader"]}, used_ms=0, bonus_min=0, now=WED(16))
+    assert "com.google.android.apps.messaging" not in s["always_allowed"], "the parent decides about texting"
+
+
 def test_the_next_lock_is_named_ahead_for_the_one_minute_warning():
     before_bed = evaluate(RULES, used_ms=0, bonus_min=0, now=WED(20, 59))
     assert before_bed["next_lock_reason"] == "bedtime"

@@ -42,7 +42,11 @@ Every claim below was verified against the live system unless marked **planned**
   verified MA size list: docs/MEDIA_UPSTREAM_API_NOTES.md. The same pass quietened the RAG HA-sync
   refusal: two Home Assistant entities whose id is a serialized user record are refused on every sync
   (every five minutes, per user - ~2,400 lines a day), so the warning is now repeated only when the
-  set of refused ids changes for that user (`services/rag/main.py`).
+  set of refused ids changes for that user (`services/rag/main.py`). A third fix closes a safety gap
+  in the same area: a parent's own "always allowed" list replaced the default outright, so a
+  customised list could drop the dialer and leave a locked phone unable to call for help; the safety
+  core (emergency, dialer, in-call, Jarvis) is now always present and a parent's list adds to it
+  (`services/common/screen_time.py`).
 - `2026-10-26` **Screen time: a full-screen lock on any phone, with a way out and a way to talk**
   (`c47d90b6` + `f673e877`; details in docs/HEALTH_HUB.md, "Tamper resistance"). A phone that is
   not a device owner now gets a full-screen `TYPE_ACCESSIBILITY_OVERLAY` lock (`GuardOverlay`,
