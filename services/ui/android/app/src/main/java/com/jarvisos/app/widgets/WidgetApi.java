@@ -21,6 +21,12 @@ import org.json.JSONObject;
 public final class WidgetApi {
     private static final String TAG = "JarvisWidgetApi";
     private static final int TIMEOUT_MS = 12000;
+    /**
+     * The household's public address, for the app's setup screen to suggest.
+     *
+     * Deliberately not a fallback for {@link #serverUrl}: a widget on a phone
+     * that has never stored a server must not guess one.
+     */
     public static final String DEFAULT_SERVER = "https://jarvis.sumemail.com";
 
     private WidgetApi() {}
@@ -33,9 +39,19 @@ public final class WidgetApi {
         return prefs(context).getString(TokenBridgePlugin.KEY_API_KEY, null);
     }
 
+    /**
+     * The configured server, or null when this phone has never been set up.
+     *
+     * It used to fall back to the public default, so a widget on a phone whose
+     * server was never stored would send its key to a host the person did not
+     * choose. A widget with no server renders the signed-out state instead.
+     */
     public static String serverUrl(Context context) {
         String s = prefs(context).getString(TokenBridgePlugin.KEY_SERVER_URL, null);
-        if (s == null || s.isEmpty()) return DEFAULT_SERVER;
+        if (s == null || s.isEmpty()) {
+            Log.w(TAG, "no server configured; the widget stays signed out");
+            return null;
+        }
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 
@@ -149,7 +165,11 @@ public final class WidgetApi {
         if (key == null || key.isEmpty()) {
             throw new IllegalStateException("Not signed in");
         }
-        return request(serverUrl(context), key, method, path, body, null);
+        String base = serverUrl(context);
+        if (base == null) {
+            throw new IllegalStateException("No server configured");
+        }
+        return request(base, key, method, path, body, null);
     }
 
     /**

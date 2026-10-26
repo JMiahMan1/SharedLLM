@@ -404,7 +404,10 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    `docker-compose.yml`), and the three data directories that were root-owned on the host
    (`data/health`, `data/bible`, `data/storage`) were chowned to match - identity holds the family's
    accounts and the Fernet-encrypted credentials, so it was the one that mattered most. Logging and
-   geo followed, because neither writes anything at all.
+   geo followed, because neither writes anything at all, and rag followed them: it embeds whatever the
+   family indexes, so it is the service most exposed to untrusted content, and its model cache now lives
+   under `HOME` on the volumes it already shared with the gateway (which were chowned to the host user)
+   instead of under `/root`.
 8. The base image was built from a moving tag, so the same commit could produce a different image on
    a different day. `docker/Dockerfile.base` now pins the multi-arch index digest of
    `python:3.11-slim`, which fixes the interpreter and the system libraries while leaving both
@@ -441,10 +444,9 @@ would still be wrong in places,
 because state lives in the process - the gateway's live media push keeps a hub per user and a registry
 of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
 `apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
-too, all of which is harmless while exactly one replica runs each service; and rag, telemetry, ui,
-dns and caddy still run as root - rag because its caches are mounted at `/root/.cache` and its named
-volume is root-owned, telemetry and dns because they read the Docker socket, and ui and caddy because
-a web server binding its port as an unprivileged user needs its own image variant.
+too, all of which is harmless while exactly one replica runs each service; and telemetry, ui, dns and
+caddy still run as root - telemetry and dns because they read the Docker socket, and ui and caddy
+because a web server binding its port as an unprivileged user needs its own image variant.
 
 **Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
