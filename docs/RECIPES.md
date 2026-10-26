@@ -5,8 +5,11 @@ first level-balanced note set; the Recipes page (plan, shopping list, search, li
 photo import, the duplicate-import guard) and the Health connection (recipe logging, the
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
 editor's nutrition summary) are live. Phase 7 (Skylight) and the remaining Phase 6/11
-polish are still open.
-Last live app commit `d766a19f` (v1.5.1).
+polish are still open. The meal-planning half of Phase 6 - staple-overlap ranking, plan parsing
+and grocery-list merging - is unbuilt scope rather than unfinished work: the Recipes page ships
+the plan editor and the shopping list as plain markdown under `Recipes/`, and no staple ranking,
+plan parser or list merger exists in `services/ui/src`. Live: version 1.6.0 (the deployed commit
+is in `HANDOVER.md` §0, which is the file that tracks it).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
 then turn them into a weekly plan and a shared shopping list. Every artefact stays a plain
@@ -138,8 +141,17 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 
 ## Phase 6 - tests, docs, deploy
 
+Shipped since this list was written: `services/ui/src/test/recipeImport.test.ts`,
+`recipeNutrition.test.ts`, `recipeEaten.test.ts` and `recipeShare.test.ts` cover the importer,
+the nutrition estimate, the Dinner-tonight comparison and share-to-chat, and
+`services/ui/src/pages/Recipes.test.tsx` covers the page (including the photo import). The
+typecheck / lint / full-suite / build gates run on every change. Staple ranking, plan parsing and
+list merging do not exist yet, so there is nothing to test for them - they are the unbuilt half
+of this phase.
+
 - [ ] Unit tests for filtering, staple ranking, scaling, plan parsing and list merging
-      (backend pytest where pure; UI vitest for the plan/list generators).
+      (backend pytest where pure; UI vitest for the plan/list generators) - only the filtering
+      and scaling halves exist.
 - [ ] UI tests: share-to-chat on a recipe, plan editor writes the note, list keeps ticks.
 - [ ] `npm run typecheck`, `npm run lint`, full test suites, `npm run build`.
 - [ ] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc; commit; deploy
