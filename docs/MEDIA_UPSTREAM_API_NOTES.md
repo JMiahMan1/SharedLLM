@@ -145,9 +145,14 @@ service.
   covers body delivery; images previously had total=10s end-to-end).
 - An upstream **404** is logged as a warning ("has no image"), not an error:
   a library entry with no artwork is normal, and logging it as an error
-  drowned out real failures in the post-deploy error count. Other non-200s
-  stay errors.
-- Tests: `gateway/tests/test_imageproxy_cache.py` (5). The gateway's
+  drowned out real failures in the post-deploy error count. The redirect
+  statuses are reported the same way, because they are not followed (the
+  host allow-list only vets the URL we were asked for, so a redirect could
+  point anywhere). Every other non-200 stays an error and is answered with
+  the upstream's own status - and that arm was lost while quietening the 404
+  flood, so for a few hours a 400 or 5xx was streamed back as if it were an
+  image. A test now pins all three cases.
+- Tests: `gateway/tests/test_imageproxy_cache.py` (8). The gateway's
   request log also captures logging-service POSTs, so helpers must filter
   upstream requests by host.
 

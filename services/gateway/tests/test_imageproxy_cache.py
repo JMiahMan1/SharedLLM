@@ -103,3 +103,37 @@ def test_imageproxy_ma_size_is_snapped_to_a_size_ma_accepts():
     assert _ma_image_size(1024) == 1024
     assert _ma_image_size(4000) == 1024  # never above the largest MA offers
     assert _ma_image_size(-5) == 80
+
+def test_imageproxy_reports_a_missing_cover_as_404(client, upstream):
+    import re
+
+    upstream.get(re.compile(r"http://ma\.local:8095/imageproxy.*"), status=404, body="nope")
+
+    resp = client.get("/api/media/imageproxy", params={"path": "/imageproxy?path=art.jpg"})
+    assert resp.status_code == 404
+
+
+def test_imageproxy_does_not_follow_a_redirect(client, upstream):
+    import re
+
+    # The host allow-list only vets the URL we were asked for, so a redirect
+    # must be reported rather than followed.
+    upstream.get(
+        re.compile(r"http://ma\.local:8095/imageproxy.*"),
+        status=302,
+        headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+        body="",
+    )
+
+    resp = client.get("/api/media/imageproxy", params={"path": "/imageproxy?path=art.jpg"})
+    assert resp.status_code == 404
+
+
+def test_imageproxy_reports_an_upstream_error_instead_of_streaming_it(client, upstream):
+    import re
+
+    upstream.get(re.compile(r"http://ma\.local:8095/imageproxy.*"), status=500, body="broken")
+
+    resp = client.get("/api/media/imageproxy", params={"path": "/imageproxy?path=art.jpg"})
+    assert resp.status_code == 500
+    assert b"broken" not in resp.content

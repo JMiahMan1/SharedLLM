@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import threading
@@ -760,6 +761,16 @@ def _is_dns_failure(e: aiohttp.ClientError) -> bool:
 async def borrow_http_client():
     yield get_http_client()
 
+def _retry_delay(base_delay: float, attempt: int) -> float:
+    """Exponential backoff with jitter, so retries do not march in step.
+
+    Several callers retry the same dependency at the same moment (every request
+    in flight when identity blinks, say). Without jitter they all come back at
+    the same instant and hit it together again.
+    """
+    return base_delay * (2 ** attempt) * (1.0 + random.random() * 0.5)
+
+
 async def retry_http_request(func, service_name: str, max_retries: int = 2, base_delay: float = 0.1, dns_recovery: bool = True):
     """Retry an aiohttp request with exponential backoff for transient errors.
     Detects DNS-related failures (empty RequestError messages on stale connections)
@@ -778,7 +789,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
                     await recreate_http_client()
                 except Exception as rec_err:
                     log.error(f"{service_name}: Failed to recreate HTTP client: {rec_err}")
-                delay = base_delay * (2 ** attempt)
+                delay = _retry_delay(base_delay, attempt)
                 await asyncio.sleep(delay)
             else:
                 raise
@@ -793,7 +804,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
                     await recreate_http_client()
                 except Exception as rec_err:
                     log.error(f"{service_name}: Failed to recreate HTTP client: {rec_err}")
-            delay = base_delay * (2 ** attempt)
+            delay = _retry_delay(base_delay, attempt)
             log.warning(f"{service_name}: RequestError (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
             await asyncio.sleep(delay)
         except TimeoutError as e:
@@ -801,7 +812,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
                 log.error(f"{service_name}: Timed out after {max_retries + 1} attempts: {e}")
                 # Re-raise as aiohttp.ClientError so callers' error handling returns clean 5xx
                 raise aiohttp.ClientError(f"Timeout: {e}") from e
-            delay = base_delay * (2 ** attempt)
+            delay = _retry_delay(base_delay, attempt)
             log.warning(f"{service_name}: Timeout (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
             await asyncio.sleep(delay)
     raise Exception(f"Unexpected: exhausted retries for {service_name}")
@@ -17325,13 +17336,17 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
             if resp.status != 200:
                 # A 404 means the cover simply is not there upstream (a library
                 # entry with no artwork) - normal, and common enough that logging
-                # it as an error drowns out real failures. Anything else (400
-                # from a bad request we built, 5xx from a broken upstream) stays
-                # an error.
+                # it as an error drowns out real failures. A redirect is not
+                # followed (see above) and is reported the same way. Anything
+                # else (400 from a bad request we built, 5xx from a broken
+                # upstream) stays an error.
                 if resp.status in (404, 301, 302, 303, 307, 308):
                     log.warning(f"[imageproxy] upstream {svc} has no image ({resp.status}) for {redact_url(target_url)}")
                     await resp.release()
                     raise HTTPException(status_code=404, detail="Failed to fetch image from upstream")
+                log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
+                await resp.release()
+                raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
 
             content_type = resp.headers.get("Content-Type", "image/jpeg")
             resp_headers = {"Cache-Control": "private, max-age=86400, immutable"}
