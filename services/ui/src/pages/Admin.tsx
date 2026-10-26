@@ -695,8 +695,10 @@ const Admin = () => {
         </div>
       </header>
 
-      {/* Tab Navigation */}
-      <div className="flex gap-2 border-b border-white/10 pb-2 overflow-x-auto" role="tablist" aria-label="Admin sections">
+      {/* Tab Navigation. Wraps rather than scrolling sideways: twelve tabs on
+          one line meant the last few were off-screen with no sign they were
+          there. */}
+      <div className="flex flex-wrap gap-2 border-b border-white/10 pb-2" role="tablist" aria-label="Admin sections">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
