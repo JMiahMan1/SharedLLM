@@ -105,11 +105,12 @@ const Login = () => {
           <form onSubmit={handleSubmit} className="space-y-6">
             {showServerField && (
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Server URL</label>
+                <label htmlFor="login-server" className="block text-sm font-medium text-slate-300 mb-2">Server URL</label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Server className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                     <input 
+                      id="login-server"
                       type="url"
                       value={serverUrl}
                       onChange={(e) => setServerUrl(e.target.value)}
@@ -147,10 +148,11 @@ const Login = () => {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Username</label>
+              <label htmlFor="login-username" className="block text-sm font-medium text-slate-300 mb-2">Username</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input 
+                  id="login-username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -166,10 +168,11 @@ const Login = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Password</label>
+              <label htmlFor="login-password" className="block text-sm font-medium text-slate-300 mb-2">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input 
+                  id="login-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -177,12 +180,15 @@ const Login = () => {
                   placeholder="Enter password"
                   autoComplete="current-password"
                   required
+                  aria-describedby={error ? 'login-error' : undefined}
                 />
               </div>
             </div>
 
             {error && (
               <motion.div 
+                id="login-error"
+                role="alert"
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2"

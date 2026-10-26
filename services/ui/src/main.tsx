@@ -42,8 +42,13 @@ function BackgroundTaskManager() {
       handles.push(stateHandle);
 
       const backHandle = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-        if (!canGoBack) {
+        // Registering this listener turns Capacitor's own Back handling off, so
+        // we have to do it ourselves. Going back only when there is no history
+        // (the old condition) meant Back did nothing at all on the phone.
+        if (canGoBack) {
           window.history.back();
+        } else {
+          void CapacitorApp.exitApp();
         }
       });
       if (disposed) {

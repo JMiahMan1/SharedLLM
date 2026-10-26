@@ -7,6 +7,7 @@ import { cn } from '../../lib/utils';
 import { navPagesFor, type NavPage } from './navItems';
 import { usePublishBottomBarHeight } from '../../lib/bottomBar';
 import { readMobileNavPaths, subscribeMobileNav } from '../../lib/mobileNav';
+import { useDialogFocus } from '../../lib/focusTrap';
 
 /** `/` only matches the dashboard; other paths also match their child routes. */
 function pathMatches(pathname: string, path: string): boolean {
@@ -19,6 +20,7 @@ const BottomNav = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreSheetRef = useDialogFocus<HTMLDivElement>(moreOpen, () => setMoreOpen(false));
   const [pinnedPaths, setPinnedPaths] = useState(() => readMobileNavPaths(user?.is_admin ?? false));
   const navRef = useRef<HTMLElement>(null);
   usePublishBottomBarHeight(navRef);
@@ -74,7 +76,11 @@ const BottomNav = () => {
               setMoreOpen(false);
             }}
           />
-          <div className="relative w-full max-w-lg mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)]">
+          <div
+            ref={moreSheetRef}
+            tabIndex={-1}
+            className="relative w-full max-w-lg mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)] outline-none"
+          >
             <div className="flex items-center justify-between px-2 pb-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">More</span>
               <button

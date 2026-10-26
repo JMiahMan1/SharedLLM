@@ -12,6 +12,7 @@ import { useClearedAt, useDismissed, newerThan } from '../../lib/clearedAt';
 import SwipeToDismiss from '../ui/SwipeToDismiss';
 import UserAvatar from '../UserAvatar';
 import { navPagesFor } from './navItems';
+import { useDialogFocus } from '../../lib/focusTrap';
 
 // Navigation search index: the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
@@ -49,6 +50,7 @@ const Header = () => {
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const profileMenuRef = useDialogFocus<HTMLDivElement>(profileOpen, () => setProfileOpen(false));
   const [showNotifications, setShowNotifications] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -293,10 +295,12 @@ const Header = () => {
 
             {profileOpen && (
               <div
+                ref={profileMenuRef}
+                tabIndex={-1}
                 role="menu"
                 aria-label="Account menu"
                 data-testid="profile-menu"
-                className="absolute right-0 mt-2 w-60 glass-menu p-1.5 rounded-2xl z-50"
+                className="absolute right-0 mt-2 w-60 glass-menu p-1.5 rounded-2xl z-50 outline-none"
               >
                 <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-white/5 mb-1">
                   <UserAvatar

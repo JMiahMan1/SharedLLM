@@ -1,6 +1,7 @@
-import { FC, ReactNode, useEffect } from 'react';
+import { FC, ReactNode, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { focusableIn, trapTab } from '../../lib/focusTrap';
 
 interface ModalProps {
   isOpen: boolean;
@@ -39,11 +40,31 @@ const SIZE_MAP: Record<string, string> = {
  */
 const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size, fullScreen = false }) => {
   const maxWClass = SIZE_MAP[size || ''] || 'max-w-2xl';
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Callers pass an inline arrow, so `onClose` is a new function every render.
+  // Depending on it re-ran this effect on each keystroke, and the cleanup then
+  // restored focus to whatever was focused before the dialog opened - so a
+  // text field inside a dialog kept only its first character.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
+    // `role="dialog" aria-modal="true"` promises a modal: focus has to move in
+    // on open, Tab has to stay inside, and focus has to come back on close.
+    // Without this, Tab walked into the page behind the overlay.
+    const restoreTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const first = focusableIn(panelRef.current)[0];
+    (first ?? panelRef.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        closeRef.current();
+        return;
+      }
+      trapTab(e, panelRef.current);
     };
     document.addEventListener('keydown', onKey);
     const previousOverflow = document.body.style.overflow;
@@ -51,8 +72,9 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size, fullScr
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
+      restoreTo?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   return (
     <AnimatePresence>
@@ -67,6 +89,8 @@ const Modal: FC<ModalProps> = ({ isOpen, onClose, title, children, size, fullScr
             className="absolute inset-0 bg-black/70 backdrop-blur-md"
           />
           <motion.div
+            ref={panelRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label={title}
