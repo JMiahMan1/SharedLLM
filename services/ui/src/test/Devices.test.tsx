@@ -5,6 +5,11 @@ import toast from 'react-hot-toast';
 import Devices from '../pages/Devices';
 import { renderWithProviders } from './render';
 import { server } from './setup';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 vi.mock('react-hot-toast', () => {
   const toast = vi.fn();
@@ -145,13 +150,12 @@ describe('Devices page', () => {
   });
 
   it('gates the remote wipe behind a confirmation', async () => {
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirm);
+    confirmMock.mockResolvedValue(false);
     renderWithProviders(<Devices />);
     fireEvent.click(await screen.findByTestId('mdm-wipe-kid-phone-0001'));
-    expect(confirm).toHaveBeenCalled();
+    expect(confirmMock).toHaveBeenCalled();
     expect(wiped).toEqual([]);
-    confirm.mockReturnValue(true);
+    confirmMock.mockResolvedValue(true);
     fireEvent.click(screen.getByTestId('mdm-wipe-kid-phone-0001'));
     await waitFor(() => expect(wiped).toEqual(['kid-phone-0001']));
     vi.unstubAllGlobals();

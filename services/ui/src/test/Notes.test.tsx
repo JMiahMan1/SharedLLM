@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
 import { EMPTY_NOTES_INDEX, readNotesSnapshot, writeNotesSnapshot } from '../lib/notesMeta';
 import { renderWithProviders } from './render';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 import {
   notesCheckOffCalls,
   notesDuplicateCalls,
@@ -345,7 +350,7 @@ describe('Notes (Keep-style)', () => {
 
   it('empties the trash after a confirmation', async () => {
     const user = userEvent.setup();
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMock.mockResolvedValue(true);
     renderWithProviders(<Notes />);
 
     await screen.findByText('Trip ideas');

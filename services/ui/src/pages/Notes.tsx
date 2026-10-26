@@ -46,6 +46,7 @@ import { showUndoToast } from '../lib/undoToast';
 import { isTypingTarget } from '../lib/keyboard';
 import { clearNoteDraft, readNoteDraft, readNoteDrafts, writeNoteDraft, type NoteDraft } from '../lib/noteDrafts';
 import { deviceOnline, isOfflineError, replayQueuedDrafts } from '../lib/noteOutbox';
+import { confirmDialog } from '../components/ui/confirmDialog';
 import {
   ARCHIVE_PREFIX,
   EMPTY_NOTES_INDEX,
@@ -1020,7 +1021,12 @@ export default function Notes() {
   };
 
   const destroyNote = async (note: NoteSummary) => {
-    if (!window.confirm(`Permanently delete "${note.title}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({
+      title: 'Delete this note for good?',
+      body: `Permanently delete "${note.title}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    }))) return;
     try {
       const res = await api.deleteNote(note.title, STORAGE, note.path, asUser);
       if (res.status !== 'SUCCESS') {
@@ -1038,7 +1044,12 @@ export default function Notes() {
   };
 
   const emptyTrash = async () => {
-    if (!window.confirm(`Permanently delete all ${trashedNotes.length} notes in the trash?`)) return;
+    if (!(await confirmDialog({
+      title: 'Empty the trash?',
+      body: `Permanently delete all ${trashedNotes.length} notes in the trash? This cannot be undone.`,
+      confirmLabel: 'Empty trash',
+      danger: true,
+    }))) return;
     try {
       const res = await api.emptyNotesTrash({ storage: STORAGE, as_user: asUser });
       if (res.status !== 'SUCCESS') {

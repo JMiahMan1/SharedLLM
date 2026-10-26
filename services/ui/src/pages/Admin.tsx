@@ -73,6 +73,7 @@ import StarBalance from '../components/wander/StarBalance';
 import BibleAdminPanel from '../components/admin/BibleAdminPanel';
 import NetworkPanel from '../components/admin/NetworkPanel';
 import SystemStoragePanel from '../components/admin/SystemStoragePanel';
+import { confirmDialog } from '../components/ui/confirmDialog';
 
 type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'storage' | 'network' | 'intercom' | 'raven' | 'settings' | 'database' | 'services' | 'bible';
 
@@ -775,8 +776,13 @@ const Admin = () => {
                       </button>
                       {!user.is_system_default && (
                         <button
-                          onClick={() => {
-                            if (window.confirm(`Delete ${user.full_name || user.username}? Their account and saved logins are removed.`)) {
+                          onClick={async () => {
+                            if (await confirmDialog({
+                              title: 'Delete this account?',
+                              body: `Delete ${user.full_name || user.username}? Their account and saved logins are removed.`,
+                              confirmLabel: 'Delete',
+                              danger: true,
+                            })) {
                               deleteUserMutation.mutate(user.username);
                             }
                           }}
