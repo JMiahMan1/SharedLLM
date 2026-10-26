@@ -147,13 +147,38 @@ jobs:
         fi
         VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
         set -o pipefail
-        HTTP=$(curl -sS --max-time 300 -o publish-response.json -w '%{http_code}' \
-          -H "X-Internal-Secret: $INTERNAL_SECRET" \
-          -F "apk=@$APK_PATH" \
-          -F "version=$VERSION" \
-          -F "git_sha=$GIT_SHA" \
-          -F "release_notes=Android build ${GIT_SHA:0:8}" \
-          "$PUBLISH_URL") || HTTP="000"
+        # The APK is published right after the image build finishes, which is
+        # exactly when a deploy recreates the gateway - so the publish can land
+        # on a gateway that is mid-restart and answer 502/503/504. Measured
+        # 2026-10-26: build bd5a9dc9 published at 14:04:35Z, got HTTP 502, and
+        # the deploy that had started at 14:00 finished restarting the gateway
+        # at 14:04:44Z - nine seconds later. Retry the transient statuses
+        # instead of throwing the whole build away.
+        HTTP=""
+        for attempt in 1 2 3 4 5; do
+          HTTP=$(curl -sS --max-time 300 -o publish-response.json -w '%{http_code}' \
+            -H "X-Internal-Secret: $INTERNAL_SECRET" \
+            -F "apk=@$APK_PATH" \
+            -F "version=$VERSION" \
+            -F "git_sha=$GIT_SHA" \
+            -F "release_notes=Android build ${GIT_SHA:0:8}" \
+            "$PUBLISH_URL") || HTTP="000"
+          if [ "$HTTP" = "200" ]; then
+            break
+          fi
+          case "$HTTP" in
+            000|502|503|504)
+              if [ "$attempt" = "5" ]; then
+                break
+              fi
+              echo "::warning::Publish attempt $attempt got HTTP $HTTP (the server is probably restarting); retrying in $((attempt * 15))s."
+              sleep $((attempt * 15))
+              ;;
+            *)
+              break
+              ;;
+          esac
+        done
         cat publish-response.json 2>/dev/null || true
         echo
         if [ "$HTTP" = "413" ]; then
