@@ -390,15 +390,20 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    `docker-compose.yml`), and the three data directories that were root-owned on the host
    (`data/health`, `data/bible`, `data/storage`) were chowned to match - identity holds the family's
    accounts and the Fernet-encrypted credentials, so it was the one that mattered most.
+8. The base image was built from a moving tag, so the same commit could produce a different image on
+   a different day. `docker/Dockerfile.base` now pins the multi-arch index digest of
+   `python:3.11-slim`, which fixes the interpreter and the system libraries while leaving both
+   architectures resolvable.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
 (`services/common/logging_utils.py`'s `warn_periodically`, used by execution's media-player
 discovery and geo's zone cache).
 
-**Open, should fix before merge.** Dependencies and the base image are mostly unpinned, so rebuilding
-the same commit does not produce the same image (a deploy still rolls back by image ID, so this is a
-reproducibility gap rather than a rollback one); the background worker starts seven loops in-process,
+**Open, should fix before merge.** The base image's Python packages and apt tools are still installed
+unpinned (the `FROM` line itself is now digest-pinned, so the interpreter and system libraries cannot
+drift, but the ~35 pip packages can - pinning those needs a constraints file generated from a
+known-good build, not a blind edit); the background worker starts seven loops in-process,
 so a second replica would double-post bot replies and alerts; a dozen pieces of state live only in
 memory; and rag, telemetry, geo, logging, ui, dns and caddy still run as root, because their data
 lives in root-owned named volumes.
