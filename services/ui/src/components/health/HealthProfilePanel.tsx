@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, HeartPulse, LayoutGrid, Loader2, Save, Scale, Share2, UserRound, X } from 'lucide-react';
+import { Download, HeartPulse, LayoutGrid, Loader2, Save, Scale, Share2, Trash2, UserRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
+import { errorText } from '../../lib/errorText';
+import { confirmDialog } from '../ui/confirmDialog';
 import { isKidMode } from '../../lib/healthSwitches';
 import { Toggle } from '../ui/Toggle';
 import type { HealthMetricSwitch, HealthProfile, HealthShare } from '../../types/api';
@@ -22,6 +24,28 @@ const GOAL_OPTIONS: Array<[HealthProfile['goal'], string]> = [
   ['gain', 'Gain'],
   ['balance', 'Balance (kids)'],
 ];
+
+/**
+ * Every measure the summary returns, and what to call it.
+ *
+ * A watch or Health Connect writes body fat, HRV and SpO2 into the same
+ * history as weight, so they are shown the same way rather than only two of
+ * them being visible.
+ */
+const MEASURE_LABELS: Record<string, string> = {
+  weight: 'Weight',
+  body_fat: 'Body fat',
+  resting_hr: 'Resting heart rate',
+  hrv: 'HRV',
+  spo2: 'Oxygen (SpO2)',
+};
+
+/** One decimal for the two that come in halves, whole numbers for the rest. */
+const MEASURE_DECIMALS: Record<string, number> = { weight: 1, body_fat: 1 };
+
+function formatMeasure(metric: string, value: number, unit: string): string {
+  return `${value.toFixed(MEASURE_DECIMALS[metric] ?? 0)} ${unit}`;
+}
 
 function Field({
   label,
@@ -94,6 +118,7 @@ export default function HealthProfilePanel() {
   const [restingHr, setRestingHr] = useState('');
   const [shareViewer, setShareViewer] = useState('');
   const [shareScope, setShareScope] = useState<HealthShare['scope']>('sleep');
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const profileQuery = useQuery({
     queryKey: ['health-profile'],
@@ -112,6 +137,11 @@ export default function HealthProfilePanel() {
     queryKey: ['family-directory'],
     queryFn: () => api.getFamilyDirectory(),
     staleTime: 300_000,
+  });
+  const historyQuery = useQuery({
+    queryKey: ['health-metric-history', historyFor],
+    queryFn: () => api.getHealthMetrics(historyFor as string, 30),
+    enabled: Boolean(historyFor),
   });
 
   const profile = profileQuery.data;
@@ -197,10 +227,35 @@ export default function HealthProfilePanel() {
     onError: (error: Error) => toast.error(error.message || 'Could not change that card'),
   });
 
+  const deleteMetric = useMutation({
+    mutationFn: (sampleId: number) => api.deleteHealthMetric(sampleId),
+    onSuccess: () => {
+      toast.success('Reading removed');
+      void queryClient.invalidateQueries({ queryKey: ['health-metric-history'] });
+      void queryClient.invalidateQueries({ queryKey: ['health-summary'] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not remove that reading'),
+  });
+
+  // A mistyped reading used to be permanent: the delete route existed and
+  // nothing in the app called it.
+  const removeReading = async (sampleId: number) => {
+    const ok = await confirmDialog({
+      title: 'Delete this reading?',
+      body: 'It is removed from the history for good. A device import can add it again.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (ok) deleteMetric.mutate(sampleId);
+  };
+
   // Kid mode as saved, not as half-edited: hiding follows the stored profile.
   const kid = isKidMode(profile);
-  const latestWeight = summaryQuery.data?.metrics.weight;
-  const latestRhr = summaryQuery.data?.metrics.resting_hr;
+  // Whatever the summary has a reading for, in the order the service sends it.
+  // Weight stays hidden in kid mode, as the rest of the panel does.
+  const measures = Object.entries(summaryQuery.data?.metrics ?? {}).filter(
+    ([key]) => MEASURE_LABELS[key] && !(kid && key === 'weight'),
+  );
   const shares = sharesQuery.data?.shares ?? [];
   const me = profile?.user_id ?? '';
   const family = (familyQuery.data ?? []).filter((member) => member.username.toLowerCase() !== me);
@@ -421,35 +476,107 @@ export default function HealthProfilePanel() {
           <Scale size={13} className="text-emerald-300" />
           Measurements
         </h3>
-        <div className="mt-2 grid grid-cols-2 gap-3">
-          {!kid && (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">Weight</p>
-              <p className="mt-0.5 text-sm font-semibold text-white">
-                {latestWeight ? `${latestWeight.value.toFixed(1)} ${latestWeight.unit}` : 'No reading'}
-              </p>
-              {latestWeight && (
-                <p className="text-[10px] text-slate-500">
-                  {formatDayLabel(latestWeight.recorded_at.slice(0, 10))} · {latestWeight.source}
-                </p>
-              )}
-            </div>
-          )}
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Resting heart rate</p>
-            <p className="mt-0.5 text-sm font-semibold text-white">
-              {latestRhr ? `${Math.round(latestRhr.value)} bpm` : 'No reading'}
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {measures.length === 0 && (
+            <p className="col-span-full text-xs text-slate-500">
+              No readings yet. Log one below, or import from a watch or Health Connect.
             </p>
-            {latestRhr && (
+          )}
+          {measures.map(([key, sample]) => (
+            <div key={key}>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">{MEASURE_LABELS[key]}</p>
+              <p className="mt-0.5 text-sm font-semibold text-white">
+                {formatMeasure(key, sample.value, sample.unit)}
+              </p>
               <p className="text-[10px] text-slate-500">
-                {formatDayLabel(latestRhr.recorded_at.slice(0, 10))} · {latestRhr.source}
-                {summaryQuery.data?.resting_hr_baseline
+                {formatDayLabel(sample.recorded_at.slice(0, 10))} · {sample.source}
+                {key === 'resting_hr' && summaryQuery.data?.resting_hr_baseline
                   ? ` · baseline ${Math.round(summaryQuery.data.resting_hr_baseline)} bpm`
                   : ''}
               </p>
+              <button
+                type="button"
+                onClick={() => setHistoryFor(historyFor === key ? null : key)}
+                aria-expanded={historyFor === key}
+                className="mt-1 text-[10px] font-semibold text-sky-300 underline hover:text-sky-200"
+              >
+                {historyFor === key ? 'Hide history' : 'History'}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {historyFor && (
+          <div
+            className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+            data-testid="measure-history"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold text-slate-300">
+                {MEASURE_LABELS[historyFor]} history
+              </p>
+              <button
+                type="button"
+                onClick={() => setHistoryFor(null)}
+                aria-label="Close history"
+                className="text-slate-500 hover:text-slate-300"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {historyQuery.isLoading && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+                <Loader2 size={12} className="animate-spin" /> Loading readings…
+              </p>
+            )}
+            {historyQuery.isError && (
+              <div className="mt-2">
+                <p className="text-xs text-amber-200">
+                  {errorText(historyQuery.error, 'Could not load the history')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void historyQuery.refetch()}
+                  className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {historyQuery.data && historyQuery.data.samples.length === 0 && (
+              <p className="mt-2 text-xs text-slate-500">No readings in the last 30 days.</p>
+            )}
+            {historyQuery.data && historyQuery.data.samples.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {historyQuery.data.samples.map((sample) => (
+                  <li
+                    key={sample.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-2 py-1 text-xs text-slate-300"
+                  >
+                    <span className="tabular-nums">
+                      {formatMeasure(historyFor, sample.value, sample.unit)}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {formatDayLabel(sample.recorded_at.slice(0, 10))} · {sample.source}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void removeReading(sample.id)}
+                      disabled={deleteMetric.isPending}
+                      aria-label={`Delete the ${formatMeasure(historyFor, sample.value, sample.unit)} reading`}
+                      className="text-slate-500 hover:text-red-300 disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {historyQuery.data?.truncated && (
+              <p className="mt-2 text-[10px] text-slate-500">Showing the newest readings only.</p>
             )}
           </div>
-        </div>
+        )}
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
           {!kid && (

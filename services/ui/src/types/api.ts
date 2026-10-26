@@ -1906,6 +1906,9 @@ export interface HealthMetricHistory {
   days: number;
   samples: HealthMetricSample[];
   latest: HealthMetricSample | null;
+  /** The read is capped; `truncated` says there was more than the cap. */
+  limit?: number;
+  truncated?: boolean;
 }
 
 /** A child's week for their parents (Phase 11 step 6), built from what was reported. */
