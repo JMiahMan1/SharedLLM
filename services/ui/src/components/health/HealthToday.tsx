@@ -34,6 +34,7 @@ import SharedWithYouCard from './SharedWithYouCard';
 import MealsCard from './MealsCard';
 import ShareToChatSheet from '../bible/ShareToChatSheet';
 import { healthDayLines, healthDayShareText } from '../../lib/healthShare';
+import { errorText } from '../../lib/errorText';
 
 interface Props {
   onNavigate: (tab: HealthTab) => void;
@@ -500,12 +501,31 @@ export default function HealthToday({ onNavigate }: Props) {
               </h3>
               <span className="text-[10px] text-slate-500">from your phone</span>
             </div>
-            <p className="mt-2 text-2xl font-bold text-white">
-              {steps.hasData ? steps.today.toLocaleString() : 'No reading yet'}
-            </p>
-            <p className="text-[11px] text-slate-500">
-              {steps.hasData ? `of ${steps.goal.toLocaleString()} goal` : 'Open the app on your phone to sync'}
-            </p>
+            {stepsQuery.isError ? (
+              // "No reading yet" is a claim about the phone. A failed fetch is
+              // not that: the number is unknown, and the person can retry.
+              <>
+                <p className="mt-2 text-xs text-amber-200">
+                  {errorText(stepsQuery.error, 'Could not load your steps')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void stepsQuery.refetch()}
+                  className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+                >
+                  Try again
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-2xl font-bold text-white">
+                  {steps.hasData ? steps.today.toLocaleString() : 'No reading yet'}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {steps.hasData ? `of ${steps.goal.toLocaleString()} goal` : 'Open the app on your phone to sync'}
+                </p>
+              </>
+            )}
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.06]">
               <div
                 className="h-full rounded-full bg-purple-500"
@@ -564,7 +584,11 @@ export default function HealthToday({ onNavigate }: Props) {
         </section>
       )}
 
-      <SharedWithYouCard people={familyQuery.data?.people ?? []} />
+      <SharedWithYouCard
+        people={familyQuery.data?.people ?? []}
+        error={familyQuery.isError ? errorText(familyQuery.error, 'Could not load what your family shared') : null}
+        onRetry={() => void familyQuery.refetch()}
+      />
     </div>
   );
 }

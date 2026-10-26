@@ -68,3 +68,22 @@ describe('DigitalWellbeingCard', () => {
     expect(await screen.findByTestId('digital-wellbeing-empty')).toHaveTextContent('No phone use reported today');
   });
 });
+
+describe('DigitalWellbeingCard week axis', () => {
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  it('labels each week bar with the day it stands for', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000);
+    vi.mocked(api.getUsage).mockResolvedValue({
+      status: 'SUCCESS',
+      days: [day(), day({ day: iso(yesterday), millis: 30 * 60000 })],
+    });
+    renderCard();
+    const chart = await screen.findByLabelText('Screen time this week');
+    // The bars used to carry no axis at all, so a taller bar meant nothing.
+    const labels = Array.from(chart.querySelectorAll('span')).map((span) => span.textContent?.trim());
+    expect(labels).toHaveLength(2);
+    expect(labels.every((label) => label && label.length > 0)).toBe(true);
+  });
+});

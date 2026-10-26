@@ -1963,16 +1963,6 @@ export const api = {
     return resp.data;
   },
 
-  async getCheckins(days = 14): Promise<{ user_id: string; checkins: HealthCheckin[] }> {
-    const resp = await apiClient.get(`/api/health/checkins?days=${days}`);
-    return resp.data;
-  },
-
-  async getCheckin(day: string): Promise<{ checkin: HealthCheckin | null }> {
-    const resp = await apiClient.get(`/api/health/checkins/${encodeURIComponent(day)}`);
-    return resp.data;
-  },
-
   async saveCheckin(
     day: string,
     body: { energy?: number; mood?: number; soreness?: number; stress?: number; note?: string },
