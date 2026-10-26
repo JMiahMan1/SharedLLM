@@ -37,6 +37,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.concurrency import run_in_threadpool
 
 from services.bible import achievements as ach
+from services.common.secrets import secret_matches
 from services.bible import (
     blb_links,
     book_import,
@@ -102,9 +103,10 @@ DEFAULT_DATABASE_URL = "sqlite:////data/bible.db"
 
 
 def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
-    if not INTERNAL_SECRET:
-        return True
-    return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
+    # Constant-time, and closed when the secret is unset. This used to return
+    # True for every caller when INTERNAL_SECRET was empty, which made the
+    # service open to anything that could reach its port.
+    return secret_matches(header_secret, INTERNAL_SECRET) or secret_matches(query_secret, INTERNAL_SECRET)
 
 
 @asynccontextmanager

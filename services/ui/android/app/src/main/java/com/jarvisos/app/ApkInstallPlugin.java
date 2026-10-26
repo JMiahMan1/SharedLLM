@@ -44,6 +44,31 @@ public class ApkInstallPlugin extends Plugin {
     }
 
     /**
+     * Whether an update URL points at the household's own Jarvis server.
+     *
+     * The download URL arrives from the web bundle, so a rogue or
+     * machine-in-the-middle response could point it anywhere. The host must
+     * match the server this phone is configured for. Only the host is compared,
+     * so a different port or scheme on the household's own server still works.
+     */
+    private static boolean isTrustedUpdateUrl(Context context, String url) {
+        try {
+            String configured = context
+                .getSharedPreferences(TokenBridgePlugin.PREFS, Context.MODE_PRIVATE)
+                .getString(TokenBridgePlugin.KEY_SERVER_URL, null);
+            if (configured == null || configured.isEmpty()) {
+                return false;
+            }
+            String wanted = new URL(configured).getHost();
+            String offered = new URL(url).getHost();
+            return wanted != null && !wanted.isEmpty() && wanted.equalsIgnoreCase(offered);
+        } catch (Exception e) {
+            Log.w(TAG, "Refusing an update URL we cannot parse", e);
+            return false;
+        }
+    }
+
+    /**
      * Stream the APK to the cache, reporting progress, then verify it against
      * the server-supplied SHA-256. Resolves only for a verified file.
      */
@@ -59,6 +84,10 @@ public class ApkInstallPlugin extends Plugin {
             // Installing an APK we cannot authenticate would make the digest
             // check decorative, so this is a hard stop rather than a warning.
             call.reject("A valid sha256 is required to install an update");
+            return;
+        }
+        if (!isTrustedUpdateUrl(getContext(), url)) {
+            call.reject("That update is not from your Jarvis server");
             return;
         }
         final Activity activity = getActivity();
@@ -322,6 +351,10 @@ public class ApkInstallPlugin extends Plugin {
                 return;
             }
             File out = new File(dir, APK_FILE);
+            if (!isTrustedUpdateUrl(context, url)) {
+                cb.onDone(null, new Exception("That update is not from your Jarvis server"));
+                return;
+            }
             conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(60000);

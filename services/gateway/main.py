@@ -3844,12 +3844,33 @@ async def chat_handler(request: Request, background_tasks=None):
         }
     )
 
+async def _require_job_owner(request: Request, job_id: str) -> None:
+    """401/403 unless the caller owns this inference job.
+
+    ``job_id`` is a short random string and the completion carries the model's
+    full answer - including any RAG context from the family's own data - so
+    guessing one must not be enough to read it. Admins may read any job.
+    """
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Inference queue not available")
+    job = await job_queue.get_job_status(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not ident.get("is_admin") and job.get("user_id") != ident.get("user"):
+        raise HTTPException(status_code=403, detail="That is not your job")
+
+
 @app.get("/api/chat/stream/{job_id}")
-async def stream_chat_job(job_id: str):
+async def stream_chat_job(job_id: str, request: Request):
     """
     SSE endpoint for real-time job completion updates.
     The UI subscribes to this to receive the final Markdown once Raven finishes.
     """
+    await _require_job_owner(request, job_id)
+
     async def event_generator():
         import redis.asyncio as redis
 
@@ -3907,13 +3928,19 @@ async def stream_chat_job(job_id: str):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/api/chat/job/{job_id}")
-async def get_chat_job_status(job_id: str):
+async def get_chat_job_status(job_id: str, request: Request):
     """Checks the status of an inference job."""
     if job_queue is None:
         raise HTTPException(status_code=503, detail="Inference queue not available")
     job = await job_queue.get_job_status(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not ident.get("is_admin") and job.get("user_id") != ident.get("user"):
+        raise HTTPException(status_code=403, detail="That is not your job")
 
     if job["status"] == JobStatus.COMPLETED:
         result = job["result"]
@@ -4880,7 +4907,7 @@ async def proxy_groups(path: str, request: Request):
 # --- Telemetry Monitoring ---
 @app.get("/api/telemetry/enroll")
 async def proxy_list_telemetry_enrollments(request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -4891,7 +4918,7 @@ async def proxy_list_telemetry_enrollments(request: Request):
 
 @app.post("/api/telemetry/enroll")
 async def proxy_enroll_telemetry(request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -4906,7 +4933,7 @@ async def proxy_enroll_telemetry(request: Request):
 @app.post("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
     """Path-based enrollment used by the UI (enrollTelemetry(entityId, config))."""
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     try:
         body = await request.json()
     except Exception:
@@ -4923,7 +4950,7 @@ async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
 
 @app.delete("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_unenroll_telemetry(entity_id: str, request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.delete(
@@ -4934,7 +4961,7 @@ async def proxy_unenroll_telemetry(entity_id: str, request: Request):
 
 @app.post("/api/telemetry/analyze")
 async def proxy_trigger_telemetry_analysis(request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -4947,7 +4974,7 @@ async def proxy_trigger_telemetry_analysis(request: Request):
 
 @app.get("/api/telemetry/summary/{entity_id:path}")
 async def proxy_get_telemetry_summary(entity_id: str, request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -4958,7 +4985,7 @@ async def proxy_get_telemetry_summary(entity_id: str, request: Request):
 
 @app.get("/api/telemetry/data/{entity_id:path}")
 async def proxy_get_telemetry_data(entity_id: str, request: Request, hours: int | None = None):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"hours": hours} if hours else None
     async with borrow_http_client() as client:
@@ -4971,7 +4998,7 @@ async def proxy_get_telemetry_data(entity_id: str, request: Request, hours: int 
 
 @app.post("/api/telemetry/snapshot")
 async def proxy_ingest_telemetry_snapshot(request: Request):
-    await _resolve_identity_from_request(request)
+    await _require_admin(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -4985,6 +5012,7 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
 @app.post("/api/telemetry/snapshot/{entity_id:path}")
 async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
     """Trigger a manual snapshot for a specific entity (UI calls this for instant updates)."""
+    await _require_admin(request)
     creds = await _resolve_identity_from_request(request)
     ha_url = creds.get("ha_url") if creds else None
     ha_token = creds.get("ha_token") if creds else None
@@ -6988,6 +7016,11 @@ async def proxy_vote_talk_poll(request: Request):
 
 @app.post("/api/generate")
 async def proxy_generate(request: Request):
+    # Verified key only: this spends the household's GPU, and the old
+    # presence check let any non-empty string through (see
+    # ``_sd_request_authorized``).
+    if not await _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
         body = await request.json()
         settings = await get_all_settings()
@@ -8923,6 +8956,7 @@ async def delete_raven_learning(doc_id: str, request: Request):
 
 @app.post("/api/admin/tests/smoke")
 async def proxy_smoke_test(request: Request):
+    await _require_admin(request)
     client = get_http_client()
     resp = await client.post(
         f"{WORKSPACE_RUNTIME_SVC}/api/admin/tests/smoke",
@@ -8934,6 +8968,7 @@ async def proxy_smoke_test(request: Request):
 
 @app.post("/api/admin/tests/unit")
 async def proxy_unit_tests(request: Request):
+    await _require_admin(request)
     client = get_http_client()
     resp = await client.post(
         f"{WORKSPACE_RUNTIME_SVC}/api/admin/tests/unit",
@@ -9291,6 +9326,7 @@ async def get_service_logs(service_name: str, request: Request, tail: int = 100)
 @app.get("/api/models")
 async def list_models(request: Request):
     """List available models from the active provider."""
+    await _require_identity_from_request(request)
     settings = await get_llm_settings()
     provider = await get_provider(settings)
 
@@ -9323,6 +9359,7 @@ async def list_models(request: Request):
 @app.post("/api/models/switch")
 async def switch_model(request: Request):
     """Switch to a different model by loading it (unloads current if needed)."""
+    await _require_admin(request)
     body = await request.json()
     model = body.get("model") if body else None
     if not model:
@@ -9358,6 +9395,7 @@ async def switch_model(request: Request):
 @app.post("/api/models/unload")
 async def unload_model(request: Request):
     """Unload a model from Ollama."""
+    await _require_admin(request)
     body = await request.json()
     model = body.get("model") if body else None
 
@@ -10236,9 +10274,19 @@ async def get_user_missions(request: Request):
 
 @app.patch("/api/raven/missions/{id_or_slug}")
 async def update_mission_status(id_or_slug: str, body: dict[str, Any], request: Request):
+    """Admin only: mission state is written by the runner, not by clients.
+
+    This used to check only that the caller was signed in, then forward an
+    arbitrary body to Identity (whose ``RavenMissionUpdate`` accepts status,
+    result, user_id and workspace_id), so any member could rewrite another
+    member's mission -- including missions that run code with the family's
+    GitHub token. Nothing in the UI calls this route.
+    """
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
 
     async with borrow_http_client() as client:
         resp = await client.patch(
@@ -10408,8 +10456,9 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
 # ---- Config Endpoints ----
 
 @app.get("/api/config/status")
-async def get_config_status():
+async def get_config_status(request: Request):
     """Return detailed configuration validation status."""
+    await _require_identity_from_request(request)
     global _config_validation_result
     if not _config_validation_result:
         # Re-validate on demand if not yet run
@@ -10432,7 +10481,7 @@ async def get_config_status():
 
 
 @app.get("/api/config/models")
-async def get_ollama_models():
+async def get_ollama_models(request: Request):
     """List locally-available models from the configured Ollama/model server.
 
     Tries both the native Ollama `/api/tags` endpoint and the OpenAI-compatible
@@ -10440,6 +10489,7 @@ async def get_ollama_models():
     then merges and de-duplicates the results so the Local Model Mapping is never
     empty simply because one endpoint shape was assumed.
     """
+    await _require_identity_from_request(request)
     try:
         settings = await get_all_settings()
         ollama_url = _get(settings, "llm_local_url")
@@ -10489,7 +10539,8 @@ async def get_ollama_models():
         return {"status": "ERROR", "message": str(e), "models": []}
 
 @app.get("/api/config")
-async def get_gateway_config():
+async def get_gateway_config(request: Request):
+    await _require_identity_from_request(request)
     # Fetch all three model settings from Identity Service to ensure UI is in sync
     assistant = await get_assistant_model()
     coding = await get_coding_model()
@@ -10506,7 +10557,9 @@ async def get_gateway_config():
     }
 
 @app.post("/api/config")
-async def update_gateway_config(new_config: dict):
+async def update_gateway_config(request: Request, new_config: dict):
+    # Admin only: this rewrites the household's global model settings.
+    await _require_admin(request)
     # Save the new configuration to the Identity Service GlobalSettings
     async with shared_http_client() as client:
         for key in ["assistant_model", "coding_model", "librarian_model"]:
@@ -10742,8 +10795,13 @@ def _hostname_for_id(mappings: dict, record_id: int) -> str | None:
 
 
 @app.get("/api/dns")
-async def ui_list_dns_records():
-    """List DNS records in the shape the UI's DnsManagementPanel expects."""
+async def ui_list_dns_records(request: Request):
+    """List DNS records in the shape the UI's DnsManagementPanel expects.
+
+    Admin only: these mappings are the household resolver's source of truth,
+    and ``/api/*`` is reachable from the internet through Caddy.
+    """
+    await _require_admin(request)
     mappings = await _load_dns_mappings()
     return [_record_from(h, mappings[h]) for h in sorted(mappings)]
 
@@ -10751,6 +10809,7 @@ async def ui_list_dns_records():
 @app.post("/api/dns")
 async def ui_create_dns_record(request: Request):
     """Create a DNS record from the UI's rich schema."""
+    await _require_admin(request)
     body = await request.json()
     domain = (body.get("domain") or "").strip()
     values = body.get("values") or []
@@ -10776,6 +10835,7 @@ async def ui_create_dns_record(request: Request):
 @app.put("/api/dns/{record_id:int}")
 async def ui_update_dns_record(record_id: int, request: Request):
     """Update a DNS record identified by the UI's numeric id."""
+    await _require_admin(request)
     mappings = await _load_dns_mappings()
     hostname = _hostname_for_id(mappings, record_id)
     if not hostname:
@@ -10809,8 +10869,9 @@ async def ui_update_dns_record(record_id: int, request: Request):
 
 
 @app.delete("/api/dns/{record_id:int}")
-async def ui_delete_dns_record(record_id: int):
+async def ui_delete_dns_record(record_id: int, request: Request):
     """Delete a DNS record identified by the UI's numeric id."""
+    await _require_admin(request)
     mappings = await _load_dns_mappings()
     hostname = _hostname_for_id(mappings, record_id)
     if not hostname:
@@ -11023,7 +11084,8 @@ async def get_user_location(user_id: str, request: Request):
 # --- Life360 & Vehicle Telemetry Endpoints ---
 
 @app.get("/api/geo/vehicles")
-async def get_geo_vehicles():
+async def get_geo_vehicles(request: Request):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicles",
@@ -11037,6 +11099,7 @@ async def get_geo_vehicles():
 
 @app.post("/api/geo/vehicles")
 async def save_geo_vehicle(request: Request):
+    await _require_admin(request)
     body = await request.json()
     async with shared_http_client() as client:
         resp = await client.post(
@@ -11053,7 +11116,8 @@ async def save_geo_vehicle(request: Request):
 
 
 @app.delete("/api/geo/vehicles/{vehicle_id}")
-async def delete_geo_vehicle(vehicle_id: str):
+async def delete_geo_vehicle(request: Request, vehicle_id: str):
+    await _require_admin(request)
     async with shared_http_client() as client:
         resp = await client.delete(
             f"{GEO_SVC}/vehicles/{vehicle_id}",
@@ -11068,7 +11132,12 @@ async def delete_geo_vehicle(vehicle_id: str):
 
 
 @app.get("/api/geo/vehicles/assigned/{user_id}")
-async def get_geo_assigned_vehicle(user_id: str):
+async def get_geo_assigned_vehicle(request: Request, user_id: str):
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user_id != ident["user"] and not ident.get("is_admin"):
+        raise HTTPException(status_code=403, detail="That is not your vehicle")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicles/assigned/{user_id}",
@@ -11082,6 +11151,7 @@ async def get_geo_assigned_vehicle(user_id: str):
 
 @app.post("/api/geo/vehicles/assign")
 async def assign_geo_vehicle(request: Request):
+    await _require_admin(request)
     body = await request.json()
     async with shared_http_client() as client:
         resp = await client.post(
@@ -11098,8 +11168,9 @@ async def assign_geo_vehicle(request: Request):
 
 
 @app.get("/api/geo/fuel-prices")
-async def get_fuel_prices(location: str = ""):
+async def get_fuel_prices(request: Request, location: str = ""):
     """Proxy fuel price lookup to geo service."""
+    await _require_identity_from_request(request)
     if not location:
         raise HTTPException(status_code=400, detail="location parameter is required")
     async with shared_http_client() as client:
@@ -11117,7 +11188,8 @@ async def get_fuel_prices(location: str = ""):
 
 
 @app.get("/api/geo/vehicle-lookup/years")
-async def vehicle_lookup_years():
+async def vehicle_lookup_years(request: Request):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/years",
@@ -11129,7 +11201,8 @@ async def vehicle_lookup_years():
 
 
 @app.get("/api/geo/vehicle-lookup/makes")
-async def vehicle_lookup_makes(year: int = 0):
+async def vehicle_lookup_makes(request: Request, year: int = 0):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/makes",
@@ -11142,7 +11215,8 @@ async def vehicle_lookup_makes(year: int = 0):
 
 
 @app.get("/api/geo/vehicle-lookup/models")
-async def vehicle_lookup_models(year: int = 0, make: str = ""):
+async def vehicle_lookup_models(request: Request, year: int = 0, make: str = ""):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/models",
@@ -11155,7 +11229,8 @@ async def vehicle_lookup_models(year: int = 0, make: str = ""):
 
 
 @app.get("/api/geo/vehicle-lookup/options")
-async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = ""):
+async def vehicle_lookup_options(request: Request, year: int = 0, make: str = "", model: str = ""):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/options",
@@ -11168,7 +11243,8 @@ async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = "")
 
 
 @app.get("/api/geo/vehicle-lookup/vin/{vin}")
-async def vehicle_lookup_vin(vin: str):
+async def vehicle_lookup_vin(request: Request, vin: str):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/vin/{vin}",
@@ -11180,7 +11256,8 @@ async def vehicle_lookup_vin(vin: str):
 
 
 @app.get("/api/geo/vehicle-lookup/{vehicle_id}")
-async def vehicle_lookup_detail(vehicle_id: str):
+async def vehicle_lookup_detail(request: Request, vehicle_id: str):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/vehicle-lookup/{vehicle_id}",
@@ -11248,7 +11325,8 @@ async def get_geo_android_auto(request: Request, user_id: str | None = None):
 
 
 @app.get("/api/geo/zones")
-async def get_geo_zones():
+async def get_geo_zones(request: Request):
+    await _require_identity_from_request(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/zones",
@@ -17121,8 +17199,14 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
 
     try:
         async with shared_http_client() as client:
+            # The host allow-list above only vets the URL we were asked for; a
+            # redirect could point anywhere (a user's own ha_url can 302 to a
+            # link-local address), so do not follow them.
             resp = await client.get(
-                target_url, headers=req_headers, timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0)
+                target_url,
+                headers=req_headers,
+                timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0),
+                allow_redirects=False,
             )
             if resp.status == 304:
                 await resp.release()
@@ -17133,12 +17217,10 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
                 # it as an error drowns out real failures. Anything else (400
                 # from a bad request we built, 5xx from a broken upstream) stays
                 # an error.
-                if resp.status == 404:
-                    log.warning(f"[imageproxy] upstream {svc} has no image (404) for {redact_url(target_url)}")
-                else:
-                    log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
-                await resp.release()
-                raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
+                if resp.status in (404, 301, 302, 303, 307, 308):
+                    log.warning(f"[imageproxy] upstream {svc} has no image ({resp.status}) for {redact_url(target_url)}")
+                    await resp.release()
+                    raise HTTPException(status_code=404, detail="Failed to fetch image from upstream")
 
             content_type = resp.headers.get("Content-Type", "image/jpeg")
             resp_headers = {"Cache-Control": "private, max-age=86400, immutable"}

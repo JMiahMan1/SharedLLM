@@ -746,6 +746,24 @@ async def handle_note(req: NoteRequest) -> ExecutionResult:
     else:
         return await _handle_nextcloud_note(req)
 
+def _local_note_path(raw_path: str) -> Path:
+    """Resolve a client-supplied local-note path inside ``LOCAL_NOTES_ROOT``.
+
+    ``path`` arrives in the request body, so it must never be able to point
+    outside the notes directory: without this, one POST could read
+    ``/proc/self/environ`` (which carries the internal secret) or overwrite a
+    file in the container.
+    """
+    root = Path(LOCAL_NOTES_ROOT).resolve()
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("That path is outside the notes folder.")
+    return resolved
+
+
 async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
     os.makedirs(LOCAL_NOTES_ROOT, exist_ok=True)
 
@@ -762,7 +780,7 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
 
         elif action == "read":
             if req.path:
-                file_path = Path(req.path)
+                file_path = _local_note_path(req.path)
             else:
                 safe_title = "".join([c for c in (req.title or "") if c.isalnum() or c in (" ", "-", "_")]).strip()
                 file_path = Path(LOCAL_NOTES_ROOT) / f"{safe_title}.md"
@@ -772,7 +790,7 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
 
         elif action == "append":
             if req.path:
-                file_path = Path(req.path)
+                file_path = _local_note_path(req.path)
             else:
                 safe_title = "".join([c for c in (req.title or "") if c.isalnum() or c in (" ", "-", "_")]).strip()
                 file_path = Path(LOCAL_NOTES_ROOT) / f"{safe_title}.md"
@@ -783,7 +801,7 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
 
         elif action == "delete":
             if req.path:
-                file_path = Path(req.path)
+                file_path = _local_note_path(req.path)
             else:
                 safe_title = "".join([c for c in (req.title or "") if c.isalnum() or c in (" ", "-", "_")]).strip()
                 file_path = Path(LOCAL_NOTES_ROOT) / f"{safe_title}.md"
@@ -810,6 +828,10 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
             )
 
         return ExecutionResult(status="FAILURE", message=f"Action {action} failed or not implemented.", service="note_local")
+
+    except ValueError as e:
+        # A path outside the notes folder is a refusal, not a server fault.
+        return ExecutionResult(status="FAILURE", message=str(e), service="note_local")
 
     except Exception as e:
         log.error(f"Local Note error: {e}")

@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from services.common import notify
 from services.common.http import get_client, get_client_insecure
+from services.common.secrets import secret_matches
 from services.config import (
     HA_TOKEN,
     HA_URL,
@@ -77,9 +78,10 @@ def _spawn(coro) -> asyncio.Task:
 
 
 def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
-    if not INTERNAL_SECRET:
-        return True
-    return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
+    # Constant-time, and closed when the secret is unset. This used to return
+    # True for every caller when INTERNAL_SECRET was empty, which made the
+    # service open to anything that could reach its port.
+    return secret_matches(header_secret, INTERNAL_SECRET) or secret_matches(query_secret, INTERNAL_SECRET)
 
 # Without this the root logger stays at WARNING and every trip start, finish,
 # discarded phantom and dropped position jump was silently thrown away.

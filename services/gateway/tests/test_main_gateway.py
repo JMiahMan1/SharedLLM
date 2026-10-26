@@ -289,9 +289,18 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     assert openai_data["data"][0]["embedding"] == [0.1, 0.2, 0.3]
 
 
+# These routes require an identity (and the DNS ones an admin), so the caller
+# has to look like the gateway's own service-to-service call: the internal
+# secret plus the user it is acting for.
+ADMIN_HEADERS = {"X-Internal-Secret": "test-secret", "X-User-Id": "alice"}
+
+
 async def test_config_models_merges_tags_and_v1_endpoints(client, monkeypatch):
     from services.gateway import main
 
+    # The subject here is the tags/v1 merge, so stand in for the auth gate
+    # (which would otherwise call the identity service).
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock())
     monkeypatch.setattr(
         main, "get_all_settings",
         AsyncMock(return_value={"llm_local_url": "http://ollama:11434/"}),
@@ -321,7 +330,7 @@ async def test_config_models_merges_tags_and_v1_endpoints(client, monkeypatch):
 
     monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
-    resp = client.get("/api/config/models")
+    resp = client.get("/api/config/models", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
@@ -332,6 +341,7 @@ async def test_config_models_merges_tags_and_v1_endpoints(client, monkeypatch):
 async def test_config_models_falls_back_to_v1_when_tags_empty(client, monkeypatch):
     from services.gateway import main
 
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock())
     monkeypatch.setattr(
         main, "get_all_settings",
         AsyncMock(return_value={"llm_local_url": "http://ollama:11434"}),
@@ -361,7 +371,7 @@ async def test_config_models_falls_back_to_v1_when_tags_empty(client, monkeypatc
 
     monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
-    resp = client.get("/api/config/models")
+    resp = client.get("/api/config/models", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "SUCCESS"
@@ -371,13 +381,20 @@ async def test_config_models_falls_back_to_v1_when_tags_empty(client, monkeypatc
 async def test_config_models_errors_when_url_missing(client, monkeypatch):
     from services.gateway import main
 
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock())
     monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={}))
 
-    resp = client.get("/api/config/models")
+    resp = client.get("/api/config/models", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ERROR"
     assert data["models"] == []
+
+
+def test_config_models_needs_a_signed_in_caller(client):
+    """The model list is not public: it used to answer anyone who asked."""
+    resp = client.get("/api/config/models")
+    assert resp.status_code == 401
 
 
 # --- DNS management (UI /api/dns routes) ---
@@ -423,7 +440,7 @@ def _patch_dns_storage(monkeypatch, initial_mappings="{}"):
 
 def test_dns_list_empty_when_no_mappings(client, monkeypatch):
     _patch_dns_storage(monkeypatch)
-    resp = client.get("/api/dns")
+    resp = client.get("/api/dns", headers=ADMIN_HEADERS)
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -433,29 +450,29 @@ def test_dns_crud_roundtrip(client, monkeypatch):
 
     created = client.post("/api/dns", json={
         "domain": "home.lan", "record_type": "A", "values": ["192.168.1.50"], "ttl": 300,
-    })
+    }, headers=ADMIN_HEADERS)
     assert created.status_code == 200
     rec = created.json()
     assert rec["domain"] == "home.lan"
     assert rec["values"] == ["192.168.1.50"]
     record_id = rec["id"]
 
-    listed = client.get("/api/dns").json()
+    listed = client.get("/api/dns", headers=ADMIN_HEADERS).json()
     assert len(listed) == 1
 
-    updated = client.put(f"/api/dns/{record_id}", json={"values": ["192.168.1.99"], "ttl": 600})
+    updated = client.put(f"/api/dns/{record_id}", json={"values": ["192.168.1.99"], "ttl": 600}, headers=ADMIN_HEADERS)
     assert updated.status_code == 200
     assert updated.json()["values"] == ["192.168.1.99"]
     assert updated.json()["ttl"] == 600
 
-    deleted = client.delete(f"/api/dns/{record_id}")
+    deleted = client.delete(f"/api/dns/{record_id}", headers=ADMIN_HEADERS)
     assert deleted.status_code == 200
-    assert client.get("/api/dns").json() == []
+    assert client.get("/api/dns", headers=ADMIN_HEADERS).json() == []
 
 
 def test_dns_legacy_string_mapping_listed(client, monkeypatch):
     _patch_dns_storage(monkeypatch, initial_mappings='{"old.lan": "10.0.0.1"}')
-    listed = client.get("/api/dns").json()
+    listed = client.get("/api/dns", headers=ADMIN_HEADERS).json()
     assert len(listed) == 1
     assert listed[0]["domain"] == "old.lan"
     assert listed[0]["values"] == ["10.0.0.1"]
