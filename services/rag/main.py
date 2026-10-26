@@ -289,7 +289,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     log.error(f"{err_msg}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
-        content={"status": "ERROR", "message": "Internal RAG Error", "detail": str(exc)}
+        # `str(exc)` can name files and SQL, so it stays in the log above.
+        content={"status": "ERROR", "message": "Internal RAG Error"}
     )
 
 

@@ -30,6 +30,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import PERMISSION_GROUPS
 from services.common.secrets import secret_matches
+from services.common.sqlite import apply_sqlite_pragmas
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity import audit, battery_alerts, push, roles, voice
 from services.identity.crypto import decrypt, digest_secret, encrypt
@@ -155,6 +156,12 @@ else:
         pool_pre_ping=True
     )
 
+
+
+# WAL, a busy timeout and NORMAL sync on every connection. Without them a
+# burst of parallel phone writes on the rollback journal became
+# "database is locked".
+apply_sqlite_pragmas(engine)
 
 
 def _ensure_schema_upgrades() -> None:

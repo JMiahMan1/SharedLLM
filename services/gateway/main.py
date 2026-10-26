@@ -2159,12 +2159,19 @@ async def resolve_identity(body: dict) -> Any:
             f"{IDENTITY_SVC}/api/resolve",
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(300.0, connect=30.0)
+            # Identity resolution is a small SQLite lookup that should answer in
+            # milliseconds. The old 300 s total / 30 s connect meant a hung
+            # identity service made every request in the app wait up to five
+            # minutes per attempt - three attempts deep, each one holding a
+            # pooled connection - which is how one slow service took the whole
+            # site down.
+            timeout=aiohttp.ClientTimeout(total=5.0, connect=1.0)
         )
         if resp.status != 200:
-            err_detail = f"Identity resolution failed: {resp.status} {await resp.text()}"
-            log.error(err_detail)
-            raise HTTPException(status_code=resp.status, detail=err_detail)
+            # The body can name internal tables and paths, so it is logged and
+            # not forwarded: the caller only needs to know resolution failed.
+            log.error("Identity resolution failed: %s %s", resp.status, await resp.text())
+            raise HTTPException(status_code=resp.status, detail="Identity resolution failed")
         data = await resp.json()
         if not isinstance(data, dict):
             log.error(f"Identity resolution returned non-dict: {data}")

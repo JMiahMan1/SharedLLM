@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.secrets import secret_matches
+from services.common.sqlite import add_missing_columns, apply_sqlite_pragmas
 from services.config import INTERNAL_SECRET
 from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, recipe_estimate, scoring, streaks, weekly
 from services.health.models import (
@@ -102,7 +103,12 @@ def _engine():
     kwargs: dict[str, Any] = {}
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
-    return create_engine(url, pool_pre_ping=True, **kwargs)
+    engine = create_engine(url, pool_pre_ping=True, **kwargs)
+    # WAL keeps a reader from blocking a writer: on the default rollback
+    # journal a long read and a phone's write turned into "database is
+    # locked" 500s. A no-op for a non-SQLite database.
+    apply_sqlite_pragmas(engine)
+    return engine
 
 
 FDC_SEED_FILENAME = "fdc-seed.db"
@@ -134,6 +140,12 @@ def _seed() -> food_seed.FoodSeed:
 async def lifespan(app: FastAPI):
     engine = _db()
     SQLModel.metadata.create_all(engine)
+    # create_all adds tables, never columns: without this a field added to a
+    # model would crash-loop the service with "no such column" until somebody
+    # wrote the ALTER by hand.
+    added = add_missing_columns(engine, SQLModel.metadata)
+    if added:
+        log.info("[Health] added missing column(s): %s", ", ".join(added))
     # Sex is male or female; a profile stored under the removed "other" option
     # is reset to "not set" so its owner picks one instead of keeping a value
     # the UI can no longer show.

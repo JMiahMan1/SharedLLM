@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, Response
 from urllib3.exceptions import InsecureRequestWarning
 
 from services.common.http import get_client
+from services.common.logging_utils import warn_periodically
 from services.common.secrets import secret_matches
 from services.config import (
     IDENTITY_SVC_URL,
@@ -559,7 +560,10 @@ async def global_exception_handler(request, exc):
     log.error(f"{err_msg}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
-        content={"status": "FAILURE", "message": err_msg, "service": "execution", "detail": traceback.format_exc().splitlines()[-3:]}
+        # No traceback in the response. It goes to the log above; a caller is
+        # another service or the app, and neither can act on our frame list -
+        # all it does is hand out our file paths and internals.
+        content={"status": "FAILURE", "message": err_msg, "service": "execution"}
     )
 
 
@@ -1204,7 +1208,14 @@ async def list_timer_devices(user_id: str | None = None):
                     "source": "ha",
                 })
         except Exception as exc:
-            log.debug(f"[timers/devices] Failed to load HA media_players: {exc}")
+            # Home Assistant being down should be visible, but this runs on
+            # every poll: warn once, then stay quiet for a while.
+            warn_periodically(
+                log,
+                "execution.ha_media_players",
+                "[timers/devices] Failed to load HA media_players: %s",
+                exc,
+            )
 
     return {
         "status": "SUCCESS",

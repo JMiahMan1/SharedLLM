@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from services.common import notify
 from services.common.http import get_client, get_client_insecure
+from services.common.logging_utils import warn_periodically
 from services.common.secrets import secret_matches
 from services.config import (
     HA_TOKEN,
@@ -590,7 +591,9 @@ async def _zones_cached() -> list[dict]:
             _zone_cache["zones"] = await _zones()
             _zone_cache["at"] = time.time()
         except Exception as e:
-            log.debug(f"[Geo] Zones unavailable: {e}")
+            # Zones refresh on a timer; a Home Assistant outage should be
+            # visible without a warning per refresh.
+            warn_periodically(log, "geo.zones", "[Geo] Zones unavailable: %s", e)
     return _zone_cache["zones"]
 
 
