@@ -683,6 +683,11 @@ const Workspaces = () => {
           workspaces.map((ws) => {
             const isPulling = pullMutation.isPending && pullMutation.variables === ws.id;
             const isSyncing = syncMutation.isPending && syncMutation.variables === ws.id;
+            // The star, share and delete buttons fired with no busy state, so a
+            // slow update looked like nothing had happened and invited a second
+            // click. Disable the row's own button while its mutation runs.
+            const isUpdating = updateMutation.isPending && updateMutation.variables?.id === ws.id;
+            const isDeleting = deleteMutation.isPending && deleteMutation.variables?.id === ws.id;
             const mode = storageValue(ws.sync_mode);
             const storageLabel = STORAGE_OPTIONS.find((o) => o.value === mode)?.label ?? mode;
             return (
@@ -730,7 +735,8 @@ const Workspaces = () => {
                         <>
                           <button
                             onClick={() => updateMutation.mutate({ id: ws.id, is_default: !ws.is_default })}
-                            className={`${ICON_BUTTON} ${ws.is_default ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'}`}
+                            disabled={isUpdating}
+                            className={`${ICON_BUTTON} ${ws.is_default ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'} disabled:opacity-50 disabled:cursor-not-allowed`}
                             title={ws.is_default ? 'Unset as default' : 'Set as default'}
                             aria-label={ws.is_default ? 'Unset as default' : 'Set as default'}
                             aria-pressed={!!ws.is_default}
@@ -739,7 +745,8 @@ const Workspaces = () => {
                           </button>
                           <button
                             onClick={() => updateMutation.mutate({ id: ws.id, owner_user: ws.owner_user === 'default' ? null : 'default' })}
-                            className={`${ICON_BUTTON} ${ws.owner_user === 'default' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'}`}
+                            disabled={isUpdating}
+                            className={`${ICON_BUTTON} ${ws.owner_user === 'default' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'} disabled:opacity-50 disabled:cursor-not-allowed`}
                             title={ws.owner_user === 'default' ? 'Unshare (make private)' : 'Share with all users'}
                             aria-label={ws.owner_user === 'default' ? 'Unshare (make private)' : 'Share with all users'}
                             aria-pressed={ws.owner_user === 'default'}
@@ -775,7 +782,8 @@ const Workspaces = () => {
                                 deleteMutation.mutate({ id: ws.id });
                               }
                             }}
-                            className={`${ICON_BUTTON} text-slate-500 hover:text-red-400 hover:bg-red-500/10`}
+                            disabled={isDeleting}
+                            className={`${ICON_BUTTON} text-slate-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed`}
                             title="Delete"
                             aria-label={`Delete ${ws.display_name}`}
                           >
