@@ -6941,13 +6941,114 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+#: How long one call is "announced": the first joiner claims this key, so a
+#: group where everybody taps Join produces one notice, not one per person.
+CALL_NOTICE_SECONDS = 900
+
+
+async def _announce_call(request: Request, token: str) -> None:
+    """Tell the room's other members that a call has started.
+
+    The in-app call banner is a client-side poll, so a phone with the app closed
+    learned nothing about a call at all. One notice per call: the first joiner
+    claims a short-lived key. Best effort throughout - a call must never fail
+    because a notice could not be sent.
+    """
+    if not token:
+        return
+    try:
+        ident = await _resolve_identity_from_request(request)
+    except HTTPException:
+        return
+    me = str(ident.get("user") or "")
+    if not me:
+        return
+    try:
+        from services.gateway.cache import get_redis
+
+        claimed = await asyncio.to_thread(
+            lambda: bool(get_redis().set(f"call-notice:{token}", me, nx=True, ex=CALL_NOTICE_SECONDS))
+        )
+    except Exception as e:
+        log.warning("[call-notice] could not claim the call: %s", e)
+        return
+    if not claimed:
+        return
+
+    # Who is in the room. Talk actor ids are the household's nextcloud_user
+    # values, which is the mapping identity holds.
+    try:
+        joined = await _proxy_execution_with_identity(
+            request, "/execute/talk", {"action": "participants", "token": token}
+        )
+        people = (json.loads(joined.body).get("detail") or {}).get("participants") or []
+    except Exception as e:
+        log.warning("[call-notice] could not read the room: %s", e)
+        return
+
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/users",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            users = await resp.json(content_type=None) if resp.status == 200 else None
+    except Exception as e:
+        log.warning("[call-notice] could not list the family: %s", e)
+        return
+    if not isinstance(users, list):
+        return
+    by_talk: dict[str, str] = {}
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        username = str(u.get("username") or "")
+        talk_id = str(u.get("nextcloud_user") or "")
+        if username and talk_id and not u.get("is_system_default"):
+            by_talk[talk_id] = username
+
+    display = ""
+    recipients: set[str] = set()
+    for person in people:
+        if not isinstance(person, dict):
+            continue
+        username = by_talk.get(str(person.get("actor_id") or ""))
+        if not username:
+            continue
+        if username == me:
+            display = str(person.get("display_name") or username)
+            continue
+        recipients.add(username)
+    if not recipients:
+        return
+
+    await _notify.send_many(
+        sorted(recipients),
+        lambda person: _notify.notice(
+            person,
+            "call",
+            f"{display or me} is on a family call",
+            "Tap to join.",
+            url="/family?tab=calls",
+            tag=f"call:{token}",
+            priority=4,
+        ),
+    )
+
+
 @app.post("/api/communication/talk/call")
 async def proxy_talk_call(request: Request):
     """Join or leave the room's Talk call and return its signalling details."""
     body = await request.json()
     action = "call_leave" if body.get("leave") else "call_join"
     payload = {"action": action, "token": body.get("token")}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+    result = await _proxy_execution_with_identity(
+        request, "/execute/talk", payload, as_user=body.get("as_user")
+    )
+    if action == "call_join" and getattr(result, "status_code", 200) == 200:
+        await _announce_call(request, str(body.get("token") or ""))
+    return result
 
 
 @app.post("/api/communication/talk/game")
