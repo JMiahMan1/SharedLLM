@@ -5951,9 +5951,51 @@ async def guard_parent_unlock(request: Request):
             body.get("notify") or [],
             "Phone protection unlocked",
             f"{body.get('parent')} unlocked Jarvis's protection on {child}'s phone for 10 minutes.",
-            "/health",
+            "/fitness",
         )
     return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
+
+
+@app.post("/api/guard/message")
+async def guard_message(request: Request):
+    """The lock screen's way to reach a parent: a short chat message to them.
+
+    Sent as the child, into the 1:1 family chat with each of their parents, so
+    the answer lands in the same place as every other family message and the
+    lock screen never has to leave the lock for it.
+    """
+    creds = await _resolve_identity_from_request(request)
+    me = str((creds or {}).get("user") or "").strip()
+    if not me:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json() or {}
+    text = str(body.get("text") or "").strip()[:500]
+    if not text:
+        raise HTTPException(status_code=422, detail="Type a message first")
+    parents, _ = await _my_parents(me)
+    if not parents:
+        raise HTTPException(status_code=422, detail="There is no parent to message")
+    sent: list[str] = []
+    for parent in parents:
+        opened = await _proxy_execution_with_identity(
+            request, "/execute/talk", {"action": "open", "target_user": parent}
+        )
+        token = ""
+        try:
+            conversation = (json.loads(opened.body).get("detail") or {}).get("conversation") or {}
+            token = str(conversation.get("token") or "")
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            token = ""
+        if not token:
+            continue
+        posted = await _proxy_execution_with_identity(
+            request, "/execute/talk", {"action": "send", "token": token, "message": text}
+        )
+        if posted.status_code == 200:
+            sent.append(parent)
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not reach a parent just now. Try again.")
+    return {"status": "SUCCESS", "sent_to": sent}
 
 
 @app.post("/api/guard/tamper")
@@ -6071,7 +6113,7 @@ async def decide_guard_request(request: Request, request_id: int, payload: dict)
             title, line = "Website allowed", f"You can open {what} for a while."
         else:
             title, line = "Approved", f"A parent said yes to {what}."
-        await _screen_time_notice(body.get("notify") or [], title, line, "/health")
+        await _screen_time_notice(body.get("notify") or [], title, line, "/fitness")
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
 
@@ -6186,7 +6228,7 @@ async def screen_time_pause(request: Request, username: str):
             title, text = "Phone paused", "You paused your phone for now." if mine else "A parent paused your phone for now."
         else:
             title, text = "Phone unpaused", "Your phone is back on."
-        await _screen_time_notice([username], title, text, "/health")
+        await _screen_time_notice([username], title, text, "/fitness")
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
         # log (Phase 12) so "who locked a device, and when" has one answer. A
         # lock is only logged when the phone can really lock itself: a device
@@ -6208,7 +6250,7 @@ async def screen_time_bonus(request: Request, username: str):
     status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/{username}/bonus", json=payload)
     if status == 200:
         minutes = (body.get("request") or {}).get("granted_minutes")
-        await _screen_time_notice(body.get("notify") or [], "Bonus time", f"A parent added {minutes} minutes for today.", "/health")
+        await _screen_time_notice(body.get("notify") or [], "Bonus time", f"A parent added {minutes} minutes for today.", "/fitness")
     return JSONResponse(status_code=status, content=body)
 
 
@@ -6230,7 +6272,7 @@ async def screen_time_ask(request: Request):
             body.get("notify") or [],
             "More screen time?",
             f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
-            "/health",
+            "/fitness",
             actions=_decide_actions("more_time_decide", request_id, "grant") if request_id is not None else None,
         )
     return JSONResponse(status_code=status, content=body)
@@ -6248,7 +6290,7 @@ async def decide_more_time(request: Request, request_id: int, payload: dict) -> 
             body.get("notify") or [],
             "More time granted" if granted else "Not this time",
             f"You have {decided.get('granted_minutes')} more minutes today." if granted else "A parent said not today.",
-            "/health",
+            "/fitness",
         )
     return status, body
 

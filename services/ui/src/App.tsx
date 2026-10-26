@@ -142,6 +142,10 @@ function App() {
             {/* The timers and announcements panel moved into the Family page
                 (Announce tab); the old URL keeps working. */}
             <Route path="/communication" element={<Navigate to="/family" replace />} />
+            {/* The health hub lives at /fitness; /health is what the older
+                screen-time pushes and the lock screen used to link to, and it
+                had no route at all, so those taps landed on a blank page. */}
+            <Route path="/health" element={<Navigate to="/fitness" replace />} />
             <Route path="/notes" element={<ProtectedRoute isMobile={isMobile}><Notes /></ProtectedRoute>} />
             <Route path="/recipes" element={<ProtectedRoute isMobile={isMobile}><Recipes /></ProtectedRoute>} />
             <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Family /></ProtectedRoute>} />

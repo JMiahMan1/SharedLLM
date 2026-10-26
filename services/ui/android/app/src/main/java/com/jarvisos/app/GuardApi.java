@@ -210,10 +210,51 @@ final class GuardApi {
         }
     }
 
+    /**
+     * The lock screen's "Ask for more time": a real request a parent answers,
+     * with the reason the child typed. Off the main thread. Returns an error to
+     * show, or null.
+     */
+    static String askMoreTime(Context context, int minutes, String note) {
+        try {
+            String day = statusDay(context);
+            if (day == null || day.isEmpty()) day = java.time.LocalDate.now().toString();
+            JSONObject body = new JSONObject();
+            body.put("minutes", minutes);
+            body.put("day", day);
+            if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
+            HttpResult r = send(context, "POST", "/api/screen-time/requests", body.toString());
+            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r.status == 200) return null;
+            String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
+            return detail.isEmpty() ? "That did not work." : detail;
+        } catch (Exception e) {
+            return "That did not work.";
+        }
+    }
+
+    /**
+     * The lock screen's "Message a parent": a short chat message to them, sent
+     * as this child in the family chat. Off the main thread. Returns an error to
+     * show, or null.
+     */
+    static String messageParents(Context context, String text) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("text", text == null ? "" : text.trim());
+            HttpResult r = send(context, "POST", "/api/guard/message", body.toString());
+            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r.status == 200) return null;
+            String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
+            return detail.isEmpty() ? "That did not work." : detail;
+        } catch (Exception e) {
+            return "That did not work.";
+        }
+    }
+
     static Set<String> alwaysAllowed(Context context) {
         return strings(lastStatus(context).optJSONArray("always_allowed"));
     }
-
     /** Apps blocked now (a parent switched them off, or their own minutes ran out). */
     static Set<String> blockedApps(Context context) {
         return strings(lastStatus(context).optJSONArray("blocked_apps"));
