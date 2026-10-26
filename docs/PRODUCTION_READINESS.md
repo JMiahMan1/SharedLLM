@@ -394,6 +394,12 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    a different day. `docker/Dockerfile.base` now pins the multi-arch index digest of
    `python:3.11-slim`, which fixes the interpreter and the system libraries while leaving both
    architectures resolvable.
+9. The background worker started seven loops in-process, so a second replica would have posted every
+   bot reply, notification and admin alert twice. The inference loop is safe anywhere (it claims jobs
+   from a queue), but the other six - health scans, the `@jarvis` monitor, chat notifications, admin
+   alerts, song notices and cleanup - now each hold a short Redis lease under their own name
+   (`InferenceJobQueue.claim_loop`), refreshed while they run, and stand down while somebody else
+   holds it. A Redis failure fails open: losing every notification would be worse than a duplicate.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
@@ -403,10 +409,12 @@ discovery and geo's zone cache).
 **Open, should fix before merge.** The base image's Python packages and apt tools are still installed
 unpinned (the `FROM` line itself is now digest-pinned, so the interpreter and system libraries cannot
 drift, but the ~35 pip packages can - pinning those needs a constraints file generated from a
-known-good build, not a blind edit); the background worker starts seven loops in-process,
-so a second replica would double-post bot replies and alerts; a dozen pieces of state live only in
-memory; and rag, telemetry, geo, logging, ui, dns and caddy still run as root, because their data
-lives in root-owned named volumes.
+known-good build, not a blind edit); a second replica of a service would still be wrong in places,
+because state lives in the process - the gateway's live media push keeps a hub per user and a registry
+of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
+`apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
+too, all of which is harmless while exactly one replica runs each service; and rag, telemetry, geo,
+logging, ui, dns and caddy still run as root, because their data lives in root-owned named volumes.
 
 **Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
 list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
