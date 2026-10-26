@@ -2486,7 +2486,7 @@ def add_device_ui(
     # Internal calls (Gateway's entity auto-discovery) send only
     # X-Internal-Secret; a user request must be an admin or home manager,
     # because writing an assignment grants control of a real device.
-    is_internal = x_internal_secret == INTERNAL_SECRET
+    is_internal = _matches_internal_secret(x_internal_secret)
     if not is_internal:
         if not authorization:
             raise HTTPException(status_code=401, detail="Missing authorization")
@@ -3346,7 +3346,7 @@ def get_settings(
 ):
     settings = session.exec(select(GlobalSetting)).all()
     # Mask sensitive keys for non-internal (UI) requests
-    if x_internal_secret != INTERNAL_SECRET:
+    if not _matches_internal_secret(x_internal_secret):
         for s in settings:
             if s.key == "llm_cloud_api_key" and s.value:
                 s.value = "sk-***"
@@ -3399,7 +3399,7 @@ def get_setting(
         raise HTTPException(status_code=404, detail="Setting not found")
 
     # Mask sensitive keys for non-internal (UI) requests
-    if x_internal_secret != INTERNAL_SECRET and key == "llm_cloud_api_key" and setting.value:
+    if not _matches_internal_secret(x_internal_secret) and key == "llm_cloud_api_key" and setting.value:
         setting.value = "sk-***"
 
     return setting
@@ -5325,7 +5325,7 @@ def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session
 async def import_nextcloud_users(x_internal_secret: str | None = Header(default=None)):
     """Import users from Nextcloud and Home Assistant, merging by username.
     Generates temp passwords and pre-fills all available user data."""
-    if x_internal_secret != INTERNAL_SECRET:
+    if not _matches_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     warnings: list[str] = []

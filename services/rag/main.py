@@ -35,6 +35,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
+from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
 from services.rag import db
 from services.rag.schemas import IngestRequest, SearchRequest, SearchResponse, SearchResultItem
@@ -295,7 +296,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 def require_internal(x_internal_secret: str = Header(...)):
-    if x_internal_secret != INTERNAL_SECRET:
+    if not secret_matches(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 

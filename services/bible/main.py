@@ -37,8 +37,6 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from starlette.concurrency import run_in_threadpool
 
 from services.bible import achievements as ach
-from services.common.secrets import secret_matches
-from services.common.sqlite import apply_sqlite_pragmas
 from services.bible import (
     blb_links,
     book_import,
@@ -80,6 +78,8 @@ from services.bible.models import (
 )
 from services.bible.providers import ProviderError, ProviderUnavailable
 from services.bible.refs import ReferenceError, format_reference, parse_reference
+from services.common.secrets import secret_matches
+from services.common.sqlite import apply_sqlite_pragmas
 from services.config import (
     BIBLE_DATABASE_URL,
     BIBLE_DEVOTIONAL_DIR,
@@ -103,11 +103,13 @@ DEFAULT_DATABASE_URL = "sqlite:////data/bible.db"
 # secret verification (same contract as every other service)
 
 
-def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
+def _verify_internal_secret(header_secret: str | None) -> bool:
     # Constant-time, and closed when the secret is unset. This used to return
     # True for every caller when INTERNAL_SECRET was empty, which made the
     # service open to anything that could reach its port.
-    return secret_matches(header_secret, INTERNAL_SECRET) or secret_matches(query_secret, INTERNAL_SECRET)
+    # Header only: the secret used to be accepted as a ?x_internal_secret= query
+    # parameter too, which puts the household's master secret in access logs.
+    return secret_matches(header_secret, INTERNAL_SECRET)
 
 
 @asynccontextmanager
@@ -155,7 +157,7 @@ async def require_internal_secret_middleware(request, call_next):
     """
     if request.url.path.rstrip("/") in ("/health", ""):
         return await call_next(request)
-    secret = request.headers.get("X-Internal-Secret") or request.query_params.get("x_internal_secret")
+    secret = request.headers.get("X-Internal-Secret")
     if not _verify_internal_secret(secret):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)

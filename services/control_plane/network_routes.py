@@ -17,6 +17,7 @@ import redis
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
 
+from services.common.secrets import secret_matches
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
 from services.control_plane import router_monitor as rm
 
@@ -28,7 +29,7 @@ _monitor: rm.Monitor | None = None
 
 
 def _require_internal(x_internal_secret: str = Header(..., alias="X-Internal-Secret")) -> None:
-    if x_internal_secret != INTERNAL_SECRET:
+    if not secret_matches(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 

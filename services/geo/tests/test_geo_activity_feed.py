@@ -142,7 +142,6 @@ async def test_summary_own_data_always_allowed(rc, monkeypatch):
         window="today",
         viewer="jeremiah",
         x_internal_secret=INTERNAL_SECRET,
-        query_secret=None,
     )
     assert out["status"] == "SUCCESS"
     assert out["steps_today"] == 4321
@@ -166,7 +165,6 @@ async def test_summary_cross_user_requires_opt_in(rc, monkeypatch):
             window="week",
             viewer="jeremiah",
             x_internal_secret=INTERNAL_SECRET,
-            query_secret=None,
         )
     assert exc.value.status_code == 404
 
@@ -189,7 +187,6 @@ async def test_summary_cross_user_allowed_when_shared(rc, monkeypatch):
         window="week",
         viewer="jeremiah",
         x_internal_secret=INTERNAL_SECRET,
-        query_secret=None,
     )
     assert out["steps_total"] == 2500
 
@@ -207,7 +204,6 @@ async def test_summary_requires_internal_secret(rc, monkeypatch):
             window="week",
             viewer="jeremiah",
             x_internal_secret="wrong",
-            query_secret=None,
         )
     assert exc.value.status_code == 403
 
@@ -244,7 +240,6 @@ async def test_feed_filters_disabled_and_non_audience_users(rc, monkeypatch):
         viewer="jeremiah",
         window="week",
         x_internal_secret=INTERNAL_SECRET,
-        query_secret=None,
     )
     names = [u["username"] for u in out["users"]]
     assert names == ["alice", "bob"]  # carol disabled, dave different audience
@@ -273,6 +268,5 @@ async def test_feed_never_includes_the_viewer(rc, monkeypatch):
         viewer="jeremiah",
         window="week",
         x_internal_secret=INTERNAL_SECRET,
-        query_secret=None,
     )
     assert out["users"] == []
