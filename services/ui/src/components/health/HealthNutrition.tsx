@@ -264,19 +264,33 @@ export default function HealthNutrition({ onNavigate }: Props) {
             </h2>
             {kid ? (
               <p className="mt-1 text-2xl font-bold text-white" data-testid="nutrition-kid-summary">
-                {!nutrition
-                  ? 'Loading…'
-                  : nutrition.logged
-                    ? `${nutrition.entries_count} ${nutrition.entries_count === 1 ? 'thing' : 'things'} logged`
-                    : 'Nothing logged yet'}
+                {nutritionQuery.isError
+                  ? 'Could not load today'
+                  : !nutrition
+                    ? 'Loading…'
+                    : nutrition.logged
+                      ? `${nutrition.entries_count} ${nutrition.entries_count === 1 ? 'thing' : 'things'} logged`
+                      : 'Nothing logged yet'}
               </p>
             ) : (
               <>
                 <p className="mt-1 text-3xl font-bold tabular-nums text-white">
-                  {Math.round(nutrition?.totals.calories ?? 0).toLocaleString()}
-                  <span className="ml-1 text-sm font-medium text-slate-500">kcal</span>
+                  {nutritionQuery.isError ? (
+                    '—'
+                  ) : (
+                    <>
+                      {Math.round(nutrition?.totals.calories ?? 0).toLocaleString()}
+                      <span className="ml-1 text-sm font-medium text-slate-500">kcal</span>
+                    </>
+                  )}
                 </p>
-                <p className="text-[11px] text-slate-500">{nutrition ? calorieSummary(nutrition) : 'Loading…'}</p>
+                <p className="text-[11px] text-slate-500">
+                  {nutritionQuery.isError
+                    ? 'Today\'s totals are unknown'
+                    : nutrition
+                      ? calorieSummary(nutrition)
+                      : 'Loading…'}
+                </p>
               </>
             )}
           </div>
@@ -291,6 +305,21 @@ export default function HealthNutrition({ onNavigate }: Props) {
             </div>
           )}
         </div>
+
+        {nutritionQuery.isError && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <p className="text-xs text-amber-200">
+              {errorText(nutritionQuery.error, 'Could not load today\'s nutrition')}
+            </p>
+            <button
+              type="button"
+              onClick={() => void nutritionQuery.refetch()}
+              className="glass-button inline-flex min-h-10 items-center gap-1.5 px-3 text-xs font-semibold disabled:opacity-50 pointer-coarse:min-h-11"
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
         {!kid && (
           <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/[0.06]">

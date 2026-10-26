@@ -14,6 +14,7 @@ import {
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { formatDayLabel, localDay } from '../../lib/healthHub';
+import { errorText } from '../../lib/errorText';
 import type { CycleFlow, HealthCycleLog, HealthCycleState } from '../../types/api';
 
 const FLOW_OPTIONS: Array<[CycleFlow, string]> = [
@@ -318,6 +319,29 @@ export default function HealthCycle() {
     return (
       <section className="glass-panel flex items-center gap-2 rounded-2xl border border-white/5 p-4 text-xs text-slate-400">
         <Loader2 size={14} className="animate-spin" /> Loading cycle settings…
+      </section>
+    );
+  }
+  // A failed fetch used to be indistinguishable from "not applicable": the
+  // panel just vanished, so a parent had no way to tell a broken request from
+  // a child who has not turned cycle tracking on.
+  if (cycleQuery.isError) {
+    return (
+      <section className="glass-panel rounded-2xl border border-amber-500/30 p-4">
+        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <Droplets size={13} className="text-rose-300" />
+          Cycle tracking
+        </h3>
+        <p className="mt-2 text-xs text-amber-200">
+          {errorText(cycleQuery.error, 'Could not load cycle settings')}
+        </p>
+        <button
+          type="button"
+          onClick={() => void cycleQuery.refetch()}
+          className="glass-button mt-3 inline-flex min-h-10 items-center gap-1.5 px-3 text-xs font-semibold disabled:opacity-50 pointer-coarse:min-h-11"
+        >
+          Try again
+        </button>
       </section>
     );
   }
