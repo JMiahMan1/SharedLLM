@@ -12,6 +12,7 @@ vi.mock('../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       getMe: vi.fn(),
+      getHealthProfile: vi.fn(),
       listNotes: vi.fn(),
       readNote: vi.fn(),
       writeNote: vi.fn(),
@@ -20,6 +21,8 @@ vi.mock('../services/api', async (importOriginal) => {
       importRecipe: vi.fn(),
       searchRecipes: vi.fn(),
       fetchRecipe: vi.fn(),
+      recipeSources: vi.fn(),
+      estimateRecipeNutrition: vi.fn(),
       readRecipePhoto: vi.fn(),
       noteAttachment: vi.fn(),
       getTalkConversations: vi.fn(),
@@ -42,6 +45,8 @@ const syncNotesRag = vi.mocked(api.syncNotesRag);
 const importRecipe = vi.mocked(api.importRecipe);
 const searchRecipes = vi.mocked(api.searchRecipes);
 const fetchRecipe = vi.mocked(api.fetchRecipe);
+const recipeSources = vi.mocked(api.recipeSources);
+const estimateRecipeNutrition = vi.mocked(api.estimateRecipeNutrition);
 const readRecipePhoto = vi.mocked(api.readRecipePhoto);
 const noteAttachment = vi.mocked(api.noteAttachment);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
@@ -69,6 +74,7 @@ describe('Recipes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getMe.mockResolvedValue({ username: 'mom', is_admin: false } as never);
+    vi.mocked(api.getHealthProfile).mockResolvedValue({ kid_mode: false } as never);
     listNotes.mockResolvedValue(listResponse(['Pancakes']));
     readNote.mockResolvedValue({ status: 'SUCCESS', message: 'flour, milk', service: 'note_read' });
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write' });
@@ -76,6 +82,7 @@ describe('Recipes', () => {
     syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
     importRecipe.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     searchRecipes.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
+    recipeSources.mockResolvedValue([]);
     readRecipePhoto.mockResolvedValue({
       raw_text: '',
       recipe: {
@@ -289,6 +296,41 @@ describe('Recipes', () => {
     expect(body.content).toContain('- [ ] 4 cups water');
   });
 
+  it('marks a search result already imported instead of offering it again', async () => {
+    searchRecipes.mockResolvedValue({
+      status: 'SUCCESS',
+      message: 'Found 1 recipe(s).',
+      service: 'recipe_import',
+      detail: {
+        results: [
+          {
+            id: '52772',
+            source: 'themealdb',
+            title: 'Chocolate Gateau',
+            description: 'Dessert · French',
+            image: null,
+            source_url: 'https://www.themealdb.com/meal/52772',
+            site: 'themealdb.com',
+            ingredients: ['175g Butter'],
+            instructions: ['Bake.'],
+          },
+        ],
+      },
+    } as never);
+    recipeSources.mockResolvedValue(['https://www.themealdb.com/meal/52772']);
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'gateau' } });
+    fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
+
+    expect(await screen.findByText('Already in Recipes')).toBeTruthy();
+    const card = screen.getByText('Chocolate Gateau').closest('button');
+    expect(card).toBeDisabled();
+    expect(fetchRecipe).not.toHaveBeenCalled();
+  });
+
   it('filters the shelf by name', async () => {
     listNotes.mockResolvedValue(listResponse(['Pancakes', 'Chicken Chili']));
     renderRecipes();
@@ -446,6 +488,62 @@ describe('Recipes', () => {
     const line = await screen.findByTestId('recipe-nutrition');
     expect(line).toHaveTextContent('Per serving (foodcom): 350 kcal');
     expect(line).toHaveTextContent('whole recipe (7 servings): 2451 kcal');
+  });
+
+  it('estimates a recipe with no stated nutrition from the USDA seed', async () => {
+    readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '## Ingredients\n- [ ] 2 lb chicken\n- [ ] flour',
+      service: 'note_read',
+    });
+    estimateRecipeNutrition.mockResolvedValue({
+      estimate: true,
+      source: 'usda_fdc',
+      seed: { present: true },
+      ingredients: [
+        {
+          text: '2 lb chicken',
+          status: 'matched',
+          food: 'Chicken, broilers or fryers, meat and skin, raw',
+          code: 'foundation:1',
+          grams: 907,
+          nutrients: { calories: 1650, protein_g: 250, carbs_g: 0, fat_g: 60, fiber_g: null, sugar_g: null, sodium_mg: null },
+        },
+        { text: 'flour', status: 'unknown', reason: 'No USDA match for “flour”' },
+      ],
+      matched: 1,
+      unknown: 1,
+      totals: { calories: 1650, protein_g: 250, carbs_g: 0, fat_g: 60, fiber_g: null, sugar_g: null, sodium_mg: null },
+      complete: true,
+    } as never);
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    fireEvent.click(await screen.findByTestId('recipe-estimate-button'));
+
+    const result = await screen.findByTestId('recipe-estimate-result');
+    expect(result).toHaveTextContent('Estimate from USDA food data');
+    expect(result).toHaveTextContent('unknown');
+    expect(screen.getByTestId('recipe-estimate-total')).toHaveTextContent('1650 kcal');
+    expect(estimateRecipeNutrition).toHaveBeenCalledWith(['2 lb chicken', 'flour']);
+  });
+
+  it('hides the USDA estimate in kid mode', async () => {
+    vi.mocked(api.getHealthProfile).mockResolvedValue({ kid_mode: true } as never);
+    readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '## Ingredients\n- [ ] 2 lb chicken',
+      service: 'note_read',
+    });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Recipe body') as HTMLTextAreaElement).value).toContain('chicken'),
+    );
+    expect(screen.queryByTestId('recipe-estimate-button')).toBeNull();
   });
 
   it('reads a recipe photo into a draft, flags uncertain words, and keeps the photo', async () => {    writeNote.mockResolvedValue({

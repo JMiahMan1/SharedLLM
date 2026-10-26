@@ -8,7 +8,14 @@ import { planDayOf } from '../../lib/mealPlan';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), readNote: vi.fn() } };
+  return {
+    ...actual,
+    api: {
+      ...(actual.api as Record<string, unknown>),
+      readNote: vi.fn(),
+      getFoodEntries: vi.fn(),
+    },
+  };
 });
 
 const wrap = (ui: ReactElement) =>
@@ -39,8 +46,42 @@ function mockNotes(recipeBody: string | null) {
   });
 }
 
+function mockFood(entries: Array<Record<string, unknown>>) {
+  vi.mocked(api.getFoodEntries).mockResolvedValue({ user_id: 'dad', entries } as never);
+}
+
+function dinnerEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    user_id: 'dad',
+    day: '2026-10-22',
+    meal: 'dinner',
+    name: 'Chicken Chili',
+    brand: 'Family recipe',
+    calories: 350,
+    protein_g: 25,
+    carbs_g: 30,
+    fat_g: 12,
+    fiber_g: null,
+    sugar_g: null,
+    sodium_mg: null,
+    servings: 1,
+    serving_grams: null,
+    barcode: null,
+    recipe_path: 'Recipes/Chicken Chili.md',
+    source: 'recipe',
+    external_id: null,
+    created_at: '',
+    density: null,
+    ...overrides,
+  };
+}
+
 describe('MealsCard', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFood([]);
+  });
 
   it("shows tonight's dinner with its per-serving and whole-recipe nutrition", async () => {
     mockNotes(RECIPE);
@@ -70,5 +111,41 @@ describe('MealsCard', () => {
     wrap(<MealsCard kid />);
     expect(await screen.findByTestId('today-meals-title')).toHaveTextContent('Chicken Chili');
     expect(screen.queryByTestId('today-meals-nutrition')).toBeNull();
+  });
+
+  it('shows the planned dinner logged as itself', async () => {
+    mockNotes(RECIPE);
+    mockFood([dinnerEntry()]);
+    wrap(<MealsCard />);
+    const match = await screen.findByTestId('today-meals-eaten-match');
+    expect(match).toHaveTextContent('Chicken Chili');
+    expect(match).toHaveTextContent('1 serving');
+    expect(match).toHaveTextContent('350 kcal');
+    expect(screen.queryByTestId('today-meals-eaten-other')).toBeNull();
+  });
+
+  it('says when something else was logged for dinner instead', async () => {
+    mockNotes(RECIPE);
+    mockFood([dinnerEntry({ id: 2, name: 'Pizza', brand: '', recipe_path: null, calories: 800 })]);
+    wrap(<MealsCard />);
+    const other = await screen.findByTestId('today-meals-eaten-other');
+    expect(other).toHaveTextContent('Pizza');
+    expect(other).toHaveTextContent("not tonight's plan");
+  });
+
+  it('says nothing is logged for dinner yet', async () => {
+    mockNotes(RECIPE);
+    mockFood([]);
+    wrap(<MealsCard />);
+    expect(await screen.findByTestId('today-meals-eaten-none')).toHaveTextContent('Nothing logged for dinner yet');
+  });
+
+  it('hides the logged calories in kid mode', async () => {
+    mockNotes(RECIPE);
+    mockFood([dinnerEntry()]);
+    wrap(<MealsCard kid />);
+    const match = await screen.findByTestId('today-meals-eaten-match');
+    expect(match).toHaveTextContent('Chicken Chili');
+    expect(match).not.toHaveTextContent('kcal');
   });
 });

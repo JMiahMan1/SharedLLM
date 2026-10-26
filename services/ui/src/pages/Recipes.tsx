@@ -8,7 +8,8 @@ import { noteBody } from '../lib/notesMeta';
 import { errorText } from '../lib/errorText';
 import { blobToBase64 } from '../lib/base64';
 import { appendAttachment, attachmentMarkdown } from '../lib/noteAttachments';
-import type { ExecutionResponse } from '../types/api';
+import { isKidMode } from '../lib/healthSwitches';
+import type { ExecutionResponse, RecipeEstimate } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
@@ -104,9 +105,19 @@ export default function Recipes() {
   const [planLevels, setPlanLevels] = useState<Record<string, string>>({});
   const [logRequest, setLogRequest] = useState<LogRequest | null>(null);
   const [loggingPlanned, setLoggingPlanned] = useState(false);
+  const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
+  // Kid mode hides calorie numbers, so the USDA estimate is not offered there.
+  const { data: healthProfile } = useQuery({
+    queryKey: ['health-profile'],
+    queryFn: () => api.getHealthProfile(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const kid = isKidMode(healthProfile);
   const [sendAs, setSendAs] = useSendAsPref(isAdmin, 'notes');
   const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
 
@@ -117,13 +128,27 @@ export default function Recipes() {
 
   const recipes = notesOf(data);
 
+  // Which source URLs are already on the shelf, so a search result that is
+  // already imported is marked instead of offered again. Read when the import
+  // panel opens (and refreshed after a save), not on every keystroke.
+  const sourcesQuery = useQuery({
+    queryKey: ['recipe-sources', asUser ?? 'me'],
+    queryFn: () => api.recipeSources(asUser),
+    enabled: importOpen,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const importedSources = useMemo(() => new Set(sourcesQuery.data ?? []), [sourcesQuery.data]);
+
   const read = useMutation({
     mutationFn: (recipe: RecipeSummary) => api.readNote(recipe.title, STORAGE, recipe.path, asUser),
     onSuccess: (res: ExecutionResponse) => {
       // note_read returns the whole file; the editor shows the recipe without
       // the stored header, or every save would stack another copy of it.
-      if (res.status === 'SUCCESS') setBody(noteBody(res.message ?? ''));
-      else toast.error(res.message || 'Could not open that recipe');
+      if (res.status === 'SUCCESS') {
+        setBody(noteBody(res.message ?? ''));
+        setEstimate(null);
+      } else toast.error(res.message || 'Could not open that recipe');
     },
     onError: (error: Error) => toast.error(error.message || 'Could not open that recipe'),
   });
@@ -132,6 +157,7 @@ export default function Recipes() {
     setSelected(null);
     setTitle('');
     setBody('');
+    setEstimate(null);
   };
 
   const save = async () => {
@@ -482,6 +508,10 @@ export default function Recipes() {
       toast.error('A recipe with that name is already on the shelf');
       return;
     }
+    if (imported.source_url && importedSources.has(imported.source_url)) {
+      toast.error('That recipe is already on the shelf');
+      return;
+    }
     setSavingImport(true);
     try {
       const labels = imported.source_kind === 'photo' ? [PHOTO_LABEL] : [];
@@ -502,6 +532,7 @@ export default function Recipes() {
       }
       toast.success('Recipe saved');
       queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      queryClient.invalidateQueries({ queryKey: ['recipe-sources'] });
       setImported(null);
       setImportUrl('');
       clearPhoto();
@@ -569,6 +600,25 @@ export default function Recipes() {
   // The open recipe's own stated nutrition, for the editor (Phase 10).
   const nutrition = useMemo(() => parseRecipeNutrition(body), [body]);
   const recipeServings = useMemo(() => parseRecipeServings(body), [body]);
+  const recipeIngredients = useMemo(() => ingredientLines(body), [body]);
+
+  // When the note states no nutrition, estimate one from the USDA seed. The
+  // result is labelled an estimate and names every ingredient it could not
+  // match; it is never written into the note.
+  const runEstimate = async () => {
+    if (recipeIngredients.length === 0) {
+      toast.error('This recipe has no ingredient lines to estimate from');
+      return;
+    }
+    setEstimating(true);
+    try {
+      setEstimate(await api.estimateRecipeNutrition(recipeIngredients));
+    } catch {
+      toast.error('The estimate could not be built right now');
+    } finally {
+      setEstimating(false);
+    }
+  };
 
   return (
     <div className="space-y-4" data-testid="recipes">
@@ -694,34 +744,40 @@ export default function Recipes() {
           </div>
           {mealResults.length > 0 && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
-              {mealResults.map((result) => (
-                <button
-                  key={result.source_url}
-                  type="button"
-                  onClick={() => void openSearchResult(result)}
-                  disabled={searchLoadingId === result.source_url}
-                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
-                >
-                  {result.image ? (
-                    <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
-                  ) : null}
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
-                    <span className="block truncate text-[10px] text-slate-400">
-                      {[
-                        result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
-                        result.description,
-                        result.total_minutes ? `${result.total_minutes} min` : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
-                    {searchLoadingId === result.source_url ? (
-                      <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
+              {mealResults.map((result) => {
+                const alreadyImported = importedSources.has(result.source_url);
+                return (
+                  <button
+                    key={result.source_url}
+                    type="button"
+                    onClick={() => void openSearchResult(result)}
+                    disabled={alreadyImported || searchLoadingId === result.source_url}
+                    data-testid={alreadyImported ? 'meal-result-imported' : undefined}
+                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
+                  >
+                    {result.image ? (
+                      <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
                     ) : null}
-                  </span>
-                </button>
-              ))}
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {[
+                          result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
+                          result.description,
+                          result.total_minutes ? `${result.total_minutes} min` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                      {alreadyImported ? (
+                        <span className="block text-[10px] text-emerald-300">Already in Recipes</span>
+                      ) : searchLoadingId === result.source_url ? (
+                        <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
           {imported && (
@@ -1006,6 +1062,64 @@ export default function Recipes() {
                 ? ` · whole recipe (${recipeServings} servings): ${portionTotals(nutrition.perServing, recipeServings).calories} kcal`
                 : ''}
             </p>
+          ) : null}
+          {nutrition.status !== 'ok' && !kid ? (
+            <div className="space-y-1" data-testid="recipe-estimate">
+              <button
+                type="button"
+                onClick={() => void runEstimate()}
+                disabled={estimating}
+                data-testid="recipe-estimate-button"
+                className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+              >
+                {estimating ? <Loader2 size={14} className="animate-spin" /> : <Utensils size={14} />}
+                Estimate from ingredients (USDA)
+              </button>
+              {estimate ? (
+                <div
+                  className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2 text-[11px] text-amber-100"
+                  data-testid="recipe-estimate-result"
+                >
+                  <p className="text-amber-200">
+                    Estimate from USDA food data - not the recipe&apos;s own numbers.
+                  </p>
+                  {!estimate.seed.present ? (
+                    <p>USDA food data is not installed on this server.</p>
+                  ) : (
+                    <>
+                      <ul className="space-y-0.5">
+                        {estimate.ingredients.map((item, index) => (
+                          <li key={`${item.text}-${index}`}>
+                            {item.status === 'matched'
+                              ? `${item.text} - ${item.food} (${item.grams} g): ${Math.round(
+                                  item.nutrients?.calories ?? 0,
+                                )} kcal`
+                              : `${item.text} - unknown (${item.reason})`}
+                          </li>
+                        ))}
+                      </ul>
+                      {estimate.totals ? (
+                        <p data-testid="recipe-estimate-total">
+                          {estimate.complete
+                            ? 'Whole recipe'
+                            : `Whole recipe, partial (${estimate.unknown} ingredient${estimate.unknown === 1 ? '' : 's'} unknown)`}
+                          : {Math.round(estimate.totals.calories ?? 0)} kcal · P{' '}
+                          {estimate.totals.protein_g ?? '?'} g · C {estimate.totals.carbs_g ?? '?'} g · F{' '}
+                          {estimate.totals.fat_g ?? '?'} g
+                          {recipeServings
+                            ? ` · ${Math.round((estimate.totals.calories ?? 0) / recipeServings)} kcal a serving (${recipeServings} servings)`
+                            : ''}
+                        </p>
+                      ) : (
+                        <p data-testid="recipe-estimate-total">
+                          No ingredient could be matched, so there is no estimate.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
           ) : null}
           <textarea
             value={body}

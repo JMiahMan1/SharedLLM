@@ -170,6 +170,7 @@ import type {
   HealthCheersDay,
   FoodLabelDraft,
   RecipePhotoDraft,
+  RecipeEstimate,
   HealthFastingState,
   HealthCycleSummary,
   HealthCyclePeriod,
@@ -2015,6 +2016,20 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * An **estimate** of a recipe's nutrition from the USDA seed, one line per
+   * ingredient. Used when a recipe states no nutrition of its own; the caller
+   * must label it as an estimate, and `unknown` ingredients carry no number.
+   */
+  async estimateRecipeNutrition(ingredients: string[]): Promise<RecipeEstimate> {
+    const resp = await apiClient.post(
+      '/api/health/food/estimate',
+      { ingredients },
+      { timeout: 30_000 },
+    );
+    return resp.data;
+  },
+
   async getHealthShares(): Promise<{ owner: string; shares: HealthShare[] }> {
     const resp = await apiClient.get('/api/health/shares');
     return resp.data;
@@ -2757,6 +2772,16 @@ export const api = {
     // One full recipe out of the offline index (search cards carry no body).
     const resp = await apiClient.post('/api/recipes/fetch', { id }, { timeout: 60_000 });
     return resp.data;
+  },
+
+  /**
+   * The source URLs already imported into Recipes/ (the duplicate-import
+   * guard). Reads every recipe note server-side; a repeat call is cached.
+   */
+  async recipeSources(as_user?: 'admin'): Promise<string[]> {
+    const resp = await apiClient.post('/api/recipes/sources', { as_user }, { timeout: 60_000 });
+    const sources = (resp.data?.detail?.sources ?? []) as unknown[];
+    return sources.filter((source): source is string => typeof source === 'string');
   },
 
   /** A recipe photo (or handwriting) read by the vision OCR into a draft; nothing is saved. */

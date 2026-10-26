@@ -434,3 +434,69 @@ async def test_shelf_fetch_is_plain_when_the_index_or_row_is_missing(monkeypatch
     result = await recipe_import.handle_recipe(_request(action="shelf_fetch", id=999, url=None))
     assert result.status == "FAILURE"
     assert "not in the offline index" in result.message
+
+
+# --- the duplicate-import guard: which source URLs are already on the shelf ---
+
+
+class _FakeProvider:
+    username = "dad"
+    password = "secret"
+
+    def file_url(self, path: str) -> str:
+        return f"https://cloud.example/remote.php/dav/files/dad/{path}"
+
+
+def test_extract_source_url_reads_the_imported_line():
+    assert (
+        recipe_import.extract_source_url(
+            "# Chili\nCategory: Recipes\n\nSource: https://www.food.com/recipe/chili-1 - imported from food.com"
+        )
+        == "https://www.food.com/recipe/chili-1"
+    )
+    # A photo import has no URL, and a note without a source matches nothing.
+    assert recipe_import.extract_source_url("Source: photo import") == ""
+    assert recipe_import.extract_source_url("## Ingredients\n- [ ] eggs") == ""
+
+
+async def test_recipe_sources_lists_what_is_already_imported(monkeypatch):
+    notes = [
+        {"title": "Chili", "path": "Recipes/Chili.md", "modified": "a", "size": 10},
+        {"title": "Gateau", "path": "Recipes/Gateau.md", "modified": "b", "size": 20},
+        {"title": "Handwriting", "path": "Recipes/Handwriting.md", "modified": "c", "size": 30},
+    ]
+    bodies = {
+        "Recipes/Chili.md": "Source: https://www.food.com/recipe/chili-1 - imported from food.com",
+        "Recipes/Gateau.md": "Source: https://www.themealdb.com/meal/52772 - imported from themealdb.com",
+        "Recipes/Handwriting.md": "Source: photo import",
+    }
+
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: _FakeProvider())
+    monkeypatch.setattr(recipe_import, "_walk_webdav_dir", _async_return(notes))
+
+    async def fake_read(_provider, note):
+        return recipe_import.extract_source_url(bodies[note["path"]])
+
+    monkeypatch.setattr(recipe_import, "_read_note_source", fake_read)
+    result = await recipe_import.handle_recipe(_request(action="recipe_sources", url=None))
+
+    assert result.status == "SUCCESS"
+    assert result.detail["sources"] == [
+        "https://www.food.com/recipe/chili-1",
+        "https://www.themealdb.com/meal/52772",
+    ]
+    assert result.detail["notes"] == 3
+
+
+async def test_recipe_sources_is_plain_without_a_nextcloud_account(monkeypatch):
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: None)
+    result = await recipe_import.handle_recipe(_request(action="recipe_sources", url=None))
+    assert result.status == "FAILURE"
+    assert "Nextcloud account" in result.message
+
+
+def _async_return(value):
+    async def inner(*_args, **_kwargs):
+        return value
+
+    return inner

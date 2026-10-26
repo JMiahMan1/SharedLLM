@@ -1,4 +1,5 @@
 """Recipe photo import: the gateway reads a recipe photo through the vision OCR."""
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -84,3 +85,48 @@ def test_an_unreadable_photo_says_so_and_a_missing_one_is_refused(client, monkey
     assert client.post(
         "/api/recipes/photo", files={"other": ("x.jpg", b"x", "image/jpeg")}
     ).status_code == 422
+
+
+class _ProxyResp:
+    def __init__(self, body, status=200):
+        self._body, self.status = body, status
+
+    async def text(self):
+        return json.dumps(self._body)
+
+
+def _proxy_fake(monkeypatch, answer, status=200):
+    sent: list[dict] = []
+
+    async def _creds(_request, _as_user=None):
+        return {"user": "dad", "is_admin": False}
+
+    class _Exec:
+        async def post(self, url, json=None, **kw):
+            sent.append({"url": url, "json": json})
+            return _ProxyResp(answer, status=status)
+
+    @asynccontextmanager
+    async def fake():
+        yield _Exec()
+
+    monkeypatch.setattr(gateway_main, "_resolve_acting_identity", _creds)
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake)
+    return sent
+
+
+def test_recipe_sources_proxies_the_duplicate_guard(client, monkeypatch):
+    sent = _proxy_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "message": "1 recipe(s) already imported.",
+            "service": "recipe_sources",
+            "detail": {"sources": ["https://www.food.com/recipe/chili-1"], "notes": 2},
+        },
+    )
+    body = client.post("/api/recipes/sources", json={}).json()
+    assert body["detail"]["sources"] == ["https://www.food.com/recipe/chili-1"]
+    assert sent[0]["url"].endswith("/execute/recipes")
+    assert sent[0]["json"]["action"] == "recipe_sources"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"

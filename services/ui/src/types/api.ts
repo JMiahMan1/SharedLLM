@@ -3537,6 +3537,52 @@ export interface RecipePhotoDraft {
   missing: string[];
 }
 
+/** One ingredient's place in a USDA-seed recipe estimate (services/health/recipe_estimate.py). */
+export interface RecipeEstimateIngredient {
+  /** The ingredient line as written in the note. */
+  text: string;
+  status: 'matched' | 'unknown';
+  /** The seed food it matched (matched only). */
+  food?: string;
+  code?: string;
+  /** The household weight the seed gave (matched only). */
+  grams?: number;
+  nutrients?: {
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    fiber_g: number | null;
+    sugar_g: number | null;
+    sodium_mg: number | null;
+  };
+  /** Why it could not be weighed (unknown only). */
+  reason?: string;
+}
+
+/** An estimate of a recipe's nutrition from the USDA seed; never the recipe's own numbers. */
+export interface RecipeEstimate {
+  /** Always true: this is an estimate, and the caller labels it as one. */
+  estimate: boolean;
+  source: string;
+  seed: { present: boolean };
+  ingredients: RecipeEstimateIngredient[];
+  matched: number;
+  unknown: number;
+  /** Sums over the matched ingredients only; null when nothing matched. */
+  totals: {
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    fiber_g: number | null;
+    sugar_g: number | null;
+    sodium_mg: number | null;
+  } | null;
+  /** Every matched ingredient reported calories/protein/carbs/fat. */
+  complete: boolean;
+}
+
 /** A cheer for a family member's day (services/health/cheers.py): a fixed kind, never free text. */
 export interface HealthCheer {
   id: number;
