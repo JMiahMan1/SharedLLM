@@ -207,12 +207,16 @@ but never checks who is asking is an open door.
 
 **Open, low.**
 
-- **L2** the internal secret is still a master bearer token: identity's `require_internal` and
-  `require_admin_or_internal` also accept it as `Authorization: Bearer <secret>`. A separate,
-  header-only service credential would be better than one value that is both a bearer token and a
-  header.
 - **L3** the working tree's gitignored `.env` holds a live `GITHUB_TOKEN` and `GITLAB_PASS`. Not a
   merge blocker (it is untracked and never committed), but rotate the GitHub token if it is live.
+
+- **LOW - L2: the internal secret is a header of its own and nothing else.** Identity's
+  `require_internal` and `require_admin_or_internal` used to accept it as
+  `Authorization: Bearer <secret>` as well. That is the header every browser and phone sends *its own*
+  key in - the one header that ends up in logs, in a bug report and in a curl example - so the
+  household's master secret had a second way to travel. The Bearer form is refused now (a real
+  administrator's own key still works, which is what that header is for), and the three gateway calls
+  that sent both the header and the same secret as a Bearer token no longer do.
 
 **Checked and found sound** (so the next reader does not re-audit them): PBKDF2-SHA256 password
 hashing with a constant-time compare; role and family escalation (a member cannot promote themselves,
@@ -479,8 +483,23 @@ discovery and geo's zone cache).
 **Open, should fix before merge.** The base image's apt tools are still installed unpinned (the
 `FROM` line, every Python package the Dockerfile names, and the interpreter are pinned, but the
 Debian packages `apt-get install` resolves at build time can move - the digest fixes the release, not
-the tool versions - and the Python transitive dependencies are free to move too, which needs a
-constraints file reconciled with each service's own `requirements.txt`).
+the tool versions).
+
+**Checked: a blanket constraints file is not the way to pin the rest.** A
+`docker/constraints.txt` was generated from the built image's `pip freeze` (194 pins) and dry-run
+against every service's own `requirements.txt`
+(`pip install --dry-run --ignore-installed -r <svc>/requirements.txt -c docker/constraints.txt`). It
+cannot be applied as-is: `control_plane` and `workspace_runtime` pin versions *older* than the base
+(`fastapi==0.109.2` and `fastapi==0.115.0` against the base's `0.162.0`, `pydantic==2.6.1` against
+`2.14.1`, and so on), and `execution`'s Whisper install resolves `torch` from a separate index. Two of
+those files turn out not to be build inputs at all - neither `services/control_plane/Dockerfile` nor
+`services/workspace_runtime/Dockerfile` installs its `requirements.txt`, so they are stale files rather
+than a source of drift; the live containers confirm it (`control_plane` runs the base's
+`fastapi 0.162.0`, `workspace_runtime` an older `0.160.0`). The real build input for the tools those two
+images add is their Dockerfiles, so `workspace_runtime`'s two unpinned `pip install` blocks are now
+pinned to what the image actually resolves (`pyright==1.1.414`, `pylint==4.1.3`, `line_profiler==5.1.0`,
+`ruff==0.17.2` - which had drifted a patch behind the base - and the rest), read from the running
+container on 2026-10-26.
 
 **Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
@@ -646,10 +665,6 @@ lease, so a second replica stands down rather than double-posting.
 These are known and recorded rather than fixed, so the next person does not have to rediscover them.
 Everything here is a deliberate call, not an oversight.
 
-- **LOW - the internal secret is still a bearer token as well as a header.** Identity's
-  `require_internal` and `require_admin_or_internal` accept it as `Authorization: Bearer <secret>`, so
-  one value is both. A separate header-only service credential would be better. (The query-parameter
-  form, the fail-open checks and the plain `==` comparisons are all fixed - see §3.3.)
 - **ACCEPTED RISK - Android still permits cleartext** (`services/ui/capacitor.config.ts`
   `cleartext: true`, `services/ui/android/app/src/main/AndroidManifest.xml`
   `usesCleartextTraffic="true"`). Android's network-security-config cannot express "plain HTTP is
