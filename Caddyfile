@@ -6,6 +6,15 @@
 {
     servers :80 {
         trusted_proxies static {$PUBLIC_PROXY_IP}
+        protocols h1
+    }
+
+    # Every listener here is plaintext: TLS terminates on the public proxy, so
+    # HTTP/2 and HTTP/3 cannot be negotiated and Caddy said so 22 times on every
+    # start ("skipped because it requires TLS"). Asking for HTTP/1.1 states what
+    # this config can actually do.
+    servers {
+        protocols h1
     }
 
     # Caddy's reverse proxy logs "aborting with incomplete response" at WARN every
