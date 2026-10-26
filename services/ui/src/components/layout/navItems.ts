@@ -2,6 +2,7 @@ import {
   BookOpen,
   Brain,
   Calendar,
+  ChefHat,
   Compass,
   Database,
   FileText,
@@ -57,6 +58,9 @@ export const NAV_PAGES: NavPage[] = [
   { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists' },
+  // The recipes page had a route but no entry anywhere, so the only way to it
+  // was Family -> Create, which mounts the same screen inline.
+  { icon: ChefHat, label: 'Recipes', path: '/recipes', keywords: 'recipes meals cooking food kitchen meal plan groceries ingredients' },
   { icon: Calendar, label: 'Calendar', path: '/calendar', keywords: 'schedule events' },
   { icon: Music, label: 'Media', path: '/media', keywords: 'music assistant audiobookshelf player', pinnedOnMobile: 4 },
   { icon: FolderKanban, label: 'Workspaces', path: '/workspaces', keywords: 'files folders registry' },

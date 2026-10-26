@@ -28,4 +28,10 @@ describe('nav pages', () => {
     expect(member?.label).toBe('Shared files');
     expect(member?.path).toBe('/devices');
   });
+
+  it('offers the recipes page, which used to have a route but no way in', () => {
+    // It was reachable only through Family -> Create.
+    const recipes = NAV_PAGES.find((page) => page.path === '/recipes');
+    expect(recipes?.label).toBe('Recipes');
+  });
 });

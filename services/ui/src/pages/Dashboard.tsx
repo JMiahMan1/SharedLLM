@@ -23,7 +23,6 @@ import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { LogEntry, Workspace, SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { Capacitor } from '@capacitor/core';
 import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDebounce } from '../hooks/useDebounce';
@@ -128,9 +127,6 @@ const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: (
       </div>
       <p className="font-semibold text-sm capitalize text-white group-hover:text-purple-200 transition-colors">
         {service.label}
-      </p>
-      <p className="mt-0.5 text-[10px] text-slate-500 leading-relaxed">
-        Revision · last restart
       </p>
     </button>
   );
@@ -301,7 +297,6 @@ const Dashboard = () => {
   const { user } = useAuth();
   const { isTracking } = useLocation();
   const { trigger } = useHaptics();
-  const isMobile = Capacitor.isNativePlatform();
   const isAdmin = user?.is_admin;
   // The widget store owns the `adminOnly` gate, so it needs the role. This
   // component is the single place that has it and renders both consumers
@@ -310,10 +305,11 @@ const Dashboard = () => {
   useEffect(() => {
     setAdminStatus(Boolean(isAdmin));
   }, [isAdmin, setAdminStatus]);
-  // On mobile, normal users get a streamlined dashboard: the full Live Service
-  // Status / Recent Activity / Workspaces sections are hidden (admins keep
-  // them). Workspaces are still reachable via the toggleable Workspaces widget.
-  const showFullSections = !isMobile || isAdmin;
+  // The Live Service Status and Workspaces sections are for whoever looks
+  // after the server. They used to be shown to every role on desktop (and to
+  // admins on a phone), which put service keys, raw registry paths and
+  // "Path resolution failed" in front of the family. Workspaces stay reachable
+  // to everyone through the toggleable Workspaces widget.
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -405,7 +401,8 @@ const Dashboard = () => {
               {user?.full_name || user?.username || 'User'}
             </span>
           </p>
-          {serviceInfo && serviceInfo.git_sha !== 'unknown' && (
+          {/* The build hash and branch are for whoever looks after the server. */}
+          {isAdmin && serviceInfo && serviceInfo.git_sha !== 'unknown' && (
             <p className="mt-0.5 text-[10px] font-mono text-slate-700">
               {serviceInfo.service} · {serviceInfo.git_sha}
               {serviceInfo.git_branch && serviceInfo.git_branch !== 'unknown' ? ` · ${serviceInfo.git_branch}` : ''}
@@ -521,7 +518,7 @@ const Dashboard = () => {
         </section>
       </SectionErrorBoundary>
 
-      {showFullSections && (
+      {isAdmin && (
       <SectionErrorBoundary label="Service Status">
         <section>
           <div className="mb-5 flex items-center justify-between">
@@ -605,7 +602,7 @@ const Dashboard = () => {
         {/* Right column */}
         <div className="space-y-6">
           {/* Workspaces */}
-          {showFullSections && (
+          {isAdmin && (
           <SectionErrorBoundary label="Workspaces">
             <section className="glass-panel p-6">
               <div className="mb-5 flex items-center gap-3">
