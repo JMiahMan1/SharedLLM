@@ -283,19 +283,19 @@ wellbeing live there.
 
 **Open (rough).**
 
-- `/recipes` has no navigation entry anywhere; it is only reachable through Family, which mounts the
-  same heavy component inline.
-- The Dashboard shows developer content to non-admins: service status with a placeholder subtitle and
-  workspace rows with raw filesystem paths.
-- The page finder is desktop-only, so phones must scroll the More sheet to reach eleven pages.
-- Twenty-three destructive confirmations still use the browser's `window.confirm` while the app ships
-  a styled modal, and several workspace actions have no busy state.
-- Media detail pages have no in-app Back control (with the Back fix this is no longer a trap, but it
-  is still inconsistent with the library page).
+- The browser's `window.confirm` is still used for about twenty destructive actions. A styled,
+  promise-based `confirmDialog` (the app's own modal) now covers the four irreversible ones - erase a
+  device, delete an account, delete a note for good, empty the trash - and the rest are being
+  converted file by file. Several workspace actions also have no busy state.
 - Raw exception text reaches users in ~199 places instead of going through `lib/errorText.ts`.
 - The admin tab bar overflows horizontally; Settings is one ~1000-line column of fourteen panels; two
-  identical-looking search boxes mean different things; the build SHA is shown to every user; and the
-  theme tokens are bypassed by hardcoded colour classes in 216 files.
+  identical-looking search boxes mean different things; and the theme tokens are bypassed by hardcoded
+  colour classes in 216 files.
+
+**Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
+service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
+hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; and the
+media detail pages carry a Back control.
 
 ### 3.6 Family comms, notes and calls
 
