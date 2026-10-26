@@ -79,10 +79,10 @@ export default function CollectionPage({ kind }: { kind: CollectionKind }) {
           <h1 className={`text-[clamp(1.5rem,4vw,2.25rem)] font-bold leading-tight ${text}`}>{detail.name}</h1>
           <p className={`text-sm ${muted}`}>{[detail.artist, summary(children, kind)].filter(Boolean).join(' · ')}</p>
           {detail.description ? <p className={`line-clamp-3 max-w-2xl text-sm ${muted}`}>{detail.description}</p> : null}
-          {kind !== 'artist' && req ? (
+          {req ? (
             <div className="flex flex-wrap items-center gap-2 pt-2">
               <button type="button" onClick={() => void play(false)} disabled={playback.busy === busyKey} className={primaryButton}>
-                <Play size={18} aria-hidden />Play
+                <Play size={18} aria-hidden />{kind === 'artist' ? 'Play all' : 'Play'}
               </button>
               <button type="button" onClick={() => void play(true)} disabled={playback.busy === busyKey} className={secondaryButton}>
                 <Shuffle size={18} aria-hidden />Shuffle

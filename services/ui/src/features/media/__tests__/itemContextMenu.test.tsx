@@ -143,11 +143,13 @@ describe('ItemContextMenu (P5-T7)', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('closes on a click outside and offers no queueing for an artist', async () => {
+  it('closes on a click outside, and an artist can be queued now that it plays', async () => {
     serveHome({ recent: [mediaItem({ uri: 'library://artist/4', name: 'The Band', media_type: 'artist' })] });
     renderMedia();
     const menu = await openMenu('The Band');
-    expect(menu.queryByRole('menuitem', { name: 'Play next' })).toBeNull();
+    // An artist plays now - Music Assistant expands it into every track it
+    // has - so Play next and Add to queue are offered for it too.
+    expect(menu.getByRole('menuitem', { name: 'Play next' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('heading', { name: 'Listen Now' }));
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
