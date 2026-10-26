@@ -249,11 +249,16 @@ renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
   backup or a move lost half of that history; it now has both directions. The README also described
   the sharing scopes as `sleep|nutrition`, which stopped being true when cycle and digital wellbeing
   were added.
+- **ROUGH - B6/B7/B8/B9** a failed steps fetch read as "No reading yet" - a claim about the phone,
+  when the number was simply unknown; the "Shared with you" card rendered nothing on a failed read,
+  which reads the same as a family that has shared nothing; the digital-wellbeing week bars had no
+  axis, so a taller bar meant nothing; and `api.getCheckins` and `api.getCheckin` had no caller at
+  all. The steps card and the shared card now name the failure and offer a retry, the week bars are
+  labelled with the day they stand for, and the two dead reads are gone.
 
 **Open.**
 
-- **ROUGH - B6/B7/B8/B9** a failed steps fetch reads as "no reading yet"; "shared with you" renders
-  nothing on error; the digital-wellbeing week bar has no day labels; and `getCheckins` has no caller.
+Nothing from this audit is still open.
 
 ### 3.5 UI/UX
 
@@ -342,13 +347,11 @@ buttons show a busy state instead of inviting a second click.
 - A phone with the app closed never learns a call is happening: `activeCalls` is a client-side 5 s
   poll and the call handler sends no notice. A real call push needs a notification category and its
   delivery rules, so it is deliberately left for a focused change rather than guessed at here.
-- There is no typing indicator. Read state is real (`receiptFor`/`last_common_read`), but nothing calls
-  Talk's typing endpoint.
+- There is no typing indicator, and it is not a cheap add: Talk's typing signal is a websocket
+  feature while this integration is HTTP-only, so it needs a websocket client rather than a poll.
+  Read state is real either way (`receiptFor`/`last_common_read`).
 - An optimistic send briefly drops the bubble while the invalidate/refetch round-trips, and
   attachments and voice notes have no optimistic bubble at all.
-- "Guardian" and "Devices" appear in the navigation for every role. Enforcement is correctly
-  server-side, so this is clutter rather than a hole.
-
 ### 3.7 Backend and operational readiness
 
 Judged as one host, one replica per service, seven users, behind a proxy - not as a SaaS.
