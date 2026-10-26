@@ -436,9 +436,61 @@ a web server binding its port as an unprivileged user needs its own image varian
 
 **Acceptable for this deployment.** Readiness reports 200 while degraded; some
 list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
-correlation id; two N+1 queries; and a handful of deliberate best-effort `except Exception: pass`
+correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
+`:latest` with a warning rather than waiting indefinitely (which is also what lets a docs-only commit
+deploy without rebuilding anything); and a handful of deliberate best-effort `except Exception: pass`
 blocks. The gateway's media layer is the model to copy for honest failure: a named cause and a clean
 502 rather than a traceback.
+
+### 3.8 Recipes, calendar, Bible, location, admin and workspaces (audited 2026-10-26)
+
+**Fixed.**
+
+- **Recipes: opening one could save it over another.** Switching recipes set the title immediately
+  but left the previous body in the editor, so a Save in that window wrote recipe A's text to recipe B
+  (and a failed read left the stale body there to be saved). The editor now clears on switch, Save is
+  disabled while the read is in flight, and a failed read clears it rather than leaving it.
+- **Recipes: a failed list read looked like an empty cookbook** ("No recipes yet. Add the first one"),
+  and the delete button had no busy state. The list says it could not load, with a retry, and the
+  delete disables for its own row. A failed duplicate check now says so instead of silently offering
+  already-imported recipes again.
+- **JarvisLab: "Last Run Result" showed the wrong run.** It read `runSmokeMutation.data ||
+  runUnitMutation.data`, so after a passing smoke test a failing unit run still showed the smoke
+  test's PASS and output. It now tracks the most recent run and names it.
+- **JarvisLab: the stack overview, the missions list and the log panel rendered failures as emptiness**
+  (blank panels, "No missions yet", "Waiting for log lines…"). Each now says what failed.
+- **Workspaces: a failed list read said "No Workspaces Found"** - a claim about the household rather
+  than about the request. It now says it could not ask, with a retry. "Sync All" and "Launch Scan"
+  could also be double-fired, launching every update twice; both disable while in flight.
+- **Admin: four destructive deletes asked nothing** (a device assignment, a media group, a light
+  cluster, a light pattern). They now use the app's own dialog. The account list has error and empty
+  states, "Add person" and the new-setting Add disable while saving, the password field refuses fewer
+  than four characters, and five inputs that had only a placeholder now have a name.
+- **Calendar: a refused write toasted success.** The server answers a FAILURE body with HTTP 200 and
+  the UI's calendar writes never checked `status`, so an event whose time could not be parsed was
+  reported as added and nothing was saved. A refused write now raises, and the date-parsing refusal is
+  reworded ("Try 'tomorrow 5pm' or 2026-10-27 17:00") instead of surfacing as a generic failure.
+- **Calendar: the desktop month's event click also opened the day view** (the event span sat inside
+  the day button with no `stopPropagation`, which is also invalid nested interactive markup), the
+  mobile month's event dots were invisible to a screen reader, the "Nothing coming up" empty state
+  rendered beside the error, and the iCal/default/integration controls could be double-fired.
+- **Bible: a one-letter search said "Nothing found"** although the query is disabled below two
+  characters - it now asks for two letters. The tab bar claimed to be a tablist with no panels; it is
+  a group of pressed buttons now. Closing a study asks first.
+- **Location: the sensor toggle always reported success.** It returned true even when no watch
+  attached, so Settings toasted "Location tracking enabled" over a failure. The map also said "No one
+  is sharing location right now" when the feed had simply failed; it now says it could not read the
+  feed.
+- **Companion devices: a failed read looked like no data** ("No devices yet", "Not enough battery
+  reports in the last day yet"). Both now say the read failed.
+- **TheMealDB search was a second, unreachable path to data `recipe_search` already fetches.** The
+  `themealdb_search` action, its handler and its four tests are gone.
+
+**Open (rough).**
+
+- The calendar's "When" field is still free text validated on the server; the client only explains the
+  server's parse error after the fact rather than catching it first.
+- `docs/RECIPES.md`'s Phase 6 (tests) and Phase 7 (Skylight) remain as that file describes.
 
 ## 4. Deliberately left, with reasons
 
@@ -463,11 +515,9 @@ Everything here is a deliberate call, not an oversight.
   untracked, so it is not a merge blocker; rotate the GitHub PAT if it is still live and keep `.env`
   out of archives and backups. The 1.9 GB `.tmp/` scratch directory holds the same class of secret
   and is likewise gitignored.
-- **The remaining audit findings are recorded above, not fixed.** §3.4 Health (A2-A4 and the B
-  items), §3.5 UI/UX (the B items), §3.6 Family comms (the A and B items) and §3.7 Backend readiness
-  (the A and B items) each list what is still below the bar with `file:line` and the smallest fix.
-  The highest-value ones from those lists are: the identity resolve timeout and the missing
-  `./data/*.db` backup (backend readiness), a chat thread that says "No messages yet" when Nextcloud
-  is down and an `@Jarvis` failure that says nothing at all (family comms), the developer crash
-  screen and the unlabelled form fields (UI), and the metric-history gap that makes imported HRV,
-  SpO2 and body-fat readings invisible (health).
+- **The remaining audit findings are recorded above, not fixed.** §3.5 UI/UX (the theme tokens
+  bypassed by hardcoded colour classes in 216 files), §3.6 Family comms (the typing indicator, which
+  needs Talk's websocket rather than a poll) and §3.7 Backend readiness (the apt tool versions and the
+  Python transitive dependencies, the per-process state that would misbehave under a second replica,
+  and the services still running as root) each list what is still below the bar with `file:line` and
+  the smallest fix.
