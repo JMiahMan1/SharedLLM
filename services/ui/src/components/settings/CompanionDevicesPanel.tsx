@@ -76,7 +76,7 @@ function BatteryChip({ reading }: { reading: BatteryReading }) {
 
 /** The last day's battery reports as a small line (percent over time). */
 function BatteryHistory({ deviceKey }: { deviceKey: string }) {
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, isError } = useQuery({
     queryKey: ['device-battery', deviceKey],
     queryFn: () => api.getDeviceBattery(deviceKey, 24),
   });
@@ -84,6 +84,7 @@ function BatteryHistory({ deviceKey }: { deviceKey: string }) {
     .filter((r) => r.pct != null)
     .map((r) => ({ at: Date.parse(r.at), value: r.pct as number }));
   if (isLoading) return <p className="text-xs text-slate-500">Loading battery history…</p>;
+  if (isError) return <p className="text-xs text-amber-200">Could not read this device's battery history.</p>;
   if (points.length < 2) return <p className="text-xs text-slate-500">Not enough battery reports in the last day yet.</p>;
   const charging = data.filter((r) => r.usb).length;
   return (
@@ -115,7 +116,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [detailFor, setDetailFor] = useState<CompanionDevice | null>(null);
 
-  const { data: allDevices = [], isLoading } = useQuery({
+  const { data: allDevices = [], isLoading, isError: devicesError } = useQuery({
     queryKey: ['companion-devices'],
     queryFn: () => api.getCompanionDevices(),
   });
@@ -313,7 +314,12 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
 
       <ul className="divide-y divide-white/5">
         {isLoading && <li className="p-4 sm:p-6 text-sm text-slate-500">Loading…</li>}
-        {!isLoading && devices.length === 0 && (
+        {!isLoading && devicesError && (
+          <li className="p-4 sm:p-6 text-sm text-amber-200">
+            Could not read your paired devices just now. Reload to try again.
+          </li>
+        )}
+        {!isLoading && !devicesError && devices.length === 0 && (
           <li className="p-4 sm:p-6 text-sm text-slate-500">No devices yet. Signing in on your phone adds it here.</li>
         )}
         {devices.map((d: CompanionDevice) => {
