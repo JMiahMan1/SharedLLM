@@ -651,7 +651,10 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
             service="talk_game",
         )
 
-    who = (req.card_detail or "family").strip()
+    # The caller's own name, never the one in the request body: `card_detail`
+    # is client-supplied, so trusting it let any member bank stars, count an
+    # answer, or join a roster as somebody else.
+    who = (getattr(req.user_context, "user", None) or "").strip() or "family"
     outcome = await _apply_game_answer(provider, req.token, who, req.message or "", req.game_words)
     if outcome is None:
         return ExecutionResult(

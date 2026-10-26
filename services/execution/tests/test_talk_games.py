@@ -132,7 +132,16 @@ def test_correct_trivia_answers_bank_a_star(talk, monkeypatch):
 
     state = games.registry.start_trivia("room-1")
     asyncio.run(
-        talk.handle_talk(_request(game_command="answer", message=state.answers[0], card_detail="Kiddo"))
+        talk.handle_talk(
+            _request(
+                game_command="answer",
+                message=state.answers[0],
+                # A decoy: the player is the verified caller now, so naming
+                # somebody else in the body has to change nothing.
+                card_detail="Somebody Else",
+                user_context={"user": "Kiddo"},
+            )
+        )
     )
 
     assert banked and banked[0]["user"] == "Kiddo"
@@ -156,7 +165,14 @@ def test_star_banking_failure_never_breaks_a_game(talk, monkeypatch):
 
     state = games.registry.start_trivia("room-1")
     result = asyncio.run(
-        talk.handle_talk(_request(game_command="answer", message=state.answers[0], card_detail="Kiddo"))
+        talk.handle_talk(
+            _request(
+                game_command="answer",
+                message=state.answers[0],
+                card_detail="Somebody Else",
+                user_context={"user": "Kiddo"},
+            )
+        )
     )
     # The answer still counted in the game, whatever geo thinks.
     assert state.player("Kiddo").stars == 1

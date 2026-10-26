@@ -6954,7 +6954,10 @@ async def proxy_talk_game(request: Request):
         "game_command": body.get("game_command"),
         "game_kind": body.get("game_kind"),
         "game_words": body.get("game_words"),
-        "card_detail": body.get("player") or body.get("card_detail"),
+        # The player is never taken from the body: it used to fall back to
+        # `body.get("player")`, which let a member name somebody else and bank
+        # their stars. Execution uses the verified caller instead.
+        "card_detail": body.get("card_detail"),
     }
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
