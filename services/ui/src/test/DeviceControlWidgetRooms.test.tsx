@@ -18,6 +18,11 @@ vi.mock('../services/api', () => ({
 
 import { api, apiClient } from '../services/api';
 import DeviceControlWidget from '../components/widgets/DeviceControlWidget';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 const settings = { widget_key: 'device_control', visibility: 'visible', order_index: 0, size: 'tall' } as UserWidgetSettings;
 
@@ -48,8 +53,8 @@ describe('DeviceControlWidget rooms', () => {
       { entity_id: 'cover.garage_door', friendly_name: 'Garage Door', state: 'closed', domain: 'cover' },
     ]);
     vi.mocked(api.getUserPresence).mockResolvedValue({ status: 'SUCCESS', user_id: 'kid', presence: { room: 'not_home', confidence: 1 } });
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirm);
+    const confirm = confirmMock;
+    confirm.mockResolvedValue(false);
     renderWidget();
     fireEvent.click(await screen.findByRole('button', { name: 'All (1)' }));
     fireEvent.click(await screen.findByRole('button', { name: /Open/ }));

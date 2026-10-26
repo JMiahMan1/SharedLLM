@@ -84,6 +84,7 @@ import {
   type UploadSelection,
 } from '../../lib/workspaceUpload';
 import type { WorkspaceSyncDirection } from '../../types/api';
+import { confirmDialog } from '../ui/confirmDialog';
 
 interface WorkspaceIDEProps {
   workspace: Workspace;
@@ -796,9 +797,9 @@ export default function WorkspaceIDE({
 
   // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
   const closeTab = useCallback(
-    (path: string) => {
+    async (path: string) => {
       const tab = tabs.find((t) => t.path === path);
-      if (tab?.dirty && !confirm(`Discard unsaved changes to ${path}?`)) return;
+      if (tab?.dirty && !(await confirmDialog({ title: 'Discard your changes?', body: `Discard unsaved changes to ${path}?`, confirmLabel: 'Discard', danger: true }))) return;
       if (tab?.imageUrl) URL.revokeObjectURL(tab.imageUrl);
       if (tab?.blobUrl) URL.revokeObjectURL(tab.blobUrl);
       setTabs((prev) => {
@@ -939,7 +940,7 @@ export default function WorkspaceIDE({
 
   const deleteEntry = useCallback(
     async (entry: WorkspaceFileEntry) => {
-      if (!confirm(`Delete ${entry.path}? This cannot be undone.`)) return;
+      if (!(await confirmDialog({ title: 'Delete this file?', body: `Delete ${entry.path}? This cannot be undone.`, confirmLabel: 'Delete', danger: true }))) return;
       try {
         await api.deleteWorkspaceFile(workspace.id, entry.path);
         toast.success(`Deleted ${entry.path}`);

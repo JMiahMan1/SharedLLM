@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
 import { noteBody } from '../../lib/notesMeta';
+import { confirmDialog } from '../ui/confirmDialog';
 
 export interface NoteVersion {
   /** Nextcloud's version id (the time it was made, in seconds). */
@@ -68,7 +69,7 @@ export default function NoteHistory({
 
   const restore = async (version: NoteVersion) => {
     const warning = dirty ? ' Your unsaved changes in this note will be discarded.' : '';
-    if (!window.confirm(`Restore the version from ${when(version)}?${warning}`)) return;
+    if (!(await confirmDialog({ title: 'Restore this version?', body: `Restore the version from ${when(version)}?${warning}`, confirmLabel: 'Restore' }))) return;
     setRestoring(true);
     try {
       const res = await api.noteVersions({ path, action: 'restore', version: version.id, storage: STORAGE, as_user: asUser });

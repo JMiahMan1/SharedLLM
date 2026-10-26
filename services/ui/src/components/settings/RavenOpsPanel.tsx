@@ -8,6 +8,7 @@ import HelpTooltip from '../ui/HelpTooltip';
 import RavenAuditLog from './RavenAuditLog';
 import RavenLiveTrace from './RavenLiveTrace';
 import RavenMissionDetail from './RavenMissionDetail';
+import { confirmDialog } from '../ui/confirmDialog';
 
 const SCAN_INTERVALS: [number, string][] = [
   [60, 'Every minute'],
@@ -291,8 +292,8 @@ export default function RavenOpsPanel() {
                 <Terminal size={12} /> Watch
               </button>
               <button
-                onClick={() => {
-                  if (window.confirm(`Stop mission #${mission.id}?`)) killMissionMutation.mutate(mission.id);
+                onClick={async () => {
+                  if (await confirmDialog({ title: 'Stop this mission?', body: `Stop mission #${mission.id}?`, confirmLabel: 'Stop', danger: true })) killMissionMutation.mutate(mission.id);
                 }}
                 disabled={killMissionMutation.isPending}
                 className={`${btn} text-red-400`}

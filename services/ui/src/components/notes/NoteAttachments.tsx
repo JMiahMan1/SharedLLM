@@ -6,6 +6,7 @@ import { base64ToBytes, blobToBase64 } from '../../lib/base64';
 import { FileText, ImagePlus, Loader2, Mic, Paperclip, PenLine, Square, Trash2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
+import { confirmDialog } from '../ui/confirmDialog';
 import {
   ATTACHMENT_MAX_BYTES,
   attachmentKind,
@@ -295,7 +296,7 @@ export default function NoteAttachments({
 
   const remove = (attachment: NoteAttachment) =>
     run(`remove:${attachment.link}`, async () => {
-      if (!window.confirm(`Delete ${attachment.name} from this note?`)) return;
+      if (!(await confirmDialog({ title: 'Delete this attachment?', body: `Delete ${attachment.name} from this note?`, confirmLabel: 'Delete', danger: true }))) return;
       const res = await api.noteAttachment({ action: 'delete', path: notePath!, attachment: attachment.link, as_user: asUser });
       if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the attachment');
       onRemove(attachment.link);

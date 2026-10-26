@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { ThemePackageManager } from './ThemePackageManager';
 import { themeRegistry } from './registry';
 import { renderWithProviders } from '../test/render';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 import {
   createThemePackage,
   createThemePack,
@@ -32,9 +37,7 @@ describe('ThemePackageManager (management UI)', () => {
     if (typeof window.prompt !== 'function') {
       vi.stubGlobal('prompt', vi.fn());
     }
-    if (typeof window.confirm !== 'function') {
-      vi.stubGlobal('confirm', vi.fn(() => true));
-    }
+    confirmMock.mockResolvedValue(true);
   });
 
   it('lists builtin pack themes without hardcoding palettes', async () => {
@@ -135,7 +138,7 @@ describe('ThemePackageManager (management UI)', () => {
 
   it('removes a user pack but refuses to remove builtin', async () => {
     seedUserPack('remove-me');
-    vi.mocked(window.confirm).mockReturnValue(true);
+    confirmMock.mockResolvedValue(true);
     renderWithProviders(<ThemePackageManager />);
     const user = userEvent.setup();
 

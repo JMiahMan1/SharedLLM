@@ -4,6 +4,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Recipes, { RECIPES_DIR } from './Recipes';
 import { api } from '../services/api';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 vi.mock('../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -172,8 +177,8 @@ describe('Recipes', () => {
   });
 
   it('deletes a recipe after asking', async () => {
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal('confirm', confirm);
+    confirmMock.mockResolvedValue(true);
+    const confirm = confirmMock;
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
 

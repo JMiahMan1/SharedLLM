@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Plus, Trash2, Upload, Palette, Eye, EyeOff } from 'lucide-react';
 import { themeRegistry } from './registry';
+import { confirmDialog } from '../components/ui/confirmDialog';
 import {
   createThemePackage,
   validateThemePack,
@@ -273,8 +274,8 @@ export function ThemePackageManager({
                     <button
                       type="button"
                       className="glass-button px-2 py-1 text-xs text-red-300"
-                      onClick={() => {
-                        if (window.confirm(`Remove pack “${pack.name}”?`)) {
+                      onClick={async () => {
+                        if (await confirmDialog({ title: 'Remove this pack?', body: `Remove pack “${pack.name}”?`, confirmLabel: 'Remove', danger: true })) {
                           try {
                             themeRegistry.removePack(pack.id);
                             refresh();

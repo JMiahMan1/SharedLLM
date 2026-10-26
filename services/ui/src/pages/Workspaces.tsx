@@ -36,6 +36,7 @@ import type { WorkspaceSyncMode } from '../types/api';
 import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import Toggle from '../components/ui/Toggle';
+import { confirmDialog } from '../components/ui/confirmDialog';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
 import {
@@ -762,8 +763,15 @@ const Workspaces = () => {
                             <Edit3 size={18} />
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Delete ${ws.display_name}? Its registration and sandbox are removed.`)) {
+                            onClick={async () => {
+                              if (
+                                await confirmDialog({
+                                  title: 'Delete this workspace?',
+                                  body: `Delete ${ws.display_name}? Its registration and sandbox are removed.`,
+                                  confirmLabel: 'Delete',
+                                  danger: true,
+                                })
+                              ) {
                                 deleteMutation.mutate({ id: ws.id });
                               }
                             }}
@@ -873,8 +881,15 @@ const Workspaces = () => {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
-                          onClick={() => {
-                            if (confirm('Revert this workspace to its previous stable state? This discards the last Raven patch.')) {
+                          onClick={async () => {
+                            if (
+                              await confirmDialog({
+                                title: 'Revert this workspace?',
+                                body: 'Revert this workspace to its previous stable state? This discards the last Raven patch.',
+                                confirmLabel: 'Revert',
+                                danger: true,
+                              })
+                            ) {
                               revertMutation.mutate(ws.id);
                             }
                           }}

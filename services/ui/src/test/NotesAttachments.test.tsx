@@ -6,6 +6,11 @@ import toast from 'react-hot-toast';
 import Notes from '../pages/Notes';
 import { renderWithProviders } from './render';
 import { notesWriteCalls, server } from './setup';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 type AttachmentCall = { action?: string; path?: string; attachment?: string; filename?: string; data?: string };
 type WriteCall = { content?: string; path?: string };
@@ -106,8 +111,8 @@ describe('Note attachments', () => {
     const user = userEvent.setup();
     const calls: AttachmentCall[] = [];
     serveGarden(calls);
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal('confirm', confirm);
+    confirmMock.mockResolvedValue(true);
+    const confirm = confirmMock;
     renderWithProviders(<Notes />);
     await user.click(await screen.findByText('Garden'));
     const panel = await screen.findByTestId('note-attachments');

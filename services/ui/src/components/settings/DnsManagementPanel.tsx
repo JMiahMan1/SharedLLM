@@ -4,6 +4,7 @@ import { Globe, Plus, Trash2, Save, Edit2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { GlobalSetting } from '../../types/api';
+import { confirmDialog } from '../ui/confirmDialog';
 
 interface DnsRecord {
   id: number;
@@ -307,8 +308,8 @@ export default function DnsManagementPanel() {
                     <Edit2 size={14} />
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm(`Delete DNS record for ${record.domain}?`)) {
+                    onClick={async () => {
+                      if (await confirmDialog({ title: 'Delete this DNS record?', body: `Delete the record for ${record.domain}?`, confirmLabel: 'Delete', danger: true })) {
                         deleteMutation.mutate(record.id);
                       }
                     }}

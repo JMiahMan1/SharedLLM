@@ -25,6 +25,7 @@ import toast from 'react-hot-toast';
 import { api, type StorageEntry, type RagStats, type StorageStatus, type SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
+import { confirmDialog } from '../components/ui/confirmDialog';
 
 /** The two backends a full reindex can target, with the copy each one shows. */
 const REINDEX_PROVIDERS: {
@@ -862,8 +863,8 @@ const KnowledgeHub = () => {
                                                        <Pencil size={13} /> Edit
                                                     </button>
                                                     <button
-                                                       onClick={() => {
-                                                          if (confirm('Delete this lesson? Raven will stop using it.')) {
+                                                       onClick={async () => {
+                                                          if (await confirmDialog({ title: 'Delete this lesson?', body: 'Delete this lesson? Raven will stop using it.', confirmLabel: 'Delete', danger: true })) {
                                                              deleteLearningMutation.mutate(item.id);
                                                           }
                                                        }}

@@ -11,6 +11,7 @@ import RavenMissionDetail from '../components/settings/RavenMissionDetail';
 import { useWebSocket, type ConnectionState } from '../lib/wsManager';
 import { useAuth } from '../context/AuthContext';
 import { useSystemHealth } from '../hooks/useSystemHealth';
+import { confirmDialog } from '../components/ui/confirmDialog';
 
 const MISSION_TEMPLATES = [
   { label: 'Audit Codebase', query: 'Audit the codebase for lint errors, unused imports, and code quality issues. Fix all findings.' },
@@ -556,8 +557,8 @@ const MissionsPane = () => {
                       <Pause size={12} /> Pause
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Stop mission #${mission.id}?`)) killMissionMutation.mutate(mission.id);
+                      onClick={async () => {
+                        if (await confirmDialog({ title: 'Stop this mission?', body: `Stop mission #${mission.id}?`, confirmLabel: 'Stop', danger: true })) killMissionMutation.mutate(mission.id);
                       }}
                       disabled={killMissionMutation.isPending}
                       className={`${actionBtn} text-red-400`}
@@ -573,8 +574,8 @@ const MissionsPane = () => {
                 )}
                 {!isLive(mission.status) && mission.status !== 'paused' && (
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Delete mission #${mission.id} and its log?`)) deleteMissionMutation.mutate(mission.id);
+                    onClick={async () => {
+                      if (await confirmDialog({ title: 'Delete this mission?', body: `Delete mission #${mission.id} and its log?`, confirmLabel: 'Delete', danger: true })) deleteMissionMutation.mutate(mission.id);
                     }}
                     disabled={deleteMissionMutation.isPending}
                     className={`${actionBtn} text-slate-400 hover:text-red-300`}

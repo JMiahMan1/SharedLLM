@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import TokenBridge from '../../plugins/tokenBridge';
+import { confirmDialog } from '../ui/confirmDialog';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -252,7 +253,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     if (wantsGarageOpen) {
       const away = await isAwayFromHome();
       if (away) {
-        const ok = window.confirm('You appear to be away from home. Open the garage door anyway?');
+        const ok = await confirmDialog({ title: 'Open the garage?', body: 'You appear to be away from home. Open the garage door anyway?', confirmLabel: 'Open', danger: true });
         if (!ok) return;
       }
     }

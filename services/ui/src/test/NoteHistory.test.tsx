@@ -6,6 +6,11 @@ import toast from 'react-hot-toast';
 import Notes from '../pages/Notes';
 import { renderWithProviders } from './render';
 import { notesReadCalls, server } from './setup';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 type VersionsCall = { path?: string; action?: string; version?: string };
 
@@ -29,7 +34,7 @@ describe('Note version history', () => {
   beforeEach(() => {
     localStorage.clear();
     toast.remove();
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMock.mockResolvedValue(true);
   });
   afterEach(() => vi.unstubAllGlobals());
 

@@ -4,6 +4,7 @@ import { BadgeCheck, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { Role, UserProfile } from '../../types/api';
+import { confirmDialog } from '../ui/confirmDialog';
 
 /**
  * Admin > Users > Roles: named sets of permissions, and who holds them.
@@ -218,9 +219,9 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
               <button
                 type="button"
                 disabled={remove.isPending}
-                onClick={() => {
+                onClick={async () => {
                   const role = roles.find((r) => r.id === draft.id);
-                  if (role && window.confirm(`Delete the ${role.name} role? Everyone with it loses what it allowed.`)) {
+                  if (role && await confirmDialog({ title: 'Delete this role?', body: `Delete the ${role.name} role? Everyone with it loses what it allowed.`, confirmLabel: 'Delete', danger: true })) {
                     remove.mutate(role);
                   }
                 }}

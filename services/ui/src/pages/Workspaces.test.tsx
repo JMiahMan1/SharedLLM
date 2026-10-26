@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import Workspaces from './Workspaces';
 import { renderWithProviders } from '../test/render';
 import { server } from '../test/setup';
+import { confirmDialog } from '../components/ui/confirmDialog';
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+const confirmMock = vi.mocked(confirmDialog);
 
 const listOf = (...workspaces: Record<string, unknown>[]) =>
   http.get('/api/workspaces', () => HttpResponse.json({ status: 'SUCCESS', workspaces }));
@@ -104,7 +109,7 @@ describe('Workspaces page', () => {
 
   it('asks what to do with artifacts before deleting a workspace', async () => {
     const deletes: unknown[] = [];
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMock.mockResolvedValue(true);
     server.use(
       listOf(gitWs),
       http.delete('/api/workspaces/code', async ({ request }) => {

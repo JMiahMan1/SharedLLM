@@ -12,6 +12,7 @@ import {
 } from '../../lib/drawingSocket';
 import SendToChat from '../chat/SendToChat';
 import { canvasPoint, paintSegment, type Point } from './canvasPoint';
+import { confirmDialog } from '../ui/confirmDialog';
 
 const COLORS = ['#1e293b', '#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
 const WIDTHS = [3, 6, 12];
@@ -173,7 +174,7 @@ export default function DrawCanvas() {
   // the stroke count is the source of truth.
   const isBlank = (): boolean => !touched.current;
 
-  const connect = () => {
+  const connect = async () => {
     const room = board.trim();
     if (!BOARD_RE.test(room)) {
       setLiveError('Board codes use letters, numbers, dashes and underscores.');
@@ -184,7 +185,7 @@ export default function DrawCanvas() {
       setLiveError('Sign in to draw together.');
       return;
     }
-    if (touched.current && !window.confirm('Joining the shared board replaces this canvas with the board drawing. Continue?')) {
+    if (touched.current && !(await confirmDialog({ title: 'Replace your drawing?', body: 'Joining the shared board replaces this canvas with the board drawing. Continue?', confirmLabel: 'Continue', danger: true }))) {
       return;
     }
 
