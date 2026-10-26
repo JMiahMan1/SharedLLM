@@ -22,6 +22,7 @@ import PeoplePanel from './PeoplePanel';
 import type { CalendarEvent } from '../../types/widget';
 import type { ExecutionResponse } from '../../services/api';
 import { PLANNER_DARK, PLANNER_LIGHT, textOn } from '../../themes/plannerPalette';
+import { confirmDialog } from '../ui/confirmDialog';
 
 // Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
@@ -370,7 +371,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
           {readOnly ? <span /> : (
             <button
               disabled={deleteMut.isPending}
-              onClick={() => { if (window.confirm(event.recurring ? 'Delete this event and all its repeats?' : 'Delete this event?')) deleteMut.mutate(); }}
+              onClick={async () => { if (await confirmDialog({ title: 'Delete this event?', body: event.recurring ? 'Delete this event and all its repeats?' : 'Delete this event?', confirmLabel: 'Delete', danger: true })) deleteMut.mutate(); }}
               className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60"
               style={{ background: '#dc2626' }}
             >

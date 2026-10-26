@@ -31,12 +31,15 @@ Every claim below was verified against the live system unless marked **planned**
     Music Assistant, Nextcloud and the gateway; exits 1 on any failure.
     **If Music Assistant alone says `UNREACHABLE (ClientConnectorError)`, it is this Mac, not MA.**
     On 2026-10-26 every `192.168.2.x` address was `[Errno 65] No route to host` from
-    `.venv/bin/python` while the public internet answered fine - macOS Local Network privacy denying
-    the interpreter, not a service fault. `ha.sumemail.com` is the only probe target that resolves to
-    a private address (192.168.2.20), which is why MA is the only one that fails. MA itself answered
-    200 to `curl` and `ping` from this Mac, and both the server and the gateway container reached it
-    with 200. Allow the terminal in System Settings -> Privacy & Security -> Local Network, or read
-    MA's result from the server instead.
+    `.venv/bin/python` (Homebrew 3.14.8) while the public internet answered fine. The same probe with
+    `/usr/bin/python3` (Apple, 3.9.6), `nc` and `curl` reached `192.168.2.20:8095` without trouble,
+    and these commands run under the **opencode** app (`zsh` <- `opencode` <- `launchd`), not under a
+    terminal - so the missing macOS Local Network permission belongs to **opencode**, and the
+    third-party Python binary is the only client it affects. `ha.sumemail.com` is the only probe
+    target that resolves to a private address (192.168.2.20), which is why MA is the only one that
+    fails. MA itself answered 200 to `curl` and `ping` from this Mac, and both the server and the
+    gateway container reached it with 200. Allow **opencode** in System Settings -> Privacy &
+    Security -> Local Network, or read MA's result from the server instead.
   - `ssh jeremiah@192.168.2.205`; `docker exec -i sharedllm_<svc> …` (direct
     service calls need `X-Internal-Secret`, present as `INTERNAL_SECRET`).
 

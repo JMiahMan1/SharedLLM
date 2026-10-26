@@ -1888,8 +1888,8 @@ const Admin = () => {
                            {service.status === 'running' && (
                              <>
                                <button
-                                 onClick={() => {
-                                   if (window.confirm(`Restart ${serviceKey}? It is unavailable for a few seconds${serviceKey === 'gateway' || serviceKey === 'caddy' ? ', and this app with it' : ''}.`)) {
+                                 onClick={async () => {
+                                   if (await confirmDialog({ title: 'Restart this service?', body: `Restart ${serviceKey}? It is unavailable for a few seconds${serviceKey === 'gateway' || serviceKey === 'caddy' ? ', and this app with it' : ''}.`, confirmLabel: 'Restart', danger: true })) {
                                      restartServiceMutation.mutate(service.name);
                                    }
                                  }}
@@ -1917,8 +1917,8 @@ const Admin = () => {
                                )}
                                 {showPullAndRestart && (
                                   <button
-                                    onClick={() => {
-                                      if (window.confirm(`Download the latest ${serviceKey} image and restart it?`)) {
+                                    onClick={async () => {
+                                      if (await confirmDialog({ title: 'Update and restart?', body: `Download the latest ${serviceKey} image and restart it?`, confirmLabel: 'Update', danger: true })) {
                                         pullAndRestartMutation.mutate(service.name);
                                       }
                                     }}

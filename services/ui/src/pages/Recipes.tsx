@@ -19,6 +19,7 @@ import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shop
 import { PHOTO_LABEL, buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
 import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib/recipeNutrition';
+import { confirmDialog } from '../components/ui/confirmDialog';
 import {
   emptyPlan,
   planLevel,
@@ -192,7 +193,7 @@ export default function Recipes() {
   };
 
   const remove = async (recipe: RecipeSummary) => {
-    if (!window.confirm(`Delete the recipe "${recipe.title}"?`)) return;
+    if (!(await confirmDialog({ title: 'Delete this recipe?', body: `Delete the recipe "${recipe.title}"?`, confirmLabel: 'Delete', danger: true }))) return;
     try {
       const res = await api.deleteNote(recipe.title, STORAGE, recipe.path, asUser);
       if (res.status === 'SUCCESS') {

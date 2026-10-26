@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import { WidgetCard } from './WidgetCard';
 import { useSendAsPref } from '../chat/sendAsPref';
 import toast from 'react-hot-toast';
+import { confirmDialog } from '../ui/confirmDialog';
 
 interface NoteItem {
   id: string;
@@ -105,7 +106,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     const note = notes.find((n) => n.id === id);
     if (!note) return;
     // Deletes the file from the notes storage, so it is not a one-tap action.
-    if (!window.confirm(`Delete "${note.title}"?`)) return;
+    if (!(await confirmDialog({ title: 'Delete this note?', body: `Delete "${note.title}"?`, confirmLabel: 'Delete', danger: true }))) return;
     // Optimistic removal
     setNotes((prev) => prev.filter((n) => n.id !== id));
     try {

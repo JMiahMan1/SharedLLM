@@ -36,8 +36,6 @@ vi.mock('../components/ui/EntitySearchDropdown', () => ({
   ),
 }));
 
-vi.stubGlobal('confirm', vi.fn(() => true));
-
 describe('Admin page', () => {
   it('api.discoverUsers returns discovered users via MSW', async () => {
     const result = await api.discoverUsers();
@@ -177,8 +175,7 @@ describe('Admin page', () => {
         return HttpResponse.json({ status: 'SUCCESS' });
       }),
     );
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal('confirm', confirm);
+    confirmMock.mockResolvedValue(false);
     renderWithProviders(<Admin />);
 
     fireEvent.click(await screen.findByText('System Services'));
@@ -187,9 +184,9 @@ describe('Admin page', () => {
     expect(screen.getByText('No data')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^restart$/i }));
-    expect(confirm).toHaveBeenCalled();
+    expect(confirmMock).toHaveBeenCalled();
     expect(restarts).toEqual([]);
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMock.mockResolvedValue(true);
   });
 
   it('deleting a user asks first', async () => {

@@ -9,6 +9,7 @@ import { challengeSharePreview, challengeShareText, standingLabel, type NameOf }
 import { useFamilyDirectory } from '../chat/familyDirectory';
 import ShareToChatSheet from '../bible/ShareToChatSheet';
 import type { HealthChallenge, HealthChallengeKind } from '../../types/api';
+import { confirmDialog } from '../ui/confirmDialog';
 
 const TARGETS = [1, 2, 3, 4, 5, 6, 7];
 
@@ -157,8 +158,8 @@ export default function FamilyChallengeCard() {
                 {me?.username && me.username.toLowerCase() === challenge.created_by && (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm(`End the ${challenge.title} challenge for everyone?`)) end.mutate(challenge.id);
+                    onClick={async () => {
+                      if (await confirmDialog({ title: 'End this challenge?', body: `End the ${challenge.title} challenge for everyone?`, confirmLabel: 'End', danger: true })) end.mutate(challenge.id);
                     }}
                     disabled={end.isPending}
                     className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"

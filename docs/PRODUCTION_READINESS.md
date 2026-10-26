@@ -283,10 +283,7 @@ wellbeing live there.
 
 **Open (rough).**
 
-- The browser's `window.confirm` is still used for about twenty destructive actions. A styled,
-  promise-based `confirmDialog` (the app's own modal) now covers the four irreversible ones - erase a
-  device, delete an account, delete a note for good, empty the trash - and the rest are being
-  converted file by file. Several workspace actions also have no busy state.
+- Several workspace actions still have no busy state.
 - Raw exception text reaches users in ~199 places instead of going through `lib/errorText.ts`.
 - The admin tab bar overflows horizontally; Settings is one ~1000-line column of fourteen panels; two
   identical-looking search boxes mean different things; and the theme tokens are bypassed by hardcoded
@@ -294,8 +291,10 @@ wellbeing live there.
 
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
-hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; and the
-media detail pages carry a Back control.
+hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; the
+media detail pages carry a Back control; and every destructive action now asks in the app's own
+`confirmDialog` rather than the browser's `window.confirm` - all twenty-four call sites across the
+app, with the tests that stubbed `window.confirm` updated to stub the dialog instead.
 
 ### 3.6 Family comms, notes and calls
 
