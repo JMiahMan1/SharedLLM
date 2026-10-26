@@ -1241,23 +1241,34 @@ def add_metrics(body: MetricsBatch, request: Request, session: Session = Depends
     }
 
 
+# A year of a metric with several readings a day is thousands of rows, and a
+# food log asked for without a day or a window has no filter at all: both reads
+# are capped so one query cannot return a person's whole history.
+MAX_METRIC_SAMPLES = 1000
+MAX_FOOD_ENTRIES = 1000
+
+
 @app.get("/metrics/{metric}")
 def get_metrics(
     metric: str,
     request: Request,
     days: int = Query(30, ge=1, le=365),
+    limit: int = Query(MAX_METRIC_SAMPLES, ge=1, le=5000),
     session: Session = Depends(get_session),
 ):
     user = _user(request)
     metric = _metric(metric)
     since = (date.today() - timedelta(days=days - 1)).isoformat()
     rows = _metric_rows_between(session, user, metric, since, date.today().isoformat())
-    samples = [_sample_out(row) for row in reversed(rows)]
+    # Newest first, and capped: the page draws a trend rather than a table.
+    samples = [_sample_out(row) for row in reversed(rows)][:limit]
     return {
         "user_id": user,
         "metric": metric,
         "unit": scoring.METRIC_UNITS[metric],
         "days": days,
+        "limit": limit,
+        "truncated": len(rows) > limit,
         "samples": samples,
         "latest": samples[0] if samples else None,
     }
@@ -1570,8 +1581,15 @@ def list_food(
     request: Request,
     day: str | None = None,
     days: int = Query(0, ge=0, le=365),
+    limit: int = Query(MAX_FOOD_ENTRIES, ge=1, le=5000),
     session: Session = Depends(get_session),
 ):
+    """Logged food, newest first.
+
+    Without ``day`` or ``days`` this used to return every entry the person had
+    ever logged; the read is capped now, and says so rather than dropping rows
+    without a word.
+    """
     user = _user(request)
     query = select(FoodEntry).where(FoodEntry.user_id == user)
     if day:
@@ -1580,7 +1598,11 @@ def list_food(
         since = (date.today() - timedelta(days=days - 1)).isoformat()
         query = query.where(FoodEntry.day >= since)
     rows = session.exec(query.order_by(FoodEntry.created_at.desc())).all()
-    return {"user_id": user, "entries": [_food_out(row) for row in rows]}
+    return {
+        "user_id": user,
+        "entries": [_food_out(row) for row in rows[:limit]],
+        "truncated": len(rows) > limit,
+    }
 
 
 @app.delete("/food/{entry_id}")

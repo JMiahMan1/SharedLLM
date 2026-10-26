@@ -235,18 +235,16 @@ renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
   so the night was listed twice; a manual log for a night now updates that night's row in place.
 - **ROUGH - B5** future-dated check-ins, food and sleep were accepted; `_day()` now refuses a day more
   than one ahead (one day of slack, matching `_instant`), as the cycle routes already did.
+- **ROUGH - B2** `GET /food` with the default `days=0` applied no filter at all, so it returned every
+  entry the person had ever logged, and `GET /metrics/{metric}` was unbounded in sample count. Both
+  reads are capped (`MAX_FOOD_ENTRIES`, `MAX_METRIC_SAMPLES`) and say `truncated: true` rather than
+  dropping rows without a word.
 
 **Open.**
 
 - **ROUGH - B1** imported measures (HRV, SpO2, body fat) are invisible: there is no metric-history UI,
   and a mistyped weight cannot be deleted, although the API for both exists and the docs promise a
   weight trend.
-- **ROUGH - B2** `GET /food` with the default `days=0` applies no filter at all, and
-  `GET /metrics/{metric}` is unbounded in sample count.
-- **ROUGH - B4** a second manual sleep log for the same night creates a duplicate row, so the night is
-  listed twice.
-- **ROUGH - B5** future-dated check-ins, food and sleep are accepted, though the cycle routes already
-  reject them.
 - **ROUGH - B3/B6/B7/B8/B9/B10** the export omits `cheers_sent`; a failed steps fetch reads as "no
   reading yet"; "shared with you" renders nothing on error; the digital-wellbeing week bar has no day
   labels; `getCheckins` has no caller; and the README describes a sharing scope that has since grown.
