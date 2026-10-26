@@ -74,6 +74,9 @@ describe('Admin page', () => {
     fireEvent.click(await screen.findByText('Create User'));
     fireEvent.change(screen.getByLabelText(/^Username$/i), { target: { value: 'jeremiah' } });
     fireEvent.change(screen.getByLabelText(/^Display Name$/i), { target: { value: 'Jeremiah Summers' } });
+    // A new account needs a password: one without it cannot sign in at all, so
+    // the form refuses it rather than creating a locked-out account.
+    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'summer-2026' } });
     fireEvent.click(screen.getByText('Save User'));
 
     expect(await screen.findByText('Jeremiah Summers')).toBeInTheDocument();

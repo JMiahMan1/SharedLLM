@@ -418,24 +418,38 @@ const Admin = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to delete user'),
   });
 
-  const importUserMutation = useMutation<DiscoveredUser, Error, DiscoveredUser>({
+  const importUserMutation = useMutation<
+    DiscoveredUser & { temporaryPassword?: string },
+    Error,
+    DiscoveredUser
+  >({
     mutationFn: async (user: DiscoveredUser) => {
+      // Importing used to create the account with no password, so it could not
+      // sign in and said nothing about why. Mint a temporary one and show it:
+      // the person can change it in Settings.
+      const temporary = `jarvis-${Math.random().toString(36).slice(2, 10)}`;
       await api.createUser({
         username: user.username,
         full_name: user.display_name || user.username,
+        password: temporary,
         is_admin: false,
         // A Mailcow mailbox's local part is the mail login, and discovery
         // already matched it to the right person.
         ...(user.source.toLowerCase().includes('mailcow') ? { mail_user: user.username } : {}),
       });
-      return user;
+      return { ...user, temporaryPassword: temporary };
     },
-    onSuccess: async (user: DiscoveredUser) => {
+    onSuccess: async (user: DiscoveredUser & { temporaryPassword?: string }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['users'] }),
         queryClient.invalidateQueries({ queryKey: ['discovered-users'] }),
       ]);
-      toast.success('Discovered user imported');
+      toast.success(
+        user.temporaryPassword
+          ? `Imported ${user.username}. Temporary password: ${user.temporaryPassword}`
+          : 'Discovered user imported',
+        { duration: 15000 },
+      );
 
       // Nextcloud is the one service that needs no password from anyone: the
       // admin mints an app password for the new account. Failures are said out
@@ -2164,6 +2178,14 @@ const Admin = () => {
               onClick={() => {
                 if (!userForm.username.trim()) {
                   toast.error('Username is required');
+                  return;
+                }
+                if (!editingUser && userForm.password.trim().length < 4) {
+                  // The field is marked required, and an account with no
+                  // password cannot sign in at all: the server stores a null
+                  // hash and login answers the generic "Invalid username or
+                  // password", which reads as a wrong password forever.
+                  toast.error('Give the new account a password (at least 4 characters)');
                   return;
                 }
                 const saved = new Set(editingUser?.saved_credentials ?? []);
