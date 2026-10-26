@@ -2490,14 +2490,50 @@ def add_device_ui(
 
 # Auth & Discovery
 
+# Sign-in failures, pruned to a window. In-process like _UNLOCK_FAILURES: this
+# is one household on one server, and a restart clearing the counters is
+# acceptable. Two keys are kept so neither a single username nor a single
+# source can be hammered.
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+_LOGIN_WINDOW_S = 900
+_LOGIN_MAX_PER_USER = 5
+_LOGIN_MAX_PER_IP = 20
+
+
+def _recent_failures(key: str, now: float) -> list[float]:
+    recent = [t for t in _LOGIN_FAILURES.get(key, []) if now - t < _LOGIN_WINDOW_S]
+    _LOGIN_FAILURES[key] = recent
+    return recent
+
+
 @app.post("/api/auth/login", response_model=LoginResponse)
-def login(req: LoginRequest, session: Session = Depends(get_session)):
+def login(req: LoginRequest, request: Request, session: Session = Depends(get_session)):
+    now = time.monotonic()
+    ip = (request.client.host if request.client else "") or "unknown"
+    user_key = f"user:{req.username.strip().lower()}"
+    ip_key = f"ip:{ip}"
+    if (
+        len(_recent_failures(user_key, now)) >= _LOGIN_MAX_PER_USER
+        or len(_recent_failures(ip_key, now)) >= _LOGIN_MAX_PER_IP
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many sign-in attempts. Wait fifteen minutes, then try again.",
+        )
+
     user = session.exec(select(User).where(User.username == req.username)).first()
     if not user or not user.password_hash:
+        _recent_failures(user_key, now).append(now)
+        _recent_failures(ip_key, now).append(now)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not verify_password(req.password, user.password_hash):
+        _recent_failures(user_key, now).append(now)
+        _recent_failures(ip_key, now).append(now)
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    _LOGIN_FAILURES.pop(user_key, None)
+    _LOGIN_FAILURES.pop(ip_key, None)
 
     session_key = _get_user_api_key(user)
     if not session_key:
@@ -2517,9 +2553,14 @@ def change_password(body: ChangePasswordRequest, session: Session = Depends(get_
     # Body model, not query param: the gateway proxies JSON bodies here and a
     # bare scalar would put the new password in URLs/access logs.
     user.password_hash = hash_password(body.new_password)
+    # Rotate the session key. The key used to survive a password change, so
+    # changing it did not sign anybody out - which is the one thing a person
+    # expects it to do. The caller gets the new key back so the device they are
+    # on stays signed in.
+    new_key = _store_user_api_key(user, os.urandom(24).hex())
     session.add(user)
     session.commit()
-    return {"status": "SUCCESS", "message": "Password updated"}
+    return {"status": "SUCCESS", "message": "Password updated", "api_key": new_key or ""}
 
 def _is_secret_config_key(key: str) -> bool:
     """A test-connection field whose value must never reach a log line.
@@ -5160,7 +5201,7 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     return mission
 
 @app.get("/api/raven/missions", response_model=list[RavenMissionListItem])
-def get_missions(limit: int = 200, workspace_id: str | None = None, session: Session = Depends(get_session)):
+def get_missions(limit: int = 200, workspace_id: str | None = None, session: Session = Depends(get_session), _: None = Depends(require_internal)):
     from typing import Any, cast
 
     from sqlalchemy.orm import defer
@@ -5173,13 +5214,14 @@ def get_missions(limit: int = 200, workspace_id: str | None = None, session: Ses
     return session.exec(stmt).all()
 
 @app.get("/api/raven/missions/{mission_id_or_slug}", response_model=RavenMissionRead)
-def get_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
+def get_mission(mission_id_or_slug: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
     return _resolve_mission(mission_id_or_slug, session)
 
 @app.post("/api/raven/missions", response_model=RavenMissionRead)
 def create_mission(
     body: RavenMissionCreate,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
 ):
     # Ensure slug uniqueness if provided
     if body.slug:
@@ -5200,7 +5242,8 @@ def create_mission(
 def update_mission(
     mission_id_or_slug: str,
     body: RavenMissionUpdate,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
 ):
     mission = _resolve_mission(mission_id_or_slug, session)
 
@@ -5252,7 +5295,7 @@ def transition_mission(
 
 
 @app.delete("/api/raven/missions/{mission_id_or_slug}")
-def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):
+def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
 
     mission = _resolve_mission(mission_id_or_slug, session)
     if not mission:
@@ -5262,7 +5305,7 @@ def delete_mission(mission_id_or_slug: str, session: Session = Depends(get_sessi
     return {"status": "SUCCESS"}
 
 @app.delete("/api/raven/missions/{mission_id}")
-def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session)):
+def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session), _: None = Depends(require_internal)):
     mission = session.exec(select(RavenMission).where(RavenMission.id == mission_id)).first()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")

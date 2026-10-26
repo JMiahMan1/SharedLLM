@@ -1,6 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
-import { storageGetSync } from '../lib/storage';
+import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
@@ -3155,7 +3155,13 @@ export const api = {
 
   async changePassword(newPassword: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/auth/change-password', { new_password: newPassword });
-    return resp.data;
+    const data = resp.data as { status?: string; message?: string; api_key?: string };
+    // The server rotates the session key on a password change so every other
+    // device is signed out. Keep this one signed in with the new key.
+    if (data?.api_key) {
+      await storageSet('jarvis_api_key', data.api_key);
+    }
+    return { status: data?.status ?? 'SUCCESS', message: data?.message ?? 'Password updated' };
   },
 
   async adminSetPassword(username: string, newPassword: string): Promise<{ status: string; message: string }> {
