@@ -2775,6 +2775,12 @@ def export_data(request: Request, session: Session = Depends(get_session)):
             {"from_user": row.from_user, "day": row.day, "kind": row.kind}
             for row in session.exec(select(Cheer).where(Cheer.to_user == user)).all()
         ],
+        # Both directions: the export is what a person takes with them, and the
+        # cheers they gave are as much their history as the ones they got.
+        "cheers_sent": [
+            {"to_user": row.to_user, "day": row.day, "kind": row.kind}
+            for row in session.exec(select(Cheer).where(Cheer.from_user == user)).all()
+        ],
         "challenges_joined": [
             {"challenge_id": row.challenge_id, "joined_at": row.joined_at}
             for row in session.exec(select(ChallengeMember).where(ChallengeMember.user_id == user)).all()
