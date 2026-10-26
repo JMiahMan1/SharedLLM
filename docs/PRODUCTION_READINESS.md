@@ -118,3 +118,249 @@ git push origin main
 
 Do this only after the production-readiness work below has landed and the tree is green, since a
 push to `main` runs the same image-build pipeline as `microservices`.
+
+### 3.3 Security
+
+Audited 2026-10-26: every gateway route (552) and identity route (168) was enumerated and each
+handler checked for whether it authenticates the caller. The structural fact behind most findings is
+that **the gateway is the authentication boundary** - the other services trust `X-Internal-Secret`
+and read `X-User-Id` as gospel, so a gateway route that reaches an upstream with the internal secret
+but never checks who is asking is an open door.
+
+**Fixed this pass.**
+
+- **BROKEN - C1: any signed-in member could read or overwrite any file in the execution container.**
+  The note routes forward `storage` from the request body, and with `storage: "local"` the handler
+  used `Path(req.path)` with no containment check, so
+  `POST /api/communication/notes/read {"storage":"local","path":"/proc/self/environ"}` returned the
+  container environment (which carries the internal secret and the household's HA/Nextcloud
+  credentials) and append/delete/write could clobber any file. Reachable even though the deployment
+  uses Nextcloud, because the branch is chosen by the body. Fixed with `_local_note_path()` in
+  `services/execution/handlers/note.py`, which resolves inside `LOCAL_NOTES_ROOT` and refuses
+  anything outside it.
+- **BROKEN - C2: household DNS records could be created, changed or deleted with no credentials.**
+  All four `/api/dns` routes went straight to the mappings that the household resolver reads, and
+  `/api/*` is internet-reachable, so an anonymous `POST /api/dns` was a household-wide DNS hijack.
+  All four now require an admin. Safe because the panel is only reachable from the admin tab.
+- **HIGH - H1: `/api/config*`, `/api/models*` and `/api/generate` were anonymous.** `POST /api/config`
+  rewrote the household's global model settings, `/api/models/unload` was a denial of service,
+  `/api/generate` was free anonymous inference on the household GPU, and `/api/config/status`
+  disclosed which keys are unset. Writes now require an admin, reads require a signed-in caller, and
+  `/api/generate` requires the same key the image generator already uses.
+- **HIGH - H2: the geo vehicle and zone routes were anonymous.** Anyone could list the family's
+  vehicles, delete one, assign a vehicle to any user, read fuel prices, or read the home and school
+  geofences. Reads now require a signed-in caller, writes an admin, and
+  `GET /api/geo/vehicles/assigned/{user_id}` answers 403 unless it is your own vehicle or you are an
+  admin.
+- **HIGH - H3: raven missions were editable by anyone.** The gateway's
+  `PATCH /api/raven/missions/{id}` checked only that the caller was signed in and then forwarded an
+  arbitrary body to Identity, whose update model accepts `status`, `result`, `user_id` and
+  `workspace_id` - so a child could rewrite another member's mission, including missions that run
+  code with the family's GitHub token. And Identity's own mission CRUD (published on the LAN at port
+  8001) had no auth at all. The PATCH is now admin-only and Identity's six mission routes require the
+  internal secret.
+- **HIGH - H4: sessions were permanent and there was no sign-in rate limit.** Login returned the
+  user's permanent key, `require_api_key` accepted it forever, and changing the password did not
+  rotate it, so "change my password" did not sign anybody out. Login is now rate limited (five
+  failures per username and twenty per source address in fifteen minutes, cleared on success) and a
+  password change rotates the key; the client stores the new key so the device you are on stays
+  signed in while every other session is invalidated. A short-lived signed session token with a real
+  revocation endpoint is the durable fix and is still open.
+- **MEDIUM - M1: telemetry enrollment was readable and writable by any member.** A child could list
+  every enrolled entity, read any entity's telemetry, trigger analysis and delete any enrollment.
+  Those routes now require an admin, which matches the panel (admin tab only).
+- **MEDIUM - M2(a): the APK updater trusted the URL it was handed.** The download URL comes from the
+  web bundle, so a rogue or machine-in-the-middle response could have pointed it at an arbitrary
+  APK. `ApkInstallPlugin` now refuses any update URL whose host is not the host this phone is
+  configured for (host only, so a different port or scheme on our own server still works), in both
+  the verified flow and the legacy unverified one.
+- **MEDIUM - M4: chat job results were readable by anyone who guessed a job id.** `job_id` is short
+  and the completion carries the model's full answer, including any RAG context from the family's own
+  data. Both routes now require the caller to own the job (admins may read any).
+- **MEDIUM - M5: the admin test runners were anonymous.** `POST /api/admin/tests/smoke` and
+  `/api/admin/tests/unit` now require an admin.
+
+**Accepted, documented risk.**
+
+- **M2(b) cleartext is left on.** `cleartext: true` in `capacitor.config.ts` and
+  `usesCleartextTraffic="true"` in the manifest stay. Turning them off would break any phone pointed
+  at a plain `http://` LAN server, and Android's network-security-config cannot express "the private
+  address ranges are fine", so the choice is a real trade-off rather than an oversight. The household
+  itself uses `https://jarvis.sumemail.com`. The update-URL host check above is the mitigation that
+  matters most here.
+
+**Open, low.**
+
+- **L1/L2** internal-secret handling: health, geo and bible return *true* from `_verify_internal_secret`
+  when `INTERNAL_SECRET` is empty (fail open), all three also accept it as a `?x_internal_secret=`
+  query parameter (which the proxy does not redact), and several places compare it with `==` instead
+  of the constant-time helper. If the gateway ever started with an empty secret, an empty header
+  would match and a caller could assert any identity. Fix: use `secret_matches` everywhere, fail
+  closed when unset, and drop the query-string and `Bearer` forms.
+- **L3** the working tree's gitignored `.env` holds a live `GITHUB_TOKEN` and `GITLAB_PASS`. Not a
+  merge blocker (it is untracked and never committed), but rotate the GitHub token if it is live.
+
+**Checked and found sound** (so the next reader does not re-audit them): PBKDF2-SHA256 password
+hashing with a constant-time compare; role and family escalation (a member cannot promote themselves,
+`family_role` is not in the self-update model, family changes require `family.manage` and cannot
+promote to father/mother); screen time (a minor cannot read or edit another member's rules, and the
+parent unlock verifies that the login is one of that child's parents); health family sharing (opt-in
+per scope, projected, with minor-cycle and digital restrictions enforced server-side); `as_user` is
+admin-only; the gateway and the proxy both redact credentials and tokens from logs; and markdown
+renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
+
+### 3.4 Health hub
+
+**Fixed.**
+
+- **BROKEN - A1: anything logged after about 5pm local counted on the next day.** The day boundary
+  was a raw string comparison on `recorded_at`, and the client sends a UTC instant, so a 6pm Phoenix
+  glass of water was stored as `...T01:00:00+00:00` on the following date and then counted tomorrow.
+  That corrupted today's water ring, the weekly water average, the water streak and the challenge day
+  counts, and `_latest_metric` had the same bug for weight and resting heart rate. The service now
+  buckets by the household's local day (`_household_tz()`, `_local_day()`,
+  `_metric_rows_between()`) everywhere it previously compared strings, and a regression test pins the
+  zone so it fails against the old behaviour on any machine.
+
+**Open.**
+
+- **BROKEN - A2** the cycle panel renders nothing at all on a failed fetch, so an error looks like
+  "not applicable" (`components/health/HealthCycle.tsx`).
+- **BROKEN - A3** nutrition shows "Loading…" forever and an empty day when the fetch fails
+  (`components/health/HealthNutrition.tsx`).
+- **BROKEN - A4** validation errors surface as "Request failed with status code 422" because
+  `lib/errorText.ts` only understands a string `detail` while FastAPI validation errors are an array.
+- **ROUGH - B1** imported measures (HRV, SpO2, body fat) are invisible: there is no metric-history UI,
+  and a mistyped weight cannot be deleted, although the API for both exists and the docs promise a
+  weight trend.
+- **ROUGH - B2** `GET /food` with the default `days=0` applies no filter at all, and
+  `GET /metrics/{metric}` is unbounded in sample count.
+- **ROUGH - B4** a second manual sleep log for the same night creates a duplicate row, so the night is
+  listed twice.
+- **ROUGH - B5** future-dated check-ins, food and sleep are accepted, though the cycle routes already
+  reject them.
+- **ROUGH - B3/B6/B7/B8/B9/B10** the export omits `cheers_sent`; a failed steps fetch reads as "no
+  reading yet"; "shared with you" renders nothing on error; the digital-wellbeing week bar has no day
+  labels; `getCheckins` has no caller; and the README describes a sharing scope that has since grown.
+
+### 3.5 UI/UX
+
+The newer surfaces (media, family chat, guardian/member, devices, remote) are the model: they have
+loading, empty and error states, busy buttons, accessible names and safe-area handling. The problems
+are the app shell, navigation plumbing and the older admin pages.
+
+**Fixed.**
+
+- **BROKEN - Android Back did nothing.** The Capacitor back-button listener was registered (which
+  disables Capacitor's own handling) with an inverted condition, so on a phone a person who opened a
+  book, a conversation or an admin tab was stuck unless the page had its own back control.
+- **BROKEN - there was no catch-all route**, so an old bookmark or a stale deep link rendered the
+  shell with an empty page. There is now a "That page does not exist" panel with a way home.
+- **BROKEN - dialogs and sheets did not manage focus.** Tab walked out of an open dialog into the page
+  behind it and focus was lost on close. A shared `useDialogFocus` hook now focuses the panel, traps
+  Tab, closes on Escape and restores focus; it is wired into the modal, the chat sheet, the account
+  menu and the mobile More sheet.
+- **BROKEN - form labels were not associated with their inputs** (162 `<label>`s app-wide, 20 with
+  `htmlFor`, and no `id` on the inputs), so a screen reader announced "edit text, blank". Login is
+  done; Identity and the rest of the app are still open.
+
+**Open (rough).**
+
+- The crash screen is a developer console shown to children: raw stack trace, component stack, a
+  platform dump, a "For Developers" block and a GitHub link, expanded by default.
+- `/recipes` has no navigation entry anywhere; it is only reachable through Family, which mounts the
+  same heavy component inline.
+- The Dashboard shows developer content to non-admins: service status with a placeholder subtitle and
+  workspace rows with raw filesystem paths.
+- The developer pages (Workspaces, Artifacts, Knowledge, Docs) are offered to every role, so a child's
+  sidebar contains RAG and embeddings, and "Devices" means two different things depending on the role.
+- The page finder is desktop-only, so phones must scroll the More sheet to reach eleven pages.
+- Twenty-three destructive confirmations still use the browser's `window.confirm` while the app ships
+  a styled modal, and several workspace actions have no busy state.
+- Media detail pages have no in-app Back control (with the Back fix this is no longer a trap, but it
+  is still inconsistent with the library page).
+- Raw exception text reaches users in ~199 places instead of going through `lib/errorText.ts`.
+- The admin tab bar overflows horizontally; Settings is one ~1000-line column of fourteen panels; two
+  identical-looking search boxes mean different things; the build SHA is shown to every user; and the
+  theme tokens are bypassed by hardcoded colour classes in 216 files.
+
+### 3.6 Family comms, notes and calls
+
+**Open (broken).**
+
+- An open chat thread says "No messages yet" when Nextcloud is down, while the inbox correctly shows
+  an error - the two halves disagree.
+- An `@Jarvis` failure is completely silent: the orchestrator logs it and nothing is posted to the
+  room, and the "Jarvis is thinking…" bubble simply vanishes after three minutes.
+- Regular trivia and the memory game cannot be started from the UI at all; only Bible trivia has a
+  chip, so the backend for the other two is unreachable.
+- The game endpoint trusts a client-supplied player identity, so any member can bank stars or answer
+  as another member.
+
+**Open (rough).** Family calls ring forever and never reach a closed app (no push, only a client
+poll); "Drop in" is disabled with no explanation; the calls tab hides errors when it has stale data;
+timer notifications deep-link to a screen that no longer exists; the notes list hides transport
+failures; there is no typing indicator; and an optimistic send briefly drops the bubble.
+
+### 3.7 Backend and operational readiness
+
+Judged as one host, one replica per service, seven users, behind a proxy - not as a SaaS.
+
+**Open, will bite.**
+
+1. The identity-resolve timeout is 300s with two retries, so a slow identity makes every request wait
+   up to fifteen minutes and exhausts the pool - the same shape as the 2026-10-25 outage. It should
+   be a few seconds total with a short connect timeout, retrying connect errors only.
+2. The health service has no migration path (`create_all` only), so the next model change
+   crash-loops with `no such column`. Identity, bible and rag each already show a pattern to copy.
+3. Stack traces and internal strings leak to clients from the execution, rag and logging services and
+   from a few gateway routes.
+4. The identity, health and bible SQLite databases run without WAL, so readers block writers and a
+   burst produces `database is locked`.
+5. There is no automated backup of `./data/*.db`. Disk loss or a bad migration is total data loss;
+   this is the single biggest data risk and a nightly `sqlite3 .backup` plus a tar would close it.
+
+**Open, should fix before merge.** Dependencies and the base image are mostly unpinned, so rebuilding
+the same commit is not reproducible and SHA-tagged rollback is illusory; Home Assistant failures are
+logged at debug so degradation is invisible; the background worker starts seven loops in-process, so
+a second replica would double-post bot replies and alerts; the deploy removes the working container
+before the new one is proven and has no automatic rollback; a dozen pieces of state live only in
+memory; and most services run as root.
+
+**Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
+list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
+correlation id; two N+1 queries; and a handful of deliberate best-effort `except Exception: pass`
+blocks. The gateway's media layer is the model to copy for honest failure: a named cause and a clean
+502 rather than a traceback.
+
+## 4. Deliberately left, with reasons
+
+These are known and recorded rather than fixed, so the next person does not have to rediscover them.
+Everything here is a deliberate call, not an oversight.
+
+- **LOW - the internal secret is still accepted as a query parameter** (`?x_internal_secret=`) on
+  about fifteen geo routes (and by the health and bible middlewares). The comparison is now
+  constant-time and fails closed when the secret is unset, and nothing in the gateway, the UI or the
+  scripts sends it that way, so the query form has no caller - but it still exists, and Caddy only
+  redacts `token` and `mt` from URLs, so a caller who used it would write the master secret into the
+  access log. Removing it is a mechanical change across those routes and is worth doing the next
+  time one of them is touched.
+- **ACCEPTED RISK - Android still permits cleartext** (`services/ui/capacitor.config.ts`
+  `cleartext: true`, `services/ui/android/app/src/main/AndroidManifest.xml`
+  `usesCleartextTraffic="true"`). Android's network-security-config cannot express "plain HTTP is
+  fine for private ranges only", and a phone pointed at a LAN `http://` server URL would stop
+  working entirely if it were switched off. The household's own URL is
+  `https://jarvis.sumemail.com`, and the APK updater now refuses any download URL whose host is not
+  the phone's configured server.
+- **LOW - the live `.env` holds a GitHub token and a GitLab password.** `.env` is gitignored and
+  untracked, so it is not a merge blocker; rotate the GitHub PAT if it is still live and keep `.env`
+  out of archives and backups. The 1.9 GB `.tmp/` scratch directory holds the same class of secret
+  and is likewise gitignored.
+- **The remaining audit findings are recorded above, not fixed.** §3.4 Health (A2-A4 and the B
+  items), §3.5 UI/UX (the B items), §3.6 Family comms (the A and B items) and §3.7 Backend readiness
+  (the A and B items) each list what is still below the bar with `file:line` and the smallest fix.
+  The highest-value ones from those lists are: the identity resolve timeout and the missing
+  `./data/*.db` backup (backend readiness), a chat thread that says "No messages yet" when Nextcloud
+  is down and an `@Jarvis` failure that says nothing at all (family comms), the developer crash
+  screen and the unlabelled form fields (UI), and the metric-history gap that makes imported HRV,
+  SpO2 and body-fat readings invisible (health).
