@@ -29,6 +29,11 @@ Every claim below was verified against the live system unless marked **planned**
   - `curl -fsS https://jarvis.sumemail.com/api/app-updates/version`
   - `.venv/bin/python scripts/check_service_urls.py` - probes Audiobookshelf,
     Music Assistant, Nextcloud and the gateway; exits 1 on any failure.
+    **If Music Assistant alone says `UNREACHABLE (ClientConnectorError)`, check it by hand before
+    believing it.** On 2026-10-26 aiohttp from the venv raised `[No route to host]` for
+    `http://ha.sumemail.com:8095` while `curl` (200), `dig` (192.168.2.20) and `ping` (0% loss) from
+    the same Mac all worked, and the server itself reached MA with 200. That is a local
+    networking/firewall artifact on the dev Mac, not an outage.
   - `ssh jeremiah@192.168.2.205`; `docker exec -i sharedllm_<svc> …` (direct
     service calls need `X-Internal-Secret`, present as `INTERNAL_SECRET`).
 
