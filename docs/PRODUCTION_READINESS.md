@@ -550,6 +550,16 @@ blocks. The gateway's media layer is the model to copy for honest failure: a nam
 - **B6 - per-person device preferences survived a sign-out** (`jarvis_guard_seen_on`, the location
   tracking switch, the step backfill marker), so on a shared phone the next person inherited the previous
   person's state. Sign-out clears them, and the native switches are cleared with the key.
+- **A signed-in account with no password, and a guessable administrator password, were both silent.**
+  Read from the live database on 2026-10-26: two members imported from Nextcloud had `password_hash` set
+  to nothing, so they were listed, appeared on the family pages, and could never sign in - the login just
+  answered "invalid username or password" - and the `default` administrator still signed in with the
+  eight-character, all-lowercase placeholder word in `DEFAULT_ADMIN_PASSWORD`. Neither was visible
+  anywhere. Identity now logs both at startup (`_warn_about_sign_in`: a short or obvious
+  `DEFAULT_ADMIN_PASSWORD`, an administrator still using it, and every account that has no password), the
+  account list reports `has_password`, and the Admin page marks those rows **No password** so a parent can
+  set one from the same screen. Rotating the administrator's password itself is the household's call: the
+  `.env` value seeds a new database and is not meant to stay in use.
 
 **Open (rough).**
 
@@ -562,7 +572,9 @@ blocks. The gateway's media layer is the model to copy for honest failure: a nam
   coordinates are gone: with no home learned, the "away from home" check now answers "not away" instead of
   comparing against the family's real address.)
 - **B3** a first run with no accounts gives no in-app guidance; the seeded administrator is `default` with
-  the password from `DEFAULT_ADMIN_PASSWORD`, which the person has to know from the docs. A hint on the
+  the password from `DEFAULT_ADMIN_PASSWORD`, which the person has to know from the docs (the startup
+  warning above now says when that value is short or obvious, and when the administrator is still using
+  it). A hint on the
   login screen would need an endpoint that says whether any account exists, and that is exactly what an
   unauthenticated caller should not be able to learn, so this stays documented rather than built.
 - The Android fixes above compile and are covered by the existing unit tests, but they need a real phone

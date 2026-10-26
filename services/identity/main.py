@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
+from dotenv import dotenv_values
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -447,6 +448,57 @@ async def _ensure_default_settings(session: Session) -> None:
     if inserted:
         session.commit()
 
+# A short or obvious DEFAULT_ADMIN_PASSWORD is the one credential a stranger can
+# guess at the login page, and an account with no password can never sign in.
+# Both used to be invisible: the seed wrote the first and imported accounts got
+# the second, and nothing said so.
+_PLACEHOLDER_ADMIN_PASSWORDS = frozenset(
+    {"changeme", "change_me", "password", "passw0rd", "admin", "administrator", "jarvis", "test", "default", "letmein"}
+)
+_ADMIN_PASSWORD_MIN_LENGTH = 12
+
+
+def _admin_password_from_env() -> str | None:
+    """The seeded admin password, from the environment or the .env file."""
+    raw = os.environ.get("DEFAULT_ADMIN_PASSWORD", "")
+    if not raw:
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+        if os.path.exists(env_path):
+            raw = dotenv_values(env_path).get("DEFAULT_ADMIN_PASSWORD", "") or ""
+    raw = (raw or "").strip()
+    return raw or None
+
+
+def _warn_about_sign_in(session: Session) -> None:
+    """Say, at boot, who cannot sign in and whether the admin password is a guess."""
+    raw = _admin_password_from_env()
+    if raw and (len(raw) < _ADMIN_PASSWORD_MIN_LENGTH or raw.lower() in _PLACEHOLDER_ADMIN_PASSWORDS):
+        log.warning(
+            "[identity] DEFAULT_ADMIN_PASSWORD is short or obvious (%d characters). "
+            "Change the administrator's password in the app; this value only seeds a new database.",
+            len(raw),
+        )
+    default_user = session.exec(select(User).where(User.username == "default")).first()
+    if raw and default_user and default_user.password_hash and verify_password(raw, default_user.password_hash):
+        log.warning(
+            "[identity] the administrator account still signs in with DEFAULT_ADMIN_PASSWORD. "
+            "Change it in the app (Settings) or set a new value and reseed; the .env value is a "
+            "starting point, not a password to keep."
+        )
+    passwordless = [
+        user.username
+        for user in session.exec(select(User)).all()
+        if not user.password_hash and not user.is_system_default
+    ]
+    if passwordless:
+        log.warning(
+            "[identity] %d account(s) have no password and cannot sign in: %s. "
+            "Set one from the Admin page (Set password).",
+            len(passwordless),
+            ", ".join(sorted(passwordless)),
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Check DB file state before initialization
@@ -477,6 +529,7 @@ async def lifespan(app: FastAPI):
         if force_reseed:
             log.info("[lifespan] FORCE_RESEED=true, re-seeding all data")
         seed_from_env(session, force=force_reseed)
+        _warn_about_sign_in(session)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
         roles.seed_default_roles(session)
@@ -965,6 +1018,7 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
 def _user_read(session: Session, user: User) -> UserRead:
     """A user as the API shows them, with their roles and what those allow."""
     read = UserRead.model_validate(user)
+    read.has_password = bool(user.password_hash)
     read.family_role = user.family_role if user.family_role in roles.FAMILY_ROLES else "other"
     read.mother_username = user.mother_username or None
     read.is_minor = read.family_role in roles.MINOR_FAMILY_ROLES

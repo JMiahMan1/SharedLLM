@@ -787,6 +787,17 @@ const Admin = () => {
                         }`}>
                           {user.is_admin ? 'Admin' : roleNames(user) || 'User'}
                         </span>
+                        {user.has_password === false && (
+                          // An account with no password is listed and appears all
+                          // over the family pages, but nobody can sign in with it.
+                          // Saying so beats a mystery "invalid username or password".
+                          <span
+                            className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-amber-300"
+                            title="This account has no password yet, so nobody can sign in with it. Use Set password."
+                          >
+                            No password
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
                       <p className="mt-2 text-[11px] text-slate-500 truncate">
