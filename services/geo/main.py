@@ -645,7 +645,10 @@ async def _fire_place_reminders(r, user: str, kind: str, zone: dict) -> None:
     (services/geo/place_reminders.py): one notice each, to them alone."""
     for entry in await place_reminders.due(r, user, kind, zone["entity_id"]):
         title, body = place_reminders.notice_text(entry)
-        url = entry.get("url") or "/communication"
+        # Place reminders belong to a note, so `url` normally points at that
+        # note. The fallback used to be `/communication`, which redirects to
+        # the Chat tab; the Notes list is where the reminder actually lives.
+        url = entry.get("url") or "/notes"
         await _send_notice(notify.notice(
             user, "timers", title, body, url=url, kind="timer", priority=4,
             tag=f"place-reminder:{entry['id']}", once=f"place-reminder:{entry['id']}",

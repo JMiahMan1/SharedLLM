@@ -537,8 +537,13 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
     if scope == "household":
         again["scope"] = "household"
     # A reminder made from a note opens that note; a snooze keeps the link.
-    link = app_link(timer_data.get("url")) or "/communication"
-    if link != "/communication":
+    # Otherwise a tap opens the Family page's Announcements tab, where timers
+    # and alarms are listed. It used to default to `/communication`, which
+    # redirects to the Chat tab - so tapping a finished timer opened a
+    # conversation about nothing.
+    default_link = "/family?tab=announce"
+    link = app_link(timer_data.get("url")) or default_link
+    if link != default_link:
         again["url"] = link
 
     extra_data: dict = {}
