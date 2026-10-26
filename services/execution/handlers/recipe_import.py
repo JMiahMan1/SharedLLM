@@ -261,31 +261,6 @@ async def _themealdb_hits(query: str, limit: int) -> list[dict] | None:
     return [recipe for recipe in recipes if recipe["title"]][:limit]
 
 
-async def _themealdb_search(req: RecipeRequest) -> ExecutionResult:
-    query = (req.query or "").strip()
-    if len(query) < 2:
-        return ExecutionResult.fail(
-            "Type at least two letters to search.", service="recipe_import"
-        )
-    recipes = await _themealdb_hits(query, 12)
-    if recipes is None:
-        return ExecutionResult.fail(
-            "TheMealDB could not be reached right now; try again shortly.",
-            service="recipe_import",
-        )
-    if not recipes:
-        return ExecutionResult.ok(
-            f"No recipes found for “{query}”.",
-            service="recipe_import",
-            detail={"recipes": []},
-        )
-    return ExecutionResult.ok(
-        f"Found {len(recipes)} recipe(s).",
-        service="recipe_import",
-        detail={"recipes": recipes},
-    )
-
-
 async def _recipe_search(req: RecipeRequest) -> ExecutionResult:
     """Offline index first, then TheMealDB fills the rest of the page."""
     query = (req.query or "").strip()
@@ -424,8 +399,6 @@ async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
 
 
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
-    if req.action == "themealdb_search":
-        return await _themealdb_search(req)
     if req.action == "recipe_search":
         return await _recipe_search(req)
     if req.action == "shelf_fetch":

@@ -204,55 +204,6 @@ def test_themealdb_maps_a_meal_into_the_import_shape():
     assert recipe["image"].startswith("https://www.themealdb.com/images/")
 
 
-async def test_themealdb_search_returns_the_meals(monkeypatch):
-    async def fake_get(path):
-        assert "search.php?s=Gateau" in path
-        return {"meals": [MEAL]}
-
-    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
-    result = await recipe_import.handle_recipe(
-        _request(action="themealdb_search", query="Gateau", url=None)
-    )
-    assert result.status == "SUCCESS"
-    assert result.detail["recipes"][0]["title"] == "Chocolate Gateau"
-
-
-async def test_themealdb_search_with_no_matches_answers_plainly(monkeypatch):
-    async def fake_get(path):
-        return {"meals": None}
-
-    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
-    result = await recipe_import.handle_recipe(
-        _request(action="themealdb_search", query="zzzz", url=None)
-    )
-    assert result.status == "SUCCESS"
-    assert result.detail["recipes"] == []
-    assert "No recipes found" in result.message
-
-
-async def test_themealdb_search_requires_a_query(monkeypatch):
-    def boom(path):  # pragma: no cover - must never run
-        raise AssertionError("search must not run for a tiny query")
-
-    monkeypatch.setattr(recipe_import, "_themealdb_get", boom)
-    result = await recipe_import.handle_recipe(
-        _request(action="themealdb_search", query="a", url=None)
-    )
-    assert result.status == "FAILURE"
-
-
-async def test_themealdb_search_survives_a_dead_api(monkeypatch):
-    async def fake_get(path):
-        raise aiohttp.ClientError("down")
-
-    monkeypatch.setattr(recipe_import, "_themealdb_get", fake_get)
-    result = await recipe_import.handle_recipe(
-        _request(action="themealdb_search", query="Gateau", url=None)
-    )
-    assert result.status == "FAILURE"
-    assert "could not be reached" in result.message
-
-
 # --- the offline index: recipe_search leads with it, shelf_fetch reads it ---
 
 
