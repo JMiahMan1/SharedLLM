@@ -441,6 +441,12 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     informational and once-per-start: the Caddyfile uses four spaces where `caddy fmt` wants tabs (the
     file is left as it is rather than reflowing every line for a cosmetic notice), and the plaintext
     internal ports report that HTTP/2 and HTTP/3 are skipped because they require TLS.
+    Every listener in this Caddyfile is plaintext (TLS terminates on the public proxy), so
+    HTTP/2 and HTTP/3 could never be negotiated and Caddy said so 22 times on every start. The
+    global `servers` block and the `:80` server block now ask for HTTP/1.1, which took a restart
+    from 24 warnings to 2 (the Caddyfile-formatting notice and the informational auto-HTTPS note),
+    measured in a throwaway container against the real file.
+
 13. Several list reads accepted any `limit`, so one caller could ask a service for everything it had:
     the admin log tail, the workspace mission list, Raven's lessons, the notification feed, the two
     media searches, the unified search and the favourites list are all bounded now (`Query(..., ge=1,
