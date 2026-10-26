@@ -797,7 +797,7 @@ Every claim below was verified against the live system unless marked **planned**
   `services/rag/tests` -> **117 passed / 14 skipped**;
   `services/health services/identity services/telemetry services/bible services/execution`
   -> **2587 passed / 60 skipped**;
-  `services/identity services/tests` -> **891 passed / 24 skipped**.
+  `services/identity services/tests` -> **896 passed / 24 skipped**.
   A full `pytest services` run also passes - but note it does **not** collect
   `tests/unit/`, and CI does: run `.venv/bin/python -m pytest tests/unit -q` as
   well before pushing. `tests/unit/test_config_env_isolation.py` is the guard
