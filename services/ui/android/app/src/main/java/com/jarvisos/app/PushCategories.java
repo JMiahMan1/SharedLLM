@@ -54,6 +54,8 @@ final class PushCategories {
     static final List<Category> ALL = Collections.unmodifiableList(Arrays.asList(
         new Category(CHAT, "Family chat",
             "New messages and Jarvis answers in your conversations.", POP_UP, GROUP_FAMILY, R.drawable.mi_chat),
+        new Category("call", "Family calls",
+            "When somebody starts a family call.", POP_UP, GROUP_FAMILY, R.drawable.mi_call),
         new Category("family_presence", "Arrivals and departures",
             "When family arrive at or leave a saved place.", NORMAL, GROUP_FAMILY, R.drawable.mi_place),
         new Category("family_safety", "Family safety",
