@@ -676,7 +676,9 @@ point.
       time (with a note) and both parents get a notice; a grant becomes today's bonus. The one rule
       is `services/common/screen_time.py` (midnight reset in the household `TIMEZONE`, overnight
       bedtime, weekday school hours, pause first, bonus extends only the limit, an always-allowed
-      list for the dialer, messages and Jarvis). Identity stores rules and requests
+      list for the dialer, messages and Jarvis - whose safety core (emergency, dialer, in-call,
+      Jarvis) a parent's own list adds to but can never remove, so a customised list cannot leave a
+      locked phone unable to call for help). Identity stores rules and requests
       (`ScreenRules`, `ScreenTimeRequest`; only a minor's parents may change them, the child may
       read theirs); the gateway serves `GET /api/screen-time/{user}/status` from the rules plus
       today's reported use, and sends the notices. Screens: `ScreenTimeCard` (the child, Health →
