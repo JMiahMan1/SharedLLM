@@ -38,6 +38,7 @@ from starlette.concurrency import run_in_threadpool
 
 from services.bible import achievements as ach
 from services.common.secrets import secret_matches
+from services.common.sqlite import apply_sqlite_pragmas
 from services.bible import (
     blb_links,
     book_import,
@@ -175,7 +176,12 @@ def _engine():
     kwargs = {}
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
-    return create_engine(url, pool_pre_ping=True, **kwargs)
+    engine = create_engine(url, pool_pre_ping=True, **kwargs)
+    # WAL keeps a reader from blocking a writer: on the default rollback
+    # journal a long read and a phone's write turned into "database is
+    # locked" 500s. A no-op for a non-SQLite database.
+    apply_sqlite_pragmas(engine)
+    return engine
 
 
 app.state.engine = None  # replaced in lifespan; get_session() builds it lazily

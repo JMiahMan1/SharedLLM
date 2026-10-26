@@ -79,7 +79,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     py_logging.error(f"{err_msg}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
-        content={"status": "ERROR", "message": "Internal Logging Error", "detail": str(exc)}
+        # `str(exc)` can name files and SQL, so it stays in the log above.
+        content={"status": "ERROR", "message": "Internal Logging Error"}
     )
 
 MAX_LOG_FIELD_LENGTH = 4000
