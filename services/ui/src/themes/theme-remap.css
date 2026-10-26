@@ -288,6 +288,7 @@
 [data-theme-scheme="light"] .hover\:text-slate-100:hover { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .hover\:text-slate-200:hover { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .hover\:text-slate-300:hover { color: var(--site-text) !important; }
+[data-theme-scheme="light"] .hover\:text-slate-400:hover { color: var(--site-text-muted) !important; }
 [data-theme-scheme="light"] .hover\:text-white:hover { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .text-\[\#e2e8f0\] { color: var(--site-text) !important; }
 [data-theme-scheme="light"] .text-\[\#fffdf8\] { color: var(--site-text) !important; }
