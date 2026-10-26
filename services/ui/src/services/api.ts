@@ -2801,11 +2801,12 @@ export const api = {
     return resp.data;
   },
 
-  async startTalkBibleTrivia(token: string): Promise<ExecutionResponse> {
+  /** Start a family game in a room: trivia, memory, or the Bible quiz. */
+  async startTalkGame(token: string, kind: 'trivia' | 'memory' | 'bible'): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/game', {
       token,
       game_command: 'start',
-      game_kind: 'bible',
+      game_kind: kind,
     });
     return resp.data;
   },
