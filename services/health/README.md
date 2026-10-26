@@ -13,7 +13,7 @@ never copies it.
 - `Checkin` - one per person per local day (energy, mood, soreness, stress).
 - `FoodEntry` - per-serving nutrition with a `servings` multiplier.
 - `OffProduct` - permanent cache of OpenFoodFacts product reads for barcode lookups.
-- `HealthShare` - owner → viewer grants scoped to `sleep` or `nutrition`.
+- `HealthShare` - owner → viewer grants scoped to `sleep`, `nutrition`, `cycle` or `digital`.
 
 Days are the person's local `YYYY-MM-DD`, supplied by the client. Instants are
 ISO-8601 with an offset.

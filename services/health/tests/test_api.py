@@ -641,11 +641,25 @@ class TestSharingAndExport:
     def test_export_contains_every_store(self, client):
         client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 450})
         client.put("/checkins/2026-10-21", json={"energy": 4})
+        # Cheers go both ways in the export: what you gave is your history too.
+        # A cheer needs a share in the right direction, so set up one each way.
+        client.put("/shares", json={"viewer": "jeremiah", "scope": "sleep"}, headers={"X-User-Id": "michele"})
+        client.put("/shares", json={"viewer": "michele", "scope": "sleep"})
+        sent = client.post("/cheers", json={"to_user": "michele", "kind": "well_done", "day": "2026-10-21"})
+        assert sent.status_code == 200, sent.text
+        received = client.post(
+            "/cheers",
+            json={"to_user": "jeremiah", "kind": "proud", "day": "2026-10-21"},
+            headers={"X-User-Id": "michele"},
+        )
+        assert received.status_code == 200, received.text
         body = client.get("/export").json()
         assert body["user_id"] == "jeremiah"
         assert len(body["sleep"]) == 1
         assert len(body["checkins"]) == 1
         assert "activity" in body["notes"]
+        assert [row["to_user"] for row in body["cheers_sent"]] == ["michele"]
+        assert [row["from_user"] for row in body["cheers_received"]] == ["michele"]
 
 
 def _cycle_profile(client, *, birth_year: int | None = 1990, sex: str = "female", kid_mode: bool = False):
