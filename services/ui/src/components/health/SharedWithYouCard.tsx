@@ -14,13 +14,47 @@ import type { HealthFamilyPerson } from '../../types/api';
  */
 export default function SharedWithYouCard({
   people,
+  error,
+  onRetry,
   renderActions,
 }: {
   people: HealthFamilyPerson[];
+  /** Set when the family read failed, so the card can say so instead of vanishing. */
+  error?: string | null;
+  onRetry?: () => void;
   /** Per-person controls under the shared lines (cheers). */
   renderActions?: (person: HealthFamilyPerson) => ReactNode;
 }) {
   const lookup = useFamilyDirectory();
+  // A failed read used to render nothing at all, which reads the same as a
+  // family that has chosen to share nothing.
+  if (error) {
+    return (
+      <section
+        className="glass-panel rounded-2xl border border-amber-500/30 p-4"
+        aria-labelledby="health-family-heading"
+        data-testid="health-family-error"
+      >
+        <h3
+          id="health-family-heading"
+          className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+        >
+          <Users size={13} className="text-purple-300" />
+          Shared with you
+        </h3>
+        <p className="mt-2 text-xs text-amber-200">{error}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="glass-button mt-3 inline-flex min-h-10 items-center px-3 text-xs font-semibold pointer-coarse:min-h-11"
+          >
+            Try again
+          </button>
+        )}
+      </section>
+    );
+  }
   if (people.length === 0) return null;
   return (
     <section

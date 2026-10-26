@@ -9,6 +9,11 @@ import { usageQuery } from '../../lib/memberPage';
 import { localDay } from '../../lib/healthHub';
 import UsageTiles from './UsageTiles';
 
+/** Single-letter weekday for a `YYYY-MM-DD`, read at noon so no zone shifts the day. */
+function weekdayInitial(day: string): string {
+  return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'narrow' });
+}
+
 /**
  * Digital wellbeing on the Health hub (Phase 10): the signed-in adult's own
  * phone use today (when it started and stopped, screen time, sessions, the
@@ -73,15 +78,26 @@ export default function DigitalWellbeingCard() {
           )}
 
           {week.length > 1 && (
-            <div className="flex items-end gap-1 h-12" aria-label="Screen time this week">
-              {week.map((d) => (
-                <div
-                  key={d.day}
-                  title={`${d.day}: ${duration(d.millis)}`}
-                  className="flex-1 rounded-t bg-sky-400/40"
-                  style={{ height: `${Math.max(6, (d.millis / longest) * 100)}%` }}
-                />
-              ))}
+            <div aria-label="Screen time this week">
+              <div className="flex items-end gap-1 h-12">
+                {week.map((d) => (
+                  <div
+                    key={d.day}
+                    title={`${d.day}: ${duration(d.millis)}`}
+                    className="flex-1 rounded-t bg-sky-400/40"
+                    style={{ height: `${Math.max(6, (d.millis / longest) * 100)}%` }}
+                  />
+                ))}
+              </div>
+              {/* The bars had no axis, so a taller Tuesday said nothing about
+                  which day it was. The exact minutes stay in the tooltip. */}
+              <div className="mt-1 flex gap-1" aria-hidden>
+                {week.map((d) => (
+                  <span key={d.day} className="flex-1 text-center text-[9px] uppercase text-slate-500">
+                    {weekdayInitial(d.day)}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
