@@ -443,7 +443,7 @@ class ActivityRequest(BaseRequest):
 
 class RecipeRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["url_import", "themealdb_search", "recipe_search", "shelf_fetch", "recipe_sources"]
+    action: Literal["url_import", "recipe_search", "shelf_fetch", "recipe_sources"]
     url: str | None = None  # url_import: the page to read
     query: str | None = None  # themealdb_search / recipe_search: what to look for
     id: int | None = None  # shelf_fetch: an offline index row
