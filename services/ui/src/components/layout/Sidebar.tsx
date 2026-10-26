@@ -61,6 +61,8 @@ const Sidebar = () => {
 
 /** Real gateway readiness and build, not a fixed "All Services Nominal". */
 const SystemStatusFooter = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin ?? false;
   const { data: health, isError } = useSystemHealth();
   const { data: info } = useServiceInfo();
   const down = health ? Object.values(health.services ?? {}).filter((s) => s !== 'OK').length : 0;
@@ -74,10 +76,12 @@ const SystemStatusFooter = () => {
 
   return (
     <div className="px-4 pb-4 pt-2 mt-auto hidden md:block">
-      <div className="glass-card px-4 py-2.5 text-xs text-slate-500 flex items-center gap-2" title={info?.git_sha && info.git_sha !== 'unknown' ? `Build ${info.git_sha}` : undefined}>
+      <div className="glass-card px-4 py-2.5 text-xs text-slate-500 flex items-center gap-2" title={isAdmin && info?.git_sha && info.git_sha !== 'unknown' ? `Build ${info.git_sha}` : undefined}>
         <div className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
         <span className="truncate">{text}</span>
-        {info && info.git_sha && info.git_sha !== 'unknown' && (
+        {/* The build hash is for whoever is looking after the server, not for
+            the family using it. */}
+        {isAdmin && info && info.git_sha && info.git_sha !== 'unknown' && (
           <span className="ml-auto font-mono text-[10px] text-slate-600">{info.git_sha}</span>
         )}
       </div>
