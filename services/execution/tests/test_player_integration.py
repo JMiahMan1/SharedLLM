@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.execution.handlers.audiobookshelf import _handle_last_played, _handle_search
+from services.execution.handlers.audiobookshelf import _handle_last_played, _handle_list, _handle_search
 from services.execution.handlers.media import (
     detect_media_type,
     play_podcast,
@@ -395,6 +395,7 @@ class TestABSHandlers:
                             "language": "en",
                         },
                         "duration": 32400,
+                        "coverPath": "/covers/atomic-habits.jpg",
                         "chapters": [
                             {"title": "1% Better", "startTime": 0},
                             {"title": "Identity", "startTime": 1200},
@@ -431,7 +432,49 @@ class TestABSHandlers:
         assert book["progress"] == 67
         assert book["is_complete"] is False
         assert book["chapter_count"] == 2
+        assert book["cover_path"] == "/covers/atomic-habits.jpg"
         assert "last_played" in book
+
+    @pytest.mark.asyncio
+    async def test_list_includes_cover_and_duration(self, ctx):
+        """The Audiobooks tab needs art and length from the list summaries."""
+        abs_url = "http://abs.local:13378"
+        abs_key = "test_api_key"
+        req = AudiobookshelfRequest(
+            user_context=ctx,
+            action="list",
+            library_id="lib_audiobooks",
+            limit=50,
+            page=0,
+        )
+        mock_result = {
+            "results": [
+                {
+                    "id": "abc123",
+                    "media": {
+                        "metadata": {"title": "The Hobbit", "authorName": "J.R.R. Tolkien"},
+                        "duration": 54000,
+                        "coverPath": "/covers/hobbit.jpg",
+                    },
+                }
+            ],
+        }
+        with patch(
+            "services.execution.handlers.audiobookshelf.abs_client.get_library_items",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            result = await _handle_list(abs_url, abs_key, req)
+
+        assert result.status == "SUCCESS"
+        assert result.detail["books"] == [
+            {
+                "id": "abc123",
+                "title": "The Hobbit",
+                "author": "J.R.R. Tolkien",
+                "duration": 54000,
+                "cover_path": "/covers/hobbit.jpg",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_search_empty_returns_success_with_empty_list(self, ctx):

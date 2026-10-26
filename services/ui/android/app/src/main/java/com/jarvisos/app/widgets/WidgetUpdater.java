@@ -76,10 +76,11 @@ public final class WidgetUpdater {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    public static PendingIntent mediaPendingIntent(Context context, String command) {
+    public static PendingIntent mediaPendingIntent(Context context, String command, String entityId) {
         Intent i = new Intent(context, WidgetActionReceiver.class);
         i.setAction(ACTION_MEDIA);
         i.putExtra(EXTRA_COMMAND, command);
+        i.putExtra(EXTRA_ENTITY, entityId);
         return PendingIntent.getBroadcast(context, 2000 + command.hashCode(), i,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

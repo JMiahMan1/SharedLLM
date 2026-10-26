@@ -44,6 +44,25 @@ public class MediaStatusTest {
         assertEquals("The Way of Kings", lines.title);
         assertEquals("Brandon Sanderson", lines.subtitle);
         assertTrue(lines.playing);
+        // The transport buttons target the player the widget is showing.
+        assertEquals("media_player.kitchen", lines.entityId);
+    }
+
+    @Test
+    public void transportCommandsMatchTheExecutionRoutesVocabulary() throws Exception {
+        // /execute/media/transport rejects play_pause/next_track/previous_track.
+        assertEquals("pause", MediaStatus.transportCommand("play_pause", true));
+        assertEquals("resume", MediaStatus.transportCommand("play_pause", false));
+        assertEquals("next", MediaStatus.transportCommand("next_track", true));
+        assertEquals("previous", MediaStatus.transportCommand("previous_track", false));
+        // Unknown buttons pass through unchanged rather than inventing a command.
+        assertEquals("stop", MediaStatus.transportCommand("stop", true));
+    }
+
+    @Test
+    public void noActivePlayerMeansNoEntityToTarget() throws Exception {
+        assertEquals("", MediaStatus.fromJson(new JSONObject().put("detail", new JSONObject())).entityId);
+        assertEquals("", MediaStatus.fromJson(null).entityId);
     }
 
     @Test

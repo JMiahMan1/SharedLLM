@@ -6,6 +6,25 @@ Phase 12 (HANDOVER.md). This module adds the pieces that did not exist:
 * ``POST /api/mdm/devices/update``     - push an app-update notice to selected devices.
 * ``POST /api/mdm/devices/{key}/wipe`` - queue a remote wipe on a device-owner phone.
 * ``GET/POST/DELETE /api/mdm/files*``  - the shared School and Library folders.
+* ``GET  /api/mdm/library/books``      - the read-only family Library set (Calibre).
+* ``POST /api/mdm/library/books/file`` - one Library book's bytes, read-only.
+* ``GET  /api/mdm/audit``              - who did what, and when.
+
+The Library set is sourced from the read-only Calibre shelf
+(docs/CALIBRE_LIBRARY.md). The gateway does not talk WebDAV itself: it browses
+the configured ``calibre_library_path`` through the storage service's existing
+provider, which owns the Nextcloud credentials, so the shelf is read the same
+way the RAG index and the Bible importer read it. Nothing here writes to the
+library. A blank ``calibre_library_path`` is reported as "not configured"
+rather than guessed at, and the shelf root is re-checked on every fetch so a
+crafted path cannot leave it.
+
+Every parent action is appended to an audit log (``audit.json``) beside the
+shared folders: who pushed an update or a folder, uploaded or removed a file,
+or locked or wiped a device, and when. It is append-only and capped, like the
+telemetry activity feed, and the Devices page reads it back. A failed write is
+logged and the action still completes, so the log is best-effort rather than a
+way to make an MDM action fail.
 
 Two MDM actions are deliberately *not* reimplemented here, because the mechanism
 already exists and a second copy is how the two drift apart:
@@ -23,15 +42,17 @@ published build is refused rather than announced (no fake sends).
 The shared folders are plain files under ``MDM_FILES_DIR`` (default
 ``/app/data/mdm_files``), each with a manifest, plus a ``pushes.json`` naming who
 each folder is pushed to. The read-only Calibre library (docs/CALIBRE_LIBRARY.md)
-is a candidate *source* for the Library folder, but this module never writes to
-it.
+is the *source* for the Library set, browsed through the storage service; this
+module never writes to it.
 """
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import re
 from datetime import UTC, datetime
@@ -39,11 +60,11 @@ from pathlib import Path
 
 import aiohttp
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from services.common import notify as _notify
 from services.common.http import get_client
-from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
+from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET, STORAGE_SVC
 
 log = logging.getLogger("gateway.mdm")
 
@@ -60,6 +81,24 @@ MDM_FILES_DIR = Path(os.getenv("MDM_FILES_DIR", "/app/data/mdm_files"))
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 #: How long a queued wipe is offered to the phone before it is ignored.
 WIPE_TTL_S = 24 * 3600
+#: The most recent MDM actions kept in the audit log.
+AUDIT_MAX = 500
+#: One Library book may not exceed this when it is opened in the app.
+MAX_LIBRARY_BOOK_BYTES = 200 * 1024 * 1024
+#: The most books one Library listing returns. A shelf can hold thousands; the
+#: response is bounded and says when it was cut, rather than shipping all of them.
+LIBRARY_MAX_BOOKS = 500
+#: How long the storage service may take to list or fetch from the shelf.
+LIBRARY_LIST_TIMEOUT = 60.0
+LIBRARY_FETCH_TIMEOUT = 180.0
+
+#: File extensions the Library set shows as books. The Calibre shelf also holds
+#: ``metadata.db``, cover images and ``.opf`` sidecars; those are not books and
+#: are left out rather than listed as unreadable rows.
+LIBRARY_BOOK_SUFFIXES = frozenset({
+    ".azw", ".azw3", ".cbz", ".cbr", ".djvu", ".docx", ".epub", ".fb2",
+    ".htmlz", ".lit", ".mobi", ".pdb", ".pdf", ".rtf", ".txt",
+})
 
 #: A file name: no path separator, no control characters, bounded length.
 _NAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
@@ -246,6 +285,222 @@ def clear_wipe(device_key: str, root: Path | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Audit log (append-only, capped, best-effort)
+# ---------------------------------------------------------------------------
+
+
+def _audit_path(root: Path | None = None) -> Path:
+    return _root(root) / "audit.json"
+
+
+def record_audit(action: str, actor: str, *, target: str | None = None,
+                 detail: dict | None = None, root: Path | None = None) -> dict | None:
+    """Append one MDM action to the audit log; ``None`` if it could not be written.
+
+    The entry is small and scalar: the action, who did it, what it touched and a
+    short detail object (owners, a file name, a size). No secret is ever put
+    here. A write failure is logged and returns ``None`` rather than raising, so
+    a full disk cannot turn a parent's action into an error they did not cause.
+    """
+    entry = {
+        "at": datetime.now(UTC).isoformat(),
+        "action": str(action or "").strip()[:60],
+        "actor": (actor or "").strip().lower(),
+        "target": (str(target).strip()[:200] if target else None),
+        "detail": detail if isinstance(detail, dict) else {},
+    }
+    try:
+        data = _read_json(_audit_path(root))
+        events = data.get("events")
+        if not isinstance(events, list):
+            events = []
+        events.append(entry)
+        data["events"] = events[-AUDIT_MAX:]
+        _write_json(_audit_path(root), data)
+    except OSError as exc:
+        log.warning("[mdm] audit write failed for %s: %s", entry["action"], exc)
+        return None
+    return entry
+
+
+def read_audit(limit: int = 100, root: Path | None = None) -> list[dict]:
+    """The most recent MDM actions, newest first."""
+    events = _read_json(_audit_path(root)).get("events")
+    if not isinstance(events, list):
+        return []
+    rows = [e for e in events if isinstance(e, dict)]
+    rows.reverse()
+    return rows[: max(0, int(limit))]
+
+
+# ---------------------------------------------------------------------------
+# The Library set, read-only from the Calibre shelf
+# ---------------------------------------------------------------------------
+
+
+def normalise_path(path: str) -> str:
+    """A rooted, slash-only path with no ``.`` or ``..`` segments.
+
+    The shelf is a namespace of strings, and a traversal segment would let a
+    request leave the library; the segments are resolved here rather than
+    trusted, the same way the Bible importer's library reader does it.
+    """
+    text = str(path or "").strip().replace("\\", "/")
+    parts: list[str] = []
+    for segment in text.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(segment)
+    return "/" + "/".join(parts)
+
+
+def _within(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def _book_format(name: str) -> str:
+    suffix = Path(str(name or "")).suffix.lower()
+    return suffix.lstrip(".") if suffix in LIBRARY_BOOK_SUFFIXES else ""
+
+
+def describe_library(entries: list, root: str) -> list[dict]:
+    """The book files in a shelf listing, sorted by name.
+
+    Directories and non-book files are dropped rather than shown as unreadable
+    rows: the Library set is a shelf of books, and a cover image or Calibre's
+    ``metadata.db`` is not one. Entries outside the configured root are dropped
+    too, so a listing that came back wrong cannot widen the shelf.
+    """
+    base = normalise_path(root)
+    books: list[dict] = []
+    for item in entries or []:
+        if not isinstance(item, dict) or item.get("is_dir"):
+            continue
+        path = normalise_path(str(item.get("path") or ""))
+        name = str(item.get("name") or path.rsplit("/", 1)[-1])
+        fmt = _book_format(name)
+        if not fmt or not path or not _within(path, base) or path == base:
+            continue
+        size = item.get("size")
+        books.append({
+            "name": name,
+            "path": path,
+            "format": fmt,
+            "size": int(size) if isinstance(size, (int, float)) and not isinstance(size, bool) else None,
+        })
+    books.sort(key=lambda b: b["name"].lower())
+    return books
+
+
+async def _library_root() -> str:
+    """The configured Calibre shelf root, or ``""`` when it is not set."""
+    from services.gateway.main import fetch_global_setting
+
+    return (await fetch_global_setting("calibre_library_path")).strip()
+
+
+def _unconfigured() -> dict:
+    return {
+        "configured": False,
+        "books": [],
+        "reason": (
+            "No Calibre library path is configured. Set 'calibre_library_path' "
+            "(Admin > LLM & Settings) to the Nextcloud folder that holds the books."
+        ),
+    }
+
+
+async def list_library_books() -> dict:
+    """List the family Library set from the read-only Calibre shelf.
+
+    The shelf is browsed through the storage service's existing Nextcloud
+    provider (the same path the RAG index and Bible importer use), so the
+    credentials stay in one place. A blank setting, an unreachable service or a
+    refusal are each reported as their own state; none of them is an empty
+    shelf, and none of them is invented.
+    """
+    root = await _library_root()
+    if not root:
+        return _unconfigured()
+    base = normalise_path(root)
+    payload = {"provider": {"kind": "nextcloud", "settings": {}}, "path": base, "recursive": True}
+    try:
+        async with get_client().post(
+            f"{STORAGE_SVC}/providers/list",
+            json=payload,
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=LIBRARY_LIST_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                log.warning("[mdm] library list failed: HTTP %s %s", resp.status, body[:200])
+                return {"configured": True, "root": base, "books": [],
+                        "error": "The family library could not be read from storage."}
+            data = await resp.json(content_type=None)
+    except Exception as e:  # an unreachable shelf is not an empty one
+        log.warning("[mdm] library list failed: %s", e)
+        return {"configured": True, "root": base, "books": [],
+                "error": "The family library could not be reached."}
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return {"configured": True, "root": base, "books": [],
+                "error": "The family library listing was not in the expected shape."}
+    books = describe_library(entries, base)
+    return {"configured": True, "root": base, "books": books[:LIBRARY_MAX_BOOKS],
+            "count": len(books), "truncated": len(books) > LIBRARY_MAX_BOOKS}
+
+
+async def fetch_library_book(path: str) -> tuple[bytes, str, str]:
+    """One Library book's bytes, its name and its content type.
+
+    Raises ``ValueError`` for a path outside the shelf, ``LookupError`` when the
+    shelf is not configured, and ``ConnectionError`` when storage refuses or is
+    unreachable. Each maps to a different HTTP answer at the route, because each
+    needs a different fix.
+    """
+    root = await _library_root()
+    if not root:
+        raise LookupError("No Calibre library path is configured.")
+    base = normalise_path(root)
+    wanted = normalise_path(path)
+    if not wanted or wanted == base or not _within(wanted, base):
+        raise ValueError("That path is not inside the family library.")
+    payload = {"provider": {"kind": "nextcloud", "settings": {}}, "path": wanted,
+               "max_bytes": MAX_LIBRARY_BOOK_BYTES}
+    try:
+        async with get_client().post(
+            f"{STORAGE_SVC}/providers/fetch",
+            json=payload,
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=LIBRARY_FETCH_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                log.warning("[mdm] library fetch failed for %s: HTTP %s %s", wanted, resp.status, body[:200])
+                raise ConnectionError("The family library could not read that book.")
+            data = await resp.json(content_type=None)
+    except (ValueError, LookupError, ConnectionError):
+        raise
+    except Exception as e:
+        log.warning("[mdm] library fetch failed for %s: %s", wanted, e)
+        raise ConnectionError("The family library could not be reached.") from e
+    encoded = data.get("content_b64") if isinstance(data, dict) else None
+    if not isinstance(encoded, str) or not encoded:
+        raise ConnectionError("The family library returned no content for that book.")
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ConnectionError("The family library returned content that could not be read.") from exc
+    name = wanted.rsplit("/", 1)[-1]
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return content, name, content_type
+
+
+# ---------------------------------------------------------------------------
 # Identity lookups
 # ---------------------------------------------------------------------------
 
@@ -377,7 +632,7 @@ async def mdm_push_app_update(request: Request):
     """
     from services.gateway.main import _require_admin, get_app_update_version
 
-    await _require_admin(request)
+    actor = await _require_admin(request)
     body = await _body(request)
     owners = await _selected_owners(body)
     if not owners:
@@ -408,6 +663,10 @@ async def mdm_push_app_update(request: Request):
             actions=[_notify.view_action("/settings", "Update now")],
         )
         sent += int(await _notify.send(payload))
+    record_audit("app_update_push", actor, detail={
+        "owners": owners, "version": version, "apk_version_code": code,
+        "bundle_available": bundle, "apk_available": apk, "sent": sent,
+    })
     return {"status": "SUCCESS", "sent": sent, "owners": owners, "version": version,
             "apk_version_code": code, "bundle_available": bundle, "apk_available": apk}
 
@@ -432,7 +691,7 @@ async def mdm_push_shared_files(request: Request):
     """
     from services.gateway.main import _require_admin
 
-    await _require_admin(request)
+    actor = await _require_admin(request)
     body = await _body(request)
     folder = _folder_or_404(str(body.get("folder") or ""))
     usernames = body.get("usernames")
@@ -450,6 +709,8 @@ async def mdm_push_shared_files(request: Request):
             actions=[_notify.view_action("/devices", f"Open {label}")],
         )
         sent += int(await _notify.send(payload))
+    record_audit("folder_push", actor, target=folder,
+                 detail={"pushed_to": people, "files": len(files), "sent": sent})
     return {"status": "SUCCESS", "folder": folder, "pushed_to": people, "files": len(files), "sent": sent}
 
 
@@ -480,6 +741,8 @@ async def mdm_upload_shared_file(request: Request, folder: str, file: UploadFile
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"The file is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
     entry = store_file(folder, name, content, file.content_type, caller)
+    record_audit("file_upload", caller, target=f"{folder}/{name}",
+                 detail={"folder": folder, "name": name, "size": len(content)})
     return {"status": "SUCCESS", "file": entry}
 
 
@@ -488,7 +751,7 @@ async def mdm_delete_shared_file(request: Request, folder: str, name: str):
     """Remove one file from a shared folder (admin)."""
     from services.gateway.main import _require_admin
 
-    await _require_admin(request)
+    actor = await _require_admin(request)
     _folder_or_404(folder)
     try:
         removed = delete_file(folder, name)
@@ -496,6 +759,8 @@ async def mdm_delete_shared_file(request: Request, folder: str, name: str):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not removed:
         raise HTTPException(status_code=404, detail="No such file")
+    record_audit("file_delete", actor, target=f"{folder}/{name}",
+                 detail={"folder": folder, "name": name})
     return {"status": "SUCCESS"}
 
 
@@ -527,7 +792,7 @@ async def mdm_wipe_device(request: Request, device_key: str):
     """
     from services.gateway.main import _identity_as_caller, _require_authenticated
 
-    await _require_authenticated(request)
+    actor = await _require_authenticated(request)
     body = await _body(request)
     if not body.get("confirm"):
         raise HTTPException(
@@ -553,12 +818,64 @@ async def mdm_wipe_device(request: Request, device_key: str):
             detail="Remote wipe needs a device-owner phone; this device has not reported device owner.",
         )
     record = queue_wipe(key, owner)
+    record_audit("device_wipe", actor, target=key, detail={"owner": owner})
     return {"status": "queued", "device_key": key, "owner_username": owner, "queued_at": record["at"],
             "delivery": "the phone erases itself on its next check-in"}
 
 
+@router.get("/api/mdm/library/books")
+async def mdm_library_books(request: Request):
+    """The family Library set, read-only from the Calibre shelf (any member).
+
+    A blank ``calibre_library_path``, an unreachable storage service and an
+    unreadable listing are each reported as their own state; none is shown as an
+    empty shelf.
+    """
+    from services.gateway.main import _require_authenticated
+
+    await _require_authenticated(request)
+    return await list_library_books()
+
+
+@router.post("/api/mdm/library/books/file")
+async def mdm_library_book_file(request: Request):
+    """One Library book's bytes, read-only (any member).
+
+    A POST rather than a GET because ``path`` is a shelf path with slashes in
+    it, and the caller has to be authenticated (the app sends the key in a
+    header), so a plain link cannot open it either way.
+    """
+    from services.gateway.main import _require_authenticated
+
+    await _require_authenticated(request)
+    body = await _body(request)
+    try:
+        content, name, content_type = await fetch_library_book(str(body.get("path") or ""))
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(content=content, media_type=content_type,
+                    headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+
+@router.get("/api/mdm/audit")
+async def mdm_audit_log(request: Request, limit: int = 100):
+    """Who did what to the family's devices and shared files, newest first (admin)."""
+    from services.gateway.main import _require_admin
+
+    await _require_admin(request)
+    capped = max(1, min(int(limit), AUDIT_MAX))
+    return {"events": read_audit(capped)}
+
+
 __all__ = [
-    "MAX_UPLOAD_BYTES", "MDM_FILES_DIR", "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file",
-    "file_path", "list_folder", "pushed_folders", "queue_wipe", "read_pushes", "read_wipes", "router",
-    "set_push", "store_file", "wipe_requested",
+    "AUDIT_MAX", "LIBRARY_BOOK_SUFFIXES", "LIBRARY_MAX_BOOKS", "MAX_LIBRARY_BOOK_BYTES", "MAX_UPLOAD_BYTES",
+    "MDM_FILES_DIR",
+    "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file", "describe_library", "fetch_library_book",
+    "file_path", "list_folder", "list_library_books", "normalise_path", "pushed_folders", "queue_wipe",
+    "read_audit", "read_pushes", "read_wipes", "record_audit", "router", "set_push", "store_file",
+    "wipe_requested",
 ]

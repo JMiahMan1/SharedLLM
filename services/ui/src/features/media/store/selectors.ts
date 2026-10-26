@@ -53,12 +53,19 @@ export function deviceOptions(
 }
 
 /** Outputs other than this device with something loaded ("Playing in your home"). */
-export function playingElsewhere(players: Record<OutputId, RemotePlayer>): RemotePlayer[] {
+export function playingElsewhere(
+  players: Record<OutputId, RemotePlayer>,
+  webPlayerId?: string | null,
+): RemotePlayer[] {
   const all = Object.values(players);
+  // This device's own Music Assistant player is not elsewhere, even when the
+  // event stream forwards it before the player list names the id.
+  const own = webPlayerId ? `ma:${webPlayerId}` : '';
   // A Music Assistant player Home Assistant also exposes is shown once, as the entity.
   const covered = new Set(all.filter((p) => p.kind === 'ha' && p.maPlayerId).map((p) => p.maPlayerId));
   return all
     .filter((p) => !(p.kind === 'ma' && covered.has(p.maPlayerId)))
+    .filter((p) => !own || p.id !== own)
     // Something loaded: a title, or an app (a TV casting YouTube) that gives none.
     .filter((p) => p.available && (p.item || p.appName) && (p.status === 'playing' || p.status === 'paused' || p.status === 'buffering'))
     .sort((a, b) => Number(b.status === 'playing') - Number(a.status === 'playing') || a.name.localeCompare(b.name));

@@ -287,9 +287,10 @@ public final class WidgetApi {
         return post(context, "/execute/ha_service", body);
     }
 
-    public static JSONObject mediaTransport(Context context, String command) throws Exception {
+    public static JSONObject mediaTransport(Context context, String command, String entityId) throws Exception {
         JSONObject body = new JSONObject();
         body.put("command", command);
+        body.put("entity_id", entityId);
         return post(context, "/execute/media/transport", body);
     }
 

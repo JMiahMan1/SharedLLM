@@ -733,11 +733,20 @@ async def _handle_list(abs_url: str, abs_key: str, req) -> ExecutionResult:
     items = result.get("results", [])
     summaries = []
     for item in items[:req.limit]:
-        meta = item.get("media", {}).get("metadata", {})
+        media = item.get("media", {})
+        meta = media.get("metadata", {})
+        # ABS returns the cover as `media.coverPath`; older builds nest it under
+        # `media.cover.path`. The Audiobooks tab needs it (and the duration) or
+        # it shows no art or length.
+        cover = media.get("coverPath", "")
+        if not cover and isinstance(media.get("cover"), dict):
+            cover = media["cover"].get("path", "")
         summaries.append({
             "id": item.get("id"),
             "title": meta.get("title", "Unknown"),
             "author": meta.get("authorName", "Unknown"),
+            "duration": media.get("duration", 0),
+            "cover_path": cover or "",
         })
 
     return ExecutionResult(
@@ -859,7 +868,9 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
                 "explicit": meta.get("explicit", False),
                 "chapters": chapters_list,
                 "chapter_count": len(chapters_list),
-                "cover_path": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
+                # ABS returns the cover as `media.coverPath`; keep the old
+                # `media.cover.path` shape as a fallback for older builds.
+                "cover_path": media.get("coverPath") or (media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover") or "")),
             })
 
         return ExecutionResult(

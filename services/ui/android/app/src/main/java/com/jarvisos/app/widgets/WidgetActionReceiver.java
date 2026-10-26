@@ -91,10 +91,15 @@ public class WidgetActionReceiver extends BroadcastReceiver {
 
         if (WidgetUpdater.ACTION_MEDIA.equals(action)) {
             final String command = intent.getStringExtra(WidgetUpdater.EXTRA_COMMAND);
+            final String entity = intent.getStringExtra(WidgetUpdater.EXTRA_ENTITY);
             if (command == null) return;
+            if (entity == null || entity.isEmpty()) {
+                postToast(app, "✕ media: no active player");
+                return;
+            }
             WidgetUpdater.onBackground(() -> {
                 try {
-                    WidgetApi.mediaTransport(app, command);
+                    WidgetApi.mediaTransport(app, command, entity);
                     WidgetUpdater.pushMedia(app);
                     postToast(app, "✓ media: " + command);
                 } catch (Exception e) {

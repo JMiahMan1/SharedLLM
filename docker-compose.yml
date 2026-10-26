@@ -302,6 +302,7 @@ services:
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
       - ./data/app_updates:/app/data/app_updates
+      - ./data/mdm_files:/app/data/mdm_files
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro

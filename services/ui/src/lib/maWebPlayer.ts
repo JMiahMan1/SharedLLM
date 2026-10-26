@@ -610,12 +610,14 @@ export function useMAWebPlayer() {
   );
 
   // List Music Assistant players so the UI device picker can offer them.
-  const listMaPlayers = useCallback(async (): Promise<MaPlayerListEntry[]> => {
+  // A failed read returns null (unknown), never []: an empty list would wipe
+  // the picker when MA is only briefly unreachable.
+  const listMaPlayers = useCallback(async (): Promise<MaPlayerListEntry[] | null> => {
     try {
       return parseMaPlayerList(await sendJsonRpc('players/all', {}));
     } catch (err) {
       console.warn('[MAWebPlayer] listMaPlayers failed:', err);
-      return [];
+      return null;
     }
   }, [sendJsonRpc]);
 

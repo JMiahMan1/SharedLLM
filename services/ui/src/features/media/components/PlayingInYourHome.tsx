@@ -23,7 +23,7 @@ export function PlayingInYourHome() {
   const players = useMediaStore((s) => s.players);
   const target = useMediaStore((s) => s.activeOutputId);
   const { patchPlayer } = useMediaStore((s) => s.actions);
-  const busy = playingElsewhere(players).filter((p) => p.id !== target);
+  const busy = playingElsewhere(players, player.playerId).filter((p) => p.id !== target);
   if (busy.length === 0) return null;
 
   const toggle = async (id: string, name: string, playing: boolean) => {

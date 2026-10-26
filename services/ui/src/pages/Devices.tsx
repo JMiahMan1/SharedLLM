@@ -3,13 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import {
-  BookOpen, Check, GraduationCap, Loader2, Lock, RefreshCw, ShieldAlert, Smartphone, Trash2, Unlock, Upload, X,
+  BookOpen, Check, GraduationCap, History, Loader2, Lock, RefreshCw, ShieldAlert, Smartphone, Trash2, Unlock, Upload, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { relativeTime } from '../lib/wanderTrips';
 import { deviceKindLabel } from '../lib/deviceKind';
+import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import type { MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 
 /**
@@ -269,6 +270,7 @@ function FolderCard({ folder, members }: { folder: MdmFolder; members: MdmMember
             }}
           />
         </label>
+        {folder.folder === 'library' && <LibraryBooks />}
         <div className="space-y-1 border-t border-white/5 pt-2">
           <p className="text-[10px] uppercase tracking-wider text-slate-500">Push to</p>
           <div className="flex flex-wrap gap-1.5">
@@ -298,28 +300,79 @@ function FolderCard({ folder, members }: { folder: MdmFolder; members: MdmMember
   );
 }
 
-/** A child's own view: only the folders pushed to them. */
-function SharedFilesForMe() {
-  const { data, isLoading, error } = useQuery({ queryKey: ['mdm-files-for-me'], queryFn: () => api.getMdmFilesForMe(), retry: false });
+/** The read-only Library shelf, shown beside the parent's Library folder. */
+function LibraryBooks() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['mdm-library-books'],
+    queryFn: () => api.getMdmLibraryBooks(),
+    retry: false,
+  });
   return (
-    <Panel title="Shared files" icon={BookOpen}>
-      <div className="space-y-3 p-4" data-testid="mdm-for-me">
-        {isLoading && <p className="text-xs text-slate-500">Loading…</p>}
-        {error && <p className="text-xs text-amber-300/90">Shared files could not be loaded.</p>}
-        {data && data.folders.length === 0 && <p className="text-xs text-slate-500">No shared folders have been pushed to you yet.</p>}
-        {data?.folders.map((f) => (
-          <div key={f.folder}>
-            <p className="text-xs font-semibold capitalize text-slate-200">{f.folder}</p>
-            <ul className="mt-1 space-y-1 text-xs">
-              {f.files.length === 0 && <li className="text-slate-500">Empty.</li>}
-              {f.files.map((file) => (
-                <li key={file.name}>
-                  <a className="text-slate-200 hover:text-white" href={`/api/mdm/files/${f.folder}/${encodeURIComponent(file.name)}`}>{file.name}</a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+    <div className="border-t border-white/5 pt-2" data-testid="mdm-library-books">
+      <p className="text-[10px] uppercase tracking-wider text-slate-500">From the family library (read-only)</p>
+      {isLoading && <p className="mt-1 text-xs text-slate-500">Loading library…</p>}
+      {error && <p className="mt-1 text-xs text-amber-300/90">The family library could not be loaded.</p>}
+      {data && !data.configured && <p className="mt-1 text-xs text-slate-500">{data.reason}</p>}
+      {data?.configured && data.error && <p className="mt-1 text-xs text-amber-300/90">{data.error}</p>}
+      {data?.configured && !data.error && data.books.length === 0 && (
+        <p className="mt-1 text-xs text-slate-500">The family library has no books yet.</p>
+      )}
+      {data?.configured && !data.error && data.books.length > 0 && (
+        <ul className="mt-1 max-h-56 space-y-1 overflow-auto text-xs">
+          {data.books.map((b) => (
+            <li key={b.path} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-slate-200">{b.name}</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wider text-slate-500">{b.format}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {data?.truncated && (
+        <p className="mt-1 text-xs text-slate-500">
+          Showing the first {data.books.length} of {data.count} books.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Plain-language labels for the MDM audit actions (the server's action names). */
+const AUDIT_LABELS: Record<string, string> = {
+  app_update_push: 'pushed an app update',
+  folder_push: 'pushed a shared folder',
+  file_upload: 'uploaded a shared file',
+  file_delete: 'removed a shared file',
+  device_wipe: 'queued a device wipe',
+  device_lock: 'locked a device',
+  device_unlock: 'unlocked a device',
+};
+
+/** Who did what to the family's devices and shared files (HANDOVER.md Phase 12). */
+function AuditLogPanel() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['mdm-audit'],
+    queryFn: () => api.getMdmAudit(),
+    retry: false,
+  });
+  return (
+    <Panel title="Activity log" icon={History}
+      aside={<span className="text-xs text-slate-500">{data?.events.length ?? 0} recent</span>}>
+      <div className="space-y-1 p-4" data-testid="mdm-audit">
+        {isLoading && <p className="text-xs text-slate-500">Loading activity…</p>}
+        {error && <p className="text-xs text-amber-300/90">The activity log could not be loaded.</p>}
+        {data && data.events.length === 0 && (
+          <p className="text-xs text-slate-500">No device-management actions have been taken yet.</p>
+        )}
+        <ul className="space-y-1 text-xs">
+          {data?.events.map((e, i) => (
+            <li key={`${e.at}-${i}`} className="flex flex-wrap items-baseline gap-x-2">
+              <span className="text-slate-200">{e.actor}</span>
+              <span className="text-slate-400">{AUDIT_LABELS[e.action] ?? e.action}</span>
+              {e.target && <span className="min-w-0 break-words text-slate-500">{e.target}</span>}
+              <span className="ml-auto shrink-0 text-slate-600">{relativeTime(e.at)}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </Panel>
   );
@@ -337,9 +390,9 @@ export default function Devices() {
       <div className={PAGE}>
         <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
           <h1 className="text-xl font-bold text-white sm:text-2xl">Devices</h1>
-          <p className="mt-0.5 text-xs text-slate-400">Files shared with you, and your own device.</p>
+          <p className="mt-0.5 text-xs text-slate-400">Files your parents share with you.</p>
         </header>
-        <SharedFilesForMe />
+        <SharedFilesPanel />
       </div>
     );
   }
@@ -391,6 +444,8 @@ export default function Devices() {
 
       {files.isLoading && <p className="text-sm text-slate-500">Loading shared folders…</p>}
       {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
+
+      <AuditLogPanel />
     </div>
   );
 }

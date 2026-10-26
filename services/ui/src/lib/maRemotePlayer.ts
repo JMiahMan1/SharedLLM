@@ -21,13 +21,13 @@ export async function sendMaRemoteCommand(
 
 /**
  * List Music Assistant players without opening the web player, for when the
- * browser has no control socket to ask. Failures stay quiet: the device picker
- * simply shows what the server already knows.
+ * browser has no control socket to ask. A failure returns null (unknown), so
+ * the caller keeps the list it already has instead of clearing the picker.
  */
-export async function listRemoteMaPlayers(): Promise<MaPlayerListEntry[]> {
+export async function listRemoteMaPlayers(): Promise<MaPlayerListEntry[] | null> {
   try {
     return parseMaPlayerList(await sendMaRemoteCommand('players/all'));
   } catch {
-    return [];
+    return null;
   }
 }

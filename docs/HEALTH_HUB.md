@@ -1,6 +1,6 @@
 # Health Hub: the best of the health apps in one
 
-Status: **live, partially built (updated 2026-10-25): phases 1-5 core, cycle tracking (recorded always, shown on request), family sharing/export and the USDA food seed are deployed; Phases 10-11 (digital wellbeing, guardianship) are in progress.** See HANDOVER.md for the live commit.
+Status: **live, partially built (updated 2026-10-25): phases 1-5 core, cycle tracking (recorded always, shown on request), family sharing/export, the USDA food seed, digital wellbeing (Phase 10) and digital guardianship (Phase 11) are deployed; the last open non-device items (the Jarvis-use card, the adult `digital` share scope and a parent ringing a child's phone) are built.** See HANDOVER.md for the live commit.
 Companion plans: `docs/RECIPES.md` (Phases 10-11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).
@@ -73,6 +73,20 @@ Built since on the server and web (2026-10-24): per-metric switches, kid-mode hi
 fasting window, weekly active minutes, streaks, micro-lessons, the coach (chat answers, weekly
 goals, daily reminders), cheers and share-my-day, the dashboard's Health today card, plan ↔ log
 ↔ shopping list, calendar workouts, and photo and voice food logging.
+
+Built since (2026-10-25, the last open non-device items): **what you do in Jarvis** (a member's
+own in-app use, Phase 10; `services/common/jarvis_use.py`, `GET /api/activity/use`,
+`JarvisUseCard`, tests `services/common/tests/test_jarvis_use.py`,
+`services/telemetry/tests/test_telemetry_activity.py`, `services/gateway/tests/test_usage_proxy.py`,
+`services/ui/src/components/health/JarvisUseCard.test.tsx`); the **adult `digital` family share
+scope** (a grown member may open their own phone use to someone; the health store keeps the grant
+and the gateway fills the day's screen time in from telemetry; tests
+`services/health/tests/test_api.py::TestSharingAndExport`,
+`services/gateway/tests/test_health_hub_gateway.py`,
+`services/ui/src/components/health/SharedWithYouCard.test.tsx`); and a **parent ringing a child's
+phone** (a parent's Find my phone on the family member page; `POST /api/guardian/find-phone/{user}`,
+tests `services/gateway/tests/test_push_senders.py`,
+`services/ui/src/components/member/FindPhoneCard.test.tsx`).
 
 Not built yet, and not pretended otherwise: a veg-servings challenge (a logged food keeps no
 food category to count from; see Phase 7). Step goal days are a challenge kind since 2026-10-24.
@@ -247,7 +261,8 @@ live search is the ecosystem-standard pattern.
 - [x] Health profile per user (age, height, sex, activity level, goal, units), stored in the health service; kid mode flags.
 - [x] Health settings page: turn metrics on/off, family sharing toggles. **Cards on your Health page**
   (Health → Health) switches each card on or off: readiness, check-in, sleep, food, water, steps,
-  active minutes, streaks, weekly digest, family challenge, cheers, lessons, coach and fasting
+  active minutes, streaks, weekly digest, family challenge, cheers, lessons, coach, what you do in
+  Jarvis and fasting
   (`services/health/preferences.py`, kept in `HealthPreferences` so an existing database needs no
   migration; `PUT /profile` takes a partial `metrics` map, `GET /profile` returns every switch
   resolved plus the catalogue). Off hides the card on the person's own screens and keeps the chat
@@ -539,13 +554,35 @@ live search is the ecosystem-standard pattern.
       use, total screen time, sessions, the top five apps by foreground time and a seven-day bar.
       An adult sees their own; a parent switches to each child; a minor sees no card. A per-session
       timeline needs the phone to report sessions (it reports first/last use and a count today).
-- [ ] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
+- [x] Jarvis itself: log feature events from the web bundle (chat, recipes, notes, timers, games,
       verses) - no permission needed - and show what each person does most inside Jarvis.
+      **Built 2026-10-25:** the bundle's route beacon already records a light page view per visit
+      (and the recorders add plays, wins and chapters); `services/common/jarvis_use.py` turns a
+      person's own feed into a small summary - the in-app features they use most over 7 or 30 days -
+      grouping media (music/video/podcasts), Bible, games, recipes, notes, calendar, family, health,
+      map, remote and settings, and leaving the phone's own collection (calls, texts, sites) out
+      because those are the parents'. `GET /api/telemetry/use/{user}` returns the aggregate and
+      `GET /api/activity/use` returns the caller's own, resolved here so no one can ask for anyone
+      else's; only the derived counts leave, never the raw stream. `JarvisUseCard` (Health → Today,
+      the `jarvis_use` switch) shows it with an explicit empty state. Tests:
+      `services/common/tests/test_jarvis_use.py`,
+      `services/telemetry/tests/test_telemetry_activity.py`,
+      `services/gateway/tests/test_usage_proxy.py`,
+      `services/ui/src/components/health/JarvisUseCard.test.tsx`.
 - [x] Visibility follows Phase 11's rule, enforced on the server: identity's
       `may_view_raw_data` (`GET /api/internal/may-view-raw`) opens a minor's usage to an admin,
       the father and the linked mother (any mother when none is linked) and to no one else, an
       adult's to themselves; `GET /api/usage/{user}` answers 403 otherwise (any signed-in member
-      could read anyone's before). An adult's opt-in `digital` family scope is still to come.
+      could read anyone's before). **An adult's opt-in `digital` family scope is built (2026-10-25):**
+      a grown member picks "Phone use" under Family sharing on their own Health page
+      (`HealthProfilePanel`); the health service stores only the grant (`ShareIn` accepts `digital`,
+      `/family` projects `{"digital": {"shared": true}}`, and a minor is refused with 422 since a
+      child's digital wellbeing is the parents'), and the gateway fills the day's screen time in from
+      telemetry for that owner, saying so plainly when the phone reported nothing (null) or the read
+      failed (`available: false`) - never a zero. The viewer sees it on Health → Today's "Shared with
+      you" (`SharedWithYouCard`). Tests: `services/health/tests/test_api.py::TestSharingAndExport`,
+      `services/gateway/tests/test_health_hub_gateway.py`,
+      `services/ui/src/components/health/SharedWithYouCard.test.tsx`.
 
 ### Phase 11 - family guardianship and discipleship (full Bark / Qustodio / Family Link parity; planned 2026-10-23)
 
@@ -568,11 +605,22 @@ point.
 
 ### Collection
 
-- [ ] **The digital profile (the point of all of it).** Every signal below - device usage,
+- [x] **The digital profile (the point of all of it).** Every signal below - device usage,
       music, media sessions, calls and SMS, web, in-app activity - lands on one per-person
       profile: a living picture of what they listen to, play, watch and browse, when and for
       how long, and the week's patterns. This is the data model Jarvis reads for
       recommendations and for the discipleship surfaces further down.
+      **Built as one per-person set of stores, not a second copy:** telemetry keeps each person's
+      activity feed (`tel:activity:{user}`), phone usage by day with top apps (`tel:usage:{user}`),
+      content-monitoring concerns (`tel:concerns:{user}`) and the weekly recaps
+      (`tel:recap:{user}`), all keyed by the account, and `services/common/guardian_recap.py`
+      assembles the week for the member page, the Sunday notice and the chat answer; the six
+      recommendation lanes read the same feed. The one thing missing was the member's own slice of
+      it, which is the Jarvis-use card above (2026-10-25). Deliberately no separate all-time
+      "profile" endpoint: it would be a redundant surface over the same stores, against "every card
+      earns its place". Tests: `services/common/tests/test_guardian_recap.py`,
+      `services/telemetry/tests/test_telemetry_activity.py`,
+      `services/common/tests/test_jarvis_use.py`.
 - [x] **Activity feed (music, games, pages, verses).** Telemetry stores a capped per-person
       stream (`POST/GET /api/telemetry/activity`) and execution records through
       `activity.record`; trivia wins, media plays (music/video/podcast/audiobook) and app
@@ -740,9 +788,21 @@ point.
       accessibility service (if not, the cover shows but the small window stays), that ending a
       split screen then going home clears both halves, that `BOOT_COUNT` advances in safe mode,
       and the Private DNS dialog's wording on Samsung.
-- [ ] **Location guardian.** The geo service already holds live location, history, zones and
+- [x] **Location guardian.** The geo service already holds live location, history, zones and
       trips; add parent-facing place alerts (arrive/leave), ring device and battery, and the
       one-device-at-a-time live view.
+      **Built:** parent-facing place alerts are geo's presence notices (an arrival/departure to the
+      family who may see the person; an important place is a `family_safety` notice to the people
+      chosen for it, `services/geo/main.py` `_notify_presence` + `family_safety.place_payload`); the
+      battery is on each device card (`/api/user-panel/devices/{device_key}/battery`,
+      `DevicesSection`); and the one-device-at-a-time live view is the member page's focused map
+      (`MiniMapCard` → `LiveFamilyMap focusUserId`). **Ringing a child's phone is built
+      (2026-10-25):** `POST /api/guardian/find-phone/{user}` (`services/gateway/family_safety.py`)
+      rings another member's phone with the same priority-5 `find_phone` notice the watch's button
+      sends, only for someone identity's visibility rule allows (a minor's parent, or the person
+      themselves), with a 30-second cooldown per person; `FindPhoneCard` on the member page's
+      Location section (a parent's Find my phone). Tests: `services/gateway/tests/test_push_senders.py`,
+      `services/ui/src/components/member/FindPhoneCard.test.tsx`.
 - [ ] **Tamper resistance.** Device-admin uninstall protection, restart on boot
       (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents -
       with a parent access code as the offline unlock/verify escape hatch.

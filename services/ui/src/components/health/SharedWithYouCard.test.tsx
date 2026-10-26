@@ -14,7 +14,7 @@ function person(overrides: Partial<HealthFamilyPerson> = {}): HealthFamilyPerson
 describe('SharedWithYouCard digital scope', () => {
   it('shows the shared screen time for the day', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: true, screen_time_min: 60, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('1 h 0 min on the phone today');
+    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('1h on the phone today');
   });
 
   it('says when the phone reported nothing, never a zero', () => {

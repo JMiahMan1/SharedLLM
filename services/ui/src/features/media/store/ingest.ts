@@ -47,9 +47,16 @@ export interface PlayersState {
   players: Record<OutputId, RemotePlayer>;
   /** When the person last moved each output's volume (ms epoch). */
   volumeTouchedAt: Record<OutputId, number>;
+  /**
+   * This browser's own Music Assistant player id (the Sendspin id), once the
+   * app has seen it. The event stream forwards every MA player, including this
+   * device's own, so the id is what lets `player`/`snapshot` drop it instead of
+   * showing the person their own device as a separate speaker.
+   */
+  webPlayerId: string | null;
 }
 
-export const EMPTY_PLAYERS: PlayersState = { players: {}, volumeTouchedAt: {} };
+export const EMPTY_PLAYERS: PlayersState = { players: {}, volumeTouchedAt: {}, webPlayerId: null };
 
 export function toStatus(state: string | undefined | null): PlaybackStatus {
   if (state === 'playing' || state === 'paused' || state === 'buffering') return state;
@@ -279,7 +286,9 @@ export function ingest(state: PlayersState, event: MediaEvent, now: number): Pla
         }, now);
       }
       players = stablePlayers(state.players, players);
-      return players === state.players ? state : { ...state, players };
+      const webPlayerId = event.webPlayerId ?? state.webPlayerId;
+      if (players === state.players && webPlayerId === state.webPlayerId) return state;
+      return { ...state, players, webPlayerId };
     }
     case 'snapshot': {
       let next = state;
@@ -288,6 +297,10 @@ export function ingest(state: PlayersState, event: MediaEvent, now: number): Pla
     }
     case 'player': {
       if (!event.output_id || event.output_id === 'web_player') return state;
+      // This device's own MA player is not a remote output: the event stream
+      // forwards it too, so drop it here rather than let a later player_updated
+      // re-add what the `ma-players` list already excluded.
+      if (state.webPlayerId && event.output_id === `ma:${state.webPlayerId}`) return state;
       const players = upsert(state, event.output_id, patchFromEvent(event, now), now);
       return players === state.players ? state : { ...state, players };
     }
@@ -311,6 +324,7 @@ export function touchVolume(state: PlayersState, id: OutputId, volume: number, n
   const prev = state.players[id];
   if (!prev) return state;
   return {
+    ...state,
     players: { ...state.players, [id]: { ...prev, volume, muted: false } },
     volumeTouchedAt: { ...state.volumeTouchedAt, [id]: now },
   };
@@ -320,6 +334,7 @@ export function touchMute(state: PlayersState, id: OutputId, muted: boolean, now
   const prev = state.players[id];
   if (!prev) return state;
   return {
+    ...state,
     players: { ...state.players, [id]: { ...prev, muted } },
     volumeTouchedAt: { ...state.volumeTouchedAt, [id]: now },
   };

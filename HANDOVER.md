@@ -26,6 +26,15 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-25 (Phase 12 MDM follow-ups, in review, uncommitted)`: `docs/MDM.md` added and the
+  Devices page finished. A child now gets a real surface for the files a parent pushed
+  (`components/mdm/SharedFilesPanel.tsx`: open in an in-app viewer or download, with the API key a
+  bare link could not carry); the Library set is sourced read-only from the Calibre shelf
+  (`GET /api/mdm/library/books`, `POST /api/mdm/library/books/file`); every parent action is kept in
+  an append-only, capped audit log (`audit.json`, `GET /api/mdm/audit`) shown as the page's Activity
+  log; and `./data/mdm_files` is now mounted so the folders and the log survive a redeploy. Per-device
+  update notices are **not** done: the notice and push plumbing is per user and the app-update
+  version is global, so there is no clean device dimension (reported, not faked).
 - `2026-10-25 (small items, in review, uncommitted)`: the open small items this handover recorded.
   - **Docs:** `/guardian` is no longer a redirect - it is its own top-level page (nav entry after
     Family, offered to every role), Health keeps its digital-wellbeing card and links across, and
@@ -754,13 +763,39 @@ surfaces and a voice for the quiet ones; collected data is parents-only while
 suggestions belong to the member they are for, and the phone pulls external-app
 activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23).
 
-### Phase 12 - device management (MDM) (planned 2026-10-25)
+### Phase 12 - device management (MDM) (first slice shipped, follow-ups in review)
 
 The user asked "is there a means we can push application (Jarvis OS) updates to devices remotely and
 maybe some other MDM related tasks like push books and other files to be available on devices for
 school work and Bible studies etc." and chose to **build full MDM-style device management**: device
 inventory, remote app-update push, file/book push, app install/uninstall control, and remote
-lock/wipe. **Not started.**
+lock/wipe. See `docs/MDM.md`.
+
+Shipped in `ccedf489`: the device inventory (`GET /api/mdm/devices`), the remote app-update push
+(`POST /api/mdm/devices/update`), the shared School/Library folders
+(`/api/mdm/files*`, `/api/mdm/files/for-me`), the remote wipe
+(`POST /api/mdm/devices/{key}/wipe`, read by the screen-time status the phone polls), the
+`Devices.tsx` page, and the Android `DeviceOwnerRules.shouldWipe` / `DeviceOwnerGuard.wipeData`.
+
+Follow-ups in review (uncommitted, this round):
+
+- **A child-facing surface that consumes the pushed files**: `components/mdm/SharedFilesPanel.tsx`
+  lists the folders pushed to the child and opens a file in an in-app viewer (reusing the workspace
+  PDF and image viewers) or downloads it. A plain link cannot carry the API key the route needs, so
+  the old bare `<a href>` download never worked; both actions now fetch a blob with the key.
+- **The Library set sourced read-only from Calibre** (`docs/CALIBRE_LIBRARY.md`): the gateway
+  browses `calibre_library_path` through the storage service's existing Nextcloud provider, keeps
+  only book-format files, and re-checks the shelf root on every fetch. A blank setting is "not
+  configured", not an empty shelf.
+- **An audit log** (`audit.json`): who pushed an update or a folder, uploaded or removed a file, or
+  locked or wiped a device, and when; shown as the Devices page's Activity log. Append-only and
+  capped, like the telemetry activity feed.
+- **Persistence**: `docker-compose.yml` now mounts `./data/mdm_files`, so the shared folders and the
+  audit log survive a redeploy.
+
+Still open: **per-device update notices** (the notice and push plumbing is per user, and the
+app-update version is global, so there is no clean device dimension yet); a wipe still needs a
+device-owner phone; app install/uninstall stays the screen rules.
 
 - For file push the chosen model is **shared School and Library folders per child device**: one
   shared set pushed to each selected child device (not per-file targeting).
@@ -786,9 +821,10 @@ lock/wipe. **Not started.**
   (to 2027-01-23, auto-renew), so the old `*.sumemail.com` wildcard is not needed. Its renewal is skipped.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
-- **Phase 12 (device management / MDM)**: not started - see "Phase 12 - device management (MDM)"
-  above for the chosen shape (device inventory, remote app-update push, shared School/Library file
-  push, install/uninstall control, remote lock/wipe).
+- **Phase 12 (device management / MDM)**: the first slice shipped (`ccedf489`); the child-facing
+  surface, the Calibre-sourced Library set and the audit log are in review (see "Phase 12 - device
+  management (MDM)" above and `docs/MDM.md`). Open: per-device update notices (the push plumbing is
+  per user), and a wipe still needs a device-owner phone.
 - Devices: the tablet/phone split is a screen-width heuristic, so a very large phone reads as a
   tablet (`72835c17`).
 - Family guard (device owner): the Layer 2 restrictions and the new Settings-page tamper matches only
