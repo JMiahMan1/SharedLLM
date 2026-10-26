@@ -6,22 +6,24 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `3269ac38`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `b4f2a243`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **c150385c**
   (APK `versionCode` **482**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
-  fixes, the UI and accessibility pass, the family-comms fixes, and the ops hardening (nightly
-  backups, deploy rollback, SQLite WAL and additive migrations, per-loop worker leases, a
-  digest-pinned base image, and identity, health, bible, storage, logging and geo now running as the
-  host user rather than root). Every deploy was verified with 0 ERROR lines in the touched services'
-  logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK `versionCode`
-  rebuilds per push (482 is current; 481 was the previous), so the native work below needs the newest
-  APK on the phones. **APK 482** carries the guard overlay that draws over a tablet's taskbar and
-  navigation strip, with "Ask for more time" and "Message a parent" painted over the lock as a sheet
-  instead of taking it down. Family guard Phase 11, the family member page (`/family/member/<child>`),
-  the Family Guardian page (`/guardian`) and the MDM/Devices work are live.
+  fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
+  a family call), and the ops hardening (nightly backups, deploy rollback, SQLite WAL and additive
+  migrations, per-loop worker leases, jittered retries, a digest-pinned base image whose Python
+  packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
+  the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
+  services' logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK
+  `versionCode` rebuilds per push (482 is current; 481 was the previous), so the native work below
+  needs the newest APK on the phones. **APK 482** carries the guard overlay that draws over a
+  tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
+  the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
+  (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
+  live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
