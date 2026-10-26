@@ -285,16 +285,17 @@ wellbeing live there.
 
 - Several workspace actions still have no busy state.
 - Raw exception text reaches users in ~199 places instead of going through `lib/errorText.ts`.
-- Settings is one ~1000-line column of fourteen panels; two identical-looking search boxes mean
-  different things; and the theme tokens are bypassed by hardcoded colour classes in 216 files.
+- Two identical-looking search boxes mean different things, and the theme tokens are bypassed by
+  hardcoded colour classes in 216 files.
 
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
 hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; the
 media detail pages carry a Back control; and every destructive action now asks in the app's own
 `confirmDialog` rather than the browser's `window.confirm` - all twenty-four call sites across the
-app, with the tests that stubbed `window.confirm` updated to stub the dialog instead; and the admin
-tab bar wraps instead of scrolling sideways, so all twelve sections are visible.
+app, with the tests that stubbed `window.confirm` updated to stub the dialog instead; the admin tab
+bar wraps instead of scrolling sideways, so all twelve sections are visible; and Settings is grouped
+into Notifications, Appearance, Family and This device instead of one flat column.
 
 ### 3.6 Family comms, notes and calls
 
