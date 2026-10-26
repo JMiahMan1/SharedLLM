@@ -485,7 +485,9 @@ constraints file reconciled with each service's own `requirements.txt`).
 **Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
 `:latest` with a warning rather than waiting indefinitely (which is also what lets a docs-only commit
-deploy without rebuilding anything); and a handful of deliberate best-effort `except Exception: pass`
+deploy without rebuilding anything) - and when the commit's own image tag is missing it now pulls
+`:latest` from the registry first, because a stale local `:latest` is how a recreate once came up on an
+image four hours older than the one published; and a handful of deliberate best-effort `except Exception: pass`
 blocks. The gateway's media layer is the model to copy for honest failure: a named cause and a clean
 502 rather than a traceback. State also lives in the process in places - the gateway's live media push
 keeps a hub per user and a registry of web players (`media_events.py`, `ma_scope.py`), and the caches in
