@@ -152,6 +152,24 @@ class TestMetrics:
         samples = client.get("/metrics/weight?days=365").json()["samples"]
         assert [s["value"] for s in samples] == [79, 80]
 
+    def test_a_long_history_is_capped_and_says_so(self, client):
+        """A year of water is thousands of rows, so the read is bounded now."""
+        client.post(
+            "/metrics",
+            json={
+                "samples": [
+                    {"metric": "water", "value": 100, "unit": "ml", "recorded_at": "2026-10-01T08:00:00Z"},
+                    {"metric": "water", "value": 200, "unit": "ml", "recorded_at": "2026-10-02T08:00:00Z"},
+                    {"metric": "water", "value": 300, "unit": "ml", "recorded_at": "2026-10-03T08:00:00Z"},
+                ]
+            },
+        )
+        body = client.get("/metrics/water?days=365&limit=2").json()
+        assert body["truncated"] is True
+        assert body["limit"] == 2
+        assert [s["value"] for s in body["samples"]] == [300, 200]
+        assert body["latest"]["value"] == 300
+
     def test_deleting_someone_elses_reading_is_a_404(self, client):
         created = client.post(
             "/metrics",
@@ -278,6 +296,18 @@ class TestNutrition:
         assert body["totals"]["calories"] == 300
         assert body["totals"]["protein_g"] == 10
         assert body["meals"]["breakfast"]["calories"] == 300
+
+    def test_the_food_log_is_capped_and_says_so(self, client):
+        """Without a day or a window the read had no filter at all."""
+        for name in ("Oats", "Eggs", "Toast"):
+            assert client.post(
+                "/food",
+                json={"day": "2026-10-21", "meal": "breakfast", "name": name, "calories": 100},
+            ).status_code == 200
+        body = client.get("/food?limit=2").json()
+        assert body["truncated"] is True
+        assert len(body["entries"]) == 2
+        assert client.get("/food?limit=10").json()["truncated"] is False
 
     def test_a_day_with_no_entries_is_not_a_fake_zero_day(self, client):
         body = client.get("/nutrition/day?day=2019-01-01").json()
