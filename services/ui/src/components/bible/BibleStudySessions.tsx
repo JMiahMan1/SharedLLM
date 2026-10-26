@@ -5,6 +5,7 @@ import { BookOpenCheck, Download, Loader2, Plus, Search, Trash2 } from 'lucide-r
 import { api } from '../../services/api';
 import type { BibleStudySession } from '../../types/api';
 import { errorText } from '../../lib/errorText';
+import { confirmDialog } from '../ui/confirmDialog';
 import JarvisStudyThread from './JarvisStudyThread';
 
 interface Props {
@@ -253,7 +254,16 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
               <button
                 type="button"
                 aria-label={`Close ${session.title || session.reference}`}
-                onClick={() => remove.mutate(session.id)}
+                onClick={async () => {
+                  if (await confirmDialog({
+                    title: 'Close this study?',
+                    body: `Close "${session.title || session.reference}"? Its turns are gone.`,
+                    confirmLabel: 'Close it',
+                    danger: true,
+                  })) {
+                    remove.mutate(session.id);
+                  }
+                }}
                 className="min-h-9 min-w-9 rounded-lg text-rose-300/80 hover:bg-rose-500/10"
               >
                 <Trash2 size={13} className="mx-auto" />

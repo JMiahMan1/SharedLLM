@@ -333,7 +333,11 @@ function BibleReaderPane({
               ))}
             </div>
           ) : !searchData?.results.length ? (
-            <p className="text-sm text-slate-400">Nothing found. Try a shorter word, or name a book.</p>
+            <p className="text-sm text-slate-400">
+              {(searchTerm ?? '').trim().length < 2
+                ? 'Type at least two letters to search.'
+                : 'Nothing found. Try a shorter word, or name a book.'}
+            </p>
           ) : (
             <ul className="space-y-1.5">
               {searchData.results.map((hit) => (
@@ -653,12 +657,11 @@ export default function Bible() {
         </p>
         {/* Five tabs share a phone's width while they fit; with large system text
             the row scrolls rather than letting labels run into each other. */}
-        <div className="mt-3 sm:mt-4 -mx-1 px-1 flex gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="tablist" aria-label="Bible sections">
+        <div className="mt-3 sm:mt-4 -mx-1 px-1 flex gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="group" aria-label="Bible sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              role="tab"
-              aria-selected={tab === id}
+              aria-pressed={tab === id}
               onClick={() => {
                 void trigger('light');
                 setTab(id);

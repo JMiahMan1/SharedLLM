@@ -586,7 +586,9 @@ describe('Bible page', () => {
   it('keeps Read the default tab even when the devotional link was the entry point', async () => {
     renderPage();
 
-    expect((await screen.findByTestId('bible-tab-read')).getAttribute('aria-selected')).toBe('true');
+    // The bar is a group of pressed buttons, not a tablist: it has no panels,
+    // and claiming role="tab" without one is a broken contract for a reader.
+    expect((await screen.findByTestId('bible-tab-read')).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('marks a verse that carries study material and leaves the others unmarked', async () => {

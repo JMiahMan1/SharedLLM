@@ -992,7 +992,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     await storageSet(KEY_LOCATION_ENABLED, 'true');
     await storageSet('jarvis_location_tracking_enabled', 'true');
     await startTracking();
-    return watchIdRef.current !== null || sensorsRef.current.location.enabled === true;
+    // Whether a watch actually attached, not what we just asked for: the caller
+    // toasts "Location tracking enabled" on a true, and startTracking can fail.
+    return watchIdRef.current !== null;
   }, [patchSensor, refreshDailySteps, syncDailySteps, startTracking, syncBackgroundSteps]);
 
   const disableSensor = useCallback(async (id: SensorId): Promise<void> => {
