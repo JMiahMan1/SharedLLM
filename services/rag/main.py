@@ -2163,6 +2163,26 @@ def _ha_item_id(user_id: str, entity_id: str) -> str:
     return f"ha:{user_id}:{entity_id}"
 
 
+# Home Assistant still carries entities whose id is a serialized user record
+# (see the test module for the two live ones). They are refused on every sync,
+# and a sync runs every five minutes for every user, so the same warning was
+# written ~2,400 times a day and buried everything else in the log. The full
+# warning is repeated only when the set of refused ids changes for that user.
+_refused_entity_ids: dict[str, tuple[str, ...]] = {}
+
+
+def _log_refused_entity_ids(user: str, malformed_ids: list[str]) -> None:
+    signature = tuple(sorted(set(malformed_ids)))
+    if _refused_entity_ids.get(user) == signature:
+        log.debug("[ha_sync] still refusing %d malformed entity_ids for %s", len(signature), user)
+        return
+    _refused_entity_ids[user] = signature
+    log.warning(
+        f"[ha_sync] refusing {len(malformed_ids)} malformed entity_ids for "
+        f"{user}: {malformed_ids[:3]}"
+    )
+
+
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: str | None = None):
     entities = payload.get("entities", [])
@@ -2183,10 +2203,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         and not _usable_entity_id(e.get("entity_id"))
     ]
     if malformed_ids:
-        log.warning(
-            f"[ha_sync] refusing {len(malformed_ids)} malformed entity_ids for "
-            f"{resolved_user}: {malformed_ids[:3]}"
-        )
+        _log_refused_entity_ids(resolved_user, malformed_ids)
     entities = [
         e for e in entities if isinstance(e, dict) and _usable_entity_id(e.get("entity_id", ""))
     ]

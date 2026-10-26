@@ -13,6 +13,8 @@ earlier sync is removed as an orphan on the next one.
 
 import asyncio
 
+import pytest
+
 from services.common.entity_ids import ENTITY_ID_MAX_LENGTH
 from services.rag import db
 from services.rag import main as rag_main
@@ -32,6 +34,14 @@ TRUNCATED_POISON_ID = (
 
 def _fake_embed(texts):
     return [[0.0] * DIM for _ in texts]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_refusal_log():
+    """The refusal warning is throttled per user; every test starts clean."""
+    rag_main._refused_entity_ids.clear()
+    yield
+    rag_main._refused_entity_ids.clear()
 
 
 def _install(tmp_path):
@@ -75,6 +85,26 @@ def test_the_poisoned_id_is_refused_and_reported(tmp_path, caplog):
     assert result["refused_count"] == 1
     assert not any(POISON_ID in i for i in _stored_ids(conn))
     assert any("malformed entity_ids" in r.message for r in caplog.records)
+
+
+def test_the_refusal_warning_is_not_repeated_on_every_sync(tmp_path, caplog):
+    """The same poisoned id is refused every five minutes; it warns once, not 2,400 times."""
+    import logging
+
+    _install(tmp_path)
+    caplog.set_level(logging.WARNING)
+    payload = {"entities": [_valid(0), {"entity_id": POISON_ID}]}
+
+    assert _sync(payload)["refused_count"] == 1
+    assert len([r for r in caplog.records if "malformed entity_ids" in r.message]) == 1
+
+    caplog.clear()
+    assert _sync(payload)["refused_count"] == 1, "the id is still refused"
+    assert not [r for r in caplog.records if "malformed entity_ids" in r.message], "and not re-warned"
+
+    caplog.clear()
+    _sync({"entities": [{"entity_id": TRUNCATED_POISON_ID}]})
+    assert [r for r in caplog.records if "malformed entity_ids" in r.message], "a new set is news"
 
 
 def test_valid_entities_still_index_normally_alongside_a_refusal(tmp_path):
