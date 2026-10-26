@@ -149,8 +149,11 @@ const Header = () => {
 
   return (
     <header className="h-14 md:h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
-      <div className="flex-1 max-w-2xl relative group md:flex hidden" ref={navRef}>
-        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
+      {/* On a phone this used to be `md:flex hidden`, so the only way to reach
+          the pages that are not pinned to the bottom bar was to scroll the More
+          sheet. The phone header renders it too now, just smaller. */}
+      <div className="flex-1 max-w-2xl relative group flex" ref={navRef}>
+        <div className="absolute inset-y-0 left-3 md:left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
           <Search size={20} />
         </div>
         <input
@@ -167,7 +170,7 @@ const Header = () => {
           }}
           placeholder="Search pages, tabs & settings…"
           data-global-search
-          className="w-full glass-input pl-12 h-12 text-lg"
+          className="w-full glass-input pl-11 md:pl-12 h-10 text-sm md:h-12 md:text-lg"
           aria-label="Search pages, tabs and settings"
         />
         {navOpen && navQuery.trim() && (
