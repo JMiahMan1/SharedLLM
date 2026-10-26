@@ -42,76 +42,82 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only PyTorch (no CUDA libs), needed by RAG/gateway for embedding models
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
 
 # Heavy ML/vector packages (fastembed, onnxruntime), only needed by RAG and gateway
-# Installing in base so they're cached across all service builds
+# Installing in base so they're cached across all service builds.
+#
+# Pinned to the versions the image resolves today (read from the built
+# image, 2026-10-26): an unpinned install meant a rebuild of the same
+# commit could silently jump a major version. Transitive dependencies
+# still float - pinning those needs a constraints file reconciled with
+# every service's own requirements.txt.
 RUN pip install --no-cache-dir \
-    fastembed \
-    sqlmodel \
-    cryptography \
-    pydantic \
-    fastapi \
-    "uvicorn[standard]>=0.29.0" \
-    httpx \
-    websockets \
-    redis \
-    python-dotenv \
-    passlib[bcrypt] \
-    pydantic-settings \
-    python-multipart \
-    requests \
-    docker \
-    playwright \
-    yt-dlp \
-    "kokoro-onnx" \
-    soundfile \
-    caldav \
-    dateparser \
-    vobject \
-    python-dateutil \
-    aiosqlite \
-    rokuecp \
-    aiowebostv \
-    samsungtvws \
-    pybravia \
-    pychromecast \
-    androidtv \
-    wakeonlan \
-    aioesphomeapi \
-    paho-mqtt \
-    dnspython \
-    easywebdav \
-    html2text \
+    fastembed==0.9.1 \
+    sqlmodel==0.0.48 \
+    cryptography==50.0.2 \
+    pydantic==2.14.1 \
+    fastapi==0.162.0 \
+    "uvicorn[standard]==0.54.0" \
+    httpx==0.28.1 \
+    websockets==17.3 \
+    redis==8.1.0 \
+    python-dotenv==1.2.4 \
+    passlib[bcrypt]==1.7.4 \
+    pydantic-settings==2.16.1 \
+    python-multipart==0.0.32 \
+    requests==2.34.2 \
+    docker==7.2.0 \
+    playwright==1.64.1 \
+    yt-dlp==2026.10.21 \
+    "kokoro-onnx==0.6.1" \
+    soundfile==0.14.0 \
+    caldav==3.6.0 \
+    dateparser==1.4.3 \
+    vobject==0.9.9 \
+    python-dateutil==2.9.0.post0 \
+    aiosqlite==0.22.1 \
+    rokuecp==0.19.5 \
+    aiowebostv==0.10.0 \
+    samsungtvws==3.0.6 \
+    pybravia==0.5.3 \
+    pychromecast==14.0.10 \
+    androidtv==0.0.75 \
+    wakeonlan==4.0.0 \
+    aioesphomeapi==46.22.0 \
+    paho-mqtt==2.1.0 \
+    dnspython==2.9.0 \
+    easywebdav==1.2.0 \
+    html2text==2025.4.15 \
     && playwright install --with-deps chromium
 
 # Whisper without triton: its metadata requires triton on Linux, but triton
 # (about 900 MB) only compiles GPU kernels and this stack runs on the CPU.
 # Its other dependencies are installed by name; the check fails the build if
 # something brings triton back or Whisper stops importing.
-RUN pip install --no-cache-dir --no-deps openai-whisper \
-    && pip install --no-cache-dir more-itertools numba tiktoken tqdm \
+RUN pip install --no-cache-dir --no-deps openai-whisper==20250625 \
+    && pip install --no-cache-dir more-itertools==11.2.1 numba==0.68.0 tiktoken==0.14.0 tqdm==4.70.1 \
     && python -c "import whisper" \
     && ! pip show triton >/dev/null 2>&1
 
 # Testing and dev tools, available in all containers for debugging
 RUN pip install --no-cache-dir \
-    pytest \
-    pytest-asyncio \
-    pytest-mock \
-    respx \
-    ruff \
-    mypy \
-    flake8 \
-    black \
-    isort \
-    pre-commit \
-    bandit \
-    safety \
-    pip-audit \
-    httpx \
-    requests-mock \
-    responses
+    pytest==9.1.1 \
+    pytest-asyncio==1.4.1 \
+    pytest-mock==3.17.0 \
+    respx==0.23.1 \
+    ruff==0.17.2 \
+    mypy==2.4.0 \
+    flake8==7.4.1 \
+    black==26.10.1 \
+    isort==9.0.2 \
+    pre_commit==4.7.0 \
+    bandit==1.9.4 \
+    safety==3.8.1 \
+    pip_audit==2.10.1 \
+    httpx==0.28.1 \
+    requests-mock==1.12.1 \
+    responses==0.26.3
 
 # Pre-download nomic-ai/nomic-embed-text-v1.5 model (cached across all services)
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')"
