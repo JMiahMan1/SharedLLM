@@ -115,3 +115,13 @@ async def test_gateway_search_ma_failure_propagation(monkeypatch, client):
 
             assert resp.status_code == 200
             assert resp.json() == mock_failure_results
+
+
+def test_an_absurd_page_size_is_refused_not_served(client):
+    """A list read is bounded at the edge.
+
+    These routes used to accept any `limit`, so one caller could ask the
+    household's services for everything they had.
+    """
+    resp = client.get("/api/media/search", params={"q": "lake", "limit": 100000})
+    assert resp.status_code == 422

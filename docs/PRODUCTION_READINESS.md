@@ -422,6 +422,10 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     commit could silently jump a major version. Every package the Dockerfile names is now pinned to the
     version the built image actually resolves (read from the image on 2026-10-26), so the interpreter,
     the system libraries and the named libraries are all fixed.
+12. Several list reads accepted any `limit`, so one caller could ask a service for everything it had:
+    the admin log tail, the workspace mission list, Raven's lessons, the notification feed, the two
+    media searches, the unified search and the favourites list are all bounded now (`Query(..., ge=1,
+    le=...)`), and an absurd page size is a 422 rather than a whole table.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
@@ -442,8 +446,7 @@ dns and caddy still run as root - rag because its caches are mounted at `/root/.
 volume is root-owned, telemetry and dns because they read the Docker socket, and ui and caddy because
 a web server binding its port as an unprivileged user needs its own image variant.
 
-**Acceptable for this deployment.** Readiness reports 200 while degraded; some
-list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
+**Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
 `:latest` with a warning rather than waiting indefinitely (which is also what lets a docs-only commit
 deploy without rebuilding anything); and a handful of deliberate best-effort `except Exception: pass`
