@@ -1074,7 +1074,7 @@ async def _require_docs_reader(request: Request) -> None:
     """A signed-in user or an internal service.
 
     This used to accept *any* non-empty key ("Bearer x" read every doc)."""
-    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+    if secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
         return
     if not await _user_id_from_request(request):
         raise HTTPException(status_code=401, detail="Authentication required to view system docs")
@@ -2451,7 +2451,7 @@ async def _acting_identity(request: Request) -> dict | None:
     # arbitrary client let anyone assert any identity -- including an admin's,
     # and ahead of their own Bearer token. Honour it only from a caller that
     # already holds the internal secret (service-to-service).
-    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+    if secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
         trusted = (request.headers.get("X-User-Id") or "").strip()
         if trusted:
             return {"user": trusted, "is_admin": True}
@@ -7630,7 +7630,7 @@ async def _sd_request_authorized(request: Request) -> bool:
     Accepts, in this order: the internal secret (service-to-service), then a
     Bearer token, then ``X-API-Key``.
     """
-    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+    if secret_matches(request.headers.get("X-Internal-Secret"), INTERNAL_SECRET):
         return True
     api_key = request.headers.get("X-API-Key")
     auth_header = request.headers.get("Authorization")
@@ -14578,7 +14578,7 @@ async def publish_app_update(request: Request):
     """
     form = await request.form()
     secret = request.headers.get("X-Internal-Secret") or form.get("secret")
-    if secret != INTERNAL_SECRET:
+    if not secret_matches(secret, INTERNAL_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     version = form.get("version", "1.2.0")

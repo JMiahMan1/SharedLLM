@@ -78,11 +78,13 @@ def _spawn(coro) -> asyncio.Task:
     return task
 
 
-def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
+def _verify_internal_secret(header_secret: str | None) -> bool:
     # Constant-time, and closed when the secret is unset. This used to return
     # True for every caller when INTERNAL_SECRET was empty, which made the
     # service open to anything that could reach its port.
-    return secret_matches(header_secret, INTERNAL_SECRET) or secret_matches(query_secret, INTERNAL_SECRET)
+    # Header only: the secret used to be accepted as a ?x_internal_secret= query
+    # parameter too, which puts the household's master secret in access logs.
+    return secret_matches(header_secret, INTERNAL_SECRET)
 
 # Without this the root logger stays at WARNING and every trip start, finish,
 # discarded phantom and dropped position jump was silently thrown away.
@@ -149,9 +151,7 @@ async def require_internal_secret_middleware(request: Request, call_next):
     """
     if request.url.path.rstrip("/") == "/health":
         return await call_next(request)
-    secret = request.headers.get("X-Internal-Secret") or request.query_params.get(
-        "x_internal_secret"
-    )
+    secret = request.headers.get("X-Internal-Secret")
     if not _verify_internal_secret(secret):
         return JSONResponse(
             status_code=403, content={"detail": "Forbidden"}
@@ -227,7 +227,6 @@ async def get_people(
     viewer: str | None = None,
     is_admin: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Person + device_tracker entities as a GeoJSON FeatureCollection.
 
@@ -241,7 +240,7 @@ async def get_people(
     admins and dropped otherwise: we cannot prove consent for a row we cannot
     attribute to a user.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean_viewer = (viewer or "").split(".")[-1].strip().lower()
 
@@ -290,7 +289,6 @@ async def get_android_auto(
     viewer: str | None = None,
     is_admin: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Android Auto / detected-activity status from the HA companion sensors.
 
@@ -300,7 +298,7 @@ async def get_android_auto(
     These sensors reveal who is home and what they are doing, so this requires
     the internal secret and the same opt-in visibility as /people.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if user_id:
         user_id = await _require_may_view(viewer, user_id, is_admin)
@@ -1105,10 +1103,9 @@ async def post_see(
     entity_id: str,
     update: LocationUpdate,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Push a location into HA via the device_tracker.see service and record telemetry breadcrumb."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
@@ -1164,10 +1161,9 @@ async def post_record(
     entity_id: str,
     update: LocationUpdate,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Directly record a telemetry breadcrumb without requiring HA."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:
@@ -1641,11 +1637,10 @@ async def get_closest(
     viewer: str | None = None,
     is_admin: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Who can get to a place soonest, by drive time on the roads (OSRM
     table), among the people the viewer may see. Nearest first."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     dest = await _destination(to)
     if not dest:
@@ -1744,9 +1739,8 @@ async def get_vehicles():
 async def save_vehicle(
     vehicle: VehiclePayload,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -1759,9 +1753,8 @@ async def save_vehicle(
 async def delete_vehicle(
     vehicle_id: str,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -1792,9 +1785,8 @@ async def get_assigned_vehicle(user_id: str):
 async def assign_vehicle(
     assign: VehicleAssignPayload,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -2489,10 +2481,9 @@ async def _note_map_region(r, lat: float, lon: float) -> None:
 @app.get("/map/regions")
 async def get_map_regions(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Regions trips have been in that the road map (OSRM) lacks."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     return {"needed": await map_regions.needed(await get_redis())}
 
@@ -2903,7 +2894,6 @@ async def update_trip(
     update: TripUpdatePayload,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Update a trip's vehicle, MPG, fuel price, notes, or place names.
 
@@ -2911,7 +2901,7 @@ async def update_trip(
     telemetry, but the display name and stored address for the start/end
     points can be edited (e.g. pick "Fry's" instead of the street address).
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -3007,7 +2997,6 @@ async def update_trip_share(
     update: TripSharePayload,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Manually assign (or clear) the riders who shared this trip.
 
@@ -3015,7 +3004,7 @@ async def update_trip_share(
     explicitly tag family members who rode along when detection missed them.
     Pass an empty list to clear shared riders.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -3189,7 +3178,6 @@ async def get_location_suggestions(
     lat: float | None = Query(None),
     lon: float | None = Query(None),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Nearby name suggestions for a coordinate (used when editing trips).
 
@@ -3199,7 +3187,7 @@ async def get_location_suggestions(
     GPS telemetry and are never edited by clients; only the display name and
     stored address change.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if lat is None or lon is None:
         raise HTTPException(status_code=422, detail="lat and lon are required")
@@ -3636,7 +3624,6 @@ async def post_daily_steps(
     update: dict,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Ingest a hardware pedometer reading (cumulative daily step counter).
 
@@ -3653,7 +3640,7 @@ async def post_daily_steps(
     that predate the hourly ledger simply omit it, and a day with no hourly
     detail stays absent rather than becoming 24 fabricated zeros.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user = (update.get("user_id") or x_user_id or "").split(".")[-1].lower()
     if not user:
@@ -3705,7 +3692,6 @@ async def get_daily_steps(
     user_id: str | None = None,
     days: int = Query(7, ge=1, le=30),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -3755,7 +3741,6 @@ async def get_step_sources(
     days: int = Query(7, ge=1, le=90),
     hourly: bool = False,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -3828,7 +3813,6 @@ async def get_step_ranges(
     range: str = Query("W", alias="range"),
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -3892,7 +3876,6 @@ async def get_metric_ranges(
     range: str = Query("W", alias="range"),
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -3956,7 +3939,6 @@ async def get_events(
     limit: int = Query(60, ge=1, le=200),
     domain: str = Query("health"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -4108,7 +4090,6 @@ async def _list_recent_workouts(r, clean_id: str, limit: int = 200) -> list[dict
 async def get_goals(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -4124,14 +4105,13 @@ async def get_goals(
 async def put_goals(
     payload: dict,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Update any subset of goals; unknown/out-of-range keys are ignored.
 
     Like PUT /steps/goal, this declared the internal secret but never verified
     it -- an unauthenticated write hole on geo's own port.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean = (str(payload.get("user_id") or "")).split(".")[-1].lower()
     if not clean:
@@ -4154,7 +4134,6 @@ async def get_achievements(
     user_id: str | None = None,
     days: int = Query(30, ge=1, le=120),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -4223,7 +4202,6 @@ async def get_achievements(
 async def get_points(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -4260,7 +4238,6 @@ MAX_STARS_PER_GRANT = 100
 async def get_stars(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Bonus-star balance and the ledger of who granted what, and why."""
     clean = (user_id or "").split(".")[-1].lower()
@@ -4287,7 +4264,6 @@ async def get_stars(
 async def grant_stars(
     payload: dict,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Grant (or deduct) bonus stars. An admin or internal caller only.
 
@@ -4346,7 +4322,6 @@ async def grant_stars(
 async def get_step_goal(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -4361,7 +4336,6 @@ async def get_step_goal(
 async def set_step_goal(
     payload: dict,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Set the user's daily step goal (1000 to 100000).
 
@@ -4370,7 +4344,7 @@ async def set_step_goal(
     could rewrite anyone's step goal. It is now verified at the source rather
     than relying on the gateway to be the only path in.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user_id = payload.get("user_id")
     clean = (str(user_id) if user_id else "").split(".")[-1].lower()
@@ -4429,10 +4403,9 @@ async def start_workout(
     update: WorkoutStartPayload,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Start a manual workout session. GPS breadcrumbs flow through the normal /see|/record pipeline."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if update.activity_type not in WORKOUT_TYPES:
         raise HTTPException(status_code=422, detail=f"activity_type must be one of: {', '.join(sorted(WORKOUT_TYPES))}")
@@ -4479,7 +4452,6 @@ async def start_workout(
 async def get_active_workout(
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = Query(None),
     is_admin: str | bool | None = Query(None),
 ):
@@ -4494,7 +4466,7 @@ async def get_active_workout(
     404 (rather than a null field) keeps the "is one running?" answer
     unambiguous and matches the shape of a plain missing resource.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user = (x_user_id or "").split(".")[-1].lower()
     if not user:
@@ -4520,10 +4492,9 @@ async def stop_workout(
     update: WorkoutStopPayload,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Stop the active workout, compute distance/speeds from the breadcrumb trail, and save it."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user = (x_user_id or "").split(".")[-1].lower()
     if not user:
@@ -4636,7 +4607,6 @@ async def import_workouts(
     body: WorkoutImportPayload,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Workouts recorded elsewhere (Health Connect), idempotent per external_id.
 
@@ -4644,7 +4614,7 @@ async def import_workouts(
     session that repeats a workout geo already has from another source is
     skipped, and steps are never set (the pedometer counts them per day).
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user = (x_user_id or "").split(".")[-1].lower()
     if not user:
@@ -4692,10 +4662,9 @@ async def dismiss_workout(
     workout_id: str,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Hide an automatically detected workout the person says they did not do."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     user = (x_user_id or "").split(".")[-1].lower()
     if not user:
@@ -5110,10 +5079,9 @@ async def get_activity_summary(
     window: str = Query("week"),
     viewer: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Running totals for one user over a window. Cross-user reads require opt-in."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean = (user_id or "").split(".")[-1].lower()
     if not clean:
@@ -5149,10 +5117,9 @@ async def get_activity_feed(
     viewer: str | None = None,
     window: str = Query("week"),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Opt-in activity of others the viewer may see. Never errors when empty."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean = (viewer or "").split(".")[-1].lower()
     if not clean:
@@ -5187,7 +5154,6 @@ async def get_activity_trends(
     days: int = Query(7, ge=1, le=30),
     refresh: bool = Query(False),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -5198,7 +5164,7 @@ async def get_activity_trends(
     narrative is an explicit action (``POST /trends/activity/analyze``) so a
     page load can never spend model time.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean = await _require_may_view(viewer, user_id, is_admin)
 
@@ -5243,7 +5209,6 @@ async def analyze_activity_trends(
     days: int = Query(7, ge=1, le=30),
     refresh: bool = Query(False),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
     viewer: str | None = None,
     is_admin: str | None = None,
 ):
@@ -5252,7 +5217,7 @@ async def analyze_activity_trends(
     Guarded by a per-user lock so concurrent callers share one generation
     instead of stampeding the model.
     """
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     clean = await _require_may_view(viewer, user_id, is_admin)
 
@@ -5613,10 +5578,9 @@ async def _refresh_fuel_prices(r=None, *, now=None, force: bool = False) -> dict
 @app.post("/fuel-prices/refresh")
 async def refresh_fuel_prices(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
     """Force the daily vehicle price refresh (service-to-service)."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
+    if not _verify_internal_secret(x_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     return await _refresh_fuel_prices(force=True)
 

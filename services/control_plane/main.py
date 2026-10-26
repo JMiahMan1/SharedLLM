@@ -10,6 +10,7 @@ from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
+from services.common.secrets import secret_matches
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 from services.control_plane import disk_alerts, network_routes, osrm_map, registry
 from services.control_plane.recreate import connect_container_networks as _connect_container_networks
@@ -289,7 +290,7 @@ def _fix_volume_permissions(container) -> list[str]:
 # Auth Dependency
 
 def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")):
-    if x_internal_secret != INTERNAL_SECRET:
+    if not secret_matches(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(status_code=401, detail="Invalid internal secret")
     return True
 
