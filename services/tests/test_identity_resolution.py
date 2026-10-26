@@ -85,7 +85,7 @@ def test_api_key_generation_and_resolution(client, session):
     resolve_resp = client.post(
         "/api/resolve",
         json={"rag_user": "dad"},
-        headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
+        headers={"X-Internal-Secret": os.environ["INTERNAL_SECRET"]}
     )
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "dad"
@@ -94,7 +94,7 @@ def test_api_key_generation_and_resolution(client, session):
     resolve_resp = client.post(
         "/api/resolve",
         json={"api_key": generated_key},
-        headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
+        headers={"X-Internal-Secret": os.environ["INTERNAL_SECRET"]}
     )
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "dad"
@@ -103,7 +103,7 @@ def test_api_key_generation_and_resolution(client, session):
     resolve_resp = client.post(
         "/api/resolve",
         json={"household": True},
-        headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
+        headers={"X-Internal-Secret": os.environ["INTERNAL_SECRET"]}
     )
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "household"
@@ -114,7 +114,7 @@ def test_api_key_generation_and_resolution(client, session):
     resolve_resp = client.post(
         "/api/resolve",
         json={},
-        headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
+        headers={"X-Internal-Secret": os.environ["INTERNAL_SECRET"]}
     )
     assert resolve_resp.status_code == 401
 

@@ -3528,7 +3528,7 @@ async def chat_handler(request: Request, background_tasks=None):
                 resp = await client.post(
                     f"{RAG_SVC}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0)
                 )
                 resp.raise_for_status()
@@ -9759,7 +9759,7 @@ async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> st
                     "user_id": "default",
                     "k": limit,
                 },
-                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=120.0),
             )
 
@@ -9815,7 +9815,7 @@ async def _warm_rag_lesson_cache() -> None:
         async with shared_http_client() as c, c.post(
             f"{RAG_SVC}/rag/search",
             json={"collection_name": "system_learnings", "query": "warmup", "user_id": "default", "k": 1},
-            headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=120.0),
         ) as resp:
             await resp.read()
