@@ -225,6 +225,19 @@ class TestSleep:
         assert summary["sleep"]["last_night"]["duration_minutes"] == 450
         assert summary["sleep"]["last_night"]["source"] == "health_connect"
 
+    def test_a_second_manual_log_for_the_same_night_replaces_it(self, client):
+        client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 300})
+        client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 450})
+        sessions = client.get("/sleep").json()["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["duration_minutes"] == 450
+
+    def test_a_night_far_in_the_future_is_refused(self, client):
+        far = (date.today() + timedelta(days=5)).isoformat()
+        response = client.post("/sleep", json={"night": far, "duration_minutes": 400})
+        assert response.status_code == 422
+        assert "future" in response.json()["detail"]
+
 
 class TestCheckins:
     def test_checkin_round_trips_and_updates(self, client):
@@ -239,6 +252,10 @@ class TestCheckins:
 
     def test_scores_outside_one_to_five_are_rejected(self, client):
         assert client.put("/checkins/2026-10-21", json={"energy": 9}).status_code == 422
+
+    def test_a_checkin_cannot_be_for_a_future_day(self, client):
+        far = (date.today() + timedelta(days=5)).isoformat()
+        assert client.put(f"/checkins/{far}", json={"energy": 3}).status_code == 422
 
 
 class TestNutrition:
