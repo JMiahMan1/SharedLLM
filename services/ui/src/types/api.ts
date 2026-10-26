@@ -119,6 +119,8 @@ export interface UserProfileRaw {
   role?: 'admin' | 'user';
   is_admin?: boolean;
   is_system_default?: boolean;
+  /** False when the account has no password at all: it cannot sign in. */
+  has_password?: boolean;
   family_role?: FamilyRole;
   mother_username?: string | null;
   /** Derived: child/teen. Their activity sharing cannot be switched off. */

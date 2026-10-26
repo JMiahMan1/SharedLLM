@@ -211,4 +211,20 @@ describe('Admin page', () => {
     expect(deleted).toEqual([]);
     confirmMock.mockResolvedValue(true);
   });
+
+  it('marks the accounts that have no password, because they cannot sign in', async () => {
+    server.use(
+      http.get('/api/users', () => HttpResponse.json([
+        { id: 2, username: 'leo', full_name: 'Leo', is_admin: false, is_system_default: false, has_password: true },
+        { id: 3, username: 'kaleb', full_name: 'Kaleb', is_admin: false, is_system_default: false, has_password: false },
+      ])),
+    );
+    renderWithProviders(<Admin />);
+
+    // One chip, on the account that cannot sign in - not on the one that can.
+    const chips = await screen.findAllByText('No password');
+    expect(chips).toHaveLength(1);
+    const row = chips[0].closest('.glass-card');
+    expect(row?.textContent).toContain('Kaleb');
+  });
 });

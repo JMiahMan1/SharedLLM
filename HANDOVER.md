@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `690ea213`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `5533f1a0`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **ebe57666**
-  (APK `versionCode` **483**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **4410f327**
+  (APK `versionCode` **484**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
@@ -18,8 +18,8 @@ Every claim below was verified against the live system unless marked **planned**
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
   services' logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK
-  `versionCode` rebuilds per push (483 is current; 482 was the previous), so the native work below
-  needs the newest APK on the phones. **APK 483** carries the guard overlay that draws over a
+  `versionCode` rebuilds per push (484 is current; 483 was the previous), so the native work below
+  needs the newest APK on the phones. **APK 484** carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
@@ -69,6 +69,16 @@ Every claim below was verified against the live system unless marked **planned**
   no chunking meant one 6.4 MB script before the first screen); with `lazy()` plus vendor chunking the
   entry script is **593 kB** (gzip 179 kB) and the workspace IDE's 2.3 MB monaco bundle is only fetched
   when the IDE is opened.
+- `2026-10-26` **Two silent sign-in problems, read from the live database.** Two members imported from
+  Nextcloud have no password at all, so they are listed and appear on the family pages but can never
+  sign in (the login just says "invalid username or password"), and the `default` administrator still
+  signs in with the eight-character, all-lowercase placeholder word in `DEFAULT_ADMIN_PASSWORD`. Neither
+  was visible anywhere. Identity now warns at startup about a short or obvious admin password, an
+  administrator still using it, and every account with no password; the account list reports
+  `has_password`; and the Admin page marks those rows **No password** so a parent can set one from the
+  same screen. Rotating the administrator password is the household's call - the `.env` value only seeds
+  a new database. Also in this batch: eight gateway list reads are bounded (`limit` above the UI's page
+  sizes is a 422, not a whole table).
 - `2026-10-26` **Production-readiness program** (`docs/PRODUCTION_READINESS.md` is the record). The
   whole app was audited against a written bar by five read-only audits (UI/UX, health hub, family
   comms, backend readiness, security); every finding was graded BROKEN / ROUGH / FINE and then fixed.

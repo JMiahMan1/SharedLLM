@@ -240,6 +240,10 @@ class UserRead(BaseModel):
     display_name: str
     is_admin: bool
     is_system_default: bool
+    #: Whether the account has a password at all. An account without one is
+    #: listed, appears in the family pages, and cannot sign in - which is worth
+    #: showing rather than leaving as a mystery "invalid username or password".
+    has_password: bool = False
     #: Household relationship and the mother account a child/teen belongs to.
     family_role: FamilyRole = "other"
     mother_username: str | None = None
