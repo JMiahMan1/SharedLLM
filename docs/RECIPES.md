@@ -199,12 +199,13 @@ account is connected, everything above still works.
       fetches the page (http/https only, 25 s timeout, 1.5 MB cap) and reads the first
       `Recipe` node (arrays and `@graph` included), returning title, ingredients, ordered
       steps (sections flattened), prep/cook/total minutes, yield, image and the source URL;
-      pages without recipe data get a plain message instead of a guess. `themealdb_search`
-      reads the free TheMealDB API (`search.php`) and maps each meal into the same shape -
-      measured ingredient pairs, steps split on line breaks, source URL `/meal/{id}`.
-      `recipe_search` answers from the offline index first (TheMealDB only fills what is
-      left, and either can fail without taking the page down) and `shelf_fetch` reads one
-      full recipe from the index by id.
+      pages without recipe data get a plain message instead of a guess. The free TheMealDB
+      API (`search.php`) is read inside `recipe_search` (`_themealdb_hits`), which maps each
+      meal into the same shape - measured ingredient pairs, steps split on line breaks,
+      source URL `/meal/{id}`. `recipe_search` answers from the offline index first
+      (TheMealDB only fills what is left, and either can fail without taking the page down)
+      and `shelf_fetch` reads one full recipe from the index by id. The standalone
+      `themealdb_search` action was reachable from no route and has been removed.
 - [x] UI: **Import a link** on the Recipes page - paste, read, preview (title, site, time,
       yield, counts) and **Save to Recipes** writes the note with the standard header, guessed
       labels (`#level-…` from time and ingredient count, `#slow-cooker`/`#instant-pot` from

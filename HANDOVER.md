@@ -6,9 +6,9 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `b4f2a243`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `ebe57666`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **c150385c**
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **ebe57666**
   (APK `versionCode` **482**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
@@ -763,7 +763,8 @@ Every claim below was verified against the live system unless marked **planned**
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` - `python` is not on
   PATH. Baselines verified 2026-10-26:
-  `services/gateway/tests services/common` -> **1860 passed**;
+  `services/gateway/tests services/common` -> **1865 passed**;
+  `services/execution` -> **1053 passed / 60 skipped**;
   `services/rag/tests` -> **117 passed / 14 skipped**;
   `services/health services/identity services/telemetry services/bible services/execution`
   -> **2587 passed / 60 skipped**;
