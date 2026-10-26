@@ -36,6 +36,7 @@ import type { WorkspaceSyncMode } from '../types/api';
 import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import Toggle from '../components/ui/Toggle';
+import { errorText } from '../lib/errorText';
 import { confirmDialog } from '../components/ui/confirmDialog';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
@@ -409,10 +410,20 @@ const Workspaces = () => {
     setExcludeDraft('');
   };
 
-  const { data: workspaces = [], isLoading } = useQuery({
+  const {
+    data: workspaces = [],
+    isLoading,
+    isError: workspacesError,
+    error: workspacesErrorObj,
+    refetch: refetchWorkspaces,
+  } = useQuery({
     queryKey: ['workspaces'],
     queryFn: () => api.getWorkspaces(),
   });
+
+  // Bulk actions used to be tappable twice, which fired every update twice.
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [launchingScan, setLaunchingScan] = useState(false);
 
   // Deep-link from the dashboard Workspaces widget (?select=<id>)
   const [searchParams, setSearchParams] = useSearchParams();
@@ -521,21 +532,26 @@ const Workspaces = () => {
   });
 
   /** Bring every workspace up to date the way its storage works: pull git, sync Nextcloud. */
-  const syncAll = () => {
+  const syncAll = async () => {
     const runs = workspaces.map((ws) =>
       usesGit(ws.sync_mode) ? api.pullWorkspace(ws.id) : api.syncWorkspace(ws.id),
     );
-    toast.promise(
-      Promise.allSettled(runs).then((results) => {
-        const failed = results.filter((r) => r.status === 'rejected').length;
-        if (failed) throw new Error(`${failed} of ${results.length} workspaces failed to update`);
-      }).finally(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] })),
-      {
-        loading: 'Updating every workspace...',
-        success: 'All workspaces up to date',
-        error: (e: Error) => e.message,
-      },
-    );
+    setSyncingAll(true);
+    try {
+      await toast.promise(
+        Promise.allSettled(runs).then((results) => {
+          const failed = results.filter((r) => r.status === 'rejected').length;
+          if (failed) throw new Error(`${failed} of ${results.length} workspaces failed to update`);
+        }).finally(() => queryClient.invalidateQueries({ queryKey: ['workspaces'] })),
+        {
+          loading: 'Updating every workspace...',
+          success: 'All workspaces up to date',
+          error: (e: Error) => e.message,
+        },
+      );
+    } finally {
+      setSyncingAll(false);
+    }
   };
 
   const revertMutation = useMutation({
@@ -594,8 +610,8 @@ const Workspaces = () => {
         {isAdmin && (
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={syncAll}
-              disabled={workspaces.length === 0}
+              onClick={() => void syncAll()}
+              disabled={workspaces.length === 0 || syncingAll}
               title="Pull every git workspace and sync every Nextcloud workspace"
               className="glass-button px-5 py-2.5 pointer-coarse:min-h-11 bg-slate-800/40 border-slate-700/50 text-slate-300 font-bold flex items-center gap-2 disabled:opacity-40"
             >
@@ -633,19 +649,25 @@ const Workspaces = () => {
             </div>
           </div>
           <button
-            onClick={() => {
-              toast.promise(
-                api.createUserMission('System diagnostic and maintenance scan', 2),
-                {
-                  loading: 'Launching Raven mission...',
-                  success: (data) => {
-                    return `Raven mission #${data.mission.id} deployed`;
-                  },
-                  error: 'Failed to launch Raven mission'
-                }
-              );
+            onClick={async () => {
+              setLaunchingScan(true);
+              try {
+                await toast.promise(
+                  api.createUserMission('System diagnostic and maintenance scan', 2),
+                  {
+                    loading: 'Launching Raven mission...',
+                    success: (data) => {
+                      return `Raven mission #${data.mission.id} deployed`;
+                    },
+                    error: 'Failed to launch Raven mission'
+                  }
+                );
+              } finally {
+                setLaunchingScan(false);
+              }
             }}
-            className="glass-button px-6 py-2.5 pointer-coarse:min-h-11 bg-purple-600/20 border-purple-500/30 text-purple-300 font-bold flex items-center justify-center gap-2 hover:bg-purple-600/30 transition-colors shrink-0"
+            disabled={launchingScan}
+            className="glass-button px-6 py-2.5 pointer-coarse:min-h-11 bg-purple-600/20 border-purple-500/30 text-purple-300 font-bold flex items-center justify-center gap-2 hover:bg-purple-600/30 transition-colors shrink-0 disabled:opacity-50"
           >
             <Brain size={18} />
             Launch Scan
@@ -660,6 +682,22 @@ const Workspaces = () => {
                <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
                <p className="text-slate-500 font-medium">Loading system registries...</p>
             </div>
+          </div>
+        ) : workspacesError ? (
+          // A failed read used to render "No Workspaces Found", which claims
+          // there are none when the truth is that we could not ask.
+          <div className="glass-panel p-12 text-center">
+            <Database size={48} className="mx-auto text-amber-500/40 mb-4" />
+            <h3 className="text-xl font-bold text-white">Could not load your workspaces</h3>
+            <p className="text-amber-200 mt-2 max-w-md mx-auto text-sm">
+              {errorText(workspacesErrorObj, 'The workspace service did not answer.')}
+            </p>
+            <button
+              onClick={() => void refetchWorkspaces()}
+              className="mt-6 glass-button px-8 py-3 pointer-coarse:min-h-11 font-bold"
+            >
+              Try again
+            </button>
           </div>
         ) : workspaces.length === 0 ? (
           <div className="glass-panel p-12 text-center">

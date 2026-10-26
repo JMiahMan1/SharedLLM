@@ -77,6 +77,8 @@ export default function Recipes() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
+  // Which recipe's delete is in flight, so a second tap cannot send another.
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
   const [share, setShare] = useState<ShareRequest | null>(null);
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [sharingList, setSharingList] = useState(false);
@@ -122,7 +124,13 @@ export default function Recipes() {
   const [sendAs, setSendAs] = useSendAsPref(isAdmin, 'notes');
   const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
 
-  const { data, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    isError: recipesError,
+    error: recipesErrorObj,
+    refetch: refetchRecipes,
+  } = useQuery({
     queryKey: ['recipes', asUser ?? 'me'],
     queryFn: () => api.listNotes({ storage: STORAGE, directories: [RECIPES_DIR], as_user: asUser }),
   });
@@ -141,20 +149,47 @@ export default function Recipes() {
   });
   const importedSources = useMemo(() => new Set(sourcesQuery.data ?? []), [sourcesQuery.data]);
 
+  // Which recipe the editor is showing. A read that lands after the person has
+  // clicked another one must not paint over the one they are looking at.
+  const openPathRef = useRef<string | null>(null);
+
   const read = useMutation({
     mutationFn: (recipe: RecipeSummary) => api.readNote(recipe.title, STORAGE, recipe.path, asUser),
-    onSuccess: (res: ExecutionResponse) => {
+    onSuccess: (res: ExecutionResponse, recipe: RecipeSummary) => {
+      if (openPathRef.current !== recipe.path) return;
       // note_read returns the whole file; the editor shows the recipe without
       // the stored header, or every save would stack another copy of it.
       if (res.status === 'SUCCESS') {
         setBody(noteBody(res.message ?? ''));
         setEstimate(null);
-      } else toast.error(res.message || 'Could not open that recipe');
+      } else {
+        // Nothing from the previous recipe may stay in the editor: saving it
+        // would write one recipe's text over another one's file.
+        setBody('');
+        setEstimate(null);
+        toast.error(res.message || 'Could not open that recipe');
+      }
     },
-    onError: (error: Error) => toast.error(error.message || 'Could not open that recipe'),
+    onError: (error: Error) => {
+      setBody('');
+      setEstimate(null);
+      toast.error(error.message || 'Could not open that recipe');
+    },
   });
 
+  const openRecipe = (recipe: RecipeSummary) => {
+    openPathRef.current = recipe.path;
+    setSelected(recipe);
+    setTitle(recipe.title);
+    // Cleared before the read, so the editor never shows the previous body
+    // under the new recipe's name while the request is in flight.
+    setBody('');
+    setEstimate(null);
+    read.mutate(recipe);
+  };
+
   const startNew = () => {
+    openPathRef.current = null;
     setSelected(null);
     setTitle('');
     setBody('');
@@ -194,6 +229,7 @@ export default function Recipes() {
 
   const remove = async (recipe: RecipeSummary) => {
     if (!(await confirmDialog({ title: 'Delete this recipe?', body: `Delete the recipe "${recipe.title}"?`, confirmLabel: 'Delete', danger: true }))) return;
+    setDeletingPath(recipe.path);
     try {
       const res = await api.deleteNote(recipe.title, STORAGE, recipe.path, asUser);
       if (res.status === 'SUCCESS') {
@@ -205,6 +241,8 @@ export default function Recipes() {
       }
     } catch {
       toast.error('Could not remove that recipe');
+    } finally {
+      setDeletingPath(null);
     }
   };
 
@@ -743,6 +781,11 @@ export default function Recipes() {
               Search
             </button>
           </div>
+          {sourcesQuery.isError && (
+            <p className="text-[11px] text-amber-200">
+              Could not check which recipes are already on the shelf, so one may be offered twice.
+            </p>
+          )}
           {mealResults.length > 0 && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
               {mealResults.map((result) => {
@@ -955,7 +998,21 @@ export default function Recipes() {
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <div className="space-y-2">
           {isLoading && <p className="text-xs text-slate-500">Loading recipes…</p>}
-          {!isLoading && recipes.length === 0 && (
+          {recipesError && (
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+              <p className="text-xs text-amber-200">
+                {errorText(recipesErrorObj, 'Could not load your recipes')}
+              </p>
+              <button
+                type="button"
+                onClick={() => void refetchRecipes()}
+                className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+          {!isLoading && !recipesError && recipes.length === 0 && (
             <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
               No recipes yet. Add the first one on the right.
             </p>
@@ -974,11 +1031,7 @@ export default function Recipes() {
             >
               <button
                 type="button"
-                onClick={() => {
-                  setSelected(recipe);
-                  setTitle(recipe.title);
-                  read.mutate(recipe);
-                }}
+                onClick={() => openRecipe(recipe)}
                 aria-current={selected?.path === recipe.path ? 'true' : undefined}
                 className="min-h-11 min-w-0 flex-1 truncate text-left text-sm text-slate-100"
               >
@@ -1001,9 +1054,14 @@ export default function Recipes() {
                 type="button"
                 aria-label={`Delete ${recipe.title}`}
                 onClick={() => void remove(recipe)}
-                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0"
+                disabled={deletingPath === recipe.path}
+                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
               >
-                <Trash2 size={14} />
+                {deletingPath === recipe.path ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
               </button>
             </div>
           ))}
@@ -1133,7 +1191,7 @@ export default function Recipes() {
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || read.isPending}
             className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : selected ? <Save size={14} /> : <Plus size={14} />}

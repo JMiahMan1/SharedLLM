@@ -237,7 +237,15 @@ const Admin = () => {
   const [activePullService, setActivePullService] = useState<string | null>(null);
   const [starUser, setStarUser] = useState('');
 
-  const { data: users = [] } = useQuery<UserProfile[]>({
+  // A failed read used to render a header with nothing under it, which reads
+  // the same as a household with no accounts.
+  const {
+    data: users = [],
+    isLoading: usersLoading,
+    isError: usersError,
+    error: usersErrorObj,
+    refetch: refetchUsers,
+  } = useQuery<UserProfile[]>({
     queryKey: ['users'],
     queryFn: () => api.getUsers(),
   });
@@ -738,6 +746,23 @@ const Admin = () => {
               </div>
 
               <div className="space-y-3">
+                {usersError && (
+                  <div className="glass-card border border-amber-500/20 bg-amber-500/10 p-4">
+                    <p className="text-sm text-amber-200">
+                      {errorText(usersErrorObj, 'Could not read the accounts.')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void refetchUsers()}
+                      className="mt-2 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {!usersError && !usersLoading && users.length === 0 && (
+                  <p className="glass-card p-4 text-sm text-slate-400">There are no accounts yet.</p>
+                )}
                 {users.map((user) => (
                   <div key={user.username} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3 sm:gap-4 overflow-hidden">
                     <div className="min-w-0 flex-1">
@@ -977,7 +1002,8 @@ const Admin = () => {
                   }
                   assignDeviceMutation.mutate({ username: deviceUsername, device_id: deviceId.trim() });
                 }}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                disabled={assignDeviceMutation.isPending}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
               >
                 <Save size={14} />
                 Add person
@@ -992,7 +1018,16 @@ const Admin = () => {
                     <p className="mt-1 text-xs text-slate-400">@{device.username}</p>
                   </div>
                   <button
-                    onClick={() => removeDeviceMutation.mutate({ device_id: device.device_id, username: device.username })}
+                    onClick={async () => {
+                      if (await confirmDialog({
+                        title: 'Remove this device?',
+                        body: `Remove @${device.username} from ${device.device_id}?`,
+                        confirmLabel: 'Remove',
+                        danger: true,
+                      })) {
+                        removeDeviceMutation.mutate({ device_id: device.device_id, username: device.username });
+                      }
+                    }}
                     className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                     aria-label={`Remove @${device.username} from ${device.device_id}`}
                   >
@@ -1084,7 +1119,16 @@ const Admin = () => {
                         </p>
                       </div>
                       <button
-                        onClick={() => deleteMediaGroupMutation.mutate(group.name)}
+                        onClick={async () => {
+                          if (await confirmDialog({
+                            title: 'Delete this media group?',
+                            body: `Delete ${group.name}? Its members are forgotten.`,
+                            confirmLabel: 'Delete',
+                            danger: true,
+                          })) {
+                            deleteMediaGroupMutation.mutate(group.name);
+                          }
+                        }}
                         className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${group.name}`}
                       >
@@ -1158,7 +1202,16 @@ const Admin = () => {
                         </p>
                       </div>
                       <button
-                        onClick={() => deleteLightClusterMutation.mutate(cluster.name)}
+                        onClick={async () => {
+                          if (await confirmDialog({
+                            title: 'Delete this light cluster?',
+                            body: `Delete ${cluster.name}? The lights themselves stay as they are.`,
+                            confirmLabel: 'Delete',
+                            danger: true,
+                          })) {
+                            deleteLightClusterMutation.mutate(cluster.name);
+                          }
+                        }}
                         className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${cluster.name}`}
                       >
@@ -1287,7 +1340,16 @@ const Admin = () => {
                         </p>
                       </div>
                       <button
-                        onClick={() => deleteLightPatternMutation.mutate(pattern.name)}
+                        onClick={async () => {
+                          if (await confirmDialog({
+                            title: 'Delete this light pattern?',
+                            body: `Delete ${pattern.name}? Its steps are gone.`,
+                            confirmLabel: 'Delete',
+                            danger: true,
+                          })) {
+                            deleteLightPatternMutation.mutate(pattern.name);
+                          }
+                        }}
                         className="rounded-xl p-2 min-h-11 min-w-11 pointer-coarse:min-h-11 flex items-center justify-center text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
                         aria-label={`Delete ${pattern.name}`}
                       >
@@ -1342,6 +1404,7 @@ const Admin = () => {
                     type="text"
                     value={intercomSessionTarget}
                     onChange={(e) => setIntercomSessionTarget(e.target.value)}
+                    aria-label="Intercom target"
                     placeholder="Target user ID or room name"
                     className="glass-input"
                   />
@@ -1418,6 +1481,7 @@ const Admin = () => {
                 <textarea
                   value={broadcastMessage}
                   onChange={(e) => setBroadcastMessage(e.target.value)}
+                  aria-label="Broadcast message"
                   placeholder="Message to broadcast..."
                   className="glass-input w-full min-h-[80px]"
                 />
@@ -1457,6 +1521,7 @@ const Admin = () => {
                 <textarea
                   value={announceMessage}
                   onChange={(e) => setAnnounceMessage(e.target.value)}
+                  aria-label="Announcement message"
                   placeholder="Announcement message..."
                   className="glass-input w-full min-h-[80px]"
                 />
@@ -1619,6 +1684,7 @@ const Admin = () => {
                 type="text"
                 value={newSettingKey}
                 onChange={(event) => setNewSettingKey(event.target.value)}
+                aria-label="Setting key"
                 placeholder="new_setting_key"
                 className="glass-input"
               />
@@ -1626,6 +1692,7 @@ const Admin = () => {
                 type="text"
                 value={newSettingValue}
                 onChange={(event) => setNewSettingValue(event.target.value)}
+                aria-label="Setting value"
                 placeholder="value"
                 className="glass-input"
               />
@@ -1639,7 +1706,8 @@ const Admin = () => {
                   setNewSettingKey('');
                   setNewSettingValue('');
                 }}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+                disabled={saveSettingMutation.isPending}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
               >
                 <KeyRound size={14} />
                 Add
@@ -2148,8 +2216,8 @@ const Admin = () => {
             </button>
             <button
               onClick={() => {
-                if (!newPassword) {
-                  toast.error('Enter a password');
+                if (newPassword.length < 4) {
+                  toast.error('Use at least 4 characters');
                   return;
                 }
                 setPasswordMutation.mutate({ username: passwordModalUser!, password: newPassword });

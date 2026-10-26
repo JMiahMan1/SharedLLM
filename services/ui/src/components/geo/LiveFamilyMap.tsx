@@ -61,7 +61,9 @@ export default function LiveFamilyMap({
 
   // The one shared location query (see wanderQueries); freshness is worked out
   // in `select`, against the time the data arrived, so render stays pure.
-  const { data: members = [] } = useQuery({
+  // A failed feed must not read as "nobody is sharing": that is a claim
+  // about the family, and the map cannot know it when the request failed.
+  const { data: members = [], isError: locationsError } = useQuery({
     ...userLocationsQuery,
     select: (raw) => buildLiveMembers(raw, Date.now(), maxAgeMs),
   });
@@ -292,8 +294,9 @@ export default function LiveFamilyMap({
   // so it has no way to know, and asserting "sharing is off" is a guess that
   // was demonstrably wrong: sharing can be on and the app still silent. Say
   // what we observe and let the per-pin "last seen N hrs ago" carry the rest.
-  const countText =
-    members.length === 0
+  const countText = locationsError
+    ? 'Could not read the location feed'
+    : members.length === 0
       ? 'No one is sharing location right now'
       : freshCount === 0
         ? `${staleCount} last seen`

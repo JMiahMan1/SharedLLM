@@ -157,13 +157,20 @@ export const JarvisLabAdmin = () => {
 
 // Advanced overview adds faster polling and more runtime detail
 const AdvancedOverviewPane = () => {
-  const { data: health } = useSystemHealth();
+  const { data: health, isError: healthError, isLoading: healthLoading } = useSystemHealth();
 
-  const { data: workspaces = [] } = useQuery<Workspace[]>({
+  const {
+    data: workspaces = [],
+    isError: workspacesError,
+    isLoading: workspacesLoading,
+  } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
     queryFn: () => api.getWorkspaces(),
     refetchInterval: 5000,
   });
+  // A failed read used to leave both panels blank, which reads the same as a
+  // stack with nothing to report.
+  const services = Object.entries(health?.services || {});
 
   return (
     <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr]">
@@ -175,16 +182,24 @@ const AdvancedOverviewPane = () => {
             <p className="text-sm text-slate-400">Real-time readiness across the running stack.</p>
           </div>
         </div>
-        <div className="space-y-3">
-          {Object.entries(health?.services || {}).map(([service, status]) => (
-            <div key={service} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
-              <span className="font-semibold text-white truncate">{service}</span>
-              <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
-                {status}
-              </span>
-            </div>
-          ))}
-        </div>
+        {healthError ? (
+          <p className="text-sm text-amber-200">Could not read the stack&apos;s readiness just now.</p>
+        ) : healthLoading ? (
+          <p className="text-sm text-slate-400">Checking…</p>
+        ) : services.length === 0 ? (
+          <p className="text-sm text-slate-400">No service has reported yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {services.map(([service, status]) => (
+              <div key={service} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+                <span className="font-semibold text-white truncate">{service}</span>
+                <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="glass-panel p-4 sm:p-6">
@@ -195,19 +210,27 @@ const AdvancedOverviewPane = () => {
             <p className="text-sm text-slate-400">Registered workspaces exposed by the workspace runtime service.</p>
           </div>
         </div>
-        <div className="space-y-3">
-          {workspaces.map((workspace) => (
-            <div key={workspace.id} className="glass-card p-4">
-              <div className="flex items-center justify-between gap-4 overflow-hidden">
-                <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
-                <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {workspace.available ? 'Available' : 'Unavailable'}
-                </span>
+        {workspacesError ? (
+          <p className="text-sm text-amber-200">Could not read the registered workspaces just now.</p>
+        ) : workspacesLoading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : workspaces.length === 0 ? (
+          <p className="text-sm text-slate-400">No workspace is registered yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {workspaces.map((workspace) => (
+              <div key={workspace.id} className="glass-card p-4">
+                <div className="flex items-center justify-between gap-4 overflow-hidden">
+                  <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
+                  <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
+                    {workspace.available ? 'Available' : 'Unavailable'}
+                  </span>
+                </div>
+                <p className="mt-2 font-mono text-xs text-slate-400 break-all">{workspace.resolved_path}</p>
               </div>
-              <p className="mt-2 font-mono text-xs text-slate-400 break-all">{workspace.resolved_path}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -215,20 +238,31 @@ const AdvancedOverviewPane = () => {
 
 // `advanced` prop unlocks both smoke tests and unit tests; user view shows smoke only
 const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
+  // The most recent run, whichever button started it: `runSmokeMutation.data`
+  // stays set after a passing smoke test, so reading it first meant a later
+  // failing unit run still showed the smoke test's PASS.
+  const [lastRun, setLastRun] = useState<{ label: string; result: SmokeTestResult } | null>(null);
+
   const runSmokeMutation = useMutation<SmokeTestResult>({
     mutationFn: () => api.runSmokeTest(),
-    onSuccess: () => toast.success('Smoke test completed'),
+    onSuccess: (result) => {
+      setLastRun({ label: 'Smoke test', result });
+      toast.success('Smoke test completed');
+    },
     onError: () => toast.error('Smoke test failed'),
   });
 
   const runUnitMutation = useMutation<SmokeTestResult>({
     mutationFn: () => api.runUnitTests(),
-    onSuccess: () => toast.success('Unit tests completed'),
+    onSuccess: (result) => {
+      setLastRun({ label: 'Unit tests', result });
+      toast.success('Unit tests completed');
+    },
     onError: () => toast.error('Unit tests failed'),
   });
 
   const activeMutation = runSmokeMutation.isPending ? runSmokeMutation : runUnitMutation.isPending ? runUnitMutation : null;
-  const lastResult = runSmokeMutation.data || runUnitMutation.data;
+  const lastResult = lastRun?.result;
 
   return (
     <section className="glass-panel p-4 sm:p-6">
@@ -268,7 +302,8 @@ const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
       {lastResult && (
         <div className="mb-6 rounded-2xl border border-white/5 bg-white/5 p-4">
           <p className="text-sm text-white">
-            Last Run Result: <span className={lastResult.passed ? 'text-emerald-300' : 'text-red-300'}>
+            {lastRun?.label} - last run result:{' '}
+            <span className={lastResult.passed ? 'text-emerald-300' : 'text-red-300'}>
               {lastResult.passed ? 'PASS' : 'FAIL'}
             </span>
           </p>
@@ -308,10 +343,14 @@ const LogTelemetryStream = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hideHealthChecks, setHideHealthChecks] = useState(true);
 
+  // The panel used to swallow this, so a logging service that was down left it
+  // saying "Waiting for log lines…" as if nothing had happened.
+  const [historyFailed, setHistoryFailed] = useState(false);
+
   useEffect(() => {
     api.getLogs(50).then((historical) => {
       setLogs((current) => [...current, ...historical].slice(0, 80));
-    }).catch(() => {});
+    }).catch(() => setHistoryFailed(true));
   }, []);
 
   const [streamUrl] = useState(() => api.getLogWebSocketUrl());
@@ -371,9 +410,11 @@ const LogTelemetryStream = () => {
         ))}
         {!visibleLogs.length && (
           <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
-            {logs.length > 0
-              ? 'Every line so far is a health check. Turn the filter off to see them.'
-              : 'Waiting for log lines…'}
+            {historyFailed
+              ? 'Could not read the recent log lines, and nothing has streamed in yet.'
+              : logs.length > 0
+                ? 'Every line so far is a health check. Turn the filter off to see them.'
+                : 'Waiting for log lines…'}
           </p>
         )}
       </div>
@@ -393,7 +434,7 @@ const MissionsPane = () => {
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
 
-  const { data: missions = [], refetch, isLoading } = useQuery<RavenMission[]>({
+  const { data: missions = [], refetch, isLoading, isError: missionsError } = useQuery<RavenMission[]>({
     queryKey: ['user-missions'],
     queryFn: () => api.getUserMissions(),
     refetchInterval: 5000,
@@ -500,6 +541,10 @@ const MissionsPane = () => {
 
         {isLoading ? (
           <p className="text-sm text-slate-500">Loading missions…</p>
+        ) : missionsError ? (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-8 text-center text-sm text-amber-200">
+            Could not read the missions just now.
+          </div>
         ) : filteredMissions.length === 0 ? (
           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
             {missions.length ? 'No missions match this filter.' : 'No missions yet. Describe a task above to start one.'}
