@@ -27,7 +27,15 @@ export default function FamilyCalls() {
     refetch,
   } = useQuery<ExecutionResponse, Error, TalkConversation[]>({
     queryKey: ['talk-conversations'],
-    queryFn: () => api.getTalkConversations(),
+    // A FAILURE body used to render as an empty list, so a broken Nextcloud
+    // looked like a family with no conversations at all.
+    queryFn: async () => {
+      const response = await api.getTalkConversations();
+      if (response.status === 'FAILURE') {
+        throw new Error(response.message || 'Could not load conversations');
+      }
+      return response;
+    },
     refetchInterval: REFRESH_MS,
     select: (response) => detailList<TalkConversation>(response, 'conversations').filter((c) => c.token && c.type !== 6),
   });
@@ -73,9 +81,13 @@ export default function FamilyCalls() {
         </p>
       )}
 
-      {isError && conversations.length === 0 && (
+      {isError && (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200" data-testid="family-calls-error">
-          <p>Could not load the family conversations.</p>
+          <p>
+            {conversations.length === 0
+              ? 'Could not load the family conversations.'
+              : 'Could not refresh the family conversations, so this list may be out of date.'}
+          </p>
           <button
             type="button"
             onClick={() => refetch()}
@@ -116,9 +128,11 @@ export default function FamilyCalls() {
                     ? 'You are in this call'
                     : active
                       ? `${people || 'Someone'} in the call`
-                      : group
-                        ? 'Family group · audio and video'
-                        : 'Direct call · audio and video'}
+                      : conversation.can_start_call === false
+                        ? 'Not available to call right now'
+                        : group
+                          ? 'Family group · audio and video'
+                          : 'Direct call · audio and video'}
                 </p>
               </div>
               <button

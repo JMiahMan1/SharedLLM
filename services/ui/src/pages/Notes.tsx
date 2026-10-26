@@ -262,7 +262,14 @@ export default function Notes() {
   const scope = asUser ?? 'me';
   const listKey = useMemo(() => ['notes-list', scope] as const, [scope]);
   const snapshot = useMemo(() => readNotesSnapshot(scope), [scope]);
-  const { data: listRes, isLoading, isFetching, refetch } = useQuery({
+  const {
+    data: listRes,
+    isLoading,
+    isFetching,
+    isError: listError,
+    error: listErrorObj,
+    refetch,
+  } = useQuery({
     queryKey: listKey,
     queryFn: () => api.listNotes({ storage: STORAGE, as_user: asUser, previews: true }),
     staleTime: 30_000,
@@ -368,7 +375,14 @@ export default function Notes() {
     return map;
   }, [notes]);
 
-  const loadError = listRes != null && listRes.status !== 'SUCCESS';
+  // A returned FAILURE body is not the only way this fails. If the request
+  // itself throws, the query is in error while `listRes` is still the cached
+  // snapshot - and the page used to say "No notes yet" over a full cache.
+  const loadError = Boolean(listError) || (listRes != null && listRes.status !== 'SUCCESS');
+  const loadErrorMessage =
+    (listErrorObj instanceof Error && listErrorObj.message) ||
+    listRes?.message ||
+    'Could not load notes. Is Nextcloud connected?';
 
   const refresh = useCallback(async () => {
     void queryClient.invalidateQueries({ queryKey: PLACE_REMINDERS_KEY });
@@ -1387,6 +1401,24 @@ export default function Notes() {
         </div>
       )}
 
+      {loadError && notes.length > 0 && (
+        // The cached notes are still on screen, so this is a warning rather
+        // than a replacement: the list may be out of date.
+        <div
+          data-testid="notes-load-error"
+          className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3"
+        >
+          <p className="text-xs text-amber-200">{loadErrorMessage}</p>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Grid */}
       {isLoading && notes.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-slate-500 text-sm gap-2">
@@ -1398,7 +1430,7 @@ export default function Notes() {
             {search
               ? 'No notes match that search.'
               : loadError
-                ? (listRes?.message || 'Could not load notes. Is Nextcloud connected?')
+                ? loadErrorMessage
                 : view === 'archive'
                   ? 'Nothing archived.'
                   : view === 'trash'
