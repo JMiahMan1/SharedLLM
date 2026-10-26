@@ -26,6 +26,22 @@ import { confirmDialog } from '../ui/confirmDialog';
 
 // Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
+
+/**
+ * A FAILURE body arrives with HTTP 200, so without this the UI toasts success
+ * over a refusal - an event whose time the server could not parse was reported
+ * as added. The server's own words are used, except for its date-parsing error,
+ * which is worth explaining: the time field accepts anything dateparser reads.
+ */
+const mustSucceed = async (pending: Promise<ExecutionResponse>): Promise<ExecutionResponse> => {
+  const res = await pending;
+  if (res.status === 'SUCCESS') return res;
+  const message = res.message || 'The calendar service refused that.';
+  if (message.startsWith('Could not parse date')) {
+    throw new Error('Could not understand that time. Try "tomorrow 5pm" or 2026-10-27 17:00.');
+  }
+  throw new Error(message);
+};
 /** Minutes-before choices for phone event reminders (0 = off). */
 const REMINDER_CHOICES = [0, 10, 15, 30, 60, 120];
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -187,7 +203,11 @@ const MobileMonthGrid = ({
               >
                 {day.getDate()}
               </span>
-              <span className="flex h-2 items-center gap-0.5">
+              <span
+                className="flex h-2 items-center gap-0.5"
+                role="img"
+                aria-label={dots.length === 1 ? '1 event' : `${dots.length} events`}
+              >
                 {dots.map((ev, idx) => {
                   const c = calendarColor(ev.calendar, people);
                   return <span key={idx} className="h-1.5 w-1.5 rounded-full" style={{ background: c }} aria-hidden="true" />;
@@ -289,15 +309,17 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
 
   const updateMut = useMutation({
     mutationFn: () =>
-      api.updateCalendarEvent({
-        action: 'update',
-        integration: event.integration,
-        ...target,
-        summary: summary.trim(),
-        // An untouched time is not sent: re-saving it would turn an all-day
-        // event into a midnight appointment.
-        ...(startInput.trim() !== initialStart ? { start_time: startInput.trim() } : {}),
-      }),
+      mustSucceed(
+        api.updateCalendarEvent({
+          action: 'update',
+          integration: event.integration,
+          ...target,
+          summary: summary.trim(),
+          // An untouched time is not sent: re-saving it would turn an all-day
+          // event into a midnight appointment.
+          ...(startInput.trim() !== initialStart ? { start_time: startInput.trim() } : {}),
+        }),
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
       toast.success('Event updated');
@@ -307,11 +329,13 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
   });
   const deleteMut = useMutation({
     mutationFn: () =>
-      api.deleteCalendarEvent({
-        action: 'delete',
-        integration: event.integration,
-        ...target,
-      }),
+      mustSucceed(
+        api.deleteCalendarEvent({
+          action: 'delete',
+          integration: event.integration,
+          ...target,
+        }),
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
       toast.success('Event deleted');
@@ -494,16 +518,19 @@ const CalendarApp = () => {
   const writable = integrations.filter((i) => i.enabled && i.writable);
 
   const addMutation = useMutation({
-    mutationFn: () => api.addCalendarEvent({
-      summary: summary.trim(),
-      start_time: startInput.trim(),
-      integration: addIntegration || detail?.default || undefined,
-    }),
+    mutationFn: () =>
+      mustSucceed(
+        api.addCalendarEvent({
+          summary: summary.trim(),
+          start_time: startInput.trim(),
+          integration: addIntegration || detail?.default || undefined,
+        }),
+      ),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('Event added'); setSummary(''); setStartInput(''); },
     onError: (e: Error) => toast.error(e.message || 'Failed to add event'),
   });
   const setDefaultMutation = useMutation({
-    mutationFn: (value: string) => api.updateCalendarSettings({ default: value }),
+    mutationFn: (value: string) => mustSucceed(api.updateCalendarSettings({ default: value })),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('Default calendar updated'); },
     onError: (e: Error) => toast.error(e.message || 'Failed to update default'),
   });
@@ -511,7 +538,7 @@ const CalendarApp = () => {
     mutationFn: (type: string) => {
       const next = new Set(disabledSet);
       if (next.has(type)) next.delete(type); else next.add(type);
-      return api.updateCalendarSettings({ disabled: Array.from(next) });
+      return mustSucceed(api.updateCalendarSettings({ disabled: Array.from(next) }));
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); },
     onError: (e: Error) => toast.error(e.message || 'Failed to update integration'),
@@ -520,7 +547,7 @@ const CalendarApp = () => {
   const addIcalMutation = useMutation({
     mutationFn: (url: string) => {
       const current = settingsData?.settings?.ical_urls ?? [];
-      return api.updateCalendarSettings({ ical_urls: [...current, url] });
+      return mustSucceed(api.updateCalendarSettings({ ical_urls: [...current, url] }));
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); setIcalUrl(''); toast.success('iCal feed added'); },
     onError: (e: Error) => toast.error(e.message || 'Failed to add iCal feed'),
@@ -528,7 +555,9 @@ const CalendarApp = () => {
 
   const removeIcalMutation = useMutation({
     mutationFn: (url: string) =>
-      api.updateCalendarSettings({ ical_urls: (settingsData?.settings?.ical_urls ?? []).filter((u) => u !== url) }),
+      mustSucceed(
+        api.updateCalendarSettings({ ical_urls: (settingsData?.settings?.ical_urls ?? []).filter((u) => u !== url) }),
+      ),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('iCal feed removed'); },
     onError: (e: Error) => toast.error(e.message || 'Failed to remove iCal feed'),
   });
@@ -545,13 +574,14 @@ const CalendarApp = () => {
   const reminderMinutes = (settingsData?.settings as { reminder_minutes?: number } | undefined)?.reminder_minutes ?? 30;
   const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const reminderMutation = useMutation({
-    mutationFn: (minutes: number) => api.updateCalendarSettings({ reminder_minutes: minutes, timezone: deviceZone }),
+    mutationFn: (minutes: number) =>
+      mustSucceed(api.updateCalendarSettings({ reminder_minutes: minutes, timezone: deviceZone })),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); toast.success('Reminders updated'); },
     onError: (e: Error) => toast.error(e.message || 'Failed to update reminders'),
   });
 
   const savePeopleMutation = useMutation({
-    mutationFn: (next: CalendarPerson[]) => api.updateCalendarSettings({ people: next }),
+    mutationFn: (next: CalendarPerson[]) => mustSucceed(api.updateCalendarSettings({ people: next })),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['calendar-settings'] }); queryClient.invalidateQueries({ queryKey: ['calendar-app'] }); toast.success('People saved'); },
     onError: (e: Error) => toast.error(e.message || 'Failed to save people'),
   });
@@ -624,7 +654,7 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
           </p>
           <div className="flex flex-wrap gap-2">
             {(detail.available_defaults ?? integrations.filter((i) => i.enabled).map((i) => i.type)).map((t) => (
-              <button key={t} onClick={() => setDefaultMutation.mutate(t)} className="min-h-11 rounded-full border px-4 text-xs font-bold" style={{ borderColor: 'var(--os-ember)', background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
+              <button key={t} onClick={() => setDefaultMutation.mutate(t)} disabled={setDefaultMutation.isPending} className="min-h-11 rounded-full border px-4 text-xs font-bold disabled:opacity-50" style={{ borderColor: 'var(--os-ember)', background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
                 {integrationMeta(t).label}
               </button>
             ))}
@@ -671,7 +701,7 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
                 </div>
               );
             })}
-            {visibleEvents.length === 0 && !isLoading && (
+            {visibleEvents.length === 0 && !isLoading && !error && (
               <div className="mt-16 text-center os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>Nothing coming up. Enjoy the quiet</div>
             )}
           </div>
@@ -755,7 +785,7 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
                       const ad = isAllDay(ev);
                       const c = calendarColor(ev.calendar, people);
                       return (
-                        <span key={idx} role="button" tabIndex={0} onClick={() => setEditing(ev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(ev); } }} title={calendarLabel(ev.calendar, people)} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: c, color: textOn(c) } : { background: 'transparent', color: 'var(--os-ink)' }}>
+                        <span key={idx} role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); setEditing(ev); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setEditing(ev); } }} title={calendarLabel(ev.calendar, people)} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: c, color: textOn(c) } : { background: 'transparent', color: 'var(--os-ink)' }}>
                           {!ad && <span className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: c }} aria-hidden="true" />}
                           <span className="truncate">{ev.summary}</span>
                         </span>
@@ -821,7 +851,7 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
                     <p className="text-[10px]" style={{ color: isSoftDown ? 'var(--os-ink-faint)' : 'var(--os-ink-soft)' }}>{isDisabled ? 'Disabled' : i.writable ? 'Read & write' : 'Read-only'}{isSoftDown ? ' · no data, retrying' : isHardDown ? ' · retrying' : ''}</p>
                   </div>
                 </div>
-                <button onClick={() => toggleDisabledMutation.mutate(i.type)} className="flex min-h-11 items-center gap-1 rounded-full border px-4 text-[10px] font-bold transition" style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+                <button onClick={() => toggleDisabledMutation.mutate(i.type)} disabled={toggleDisabledMutation.isPending} className="flex min-h-11 items-center gap-1 rounded-full border px-4 text-[10px] font-bold transition disabled:opacity-50" style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
                   {isDisabled ? <Check size={12} /> : null}{isDisabled ? 'Enable' : 'Disable'}
                 </button>
               </div>
@@ -840,12 +870,13 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
             <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>iCal Subscriptions</p>
             <div className="flex gap-2">
               <input type="url" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} aria-label="iCal feed URL" className="min-h-11 min-w-0 flex-1 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
-              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="inline-flex min-h-11 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
+              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} disabled={addIcalMutation.isPending}
+                  className="inline-flex min-h-11 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-50" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
             </div>
             {(settingsData?.settings?.ical_urls ?? []).map((u) => (
               <div key={u} className="mt-2 flex items-center gap-2">
                 <p className="min-w-0 flex-1 truncate text-xs" style={{ color: 'var(--os-ink-soft)' }}>{u}</p>
-                <button onClick={() => removeIcalMutation.mutate(u)} aria-label={`Remove ${u}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ color: 'var(--os-ink-soft)' }}><X size={14} /></button>
+                <button onClick={() => removeIcalMutation.mutate(u)} disabled={removeIcalMutation.isPending} aria-label={`Remove ${u}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50" style={{ color: 'var(--os-ink-soft)' }}><X size={14} /></button>
               </div>
             ))}
           </div>
