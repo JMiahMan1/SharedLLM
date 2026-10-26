@@ -8,6 +8,7 @@ import { formatDuration, formatTimeLeft } from '../format';
 import { useLivePosition } from '../engine/useLivePosition';
 import { useMediaStore } from '../store/mediaStore';
 import { Artwork } from '../components/Artwork';
+import BackToLibrary from '../components/BackToLibrary';
 import { EmptyState, ErrorRetry, RowSkeletons } from '../components/StateViews';
 import { TrackRow } from '../components/TrackRow';
 import { iconButton, muted, primaryButton, secondaryButton, text } from '../components/ui';
@@ -34,12 +35,24 @@ export default function BookPage() {
   const session = useMediaStore((s) => s.absSession);
   const remotePosition = useLivePosition(remote);
 
-  if (q.isLoading) return <RowSkeletons label="Loading book" />;
+  if (q.isLoading) {
+    return (
+      <div className="space-y-4">
+        <BackToLibrary to="/media/library/audiobooks" label="Audiobooks" />
+        <RowSkeletons label="Loading book" />
+      </div>
+    );
+  }
   if (q.isError || !q.data) {
     const notFound = isAxiosError(q.error) && q.error.response?.status === 404;
-    return notFound
-      ? <EmptyState title="This book isn’t in your library" action={{ label: 'Go to your library', to: '/media/library/audiobooks' }} />
-      : <ErrorRetry title="Couldn’t load this book" detail="Your audiobook server did not answer." onRetry={() => void q.refetch()} />;
+    return (
+      <div className="space-y-4">
+        <BackToLibrary to="/media/library/audiobooks" label="Audiobooks" />
+        {notFound
+          ? <EmptyState title="This book isn’t in your library" action={{ label: 'Go to your library', to: '/media/library/audiobooks' }} />
+          : <ErrorRetry title="Couldn’t load this book" detail="Your audiobook server did not answer." onRetry={() => void q.refetch()} />}
+      </div>
+    );
   }
 
   const book = q.data;
@@ -83,6 +96,7 @@ export default function BookPage() {
 
   return (
     <>
+      <BackToLibrary to="/media/library/audiobooks" label="Audiobooks" />
       <header className="flex flex-col gap-5 sm:flex-row sm:items-end">
         <div className="w-44 shrink-0 sm:w-52">
           <Artwork image={book.image} kind="audiobook" size={208} fill />

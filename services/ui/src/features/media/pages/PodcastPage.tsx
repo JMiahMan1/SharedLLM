@@ -6,6 +6,7 @@ import { formatTimeLeft } from '../format';
 import { maUriFromRoute } from '../items';
 import { serviceProblem } from '../copy';
 import { Artwork } from '../components/Artwork';
+import BackToLibrary from '../components/BackToLibrary';
 import { EmptyState, ErrorRetry, PartialNotice, RowSkeletons } from '../components/StateViews';
 import { TrackRow, type RowItem } from '../components/TrackRow';
 import { muted, primaryButton, text } from '../components/ui';
@@ -43,12 +44,24 @@ export default function PodcastPage() {
   const absEpisodes = usePodcastEpisodes(isAbs && detail.data ? id : null, detail.data?.name ?? '');
   const { playback } = useMediaScreen();
 
-  if (detail.isLoading) return <RowSkeletons label="Loading podcast" />;
+  if (detail.isLoading) {
+    return (
+      <div className="space-y-4">
+        <BackToLibrary to="/media/library/podcasts" label="Podcasts" />
+        <RowSkeletons label="Loading podcast" />
+      </div>
+    );
+  }
   if (detail.isError || !detail.data) {
     const notFound = isAxiosError(detail.error) && detail.error.response?.status === 404;
-    return notFound
-      ? <EmptyState title="This podcast isn’t in your library" action={{ label: 'Go to your library', to: '/media/library/podcasts' }} />
-      : <ErrorRetry title="Couldn’t load this podcast" detail="The media service did not answer." onRetry={() => void detail.refetch()} />;
+    return (
+      <div className="space-y-4">
+        <BackToLibrary to="/media/library/podcasts" label="Podcasts" />
+        {notFound
+          ? <EmptyState title="This podcast isn’t in your library" action={{ label: 'Go to your library', to: '/media/library/podcasts' }} />
+          : <ErrorRetry title="Couldn’t load this podcast" detail="The media service did not answer." onRetry={() => void detail.refetch()} />}
+      </div>
+    );
   }
 
   const podcast = detail.data;
@@ -75,6 +88,7 @@ export default function PodcastPage() {
 
   return (
     <>
+      <BackToLibrary to="/media/library/podcasts" label="Podcasts" />
       <header className="flex flex-col gap-5 sm:flex-row sm:items-end">
         <div className="w-44 shrink-0 sm:w-52">
           <Artwork image={podcast.image} kind="podcast" size={208} fill />

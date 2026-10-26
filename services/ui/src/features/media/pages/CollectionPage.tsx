@@ -7,6 +7,7 @@ import { formatDuration } from '../format';
 import { itemKind, KIND_LABEL, maUriFromRoute } from '../items';
 import { serviceProblem } from '../copy';
 import { Artwork } from '../components/Artwork';
+import BackToLibrary from '../components/BackToLibrary';
 import { ItemContextMenu } from '../components/ItemContextMenu';
 import { MediaCard } from '../components/MediaCard';
 import { EmptyState, ErrorRetry, PartialNotice, RowSkeletons } from '../components/StateViews';
@@ -16,6 +17,13 @@ import { detailPath, playRequestFor } from '../items';
 import { useMediaScreen } from './MediaScreen';
 
 export type CollectionKind = 'album' | 'artist' | 'playlist';
+
+/** Where each kind's list lives, so a detail page can offer a way back. */
+const LIBRARY_BACK: Record<CollectionKind, { tab: string; label: string }> = {
+  album: { tab: 'albums', label: 'Albums' },
+  artist: { tab: 'artists', label: 'Artists' },
+  playlist: { tab: 'playlists', label: 'Playlists' },
+};
 
 /** "4 songs · 52 min" from the children MA listed. */
 function summary(children: MediaItemChild[], kind: CollectionKind): string {
@@ -41,6 +49,7 @@ export default function CollectionPage({ kind }: { kind: CollectionKind }) {
   if (q.isLoading) {
     return (
       <div className="space-y-6">
+        <BackToLibrary to={`/media/library/${LIBRARY_BACK[kind].tab}`} label={LIBRARY_BACK[kind].label} />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <div className="skeleton aspect-square w-48 rounded-[var(--radius-card)] sm:w-56" />
           <div className="flex-1 space-y-2"><div className="skeleton h-8 w-2/3 rounded" /><div className="skeleton h-4 w-1/3 rounded" /></div>
@@ -51,9 +60,14 @@ export default function CollectionPage({ kind }: { kind: CollectionKind }) {
   }
   if (q.isError || !q.data) {
     const notFound = isAxiosError(q.error) && q.error.response?.status === 404;
-    return notFound
-      ? <EmptyState title={`This ${label} isn’t in your library`} detail="It may have been removed from your music library." action={{ label: 'Go to your library', to: '/media/library' }} />
-      : <ErrorRetry title={`Couldn’t load this ${label}`} detail="Your music library did not answer." onRetry={() => void q.refetch()} />;
+    return (
+      <div className="space-y-4">
+        <BackToLibrary to={`/media/library/${LIBRARY_BACK[kind].tab}`} label={LIBRARY_BACK[kind].label} />
+        {notFound
+          ? <EmptyState title={`This ${label} isn’t in your library`} detail="It may have been removed from your music library." action={{ label: 'Go to your library', to: '/media/library' }} />
+          : <ErrorRetry title={`Couldn’t load this ${label}`} detail="Your music library did not answer." onRetry={() => void q.refetch()} />}
+      </div>
+    );
   }
 
   const detail = q.data;
@@ -70,6 +84,7 @@ export default function CollectionPage({ kind }: { kind: CollectionKind }) {
 
   return (
     <>
+      <BackToLibrary to={`/media/library/${LIBRARY_BACK[kind].tab}`} label={LIBRARY_BACK[kind].label} />
       <header className="flex flex-col gap-5 sm:flex-row sm:items-end">
         <div className="w-48 shrink-0 shadow-[0_30px_80px_-20px_var(--site-glow)] sm:w-56">
           <Artwork image={detail.image} kind={kind} size={224} fill />
