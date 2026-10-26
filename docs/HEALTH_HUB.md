@@ -818,8 +818,11 @@ point.
       with a full-screen Accessibility overlay (`GuardOverlay`, a `TYPE_ACCESSIBILITY_OVERLAY`
       window owned by the service, so Home and Back cannot leave it and no extra permission is
       needed; built 2026-10-26, needs a new APK), leaving only the always-allowed apps (calls,
-      texts, Jarvis) and the system screens open; it shows the reason and an "Ask for more time"
-      button. Switching device admin or the guard off
+      texts, Jarvis) and the system screens open; it shows the reason, an "Ask for more time"
+      button and a "Message a parent" button (the family chat, since a child who cannot get in
+      is exactly who needs to reach one). The whole screen scrolls, so the parent's login fields
+      stay reachable with the keyboard up, and the way out of the lock is always a parent's own
+      login or their offline code - a lock is never a dead end. Switching device admin or the guard off
       reports to `POST /api/guard/tamper` and both parents get a notice; `GuardWatch` reports a
       guard that was on and is now missing. Decisions live in pure `GuardRules` (JVM-tested).
       Setup is the `PhoneProtectionCard` on the child's Health page (device admin, then
