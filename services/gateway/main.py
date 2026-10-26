@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlspli
 from zoneinfo import ZoneInfo
 
 import aiohttp
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
@@ -1184,7 +1184,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
       pass
 
 @app.get("/api/admin/logs")
-async def get_api_admin_logs(request: Request, limit: int = 50, service: str | None = None, level: str | None = None):
+async def get_api_admin_logs(request: Request, limit: int = Query(50, ge=1, le=500), service: str | None = None, level: str | None = None):
     # This route had no authentication at all -- it took no request, so it could
     # not even look at a caller -- and forwarded straight to the logging service
     # with the internal secret. Anyone who could reach the gateway could read the
@@ -8174,7 +8174,7 @@ async def git_branch_create_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/branch/create", request)
 
 @app.get("/api/workspaces/{workspace_id}/raven/missions")
-async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = 50):
+async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = Query(50, ge=1, le=500)):
     # Identity is asked with the internal secret and does not filter by user,
     # so the caller must be able to see the workspace itself.
     creds = await _resolve_identity_from_request(request)
@@ -9033,7 +9033,7 @@ async def rag_maintenance(request: Request):
 
 
 @app.get("/api/storage/learning")
-async def get_raven_learnings(request: Request, limit: int = 200, sort: str = "recent"):
+async def get_raven_learnings(request: Request, limit: int = Query(200, ge=1, le=500), sort: str = "recent"):
     """List Raven lessons (system_learnings) with reuse stats for the UI.
 
     Signed-in callers only: this used to fall back to the first user when the
@@ -14237,7 +14237,7 @@ async def get_latest_telemetry_report(request: Request, type: str = "health", pe
 
 
 @app.get("/api/telemetry/notifications")
-async def get_telemetry_notifications(request: Request, limit: int = 20):
+async def get_telemetry_notifications(request: Request, limit: int = Query(20, ge=1, le=200)):
     user = await _user_id_from_request(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -14828,7 +14828,7 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
 
 
 @app.get("/api/media/music-assistant/search")
-async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
+async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = Query(20, ge=1, le=100), artist: str = "", album: str = "", library_only: bool = True):
     """Search MA for media items via HA."""
     # An unproven caller is a 401, never an empty 200: swallowing the auth
     # failure here is what let an anonymous caller read this data.
@@ -14939,7 +14939,7 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, request: Request, limit: int = 20):
+async def search_abs(q: str, request: Request, limit: int = Query(20, ge=1, le=100)):
     """Search Audiobookshelf for books, podcasts, and authors (per-user credentials)."""
     # An unproven caller is a 401, never an empty 200: swallowing the auth
     # failure here is what let an anonymous caller read this data.
@@ -15309,7 +15309,7 @@ async def get_media_home(request: Request):
 
 
 @app.get("/api/media/search")
-async def search_media(request: Request, q: str = "", types: str = "", limit: int = 20):
+async def search_media(request: Request, q: str = "", types: str = "", limit: int = Query(20, ge=1, le=100)):
     """Unified MA + ABS search (§7.5); each side fails independently."""
     query = (q or "").strip()
     if not query:
@@ -15568,7 +15568,7 @@ async def get_media_library(tab: str, request: Request, offset: int = 0, limit: 
 
 
 @app.get("/api/media/favorites")
-async def get_media_favorites(request: Request, limit: int = 50):
+async def get_media_favorites(request: Request, limit: int = Query(50, ge=1, le=200)):
     """Favorite items across MA media types (live-verified ``favorite=true``)."""
     await _resolve_identity_from_request(request)
     errors = MediaErrorInfo()
