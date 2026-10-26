@@ -155,9 +155,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     () => void queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] }),
     asUser,
   );
-  const { data: fetched = EMPTY_ARRAY, isFetching: fetchingMessages, refetch: refetchMessages } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
+  const {
+    data: fetched = EMPTY_ARRAY,
+    isFetching: fetchingMessages,
+    isError: messagesError,
+    error: messagesErrorObj,
+    refetch: refetchMessages,
+  } = useQuery<ExecutionResponse, Error, TalkMessage[]>({
     queryKey: ['talk-messages', activeToken, limit],
-    queryFn: () => api.getTalkMessages(activeToken, limit),
+    // A FAILURE body used to render as an empty thread ("No messages yet"),
+    // which reads as "nobody has said anything" rather than "the fetch failed".
+    queryFn: async () => {
+      const response = await api.getTalkMessages(activeToken, limit);
+      if (response.status === 'FAILURE') {
+        throw new Error(response.message || 'Could not load messages');
+      }
+      return response;
+    },
     enabled: Boolean(activeToken),
     // While "Show earlier" loads, keep this conversation's messages on screen
     // (never another conversation's).
@@ -582,6 +596,22 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
 
+        {messagesError && (
+          // Without this a failed fetch looked exactly like an empty room.
+          <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2" data-testid="thread-error">
+            <p className="text-xs text-amber-200">
+              {messagesErrorObj?.message || 'Could not load messages.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetchMessages()}
+              className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
         <MessageThread
           // Remount when the thread comes on screen: on a phone it is laid out
           // hidden behind the list, where "open at the latest message" measured
@@ -615,7 +645,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               : undefined
           }
           loadingEarlier={loadingEarlier}
-          emptyText={activeToken ? 'No messages yet. Say hello, or ask @Jarvis something.' : 'Pick a conversation to see messages.'}
+          emptyText={
+            activeToken
+              ? messagesError
+                ? 'Could not load messages.'
+                : 'No messages yet. Say hello, or ask @Jarvis something.'
+              : 'Pick a conversation to see messages.'
+          }
         />
 
         {showPollForm && (
