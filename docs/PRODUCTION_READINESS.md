@@ -425,7 +425,23 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     commit could silently jump a major version. Every package the Dockerfile names is now pinned to the
     version the built image actually resolves (read from the image on 2026-10-26), so the interpreter,
     the system libraries and the named libraries are all fixed.
-12. Several list reads accepted any `limit`, so one caller could ask a service for everything it had:
+12. **The loudest warnings in the whole stack were false alarms.** Caddy logged
+    `aborting with incomplete response` at WARN every time a long-lived stream ended - the media events
+    feed and the push stream, whenever a phone closed the app or its screen slept: **1348 of the 1348
+    lines Caddy wrote in 24 hours** were that one message, which buries a real proxy warning when one
+    happens. Caddy's global `log` block now raises that one logger
+    (`include http.handlers.reverse_proxy`) to ERROR, so expected stream ends are silent and genuine
+    failures still show; verified in a throwaway container before applying (a killed stream produced 1
+    warning without it, 0 with it, and the access log was untouched). Two startup warnings went with
+    it: the redundant `header_up X-Forwarded-Proto` lines Caddy told us about on every start are gone
+    (it already forwards that header). The image proxy's 404 warnings were checked too and are honest:
+    **5 in seven days**, each a library entry that really has no artwork upstream
+    (`/audiobooks/Psalms [B005FXZPPM]/cover.jpg`, `/podcasts/Haunted Cosmos/cover.jpg`, two
+    `/metadata/items/<id>/cover.jpg`), not a URL we build wrongly. What remains at startup is
+    informational and once-per-start: the Caddyfile uses four spaces where `caddy fmt` wants tabs (the
+    file is left as it is rather than reflowing every line for a cosmetic notice), and the plaintext
+    internal ports report that HTTP/2 and HTTP/3 are skipped because they require TLS.
+13. Several list reads accepted any `limit`, so one caller could ask a service for everything it had:
     the admin log tail, the workspace mission list, Raven's lessons, the notification feed, the two
     media searches, the unified search and the favourites list are all bounded now (`Query(..., ge=1,
     le=...)`), and an absurd page size is a 422 rather than a whole table.
@@ -498,6 +514,23 @@ blocks. The gateway's media layer is the model to copy for honest failure: a nam
   reports in the last day yet"). Both now say the read failed.
 - **TheMealDB search was a second, unreachable path to data `recipe_search` already fetches.** The
   `themealdb_search` action, its handler and its four tests are gone.
+- **Import a recipe from a photo, including handwriting - verified working end to end (2026-10-26).**
+  The Recipes page has a **Photo or handwriting** button whose file input carries
+  `capture="environment"`, so on a phone or tablet it opens the camera rather than a file picker; the
+  shot goes to `POST /api/recipes/photo` (multipart, 8 MB cap, 422/413 on a missing or oversized
+  image), which sends it to execution's `/execute/ocr` with `task="recipe"`. That prompt is written to
+  transcribe only what is on the page and to list anything it was unsure of;
+  `services/common/recipe_ocr.py` then turns the transcription into an editable draft, naming what is
+  missing rather than inventing it, and the raw text stays beside the draft so a person can check the
+  page. The vision model is the household's own (`vision_ocr_model` = `qwen2.5-vl:7b` on
+  `vision_ocr_proxy_url`, the home desktop's OpenAI-compatible endpoint - the same local model the
+  Health food label and the workspace screenshots use), so a photographed recipe never leaves the
+  house. **Measured live:** a rendered recipe card (title, "Serves 8", "Prep 15 min / Cook 55 min",
+  six ingredients, four steps) came back as title `Grandma's Banana Bread`, those six ingredients,
+  those four steps, `prep_minutes 15`, `cook_minutes 55`, `total_minutes 70`, `yield "8"`, with
+  `missing: []` and `uncertain: []`. When the model cannot be reached the route answers 502 with the
+  reason and the page says "Type the recipe instead", so a dead desktop is a message rather than a
+  blank draft.
 
 **Open (rough).**
 
