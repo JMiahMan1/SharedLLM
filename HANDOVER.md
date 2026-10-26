@@ -6,11 +6,14 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca6d4c8**
-  (APK `versionCode` **452**, 2026-10-25; every app service redeployed at that tip, 0 new errors
-  after). APK: CI builds one per push under `services/ui/**`; the native work below needs the
-  newest APK on the phones. Family guard Phase 11 and the family member page
-  (`/family/member/<child>`) are live.
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **6932452c**
+  (APK `versionCode` **459**, 2026-10-25; `https://jarvis.sumemail.com/health` is 200 and
+  `scripts/check_service_urls.py` is 4/4 PASS). Deploy 12 (gateway + execution + health + ui) was
+  in flight for `6932452c` at handover time. APK: CI builds one per push under `services/ui/**`,
+  and the APK `versionCode` rebuilds per push (459 is current; 458 was the previous), so the native
+  work below needs the newest APK on the phones. Family guard Phase 11, the family member page
+  (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
+  live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -26,31 +29,76 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
-- `2026-10-25 (Phase 12 MDM follow-ups, in review, uncommitted)`: `docs/MDM.md` added and the
-  Devices page finished. A child now gets a real surface for the files a parent pushed
-  (`components/mdm/SharedFilesPanel.tsx`: open in an in-app viewer or download, with the API key a
-  bare link could not carry); the Library set is sourced read-only from the Calibre shelf
-  (`GET /api/mdm/library/books`, `POST /api/mdm/library/books/file`); every parent action is kept in
-  an append-only, capped audit log (`audit.json`, `GET /api/mdm/audit`) shown as the page's Activity
-  log; and `./data/mdm_files` is now mounted so the folders and the log survive a redeploy. Per-device
-  update notices are **not** done: the notice and push plumbing is per user and the app-update
-  version is global, so there is no clean device dimension (reported, not faked).
-- `2026-10-25 (small items, in review, uncommitted)`: the open small items this handover recorded.
-  - **Docs:** `/guardian` is no longer a redirect - it is its own top-level page (nav entry after
-    Family, offered to every role), Health keeps its digital-wellbeing card and links across, and
-    `/guardian?child=` opens the member page; the dead `GuardianRedirect` and the stale docs are gone.
-  - **Screen-time pause notice:** the gateway says "You paused your phone for now" when a grown
-    member pauses their own phone, "A parent paused your phone for now" when a parent pauses a
-    child's.
-  - **Recommendation lanes self-edit:** a grown member can turn their own suggestion lanes on or off
-    (`_may_edit_screen_time`, the same rule as their screen-time rules); a parent still controls a
-    minor's and nobody touches another member's.
-  - **App updater:** `services/ui/src/test/appUpdaterInit.test.ts` proves the native-build guard fix
-    (`0afd1da6`) clears the pending/rejected OTA SHAs on an APK upgrade and does not blacklist the
-    stale pending SHA.
-  - **Media docs:** P6-T5 and P7-T3 to P7-T5 of docs/MEDIA_OVERHAUL.md marked shipped (the open
-    Phase 6 rows and the unmeasured P7-T4 parts are named there); Phase 8 (device checklist) and
-    Phase 9 (release) stay open.
+- `2026-10-25 latest` (the round that closed the day: recipes, a real guard lock, media fixes, the
+  MDM follow-ups, the 1.6.0 release and the Health phase; all on `origin/microservices`, tip
+  `6932452c`).
+  - **Recipes: skip duplicates, show what was planned, estimate nutrition** (`6932452c`; Recipes
+    Phase 8 duplicate-import guard + Phase 10 planned-vs-eaten + a USDA-seed estimate): the import
+    path refuses a recipe whose source URL is already on the shelf; the MealsCard shows today's
+    planned dinner beside what was actually logged (`services/ui/src/lib/recipeEaten.ts`); and a
+    clearly-labelled **USDA-seed nutrition estimate** is offered when a note states none, with every
+    ingredient the seed cannot match left **unknown** with the reason, never a guessed number
+    (`services/health/recipe_estimate.py`, MealsCard/Recipes UI, docs/RECIPES.md + docs/FAMILY_HUB.md).
+    This commit also carries the Phase 12 MDM follow-up below.
+  - **A parent's lock is a real lock, not a message** (`613edbb0`, Phase 11): a device-owner phone
+    now enters lock-task/kiosk mode while locked (`DeviceOwnerRules.lockTask`, `DeviceOwnerGuard`
+    set/clear the lock-task package, `GuardScreenActivity` enters kiosk while locked and releases it
+    on destroy with a self-check); a parent's lock is immediate (the guard `tick()` plus a static
+    `refreshNow()` the `PushService` calls on a screen-time notice); the false "Locked" success is
+    gone (Devices.tsx says "Locked" only when the phone reports `deviceOwner`, and the gateway
+    writes the `device_lock` audit only then); the protection card shows
+    `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` and the "no accounts
+    signed in / factory reset" caveat. JVM 26 tests pass. **Caveat:** a real OS lock still needs the
+    phone provisioned as **device owner** (a one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE`
+    at a factory reset - not implemented); without it the lock is the Accessibility home-redirect
+    plus the cover only.
+  - **Media: the widget transport, the phantom speaker and the audiobook art** (`84bced59`): the
+    Android home-screen widget's transport buttons were 422s and now send the route's command
+    vocabulary plus the player's `entity_id`; this device's own Music Assistant player no longer
+    appears as a phantom speaker (the store remembers the Sendspin id and drops its player events);
+    MA error frames on read endpoints surface as errors instead of a silent empty; a transient
+    `players/all` failure keeps the previous speaker list; audiobook artwork (`media.coverPath`) and
+    the library-row cover/duration survive. This commit also carries the Phase 12 MDM follow-up
+    below.
+  - **Phase 12 MDM follow-ups** (`84bced59` + `6932452c`, see `docs/MDM.md`): a child-facing surface
+    for the pushed School/Library files (`components/mdm/SharedFilesPanel.tsx`: open in an in-app
+    viewer or download, carrying the API key a bare link could not); the Library set sourced
+    read-only from the Calibre shelf (`GET /api/mdm/library/books`, `POST
+    /api/mdm/library/books/file`); an append-only, capped MDM audit log (`audit.json`, `GET
+    /api/mdm/audit`) shown as the page's Activity log; and `./data/mdm_files` mounted so the folders
+    and the log survive a redeploy. Per-device update notices are **not** done (the notice and push
+    plumbing is per user and the app-update version is global, so there is no clean device dimension
+    - reported, not faked).
+  - **Release 1.6.0** (`c9c640dd`, Phase 9): the UI version bump (`services/ui/package.json`
+    1.5.2 -> 1.6.0) plus handover edits. **Honest note:** `git add -A` was used, so this commit
+    ALSO carries the in-flight Health-phase work below; the commit is mislabelled but was
+    deliberately left as pushed (history was not rewritten).
+  - **Health phase** (committed inside `c9c640dd`): "What you do in Jarvis"
+    (`services/common/jarvis_use.py`, `GET /api/telemetry/use/{user}`, `GET /api/activity/use`,
+    `JarvisUseCard` behind a new `jarvis_use` switch); an adult opt-in `digital` family share scope
+    (minors refused 422; `/family` projects `{"digital":{"shared":true}}`; the gateway fills screen
+    time from telemetry saying "no report"/"unavailable" rather than a zero; `SharedWithYouCard`;
+    `HealthProfilePanel` offers "Phone use" to adults only); find-phone
+    (`POST /api/guardian/find-phone/{user}`, the priority-5 `find_phone` notice, a 30 s cooldown,
+    `FindPhoneCard`). The gateway health-hub and usage-proxy tests came with it; docs/HEALTH_HUB.md
+    Phase 10 (digital wellbeing) is now built and the find-phone lands on the Phase 11 member page.
+  - **Media polish** (`0316f940`): P7-T5 image sizing (srcSet/sizes/sized proxies via a new
+    `features/media/components/image.ts`), P7-T3 now-playing screen-reader announcements
+    (`NowPlayingAnnouncer.tsx`), the P7-T4 render-count regression test, and P6-T5's 53-row UX ledger
+    (`docs/MEDIA_OVERHAUL_QA.md`). In docs/MEDIA_OVERHAUL.md terms P6-T5, P7-T3, P7-T4 and P7-T5 are
+    now shipped.
+  - **Recipes from a photo, and small follow-ups** (`b891938b`): Recipes Phase 9 photo/handwriting
+    import (local vision OCR only, nothing leaves the house; `services/common/recipe_ocr.py`,
+    gateway `POST /api/recipes/photo`, an editable draft beside the raw transcription) and the
+    Phase 10 "Dinner tonight" card; plus the small items - docs corrected for `/guardian` (its own
+    top-level page, not a redirect), the pause notice now distinguishes a self-pause from a parent
+    pause, recommendation lanes are self-editable by a grown member, and a new app-updater
+    regression test (`services/ui/src/test/appUpdaterInit.test.ts`).
+  - **MDM first slice** (`ccedf489`, Phase 12): device inventory, remote update push, shared files,
+    lock and wipe - a parent Devices page and gateway `services/gateway/mdm.py` (`GET
+    /api/mdm/devices`, `POST /api/mdm/devices/update` (409 when no build), `/api/mdm/files*`
+    upload/list/download/delete/push/for-me, `POST /api/mdm/devices/{key}/wipe` confirm-gated
+    device-owner-only); the phone polls `wipe_requested` and the guard wipes.
 - `2026-10-25 late` (the day's round: repo hygiene, integrations finished, a live identity outage
   fixed, and a broad Family-guard, digital-wellbeing and device push; every item below was verified
   by tests, a live deploy and a smoke test, and is on `origin/microservices` at `41115ca6`).
@@ -97,10 +145,11 @@ Every claim below was verified against the live system unless marked **planned**
       "parents" notice addressed to a minor is DROPPED), so app-update/system/ops notices never reach a
       child while a parent still hears about updates and problems; the minor set comes from identity's
       `is_minor` and an unreadable identity fails closed (503).
-    - **Family Guardian gets its own top-level page** (`/guardian`, nav entry after Family; in review,
-      uncommitted): it no longer lives inside Health; Health keeps its digital-wellbeing card and a
-      link to the Guardian page. UI full suite 275 files / 2130 tests passed.
-    - **Tamper events for non-minors dropped, and self-editing** (in review, uncommitted): identity
+    - **Family Guardian gets its own top-level page** (`bf11c921`; `/guardian`, nav entry after
+      Family, offered to every role): it no longer lives inside Health; Health keeps its
+      digital-wellbeing card and a link to the Guardian page, and `/guardian?child=` opens the member
+      page. UI full suite 275 files / 2130 tests passed.
+    - **Tamper events for non-minors dropped, and self-editing** (`3b1aa18b`): identity
       drops a tamper report for an adult child or a parent (no `DeviceEvent`, empty notify, explicit
       `dropped: "not_minor"`), so only child/teen reports reach parents; an adult child can remove and
       disable their OWN monitoring settings (new `_may_edit_screen_time`: a parent-of-minor, or a grown
@@ -728,42 +777,49 @@ Corpus side: the CC0 Food.com dataset carries per-recipe nutrition (verify
 per-serving vs per-recipe on first download); computed values only as fallback
 via recipe-scrapers → ingredient-parser-NLP → seed match.
 
-### `docs/RECIPES.md` - Phases 0-1 built, rest planned
+### `docs/RECIPES.md` - Phases 0-10 largely built, rest planned
 
 Phases 0-1 are shipped: the importer (`scripts/import_recipes.py`) filters the
 CC0 Food.com corpus by the kid level rules, ranks by staples/few ingredients/
 short time and renders level-tagged markdown notes (per-serving `foodcom`
 nutrition, scaled to 7 servings) - 120 notes live in Nextcloud `Recipes/`.
-The Recipes page now shares any recipe into a family chat and has a Teach
-Jarvis RAG-sync button (`cb530641`). Remaining phases: weekly meal-plan
-note, shopping list generator, Jarvis/sharing polish, search & import (FTS +
-TheMealDB + schema.org paste-a-link), photo/handwriting import (Alpaca OCR),
-Health tab connection (planned meals log nutrition), Noom-style calorie
-budgets and logging.
+The Recipes page shares any recipe into a family chat and has a Teach Jarvis
+RAG-sync button (`cb530641`). Phases 2-10 are now largely built: the weekly meal
+plan and shopping list (Phases 3-4), search & import over the offline FTS index
+plus TheMealDB and schema.org paste-a-link with a duplicate guard (Phase 8,
+`6932452c`), photo/handwriting import through Alpaca OCR with an editable draft
+(Phase 9, `b891938b`), and the Health tab connection - per-serving nutrition, the
+"Estimate from ingredients (USDA)" fallback, the "Dinner tonight" card and
+planned-vs-eaten logging (Phase 10, `b891938b` + `6932452c`). Remaining: the
+Noom-style calorie budget and logging (Phase 11) and the Phase 10 optional daily
+targets / weekly averages.
 
 ### `docs/HEALTH_HUB.md` - largely built
 
 Phases 1-5 core are live (profiles, open ingestion, sleep/readiness, nutrition,
-budgets/day view, sharing/export) plus opt-in cycle tracking. Remaining
-documented phases: Health Connect/device import, recipe↔log round trip, weekly
-digest, family challenges/cheers, widgets (dashboard health widget exists),
-photo/voice logging, fasting windows, micro-lessons and chat coach,
-digital wellbeing (Phase 10 - phone usage sessions, top apps and Jarvis
-feature use; planned 2026-10-23), and digital guardianship (Phase 11 - the
-Family Link/Qustodio/Bark class on our own server, focused on collecting mobile
-device data into a living per-person profile Jarvis reads to make recommendations
-and give positive Biblical direction (an inappropriate artist becomes a
-like-styled Christian one; a video theme is redeemed - same theme told well by a
-better creator - or redirected): activity feeds, music (Jarvis playback +
-optional Spotify linking + media sessions), video and creator entities, device
-usage, calls/SMS, web, budgets and
-routines, app control, filtering, location alerts, local-model monitoring with a
-weekly recap, plus three-audience profiles, the shared parents' page, prayer
-surfaces and a voice for the quiet ones; collected data is parents-only while
-suggestions belong to the member they are for, and the phone pulls external-app
-activity (YouTube, Spotify, podcasts) through media sessions; planned 2026-10-23).
+budgets/day view, sharing/export) plus opt-in cycle tracking, and Phases 6-11 are
+now largely built: Health Connect/device import, the recipe↔log round trip, the
+weekly digest, family challenges/cheers, the dashboard health widget,
+photo/voice logging, fasting windows, micro-lessons and the chat coach; **digital
+wellbeing** (Phase 10 - phone usage sessions, top apps and "What you do in
+Jarvis"; built 2026-10-25, `c9c640dd`); and **digital guardianship** (Phase 11 -
+the Family Link/Qustodio/Bark class on our own server, focused on collecting
+mobile device data into a living per-person profile Jarvis reads to make
+recommendations and give positive Biblical direction (an inappropriate artist
+becomes a like-styled Christian one; a video theme is redeemed - same theme told
+well by a better creator - or redirected): activity feeds, music (Jarvis playback
++ optional Spotify linking + media sessions), video and creator entities, device
+usage, calls/SMS, web, budgets and routines, app control, filtering, location
+alerts, local-model monitoring with a weekly recap, plus three-audience profiles,
+the shared parents' page, prayer surfaces and a voice for the quiet ones;
+collected data is parents-only while suggestions belong to the member they are
+for, and the phone pulls external-app activity (YouTube, Spotify, podcasts)
+through media sessions). Find-my-phone (`POST /api/guardian/find-phone/{user}`,
+the priority-5 `find_phone` notice and `FindPhoneCard` on the member page) landed
+with the 2026-10-25 Health work. Remaining: the Phase 10 optional daily targets,
+and the Phase 11/12 device checks that need a real phone (see docs/HEALTH_HUB.md).
 
-### Phase 12 - device management (MDM) (first slice shipped, follow-ups in review)
+### Phase 12 - device management (MDM) (first slice and follow-ups shipped; per-device targeting open)
 
 The user asked "is there a means we can push application (Jarvis OS) updates to devices remotely and
 maybe some other MDM related tasks like push books and other files to be available on devices for
@@ -772,12 +828,13 @@ inventory, remote app-update push, file/book push, app install/uninstall control
 lock/wipe. See `docs/MDM.md`.
 
 Shipped in `ccedf489`: the device inventory (`GET /api/mdm/devices`), the remote app-update push
-(`POST /api/mdm/devices/update`), the shared School/Library folders
+(`POST /api/mdm/devices/update`, 409 when there is no build), the shared School/Library folders
 (`/api/mdm/files*`, `/api/mdm/files/for-me`), the remote wipe
-(`POST /api/mdm/devices/{key}/wipe`, read by the screen-time status the phone polls), the
-`Devices.tsx` page, and the Android `DeviceOwnerRules.shouldWipe` / `DeviceOwnerGuard.wipeData`.
+(`POST /api/mdm/devices/{key}/wipe`, confirm-gated device-owner-only, read by the screen-time status
+the phone polls), the `Devices.tsx` page, and the Android `DeviceOwnerRules.shouldWipe` /
+`DeviceOwnerGuard.wipeData`.
 
-Follow-ups in review (uncommitted, this round):
+Follow-ups shipped (`84bced59` + `6932452c`):
 
 - **A child-facing surface that consumes the pushed files**: `components/mdm/SharedFilesPanel.tsx`
   lists the folders pushed to the child and opens a file in an in-app viewer (reusing the workspace
@@ -806,38 +863,64 @@ device-owner phone; app install/uninstall stays the screen rules.
 
 ## 4. Open small items
 
-- Media: the Phase 8 device checklist and Phase 9 (release, version bump) of
-  docs/MEDIA_OVERHAUL.md remain; P6-T5 (UX ledger pass) and P7-T3 to P7-T5 (screen-reader labels
-  and the now-playing announcement, performance budget, image sizing) shipped 2026-10-25.
+- Media: the **Phase 8 device checks** (swipe-away playback carries on, then reopening reclaims it;
+  the home-screen widget's transport on a real phone) and **Phase 9's** final gates - one `LIVE=1`
+  E2E run (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test --project=live`) - are still
+  outstanding; the 1.6.0 version bump is done (`c9c640dd`). P6-T5 (UX ledger pass) and P7-T3 to
+  P7-T5 (screen-reader labels and the now-playing announcement, performance budget, image sizing)
+  shipped 2026-10-25 (`0316f940`). The hermetic media E2E passes for `hermetic-desktop` and
+  `hermetic-mobile` apart from known-flaky specs; the `hermetic-iphone` project needs
+  `npx playwright install` locally.
 - Health: the veg challenge (steps shipped as a family challenge); the family challenge's labelled
   "guideline goal" for members with no goal of their own still needs Jeremiah's yes/no under the
   no-fallback rule.
-- A **headless Chrome on a Windows machine** (UA `HeadlessChrome/153`, Windows) runs the app from
-  its own dev server at `http://localhost:5288` proxied to `http://192.168.2.205:8080`, with an
-  expired API key: it polls `/api/users/me/theme` (401) and `/health/ready` every ~4.5 s, since
-  2026-10-24 20:00 UTC (~360 refused calls an hour). Not on the Mac; likely another tool's test
-  browser. Ask Jeremiah to stop it or give it a valid login.
+- **Headless-Chrome mystery closed (2026-10-25):** the "headless Chrome with an expired API key"
+  polling ~360 refused calls/hour was **Jeremiah's own phone** - a Samsung Galaxy S26 (SM-S942U1)
+  running the Jarvis APK on cellular from 172.59.203.208. `/api/users/me/theme` returns 200 (a
+  public default theme with an empty `user_id`) and there were no 401s, so there is nothing to
+  stop. The old UA-based guess (another tool's Windows test browser) was wrong.
 - **TLS:** every host (jarvis, abs, ai, books, docket, games) serves its own nginx-validated certificate
   (to 2027-01-23, auto-renew), so the old `*.sumemail.com` wildcard is not needed. Its renewal is skipped.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
-- **Phase 12 (device management / MDM)**: the first slice shipped (`ccedf489`); the child-facing
-  surface, the Calibre-sourced Library set and the audit log are in review (see "Phase 12 - device
-  management (MDM)" above and `docs/MDM.md`). Open: per-device update notices (the push plumbing is
-  per user), and a wipe still needs a device-owner phone.
+- **Phase 12 (device management / MDM)**: the first slice (`ccedf489`) and the follow-ups
+  (`84bced59` + `6932452c`: the child-facing file surface, the Calibre-sourced Library set and the
+  audit log) have shipped (see "Phase 12 - device management (MDM)" above and `docs/MDM.md`). Open:
+  per-device update notices (the push plumbing is per user), and a wipe still needs a device-owner
+  phone.
 - Devices: the tablet/phone split is a screen-width heuristic, so a very large phone reads as a
   tablet (`72835c17`).
-- Family guard (device owner): the Layer 2 restrictions and the new Settings-page tamper matches only
-  take effect on a phone provisioned as device owner
-  (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`).
+- Family guard (device owner): the Layer 2 restrictions, the new Settings-page tamper matches, the
+  **kiosk lock-task mode** and the **real OS lock** all require a one-time device-owner provisioning
+  (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` on a phone with no accounts
+  signed in, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a factory reset, which is not implemented).
+  Without it a lock is the Accessibility home-redirect plus the cover only.
+- **Family Link / Qustodio / Bark research (2026-10-25):** there are no supported public APIs for
+  device control (only reverse-engineered Home Assistant bridges), so their best features are being
+  rebuilt natively. Build order (cheap parenting wins first): (1) the cheap parenting wins - an
+  "Ask a parent" unblock on the blocked-app screen, a child's own weekly screen-time report, and a
+  repeated-blocked-site alert; (2) web-filter categories; (3) notification/social monitoring;
+  (4) a device-owner hardening batch; (5) remote app install/uninstall; (6) kiosk/COSU;
+  (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config + OS-update policy.
+- **OpenRouter**: the per-user OpenRouter tile is removed (`d517166f`) and there is no per-user
+  OpenRouter credential; OpenRouter is the global Settings > LLM setting.
 
 ## 5. Immediate next steps
 
 1. **Device checks (need a person with the phones; install the newest APK first):**
-   - background music: play on the phone, swipe the app away (music continues), reopen it;
+   - **Device-owner provisioning first** (see item 3): on a phone with no accounts signed in,
+     `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`, so the Layer 2
+     restrictions, kiosk lock-task mode and the real OS lock actually engage;
+   - background music: play on the phone, swipe the app away (music continues), reopen it, and the
+     home-screen widget's transport buttons on a real phone (media Phase 8);
+   - the **real lock** (`613edbb0`): bedtime/pause enters kiosk lock-task mode on a device-owner
+     phone, a parent's lock is immediate, and Devices says "Locked" only when the phone reports
+     `deviceOwner`;
    - Health Connect connect/sync and the Health today widget (list in docs/HEALTH_HUB.md);
    - Phase 11: install approval, camera permission gating, the one-minute warning, "ask a
      parent" from a blocked site (list in docs/HEALTH_HUB.md Phase 11);
+   - Phase 12 MDM: a pushed School/Library file opens in the in-app viewer or downloads on the
+     child's device, and a remote wipe lands on a device-owner phone;
    - Notes: a place reminder on arriving home, a voice note, drawing, an offline edit;
    - the screen fix: the app must not drag under the status bar or the Android buttons;
    - the Jarvis guard: uninstall attempt → parent-login screen; parent login and the **offline
@@ -850,12 +933,16 @@ device-owner phone; app install/uninstall stays the screen rules.
    arrival-order answers, late answers not burned).
 3. Phase 11: the device-owner Layer 2 restrictions shipped (block the guard's own uninstall,
    `DISALLOW_SAFE_BOOT`/`FACTORY_RESET`/`USER_SWITCH`/`ADD_USER`/`DEBUGGING_FEATURES`/`CONFIG_VPN`/
-   `CONFIG_PRIVATE_DNS`, a real `lockNow()` at lock onset, and the new Settings-page tamper matches)
-   but only take effect on a phone provisioned as device owner
-   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`), which still belongs to
-   the other tool. The web-filter bypass blocks (unsupported browsers, split screen, safe mode)
-   shipped.
-4. Finish the media Phase 8 device checklist and Phase 9 (release).
+   `CONFIG_PRIVATE_DNS`, a real `lockNow()` at lock onset, and the new Settings-page tamper matches),
+   and a parent's lock is now a real lock (`613edbb0`: kiosk lock-task mode on a device-owner phone,
+   an immediate lock, and the false "Locked" success gone). All of it only takes effect on a phone
+   provisioned as device owner (`adb shell dpm set-device-owner
+   com.jarvisos.app/.GuardAdminReceiver`, one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a
+   factory reset, not implemented). The web-filter bypass blocks (unsupported browsers, split
+   screen, safe mode) shipped.
+4. Finish the media Phase 8 device checks (above) and Phase 9: the final full gate, the full hermetic
+   E2E on all projects, and one `LIVE=1` run against the dev server
+   (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test --project=live`).
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live
