@@ -286,21 +286,41 @@ are the app shell, navigation plumbing and the older admin pages.
 
 ### 3.6 Family comms, notes and calls
 
-**Open (broken).**
+**Fixed.**
 
-- An open chat thread says "No messages yet" when Nextcloud is down, while the inbox correctly shows
-  an error - the two halves disagree.
-- An `@Jarvis` failure is completely silent: the orchestrator logs it and nothing is posted to the
-  room, and the "Jarvis is thinking…" bubble simply vanishes after three minutes.
-- Regular trivia and the memory game cannot be started from the UI at all; only Bible trivia has a
-  chip, so the backend for the other two is unreachable.
-- The game endpoint trusts a client-supplied player identity, so any member can bank stars or answer
-  as another member.
+- An open chat thread used to say "No messages yet" when Nextcloud was down, while the inbox correctly
+  showed an error - the two halves disagreed. The thread's fetch now throws on a FAILURE body, and the
+  thread shows an inline error with a retry instead of the empty text.
+- An `@Jarvis` failure was completely silent: the orchestrator logged it, nothing was posted to the
+  room, and the "Jarvis is thinking…" bubble simply vanished after three minutes. A failure now posts
+  one short line into the room ("I could not answer that just now. Try again in a moment.").
+- Regular trivia and the memory game could not be started from the UI at all; only Bible trivia had a
+  chip, so the backend for the other two was unreachable. All three now start from the composer's
+  chips (Trivia, Memory, Bible trivia) through one call.
+- The game endpoint trusted a client-supplied player identity, so any member could bank stars or
+  answer as another member. The player is now the verified caller.
+- An unanswered drop-in call chimed every 2.5 seconds until somebody dismissed the banner, so a phone
+  left on a table rang all afternoon. The banner stays up; the ringing stops after a minute.
+- The calls tab hid a failed refresh whenever it still had a list. It now says the list may be out of
+  date, and a disabled "Drop in" explains itself ("Not available to call right now").
+- Timer and place-reminder notifications deep-linked to `/communication`, which redirects to the Chat
+  tab - so tapping a finished timer opened a conversation about nothing. Timers now open the Family
+  page's Announce tab and place reminders open Notes.
+- The notes list treated only a returned FAILURE body as an error, so a thrown request showed "No
+  notes yet. Take one above." over a full cache. It now warns that the cached list may be out of date
+  and offers a retry.
 
-**Open (rough).** Family calls ring forever and never reach a closed app (no push, only a client
-poll); "Drop in" is disabled with no explanation; the calls tab hides errors when it has stale data;
-timer notifications deep-link to a screen that no longer exists; the notes list hides transport
-failures; there is no typing indicator; and an optimistic send briefly drops the bubble.
+**Open (rough).**
+
+- A phone with the app closed never learns a call is happening: `activeCalls` is a client-side 5 s
+  poll and the call handler sends no notice. A real call push needs a notification category and its
+  delivery rules, so it is deliberately left for a focused change rather than guessed at here.
+- There is no typing indicator. Read state is real (`receiptFor`/`last_common_read`), but nothing calls
+  Talk's typing endpoint.
+- An optimistic send briefly drops the bubble while the invalidate/refetch round-trips, and
+  attachments and voice notes have no optimistic bubble at all.
+- "Guardian" and "Devices" appear in the navigation for every role. Enforcement is correctly
+  server-side, so this is clutter rather than a hole.
 
 ### 3.7 Backend and operational readiness
 
