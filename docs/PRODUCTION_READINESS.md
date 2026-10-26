@@ -195,14 +195,22 @@ but never checks who is asking is an open door.
   itself uses `https://jarvis.sumemail.com`. The update-URL host check above is the mitigation that
   matters most here.
 
+- **LOW - L1: the internal secret is compared in constant time everywhere, and is a header only.**
+  Health, geo and bible used to return *true* from `_verify_internal_secret` when `INTERNAL_SECRET`
+  was empty (fail open) and to accept the secret as a `?x_internal_secret=` query parameter, which
+  writes the household's master secret into every access log on the path (the proxy redacts `token`
+  and `mt`, not this). All three now use the shared constant-time `secret_matches`, which fails closed
+  when the expected secret is unset, and the query form is gone: geo's sixteen routes and all three
+  middlewares read the header only. The plain `==` comparisons in identity (four, including the one
+  that decides whether a caller may write a device assignment), rag, the control plane (two) and the
+  gateway (four, including `_acting_identity` and `_sd_request_authorized`) use the same helper.
+
 **Open, low.**
 
-- **L1/L2** internal-secret handling: health, geo and bible return *true* from `_verify_internal_secret`
-  when `INTERNAL_SECRET` is empty (fail open), all three also accept it as a `?x_internal_secret=`
-  query parameter (which the proxy does not redact), and several places compare it with `==` instead
-  of the constant-time helper. If the gateway ever started with an empty secret, an empty header
-  would match and a caller could assert any identity. Fix: use `secret_matches` everywhere, fail
-  closed when unset, and drop the query-string and `Bearer` forms.
+- **L2** the internal secret is still a master bearer token: identity's `require_internal` and
+  `require_admin_or_internal` also accept it as `Authorization: Bearer <secret>`. A separate,
+  header-only service credential would be better than one value that is both a bearer token and a
+  header.
 - **L3** the working tree's gitignored `.env` holds a live `GITHUB_TOKEN` and `GITLAB_PASS`. Not a
   merge blocker (it is untracked and never committed), but rotate the GitHub token if it is live.
 
@@ -497,13 +505,10 @@ blocks. The gateway's media layer is the model to copy for honest failure: a nam
 These are known and recorded rather than fixed, so the next person does not have to rediscover them.
 Everything here is a deliberate call, not an oversight.
 
-- **LOW - the internal secret is still accepted as a query parameter** (`?x_internal_secret=`) on
-  about fifteen geo routes (and by the health and bible middlewares). The comparison is now
-  constant-time and fails closed when the secret is unset, and nothing in the gateway, the UI or the
-  scripts sends it that way, so the query form has no caller - but it still exists, and Caddy only
-  redacts `token` and `mt` from URLs, so a caller who used it would write the master secret into the
-  access log. Removing it is a mechanical change across those routes and is worth doing the next
-  time one of them is touched.
+- **LOW - the internal secret is still a bearer token as well as a header.** Identity's
+  `require_internal` and `require_admin_or_internal` accept it as `Authorization: Bearer <secret>`, so
+  one value is both. A separate header-only service credential would be better. (The query-parameter
+  form, the fail-open checks and the plain `==` comparisons are all fixed - see §3.3.)
 - **ACCEPTED RISK - Android still permits cleartext** (`services/ui/capacitor.config.ts`
   `cleartext: true`, `services/ui/android/app/src/main/AndroidManifest.xml`
   `usesCleartextTraffic="true"`). Android's network-security-config cannot express "plain HTTP is
