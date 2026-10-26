@@ -328,6 +328,10 @@ services:
     container_name: sharedllm_logging
     restart: unless-stopped
     mem_limit: 512m
+    # Runs as the host user, not root: it writes nothing outside its own
+    # image, and a container that cannot write anywhere is one less thing to
+    # trust.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
@@ -699,6 +703,10 @@ services:
     container_name: sharedllm_geo
     restart: unless-stopped
     mem_limit: 512m
+    # Runs as the host user, not root: it writes nothing outside its own
+    # image, and a container that cannot write anywhere is one less thing to
+    # trust.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:

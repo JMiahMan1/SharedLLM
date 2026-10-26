@@ -389,7 +389,8 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
 7. Identity, health, bible and storage ran as root. They now run as the host user (`user:` in
    `docker-compose.yml`), and the three data directories that were root-owned on the host
    (`data/health`, `data/bible`, `data/storage`) were chowned to match - identity holds the family's
-   accounts and the Fernet-encrypted credentials, so it was the one that mattered most.
+   accounts and the Fernet-encrypted credentials, so it was the one that mattered most. Logging and
+   geo followed, because neither writes anything at all.
 8. The base image was built from a moving tag, so the same commit could produce a different image on
    a different day. `docker/Dockerfile.base` now pins the multi-arch index digest of
    `python:3.11-slim`, which fixes the interpreter and the system libraries while leaving both
@@ -413,8 +414,10 @@ known-good build, not a blind edit); a second replica of a service would still b
 because state lives in the process - the gateway's live media push keeps a hub per user and a registry
 of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
 `apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
-too, all of which is harmless while exactly one replica runs each service; and rag, telemetry, geo,
-logging, ui, dns and caddy still run as root, because their data lives in root-owned named volumes.
+too, all of which is harmless while exactly one replica runs each service; and rag, telemetry, ui,
+dns and caddy still run as root - rag because its caches are mounted at `/root/.cache` and its named
+volume is root-owned, telemetry and dns because they read the Docker socket, and ui and caddy because
+a web server binding its port as an unprivileged user needs its own image variant.
 
 **Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
 list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
