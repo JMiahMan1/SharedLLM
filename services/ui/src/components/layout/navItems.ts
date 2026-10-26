@@ -36,6 +36,13 @@ export interface NavPage {
   adminOnly?: boolean;
   /** Label in the phone bottom bar, when it differs ("Home"). */
   mobileLabel?: string;
+  /**
+   * Label for a signed-in member who is not an admin, when the page means
+   * something different to them. "Devices" is device management for a parent
+   * and a list of the files a parent shares for a child, so the same word sent
+   * a child somewhere they had no reason to look.
+   */
+  memberLabel?: string;
   /** Default slot (1-5) among the tabs pinned to the phone bottom bar. */
   pinnedOnMobile?: number;
 }
@@ -46,7 +53,7 @@ export const NAV_PAGES: NavPage[] = [
   { icon: HeartPulse, label: 'Health', path: '/fitness', keywords: 'steps workouts pedometer fitness goals achievements', pinnedOnMobile: 5 },
   { icon: Users, label: 'Family', path: '/family', keywords: 'games talk chores rewards together recipes timers alarms announcements speakers devices notifications', pinnedOnMobile: 3 },
   { icon: ShieldHalf, label: 'Guardian', path: '/guardian', keywords: 'family guardian parental controls screen time safety children kids wellbeing' },
-  { icon: Smartphone, label: 'Devices', path: '/devices', keywords: 'mdm device management inventory remote wipe lock update push shared school library files' },
+  { icon: Smartphone, label: 'Devices', memberLabel: 'Shared files', path: '/devices', keywords: 'mdm device management inventory remote wipe lock update push shared school library files' },
   { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists' },
@@ -61,7 +68,13 @@ export const NAV_PAGES: NavPage[] = [
   { icon: Shield, label: 'Admin', path: '/admin', keywords: 'manage control panel users services', adminOnly: true },
 ];
 
-/** The pages this user may open, in display order. */
+/**
+ * The pages this user may open, in display order, with the labels that fit
+ * them: a member who is not an admin sees "Shared files" where an admin sees
+ * "Devices".
+ */
 export function navPagesFor(isAdmin: boolean): NavPage[] {
-  return NAV_PAGES.filter((page) => !page.adminOnly || isAdmin);
+  return NAV_PAGES.filter((page) => !page.adminOnly || isAdmin).map((page) =>
+    !isAdmin && page.memberLabel ? { ...page, label: page.memberLabel } : page
+  );
 }

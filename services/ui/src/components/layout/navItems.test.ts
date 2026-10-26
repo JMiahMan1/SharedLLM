@@ -17,4 +17,15 @@ describe('nav pages', () => {
   it('does not pin the guardian page to the phone bottom bar', () => {
     expect(NAV_PAGES.find((page) => page.path === '/guardian')?.pinnedOnMobile).toBeUndefined();
   });
+
+  it('calls the devices page "Shared files" for a member who is not an admin', () => {
+    // A parent gets device management; a child gets the files their parents
+    // share with them. The same word for both sent a child somewhere they had
+    // no reason to look.
+    const admin = navPagesFor(true).find((page) => page.path === '/devices');
+    const member = navPagesFor(false).find((page) => page.path === '/devices');
+    expect(admin?.label).toBe('Devices');
+    expect(member?.label).toBe('Shared files');
+    expect(member?.path).toBe('/devices');
+  });
 });
