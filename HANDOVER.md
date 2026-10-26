@@ -5,7 +5,7 @@ Every claim below was verified against the live system unless marked **planned**
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `eca4d83f`.
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `d05bd6ec`.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca4d83f**
   (APK `versionCode` **462**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
@@ -704,7 +704,7 @@ Every claim below was verified against the live system unless marked **planned**
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` - `python` is not on
   PATH. Baselines verified 2026-10-26:
-  `services/gateway/tests services/common` -> **1831 passed**;
+  `services/gateway/tests services/common` -> **1836 passed**;
   `services/rag/tests` -> **117 passed / 14 skipped**;
   `services/health services/identity services/telemetry services/bible services/execution`
   -> **2581 passed / 60 skipped**;
@@ -774,6 +774,27 @@ Every claim below was verified against the live system unless marked **planned**
   on (circle, cannot opt out); adult child can opt out. One linked mother per
   minor. Managed in Admin → Users → Family (admins) or Settings → Family roles
   (mothers).
+- **Family guard / screen time** (phone side is Android-only, and needs the current APK):
+  rules per child - a daily limit, weekend limit, per-weekday limits, bedtime, a school
+  window, pause, and parent-granted bonus minutes - are evaluated by
+  `services/common/screen_time.py` and served as `GET /api/screen-time/{user}/status`;
+  parents set them from the member page (`/family/member/<child>`) or the Devices page.
+  On the phone the **Accessibility guard** (`GuardService`) enforces them: while the lock
+  is up it draws a **full-screen overlay** (`GuardOverlay`, a `TYPE_ACCESSIBILITY_OVERLAY`
+  window) over everything including the home screen, a tablet's taskbar and the navigation
+  strip, so Home and Back cannot leave it. The lock names the reason and offers "Ask for
+  more time" (`POST /api/screen-time/requests`), "Message a parent" (`POST /api/guard/message`,
+  which opens the 1:1 family chat with each parent and sends the text as the child) and
+  "Open Jarvis" - all painted over the lock as a sheet, so the lock is never taken down -
+  plus a parent's own login (`POST /api/guard/parent-unlock`: ten minutes, five tries per
+  ten) or their 6-12 digit offline code. A parent's own always-allowed list can only **add**
+  to a safety core (dialer, emergency, in-call, Jarvis), never remove it. On a **device-owner**
+  phone the lock is Android's own (`lockNow`) plus lock-task kiosk mode, uninstalling the
+  guard is blocked, and the UserManager restrictions and the remote wipe apply. With the
+  guard off a lock is only a notification, which is why the Devices page says "Locked" only
+  when the phone reports a device owner or the guard on (`mdm.real_lock_reported`). Also
+  live: app blocking, the DNS-only web filter, install approvals, permission gating, the
+  one-minute warning, and tamper / guard-missing reports.
 - **Dashboard role defaults**: child sees chores, calendar, media, notes, verse
   of the day, assigned device control; teen adds climate; non-admin adults see
   everything except Workspaces; admins see Workspaces too. Any saved choice
@@ -814,6 +835,17 @@ Every claim below was verified against the live system unless marked **planned**
 - **Service health**: classified probes in the gateway; admin alerts when
   Audiobookshelf, Music Assistant or Nextcloud go down; `check_service_urls.py`
   for a local pass/fail.
+- **MDM / Devices (Phase 12)**: every family device is inventoried (kind, owner, app
+  version, reported capabilities, last seen) on the Devices page; a parent can push an app
+  update to one, push shared School/Library files to a child's device (they open in the
+  in-app viewer or download), lock/unlock a device (that is the screen-time pause, audited
+  only when the phone can really lock) and request a wipe (needs a device-owner phone).
+  `docs/MDM.md`.
+- **Family pages and OTA**: `/family/member/<child>` is the parent's single page for one
+  child (chores, screen time, devices, wellbeing, sharing) and `/guardian` is the parent's
+  own view (the week, prayer, digital wellbeing, concerns, journal, weekly recap,
+  find-my-phone). The Android app updates itself over the air from
+  `/api/app-updates/version` (`docs/MOBILE_OTA_UPDATES.md`).
 - **Also live**: Bible reader/imported books/devotionals, calendar, geo steps,
   chat/voice, devices, recipes plan docs.
 
@@ -962,7 +994,8 @@ device-owner phone; app install/uninstall stays the screen rules.
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` on a phone with no accounts
   signed in, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a factory reset, which is not implemented).
   Without it a lock is the full-screen Accessibility overlay (`GuardOverlay`), which covers the home
-  screen and cannot be left with Home or Back but is not Android's own lock screen.
+  screen and a tablet's taskbar and navigation strip and cannot be left with Home or Back, but is not
+  Android's own lock screen.
 - **Family Link / Qustodio / Bark research (2026-10-25):** there are no supported public APIs for
   device control (only reverse-engineered Home Assistant bridges), so their best features are being
   rebuilt natively. Build order (cheap parenting wins first): (1) the cheap parenting wins - an
