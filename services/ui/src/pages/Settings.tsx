@@ -88,26 +88,32 @@ const Settings = () => {
         <NotificationsRow />
       </div>
 
-      <NotificationPreferencesPanel />
-      {native && <PushAppsPanel />}
+      <section className="space-y-4" aria-labelledby="settings-notifications">
+        <h2 id="settings-notifications" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Notifications</h2>
+        <NotificationPreferencesPanel />
+        {native && <PushAppsPanel />}
+      </section>
 
-      <MobileMenuPanel />
+      <section className="space-y-4" aria-labelledby="settings-appearance">
+        <h2 id="settings-appearance" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Appearance</h2>
+        <SiteThemePanel />
+        <MobileMenuPanel />
+      </section>
 
-      <SiteThemePanel />
+      <section className="space-y-4" aria-labelledby="settings-family">
+        <h2 id="settings-family" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Family</h2>
+        <FamilyPanel />
+        <ActivitySharingPanel />
+        <FamilyDropInSection />
+        <TelemetryReportsPanel />
+      </section>
 
-      <ActivitySharingPanel />
-
-      <FamilyPanel />
-
-      <TelemetryReportsPanel />
-
-      <SensorsSection />
-
-      <FamilyDropInSection />
-
-      <AppUpdatesSection />
-
-      <AppCleanupPanel />
+      <section className="space-y-4" aria-labelledby="settings-device">
+        <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>
+        <SensorsSection />
+        <AppUpdatesSection />
+        <AppCleanupPanel />
+      </section>
 
       <div className="glass-panel rounded-2xl p-4 space-y-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Location & Presence</h2>
