@@ -577,6 +577,15 @@ services:
     container_name: sharedllm_ui
     restart: unless-stopped
     mem_limit: 256m
+    # nginx serves the app as the host user. It needs a writable cache (proxy
+    # and upload temp files - attachments can be 20 MB) and a writable /run for
+    # its pid, which is exactly what these two tmpfs mounts give it. Verified by
+    # running the published image as uid 1000 on the sharedllm network: static
+    # files 200, /api proxied to the gateway 200.
+    user: "${PUID}:${PGID}"
+    tmpfs:
+      - /var/cache/nginx:mode=1777,size=128m
+      - /var/run:mode=1777,size=8m
     environment:
       - TZ=America/Phoenix
     depends_on:
