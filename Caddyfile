@@ -7,6 +7,19 @@
     servers :80 {
         trusted_proxies static {$PUBLIC_PROXY_IP}
     }
+
+    # Caddy's reverse proxy logs "aborting with incomplete response" at WARN every
+    # time a long-lived stream ends -- the media events feed and the push stream,
+    # whenever a phone closes the app or the screen sleeps. That is expected, and
+    # it was 1400+ lines a day (measured 2026-10-26) drowning the warnings that
+    # matter. Real failures from that logger are ERROR, so this raises its level
+    # without touching the access log or any other logger.
+    log reverse_proxy_noise {
+        output stdout
+        format json
+        level ERROR
+        include http.handlers.reverse_proxy
+    }
 }
 
 # Cross-Network Routes (Host Network → Bridge Network)
@@ -157,14 +170,16 @@
     }
     handle /api/sendspin {
         reverse_proxy gateway:11435 {
+            # Caddy already forwards X-Forwarded-Proto and sets X-Real-IP from the
+            # client, so repeating them here only earned a startup warning.
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
         }
     }
     handle /api/ma-jsonrpc {
         reverse_proxy gateway:11435 {
+            # Caddy already forwards X-Forwarded-Proto and sets X-Real-IP from the
+            # client, so repeating them here only earned a startup warning.
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
         }
     }
     handle /api/presence* {
