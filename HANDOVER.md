@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `ebe57666`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `690ea213`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **ebe57666**
-  (APK `versionCode` **482**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+  (APK `versionCode` **483**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
@@ -18,8 +18,8 @@ Every claim below was verified against the live system unless marked **planned**
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
   services' logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK
-  `versionCode` rebuilds per push (482 is current; 481 was the previous), so the native work below
-  needs the newest APK on the phones. **APK 482** carries the guard overlay that draws over a
+  `versionCode` rebuilds per push (483 is current; 482 was the previous), so the native work below
+  needs the newest APK on the phones. **APK 483** carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
@@ -50,6 +50,25 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-26` **Android client, account lifecycle and first-load weight** (the tail of the
+  production-readiness program; `docs/PRODUCTION_READINESS.md` §3.9). **Signing out now signs out:**
+  `logout` awaited nothing before navigating, and on Android the key is mirrored into the native
+  preferences the background services read, so the phone kept streaming notifications and uploading
+  location and steps with the previous person's key; the clear is awaited now, and the same path stops
+  the location and step foreground services, clears their switches and clears the notices still on the
+  lock screen. A rejected key no longer spins the push stream every five minutes forever; it clears and
+  stops. `StepSyncService` now answers Android 15's six-hour `dataSync` cap by stopping deliberately
+  instead of being killed with its notice still up. An **admin password reset rotates the session key**
+  (it used to leave the old phone fully signed in, which is the opposite of what a reset is for).
+  Creating an account now requires a password and importing a discovered user mints a temporary one,
+  because a null password meant the account could never sign in and said nothing about why. A slow start
+  can no longer trap the app at `/login` (the init error is cleared on success), a role change reaches
+  the client without a reload, `Comms.requestAccess` reports the real permission result instead of the
+  pre-dialog one, the step counter unregisters its sensor with the bridge, and the family's real home
+  coordinates are out of the APK. **Weight:** every page is now loaded on demand (23 static imports and
+  no chunking meant one 6.4 MB script before the first screen); with `lazy()` plus vendor chunking the
+  entry script is **593 kB** (gzip 179 kB) and the workspace IDE's 2.3 MB monaco bundle is only fetched
+  when the IDE is opened.
 - `2026-10-26` **Production-readiness program** (`docs/PRODUCTION_READINESS.md` is the record). The
   whole app was audited against a written bar by five read-only audits (UI/UX, health hub, family
   comms, backend readiness, security); every finding was graded BROKEN / ROUGH / FINE and then fixed.

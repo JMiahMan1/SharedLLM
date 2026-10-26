@@ -500,6 +500,71 @@ blocks. The gateway's media layer is the model to copy for honest failure: a nam
   server's parse error after the fact rather than catching it first.
 - `docs/RECIPES.md`'s Phase 6 (tests) and Phase 7 (Skylight) remain as that file describes.
 
+### 3.9 The Android client and the account lifecycle (audited 2026-10-26)
+
+**Fixed.**
+
+- **A1 - signing out did not reliably sign out.** `logout` removed the stored key
+  and then navigated immediately, but on Android the key is mirrored into the native preferences that the
+  background services read, and that write is a bridge round-trip: it never finished. The phone kept
+  streaming notifications, uploading location and steps, and running widgets with the previous person's
+  key. `logout` is async now and waits for both removals before it navigates.
+- **A2 - a slow start could trap the app at the login screen.** A three-second timeout set `initError`,
+  and nothing ever cleared it: a successful sign-in was still bounced back to `/login` until the app was
+  reloaded. The error is cleared on a successful restore and on a successful login.
+- **A3 - step sync died silently on Android 15.** `StepSyncService` held a `dataSync` foreground service
+  all day, and Android 15 stops those after six hours; there was no `onTimeout`, so the service was
+  killed with the "Step counting is on" notice still up. Both `onTimeout` overloads now stop deliberately.
+- **A4 - signing out left the location and step services running.** `setCredentials` stopped the push
+  stream only, so a signed-out phone still powered the GPS and still advertised that location sharing was
+  on. Sign-out now stops both services and clears their switches.
+- **A5 - a rejected key spun the push stream forever.** A 401 or 403 was treated as a blip and retried
+  every five minutes, holding a foreground service on a credential that could not work. It now clears the
+  mirrored key, clears the notices and stops.
+- **A6 - the previous person's notifications stayed on the lock screen** after a sign-out (they were only
+  cleared when the account *changed*). Sign-out clears them too.
+- **A7 - an admin password reset did not rotate the session key.** Changing your own password rotated it;
+  a parent resetting a child's password left the old phone fully signed in and still reporting, which is
+  the opposite of what a reset is for. The admin route now rotates the key the same way.
+- **A8 - `Comms.requestAccess` answered before the dialog.** It read the permissions immediately after
+  asking, so it reported the state from before the choice; a caller could believe access was refused the
+  moment after it was granted. The answer now comes from the permission result.
+- **A12 - the step counter left its sensor registered** when the bridge went away, keeping the plugin and
+  the sensor alive. It unregisters in `handleOnDestroy`.
+- **A10 - the family's home coordinates were baked into the APK.** They were the fallback home for the
+  "away from home" check, so the real address shipped in every download. With no home learned, the check
+  now answers "not away" instead of comparing against it.
+- **B1 - a new account could be created with no password and then simply could not sign in.** The field
+  was marked required but nothing enforced it, and the server stores no hash, so the only feedback was the
+  generic "Invalid username or password" - forever. Creating an account now requires a password of at
+  least four characters, and importing a discovered user mints a temporary one and shows it.
+- **B2 - a role change reached the client only on a full reload**, so a demoted member kept being offered
+  actions the server refused. The profile is re-read when the app returns to the foreground and every five
+  minutes.
+- **B4 - a wrong password was reported twice** (a toast and the inline alert). The login page keeps the
+  inline one.
+- **B5 - `role` reported `'user'` when nobody was signed in.** It is null now, as its type says.
+- **B6 - per-person device preferences survived a sign-out** (`jarvis_guard_seen_on`, the location
+  tracking switch, the step backfill marker), so on a shared phone the next person inherited the previous
+  person's state. Sign-out clears them, and the native switches are cleared with the key.
+
+**Open (rough).**
+
+- **A9** cleartext traffic and user-installed certificate authorities are enabled for every host
+  (`AndroidManifest.xml`, `capacitor.config.ts`, `res/xml/network_security_config.xml`). The household uses
+  HTTPS, so this is the accepted risk recorded in §4 rather than an oversight - but the user-CA trust in
+  particular is broader than it needs to be.
+- **A11** `WidgetApi.DEFAULT_SERVER` falls back to the public domain for an unconfigured widget, so a
+  widget on a phone that has never signed in calls out rather than rendering "Sign in". (The baked-in home
+  coordinates are gone: with no home learned, the "away from home" check now answers "not away" instead of
+  comparing against the family's real address.)
+- **B3** a first run with no accounts gives no in-app guidance; the seeded administrator is `default` with
+  the password from `DEFAULT_ADMIN_PASSWORD`, which the person has to know from the docs. A hint on the
+  login screen would need an endpoint that says whether any account exists, and that is exactly what an
+  unauthenticated caller should not be able to learn, so this stays documented rather than built.
+- The Android fixes above compile and are covered by the existing unit tests, but they need a real phone
+  (Android 15 or 16 for the `dataSync` cap) to be confirmed in the field.
+
 ## 4. Deliberately left, with reasons
 
 These are known and recorded rather than fixed, so the next person does not have to rediscover them.
