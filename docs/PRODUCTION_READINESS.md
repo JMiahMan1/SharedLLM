@@ -300,8 +300,7 @@ wellbeing live there.
 
 **Open (rough).**
 
-- Two identical-looking search boxes mean different things, and the theme tokens are bypassed by
-  hardcoded colour classes in 216 files.
+- The theme tokens are bypassed by hardcoded colour classes in 216 files.
 
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
@@ -313,7 +312,7 @@ bar wraps instead of scrolling sideways, so all twelve sections are visible; and
 into Notifications, Appearance, Family and This device instead of one flat column; a failed request now carries the server's
 own words rather than "Request failed with status code 500" - fixed once in the axios interceptor where every request
 passes, not at the ~171 places that display it; and the two knowledge searches use a brain icon and say what they
-search, so they no longer look like the app-wide page finder; and the workspace row's star, share and delete
+search, so they no longer look like the app-wide page finder; the workspace row's star, share and delete
 buttons show a busy state instead of inviting a second click.
 
 ### 3.6 Family comms, notes and calls
@@ -341,6 +340,13 @@ buttons show a busy state instead of inviting a second click.
 - The notes list treated only a returned FAILURE body as an error, so a thrown request showed "No
   notes yet. Take one above." over a full cache. It now warns that the cached list may be out of date
   and offers a retry.
+- A sent text message dropped out of the feed as soon as the request succeeded and only came back on
+  a later poll, because the optimistic bubble was removed straight after a refetch that often did not
+  contain the message yet. The bubble now stays until a fetch actually has it (with a twenty-second
+  backstop), so the message never blinks out.
+- A photo or a voice note appeared in the feed only once the upload returned and the thread refetched,
+  so a large one looked like nothing had happened. Both now show a pending bubble as soon as they are
+  sent, which goes away as soon as the real message is in the thread.
 
 **Open (rough).**
 
@@ -350,8 +356,6 @@ buttons show a busy state instead of inviting a second click.
 - There is no typing indicator, and it is not a cheap add: Talk's typing signal is a websocket
   feature while this integration is HTTP-only, so it needs a websocket client rather than a poll.
   Read state is real either way (`receiptFor`/`last_common_read`).
-- An optimistic send briefly drops the bubble while the invalidate/refetch round-trips, and
-  attachments and voice notes have no optimistic bubble at all.
 ### 3.7 Backend and operational readiness
 
 Judged as one host, one replica per service, seven users, behind a proxy - not as a SaaS.

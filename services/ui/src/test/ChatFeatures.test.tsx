@@ -208,3 +208,69 @@ describe('opening a conversation', () => {
     expect(screen.queryByRole('button', { name: /show earlier messages/i })).not.toBeInTheDocument();
   });
 });
+
+describe('family chat optimistic send', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('/api/communication/talk/conversations', () =>
+        HttpResponse.json({ status: 'SUCCESS', detail: { conversations: [room] } }),
+      ),
+      http.get('/api/communication/talk/messages', () =>
+        HttpResponse.json({ status: 'SUCCESS', detail: { messages } }),
+      ),
+      http.get('/api/communication/talk/polls', () =>
+        HttpResponse.json({ status: 'SUCCESS', detail: { polls: [] } }),
+      ),
+      http.post('/api/communication/talk/read', () => HttpResponse.json({ status: 'SUCCESS' })),
+      http.get('/api/communication/talk/mentions', () =>
+        HttpResponse.json({ status: 'SUCCESS', detail: { mentions: [] } }),
+      ),
+      http.post('/api/communication/talk/messages', () =>
+        HttpResponse.json({ status: 'SUCCESS', detail: { message_record: { id: 999 } } }),
+      ),
+    );
+  });
+
+  it('keeps the sent message on screen while the room has not echoed it yet', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+    const feed = await loadedFeed();
+
+    await user.type(screen.getByLabelText('Message'), 'Bring the good syrup');
+    await user.click(screen.getByRole('button', { name: /send message/i }));
+
+    // The room's history above never contains this message, so a bubble dropped
+    // as soon as the request succeeded used to blink out of the feed and only
+    // come back on a later poll.
+    await waitFor(() => expect(screen.getByLabelText('Message')).toHaveValue(''));
+    await waitFor(() => expect(feed).toHaveTextContent('Bring the good syrup'));
+  });
+  it('shows a photo in the feed while it is still uploading', async () => {
+    const user = userEvent.setup();
+    // Hold the upload open, so the bubble has to exist before the send returns.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post('/api/communication/talk/file', async () => {
+        await gate;
+        return HttpResponse.json({ status: 'SUCCESS', detail: { message_record: { id: 1001 } } });
+      }),
+    );
+    renderWithProviders(<Family />);
+    const feed = await loadedFeed();
+
+    await user.upload(
+      screen.getByLabelText('Attach files'),
+      new File(['x'], 'beach.jpg', { type: 'image/jpeg' }),
+    );
+    await user.click(screen.getByRole('button', { name: /send message/i }));
+
+    // A photo used to appear only once the upload returned and the thread
+    // refetched, so a large one looked like nothing had happened.
+    await waitFor(() => expect(feed).toHaveTextContent('beach.jpg'));
+    release();
+  });
+});
+
