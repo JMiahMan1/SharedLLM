@@ -15,6 +15,7 @@ export interface NotificationCategory {
 
 export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   { id: 'chat', label: 'Family chat', description: 'New messages and Jarvis answers in your conversations.' },
+  { id: 'call', label: 'Family calls', description: 'When somebody starts a family call.' },
   { id: 'family_presence', label: 'Arrivals and departures', description: 'When family arrive at or leave a saved place.' },
   {
     id: 'family_safety',

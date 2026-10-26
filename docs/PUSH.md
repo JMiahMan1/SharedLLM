@@ -124,7 +124,7 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
 
 - `category` (required for new senders, defaults to `general`) is what
   preferences switch on and off. Categories:
-  `chat`, `family_presence`, `family_safety`, `leave_by`, `calendar`,
+  `chat`, `call`, `family_presence`, `family_safety`, `leave_by`, `calendar`,
   `timers`, `bible`, `reports`, `home`, `jobs`, `raven`, `app_updates`,
   `health`, `admin` (admins only).
 - `priority` 1 to 5 (ntfy's scale; 5 = urgent, used for SOS and leaks).
@@ -371,6 +371,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 | Category | Sent by | When |
 |---|---|---|
 | chat | gateway `chat_notify` | new family message, Jarvis answer (Reply, Open); tag per conversation |
+| call | gateway `proxy_talk_call` | somebody joined a family call: one notice per call, claimed by the first joiner for fifteen minutes; Open opens the calls tab |
 | family_presence | geo `_notify_presence` | arrivals and departures (Map) |
 | family_safety | identity `battery_alerts`, geo `safety`, gateway `family_safety` | low phone battery (below `LOW_BATTERY_PCT` and not charging; armed again only by charging or a reading of `LOW_BATTERY_PCT` + 5, and at most once a day per phone owner through `once`), arrived at or left a place marked important (school; admins choose the places), unusually long stop somewhere unknown, "On my way" (once per 5 min per person) and SOS (priority 5, once a minute per person; sooner is a 429 saying when) from the app; Find my phone from the watch (priority 5, rings the phone for a minute with a Stop action); a child's ask (new app, permission, blocked site) and a request for more screen time reach both parents with Approve and Disapprove buttons (`guard_decide`, `more_time_decide`) |
 | leave_by | execution `leave_by` | time to leave for an event with a location (tag per event) |
