@@ -411,6 +411,21 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any, re
             log.info(f"[Jarvis] Successfully posted answer to room {token}")
     except Exception as e:
         log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
+        # A silent failure left the room with a "Jarvis is thinking…" bubble
+        # that never resolved. Say so, in the room, where the person asked.
+        try:
+            ok, _data, message = await _post_as_jarvis(
+                provider,
+                token,
+                {
+                    "message": _assistant_post("I could not answer that just now. Try again in a moment."),
+                    **({"replyTo": str(reply_to)} if reply_to else {}),
+                },
+            )
+            if not ok:
+                log.error(f"[Jarvis] Could not post the failure notice: {message}")
+        except Exception as post_error:  # NameError included, if provider never bound
+            log.error(f"[Jarvis] Could not post the failure notice: {post_error}")
 
 
 CARD_KINDS = ("activity", "game", "creation", "system")
