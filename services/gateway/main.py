@@ -6189,12 +6189,13 @@ async def screen_time_pause(request: Request, username: str):
         await _screen_time_notice([username], title, text, "/health")
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
         # log (Phase 12) so "who locked a device, and when" has one answer. A
-        # lock is only logged when the phone is a device owner and can really
-        # lock (Android's own lock screen / lock task): on any other phone the
-        # "lock" is only the Accessibility soft cover, and logging "locked a
-        # device" would be a false success.
-        if paused and not await mdm.device_owner_reported(request, subject):
-            log.info("[mdm] %s is not a device owner; the lock is a soft lock, not logged as a real lock", subject)
+        # lock is only logged when the phone can really lock itself: a device
+        # owner uses Android's own lock screen / lock task, and any other phone
+        # uses the full-screen Accessibility overlay. With the guard off the
+        # "lock" is only a notification, and logging "locked a device" would be
+        # a false success.
+        if paused and not await mdm.real_lock_reported(request, subject):
+            log.info("[mdm] %s has neither a device owner nor the screen guard on; the lock is a notification, not logged as a real lock", subject)
         else:
             mdm.record_audit("device_lock" if paused else "device_unlock", actor,
                              target=subject, detail={"self": mine})

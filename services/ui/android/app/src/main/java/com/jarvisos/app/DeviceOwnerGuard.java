@@ -70,7 +70,8 @@ final class DeviceOwnerGuard {
     /**
      * A real OS lock (Android's own lock screen), for a screen-time lock on a
      * device owner. Call only when {@link DeviceOwnerRules#hardLock} says so;
-     * without device owner the guard falls back to the Accessibility soft lock.
+     * without device owner the guard covers the screen with the Accessibility
+     * overlay instead ({@link GuardOverlay}).
      */
     static void lockNow(Context context) {
         DevicePolicyManager dpm = dpm(context);
@@ -78,7 +79,7 @@ final class DeviceOwnerGuard {
         try {
             dpm.lockNow();
         } catch (Exception ignored) {
-            // No secure lock screen, or no longer device owner: the soft lock still runs.
+            // No secure lock screen, or no longer device owner: the overlay still runs.
         }
     }
 
@@ -87,7 +88,7 @@ final class DeviceOwnerGuard {
      * may run once the guard screen starts lock task. A device owner may set the
      * allowlist; call only when {@link DeviceOwnerRules#lockTask} says so. Without
      * device owner (or on an older Android without lock task) this does nothing,
-     * and the Accessibility soft lock is the whole of the lock.
+     * and the Accessibility overlay is the whole of the lock.
      */
     static void enterLockTask(Context context) {
         DevicePolicyManager dpm = dpm(context);
@@ -96,7 +97,7 @@ final class DeviceOwnerGuard {
             dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class),
                     new String[]{context.getPackageName()});
         } catch (Exception ignored) {
-            // Not device owner, or no lock task on this Android: the soft lock still runs.
+            // Not device owner, or no lock task on this Android: the overlay still runs.
         }
     }
 

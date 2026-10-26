@@ -99,7 +99,7 @@ public class GuardScreenActivity extends ComponentActivity {
             kioskCheck.removeCallbacks(kioskTick);
             kioskCheck.postDelayed(kioskTick, KIOSK_CHECK_MS);
         } catch (Exception ignored) {
-            // Not allowlisted (older Android, or no longer device owner): the soft cover still shows.
+            // Not allowlisted (older Android, or no longer device owner): the cover still shows.
         }
     }
 
@@ -140,6 +140,15 @@ public class GuardScreenActivity extends ComponentActivity {
                         startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/health"));
+                        finish();
+                    }
+
+                    @Override
+                    public void onMessageParents() {
+                        // The family chat, where a parent can be messaged.
+                        startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/family?tab=chat"));
                         finish();
                     }
                 });

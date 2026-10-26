@@ -262,7 +262,7 @@ def test_a_refused_pause_tells_nobody(wired):
     assert sent == []
 
 
-def test_a_lock_is_only_audited_when_the_phone_is_a_device_owner(wired, monkeypatch):
+def test_a_lock_is_only_audited_when_the_phone_can_really_lock(wired, monkeypatch):
     client, _, _, answers = wired
     audits: list[tuple] = []
     monkeypatch.setattr(gateway_main.mdm, "record_audit",
@@ -274,21 +274,27 @@ def test_a_lock_is_only_audited_when_the_phone_is_a_device_owner(wired, monkeypa
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
 
     answers[("POST", "/screen-time/kid/pause")] = (200, {"username": "kid", "rules": {"paused": True}})
-    # The phone has not reported device owner: the "lock" is only the soft cover,
-    # so it is not logged as a real lock.
-    answers[("GET", "/family/devices/kid")] = (200, {"devices": [{"capabilities": {"guard": {"deviceOwner": False}}}]})
+    # No device owner and the screen guard off: the "lock" is only a
+    # notification, so it is not logged as a real lock.
+    answers[("GET", "/family/devices/kid")] = (200, {"devices": [{"capabilities": {"guard": {"deviceOwner": False, "guardEnabled": False}}}]})
     assert client.post("/api/screen-time/kid/pause", json={}).status_code == 200
     assert audits == []
 
-    # A device-owner phone: the lock is real, so it is logged.
-    answers[("GET", "/family/devices/kid")] = (200, {"devices": [{"capabilities": {"guard": {"deviceOwner": True}}}]})
+    # The screen guard on, but no device owner: the full-screen Accessibility
+    # overlay covers the phone, so the lock is real and is logged.
+    answers[("GET", "/family/devices/kid")] = (200, {"devices": [{"capabilities": {"guard": {"deviceOwner": False, "guardEnabled": True}}}]})
     assert client.post("/api/screen-time/kid/pause", json={}).status_code == 200
     assert [a[0] for a in audits] == ["device_lock"]
+
+    # A device-owner phone: the lock is real too, so it is logged.
+    answers[("GET", "/family/devices/kid")] = (200, {"devices": [{"capabilities": {"guard": {"deviceOwner": True}}}]})
+    assert client.post("/api/screen-time/kid/pause", json={}).status_code == 200
+    assert [a[0] for a in audits] == ["device_lock", "device_lock"]
 
     # Unlocking is always logged: it lifts whatever lock there was.
     answers[("POST", "/screen-time/kid/pause")] = (200, {"username": "kid", "rules": {}})
     assert client.post("/api/screen-time/kid/pause", json={"resume": True}).status_code == 200
-    assert [a[0] for a in audits] == ["device_lock", "device_unlock"]
+    assert [a[0] for a in audits] == ["device_lock", "device_lock", "device_unlock"]
 
 
 def test_status_blocks_an_app_past_its_own_minutes(wired):

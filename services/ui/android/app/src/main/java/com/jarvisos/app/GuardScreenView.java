@@ -10,6 +10,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 /**
@@ -21,10 +22,12 @@ import android.widget.TextView;
  * Tamper mode: "A parent needs to sign in" with a parent's own Jarvis login,
  * checked by the server (only this child's parents, five tries then a wait).
  * Locked mode: why the phone is locked (bedtime, school, the day's time, a
- * pause), a way to ask for more time in Jarvis, and the same parent login, with
- * a parent's offline code for when there is no connection.
+ * pause), a way to ask for more time in Jarvis, a way to message a parent in
+ * the family chat, and the same parent login, with a parent's offline code for
+ * when there is no connection. The whole screen scrolls, so the parent's
+ * fields stay reachable with the keyboard up and the way out is never hidden.
  *
- * The screen does not act on its own: it calls the {@link Host} for the two
+ * The screen does not act on its own: it calls the {@link Host} for the three
  * things only the place showing it can do (a cover activity finishes; the
  * overlay takes its window down).
  */
@@ -37,6 +40,9 @@ final class GuardScreenView {
 
         /** The child asked for more time: open Jarvis (Health holds the card). */
         void onAskMoreTime();
+
+        /** The child wants to talk to a parent: open Jarvis on the family chat. */
+        void onMessageParents();
     }
 
     private GuardScreenView() {}
@@ -81,7 +87,8 @@ final class GuardScreenView {
                     : appName + " asked for something your parents approve first. They have been asked; try again once one of them says yes.";
         } else {
             titleText = lockedTitle(context);
-            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time in Jarvis.";
+            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time, or message them."
+                    + " A parent can sign in below, or use their offline code, to lift this.";
         }
         TextView title = text(context, titleText, 24);
         TextView body = text(context, bodyText, 16);
@@ -129,6 +136,12 @@ final class GuardScreenView {
             ask.setOnClickListener(v -> host.onAskMoreTime());
             root.addView(ask);
         }
+        // A way to reach a parent by chat in every mode: a blocked app or a
+        // denied install is exactly when a child needs to talk to one.
+        Button message = new Button(context);
+        message.setText("Message a parent");
+        message.setOnClickListener(v -> host.onMessageParents());
+        root.addView(message);
         // No connection: a parent's offline code works instead of their login.
         EditText offline = new EditText(context);
         offline.setHint("Parent's offline code");
@@ -160,7 +173,15 @@ final class GuardScreenView {
         root.addView(offline);
         root.addView(useCode);
         root.addView(error);
-        return root;
+
+        // Scrollable so the parent's fields stay reachable with the keyboard
+        // up, and a small screen never hides the way out of the lock.
+        ScrollView scroller = new ScrollView(context);
+        scroller.setFillViewport(true);
+        scroller.setBackgroundColor(Color.parseColor("#030711"));
+        scroller.setClickable(true);
+        scroller.addView(root);
+        return scroller;
     }
 
     private static String lockedTitle(Context context) {
