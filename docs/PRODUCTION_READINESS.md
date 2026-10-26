@@ -87,6 +87,12 @@ Fixed in this pass (commits `9dbf4243`, `bd5a9dc9`):
 - **BROKEN - a real artist could not be played.** `playRequestFor` refused every artist, so the
   artist page had no Play button. MA expands an artist URI into every track that artist has, so the
   page now offers Play all and Shuffle, and the row menu offers Play next and Add to queue.
+- **ROUGH - the image proxy streamed an upstream error as if it were an image.** Only 404 and the
+  redirect statuses were handled; every other non-200 (a 400 from a request we built, a 5xx from a
+  broken upstream) fell through to the streaming response, so a cover came back as a broken image
+  rather than an error. It now returns 404 for a missing cover or a redirect and the upstream's own
+  status otherwise, with a test for each. This was a regression from quietening the 404 flood, so it
+  was live for a few hours.
 
 ### 3.2 Merging `microservices` into `main` (investigated 2026-10-26)
 
@@ -401,6 +407,9 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    alerts, song notices and cleanup - now each hold a short Redis lease under their own name
    (`InferenceJobQueue.claim_loop`), refreshed while they run, and stand down while somebody else
    holds it. A Redis failure fails open: losing every notification would be worse than a duplicate.
+10. Retries backed off exactly, so every request in flight when a dependency blinked came back at the
+    same instant and hit it together again. `retry_http_request` now jitters its backoff by up to 50%
+    (`_retry_delay`), with a test that two calls at the same attempt do not wait the same time.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
@@ -419,7 +428,7 @@ dns and caddy still run as root - rag because its caches are mounted at `/root/.
 volume is root-owned, telemetry and dns because they read the Docker socket, and ui and caddy because
 a web server binding its port as an unprivileged user needs its own image variant.
 
-**Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
+**Acceptable for this deployment.** Readiness reports 200 while degraded; some
 list endpoints accept an uncapped `limit`; the error envelope differs between services; no request
 correlation id; two N+1 queries; and a handful of deliberate best-effort `except Exception: pass`
 blocks. The gateway's media layer is the model to copy for honest failure: a named cause and a clean
