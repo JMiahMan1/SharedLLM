@@ -135,20 +135,13 @@ public class GuardScreenActivity extends ComponentActivity {
                     }
 
                     @Override
-                    public void onAskMoreTime() {
-                        // Health holds the "Ask for more time" card.
+                    public void onOpenJarvis() {
+                        // Jarvis is always allowed; the lock comes back when the
+                        // child leaves it. Asking for more time and messaging a
+                        // parent stay on this screen, painted over the lock.
                         startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                                .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/health"));
-                        finish();
-                    }
-
-                    @Override
-                    public void onMessageParents() {
-                        // The family chat, where a parent can be messaged.
-                        startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                                .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/family?tab=chat"));
+                                .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/"));
                         finish();
                     }
                 });

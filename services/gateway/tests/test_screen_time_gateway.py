@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from services.gateway import main as gateway_main
@@ -387,3 +388,95 @@ def test_a_parents_answer_to_a_more_time_request_reaches_the_child(wired):
     assert calls[-1]["url"].endswith("/api/screen-time/requests/3") and calls[-1]["json"] == {"grant": True}
     assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "More time granted"
     assert "30 more minutes" in sent[-1]["body"]
+
+
+def _message_setup(monkeypatch, parents, talk, flags):
+    """Wire the lock screen's "Message a parent" to a fake execution service.
+
+    ``flags`` carries ``open_ok`` / ``send_ok`` so a test can make the chat
+    service fail on either step.
+    """
+
+    async def _who(_request):
+        return {"user": "kid"}
+
+    async def _parents(_user):
+        return list(parents), "Kid"
+
+    async def _proxy(request, endpoint, payload=None, **_kw):
+        payload = payload or {}
+        talk.append({"endpoint": endpoint, **payload})
+        if payload.get("action") == "open":
+            if not flags.get("open_ok", True):
+                return JSONResponse(status_code=500, content={"detail": "talk is down"})
+            return JSONResponse(status_code=200, content={
+                "status": "SUCCESS",
+                "detail": {"conversation": {"token": f"tok-{payload.get('target_user')}"}},
+            })
+        if not flags.get("send_ok", True):
+            return JSONResponse(status_code=500, content={"detail": "talk is down"})
+        return JSONResponse(status_code=200, content={"status": "SUCCESS"})
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
+    monkeypatch.setattr(gateway_main, "_my_parents", _parents)
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", _proxy)
+
+
+def test_messaging_a_parent_opens_the_chat_and_sends_it(wired, monkeypatch):
+    client, _, _, _ = wired
+    talk: list[dict] = []
+    _message_setup(monkeypatch, ["mom", "dad"], talk, {})
+
+    r = client.post("/api/guard/message", json={"text": "  can I have 20 more minutes?  "})
+
+    assert r.status_code == 200
+    assert r.json() == {"status": "SUCCESS", "sent_to": ["mom", "dad"]}
+    # One room per parent, then the message in it: open, send, open, send.
+    assert [c["action"] for c in talk] == ["open", "send", "open", "send"]
+    assert talk[0]["target_user"] == "mom" and talk[2]["target_user"] == "dad"
+    assert talk[1] == {"endpoint": "/execute/talk", "action": "send", "token": "tok-mom",
+                       "message": "can I have 20 more minutes?"}
+
+
+def test_an_empty_message_is_not_sent_to_anyone(wired, monkeypatch):
+    client, _, _, _ = wired
+    talk: list[dict] = []
+    _message_setup(monkeypatch, ["mom"], talk, {})
+
+    assert client.post("/api/guard/message", json={"text": "   "}).status_code == 422
+    assert client.post("/api/guard/message", json={}).status_code == 422
+    assert talk == []
+
+
+def test_a_child_with_no_parents_has_nobody_to_message(wired, monkeypatch):
+    client, _, _, _ = wired
+    talk: list[dict] = []
+    _message_setup(monkeypatch, [], talk, {})
+
+    assert client.post("/api/guard/message", json={"text": "hello"}).status_code == 422
+    assert talk == []
+
+
+def test_messaging_needs_a_signed_in_phone(wired, monkeypatch):
+    client, _, _, _ = wired
+
+    async def _nobody(_request):
+        return {}
+
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _nobody)
+    assert client.post("/api/guard/message", json={"text": "hello"}).status_code == 401
+
+
+def test_a_parent_that_cannot_be_reached_is_reported_not_claimed(wired, monkeypatch):
+    client, _, _, _ = wired
+    talk: list[dict] = []
+    flags = {"open_ok": False}
+    _message_setup(monkeypatch, ["mom"], talk, flags)
+
+    r = client.post("/api/guard/message", json={"text": "hello"})
+    assert r.status_code == 502 and "Try again" in r.json()["detail"]
+
+    flags.update(open_ok=True, send_ok=False)
+    assert client.post("/api/guard/message", json={"text": "hello"}).status_code == 502
+
+

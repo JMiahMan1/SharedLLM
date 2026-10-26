@@ -820,9 +820,19 @@ point.
       with a full-screen Accessibility overlay (`GuardOverlay`, a `TYPE_ACCESSIBILITY_OVERLAY`
       window owned by the service, so Home and Back cannot leave it and no extra permission is
       needed; built 2026-10-26, needs a new APK), leaving only the always-allowed apps (calls,
-      texts, Jarvis) and the system screens open; it shows the reason, an "Ask for more time"
-      button and a "Message a parent" button (the family chat, since a child who cannot get in
-      is exactly who needs to reach one). The whole screen scrolls, so the parent's login fields
+      texts, Jarvis) and the system screens open. The window is forced over every system bar
+      (`FLAG_LAYOUT_NO_LIMITS` with only the keyboard inset still fitted), because a tablet's
+      taskbar and wide navigation strip otherwise left part of the screen visible and usable and
+      the lock was not really full screen; the keyboard inset stays fitted so a parent can type
+      their login with the lock up. It shows the reason, an "Ask for more time" button and a
+      "Message a parent" button (the family chat, since a child who cannot get in
+      is exactly who needs to reach one). Both are painted **over** the lock as a sheet inside the
+      same view (`POST /api/screen-time/requests` for the ask, `POST /api/guard/message` for the
+      message, which opens the 1:1 Nextcloud Talk room with each parent and sends the text), so the
+      lock stays up underneath and the child never lands on a page of its own - the old buttons
+      took the lock down and deep-linked to `/health`, which had no route and rendered blank. The
+      lock also offers "Open Jarvis" (Jarvis is always allowed; the lock comes back when the child
+      leaves it). The whole screen scrolls, so the parent's login fields
       stay reachable with the keyboard up, and the way out of the lock is always a parent's own
       login or their offline code - a lock is never a dead end. Switching device admin or the guard off
       reports to `POST /api/guard/tamper` and both parents get a notice; `GuardWatch` reports a

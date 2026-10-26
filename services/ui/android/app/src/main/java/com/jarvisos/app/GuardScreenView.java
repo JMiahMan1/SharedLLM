@@ -7,8 +7,10 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -22,14 +24,16 @@ import android.widget.TextView;
  * Tamper mode: "A parent needs to sign in" with a parent's own Jarvis login,
  * checked by the server (only this child's parents, five tries then a wait).
  * Locked mode: why the phone is locked (bedtime, school, the day's time, a
- * pause), a way to ask for more time in Jarvis, a way to message a parent in
- * the family chat, and the same parent login, with a parent's offline code for
- * when there is no connection. The whole screen scrolls, so the parent's
- * fields stay reachable with the keyboard up and the way out is never hidden.
+ * pause), a way to ask for more time, a way to message a parent, and the same
+ * parent login, with a parent's offline code for when there is no connection.
+ * The whole screen scrolls, so the parent's fields stay reachable with the
+ * keyboard up and the way out is never hidden.
  *
- * The screen does not act on its own: it calls the {@link Host} for the three
- * things only the place showing it can do (a cover activity finishes; the
- * overlay takes its window down).
+ * Asking for more time and messaging a parent happen <em>over the lock</em>: a
+ * sheet is painted on top of the lock instead of the lock being taken down, so
+ * the child always has a way back and never lands on a page of its own. The
+ * screen calls the {@link Host} only for the two things only the place showing
+ * it can do: a parent unlocked, or the child wants Jarvis itself.
  */
 final class GuardScreenView {
 
@@ -38,11 +42,8 @@ final class GuardScreenView {
         /** A parent signed in (or used their offline code): the lock is lifted. */
         void onUnlocked();
 
-        /** The child asked for more time: open Jarvis (Health holds the card). */
-        void onAskMoreTime();
-
-        /** The child wants to talk to a parent: open Jarvis on the family chat. */
-        void onMessageParents();
+        /** The child opened Jarvis, which is always allowed to run. */
+        void onOpenJarvis();
     }
 
     private GuardScreenView() {}
@@ -53,6 +54,7 @@ final class GuardScreenView {
         boolean install = GuardScreenActivity.MODE_INSTALL.equals(mode);
         boolean permission = GuardScreenActivity.MODE_PERMISSION.equals(mode);
         boolean bypass = GuardScreenActivity.MODE_BYPASS.equals(mode);
+        boolean locked = !tamper && !appOff && !install && !permission && !bypass;
         String appName = app == null || app.isEmpty() ? "This app" : app;
 
         LinearLayout root = new LinearLayout(context);
@@ -87,8 +89,8 @@ final class GuardScreenView {
                     : appName + " asked for something your parents approve first. They have been asked; try again once one of them says yes.";
         } else {
             titleText = lockedTitle(context);
-            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time, or message them."
-                    + " A parent can sign in below, or use their offline code, to lift this.";
+            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time, or message them,"
+                    + " without leaving this screen. A parent can sign in below, or use their offline code, to lift it.";
         }
         TextView title = text(context, titleText, 24);
         TextView body = text(context, bodyText, 16);
@@ -130,18 +132,27 @@ final class GuardScreenView {
 
         root.addView(title);
         root.addView(body);
+        // The sheets are painted over the lock; the lock itself is never taken
+        // down for them, so a child always has a way back.
+        Sheet sheet = new Sheet(context);
         if (!tamper && !install && !permission && !bypass) {
             Button ask = new Button(context);
             ask.setText("Ask for more time");
-            ask.setOnClickListener(v -> host.onAskMoreTime());
+            ask.setOnClickListener(v -> sheet.show(askCard(context, sheet)));
             root.addView(ask);
         }
         // A way to reach a parent by chat in every mode: a blocked app or a
         // denied install is exactly when a child needs to talk to one.
         Button message = new Button(context);
         message.setText("Message a parent");
-        message.setOnClickListener(v -> host.onMessageParents());
+        message.setOnClickListener(v -> sheet.show(messageCard(context, sheet)));
         root.addView(message);
+        if (locked) {
+            Button jarvis = new Button(context);
+            jarvis.setText("Open Jarvis");
+            jarvis.setOnClickListener(v -> host.onOpenJarvis());
+            root.addView(jarvis);
+        }
         // No connection: a parent's offline code works instead of their login.
         EditText offline = new EditText(context);
         offline.setHint("Parent's offline code");
@@ -180,8 +191,187 @@ final class GuardScreenView {
         scroller.setFillViewport(true);
         scroller.setBackgroundColor(Color.parseColor("#030711"));
         scroller.setClickable(true);
-        scroller.addView(root);
-        return scroller;
+        scroller.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // The lock, with the sheets painted on top of it. The sheets sit inside
+        // the same view, so the lock stays up underneath: the allowed flows
+        // paint over the lock window instead of replacing it.
+        FrameLayout frame = new FrameLayout(context);
+        frame.setBackgroundColor(Color.parseColor("#030711"));
+        frame.addView(scroller, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        frame.addView(sheet.layer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return frame;
+    }
+
+    /**
+     * The panel painted over the lock: a dimmed lock behind a card. Only one is
+     * up at a time and it never removes the lock under it.
+     */
+    private static final class Sheet {
+        final FrameLayout layer;
+
+        Sheet(Context context) {
+            layer = new FrameLayout(context);
+            layer.setBackgroundColor(Color.parseColor("#E6030711"));
+            layer.setClickable(true);
+            layer.setVisibility(View.GONE);
+        }
+
+        void show(View card) {
+            layer.removeAllViews();
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.CENTER;
+            lp.setMargins(40, 40, 40, 40);
+            layer.addView(card, lp);
+            layer.setVisibility(View.VISIBLE);
+        }
+
+        void hide() {
+            layer.setVisibility(View.GONE);
+            layer.removeAllViews();
+        }
+    }
+
+    /** "Ask for more time": how many minutes and why, sent for a parent to answer. */
+    private static View askCard(Context context, Sheet sheet) {
+        int[] minutes = {30};
+        LinearLayout card = card(context);
+        card.addView(heading(context, "Ask for more time"));
+
+        LinearLayout choices = new LinearLayout(context);
+        choices.setOrientation(LinearLayout.HORIZONTAL);
+        choices.setGravity(Gravity.CENTER);
+        int[] options = {15, 30, 60};
+        String[] labels = {"15 min", "30 min", "1 hour"};
+        Button[] buttons = new Button[options.length];
+        for (int i = 0; i < options.length; i++) {
+            final int option = options[i];
+            Button choice = new Button(context);
+            choice.setText(labels[i]);
+            choice.setAlpha(option == minutes[0] ? 1f : 0.45f);
+            choice.setOnClickListener(v -> {
+                minutes[0] = option;
+                for (Button b : buttons) b.setAlpha(0.45f);
+                choice.setAlpha(1f);
+            });
+            buttons[i] = choice;
+            choices.addView(choice);
+        }
+        card.addView(choices);
+
+        EditText note = new EditText(context);
+        note.setHint("Why? (optional)");
+        note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        note.setTextColor(Color.WHITE);
+        note.setHintTextColor(Color.parseColor("#64748B"));
+        card.addView(note);
+
+        TextView status = statusLine(context);
+        Button send = new Button(context);
+        send.setText("Ask");
+        send.setOnClickListener(v -> {
+            send.setEnabled(false);
+            status.setTextColor(Color.parseColor("#94A3B8"));
+            status.setText("Asking...");
+            String why = note.getText().toString().trim();
+            new Thread(() -> {
+                String problem = GuardApi.askMoreTime(context, minutes[0], why);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    send.setEnabled(true);
+                    if (problem == null) {
+                        status.setTextColor(Color.parseColor("#86EFAC"));
+                        status.setText("Asked. A parent will answer soon.");
+                    } else {
+                        status.setTextColor(Color.parseColor("#FCD34D"));
+                        status.setText(problem);
+                    }
+                });
+            }).start();
+        });
+        card.addView(send);
+        card.addView(status);
+        card.addView(closeButton(context, sheet));
+        return card;
+    }
+
+    /** "Message a parent": a short chat message to them, sent from the lock. */
+    private static View messageCard(Context context, Sheet sheet) {
+        LinearLayout card = card(context);
+        card.addView(heading(context, "Message a parent"));
+        TextView hint = text(context, "It goes to your parents in the family chat.", 14);
+        hint.setTextColor(Color.parseColor("#94A3B8"));
+        card.addView(hint);
+
+        EditText message = new EditText(context);
+        message.setHint("Type a message");
+        message.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        message.setTextColor(Color.WHITE);
+        message.setHintTextColor(Color.parseColor("#64748B"));
+        card.addView(message);
+
+        TextView status = statusLine(context);
+        Button send = new Button(context);
+        send.setText("Send");
+        send.setOnClickListener(v -> {
+            String text = message.getText().toString().trim();
+            if (text.isEmpty()) {
+                status.setTextColor(Color.parseColor("#FCD34D"));
+                status.setText("Type a message first.");
+                return;
+            }
+            send.setEnabled(false);
+            status.setTextColor(Color.parseColor("#94A3B8"));
+            status.setText("Sending...");
+            new Thread(() -> {
+                String problem = GuardApi.messageParents(context, text);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    send.setEnabled(true);
+                    if (problem == null) {
+                        message.setText("");
+                        status.setTextColor(Color.parseColor("#86EFAC"));
+                        status.setText("Sent. A parent will see it in the family chat.");
+                    } else {
+                        status.setTextColor(Color.parseColor("#FCD34D"));
+                        status.setText(problem);
+                    }
+                });
+            }).start();
+        });
+        card.addView(send);
+        card.addView(status);
+        card.addView(closeButton(context, sheet));
+        return card;
+    }
+
+    private static LinearLayout card(Context context) {
+        LinearLayout card = new LinearLayout(context);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(40, 40, 40, 40);
+        card.setBackgroundColor(Color.parseColor("#0B1220"));
+        return card;
+    }
+
+    private static TextView heading(Context context, String value) {
+        TextView view = text(context, value, 20);
+        view.setGravity(Gravity.START);
+        return view;
+    }
+
+    private static TextView statusLine(Context context) {
+        TextView view = text(context, "", 14);
+        view.setGravity(Gravity.START);
+        return view;
+    }
+
+    private static Button closeButton(Context context, Sheet sheet) {
+        Button close = new Button(context);
+        close.setText("Back to the lock");
+        close.setOnClickListener(v -> sheet.hide());
+        return close;
     }
 
     private static String lockedTitle(Context context) {

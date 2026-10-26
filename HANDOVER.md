@@ -5,7 +5,7 @@ Every claim below was verified against the live system unless marked **planned**
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `6604bd7a`.
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `3dd0b11c`.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **1f59d07d**
   (APK `versionCode` **461**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
@@ -14,9 +14,8 @@ Every claim below was verified against the live system unless marked **planned**
   `services/ui/**`, and the APK `versionCode` rebuilds per push (461 is current; 460 was the
   previous), so the native work below needs the newest APK on the phones. APK 461 already carries
   the full-screen guard overlay and its "Ask for more time" / "Message a parent" buttons. Family
-  guard Phase 11, the
-  family member page (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the
-  MDM/Devices work are live.
+  guard Phase 11, the family member page (`/family/member/<child>`), the Family Guardian page
+  (`/guardian`) and the MDM/Devices work are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -51,13 +50,23 @@ Every claim below was verified against the live system unless marked **planned**
   core (emergency, dialer, in-call, Jarvis) is now always present and a parent's list adds to it
   (`services/common/screen_time.py`).
 - `2026-10-26` **Screen time: a full-screen lock on any phone, with a way out and a way to talk**
-  (`c47d90b6` + `f673e877`; details in docs/HEALTH_HUB.md, "Tamper resistance"). A phone that is
+  (`c47d90b6` + `f673e877`, then `GuardOverlay` forced full screen and the allowed flows moved
+  inside it; details in docs/HEALTH_HUB.md, "Tamper resistance"). A phone that is
   not a device owner now gets a full-screen `TYPE_ACCESSIBILITY_OVERLAY` lock (`GuardOverlay`,
   owned by the Accessibility guard) that covers the **home screen too**, so Home and Back cannot
-  leave it and no extra permission is needed. The lock screen shows why it is locked and offers
-  "Ask for more time" and **"Message a parent"** (opens Jarvis on the family chat), and it scrolls
+  leave it and no extra permission is needed. The window draws over every system bar (a tablet's
+  taskbar and navigation strip used to stay visible and usable, so the lock was not really full
+  screen), with only the keyboard inset still fitted so a parent can type their login with the
+  lock up. The lock screen shows why it is locked and offers
+  "Ask for more time" and **"Message a parent"** - both painted **over** the lock as a sheet inside
+  the same view (a request to `POST /api/screen-time/requests`, or a chat message to each parent
+  through `POST /api/guard/message`), so the lock stays up underneath and the child never lands on
+  a page of its own. It also offers "Open Jarvis", and it scrolls
   so a parent's login or offline code stays reachable with the keyboard up - the lock is never a
-  dead end. A lock is only logged (and only called "Locked" on Devices) when the phone can really
+  dead end. The screen-time pushes and the old lock buttons deep-linked to `/health`, which had no
+  route at all and rendered a blank page; the health hub is `/fitness`, `/health` now redirects
+  there, and the pushes point at `/fitness` directly. A lock is only logged (and only called
+  "Locked" on Devices) when the phone can really
   lock: `mdm.real_lock_reported` is true for a device owner (Android's own lock plus lock task) or
   any phone with the Accessibility guard on; with the guard off it is only a notification. Needs a
   new APK on the phone, and the guard still has to be switched on by hand on the tablet.
@@ -983,8 +992,10 @@ device-owner phone; app install/uninstall stays the screen rules.
    - the screen fix: the app must not drag under the status bar or the Android buttons;
    - the Jarvis guard: uninstall attempt → parent-login screen; parent login and the **offline
      code** (airplane mode) unlock; bedtime/pause covers the whole screen (the home screen too)
-     with the overlay and cannot be left with Home or Back; calls and texts still work; the lock
-     screen offers "Ask for more time" and "Message a parent";
+     with the overlay, over the tablet taskbar and navigation strip, and cannot be left with Home
+     or Back; calls and texts still work; the lock
+     screen offers "Ask for more time" and "Message a parent", and both stay on the lock (a sheet
+     painted over it) instead of taking it down;
    - app blocking: a blocked app closes with "That app is off for now";
    - the **web filter**: Phone protection card → Web filter → Allow; a blocked site fails, Google
      search is SafeSearch, ordinary browsing keeps working (DNS-only VPN), Disconnect is covered;

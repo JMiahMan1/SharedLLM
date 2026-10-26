@@ -4,8 +4,10 @@ import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.PixelFormat;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 
 /**
@@ -60,12 +62,23 @@ final class GuardOverlay {
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
-        // Resize for the keyboard: a parent has to be able to type their login
-        // (or the offline code) with the lock up, which is the way out.
+        // A tablet keeps a taskbar and, in landscape, a wide navigation strip.
+        // Without NO_LIMITS the lock stops short of them, so part of the screen
+        // stays visible and usable and the lock is not really full screen.
+        // NO_LIMITS draws over every system bar, so the keyboard inset is the
+        // only one the window still fits: a parent has to be able to type their
+        // login (or the offline code) with the lock up, and that is the way out.
         lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lp.setFitInsetsTypes(WindowInsets.Type.ime());
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
         try {
             windows.addView(built, lp);
             view = built;
@@ -100,20 +113,17 @@ final class GuardOverlay {
         }
 
         @Override
-        public void onAskMoreTime() {
-            openInJarvis("/health");
-        }
-
-        @Override
-        public void onMessageParents() {
-            openInJarvis("/family?tab=chat");
+        public void onOpenJarvis() {
+            openInJarvis("/");
         }
     };
 
     /**
-     * Take the lock down and open Jarvis on a page. Jarvis is one of the
-     * always-allowed apps, so the lock stays down while it is in front and comes
-     * back on its own when the child leaves it (see {@link GuardService}).
+     * Take the lock down and open Jarvis, which is one of the always-allowed
+     * apps, so the lock stays down while it is in front and comes back on its
+     * own when the child leaves it (see {@link GuardService}). Asking for more
+     * time and messaging a parent never come through here: those are painted
+     * over the lock, so the lock itself never goes away for them.
      */
     private void openInJarvis(String path) {
         hide();
