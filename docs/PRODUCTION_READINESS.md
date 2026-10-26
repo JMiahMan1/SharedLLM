@@ -285,16 +285,16 @@ wellbeing live there.
 
 - Several workspace actions still have no busy state.
 - Raw exception text reaches users in ~199 places instead of going through `lib/errorText.ts`.
-- The admin tab bar overflows horizontally; Settings is one ~1000-line column of fourteen panels; two
-  identical-looking search boxes mean different things; and the theme tokens are bypassed by hardcoded
-  colour classes in 216 files.
+- Settings is one ~1000-line column of fourteen panels; two identical-looking search boxes mean
+  different things; and the theme tokens are bypassed by hardcoded colour classes in 216 files.
 
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
 hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; the
 media detail pages carry a Back control; and every destructive action now asks in the app's own
 `confirmDialog` rather than the browser's `window.confirm` - all twenty-four call sites across the
-app, with the tests that stubbed `window.confirm` updated to stub the dialog instead.
+app, with the tests that stubbed `window.confirm` updated to stub the dialog instead; and the admin
+tab bar wraps instead of scrolling sideways, so all twelve sections are visible.
 
 ### 3.6 Family comms, notes and calls
 
@@ -338,25 +338,40 @@ app, with the tests that stubbed `window.confirm` updated to stub the dialog ins
 
 Judged as one host, one replica per service, seven users, behind a proxy - not as a SaaS.
 
-**Open, will bite.**
+**Fixed since the audit.**
 
-1. The identity-resolve timeout is 300s with two retries, so a slow identity makes every request wait
-   up to fifteen minutes and exhausts the pool - the same shape as the 2026-10-25 outage. It should
-   be a few seconds total with a short connect timeout, retrying connect errors only.
-2. The health service has no migration path (`create_all` only), so the next model change
-   crash-loops with `no such column`. Identity, bible and rag each already show a pattern to copy.
-3. Stack traces and internal strings leak to clients from the execution, rag and logging services and
-   from a few gateway routes.
-4. The identity, health and bible SQLite databases run without WAL, so readers block writers and a
-   burst produces `database is locked`.
-5. There is no automated backup of `./data/*.db`. Disk loss or a bad migration is total data loss;
-   this is the single biggest data risk and a nightly `sqlite3 .backup` plus a tar would close it.
+1. The identity-resolve timeout was 300s with two retries, so a slow identity made every request wait
+   up to fifteen minutes and exhausted the pool - the same shape as the 2026-10-25 outage. It is now
+   a 5s total with a 1s connect timeout. The shared client's own 300s default is deliberately kept:
+   LLM generation, media streaming and image jobs legitimately run for minutes, and the endpoints that
+   need a short wait pass their own timeout.
+2. The health service had no migration path (`create_all` only), so the next model change would
+   crash-loop with `no such column`. `services/common/sqlite.py` now offers `add_missing_columns()`,
+   which adds every column the models declare but the table lacks, and health calls it on startup.
+   Identity and bible keep their hand-written migrations, which do more than add columns.
+3. Stack traces and internal strings no longer reach clients from the execution, rag or logging
+   services, and the gateway's identity-resolution failure no longer echoes the identity service's
+   body - the detail is logged, the caller gets a plain message.
+4. The identity, health and bible SQLite databases now run WAL with a 5s busy timeout and NORMAL
+   synchronous (`apply_sqlite_pragmas()`), the same settings rag already set by hand.
+5. There was no automated backup of `./data/*.db`. `scripts/backup_databases.sh` takes a consistent
+   `sqlite3 .backup` snapshot of every non-empty database under `./data` except the rebuildable seed
+   files, tars them, keeps the newest fourteen, and fails loudly if any database cannot be copied.
+   Verified on the server: identity, bible, health and the RAG vector store, 25 MB. A nightly cron
+   entry is installed on the host.
+6. A failed deploy left the broken image running. `scripts/deploy_remote.sh` now records the image ID
+   each service is running before it recreates anything and, on any of its failure paths (a gateway
+   traceback, a startup timeout, a missing execution container), retags those images back and recreates
+   the stack, so a bad deploy leaves the last working build live.
+
+A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
+debug. They now warn once and then stay quiet for fifteen minutes
+(`services/common/logging_utils.py`'s `warn_periodically`, used by execution's media-player
+discovery and geo's zone cache).
 
 **Open, should fix before merge.** Dependencies and the base image are mostly unpinned, so rebuilding
-the same commit is not reproducible and SHA-tagged rollback is illusory; Home Assistant failures are
-logged at debug so degradation is invisible; the background worker starts seven loops in-process, so
-a second replica would double-post bot replies and alerts; the deploy removes the working container
-before the new one is proven and has no automatic rollback; a dozen pieces of state live only in
+the same commit is not reproducible and SHA-tagged rollback is illusory; the background worker starts seven loops in-process, so
+a second replica would double-post bot replies and alerts; a dozen pieces of state live only in
 memory; and most services run as root.
 
 **Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
