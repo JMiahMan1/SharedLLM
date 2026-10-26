@@ -386,6 +386,10 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
    each service is running before it recreates anything and, on any of its failure paths (a gateway
    traceback, a startup timeout, a missing execution container), retags those images back and recreates
    the stack, so a bad deploy leaves the last working build live.
+7. Identity, health, bible and storage ran as root. They now run as the host user (`user:` in
+   `docker-compose.yml`), and the three data directories that were root-owned on the host
+   (`data/health`, `data/bible`, `data/storage`) were chowned to match - identity holds the family's
+   accounts and the Fernet-encrypted credentials, so it was the one that mattered most.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
@@ -393,9 +397,11 @@ debug. They now warn once and then stay quiet for fifteen minutes
 discovery and geo's zone cache).
 
 **Open, should fix before merge.** Dependencies and the base image are mostly unpinned, so rebuilding
-the same commit is not reproducible and SHA-tagged rollback is illusory; the background worker starts seven loops in-process, so
-a second replica would double-post bot replies and alerts; a dozen pieces of state live only in
-memory; and most services run as root.
+the same commit does not produce the same image (a deploy still rolls back by image ID, so this is a
+reproducibility gap rather than a rollback one); the background worker starts seven loops in-process,
+so a second replica would double-post bot replies and alerts; a dozen pieces of state live only in
+memory; and rag, telemetry, geo, logging, ui, dns and caddy still run as root, because their data
+lives in root-owned named volumes.
 
 **Acceptable for this deployment.** No retry jitter; readiness reports 200 while degraded; some
 list endpoints accept an uncapped `limit`; the error envelope differs between services; no request

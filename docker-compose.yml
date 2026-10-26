@@ -84,6 +84,9 @@ services:
     container_name: sharedllm_identity
     restart: unless-stopped
     mem_limit: 1g
+    # Runs as the host user that owns ./data/identity, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
@@ -446,6 +449,9 @@ services:
     container_name: sharedllm_storage
     restart: unless-stopped
     mem_limit: 1g
+    # Runs as the host user that owns ./data/storage, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
@@ -561,6 +567,9 @@ services:
     container_name: sharedllm_bible
     restart: unless-stopped
     mem_limit: 512m
+    # Runs as the host user that owns ./data/bible, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
@@ -610,6 +619,9 @@ services:
     container_name: sharedllm_health
     restart: unless-stopped
     mem_limit: 256m
+    # Runs as the host user that owns ./data/health, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
