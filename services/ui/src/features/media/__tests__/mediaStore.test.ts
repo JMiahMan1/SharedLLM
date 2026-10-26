@@ -149,6 +149,19 @@ describe('ingest: the media store reducer', () => {
       },
     },
     {
+      name: 'this device’s own MA player is dropped from the event stream too (no phantom speaker)',
+      steps: [
+        [{ type: 'ma-players', webPlayerId: 'me', players: [{ player_id: 'office', name: 'Office', available: true, state: 'idle', powered: true }] }, 0],
+        [{ type: 'player', output_id: 'ma:me', state: 'playing', item: { title: 'Mine', uri: 'x://m' } }, 1],
+        [{ type: 'snapshot', players: [{ output_id: 'ma:me', state: 'playing', item: { title: 'Mine', uri: 'x://m' } }, { output_id: 'ma:office', state: 'playing' }] }, 2],
+      ],
+      check: (s) => {
+        expect(s.webPlayerId).toBe('me');
+        expect(s.players['ma:me']).toBeUndefined();
+        expect(s.players['ma:office'].status).toBe('playing');
+      },
+    },
+    {
       name: 'the web player row and empty ids are ignored',
       steps: [[status({ entity_id: 'web_player', state: 'playing' }, { state: 'playing' }), 0], [{ type: 'player', output_id: 'web_player', state: 'playing' }, 1], [{ type: 'heartbeat' }, 2], [{ type: 'queue', output_id: 'nobody' }, 3]],
       check: (s) => expect(s.players).toEqual({}),
@@ -269,5 +282,13 @@ describe('selectors', () => {
 
   it('lists what is playing around the house, playing first, each device once', () => {
     expect(playingElsewhere(players).map((p) => p.id)).toEqual([K, 'ma:office']);
+  });
+
+  it('never lists this device’s own MA player as elsewhere, even before it is named', () => {
+    const own = { ...players['ma:office'], id: 'ma:me', name: 'This device' };
+    const withOwn = { ...players, 'ma:me': own };
+    expect(playingElsewhere(withOwn, 'me').map((p) => p.id)).toEqual([K, 'ma:office']);
+    // Without the id the row is still visible; the caller is what names it.
+    expect(playingElsewhere(withOwn).map((p) => p.id)).toContain('ma:me');
   });
 });

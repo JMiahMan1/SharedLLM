@@ -121,7 +121,7 @@ export const useMediaStore = create<MediaStoreState>()(
         ingest: (event) => {
           const s = get();
           const next = ingest(s, event, Date.now());
-          if (next !== s) set({ players: next.players, volumeTouchedAt: next.volumeTouchedAt });
+          if (next !== s) set({ players: next.players, volumeTouchedAt: next.volumeTouchedAt, webPlayerId: next.webPlayerId });
         },
         setVolume: (id, volume) => {
           const next = touchVolume(get(), id, volume, Date.now());
@@ -173,5 +173,5 @@ export const useMediaActions = () => useMediaStore((s) => s.actions);
 
 /** Tests only: back to a fresh store. */
 export function resetMediaStore(): void {
-  useMediaStore.setState({ ...INITIAL, players: {}, volumeTouchedAt: {}, pending: {}, sheets: { ...INITIAL.sheets }, recentSearches: [] });
+  useMediaStore.setState({ ...INITIAL, players: {}, volumeTouchedAt: {}, webPlayerId: null, pending: {}, sheets: { ...INITIAL.sheets }, recentSearches: [] });
 }

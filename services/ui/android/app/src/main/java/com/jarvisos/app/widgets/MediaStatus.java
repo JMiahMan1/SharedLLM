@@ -27,18 +27,41 @@ public final class MediaStatus {
         /** The artist when there is one, otherwise the player's state. */
         public final String subtitle;
         public final boolean playing;
+        /**
+         * The {@code entity_id} of the player being shown, or "" when nothing
+         * is active. The transport buttons send this as the target, so a press
+         * reaches the same player the widget is displaying.
+         */
+        public final String entityId;
 
-        Lines(String title, String subtitle, boolean playing) {
+        Lines(String title, String subtitle, boolean playing, String entityId) {
             this.title = title;
             this.subtitle = subtitle;
             this.playing = playing;
+            this.entityId = entityId;
         }
     }
 
     private MediaStatus() {}
 
+    /**
+     * The execution route's transport command for one of the widget's buttons.
+     *
+     * <p>The widget's buttons are play/pause/next/previous, but
+     * {@code /execute/media/transport} accepts only {@code pause}/{@code resume}
+     * for play/pause (it rejects {@code play_pause}), so the button resolves
+     * against the state the widget is already showing. Next/previous map
+     * straight through ({@code next_track} → {@code next}).
+     */
+    public static String transportCommand(String button, boolean playing) {
+        if ("play_pause".equals(button)) return playing ? "pause" : "resume";
+        if ("next_track".equals(button)) return "next";
+        if ("previous_track".equals(button)) return "previous";
+        return button;
+    }
+
     public static Lines fromJson(JSONObject response) {
-        if (response == null) return new Lines("Nothing playing", "", false);
+        if (response == null) return new Lines("Nothing playing", "", false, "");
 
         // detail is the handler's payload; fall back to the envelope so a future
         // flattening of the response still renders instead of going blank.
@@ -46,7 +69,7 @@ public final class MediaStatus {
         if (detail == null) detail = response;
 
         JSONObject player = detail.optJSONObject("active");
-        if (player == null) return new Lines("Nothing playing", "", false);
+        if (player == null) return new Lines("Nothing playing", "", false, "");
 
         // EntityNames.text, never optString: on a phone optString turns the
         // handler's JSON nulls into the word "null".
@@ -59,6 +82,10 @@ public final class MediaStatus {
 
         String artist = EntityNames.text(player, "media_artist");
 
-        return new Lines(title, artist.isEmpty() ? state : artist, "playing".equalsIgnoreCase(state));
+        return new Lines(
+            title,
+            artist.isEmpty() ? state : artist,
+            "playing".equalsIgnoreCase(state),
+            EntityNames.text(player, "entity_id"));
     }
 }

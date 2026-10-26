@@ -4,6 +4,7 @@ Identity owns the data; these tests fake identity at the gateway boundary and
 check that the MDM routes reuse it, refuse to invent anything (an unreadable
 member, a push with no published build), and reach the shared-folder store.
 """
+import base64
 import json
 
 import pytest
@@ -37,6 +38,13 @@ class _Client:
                 return _Ctx(_Resp(status, payload))
         return _Ctx(_Resp(404, {}))
 
+    def post(self, url, **kwargs):
+        self.calls.append(url)
+        for needle, (status, payload) in self.routes.items():
+            if needle in url:
+                return _Ctx(_Resp(status, payload))
+        return _Ctx(_Resp(404, {}))
+
 
 class _Ctx:
     def __init__(self, resp):
@@ -52,7 +60,8 @@ class _Ctx:
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     """A gateway with identity faked and the shared folders under tmp_path."""
-    state = {"admin": "dad", "caller": "dad", "devices": {}, "internal": {}, "updates": {}, "notices": []}
+    state = {"admin": "dad", "caller": "dad", "devices": {}, "internal": {}, "updates": {},
+             "notices": [], "library_path": "/Books/Text"}
 
     async def _require_admin(_request):
         return state["admin"]
@@ -72,10 +81,14 @@ def world(monkeypatch, tmp_path):
         state["notices"].append(payload)
         return True
 
+    async def _fetch_global_setting(_key, default=""):
+        return state["library_path"]
+
     monkeypatch.setattr(gateway_main, "_require_admin", _require_admin)
     monkeypatch.setattr(gateway_main, "_require_authenticated", _require_authenticated)
     monkeypatch.setattr(gateway_main, "_identity_as_caller", _as_caller)
     monkeypatch.setattr(gateway_main, "get_app_update_version", _get_app_update_version)
+    monkeypatch.setattr(gateway_main, "fetch_global_setting", _fetch_global_setting)
     monkeypatch.setattr(mdm._notify, "send", _send)
     monkeypatch.setattr(mdm, "MDM_FILES_DIR", tmp_path / "mdm")
     client = _Client(state["internal"])
@@ -251,3 +264,125 @@ def test_an_old_queued_wipe_is_ignored(tmp_path):
     assert mdm.wipe_requested("kid", root=root) is False
     mdm.queue_wipe("k1", "kid", root=root)
     assert mdm.wipe_requested("kid", root=root) is True
+
+
+# --- audit log -------------------------------------------------------------
+
+
+def test_audit_log_is_append_only_and_newest_first(tmp_path):
+    root = tmp_path / "m"
+    mdm.record_audit("file_upload", "Dad", target="school/a.txt", detail={"size": 3}, root=root)
+    mdm.record_audit("device_wipe", "dad", target="kid-phone-0001", root=root)
+    rows = mdm.read_audit(root=root)
+    assert [r["action"] for r in rows] == ["device_wipe", "file_upload"]
+    assert rows[1]["actor"] == "dad" and rows[1]["target"] == "school/a.txt"
+    assert rows[1]["detail"] == {"size": 3}
+
+
+def test_audit_log_is_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(mdm, "AUDIT_MAX", 3)
+    root = tmp_path / "m"
+    for i in range(5):
+        mdm.record_audit("file_upload", "dad", target=f"school/{i}.txt", root=root)
+    rows = mdm.read_audit(root=root)
+    assert [r["target"] for r in rows] == ["school/4.txt", "school/3.txt", "school/2.txt"]
+
+
+def test_each_mdm_action_is_recorded(world):
+    client, state = world
+    state["updates"] = {"bundle_available": True, "apk_available": False, "version": "2.0.0"}
+    client.post("/api/mdm/devices/update", json={"usernames": ["kid"]})
+    client.post("/api/mdm/files/school", files={"file": ("reading.txt", b"hello", "text/plain")})
+    client.post("/api/mdm/files/push", json={"folder": "school", "usernames": ["kid"]})
+    client.delete("/api/mdm/files/school/reading.txt")
+    actions = [r["action"] for r in mdm.read_audit()]
+    assert actions == ["file_delete", "folder_push", "file_upload", "app_update_push"]
+    assert all(r["actor"] == "dad" for r in mdm.read_audit())
+
+
+def test_audit_route_returns_the_log(world):
+    client, _ = world
+    mdm.record_audit("device_lock", "dad", target="kid")
+    body = client.get("/api/mdm/audit").json()
+    assert body["events"][0]["action"] == "device_lock"
+    assert body["events"][0]["target"] == "kid"
+
+
+# --- the Library set from the Calibre shelf --------------------------------
+
+
+def test_describe_library_keeps_books_and_drops_everything_else():
+    entries = [
+        {"path": "/Books/Text/Author/Title (1)/Title - Author.epub", "name": "Title - Author.epub",
+         "is_dir": False, "size": 1234},
+        {"path": "/Books/Text/metadata.db", "name": "metadata.db", "is_dir": False, "size": 10},
+        {"path": "/Books/Text/Author/Title (1)/cover.jpg", "name": "cover.jpg", "is_dir": False, "size": 9},
+        {"path": "/Books/Text/Author", "name": "Author", "is_dir": True},
+        {"path": "/Elsewhere/Escape.pdf", "name": "Escape.pdf", "is_dir": False, "size": 5},
+    ]
+    books = mdm.describe_library(entries, "/Books/Text")
+    assert [b["name"] for b in books] == ["Title - Author.epub"]
+    assert books[0]["format"] == "epub" and books[0]["size"] == 1234
+
+
+def test_library_reports_an_unconfigured_shelf_rather_than_an_empty_one(world):
+    client, state = world
+    state["library_path"] = "   "
+    body = client.get("/api/mdm/library/books").json()
+    assert body["configured"] is False and body["books"] == []
+    assert "calibre_library_path" in body["reason"]
+
+
+def test_library_lists_books_from_the_shelf_through_storage(world):
+    client, state = world
+    state["internal"]["/providers/list"] = (200, {"status": "SUCCESS", "entries": [
+        {"path": "/Books/Text/A/Book (1)/Book - A.epub", "name": "Book - A.epub", "is_dir": False, "size": 42},
+        {"path": "/Books/Text/metadata.db", "name": "metadata.db", "is_dir": False, "size": 3},
+    ]})
+    body = client.get("/api/mdm/library/books").json()
+    assert body["configured"] is True and body["root"] == "/Books/Text"
+    assert [b["name"] for b in body["books"]] == ["Book - A.epub"]
+    assert any("providers/list" in call for call in state["client"].calls)
+
+
+def test_library_reports_a_storage_failure_as_its_own_state(world):
+    client, state = world
+    state["internal"]["/providers/list"] = (500, {"detail": "boom"})
+    body = client.get("/api/mdm/library/books").json()
+    assert body["configured"] is True and body["books"] == [] and "error" in body
+
+
+def test_library_listing_is_bounded_and_says_when_it_was_cut(world, monkeypatch):
+    client, state = world
+    monkeypatch.setattr(mdm, "LIBRARY_MAX_BOOKS", 1)
+    state["internal"]["/providers/list"] = (200, {"status": "SUCCESS", "entries": [
+        {"path": "/Books/Text/A/One (1)/One - A.epub", "name": "One - A.epub", "is_dir": False, "size": 1},
+        {"path": "/Books/Text/B/Two (2)/Two - B.pdf", "name": "Two - B.pdf", "is_dir": False, "size": 2},
+    ]})
+    body = client.get("/api/mdm/library/books").json()
+    assert len(body["books"]) == 1 and body["count"] == 2 and body["truncated"] is True
+
+
+def test_library_fetch_returns_the_book_bytes(world):
+    client, state = world
+    state["internal"]["/providers/fetch"] = (
+        200, {"status": "SUCCESS", "content_b64": base64.b64encode(b"a book").decode("ascii")})
+    resp = client.post("/api/mdm/library/books/file",
+                       json={"path": "/Books/Text/A/Book (1)/Book - A.epub"})
+    assert resp.status_code == 200 and resp.content == b"a book"
+    assert resp.headers["content-type"].startswith("application/epub")
+
+
+def test_library_fetch_refuses_a_path_outside_the_shelf(world):
+    client, state = world
+    resp = client.post("/api/mdm/library/books/file", json={"path": "/etc/passwd"})
+    assert resp.status_code == 422
+    assert not [c for c in state["client"].calls if "providers/fetch" in c]
+
+
+def test_library_fetch_is_a_refusal_when_the_shelf_is_not_configured(world):
+    client, state = world
+    state["library_path"] = ""
+    resp = client.post("/api/mdm/library/books/file", json={"path": "/Books/Text/x.pdf"})
+    assert resp.status_code == 409
+

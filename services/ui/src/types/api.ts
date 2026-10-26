@@ -476,6 +476,38 @@ export interface MdmFolder {
   pushed_to: string[];
 }
 
+/** One book on the read-only family Library shelf (Calibre). */
+export interface MdmLibraryBook {
+  name: string;
+  path: string;
+  format: string;
+  size: number | null;
+}
+
+/**
+ * The Library set. A blank `calibre_library_path` is `configured: false` with a
+ * reason; an unreachable shelf is `error`; neither is an empty shelf.
+ */
+export interface MdmLibraryListing {
+  configured: boolean;
+  books: MdmLibraryBook[];
+  root?: string;
+  count?: number;
+  /** True when the shelf holds more books than one listing returns. */
+  truncated?: boolean;
+  reason?: string;
+  error?: string;
+}
+
+/** One parent action in the MDM audit log (HANDOVER.md Phase 12). */
+export interface MdmAuditEvent {
+  at: string;
+  action: string;
+  actor: string;
+  target: string | null;
+  detail: Record<string, unknown>;
+}
+
 /** One thing content monitoring found on a child's phone. */
 export interface GuardianConcern {
   category: string;

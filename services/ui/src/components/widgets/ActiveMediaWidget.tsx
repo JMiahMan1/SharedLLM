@@ -37,7 +37,7 @@ const ActiveMediaWidget = ({ userSettings, onMediaStop, settingsButton }: IActiv
 
   // This device first while it has something loaded and is playing (or
   // nothing else is); otherwise the busiest speaker in the house.
-  const remote = playingElsewhere(players)[0] ?? null;
+  const remote = playingElsewhere(players, web?.playerId)[0] ?? null;
   const showWeb = Boolean(web?.mediaTitle) && (web!.isPlaying || !remote || remote.status !== 'playing');
   const shown = showWeb ? null : remote;
   const remotePosition = useLivePosition(shown);

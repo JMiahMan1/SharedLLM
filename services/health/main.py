@@ -1748,13 +1748,12 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
                     detail="A minor can only share cycle data with their designated mother or trusted adult.",
                 )
 
-    if body.scope == "digital" and body.enabled:
+    if body.scope == "digital" and body.enabled and _is_minor(session.get(HealthProfile, user)):
         # A minor's digital wellbeing is the parents'; it is not theirs to open.
-        if _is_minor(session.get(HealthProfile, user)):
-            raise HTTPException(
-                status_code=422,
-                detail="Phone use sharing is for adults; a child's belongs to their parents.",
-            )
+        raise HTTPException(
+            status_code=422,
+            detail="Phone use sharing is for adults; a child's belongs to their parents.",
+        )
 
     row = session.exec(
         select(HealthShare).where(

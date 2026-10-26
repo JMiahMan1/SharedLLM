@@ -36,12 +36,32 @@ const folders = {
 let pushed: Array<Record<string, unknown>> = [];
 let wiped: string[] = [];
 
+const libraryBooks = {
+  configured: true,
+  root: '/Books/Text',
+  books: [
+    { name: 'Pilgrim - Bunyan.epub', path: '/Books/Text/Bunyan/Pilgrim (1)/Pilgrim - Bunyan.epub', format: 'epub', size: 2048 },
+  ],
+  count: 1,
+};
+
+const auditEvents = {
+  events: [
+    { at: '2026-10-25T11:00:00Z', action: 'device_lock', actor: 'dad', target: 'kid', detail: { self: false } },
+    { at: '2026-10-25T10:30:00Z', action: 'file_upload', actor: 'dad', target: 'school/worksheet.pdf', detail: { size: 10 } },
+  ],
+};
+
 beforeEach(() => {
   pushed = [];
   wiped = [];
   server.use(
     http.get('/api/mdm/devices', () => HttpResponse.json(inventory)),
     http.get('/api/mdm/files', () => HttpResponse.json(folders)),
+    http.get('/api/mdm/files/for-me', () => HttpResponse.json({ folders: [] })),
+    http.get('/api/mdm/library/books', () => HttpResponse.json(libraryBooks)),
+    http.get('/api/mdm/audit', () => HttpResponse.json(auditEvents)),
+    http.get('/api/mdm/files/school/worksheet.pdf', () => new HttpResponse(new Blob(['worksheet']), { headers: { 'Content-Type': 'application/pdf' } })),
     http.post('/api/mdm/devices/update', async ({ request }) => {
       pushed.push((await request.json()) as Record<string, unknown>);
       return HttpResponse.json({ status: 'SUCCESS', sent: 1, owners: ['kid'], version: '2.0.0' });
@@ -87,5 +107,63 @@ describe('Devices page', () => {
     expect(await screen.findByTestId('mdm-folder-school')).toBeInTheDocument();
     expect(screen.getByText('worksheet.pdf')).toBeInTheDocument();
     expect(screen.getByText('No files in this folder yet.')).toBeInTheDocument();  // the empty Library
+  });
+
+  it('shows the audit log of parent actions', async () => {
+    renderWithProviders(<Devices />);
+    expect(await screen.findByTestId('mdm-audit')).toBeInTheDocument();
+    expect(await screen.findByText('locked a device')).toBeInTheDocument();
+    expect(await screen.findByText('uploaded a shared file')).toBeInTheDocument();
+  });
+
+  it('shows the read-only family library beside the Library folder', async () => {
+    renderWithProviders(<Devices />);
+    expect(await screen.findByTestId('mdm-library-books')).toBeInTheDocument();
+    expect(await screen.findByText('Pilgrim - Bunyan.epub')).toBeInTheDocument();
+  });
+});
+
+describe('Devices page for a child', () => {
+  const childMe = http.get('/api/users/me', () => HttpResponse.json({ id: 2, username: 'kid', is_admin: false }));
+  const forMe = (folders: unknown) => http.get('/api/mdm/files/for-me', () => HttpResponse.json({ folders }));
+
+  it('lists only the folders pushed to the child, plus the family library', async () => {
+    server.use(
+      childMe,
+      forMe([
+        { folder: 'school', files: [{ name: 'worksheet.pdf', size: 10, sha256: 'x', content_type: 'application/pdf', uploaded_by: 'dad', uploaded_at: '2026-10-25T09:00:00Z' }] },
+        { folder: 'library', files: [] },
+      ]),
+    );
+    renderWithProviders(<Devices />);
+    expect(await screen.findByTestId('mdm-for-me-school')).toHaveTextContent('worksheet.pdf');
+    expect(await screen.findByText('Pilgrim - Bunyan.epub')).toBeInTheDocument();
+    // A child never sees the parent's device inventory.
+    expect(screen.queryByTestId('mdm-device-kid-phone-0001')).not.toBeInTheDocument();
+  });
+
+  it('says so when nothing has been pushed yet', async () => {
+    server.use(childMe, forMe([]));
+    renderWithProviders(<Devices />);
+    expect(await screen.findByTestId('mdm-for-me-empty')).toHaveTextContent('No shared folders have been pushed to you yet.');
+  });
+
+  it('opens a shared file in the in-app viewer', async () => {
+    const realCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock');
+    URL.revokeObjectURL = vi.fn();
+    try {
+      server.use(
+        childMe,
+        forMe([
+          { folder: 'school', files: [{ name: 'worksheet.pdf', size: 10, sha256: 'x', content_type: 'application/pdf', uploaded_by: 'dad', uploaded_at: '2026-10-25T09:00:00Z' }] },
+        ]),
+      );
+      renderWithProviders(<Devices />);
+      fireEvent.click(await screen.findByRole('button', { name: 'worksheet.pdf' }));
+      expect(await screen.findByRole('dialog', { name: 'worksheet.pdf preview' })).toBeInTheDocument();
+    } finally {
+      URL.createObjectURL = realCreate;
+    }
   });
 });

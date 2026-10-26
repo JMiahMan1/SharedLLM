@@ -87,7 +87,9 @@ export function useMediaStatusFeed(
     let cancelled = false;
     const load = async () => {
       const players = webConnected && listOverSocket ? await listOverSocket() : await listRemoteMaPlayers();
-      if (!cancelled) useMediaStore.getState().actions.ingest({ type: 'ma-players', players, webPlayerId });
+      // A failed read is unknown, not an empty list: keep what we already show
+      // rather than wiping the output picker on a transient MA error.
+      if (!cancelled && players) useMediaStore.getState().actions.ingest({ type: 'ma-players', players, webPlayerId });
     };
     void load();
     const id = maTarget && !streamOpen

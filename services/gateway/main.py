@@ -6178,6 +6178,10 @@ async def screen_time_pause(request: Request, username: str):
         else:
             title, text = "Phone unpaused", "Your phone is back on."
         await _screen_time_notice([username], title, text, "/health")
+        # The Devices page's lock/unlock is this pause; keep it in the MDM audit
+        # log (Phase 12) so "who locked a device, and when" has one answer.
+        mdm.record_audit("device_lock" if paused else "device_unlock", actor,
+                         target=subject, detail={"self": mine})
     return JSONResponse(status_code=status, content=body)
 
 
@@ -14868,11 +14872,17 @@ async def _media_ma_rpc(
     if not mass_url or not mass_token:
         raise _MediaUpstreamError("Music Assistant is not configured")
     try:
-        return await _ma_rpc(mass_url, mass_token, command, args, timeout=timeout)
+        result = await _ma_rpc(mass_url, mass_token, command, args, timeout=timeout)
     except HTTPException as e:
         raise _MediaUpstreamError(f"Music Assistant returned HTTP {e.status_code}") from e
     except (TimeoutError, aiohttp.ClientError) as e:
         raise _MediaUpstreamError(f"Music Assistant is unreachable: {type(e).__name__}") from e
+    if isinstance(result, dict) and result.get("error_code"):
+        # MA answers a rejected read with HTTP 200 and an error frame; without
+        # this the endpoint would return an empty list instead of an error state.
+        detail = result.get("error") or result.get("details") or f"error {result['error_code']}"
+        raise _MediaUpstreamError(f"Music Assistant: {detail}")
+    return result
 
 
 async def _media_ma_items(request: Request, command: str, args: dict | None = None, *, timeout: float = _MEDIA_UPSTREAM_TIMEOUT) -> list[dict]:
@@ -14907,14 +14917,18 @@ async def _media_exec_audiobookshelf(creds: Any, params: dict, *, timeout: float
 
 
 def _media_abs_book_item(book: dict) -> dict:
-    """Normalize an ABS last-played/list book to MediaItem kwargs."""
+    """Normalize an ABS last-played/list book to MediaItem kwargs.
+
+    Execution's ABS summaries name the cover ``cover_path`` (last played/list)
+    or ``cover`` (search); accept either so the artwork is not dropped.
+    """
     return {
         "uri": f"abs://{book.get('id') or ''}",
         "name": book.get("title") or "",
         "media_type": "audiobook",
         "artist": book.get("author") or "",
         "album": book.get("series") or "",
-        "image": book.get("cover_path") or "",
+        "image": book.get("cover_path") or book.get("cover") or "",
         "duration": book.get("duration"),
         "favorite": None,
     }

@@ -387,9 +387,102 @@ def test_library_audiobooks_pages_through_abs(client, upstream, ma):
     ), queries
 
 
+def test_abs_book_cover_and_duration_survive_normalization(client, upstream, ma):
+    """`cover_path` from execution becomes the item's image; duration is kept."""
+    ma["responses"]["music/recently_played_items"] = []
+    ma["responses"]["music/in_progress_items"] = []
+    ma["responses"]["music/playlists/library_items"] = []
+    ma["responses"]["music/tracks/library_items"] = []
+    ma["responses"]["music/radios/library_items"] = []
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [
+                    {
+                        "id": "b1",
+                        "title": "Abs Book",
+                        "author": "A",
+                        "duration": 3600,
+                        "cover_path": "/covers/b1.jpg",
+                    }
+                ]
+            },
+        },
+    )
+
+    body = client.get("/api/media/home").json()
+
+    book = body["recent"][0]
+    assert book["image"] == "/covers/b1.jpg"
+    assert book["duration"] == 3600
+
+
+def test_abs_search_book_cover_uses_the_cover_field(client, upstream, ma):
+    """Execution's search summaries name the cover `cover`; it must still resolve."""
+    ma["responses"]["music/search"] = {}
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={
+            "status": "SUCCESS",
+            "detail": {
+                "books": [
+                    {"id": "b1", "title": "Blue Train: The Book", "author": "A", "cover": "/covers/b1.jpg"}
+                ],
+                "podcasts": [],
+                "authors": [],
+            },
+        },
+    )
+
+    body = client.get("/api/media/search", params={"q": "Blue Train"}).json()
+
+    assert body["audiobooks"][0]["image"] == "/covers/b1.jpg"
+
+
 def test_library_rejects_an_unknown_tab(client):
     resp = client.get("/api/media/library/movies")
     assert resp.status_code == 422
+
+
+def test_library_surfaces_an_ma_error_frame(client, ma):
+    """MA answers a rejected read with HTTP 200 and an error frame.
+
+    It must become an error state, not a silent empty list.
+    """
+    ma["responses"]["music/tracks/library_items"] = {
+        "error_code": 400,
+        "error": "Library is unavailable",
+    }
+
+    resp = client.get("/api/media/library/tracks")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["items"] == []
+    assert "Library is unavailable" in body["errors"]["ma"]
+
+
+def test_home_surfaces_an_ma_error_frame(client, upstream, ma):
+    """One shelf failing with an MA error frame is reported, not swallowed."""
+    ma["responses"]["music/recently_played_items"] = {"error_code": 400, "details": "No provider"}
+    mock_upstream(
+        upstream,
+        "GET",
+        ABS_DETAIL_URL,
+        payload={"status": "SUCCESS", "detail": {"books": []}},
+    )
+
+    resp = client.get("/api/media/home")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "No provider" in body["errors"]["ma"]
 
 
 def test_favorites_merges_all_media_types(client, ma):

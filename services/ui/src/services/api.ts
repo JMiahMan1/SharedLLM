@@ -147,6 +147,8 @@ import type {
   MdmFolder,
   MdmInventory,
   MdmSharedFile,
+  MdmLibraryListing,
+  MdmAuditEvent,
   GuardianPrompt,
   GuardianJournalNote,
   ActivityEvent,
@@ -1118,6 +1120,33 @@ export const api = {
   /** The shared folders pushed to the caller, for the device-facing list. */
   async getMdmFilesForMe(): Promise<{ folders: Array<{ folder: string; files: MdmSharedFile[] }> }> {
     const resp = await apiClient.get('/api/mdm/files/for-me');
+    return resp.data;
+  },
+
+  /** One shared file's bytes, so the app can preview or download it with the key. */
+  async getMdmFileBlob(folder: string, name: string): Promise<Blob> {
+    const resp = await apiClient.get(
+      `/api/mdm/files/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`,
+      { responseType: 'blob' },
+    );
+    return resp.data;
+  },
+
+  /** The read-only family Library set, sourced from the Calibre shelf. */
+  async getMdmLibraryBooks(): Promise<MdmLibraryListing> {
+    const resp = await apiClient.get('/api/mdm/library/books');
+    return resp.data;
+  },
+
+  /** One Library book's bytes (read-only). */
+  async getMdmLibraryBookBlob(path: string): Promise<Blob> {
+    const resp = await apiClient.post('/api/mdm/library/books/file', { path }, { responseType: 'blob' });
+    return resp.data;
+  },
+
+  /** Who did what to the family's devices and shared files, newest first (admin). */
+  async getMdmAudit(limit = 100): Promise<{ events: MdmAuditEvent[] }> {
+    const resp = await apiClient.get('/api/mdm/audit', { params: { limit } });
     return resp.data;
   },
 
