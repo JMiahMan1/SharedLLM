@@ -1,17 +1,20 @@
 # Jarvis OS / SharedLLM - session handover
 
-Updated 2026-10-25 for the next AI assistant taking over this repo.
+Updated 2026-10-26 for the next AI assistant taking over this repo.
 Every claim below was verified against the live system unless marked **planned**.
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `6604bd7a`.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **1f59d07d**
-  (APK `versionCode` **460**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
-  `scripts/check_service_urls.py` is 4/4 PASS). Deploy 13 (gateway + ui) landed for `1f59d07d` on
-  2026-10-26 with 0 ERROR lines in the gateway and ui logs since. APK: CI builds one per push under
-  `services/ui/**`, and the APK `versionCode` rebuilds per push (460 is current; 459 was the
-  previous), so the native work below needs the newest APK on the phones. Family guard Phase 11, the
+  (APK `versionCode` **461**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+  `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
+  `1f59d07d`), **14** (gateway, `7a4f083d`) and **15** (gateway + rag, `6604bd7a`), each verified with
+  0 ERROR lines in the touched services' logs since the deploy. APK: CI builds one per push under
+  `services/ui/**`, and the APK `versionCode` rebuilds per push (461 is current; 460 was the
+  previous), so the native work below needs the newest APK on the phones. APK 461 already carries
+  the full-screen guard overlay and its "Ask for more time" / "Message a parent" buttons. Family
+  guard Phase 11, the
   family member page (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the
   MDM/Devices work are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
@@ -686,14 +689,25 @@ Every claim below was verified against the live system unless marked **planned**
   `-x`), then confirm it is gone. Never leave seeded artists/creators/calls in a real feed.
 - **UI gates**, run in `services/ui`: `npm run typecheck`, `npm run lint`
   (baseline 0 errors / 11 pre-existing warnings), `npx vitest run`
-  (275 files / 2130 tests), `npm run build` (also packages the OTA bundle).
+  (288 files / 2192 tests), `npm run build` (also packages the OTA bundle).
   After adding Tailwind colour classes run `npm run gen:theme-css` or
   `src/themes/themeRemap.test.ts` fails.
 - **Backend tests**: `.venv/bin/python -m pytest <paths>` - `python` is not on
-  PATH. Current baselines: health **137**, identity **448**, gateway **1597**, telemetry
-  **91**, bible **712**, common **56**, execution **1016 passed / 60 skipped** (ignore
+  PATH. Baselines verified 2026-10-26:
+  `services/gateway/tests services/common` -> **1831 passed**;
+  `services/rag/tests` -> **117 passed / 14 skipped**;
+  `services/health services/identity services/telemetry services/bible services/execution`
+  -> **2581 passed / 60 skipped**;
+  `services/identity services/tests` -> **891 passed / 24 skipped**.
+  A full `pytest services` run also passes - but note it does **not** collect
+  `tests/unit/`, and CI does: run `.venv/bin/python -m pytest tests/unit -q` as
+  well before pushing. `tests/unit/test_config_env_isolation.py` is the guard
+  that every env var `services/config.py` reads is pinned in the root
+  `conftest.py` `_TEST_ENV_DEFAULTS`; it was red in CI for a day (2026-10-25 ->
+  2026-10-26) because `ALERT_TLS_HOSTS` was read without a pin, and a green
+  local `pytest services` hid it. Ignore
   `services/execution/tests/test_calendar_window_and_uid.py`; it needs the
-  optional `vobject` package).
+  optional `vobject` package.
 - **Deploy**: `./scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <services>`
   in the background (~5 min; waits for GitHub Actions *Build & Push Images* and
   pins the server to the **branch tip**). Land code and docs together; a
@@ -893,6 +907,19 @@ device-owner phone; app install/uninstall stays the screen rules.
 
 ## 4. Open small items
 
+- **Noah's tablet still has the guard switched off, so nothing locks on it yet.** Device
+  `81587280fd22d5e457c09a64e820e46e` (Samsung SM-X520, Android 16) reports device admin / device
+  owner / Accessibility guard / usage access all **false**, and `screenrules.data` is `"{}"` (no
+  rules at all). The full-screen lock needs, in order: the newest APK installed on the tablet, then
+  on the tablet **Settings -> Apps -> Jarvis -> ⋮ -> "Allow restricted settings"** (Android 13+
+  refuses to switch on an Accessibility service for an app that was sideloaded - the toggle simply
+  flips back with "app was denied access"; Samsung also needs **Settings -> Security and privacy ->
+  Auto Blocker -> Off** for the ⋮ entry to appear at all), then **Settings -> Accessibility ->
+  "Jarvis screen guard" -> On**, the app's **Device protection** (device admin) -> On, **Usage
+  access** -> Allow; and then a rule set for him (daily limit / bedtime / school) from the member
+  page. Android forbids the app enabling any of this for itself, so it has to be done by hand on the
+  device; installing the APK with `adb install -r` instead of tapping the download skips the
+  restricted-settings gate entirely.
 - Media: the **Phase 8 device checks** (swipe-away playback carries on, then reopening reclaims it;
   the home-screen widget's transport on a real phone) and **Phase 9's** final gates - one `LIVE=1`
   E2E run (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test --project=live`) - are still
