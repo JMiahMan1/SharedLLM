@@ -6,7 +6,6 @@ import {
   Copy, 
   ChevronDown, 
   ChevronRight, 
-  Bug,
   ExternalLink,
   Info
 } from 'lucide-react';
@@ -108,8 +107,8 @@ function getErrorDetails(error: Error | null, errorInfo: ErrorInfo | null): Erro
   return details;
 }
 
-function ErrorSection({ detail, index }: { detail: ErrorDetail; index: number }) {
-  const [isExpanded, setIsExpanded] = useState(index === 0);
+function ErrorSection({ detail }: { detail: ErrorDetail }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   
   const handleCopy = () => {
     navigator.clipboard.writeText(detail.value);
@@ -231,66 +230,68 @@ class ErrorBoundary extends Component<Props, State> {
       const summary = this.getErrorSummary();
 
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans">
-          <div className="bg-slate-900 border border-red-500/30 rounded-xl p-8 max-w-3xl w-full text-center shadow-2xl">
-            <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-6" />
-            <h1 className="text-2xl font-bold text-white mb-2">Jarvis Encountered a UI Error</h1>
-            
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 mb-6">
-              <div className="flex items-center gap-2 text-amber-400 text-sm">
-                <Info className="w-4 h-4" />
-                <span className="font-medium">{summary}</span>
-              </div>
-            </div>
+        <div
+          role="alert"
+          className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans"
+        >
+          <div className="bg-slate-900 border border-white/10 rounded-xl p-8 max-w-2xl w-full text-center shadow-2xl">
+            <ShieldAlert className="w-14 h-14 text-amber-400 mx-auto mb-5" />
+            <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
 
             <p className="text-slate-400 mb-6">
-              A component failed to render properly. The detailed error information below will help developers fix this issue.
+              Jarvis hit a problem showing this page. Try again - and if it keeps happening, tell a
+              grown-up.
             </p>
-            
-            {/* Error Details Panel */}
-            <div className="text-left mb-6 space-y-2">
-              {details.map((detail, index) => (
-                <ErrorSection key={index} detail={detail} index={index} />
-              ))}
+
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <button 
+                onClick={this.handleReset}
+                className="flex items-center justify-center py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex-1 shadow-lg shadow-blue-900/20"
+              >
+                <RefreshCcw className="w-5 h-5 mr-2" />
+                Try again
+              </button>
+              
+              <button 
+                onClick={this.handleGoHome}
+                className="flex items-center justify-center py-3 px-6 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 rounded-lg transition-colors font-medium flex-1"
+              >
+                <Home className="w-5 h-5 mr-2" />
+                Go home
+              </button>
             </div>
 
-            {/* Debug Info */}
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 mb-6">
-              <div className="flex items-center gap-2 text-blue-400 text-sm mb-2">
-                <Bug className="w-4 h-4" />
-                <span className="font-medium">For Developers</span>
+            {/* Still here for whoever needs it, but a stack trace is not what a
+                child should be handed when a page fails to draw. */}
+            <details className="mt-6 text-left">
+              <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-400">
+                Technical details
+              </summary>
+
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+                <Info className="w-3.5 h-3.5" />
+                <span>{summary}</span>
+              </p>
+
+              <div className="mt-2 space-y-2">
+                {details.map((detail) => (
+                  <ErrorSection key={detail.label} detail={detail} />
+                ))}
               </div>
-              <p className="text-slate-400 text-xs">
-                Copy the error details above and file an issue at{' '}
+
+              <p className="mt-3 text-xs text-slate-500">
+                Copy the details above and file an issue at{' '}
                 <a 
                   href="https://github.com/JMiahMan1/SharedLLM/issues" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 underline flex items-center gap-1 inline-flex"
+                  className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1"
                 >
                   GitHub Issues
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </p>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button 
-                onClick={this.handleReset}
-                className="flex items-center justify-center py-3 px-6 bg-red-600/10 hover:bg-red-600/20 text-red-500 border border-red-500/20 rounded-lg transition-colors font-medium flex-1"
-              >
-                <RefreshCcw className="w-5 h-5 mr-2" />
-                Reload Page
-              </button>
-              
-              <button 
-                onClick={this.handleGoHome}
-                className="flex items-center justify-center py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex-1 shadow-lg shadow-blue-900/20"
-              >
-                <Home className="w-5 h-5 mr-2" />
-                Return to Dashboard
-              </button>
-            </div>
+            </details>
           </div>
         </div>
       );
