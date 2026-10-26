@@ -6,14 +6,14 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **6932452c**
-  (APK `versionCode` **459**, 2026-10-25; `https://jarvis.sumemail.com/health` is 200 and
-  `scripts/check_service_urls.py` is 4/4 PASS). Deploy 12 (gateway + execution + health + ui) was
-  in flight for `6932452c` at handover time. APK: CI builds one per push under `services/ui/**`,
-  and the APK `versionCode` rebuilds per push (459 is current; 458 was the previous), so the native
-  work below needs the newest APK on the phones. Family guard Phase 11, the family member page
-  (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
-  live.
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **1f59d07d**
+  (APK `versionCode` **460**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+  `scripts/check_service_urls.py` is 4/4 PASS). Deploy 13 (gateway + ui) landed for `1f59d07d` on
+  2026-10-26 with 0 ERROR lines in the gateway and ui logs since. APK: CI builds one per push under
+  `services/ui/**`, and the APK `versionCode` rebuilds per push (460 is current; 459 was the
+  previous), so the native work below needs the newest APK on the phones. Family guard Phase 11, the
+  family member page (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the
+  MDM/Devices work are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -29,6 +29,17 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-26` **Bug hunt (live gateway logs): every Music Assistant cover was a 400, and a websocket
+  callback threw on every position tick.** MA's imageproxy only resizes to `0/80/160/256/512/1024`;
+  the gateway forwarded the UI's width verbatim, so a cover asked for at 44/96/128/760 px came back
+  `400 Unsupported size ...` (`[imageproxy] upstream ma status 400` in production). The width is now
+  snapped UP to the next size MA accepts (`_ma_image_size` in `services/gateway/main.py`). Separately,
+  MA has sent `queue_time_updated` carrying a **bare number**, which raised
+  `AttributeError: 'float' object has no attribute 'get'` inside the MA websocket callback on every
+  position tick; a payload that is not an object is now skipped (`normalize_ma_event` /
+  `normalize_ma_player`). An upstream **404** (a library entry with no artwork) is logged as a
+  warning rather than an error, so the post-deploy error count is meaningful again. Details and the
+  verified MA size list: docs/MEDIA_UPSTREAM_API_NOTES.md.
 - `2026-10-26` **Screen time: a full-screen lock on any phone, with a way out and a way to talk**
   (`c47d90b6` + `f673e877`; details in docs/HEALTH_HUB.md, "Tamper resistance"). A phone that is
   not a device owner now gets a full-screen `TYPE_ACCESSIBILITY_OVERLAY` lock (`GuardOverlay`,

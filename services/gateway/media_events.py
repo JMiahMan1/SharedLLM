@@ -118,7 +118,9 @@ def _ma_item(raw: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 def normalize_ma_player(player: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """MA player object -> normalized player event (output_id ``ma:<id>``)."""
-    if not player:
+    # A non-mapping payload (MA has sent a bare number for a player event) has
+    # no player in it: skip it instead of raising on the first ``.get``.
+    if not player or not isinstance(player, Mapping):
         return None
     inner = player
     if "player_id" not in inner and isinstance(player.get("data"), Mapping):
@@ -144,7 +146,11 @@ def normalize_ma_player(player: Mapping[str, Any] | None) -> dict[str, Any] | No
 
 def normalize_ma_event(event_type: str, data: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """MA websocket event -> normalized player/queue event."""
-    data = data or {}
+    # ``queue_time_updated`` has arrived carrying a bare number (the elapsed
+    # seconds) rather than an object, which used to raise inside this call and
+    # log a callback error on every position tick. A payload with no object in
+    # it names no queue, so there is nothing to publish.
+    data = data if isinstance(data, Mapping) else {}
     if event_type == "player_updated":
         return normalize_ma_player(data)
     if event_type in _MA_QUEUE_EVENT_TYPES:

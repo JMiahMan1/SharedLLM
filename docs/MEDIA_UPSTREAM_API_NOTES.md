@@ -122,17 +122,18 @@ service.
 
 ## Imageproxy cache/stream + `w=`→`size=` (P2-T2 / BUG-11, 2026-09-27)
 
-- **MA imageproxy `size` param (plan VERIFY):** partially verified against
-  live MA `192.168.2.20:8095`:
-  - MA's own production image URLs (observed in HA `entity_picture` data)
-    are `.../imageproxy/<image_id>?size=512&fmt=jpg`, so `size=` is the
-    param name MA itself emits/accepts on this route.
-  - Functional probes from a workstation: `/imageproxy?path=<urlencoded
-    remote url>&size={64,512}&fmt=jpg` → 400 empty body; path-segment form
-    `/imageproxy/<urlsafe-b64 url>?size=…` → 400 "Invalid image id" (the id
-    must be an MA-internal image id, not an arbitrary URL), so the probes
-    could not exercise resizing end-to-end without a real library image id.
-    **Still (VERIFY):** full resize round-trip with a real MA image id.
+- **MA imageproxy `size` param (verified 2026-10-26):** MA's own production
+  image URLs (observed in HA `entity_picture` data) are
+  `.../imageproxy/<image_id>?size=512&fmt=jpg`, so `size=` is the param name
+  MA itself emits/accepts on this route.
+  - **MA only resizes to `0, 80, 160, 256, 512, 1024`** (0 = original). Any
+    other width is refused: `curl ".../imageproxy/<id>?size=96"` answers
+    `400 Unsupported size 96: must be one of 0, 80, 160, 256, 512, 1024`. The
+    gateway was forwarding the UI's width verbatim, so every cover asked for
+    at 44/96/128/760 px failed with a 400 in production (the log line
+    `[imageproxy] upstream ma status 400`); it now snaps the width UP to the
+    next size MA accepts (`_ma_image_size` in `services/gateway/main.py`), so
+    a cover never fails on a size MA does not offer.
   - `/api-docs` returns the HTML docs shell (not machine-readable openapi).
 - Behavior shipped: `w=` accepted on `/api/media/imageproxy`; only forwarded
   when the resolved upstream is MA (`svc == "ma"`), replacing any existing
@@ -142,7 +143,11 @@ service.
   upstream 304 returned as empty 304. Body is streamed in 64 KiB chunks
   (was fully buffered); request timeout raised to total=30s (streaming
   covers body delivery; images previously had total=10s end-to-end).
-- Tests: `gateway/tests/test_imageproxy_cache.py` (4). The gateway's
+- An upstream **404** is logged as a warning ("has no image"), not an error:
+  a library entry with no artwork is normal, and logging it as an error
+  drowned out real failures in the post-deploy error count. Other non-200s
+  stay errors.
+- Tests: `gateway/tests/test_imageproxy_cache.py` (5). The gateway's
   request log also captures logging-service POSTs, so helpers must filter
   upstream requests by host.
 
