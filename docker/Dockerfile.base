@@ -119,8 +119,14 @@ RUN pip install --no-cache-dir \
     requests-mock==1.12.1 \
     responses==0.26.3
 
-# Pre-download nomic-ai/nomic-embed-text-v1.5 model (cached across all services)
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')"
+# Pre-download nomic-ai/nomic-embed-text-v1.5 model (cached across all services).
+# The download lands in /tmp/fastembed_cache owned by root, and the services that
+# use it run as the host user, so huggingface_hub could not refresh its tree cache
+# and logged "Ignoring corrupted tree cache file ... Permission denied" on every
+# embedder start - a warning that reads like a broken model and is not one. The
+# cache is made writable by anyone so the runtime user can keep it fresh.
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')" \
+    && chmod -R a+rwX /tmp/fastembed_cache
 
 ENV PYTHONPATH=/app
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
