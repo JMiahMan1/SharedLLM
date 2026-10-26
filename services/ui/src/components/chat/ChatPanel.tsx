@@ -188,7 +188,21 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     select: (response) => sortMessages(detailList<TalkMessage>(response, 'messages')),
   });
 
-  const messages = useMemo(() => [...fetched, ...(pending[activeToken] || [])], [fetched, pending, activeToken]);
+  // A sent bubble is hidden as soon as a fetch contains the message, so it
+  // never blinks out between "sent" and "Nextcloud indexed it". A failed one
+  // stays, with its Retry. Deriving this here keeps the render pure, and the
+  // send path prunes the state after twenty seconds either way.
+  const messages = useMemo(() => {
+    const waiting = pending[activeToken] || [];
+    return [
+      ...fetched,
+      ...waiting.filter(
+        (m) =>
+          m.pending !== 'sending' ||
+          !fetched.some((f) => typeof f.id === 'number' && f.message === m.message),
+      ),
+    ];
+  }, [fetched, pending, activeToken]);
   // "Show earlier" asked for more than is on screen and the fetch is out.
   const loadingEarlier = fetchingMessages && fetched.length > 0 && fetched.length < limit;
 
@@ -316,7 +330,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         setJarvisAsked((current) => ({ ...current, [token]: Date.now() }));
       }
       await queryClient.invalidateQueries({ queryKey: ['talk-messages', token] });
-      updatePending(token, (list) => list.filter((m) => m.id !== local.id));
+      // The bubble is not dropped here. The refetch that just ran often does not
+      // contain the message yet, so removing it now made the message blink out
+      // and come back. The effect below removes it as soon as a fetch actually
+      // shows it; this is only the backstop for a room that never echoes it.
+      window.setTimeout(() => {
+        updatePending(token, (list) => list.filter((m) => m.id !== local.id));
+      }, 20000);
       queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
     } catch (error) {
       updatePending(token, (list) => list.map((m) => (m.id === local.id ? { ...m, pending: 'failed' } : m)));
@@ -341,6 +361,24 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     setReplyTo(null);
     void deliver(activeToken, local);
   };
+
+  // A photo or a voice note shows up in the feed the moment it is sent, the
+  // same as a text message, instead of only after the upload returns and the
+  // thread refetches. It is removed as soon as the real message arrives (or by
+  // the caller, once the send settles).
+  const showPendingFile = (text: string): TalkMessage => {
+    const local: TalkMessage = {
+      id: `local-file-${Date.now()}`,
+      actor_display_name: 'You',
+      message: text,
+      timestamp: Math.floor(Date.now() / 1000),
+      pending: 'sending',
+    };
+    updatePending(activeToken, (list) => [...list, local]);
+    return local;
+  };
+  const dropPendingFile = (id: TalkMessage['id']) =>
+    updatePending(activeToken, (list) => list.filter((m) => m.id !== id));
 
   const saveEdit = async (text: string) => {
     const target = editing;
@@ -414,8 +452,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   });
 
   const sendVoice = useMutation({
-    mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string }) =>
-      api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm`, as_user: asUser }),
+    mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string; file_name?: string }) =>
+      api.sendTalkVoice({
+        token: activeToken,
+        ...payload,
+        file_name: payload.file_name || `voice-${Date.now()}.webm`,
+        as_user: asUser,
+      }),
     onSuccess: () => {
       toast.success('Voice message sent');
       refreshThread(activeToken);
@@ -775,11 +818,16 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               : []),
           ]}
           onSendVoice={async (payload) => {
+            const local = showPendingFile('Voice message');
             try {
               await sendVoice.mutateAsync(payload);
               return true;
             } catch {
               return false;
+            } finally {
+              // The real message is in the thread by now; the short delay lets
+              // the refetch land so the bubble does not blink.
+              window.setTimeout(() => dropPendingFile(local.id), 800);
             }
           }}
           sendingVoice={sendVoice.isPending}
@@ -787,11 +835,14 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           onStage={(files) => setStaged((current) => [...current, ...files])}
           onUnstage={(index) => setStaged((current) => current.filter((_, i) => i !== index))}
           onSendFiles={async (caption) => {
+            const local = showPendingFile(caption || staged[0]?.name || 'Attachment');
             try {
               await sendFiles.mutateAsync(caption);
               return true;
             } catch {
               return false;
+            } finally {
+              window.setTimeout(() => dropPendingFile(local.id), 800);
             }
           }}
           sendingFiles={sendFiles.isPending}
