@@ -35,14 +35,21 @@ from typing import Any
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SCHOOL_DAYS_DEFAULT = ("mon", "tue", "wed", "thu", "fri")
 # Never locked, so a locked phone can still call home, text a parent and ask
-# Jarvis for more time.
+# Jarvis for more time. The Samsung and other OEM dialer/messaging packages are
+# here too, since the always-allowed list has to name the package the phone
+# actually shows for a call or a text.
 ALWAYS_ALLOWED_DEFAULT = (
     "com.jarvisos.app",
     "com.google.android.dialer",
     "com.android.dialer",
+    "com.samsung.android.dialer",
     "com.google.android.apps.messaging",
     "com.android.mms",
+    "com.samsung.android.messaging",
     "com.android.emergency",
+    "com.android.incallui",
+    "com.samsung.android.incallui",
+    "com.android.server.telecom",
 )
 
 

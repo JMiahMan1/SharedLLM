@@ -814,8 +814,12 @@ point.
       then a ten-minute wait, 10-minute window, both parents told; the window also lifts any
       screen-time lock). Each covered uninstall attempt is reported as `uninstall_attempt`. The
       same service enforces
-      screen time (4b): while `locked` it sends the child home except for always-allowed apps,
-      with the reason and an "Ask for more time" button. Switching device admin or the guard off
+      screen time (4b): while `locked` it covers the whole screen - the home screen included -
+      with a full-screen Accessibility overlay (`GuardOverlay`, a `TYPE_ACCESSIBILITY_OVERLAY`
+      window owned by the service, so Home and Back cannot leave it and no extra permission is
+      needed; built 2026-10-26, needs a new APK), leaving only the always-allowed apps (calls,
+      texts, Jarvis) and the system screens open; it shows the reason and an "Ask for more time"
+      button. Switching device admin or the guard off
       reports to `POST /api/guard/tamper` and both parents get a notice; `GuardWatch` reports a
       guard that was on and is now missing. Decisions live in pure `GuardRules` (JVM-tested).
       Setup is the `PhoneProtectionCard` on the child's Health page (device admin, then
@@ -844,20 +848,20 @@ point.
       and `DISALLOW_FACTORY_RESET` (the reset is refused, so a phone cannot be wiped to escape). A
       screen-time lock (a parent's Pause / Lock now, bedtime, school, the day's limit) is then a
       **real OS lock**: `lockNow()` puts Android's own lock screen up once when a lock starts,
-      instead of only sending the child home, while the Accessibility cover still shows why and
-      offers the parent login or the offline code. The always-allowed apps (calls, texts, Jarvis)
-      still open after the child unlocks, so a call is not blocked and the parent-unlock screen
-      stays reachable; anything else is covered by the guard as in Layer 1. On a phone that is not a
-      device owner every device-owner call is skipped and the Accessibility soft lock is the whole
-      of the lock, exactly as in Layer 1. When the server says a phone is no longer a minor's
+      while the cover activity pinned with lock-task (kiosk) mode still shows why and offers the
+      parent login or the offline code. The always-allowed apps (calls, texts, Jarvis) still open
+      after the child unlocks, so a call is not blocked and the parent-unlock screen stays
+      reachable. On a phone that is not a device owner every device-owner call is skipped and the
+      full-screen Accessibility overlay (Layer 1) is the whole of the lock, so the lock still
+      covers the home screen and cannot be left with Home or Back. When the server says a phone is no longer a minor's
       (`status.protected` false, from an answer rather than a default) the guard takes the
       restrictions and the uninstall block off again; while the phone has no status yet they stay,
       so an offline spell never weakens protection. Remaining limits: the lock is still a lock
       screen the child unlocks with their PIN (and in that moment gets calls, texts and Jarvis);
       device owner blocks the safe-boot *setting*, not a recovery key combo on every OEM; `lockNow`
-      needs a lock screen set, else it only turns the screen off; a single-app kiosk (lock task
-      mode) is not used; and the restrictions cannot be lifted while the phone cannot reach the
-      server. To retire a device-owner phone, change the child's family role so the server reports
+      needs a lock screen set, else it only turns the screen off; the Accessibility overlay cannot
+      cover the notification shade or the power menu; and the restrictions cannot be lifted while
+      the phone cannot reach the server. To retire a device-owner phone, change the child's family role so the server reports
       it not protected and the guard clears the restrictions, then reset.
 
 ### Watching (Bark parity)
