@@ -8,8 +8,9 @@ import java.util.Set;
 
 /**
  * What the screen guard does with the screen that just opened: let it be,
- * cover it because it would remove or switch off Jarvis's protection, or send
- * the child home because screen time is up (bedtime, school, the limit, a
+ * cover it because it would remove or switch off Jarvis's protection, or cover
+ * it with the full-screen lock overlay (the guard's own screen, on top of
+ * everything) because screen time is up (bedtime, school, the limit, a
  * parent's pause), or close one app a parent switched off or whose own
  * minutes are used up (app control).
  *
@@ -50,12 +51,19 @@ public final class GuardRules {
             "com.miui.securitycenter",
             "com.google.android.permissioncontroller"));
 
-    /** Never covered by a screen-time lock: the guard's own screen, the system UI and emergency calls. */
+    /**
+     * Never covered by a screen-time lock: the guard's own screen, the system UI,
+     * emergency calls and the incoming-call screens (so a call can always be
+     * answered, even before the server's always-allowed list has arrived).
+     */
     static final Set<String> NEVER_LOCKED = new HashSet<>(Arrays.asList(
             OWN_PACKAGE,
             "com.android.systemui",
             "com.android.emergency",
-            "com.android.phone"));
+            "com.android.phone",
+            "com.android.incallui",
+            "com.samsung.android.incallui",
+            "com.android.server.telecom"));
 
     private GuardRules() {}
 
@@ -144,6 +152,33 @@ public final class GuardRules {
         return NEVER_LOCKED.contains(pkg)
                 || pkg.equals(launcher)
                 || (alwaysAllowed != null && alwaysAllowed.contains(pkg));
+    }
+
+    /**
+     * Never covered by the full-screen lock overlay: the guard's own screens and
+     * the system UI (so a parent's login and an emergency call still open), and
+     * the always-allowed apps (calls, texts, Jarvis). Unlike {@link #exempt} the
+     * home screen is deliberately NOT here, so Home cannot dismiss the lock.
+     */
+    public static boolean lockOverlayExempt(String pkg, Collection<String> alwaysAllowed) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        return NEVER_LOCKED.contains(pkg) || (alwaysAllowed != null && alwaysAllowed.contains(pkg));
+    }
+
+    /**
+     * Whether the full-screen lock overlay should cover the screen now: on a
+     * protected phone that is locked, outside a parent's unlock window, and not
+     * a device owner (a device owner gets Android's own lock screen and lock-task
+     * mode instead), with a window in front that the lock does not leave alone.
+     *
+     * The overlay is what makes a lock on a phone that is not a device owner
+     * cover the whole screen - the home screen included - and stay put when the
+     * child presses Home or Back, instead of only sending the child home.
+     */
+    public static boolean lockOverlay(boolean deviceOwner, boolean protectedPhone, boolean locked,
+                                      boolean unlocked, String pkg, Collection<String> alwaysAllowed) {
+        if (deviceOwner || !protectedPhone || !locked || unlocked) return false;
+        return !lockOverlayExempt(pkg, alwaysAllowed);
     }
 
     /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */

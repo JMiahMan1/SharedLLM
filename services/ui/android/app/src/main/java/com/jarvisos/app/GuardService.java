@@ -32,9 +32,9 @@ import java.util.concurrent.TimeUnit;
  * Jarvis's screen guard on a child's phone (Phase 11: time budgets, app
  * control, tamper resistance). An Accessibility service sees each window that
  * opens, so it can (1) cover any screen that would uninstall Jarvis or switch
- * its protection off with a parent-login screen, (2) send the child home
- * while screen time is up, except for the always-allowed apps (calls, texts,
- * Jarvis), (3) close an app a parent blocked or whose own minutes are used up,
+ * its protection off with a parent-login screen, (2) cover the whole screen
+ * with a parent-login lock while screen time is up, except for the
+ * always-allowed apps (calls, texts, Jarvis), (3) close an app a parent blocked or whose own minutes are used up,
  * (4) keep an app installed since the guard started closed until a parent
  * approves it, (5) dismiss Android's permission dialog for a kind a parent
  * approves first, (6) warn a minute before a lock lands, and (7) keep the web
@@ -57,7 +57,9 @@ import java.util.concurrent.TimeUnit;
  * DeviceOwnerRules): the uninstall is blocked outright, safe boot and the
  * factory reset are disallowed, and a screen-time lock is Android's own lock
  * screen (lockNow) plus lock-task (kiosk) mode, which pins the child to the
- * guard screen, instead of only sending the child home. A parent's lock that
+ * guard screen. Without the device owner the lock is the full-screen
+ * Accessibility overlay ({@link GuardOverlay}), which covers the launcher and
+ * every other app so Home and Back cannot dismiss it. A parent's lock that
  * arrives by push is applied at once ({@link #refreshNow()}), not at the next
  * minute's refresh.
  */
@@ -94,6 +96,14 @@ public class GuardService extends AccessibilityService {
      * per guard run): that user has no Jarvis and no guard, so it is a way out.
      */
     private volatile boolean multiUserReported = false;
+    /**
+     * The full-screen lock on a phone that is not a device owner
+     * ({@link GuardOverlay}): a lock that covers the whole screen, home
+     * included, and stays put when the child presses Home or Back. Created on
+     * first use; never used on a device owner (that gets Android's own lock
+     * screen and lock-task mode instead).
+     */
+    private GuardOverlay lockOverlay;
 
     @Override
     protected void onServiceConnected() {
@@ -148,8 +158,12 @@ public class GuardService extends AccessibilityService {
         checkInstalls();
         checkFilterBypass();
         checkMultiUser();
-        // A lock that starts while the child is already in an app.
-        main.post(this::checkCurrentWindow);
+        // A lock that starts while the child is already in an app, and the
+        // full-screen lock overlay kept in step with the window in front.
+        main.post(() -> {
+            checkCurrentWindow();
+            syncLockOverlay();
+        });
     }
 
     /**
@@ -202,6 +216,9 @@ public class GuardService extends AccessibilityService {
 
     /** The window in front just changed. */
     private void act(String pkg, String cls, String text) {
+        // Keep the full-screen lock in step with the window in front, even when
+        // it is one the lock leaves alone (home, calls, Jarvis).
+        syncLockOverlay();
         String launcher = launcherPackage();
         GuardRules.Action action = decide(pkg, cls, text, launcher);
         if (action == GuardRules.Action.ALLOW) {
@@ -218,6 +235,8 @@ public class GuardService extends AccessibilityService {
      * kept visible in split screen or picture-in-picture is closed too.
      */
     private void checkVisibleWindows() {
+        // A window joined or left: the full-screen lock follows the one in front.
+        syncLockOverlay();
         List<AccessibilityWindowInfo> windows = visibleWindows();
         int appWindows = appWindows(windows);
         String launcher = launcherPackage();
@@ -239,6 +258,19 @@ public class GuardService extends AccessibilityService {
     /** Take a blocked window off the screen and show why. */
     private void block(GuardRules.Action action, String pkg, String text, GuardRules.Clear clear,
                        AccessibilityNodeInfo pipRoot) {
+        if (action == GuardRules.Action.BLOCK_LOCKED) {
+            // The lock covers the whole screen: the full-screen overlay on a
+            // phone that is not a device owner (home included, and Home/Back
+            // cannot leave it), or the cover activity pinned with lock-task mode
+            // on a device owner. Either way there is nothing to clear or send
+            // home, and no cover-per-screen-change throttle to respect.
+            if (DeviceOwnerGuard.isOwner(this)) {
+                startCover(action, pkg);
+            } else {
+                syncLockOverlay();
+            }
+            return;
+        }
         long now = System.currentTimeMillis();
         if (now - lastCoverAt < 700) return; // one cover per screen change, not one per event
         lastCoverAt = now;
@@ -252,7 +284,7 @@ public class GuardService extends AccessibilityService {
             performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN);
             main.postDelayed(() -> {
                 performGlobalAction(GLOBAL_ACTION_HOME);
-                cover(action, pkg);
+                startCover(action, pkg);
             }, SPLIT_SETTLE_MS);
             return;
         }
@@ -266,7 +298,7 @@ public class GuardService extends AccessibilityService {
         } else if (!dismissed) {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }
-        cover(action, pkg);
+        startCover(action, pkg);
     }
 
     /**
@@ -275,7 +307,7 @@ public class GuardService extends AccessibilityService {
      * unlock window). The lock screen goes up once when a lock starts; after that
      * the Accessibility cover is the way back in, so calls, texts and Jarvis still
      * open. On a phone that is not a device owner this is always false and the
-     * home-redirect above is the whole of the lock, as before.
+     * full-screen overlay ({@link #syncLockOverlay()}) is the whole of the lock.
      */
     private boolean hardLockWanted() {
         return DeviceOwnerRules.hardLock(DeviceOwnerGuard.isOwner(this), GuardApi.isProtected(this),
@@ -283,7 +315,7 @@ public class GuardService extends AccessibilityService {
     }
 
     /** The guard's screen saying why, over whatever was closed. */
-    private void cover(GuardRules.Action action, String pkg) {
+    private void startCover(GuardRules.Action action, String pkg) {
         String mode;
         switch (action) {
             case BLOCK_TAMPER:
@@ -308,6 +340,40 @@ public class GuardService extends AccessibilityService {
                 .putExtra(GuardScreenActivity.EXTRA_DENIED,
                         InstallApprovals.denied(pkg, GuardApi.appApprovals(this)));
         startActivity(cover);
+    }
+
+    /**
+     * Keep the full-screen lock overlay in step with the window in front: up
+     * while the phone is locked (on a phone that is not a device owner) and the
+     * front window is one the lock covers, down otherwise. Runs on the main
+     * thread, where the Accessibility window list and the overlay live.
+     */
+    private void syncLockOverlay() {
+        boolean wanted = GuardRules.lockOverlay(DeviceOwnerGuard.isOwner(this), GuardApi.isProtected(this),
+                GuardApi.isLocked(this), GuardApi.isUnlocked(this), frontAppPackage(), GuardApi.alwaysAllowed(this));
+        if (wanted) {
+            if (lockOverlay == null) lockOverlay = new GuardOverlay(this);
+            lockOverlay.show();
+        } else if (lockOverlay != null) {
+            lockOverlay.hide();
+        }
+    }
+
+    /**
+     * The package of the topmost application window - not the guard's own
+     * overlay, which is an accessibility window, so the lock does not flicker on
+     * itself. Empty when nothing is in front.
+     */
+    private String frontAppPackage() {
+        String first = "";
+        for (AccessibilityWindowInfo w : visibleWindows()) {
+            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null) continue;
+            if (w.isFocused()) return root.getPackageName().toString();
+            if (first.isEmpty()) first = root.getPackageName().toString();
+        }
+        return first;
     }
 
     /**
@@ -515,7 +581,9 @@ public class GuardService extends AccessibilityService {
 
     @Override
     public boolean onUnbind(Intent intent) {
-        // Switched off in Settings (or killed): tell the parents on a child's phone.
+        // Switched off in Settings (or killed): take the lock down and tell the
+        // parents on a child's phone.
+        if (lockOverlay != null) lockOverlay.hide();
         if (GuardApi.isProtected(this) && !GuardApi.isUnlocked(this)) {
             GuardApi.reportTamper(this, "guard_disabled");
         }

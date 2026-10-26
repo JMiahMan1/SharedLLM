@@ -200,4 +200,44 @@ public class GuardRulesTest {
         assertEquals(0, GuardRules.bootsWithoutGuard(42, 0)); // no counter on this phone
         assertEquals(0, GuardRules.bootsWithoutGuard(50, 3)); // counter reset (factory reset)
     }
+
+    private static boolean overlay(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked, String pkg) {
+        return GuardRules.lockOverlay(deviceOwner, protectedPhone, locked, unlocked, pkg, ALLOWED);
+    }
+
+    @Test
+    public void theLockOverlayCoversTheLauncherAndEveryOtherApp() {
+        // Unlike GuardRules.decide, the launcher is NOT exempt: Home cannot dismiss the lock.
+        assertEquals(true, overlay(false, true, true, false, LAUNCHER));
+        assertEquals(true, overlay(false, true, true, false, "com.epicgames.fortnite"));
+    }
+
+    @Test
+    public void theLockOverlayLeavesCallsTextsJarvisAndSystemScreensAlone() {
+        assertEquals(false, overlay(false, true, true, false, "com.google.android.dialer"));
+        assertEquals(false, overlay(false, true, true, false, "com.google.android.apps.messaging"));
+        assertEquals(false, overlay(false, true, true, false, "com.jarvisos.app"));
+        assertEquals(false, overlay(false, true, true, false, "com.android.systemui"));
+        assertEquals(false, overlay(false, true, true, false, "com.android.emergency"));
+        assertEquals(false, overlay(false, true, true, false, "com.android.phone"));
+        // An incoming call can always be answered, even before the server's list arrives.
+        assertEquals(false, overlay(false, true, true, false, "com.android.incallui"));
+        assertEquals(false, overlay(false, true, true, false, "com.samsung.android.incallui"));
+        assertEquals(false, overlay(false, true, true, false, "com.android.server.telecom"));
+    }
+
+    @Test
+    public void theLockOverlayIsNotUsedOnADeviceOwnerOrWhenNotLocked() {
+        assertEquals(false, overlay(true, true, true, false, "com.epicgames.fortnite")); // Layer 2 does lockNow + kiosk
+        assertEquals(false, overlay(false, false, true, false, "com.epicgames.fortnite")); // an adult's phone
+        assertEquals(false, overlay(false, true, false, false, "com.epicgames.fortnite")); // nothing is locked
+        assertEquals(false, overlay(false, true, true, true, "com.epicgames.fortnite")); // a parent's unlock window
+    }
+
+    @Test
+    public void anUnknownWindowStillGetsTheLock() {
+        // With no window known yet the safe default is to cover the screen.
+        assertEquals(true, overlay(false, true, true, false, ""));
+        assertEquals(true, overlay(false, true, true, false, null));
+    }
 }

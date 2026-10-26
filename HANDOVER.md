@@ -50,8 +50,8 @@ Every claim below was verified against the live system unless marked **planned**
     `adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` and the "no accounts
     signed in / factory reset" caveat. JVM 26 tests pass. **Caveat:** a real OS lock still needs the
     phone provisioned as **device owner** (a one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE`
-    at a factory reset - not implemented); without it the lock is the Accessibility home-redirect
-    plus the cover only.
+    at a factory reset - not implemented); without it the lock is the full-screen Accessibility
+    overlay (it covers the home screen too and Home/Back cannot leave it), not Android's own lock.
   - **Media: the widget transport, the phantom speaker and the audiobook art** (`84bced59`): the
     Android home-screen widget's transport buttons were 422s and now send the route's command
     vocabulary plus the player's `entity_id`; this device's own Music Assistant player no longer
@@ -136,7 +136,7 @@ Every claim below was verified against the live system unless marked **planned**
       tamper event `multi_user`.
     - **Device-owner lock (Layer 2)** (`ecf6584f`): the guard blocks its own uninstall, sets
       `DISALLOW_SAFE_BOOT` and `DISALLOW_FACTORY_RESET`, and calls a real `lockNow()` at lock onset;
-      non-device-owner phones keep the soft lock.
+      non-device-owner phones get the full-screen Accessibility overlay lock (`GuardOverlay`).
     - **Approve from the notification; ops notices stay off children's phones** (`41115ca6`): a parent
       gets Approve/Disapprove buttons in the notification for a child's asks (new app, permission,
       blocked site) and for more time, sent to EVERY parent; new push callbacks `guard_decide` and
@@ -894,7 +894,8 @@ device-owner phone; app install/uninstall stays the screen rules.
   **kiosk lock-task mode** and the **real OS lock** all require a one-time device-owner provisioning
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` on a phone with no accounts
   signed in, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a factory reset, which is not implemented).
-  Without it a lock is the Accessibility home-redirect plus the cover only.
+  Without it a lock is the full-screen Accessibility overlay (`GuardOverlay`), which covers the home
+  screen and cannot be left with Home or Back but is not Android's own lock screen.
 - **Family Link / Qustodio / Bark research (2026-10-25):** there are no supported public APIs for
   device control (only reverse-engineered Home Assistant bridges), so their best features are being
   rebuilt natively. Build order (cheap parenting wins first): (1) the cheap parenting wins - an
