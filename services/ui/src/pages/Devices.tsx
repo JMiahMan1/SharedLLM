@@ -403,7 +403,10 @@ export default function Devices() {
     return (
       <div className={PAGE}>
         <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
-          <h1 className="text-xl font-bold text-white sm:text-2xl">Devices</h1>
+          {/* The navigation calls this "Shared files" for a member who is not
+              an admin, because that is all it is to them: the device inventory
+              below is a parent's view. */}
+          <h1 className="text-xl font-bold text-white sm:text-2xl">Shared files</h1>
           <p className="mt-0.5 text-xs text-slate-400">Files your parents share with you.</p>
         </header>
         <SharedFilesPanel />
