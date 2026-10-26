@@ -290,7 +290,10 @@ schema.org data: paste the URL, preview the ingredients and steps, and **Save to
 adds it with guessed level labels and a source line. When a link is not to hand, the same
 panel **searches recipes** - the built-in offline index over the whole CC0 Food.com corpus
 answers instantly and a pick reads its full ingredients and steps locally; TheMealDB fills
-in the rest with photos, saved with attribution to themealdb.com. A name filter above the
+in the rest with photos, saved with attribution to themealdb.com. A search result whose
+source URL is already on the shelf is marked **Already in Recipes** and cannot be picked
+again (the guard reads every recipe note, not just a preview), and a pasted link already
+imported is refused on save. A name filter above the
 shelf narrows the list as you type; the week plan, shopping list and import all pick from
 the same shelf.
 
@@ -298,10 +301,13 @@ A recipe can also be added from a **photo or handwriting**: a picture of the pag
 camera capture on the phone) goes through the local vision OCR into an editable draft
 beside the raw transcription, the words the model was unsure of are flagged for a check,
 the original photo is kept with the note, and saving adds it with a `#photo-import` label.
-The Recipes editor shows a note's own stated per-serving nutrition, and a planned dinner
-logs into Health with a portion picker; Health → Today shows a **Dinner tonight** card
-with the week plan's dinner and its estimated nutrition (hidden when nothing is planned
-or in kid mode).
+The Recipes editor shows a note's own stated per-serving nutrition, or offers an
+**Estimate from ingredients (USDA)** when the note states none: each ingredient is matched
+in the USDA seed and weighed with a household portion, the result is labelled an estimate,
+and any ingredient it cannot match or weigh is shown as **unknown** rather than guessed. A
+planned dinner logs into Health with a portion picker; Health → Today shows a **Dinner
+tonight** card with the week plan's dinner, its nutrition and what was actually logged for
+dinner today (planned vs. eaten), all hidden when nothing is planned or in kid mode.
 
 ## Voice signatures (shipped)
 

@@ -2,8 +2,9 @@
 
 Status: **Phases 0-5, 8-10 built** - the importer (`scripts/import_recipes.py`) renders the
 first level-balanced note set; the Recipes page (plan, shopping list, search, link and
-photo import) and the Health connection (recipe logging, the Dinner tonight card and the
-editor's nutrition summary) are live. Phase 7 (Skylight) and the remaining Phase 6/10/11
+photo import, the duplicate-import guard) and the Health connection (recipe logging, the
+Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
+editor's nutrition summary) are live. Phase 7 (Skylight) and the remaining Phase 6/11
 polish are still open.
 Last live app commit `d766a19f` (v1.5.1).
 
@@ -212,9 +213,14 @@ account is connected, everything above still works.
       offline index, TheMealDB hits show a photo; both pick into the same preview and save
       (source lines point back at food.com or themealdb.com). A name filter above the shelf
       narrows the list as you type.
-- [ ] Duplicate guard: skip a result whose source URL is already imported. (The paste-a-link
-      save stamps the source URL into the note and refuses a same-title save; the search
-      results guard arrives with the search slice.)
+- [x] Duplicate guard: a search result whose source URL is already imported is marked
+      **Already in Recipes** and cannot be picked again. The guard is exact, not a
+      preview heuristic: `recipe_sources` (execution `handlers/recipe_import.py`) lists
+      `Recipes/`, reads every note's `Source:` line (cached by the note's version, so a
+      repeat search only re-reads what changed) and returns the URLs; the gateway route
+      is `POST /api/recipes/sources`. A pasted link whose URL is already on the shelf is
+      refused on save too. Tests: `services/execution/tests/test_recipe_import.py`,
+      `services/gateway/tests/test_recipe_gateway.py`, `src/pages/Recipes.test.tsx`.
 - [x] Tests: JSON-LD parsing and the handler (pytest, fixture page -
       `services/execution/tests/test_recipe_import.py`), label guessing and note rendering
       (`src/test/recipeImport.test.ts`) and paste → read → preview → save
@@ -258,8 +264,17 @@ account is connected, everything above still works.
       editor now shows that line back, per serving and as a whole-recipe estimate
       scaled to the servings the note states (`parseRecipeServings`), so the numbers
       are visible without opening the log sheet.
-- [ ] Edited or computed recipes fall back to the USDA-seed pipeline (the FTS match
-      and FNDDS portion conversion described above). Still open.
+- [x] Edited or computed recipes fall back to the USDA-seed pipeline: when a note states
+      no nutrition, the Recipes editor offers **Estimate from ingredients (USDA)**.
+      `services/health/recipe_estimate.py` splits each ingredient line into a quantity, a
+      unit and a name, matches the name in the USDA seed (`services/health/food_seed.py`,
+      `data/health/fdc-seed.db`) and weighs it with an FNDDS household portion
+      (N = V × W / 100); mass units convert directly. It is labelled an estimate and
+      never the recipe's own numbers, and every ingredient the seed cannot match (or
+      weigh) is shown as **unknown** with the reason, never a guessed number; a total
+      built from only some lines says so. The offer is hidden in kid mode. Tests:
+      `services/health/tests/test_recipe_estimate.py`,
+      `services/gateway/tests/test_health_hub_gateway.py`, `src/pages/Recipes.test.tsx`.
 - [x] Health tab: a **Dinner tonight** card (`MealsCard`, Health → Today) shows
       today's planned dinner from `Recipes/Meal plan.md` with its stated per-serving
       nutrition and a whole-recipe estimate scaled to the note's own servings, and a
@@ -273,16 +288,21 @@ account is connected, everything above still works.
       on an open recipe, post the note's per-serving nutrition with a portion picker
       (see HEALTH_HUB.md Phase 4). Logging tonight's dinner from the plan now also ticks
       that day cooked in the plan (an option in the log sheet, on by default), and the
-      shopping list leaves cooked dinners out (HEALTH_HUB.md Phase 8). A planned-vs-eaten
-      card is still open.
+      shopping list leaves cooked dinners out (HEALTH_HUB.md Phase 8). The **Dinner
+      tonight** card now shows what was actually logged for dinner today beside the plan
+      - tonight's recipe logged as itself, something else logged instead, or nothing yet
+      - via `src/lib/recipeEaten.ts`; its numbers hide in kid mode. Tests:
+      `src/test/recipeEaten.test.ts`, `src/components/health/MealsCard.test.tsx`.
 - [ ] Optional (decide with the family): daily calorie/protein targets, weekly averages,
       and per-person portions.
 - [x] Stay out of the way when there is no plan or nutrition data: the Dinner tonight
       card returns nothing when no dinner is planned.
 - [x] Tests: nutrition parsing, scaling and the note's stated servings (pure -
       `src/test/recipeNutrition.test.ts`), the plan's today mapping and the log sheet
-      (`LogRecipeSheet.test.tsx`, `RecipesPlan.test.tsx`) and the Dinner tonight card
-      (`MealsCard.test.tsx`).
+      (`LogRecipeSheet.test.tsx`, `RecipesPlan.test.tsx`), the Dinner tonight card and
+      its planned-vs-eaten comparison (`MealsCard.test.tsx`, `src/test/recipeEaten.test.ts`)
+      and the USDA estimate (`services/health/tests/test_recipe_estimate.py`,
+      `src/pages/Recipes.test.tsx`).
 - [ ] Docs and deploy.
 
 ## Phase 11 - calorie budget and logging (Noom-style)

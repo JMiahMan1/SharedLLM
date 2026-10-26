@@ -14,6 +14,7 @@ vi.mock('../services/api', async (importOriginal) => {
     api: {
       ...actual.api,
       getMe: vi.fn(),
+      getHealthProfile: vi.fn(),
       listNotes: vi.fn(),
       readNote: vi.fn(),
       writeNote: vi.fn(),
@@ -74,6 +75,7 @@ describe('Recipes week plan', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getMe.mockResolvedValue({ username: 'mom', is_admin: false } as never);
+    vi.mocked(api.getHealthProfile).mockResolvedValue({ kid_mode: false } as never);
     listNotes.mockResolvedValue(listResponse(['Pancakes']) as never);
     readNote.mockImplementation(
       (async (title: string) => (title === 'Meal plan' ? PLAN_RESPONSE : RECIPE_RESPONSE)) as never,

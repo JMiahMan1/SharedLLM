@@ -4,7 +4,9 @@ import { Utensils } from 'lucide-react';
 import { api } from '../../services/api';
 import { readMealPlan } from '../../lib/mealPlanStore';
 import { planDayOf } from '../../lib/mealPlan';
+import { localDay } from '../../lib/healthHub';
 import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../../lib/recipeNutrition';
+import { eatenDinner } from '../../lib/recipeEaten';
 import LogRecipeSheet from './LogRecipeSheet';
 
 const STORAGE = 'nextcloud';
@@ -16,12 +18,15 @@ const RECIPES_DIR = 'Recipes';
  * whole-recipe estimate scaled to the servings the recipe states - nothing is
  * guessed, and a recipe with no nutrition says so instead of showing a number.
  *
- * The card hides itself when nothing is planned (and its nutrition line in
- * kid mode), so an empty day stays quiet.
+ * Below it, what was actually logged for dinner today, so a parent can see the
+ * difference: tonight's recipe logged as itself, something else logged instead,
+ * or nothing yet. The card hides itself when nothing is planned (and its
+ * numbers in kid mode), so an empty day stays quiet.
  */
 export default function MealsCard({ kid = false }: { kid?: boolean }) {
   const queryClient = useQueryClient();
   const today = useMemo(() => planDayOf(), []);
+  const day = useMemo(() => localDay(), []);
   const [logOpen, setLogOpen] = useState(false);
 
   const planQuery = useQuery({
@@ -43,9 +48,22 @@ export default function MealsCard({ kid = false }: { kid?: boolean }) {
     retry: false,
   });
 
+  // What was actually logged for dinner today, to compare with the plan.
+  const foodQuery = useQuery({
+    queryKey: ['health-food', day],
+    queryFn: () => api.getFoodEntries(day),
+    enabled: Boolean(title),
+    staleTime: 30_000,
+    retry: false,
+  });
+
   const body = recipeQuery.data?.status === 'SUCCESS' ? recipeQuery.data.message ?? '' : '';
   const parsed = useMemo(() => parseRecipeNutrition(body), [body]);
   const servings = useMemo(() => parseRecipeServings(body), [body]);
+  const eaten = useMemo(
+    () => eatenDinner(path, title, foodQuery.data?.entries ?? []),
+    [path, title, foodQuery.data],
+  );
 
   // No plan (or still loading it): stay out of the way.
   if (!title) return null;
@@ -86,6 +104,34 @@ export default function MealsCard({ kid = false }: { kid?: boolean }) {
       {recipeQuery.isError ? (
         <p className="mt-1 text-[11px] text-amber-300">The recipe could not be read right now.</p>
       ) : null}
+      <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-2" data-testid="today-meals-eaten">
+        <p className="text-[10px] uppercase tracking-wider text-slate-500">Logged today</p>
+        {foodQuery.isError ? (
+          <p className="text-xs text-slate-500" data-testid="today-meals-eaten-error">
+            Today&apos;s log could not be read.
+          </p>
+        ) : !foodQuery.isSuccess ? (
+          <p className="text-xs text-slate-500" data-testid="today-meals-eaten-loading">
+            Checking today&apos;s log…
+          </p>
+        ) : eaten.matched ? (
+          <p className="text-xs text-emerald-300" data-testid="today-meals-eaten-match">
+            {eaten.matched.name}
+            {eaten.matched.servings
+              ? ` · ${eaten.matched.servings} serving${eaten.matched.servings === 1 ? '' : 's'}`
+              : ''}
+            {!kid ? ` · ${Math.round(eaten.matched.calories * eaten.matched.servings)} kcal` : ''}
+          </p>
+        ) : eaten.entries.length > 0 ? (
+          <p className="text-xs text-amber-300" data-testid="today-meals-eaten-other">
+            {eaten.names.join(', ')} - not tonight&apos;s plan
+          </p>
+        ) : (
+          <p className="text-xs text-slate-500" data-testid="today-meals-eaten-none">
+            Nothing logged for dinner yet
+          </p>
+        )}
+      </div>
       <button
         type="button"
         onClick={() => setLogOpen(true)}

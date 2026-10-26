@@ -54,6 +54,7 @@ def client():
         ("POST", "/api/health/fasting/start", {"target_hours": 14}, "/fasting/start"),
         ("POST", "/api/health/fasting/stop", {}, "/fasting/stop"),
         ("DELETE", "/api/health/fasting/3", None, "/fasting/3"),
+        ("POST", "/api/health/food/estimate", {"ingredients": ["2 cups broccoli"]}, "/food/estimate"),
     ],
 )
 def test_routes_forward_as_the_caller(client, calls, method, path, body, upstream):

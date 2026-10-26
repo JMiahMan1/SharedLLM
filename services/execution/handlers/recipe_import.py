@@ -8,17 +8,21 @@ ingredients with units, ordered steps, times, yield, an image - so the importer
 reads the page once and never has to scrape HTML. Sites that do not publish it
 get a plain "cannot read this page" answer instead of a guess.
 """
+import asyncio
 import html
 import json
 import logging
 import re
+from collections import OrderedDict
 from typing import Any
 from urllib.parse import quote, urlparse
 
 import aiohttp
 
+from services.execution.handlers.note import _walk_webdav_dir, note_body
 from services.execution.handlers.recipe_seed import get_seed
 from services.execution.http_client import get_session, host_of
+from services.execution.personal_data import missing_account_message, resolve_personal_data_provider
 from services.execution.schemas import ExecutionResult, RecipeRequest
 
 log = logging.getLogger("execution.recipe_import")
@@ -35,6 +39,29 @@ _DURATION_RE = re.compile(
 _MAX_BYTES = 1_500_000
 _TIMEOUT = aiohttp.ClientTimeout(total=25.0, connect=10.0)
 _UA = "Jarvis-OS/1.0 (family recipe import; self-hosted)"
+
+# --- duplicate-import guard -------------------------------------------------
+# The Recipes page needs to know which source URLs are already on the shelf
+# before it offers a search result again. A note's ``Source:`` line carries the
+# URL; the notes ``list`` previews only the newest few notes, so the guard reads
+# every recipe note (through the same WebDAV listing the notes page uses) and
+# caches each read by its version, re-reading only what changed.
+_RECIPES_DIR = "Recipes"
+_SOURCE_URL_RE = re.compile(r"^Source:\s*(https?://\S+)", re.I | re.M)
+_SOURCE_CONCURRENCY = 4
+_SOURCE_CACHE_MAX = 512
+_source_cache: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
+
+
+def extract_source_url(text: str | None) -> str:
+    """The URL on a note's ``Source:`` line, or ``""`` when it has none.
+
+    Imported notes end with ``Source: <url> - imported from <site>``; a photo
+    import has no URL (``Source: photo import``), so it matches nothing.
+    """
+    match = _SOURCE_URL_RE.search(note_body(text or ""))
+    return match.group(1) if match else ""
+
 
 
 def _text(value: Any) -> str:
@@ -334,6 +361,68 @@ async def _shelf_fetch(req: RecipeRequest) -> ExecutionResult:
     )
 
 
+async def _read_note_source(provider, note: dict) -> str:
+    """The source URL of one note, cached by the note's version.
+
+    A read that fails is a blank source, never an error: the guard only loses
+    the "already imported" mark for that note.
+    """
+    from ..http_client import request as http_request
+
+    url = provider.file_url(note["path"].lstrip("/"))
+    version = f"{note.get('modified', '')}|{note.get('size', 0)}"
+    cached = _source_cache.get(url)
+    if cached and cached[0] == version:
+        _source_cache.move_to_end(url)
+        return cached[1]
+    try:
+        resp = await http_request(
+            "GET", url, auth=(provider.username, provider.password), verify=False, timeout=20
+        )
+    except Exception as exc:  # one unreadable note must not fail the scan
+        log.warning("[recipe_import] source read failed for %s: %s", note["path"], str(exc) or type(exc).__name__)
+        return ""
+    if resp["status_code"] != 200:
+        return ""
+    source = extract_source_url(resp["text"])
+    _source_cache[url] = (version, source)
+    _source_cache.move_to_end(url)
+    while len(_source_cache) > _SOURCE_CACHE_MAX:
+        _source_cache.popitem(last=False)
+    return source
+
+
+async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
+    """The source URLs already imported into ``Recipes/`` (the duplicate guard).
+
+    Reads every recipe note so the answer is exact, not a preview heuristic;
+    each read is cached by the note's version, so a repeat search only re-reads
+    notes that changed.
+    """
+    provider = resolve_personal_data_provider(req.user_context)
+    if not provider:
+        return ExecutionResult.fail(missing_account_message(req.user_context), service="recipe_sources")
+    try:
+        notes = await _walk_webdav_dir(provider, _RECIPES_DIR)
+    except Exception as exc:  # a listing failure is a blank guard, not a 500
+        log.warning("[recipe_import] recipe listing failed: %s", str(exc) or type(exc).__name__)
+        return ExecutionResult.fail("Could not read the recipe shelf right now.", service="recipe_sources")
+
+    gate = asyncio.Semaphore(_SOURCE_CONCURRENCY)
+
+    async def one(note: dict) -> str:
+        async with gate:
+            return await _read_note_source(provider, note)
+
+    found = await asyncio.gather(*(one(note) for note in notes))
+    sources = sorted({source for source in found if source})
+    return ExecutionResult.ok(
+        f"{len(sources)} of {len(notes)} recipe(s) name a source already imported.",
+        service="recipe_sources",
+        detail={"sources": sources, "notes": len(notes)},
+    )
+
+
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
     if req.action == "themealdb_search":
         return await _themealdb_search(req)
@@ -341,6 +430,8 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
         return await _recipe_search(req)
     if req.action == "shelf_fetch":
         return await _shelf_fetch(req)
+    if req.action == "recipe_sources":
+        return await _recipe_sources(req)
     if req.action != "url_import":
         return ExecutionResult.fail(
             f"Unknown recipe action: {req.action}", service="recipe_import"

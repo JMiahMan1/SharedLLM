@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, scoring, streaks, weekly
+from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, recipe_estimate, scoring, streaks, weekly
 from services.health.models import (
     ChallengeMember,
     Checkin,
@@ -553,6 +553,12 @@ class FoodIn(BaseModel):
         if not (0 < value <= 100):
             raise ValueError("servings must be greater than 0 and at most 100")
         return value
+
+
+class RecipeEstimateIn(BaseModel):
+    """The ingredient lines a recipe estimate is built from."""
+
+    ingredients: list[str] = Field(default_factory=list, max_length=recipe_estimate.MAX_INGREDIENTS)
 
 
 class ShareIn(BaseModel):
@@ -1681,6 +1687,19 @@ async def search_food(q: str = Query(min_length=1, max_length=120), limit: int =
         "seed": {"present": seed.present, "results": len(seed_hits)},
         "results": seed_hits + off_hits,
     }
+
+
+@app.post("/food/estimate")
+def estimate_recipe_food(body: RecipeEstimateIn):
+    """An **estimate** of a recipe's nutrition from the USDA seed, per ingredient.
+
+    Used when a recipe states no nutrition of its own: each ingredient line is
+    matched against the seed and weighed with a household portion. An ingredient
+    the seed cannot match is reported as ``unknown`` (never a guessed number),
+    and the total covers only the matched lines. The source is named so the
+    caller can label it as an estimate rather than the recipe's own numbers.
+    """
+    return recipe_estimate.estimate_ingredients(body.ingredients, _seed())
 
 
 @app.get("/food/barcode/{code}")
