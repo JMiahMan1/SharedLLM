@@ -314,7 +314,18 @@ wellbeing live there.
 
 **Open (rough).**
 
-- The theme tokens are bypassed by hardcoded colour classes in 216 files.
+Nothing from this audit is still open.
+
+**Checked, and not a defect: the theme tokens are not bypassed by hardcoded colour classes.**
+`services/ui/scripts/gen-theme-css.mjs` reads every `.tsx`/`.ts` file under `src` (tests excluded), finds
+every colour class the source actually uses, and writes `src/themes/theme-remap.css`: purple, violet and
+indigo follow the theme accent; the neutral families (slate, gray, zinc, neutral, stone) become the
+theme's surface and text per scheme, with dim text raised to readable contrast on dark themes and dark
+surfaces re-shaded on light ones; the chroma families are adjusted per hue so they stay legible in both
+schemes; and white text on a solid fill (the red SOS button) is left alone. `themeRemap.test.ts` runs the
+generator with `--check` and fails when the committed file is out of date, so a new colour class cannot
+silently escape the theme - which is why the "216 files use hardcoded colours" count is not a defect: the
+classes are the input to the generator, not a bypass of it.
 
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
@@ -469,19 +480,20 @@ discovery and geo's zone cache).
 `FROM` line, every Python package the Dockerfile names, and the interpreter are pinned, but the
 Debian packages `apt-get install` resolves at build time can move - the digest fixes the release, not
 the tool versions - and the Python transitive dependencies are free to move too, which needs a
-constraints file reconciled with each service's own `requirements.txt`); a second replica of a service
-would still be wrong in places,
-because state lives in the process - the gateway's live media push keeps a hub per user and a registry
-of web players (`media_events.py`, `ma_scope.py`), and caches in `cache.py`, `prompts.py`,
-`apk_manifest.py`, `services/health/main.py` and `services/common/circuit_breaker.py` are per-process
-too, all of which is harmless while exactly one replica runs each service.
+constraints file reconciled with each service's own `requirements.txt`).
 
 **Acceptable for this deployment.** Readiness reports 200 while degraded; the error envelope differs between services; no request
 correlation id; two N+1 queries; a deploy whose commit has not finished building yet falls back to
 `:latest` with a warning rather than waiting indefinitely (which is also what lets a docs-only commit
 deploy without rebuilding anything); and a handful of deliberate best-effort `except Exception: pass`
 blocks. The gateway's media layer is the model to copy for honest failure: a named cause and a clean
-502 rather than a traceback.
+502 rather than a traceback. State also lives in the process in places - the gateway's live media push
+keeps a hub per user and a registry of web players (`media_events.py`, `ma_scope.py`), and the caches in
+`cache.py`, `prompts.py`, `apk_manifest.py`, `services/health/main.py` and
+`services/common/circuit_breaker.py` are per-process - which is correct for one replica per service
+(what `docker-compose.yml` runs) and would need moving into Redis before a second replica of the
+gateway or health was added. The six background-worker loops are already safe: each holds a short Redis
+lease, so a second replica stands down rather than double-posting.
 
 ### 3.8 Recipes, calendar, Bible, location, admin and workspaces (audited 2026-10-26)
 
