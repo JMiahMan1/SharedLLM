@@ -653,6 +653,17 @@ export function rethrowWithServerDetail(error: unknown, fallback: string): never
   throw new Error(message);
 }
 
+/** The server's own words for a failed response, or null when it gave none. */
+export function serverMessage(data: unknown): string | null {
+  const body = data as { detail?: unknown; message?: unknown } | null | undefined;
+  const detail = body?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  // FastAPI's validation errors arrive as an array of {loc, msg, type}.
+  if (Array.isArray(detail) && typeof detail[0]?.msg === 'string') return detail[0].msg;
+  if (typeof body?.message === 'string' && body.message.trim()) return body.message;
+  return null;
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -742,6 +753,15 @@ apiClient.interceptors.response.use(
           },
         });
       }
+    }
+
+    // Callers all over the app show `error.message`, and left alone that reads
+    // "Request failed with status code 500". The server usually said something
+    // useful, so put its words on the error once, here, where every request
+    // passes.
+    if (isAxiosError && error.response) {
+      const message = serverMessage(error.response.data);
+      if (message) error.message = message;
     }
 
     console.error('[API] Response error:', error.message, error.config?.baseURL, error.config?.url);
