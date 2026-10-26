@@ -46,6 +46,41 @@ class InferenceJobQueue:
             self._redis = redis.from_url(self.redis_url, decode_responses=True)
             log.info(f"Connected to Redis at {self.redis_url} for job queuing.")
 
+    async def claim_loop(self, name: str, token: str, ttl_seconds: int) -> bool:
+        """Whether this worker may run the ``name`` loop right now.
+
+        Claiming inference jobs is safe from any number of workers: the queue
+        hands each job to exactly one of them. Every other loop in the worker
+        posts something - bot replies, chat notifications, admin alerts, song
+        notices, cleanup - so a second gateway must not run them as well. Each
+        such loop holds a short lease under its own name and refreshes it while
+        it runs; another worker stands down until the lease expires.
+
+        A Redis failure returns True: losing every notification would be worse
+        than a possible duplicate.
+        """
+        if not self._redis:
+            try:
+                await self.connect()
+            except Exception as e:
+                log.warning(f"[RavenWorker] No Redis for the {name} lease: {e}")
+                return True
+
+        assert self._redis is not None
+
+        key = f"raven:loop:{name}"
+        try:
+            if await self._redis.set(key, token, nx=True, ex=ttl_seconds):  # type: ignore[misc]
+                return True
+            holder = await self._redis.get(key)  # type: ignore[misc]
+            if holder == token:
+                await self._redis.expire(key, ttl_seconds)  # type: ignore[misc]
+                return True
+            return False
+        except Exception as e:
+            log.warning(f"[RavenWorker] Could not check the {name} lease: {e}")
+            return True
+
     async def enqueue_job(self, user_id: str, payload: dict[str, Any]) -> str:
         """Adds a job to the FIFO queue."""
         if not self._redis:

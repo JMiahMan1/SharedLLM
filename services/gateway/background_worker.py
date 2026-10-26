@@ -166,6 +166,10 @@ class RavenWorker:
         # a mission it should have pushed.
         self.__init_self_repair_state()
         self.job_queue = InferenceJobQueue(REDIS_URL)
+
+        # Identifies this process in the per-loop Redis leases below, so a
+        # second gateway stands down from the loops that post things.
+        self._lease_token = f"worker-{os.getpid()}-{int(time.time())}"
         #: Inference jobs claimed and not finished yet. The loop keeps claiming
         #: while this set has room, so one long Raven mission cannot stop Tier 2
         #: work from starting.
@@ -327,6 +331,13 @@ class RavenWorker:
 
                 if is_suspended:
                     log.info("Raven health checks are suspended. Standing by...")
+                    await asyncio.sleep(scan_interval)
+                    continue
+
+                # One scan at a time across workers: it can open missions.
+                if not await self.job_queue.claim_loop(
+                    "health", self._lease_token, max(120, scan_interval * 2)
+                ):
                     await asyncio.sleep(scan_interval)
                     continue
 
@@ -509,6 +520,9 @@ class RavenWorker:
                 continue
 
             try:
+                if not await self.job_queue.claim_loop("talk_monitor", self._lease_token, 60):
+                    await asyncio.sleep(10)
+                    continue
                 await self._check_talk_once(r)
                 await asyncio.sleep(10) # Poll every 10 seconds
             except (aiohttp.ClientConnectionError, TimeoutError) as e:
@@ -535,6 +549,11 @@ class RavenWorker:
             try:
                 if r is None:
                     r = redis.from_url(REDIS_URL, decode_responses=True)
+                if not await self.job_queue.claim_loop(
+                    "chat_notify", self._lease_token, max(60, chat_notify.POLL_SECONDS * 3)
+                ):
+                    await asyncio.sleep(chat_notify.POLL_SECONDS)
+                    continue
                 async with _shared_http_client() as client:
                     await chat_notify.check_once(
                         r, client, identity=IDENTITY_SVC, execution=EXECUTION_SVC,
@@ -571,6 +590,10 @@ class RavenWorker:
             try:
                 if r is None:
                     r = redis.from_url(REDIS_URL, decode_responses=True)
+                if not await self.job_queue.claim_loop(
+                    "admin_alerts", self._lease_token, max(120, admin_alerts.CHECK_SECONDS * 3)
+                ):
+                    continue
                 settings = await get_dynamic_llm_settings()
                 async with _shared_http_client() as client:
                     await admin_alerts.check_once(r, client, settings, gateway=GATEWAY_SVC)
@@ -596,6 +619,10 @@ class RavenWorker:
             try:
                 if r is None:
                     r = redis.from_url(REDIS_URL, decode_responses=True)
+                if not await self.job_queue.claim_loop(
+                    "songs", self._lease_token, max(120, notices.SONG_POLL_SECONDS * 3)
+                ):
+                    continue
                 async with _shared_http_client() as client:
                     await notices.check_songs_once(r, client)
             except asyncio.CancelledError:
@@ -1561,7 +1588,11 @@ class RavenWorker:
 
         while self.is_running:
             try:
-                await self._run_cleanup()
+                # Cleanup prunes shared Redis keys and RAG rows: one worker only.
+                if await self.job_queue.claim_loop(
+                    "cleanup", self._lease_token, max(300, CLEANUP_INTERVAL * 2)
+                ):
+                    await self._run_cleanup()
             except Exception as e:
                 log.error(f"Cleanup loop error: {e}")
 
