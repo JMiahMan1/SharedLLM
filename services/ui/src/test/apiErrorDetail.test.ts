@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rethrowWithServerDetail } from '../services/api';
+import { rethrowWithServerDetail, serverMessage } from '../services/api';
 
 /**
  * The response interceptor rejects the raw axios error, whose message is only
@@ -43,5 +43,34 @@ describe('rethrowWithServerDetail', () => {
   it('survives a null or undefined error', () => {
     expect(fail(undefined).message).toBe('Fallback message');
     expect(fail({ data: { detail: 'real reason' } }).message).toBe('real reason');
+  });
+});
+
+/**
+ * Every `catch` in the app shows `error.message`, so the interceptor puts the
+ * server's own words there. This is that decision on its own.
+ */
+describe('serverMessage', () => {
+  it('prefers a string detail', () => {
+    expect(serverMessage({ detail: 'That name is taken.' })).toBe('That name is taken.');
+  });
+
+  it('unwraps a FastAPI validation error list', () => {
+    expect(serverMessage({ detail: [{ msg: 'field required' }] })).toBe('field required');
+  });
+
+  it('accepts the message the gateway proxies answer with', () => {
+    expect(serverMessage({ message: 'Music Assistant is not configured.' })).toBe(
+      'Music Assistant is not configured.',
+    );
+  });
+
+  it('gives nothing back when the server gave nothing useful', () => {
+    expect(serverMessage({ detail: '   ' })).toBeNull();
+    expect(serverMessage({ detail: 42 })).toBeNull();
+    expect(serverMessage({})).toBeNull();
+    expect(serverMessage(null)).toBeNull();
+    expect(serverMessage(undefined)).toBeNull();
+    expect(serverMessage('plain text')).toBeNull();
   });
 });

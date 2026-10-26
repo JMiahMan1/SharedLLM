@@ -412,7 +412,7 @@ const Dashboard = () => {
 
         <div className="flex items-center gap-2.5 w-full md:w-auto md:max-w-lg">
           <form onSubmit={handleSearch} className="relative flex-1 min-w-0">
-            <Search
+            <Brain
               className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
               size={16}
             />
@@ -423,7 +423,7 @@ const Dashboard = () => {
               placeholder="Search knowledge & files…"
               className="glass-input w-full py-2.5 pl-10 pr-14 text-sm"
               enterKeyHint="search"
-              aria-label="Global search"
+              aria-label="Search the knowledge base"
             />
             <button
               type="submit"

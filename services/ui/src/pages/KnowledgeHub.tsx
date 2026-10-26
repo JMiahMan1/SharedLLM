@@ -357,14 +357,14 @@ const KnowledgeHub = () => {
       {/* RAG Semantic Search: the home for semantic memory / indexed storage */}
       <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
         <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <Search size={16} className="text-indigo-300" />
+          <Brain size={16} className="text-indigo-300" />
           <h3 className="font-bold text-indigo-300">Semantic Memory Search</h3>
           <span className="text-[10px] uppercase tracking-widest text-slate-500">
             RAG · indexed files, Home Assistant, missions &amp; more
           </span>
         </div>
         <form onSubmit={runRagSearch} className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+          <Brain className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
           <input
             type="text"
             value={ragQuery}
