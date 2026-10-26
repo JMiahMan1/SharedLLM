@@ -6,11 +6,14 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `5533f1a0`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `b29adfc3`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **4410f327**
-  (APK `versionCode` **484**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
-  `scripts/check_service_urls.py` is 4/4 PASS). 2026-10-26 shipped, in order: the guard overlay with
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **efef4f23**
+  (APK `versionCode` **486**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+  `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
+  (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
+  dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
+  docker group for socket reads, nginx got two writable tmpfs mounts instead of an image change). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
   a family call), and the ops hardening (nightly backups, deploy rollback, SQLite WAL and additive
@@ -18,8 +21,8 @@ Every claim below was verified against the live system unless marked **planned**
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
   services' logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK
-  `versionCode` rebuilds per push (484 is current; 483 was the previous), so the native work below
-  needs the newest APK on the phones. **APK 484** carries the guard overlay that draws over a
+  `versionCode` rebuilds per push (486 is current; 485 was the previous), so the native work below
+  needs the newest APK on the phones. **APK 486** carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
