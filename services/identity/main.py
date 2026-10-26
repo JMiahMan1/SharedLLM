@@ -654,30 +654,29 @@ def _matches_internal_secret(val: str | None) -> bool:
         or (INTERNAL_SECRET and secret_matches(val, INTERNAL_SECRET))
     )
 
-def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
+def require_internal(x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
+    """Service-to-service only, and only via its own header.
+
+    The secret used to be accepted as ``Authorization: Bearer <secret>`` too.
+    That header is what every browser and phone sends their *own* key in, so
+    the master secret could travel in the one header that gets logged, copied
+    into a bug report and pasted into a curl example. It has its own header.
+    """
     if _matches_internal_secret(x_internal_secret):
         return
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing internal token")
-    token = authorization.split(" ")[1]
-    if not _matches_internal_secret(token):
-        raise HTTPException(status_code=403, detail="Invalid internal token")
+    raise HTTPException(status_code=403, detail="Invalid internal token")
 
 def require_admin_or_internal(
     authorization: str = Header(None),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
     session: Session = Depends(get_session)
 ):
-    # Trust internal services
+    # Trust internal services, through their own header only - see
+    # require_internal for why the secret is not accepted as a Bearer token.
     if _matches_internal_secret(x_internal_secret):
         return True
 
-    # Trust bearer tokens matching internal secret
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        if _matches_internal_secret(token):
-            return True
-
+    # Otherwise a real administrator's own API key, which arrives as Bearer.
     # Check if user is admin via API key
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authorization")
