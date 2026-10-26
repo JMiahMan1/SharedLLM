@@ -500,6 +500,37 @@ class TestSummary:
         assert logged["water"]["logged"] is True
         assert logged["water"]["ml"] == 500
 
+    def test_water_drunk_late_counts_on_the_day_it_was_drunk(self, client):
+        """A 6pm glass is stored with a UTC date of the next day.
+
+        The day boundary used to be a raw string compare on recorded_at, so
+        anything logged after 5pm local (the container runs
+        TZ=America/Phoenix) landed on tomorrow: today's ring, the weekly water
+        average and the streak all read the wrong day.
+        """
+        import os
+        import time
+
+        original = os.environ.get("TZ")
+        os.environ["TZ"] = "America/Phoenix"
+        time.tzset()
+        try:
+            # 20:00 Phoenix on 2026-10-21 is 03:00Z on the 22nd.
+            client.post(
+                "/metrics",
+                json={"samples": [{"metric": "water", "value": 500, "unit": "ml", "recorded_at": "2026-10-22T03:00:00Z"}]},
+            )
+            drunk = client.get("/summary?day=2026-10-21").json()
+            assert drunk["water"]["logged"] is True
+            assert drunk["water"]["ml"] == 500
+            assert client.get("/summary?day=2026-10-22").json()["water"]["logged"] is False
+        finally:
+            if original is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original
+            time.tzset()
+
     def test_readiness_names_missing_baseline(self, client):
         client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 420})
         client.post(
