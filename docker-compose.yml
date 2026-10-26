@@ -201,6 +201,11 @@ services:
     container_name: sharedllm_rag
     restart: unless-stopped
     mem_limit: 6g
+    # Runs as the host user that owns the /data volume, not root: this service
+    # embeds whatever the family indexes, so it is the one most exposed to
+    # untrusted content. Its model cache therefore lives under HOME rather than
+    # /root, and the cache volumes are owned to match.
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     environment:
@@ -213,6 +218,7 @@ services:
       - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
       - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
+      - HOME=/home/sharedllm
       - RAG_DB_PATH=/data/rag.db
       - TZ=America/Phoenix
       - HUGGINGFACE_HUB_DISABLE_XET=1
@@ -222,8 +228,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - chroma_data:/data
-      - huggingface_cache:/root/.cache/huggingface
-      - qdrant_cache:/root/.cache/qdrant
+      # The same volumes the gateway mounts, at the path HOME points at, so the
+      # model cache is shared and neither service needs to be root to read it.
+      - huggingface_cache:/home/sharedllm/.cache/huggingface
+      - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
