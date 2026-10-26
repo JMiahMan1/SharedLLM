@@ -38,6 +38,7 @@ import Health from './pages/Health';
 import Guardian from './pages/Guardian';
 import Devices from './pages/Devices';
 import FamilyMember from './pages/FamilyMember';
+import NotFound from './pages/NotFound';
 import Bible from './pages/Bible';
 import { initAppUpdater } from './lib/appUpdater';
 import { useSiteTheme } from './themes/siteTheme';
@@ -173,6 +174,10 @@ function App() {
             {/* Jarvis Lab: user view (admin-only access) and admin view */}
             <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
             <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
+
+            {/* Anything else: an old bookmark, a typo, or a stale deep link.
+                Without this the shell rendered with an empty page. */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
           <MediaOverlays />
         </Router>
