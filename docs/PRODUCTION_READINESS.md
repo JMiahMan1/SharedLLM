@@ -208,7 +208,8 @@ but never checks who is asking is an open door.
 **Open, low.**
 
 - **L3** the working tree's gitignored `.env` holds a live `GITHUB_TOKEN` and `GITLAB_PASS`. Not a
-  merge blocker (it is untracked and never committed), but rotate the GitHub token if it is live.
+  merge blocker (it is untracked and never committed), but rotate the GitHub token if it is live - §4
+  records the scopes it actually carries and the narrower token that would replace it.
 
 - **LOW - L2: the internal secret is a header of its own and nothing else.** Identity's
   `require_internal` and `require_admin_or_internal` used to accept it as
@@ -675,7 +676,16 @@ Everything here is a deliberate call, not an oversight.
 - **LOW - the live `.env` holds a GitHub token and a GitLab password.** `.env` is gitignored and
   untracked, so it is not a merge blocker; rotate the GitHub PAT if it is still live and keep `.env`
   out of archives and backups. The 1.9 GB `.tmp/` scratch directory holds the same class of secret
-  and is likewise gitignored.
+  and is likewise gitignored. Measured 2026-10-26: the token is a classic PAT (40 characters) for
+  `JMiahMan1` with the scopes `repo, workflow, write:packages, delete:packages, user` - so it can
+  rewrite any repository including private ones, push changes to CI workflows (which run with the
+  deploy secrets), and publish or delete container images, which is the same registry the deploys pull
+  from. It is read at runtime by two things: the control plane's update check (`_github_token()`,
+  user 1's credential from Identity first, then `GHCR_TOKEN`, then `GITHUB_TOKEN`) and the `gh` CLI the
+  workspace agent runs (`services/execution/main.py`). `repo` is what pushing needs; `workflow`,
+  `delete:packages` and `user` are not, and a fine-grained token limited to the repositories the agent
+  actually pushes to (Contents read/write, Metadata read) would do the same job with a fraction of the
+  blast radius.
 - **The remaining audit findings are recorded above, not fixed.** §3.5 UI/UX (the theme tokens
   bypassed by hardcoded colour classes in 216 files), §3.6 Family comms (the typing indicator, which
   needs Talk's websocket rather than a poll) and §3.7 Backend readiness (the apt tool versions and the
