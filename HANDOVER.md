@@ -5,7 +5,9 @@ Every claim below was verified against the live system unless marked **planned**
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `d05bd6ec`.
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
+  commit is `eca4d83f` (deploy 16); docs-only commits land on top of it, this file's own commits
+  included, so read the tip from `git log` rather than from here.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca4d83f**
   (APK `versionCode` **462**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
