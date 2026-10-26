@@ -542,21 +542,18 @@ async def _selected_owners(body: dict) -> list[str]:
     return out
 
 
-async def device_owner_reported(request: Request, username: str) -> bool:
-    """Whether the named member has a device that reported ``guard.deviceOwner``.
+async def _guard_caps(request: Request, username: str) -> list[dict]:
+    """The ``capabilities.guard`` block of each of the named member's devices.
 
-    Used to gate the MDM lock audit: a screen-time "lock" is only a real OS
-    lock on a device-owner phone (otherwise it is the Accessibility soft cover),
-    so logging "locked a device" without one would be a false success. A lookup
-    that fails, or a member with no such device, answers ``False`` — a lie is
-    never logged. The caller's own devices come from the user-panel list, since
-    identity's per-member endpoint refuses the subject themselves.
+    A lookup that fails, or a member with no such device, answers empty - a lie
+    is never logged. The caller's own devices come from the user-panel list,
+    since identity's per-member endpoint refuses the subject themselves.
     """
     from services.gateway.main import _identity_as_caller
 
     name = (username or "").strip().lower()
     if not name:
-        return False
+        return []
     try:
         status, info = await _identity_as_caller(request, "GET", f"/api/family/devices/{name}")
         if status == 200 and isinstance(info, dict):
@@ -566,13 +563,32 @@ async def device_owner_reported(request: Request, username: str) -> bool:
             rows = ([d for d in info if isinstance(d, dict) and (d.get("owner_username") or "").lower() == name]
                     if status == 200 and isinstance(info, list) else [])
     except Exception as exc:  # a lookup failure is not a device that exists
-        log.warning("[mdm] device owner lookup for %s failed: %s", name, exc)
-        return False
+        log.warning("[mdm] guard capability lookup for %s failed: %s", name, exc)
+        return []
+    out: list[dict] = []
     for device in rows:
         guard = (device.get("capabilities") or {}).get("guard") or {}
-        if guard.get("deviceOwner"):
-            return True
-    return False
+        if isinstance(guard, dict):
+            out.append(guard)
+    return out
+
+
+async def device_owner_reported(request: Request, username: str) -> bool:
+    """Whether the named member has a device that reported ``guard.deviceOwner``."""
+    return any(g.get("deviceOwner") for g in await _guard_caps(request, username))
+
+
+async def real_lock_reported(request: Request, username: str) -> bool:
+    """Whether a screen-time lock really locks the named member's phone.
+
+    A device-owner phone gets Android's own lock screen plus lock-task mode; any
+    other phone gets the full-screen Accessibility overlay (``GuardOverlay``),
+    which covers the launcher and every app while the Accessibility guard is on.
+    So the lock is real when either is reported: with the guard off it is only a
+    notification, and logging "locked a device" would be a false success.
+    """
+    return any(g.get("deviceOwner") or g.get("guardEnabled")
+               for g in await _guard_caps(request, username))
 
 
 def _folder_or_404(folder: str) -> str:
@@ -910,6 +926,6 @@ __all__ = [
     "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file", "describe_library", "device_owner_reported",
     "fetch_library_book",
     "file_path", "list_folder", "list_library_books", "normalise_path", "pushed_folders", "queue_wipe",
-    "read_audit", "read_pushes", "read_wipes", "record_audit", "router", "set_push", "store_file",
+    "read_audit", "read_pushes", "read_wipes", "real_lock_reported", "record_audit", "router", "set_push", "store_file",
     "wipe_requested",
 ]

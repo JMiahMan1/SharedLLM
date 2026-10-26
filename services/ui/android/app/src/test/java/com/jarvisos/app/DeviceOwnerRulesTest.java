@@ -66,7 +66,7 @@ public class DeviceOwnerRulesTest {
     @Test
     public void aScreenTimeLockIsARealOsLockOnlyOnADeviceOwnerPhone() {
         assertTrue(DeviceOwnerRules.hardLock(true, true, true, false));
-        assertFalse(DeviceOwnerRules.hardLock(false, true, true, false)); // Layer 1: the soft lock sends them home
+        assertFalse(DeviceOwnerRules.hardLock(false, true, true, false)); // not device owner: the Accessibility overlay locks instead
         assertFalse(DeviceOwnerRules.hardLock(true, true, false, false)); // not locked
         assertFalse(DeviceOwnerRules.hardLock(true, true, true, true)); // a parent's unlock window
         assertFalse(DeviceOwnerRules.hardLock(true, false, true, false)); // an adult's phone
@@ -75,7 +75,7 @@ public class DeviceOwnerRulesTest {
     @Test
     public void thePhoneIsPinnedToTheGuardScreenOnlyOnADeviceOwnerPhone() {
         assertTrue(DeviceOwnerRules.lockTask(true, true, true, false));
-        assertFalse(DeviceOwnerRules.lockTask(false, true, true, false)); // not device owner: the soft cover only
+        assertFalse(DeviceOwnerRules.lockTask(false, true, true, false)); // not device owner: the overlay covers it instead
         assertFalse(DeviceOwnerRules.lockTask(true, true, false, false)); // not locked
         assertFalse(DeviceOwnerRules.lockTask(true, true, true, true)); // a parent's unlock window
         assertFalse(DeviceOwnerRules.lockTask(true, false, true, false)); // an adult's phone

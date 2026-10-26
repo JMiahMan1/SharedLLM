@@ -81,7 +81,8 @@ public final class DeviceOwnerRules {
     /**
      * Whether a screen-time lock is a real OS lock now: a device owner, on a
      * protected phone, locked, and not inside a parent's unlock window. Without
-     * device owner the guard falls back to the Accessibility soft lock.
+     * device owner the guard covers the screen with the Accessibility overlay
+     * instead ({@link GuardOverlay}), which this is not about.
      */
     public static boolean hardLock(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked) {
         return deviceOwner && protectedPhone && locked && !unlocked;
@@ -94,8 +95,8 @@ public final class DeviceOwnerRules {
      * device-owner locks: {@link #hardLock} puts Android's lock screen up once,
      * while lock-task mode keeps the child on the guard screen, so the launcher
      * and every other app stay out of reach until a parent unlocks. Without
-     * device owner the guard falls back to the Accessibility soft lock, and
-     * this is always false.
+     * device owner the guard covers the screen with the Accessibility overlay
+     * instead ({@link GuardOverlay}), and this is always false.
      */
     public static boolean lockTask(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked) {
         return deviceOwner && protectedPhone && locked && !unlocked;

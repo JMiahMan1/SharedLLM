@@ -16,11 +16,12 @@ import android.view.WindowManager;
  * activity (Layer 1) cannot do.
  *
  * It shows the same screen as the Accessibility cover ({@link GuardScreenView}),
- * so a parent can still sign in (or use their offline code) to lift it and the
- * child can ask for more time in Jarvis, which is one of the always-allowed
- * apps. Only an Accessibility service may add this window type, which is why it
- * lives on the guard and not on the cover activity; it needs no extra
- * permission and is not the SYSTEM_ALERT_WINDOW kind.
+ * so a parent can still sign in (or use their offline code) to lift it, and the
+ * child can ask for more time in Jarvis or message a parent in the family chat,
+ * both of which are always-allowed. Only an Accessibility service may add this
+ * window type, which is why it lives on the guard and not on the cover
+ * activity; it needs no extra permission and is not the SYSTEM_ALERT_WINDOW
+ * kind.
  *
  * On a device owner the lock is Android's own lock screen plus lock-task mode
  * instead ({@link DeviceOwnerRules}), so this is not shown there.
@@ -59,9 +60,11 @@ final class GuardOverlay {
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
+        // Resize for the keyboard: a parent has to be able to type their login
+        // (or the offline code) with the lock up, which is the way out.
         lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
         try {
             windows.addView(built, lp);
@@ -98,12 +101,24 @@ final class GuardOverlay {
 
         @Override
         public void onAskMoreTime() {
-            // Jarvis is one of the always-allowed apps, so the lock comes down
-            // for it and the child can use the Health page to ask.
-            hide();
-            service.startActivity(new Intent(service, MainActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/health"));
+            openInJarvis("/health");
+        }
+
+        @Override
+        public void onMessageParents() {
+            openInJarvis("/family?tab=chat");
         }
     };
+
+    /**
+     * Take the lock down and open Jarvis on a page. Jarvis is one of the
+     * always-allowed apps, so the lock stays down while it is in front and comes
+     * back on its own when the child leaves it (see {@link GuardService}).
+     */
+    private void openInJarvis(String path) {
+        hide();
+        service.startActivity(new Intent(service, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(PushNotifier.EXTRA_OPEN_PATH, path));
+    }
 }

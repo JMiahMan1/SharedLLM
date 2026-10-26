@@ -32,7 +32,20 @@ const inventory = {
   generated_at: '2026-10-25T10:00:00Z',
 };
 
-const softDevice = {
+const unprotectedDevice = {
+  devices: [
+    {
+      ...inventory.devices[0],
+      capabilities: { guard: { deviceOwner: false, guardEnabled: false, webFilterActive: false, reportedAt: '2026-10-25T10:00:00Z' } },
+    },
+  ],
+  members: inventory.members,
+  generated_at: inventory.generated_at,
+};
+
+// Not a device owner, but the screen guard is on: the full-screen Accessibility
+// overlay lock really covers this phone, so the lock is real.
+const guardedDevice = {
   devices: [
     {
       ...inventory.devices[0],
@@ -112,14 +125,22 @@ describe('Devices page', () => {
     renderWithProviders(<Devices />);
     fireEvent.click(await screen.findByTestId('mdm-lock-kid-phone-0001'));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Locked'));
-    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('not truly locked'), expect.anything());
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('Not locked'), expect.anything());
   });
 
-  it('never claims a real lock when the phone is not a device owner', async () => {
-    server.use(http.get('/api/mdm/devices', () => HttpResponse.json(softDevice)));
+  it('says "Locked" on a phone with the screen guard on, where the overlay lock is real', async () => {
+    server.use(http.get('/api/mdm/devices', () => HttpResponse.json(guardedDevice)));
     renderWithProviders(<Devices />);
     fireEvent.click(await screen.findByTestId('mdm-lock-kid-phone-0001'));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('not truly locked'), expect.anything()));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Locked'));
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('Not locked'), expect.anything());
+  });
+
+  it('never claims a real lock when the phone has no device owner and no screen guard', async () => {
+    server.use(http.get('/api/mdm/devices', () => HttpResponse.json(unprotectedDevice)));
+    renderWithProviders(<Devices />);
+    fireEvent.click(await screen.findByTestId('mdm-lock-kid-phone-0001'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('Not locked'), expect.anything()));
     expect(toast.success).not.toHaveBeenCalledWith('Locked');
   });
 

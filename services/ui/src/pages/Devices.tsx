@@ -118,8 +118,10 @@ function AppControls({ owner }: { owner: string }) {
 function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () => void }) {
   const [showApps, setShowApps] = useState(false);
   const guard = device.capabilities?.guard;
-  // Only a device-owner phone can really lock itself; the rest is a soft cover.
-  const deviceOwner = Boolean(guard?.deviceOwner);
+  // A lock really covers the phone on a device owner (Android's own lock screen
+  // plus lock task) or on any phone with the screen guard on (the full-screen
+  // Accessibility overlay). With the guard off it is only a notification.
+  const reallyLocks = Boolean(guard?.deviceOwner || guard?.guardEnabled);
   const facts: Array<[string, string]> = [
     ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
     ['Model', [device.manufacturer, device.model].filter(Boolean).join(' ') || 'unknown'],
@@ -138,12 +140,12 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
     onSuccess: (_r, resume) => {
       if (resume) {
         toast.success('Unlocked');
-      } else if (deviceOwner) {
+      } else if (reallyLocks) {
         toast.success('Locked');
       } else {
-        // Never claim a lock Android did not really apply: without device owner
-        // this is only the Accessibility soft cover (see PhoneProtectionCard).
-        toast('Soft lock sent — this phone is not a device owner, so it is not truly locked', { icon: '⚠️' });
+        // Never claim a lock Android did not really apply: with the screen guard
+        // off this phone only shows a notification (see PhoneProtectionCard).
+        toast('Not locked — the screen guard is off on this phone, so it only got a notification', { icon: '⚠️' });
       }
     },
     onError: (e: Error) => toast.error(e.message || 'Could not change the lock'),
