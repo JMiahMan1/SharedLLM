@@ -43,6 +43,13 @@ services:
     container_name: sharedllm_caddy
     restart: unless-stopped
     mem_limit: 256m
+    # The front door runs as the host user too: it is the one service a stranger
+    # reaches directly, so it should not be root. It still binds 80 and 443 inside
+    # the container (published on high host ports), which is what the capability
+    # is for; the two state volumes were chowned to match.
+    user: "${PUID}:${PGID}"
+    cap_add:
+      - NET_BIND_SERVICE
     environment:
       # The reverse proxy in front of this stack (docs/PUSH.md, "Limits").
       - PUBLIC_PROXY_IP=${PUBLIC_PROXY_IP:-127.0.0.1}
