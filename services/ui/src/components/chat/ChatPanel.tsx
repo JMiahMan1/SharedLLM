@@ -5,7 +5,7 @@ import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -352,6 +352,28 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
       refreshThread(activeToken);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not edit the message');
+    }
+  };
+
+  // Trivia, Memory and the Bible quiz all start the same way; only the kind
+  // differs. They used to be reachable only as a raw API call, so the games
+  // existed but nothing in the UI could start two of them.
+  const startGame = async (kind: 'trivia' | 'memory' | 'bible') => {
+    const label = kind === 'bible' ? 'Bible trivia' : kind === 'memory' ? 'Memory' : 'Trivia';
+    if (!activeToken) {
+      toast.error('Pick a conversation first');
+      return;
+    }
+    try {
+      const response = await api.startTalkGame(activeToken, kind);
+      if (response.status === 'SUCCESS') {
+        toast.success(`${label} started`);
+        void refetchMessages();
+      } else {
+        toast.error(response.message || `Could not start ${label}`);
+      }
+    } catch {
+      toast.error(`Could not start ${label}`);
     }
   };
 
@@ -728,21 +750,22 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
                   .catch(() => toast.error("Today's verse is not available")),
             },
             {
+              key: 'trivia',
+              label: 'Trivia',
+              icon: <Sparkles size={14} className="text-sky-300" />,
+              onSelect: () => void startGame('trivia'),
+            },
+            {
+              key: 'memory',
+              label: 'Memory',
+              icon: <Puzzle size={14} className="text-emerald-300" />,
+              onSelect: () => void startGame('memory'),
+            },
+            {
               key: 'bible-trivia',
               label: 'Bible trivia',
               icon: <BookOpen size={14} className="text-amber-300" />,
-              onSelect: () =>
-                void api
-                  .startTalkBibleTrivia(activeToken)
-                  .then((response) => {
-                    if (response.status === 'SUCCESS') {
-                      toast.success('Bible trivia started');
-                      void refetchMessages();
-                    } else {
-                      toast.error(response.message || 'Could not start Bible trivia');
-                    }
-                  })
-                  .catch(() => toast.error('Could not start Bible trivia')),
+              onSelect: () => void startGame('bible'),
             },
             ...(onOpenTab
               ? [
