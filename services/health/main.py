@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, field_validator
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
 from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, recipe_estimate, scoring, streaks, weekly
 from services.health.models import (
@@ -166,9 +167,10 @@ def get_session() -> Iterator[Session]:
 
 
 def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
-    if not INTERNAL_SECRET:
-        return True
-    return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
+    # Constant-time, and closed when the secret is unset. This used to return
+    # True for every caller when INTERNAL_SECRET was empty, which made the
+    # service open to anything that could reach its port.
+    return secret_matches(header_secret, INTERNAL_SECRET) or secret_matches(query_secret, INTERNAL_SECRET)
 
 
 @app.middleware("http")
@@ -271,6 +273,56 @@ def _instant(value: str | None, *, field: str = "recorded_at") -> str:
     if parsed.year < 1900:
         raise HTTPException(status_code=422, detail=f"{field} is implausibly old")
     return parsed.isoformat()
+
+
+def _household_tz():
+    """The zone the household lives in - the service's own local zone.
+
+    The container runs with ``TZ=America/Phoenix``, so ``astimezone()`` is the
+    same zone ``_instant`` anchors a bare instant to.
+    """
+    return datetime.now().astimezone().tzinfo
+
+
+def _local_day(recorded_at: str) -> str:
+    """The household-local ``YYYY-MM-DD`` an instant belongs to.
+
+    A reading is stored as an ISO-8601 string that may carry a UTC offset (the
+    app posts ``new Date().toISOString()``), so ``recorded_at[:10]`` and string
+    comparisons against a local day put an evening reading on the *next* day: a
+    6pm Phoenix glass of water is stored ``2026-10-22T01:00:00+00:00``. Every
+    day bucket goes through here instead.
+    """
+    try:
+        parsed = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    except ValueError:
+        return recorded_at[:10]
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_household_tz())
+    return parsed.astimezone(_household_tz()).strftime("%Y-%m-%d")
+
+
+def _metric_rows_between(
+    session: Session, user: str, metric: str, first_day: str, last_day: str
+) -> list[MetricSample]:
+    """Metric samples whose household-local day falls in ``[first_day, last_day]``.
+
+    The SQL window is widened by a day on each side (a stored instant can carry
+    a UTC offset) and the exact local day is then decided by ``_local_day``.
+    """
+    lo = (date.fromisoformat(first_day) - timedelta(days=1)).isoformat()
+    hi = (date.fromisoformat(last_day) + timedelta(days=2)).isoformat()
+    rows = session.exec(
+        select(MetricSample)
+        .where(
+            MetricSample.user_id == user,
+            MetricSample.metric == metric,
+            MetricSample.recorded_at >= lo,
+            MetricSample.recorded_at < hi,
+        )
+        .order_by(MetricSample.recorded_at.asc())
+    ).all()
+    return [row for row in rows if first_day <= _local_day(row.recorded_at) <= last_day]
 
 
 def _metric(metric: str) -> str:
@@ -1182,16 +1234,8 @@ def get_metrics(
     user = _user(request)
     metric = _metric(metric)
     since = (date.today() - timedelta(days=days - 1)).isoformat()
-    rows = session.exec(
-        select(MetricSample)
-        .where(
-            MetricSample.user_id == user,
-            MetricSample.metric == metric,
-            MetricSample.recorded_at >= since,
-        )
-        .order_by(MetricSample.recorded_at.desc())
-    ).all()
-    samples = [_sample_out(row) for row in rows]
+    rows = _metric_rows_between(session, user, metric, since, date.today().isoformat())
+    samples = [_sample_out(row) for row in reversed(rows)]
     return {
         "user_id": user,
         "metric": metric,
@@ -1216,23 +1260,20 @@ def delete_metric(sample_id: int, request: Request, session: Session = Depends(g
 def _latest_metric(session: Session, user: str, metric: str, on_or_before: str | None = None) -> MetricSample | None:
     query = select(MetricSample).where(MetricSample.user_id == user, MetricSample.metric == metric)
     if on_or_before:
-        # ISO strings sort by their date prefix, whatever offset they carry, so
-        # "before tomorrow" includes every reading whose local day is <= today.
-        next_day = (date.fromisoformat(on_or_before) + timedelta(days=1)).isoformat()
-        query = query.where(MetricSample.recorded_at < next_day)
+        # Widen by two days and then compare local days: a reading taken late on
+        # the local day can be stored with a +HH:MM offset that pushes its string
+        # past the next midnight, so a string bound alone would drop it.
+        horizon = (date.fromisoformat(on_or_before) + timedelta(days=2)).isoformat()
+        query = query.where(MetricSample.recorded_at < horizon)
+        for row in session.exec(query.order_by(MetricSample.recorded_at.desc()).limit(200)).all():
+            if _local_day(row.recorded_at) <= on_or_before:
+                return row
+        return None
     return session.exec(query.order_by(MetricSample.recorded_at.desc()).limit(1)).first()
 
 
 def _metric_series(session: Session, user: str, metric: str, since: str) -> list[MetricSample]:
-    return session.exec(
-        select(MetricSample)
-        .where(
-            MetricSample.user_id == user,
-            MetricSample.metric == metric,
-            MetricSample.recorded_at >= since,
-        )
-        .order_by(MetricSample.recorded_at.asc())
-    ).all()
+    return _metric_rows_between(session, user, metric, since, date.today().isoformat())
 
 
 # --- sleep -----------------------------------------------------------------
@@ -1934,14 +1975,7 @@ def summary(
         checkin_stress=checkin.stress if checkin else None,
     )
 
-    water_rows = session.exec(
-        select(MetricSample).where(
-            MetricSample.user_id == user,
-            MetricSample.metric == "water",
-            MetricSample.recorded_at >= day,
-            MetricSample.recorded_at < (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
-        )
-    ).all()
+    water_rows = _metric_rows_between(session, user, "water", day, day)
     water = scoring.water_progress(
         sum(row.value for row in water_rows) if water_rows else None,
         water_goal,
@@ -2022,15 +2056,10 @@ def _week_days(session: Session, user: str, first: date, count: int, sleep_need:
     ).all():
         calories[row.day] = calories.get(row.day, 0.0) + row.calories * max(0.0, row.servings)
     water: dict[str, float] = {}
-    for row in session.exec(
-        select(MetricSample).where(
-            MetricSample.user_id == user,
-            MetricSample.metric == "water",
-            MetricSample.recorded_at >= start,
-            MetricSample.recorded_at < stop,
-        )
-    ).all():
-        water[row.recorded_at[:10]] = water.get(row.recorded_at[:10], 0.0) + row.value
+    last_water_day = (date.fromisoformat(stop) - timedelta(days=1)).isoformat()
+    for row in _metric_rows_between(session, user, "water", start, last_water_day):
+        local = _local_day(row.recorded_at)
+        water[local] = water.get(local, 0.0) + row.value
 
     days = []
     for offset in range(count):
