@@ -283,7 +283,6 @@ wellbeing live there.
 
 **Open (rough).**
 
-- Several workspace actions still have no busy state.
 - Two identical-looking search boxes mean different things, and the theme tokens are bypassed by
   hardcoded colour classes in 216 files.
 
@@ -297,7 +296,8 @@ bar wraps instead of scrolling sideways, so all twelve sections are visible; and
 into Notifications, Appearance, Family and This device instead of one flat column; a failed request now carries the server's
 own words rather than "Request failed with status code 500" - fixed once in the axios interceptor where every request
 passes, not at the ~171 places that display it; and the two knowledge searches use a brain icon and say what they
-search, so they no longer look like the app-wide page finder.
+search, so they no longer look like the app-wide page finder; and the workspace row's star, share and delete
+buttons show a busy state instead of inviting a second click.
 
 ### 3.6 Family comms, notes and calls
 
