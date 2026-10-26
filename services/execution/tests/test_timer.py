@@ -286,7 +286,7 @@ async def test_a_note_reminder_opens_its_note_and_a_snooze_keeps_the_link(monkey
     assert body["actions"][1]["params"]["url"] == link
 
 
-async def test_a_stored_link_off_the_app_falls_back_to_communication(monkeypatch):
+async def test_a_stored_link_off_the_app_falls_back_to_the_timer_list(monkeypatch):
     from services.common import http
     from services.execution.handlers.timer import notify_timer_done
 
@@ -294,7 +294,9 @@ async def test_a_stored_link_off_the_app_falls_back_to_communication(monkeypatch
     monkeypatch.setattr(http, "get_client", _FakeSession)
     await notify_timer_done("michele", {"id": "r2", "title": "x", "type": "reminder", "url": "https://evil.test/"})
     (_, body), = _FakeSession.calls
-    assert body["data"]["url"] == "/communication"
+    # The Family page's Announcements tab lists the timers. This used to point
+    # at `/communication`, which redirects to the Chat tab.
+    assert body["data"]["url"] == "/family?tab=announce"
     assert "url" not in body["actions"][1]["params"]
 
 
