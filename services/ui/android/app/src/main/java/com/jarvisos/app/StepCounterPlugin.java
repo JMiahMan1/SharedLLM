@@ -447,4 +447,19 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         ret.put("source", StepLedger.SOURCE_PHONE);
         call.resolve(ret);
     }
+
+    /**
+     * Stop the sensor when the bridge goes away.
+     *
+     * The listener is `this`, so leaving it registered kept the plugin (and the
+     * dead bridge it reports to) alive, and kept the sensor awake.
+     */
+    @Override
+    protected void handleOnDestroy() {
+        if (listening) {
+            sensorManager.unregisterListener(this);
+            listening = false;
+        }
+        super.handleOnDestroy();
+    }
 }

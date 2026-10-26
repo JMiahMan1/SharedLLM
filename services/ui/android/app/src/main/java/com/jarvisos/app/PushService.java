@@ -177,9 +177,17 @@ public class PushService extends Service {
                 current = conn;
                 int status = conn.getResponseCode();
                 if (status == 401 || status == 403) {
-                    Log.w(TAG, "not authorised (" + status + "); retrying in 5 min");
-                    sleep(UNAUTHORISED_WAIT_MS);
-                    continue;
+                    // A rejected key is not a blip: this stream cannot come back
+                    // until somebody signs in again. Retrying every five minutes
+                    // held a foreground service and a dead credential for as long
+                    // as the app was never opened, so clear the mirrored key and
+                    // stop. The WebView clears its own copy on the next 401.
+                    Log.w(TAG, "not authorised (" + status + "); stopping");
+                    p.edit().remove(TokenBridgePlugin.KEY_API_KEY).apply();
+                    PushNotifier.clearAll(this);
+                    running = false;
+                    stopSelf();
+                    return;
                 }
                 if (PushFallback.streamUnavailable(status)) {
                     startPolling(p, status);

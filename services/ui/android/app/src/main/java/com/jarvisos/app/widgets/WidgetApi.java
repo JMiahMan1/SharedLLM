@@ -110,8 +110,15 @@ public final class WidgetApi {
 
     public static boolean isAwayFromHome(Context context, float thresholdMeters) {
         SharedPreferences p = prefs(context);
-        float homeLat = p.getFloat(TokenBridgePlugin.KEY_HOME_LAT, (float) TokenBridgePlugin.DEFAULT_HOME_LAT);
-        float homeLng = p.getFloat(TokenBridgePlugin.KEY_HOME_LNG, (float) TokenBridgePlugin.DEFAULT_HOME_LNG);
+        if (!p.contains(TokenBridgePlugin.KEY_HOME_LAT) || !p.contains(TokenBridgePlugin.KEY_HOME_LNG)) {
+            // Home has not been learned yet. Without it there is nothing to be
+            // away from, so do not guess: the app sets it from Home Assistant's
+            // zone.home. (This used to fall back to coordinates baked into the
+            // APK - the family's actual house.)
+            return false;
+        }
+        float homeLat = p.getFloat(TokenBridgePlugin.KEY_HOME_LAT, 0f);
+        float homeLng = p.getFloat(TokenBridgePlugin.KEY_HOME_LNG, 0f);
         if (!p.contains(TokenBridgePlugin.KEY_LAST_LAT)) {
             // No fix yet: treat as home so we don't nag with confirms on first use
             return false;

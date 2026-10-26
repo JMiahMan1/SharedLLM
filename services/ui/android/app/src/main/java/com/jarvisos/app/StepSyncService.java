@@ -133,6 +133,25 @@ public class StepSyncService extends Service {
         return START_STICKY;
     }
 
+    /**
+     * Android 15 caps a `dataSync` foreground service at six hours in any
+     * twenty-four, and stops it without asking. Stopping deliberately keeps the
+     * notice honest and leaves the switches as the person set them; the tick
+     * alarm and the next app open both re-arm this, and the remaining ticks of
+     * the day run once the cap resets.
+     */
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        Log.w(TAG, "foreground time limit reached; stopping until the cap resets");
+        stopSync();
+    }
+
+    @Override
+    public void onTimeout(int startId) {
+        Log.w(TAG, "foreground time limit reached; stopping until the cap resets");
+        stopSync();
+    }
+
     private void persistIdentity(String user, String id) {
         username = user;
         userId = id;
