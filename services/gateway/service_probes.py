@@ -29,7 +29,11 @@ ERROR = "ERROR"
 
 #: A liveness probe has to fail fast. A wedged host can accept TCP and never
 #: answer, so waiting the data-call timeout (12 s) just delays every caller.
-DEFAULT_PROBE_TIMEOUT = 4.0
+# Nextcloud answers /status.php in under a second once its worker is warm, but a
+# cold one measured 4.02s on 2026-10-26 - just past this timeout, which made the
+# probe report a healthy service as unreachable. Eight seconds still fails fast
+# for a genuinely dead host (the connection is refused, not slow).
+DEFAULT_PROBE_TIMEOUT = 8.0
 
 
 @dataclass
