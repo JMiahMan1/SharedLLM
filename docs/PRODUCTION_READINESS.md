@@ -222,14 +222,22 @@ renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
   `_metric_rows_between()`) everywhere it previously compared strings, and a regression test pins the
   zone so it fails against the old behaviour on any machine.
 
+- **BROKEN - A2/A3: a failed health fetch looked like an empty day.** The cycle panel rendered
+  nothing at all on an error, which is indistinguishable from "not applicable"
+  (`components/health/HealthCycle.tsx`), and nutrition showed `0 kcal` with "Loading…" forever while
+  every meal said "Nothing logged." (`components/health/HealthNutrition.tsx`). Both now say what went
+  wrong and offer a retry.
+- **BROKEN - A4: a validation error read "Request failed with status code 422".** `lib/errorText.ts`
+  now unwraps FastAPI's validation array (its first `msg`), and the axios response interceptor puts
+  the server's own words on `error.message` once, so the ~171 places that display it say something
+  useful.
+- **ROUGH - B4** a second manual sleep log for the same night added a row instead of correcting it,
+  so the night was listed twice; a manual log for a night now updates that night's row in place.
+- **ROUGH - B5** future-dated check-ins, food and sleep were accepted; `_day()` now refuses a day more
+  than one ahead (one day of slack, matching `_instant`), as the cycle routes already did.
+
 **Open.**
 
-- **BROKEN - A2** the cycle panel renders nothing at all on a failed fetch, so an error looks like
-  "not applicable" (`components/health/HealthCycle.tsx`).
-- **BROKEN - A3** nutrition shows "Loading…" forever and an empty day when the fetch fails
-  (`components/health/HealthNutrition.tsx`).
-- **BROKEN - A4** validation errors surface as "Request failed with status code 422" because
-  `lib/errorText.ts` only understands a string `detail` while FastAPI validation errors are an array.
 - **ROUGH - B1** imported measures (HRV, SpO2, body fat) are invisible: there is no metric-history UI,
   and a mistyped weight cannot be deleted, although the API for both exists and the docs promise a
   weight trend.

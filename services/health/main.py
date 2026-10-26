@@ -252,9 +252,14 @@ def _day(value: str | None, *, field: str = "day") -> str:
     if not DAY_RE.match(value):
         raise HTTPException(status_code=422, detail=f"{field} must be YYYY-MM-DD")
     try:
-        date.fromisoformat(value)
+        parsed = date.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{field} is not a real date") from exc
+    # A day more than one ahead is a typo, not a plan: it would sit in the
+    # weekly digest and in the streaks as a day that never happened. One day of
+    # slack matches `_instant`, so logging "tonight" still works.
+    if parsed > date.today() + timedelta(days=1):
+        raise HTTPException(status_code=422, detail=f"{field} cannot be in the future")
     return value
 
 
@@ -1353,20 +1358,31 @@ def add_sleep(body: SleepIn, request: Request, session: Session = Depends(get_se
         ).first()
         if existing is not None:
             return {**_sleep_out(existing), "duplicate": True}
+    else:
+        existing = None
+        if source == "manual":
+            # One hand-logged night, one row. A second log for the same night
+            # used to add another row, so the night appeared twice in the list
+            # and the score depended on which of the two was read.
+            existing = session.exec(
+                select(SleepSession).where(
+                    SleepSession.user_id == user,
+                    SleepSession.night == night,
+                    SleepSession.source == source,
+                )
+            ).first()
 
-    row = SleepSession(
-        user_id=user,
-        night=night,
-        bedtime=_instant(bedtime, field="bedtime") if bedtime else None,
-        wake_time=_instant(wake_time, field="wake_time") if wake_time else None,
-        duration_minutes=duration,
-        efficiency=body.efficiency,
-        quality=body.quality,
-        stages_json=json.dumps(body.stages or {}),
-        source=source,
-        external_id=body.external_id,
-        note=body.note,
-    )
+    row = existing or SleepSession(user_id=user)
+    row.night = night
+    row.bedtime = _instant(bedtime, field="bedtime") if bedtime else None
+    row.wake_time = _instant(wake_time, field="wake_time") if wake_time else None
+    row.duration_minutes = duration
+    row.efficiency = body.efficiency
+    row.quality = body.quality
+    row.stages_json = json.dumps(body.stages or {})
+    row.source = source
+    row.external_id = body.external_id
+    row.note = body.note
     session.add(row)
     session.commit()
     session.refresh(row)
