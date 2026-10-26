@@ -23,7 +23,8 @@ import java.util.Set;
  *   - DISALLOW_DEBUGGING_FEATURES closes adb / USB debugging as a way in,
  *   - DISALLOW_CONFIG_VPN and DISALLOW_CONFIG_PRIVATE_DNS keep the web filter
  *     from being switched off from Settings,
- *   - a screen-time lock is a real OS lock (lockNow), not only going home.
+ *   - a screen-time lock is a real OS lock (lockNow plus lock-task / kiosk
+ *     mode, which pins the phone to the guard screen), not only going home.
  * A parent's unlock window lifts the lock (they can use the phone); the uninstall
  * block and the restrictions stay, since removing them needs more than the
  * ten-minute window. When the server says this is no longer a minor's phone the
@@ -83,6 +84,20 @@ public final class DeviceOwnerRules {
      * device owner the guard falls back to the Accessibility soft lock.
      */
     public static boolean hardLock(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked) {
+        return deviceOwner && protectedPhone && locked && !unlocked;
+    }
+
+    /**
+     * Whether the phone should be pinned to the guard's screen (Android's
+     * lock-task / kiosk mode) now: a device owner, on a protected phone, locked,
+     * and not inside a parent's unlock window. This is the stronger of the two
+     * device-owner locks: {@link #hardLock} puts Android's lock screen up once,
+     * while lock-task mode keeps the child on the guard screen, so the launcher
+     * and every other app stay out of reach until a parent unlocks. Without
+     * device owner the guard falls back to the Accessibility soft lock, and
+     * this is always false.
+     */
+    public static boolean lockTask(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked) {
         return deviceOwner && protectedPhone && locked && !unlocked;
     }
 

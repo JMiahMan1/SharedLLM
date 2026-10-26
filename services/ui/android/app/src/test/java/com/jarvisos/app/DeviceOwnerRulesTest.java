@@ -73,6 +73,15 @@ public class DeviceOwnerRulesTest {
     }
 
     @Test
+    public void thePhoneIsPinnedToTheGuardScreenOnlyOnADeviceOwnerPhone() {
+        assertTrue(DeviceOwnerRules.lockTask(true, true, true, false));
+        assertFalse(DeviceOwnerRules.lockTask(false, true, true, false)); // not device owner: the soft cover only
+        assertFalse(DeviceOwnerRules.lockTask(true, true, false, false)); // not locked
+        assertFalse(DeviceOwnerRules.lockTask(true, true, true, true)); // a parent's unlock window
+        assertFalse(DeviceOwnerRules.lockTask(true, false, true, false)); // an adult's phone
+    }
+
+    @Test
     public void aRemoteWipeRunsOnlyOnADeviceOwnerWithAQueuedWipe() {
         assertTrue(DeviceOwnerRules.shouldWipe(true, true));
         assertFalse(DeviceOwnerRules.shouldWipe(true, false)); // nothing was requested

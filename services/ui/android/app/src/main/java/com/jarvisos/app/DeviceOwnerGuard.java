@@ -83,6 +83,39 @@ final class DeviceOwnerGuard {
     }
 
     /**
+     * Allow Jarvis to hold Android's lock-task (kiosk) mode: only this package
+     * may run once the guard screen starts lock task. A device owner may set the
+     * allowlist; call only when {@link DeviceOwnerRules#lockTask} says so. Without
+     * device owner (or on an older Android without lock task) this does nothing,
+     * and the Accessibility soft lock is the whole of the lock.
+     */
+    static void enterLockTask(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        if (dpm == null) return;
+        try {
+            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class),
+                    new String[]{context.getPackageName()});
+        } catch (Exception ignored) {
+            // Not device owner, or no lock task on this Android: the soft lock still runs.
+        }
+    }
+
+    /**
+     * Take the lock-task allowlist off again, so a phone whose lock has lifted
+     * is not left pinnable. Call after {@code stopLockTask()} (or once the guard
+     * screen has gone), and only on a device owner.
+     */
+    static void exitLockTask(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        if (dpm == null) return;
+        try {
+            dpm.setLockTaskPackages(new ComponentName(context, GuardAdminReceiver.class), new String[0]);
+        } catch (Exception ignored) {
+            // Not device owner: nothing to clear.
+        }
+    }
+
+    /**
      * Erase the phone (a factory reset) at a parent's explicit request. Only a
      * device owner may; call only when {@link DeviceOwnerRules#shouldWipe} says
      * so. This cannot be undone: the phone comes back to its out-of-box state.

@@ -56,7 +56,10 @@ import java.util.concurrent.TimeUnit;
  * further through DevicePolicyManager (DeviceOwnerGuard, decisions in pure
  * DeviceOwnerRules): the uninstall is blocked outright, safe boot and the
  * factory reset are disallowed, and a screen-time lock is Android's own lock
- * screen (lockNow) instead of only sending the child home.
+ * screen (lockNow) plus lock-task (kiosk) mode, which pins the child to the
+ * guard screen, instead of only sending the child home. A parent's lock that
+ * arrives by push is applied at once ({@link #refreshNow()}), not at the next
+ * minute's refresh.
  */
 public class GuardService extends AccessibilityService {
 
@@ -66,6 +69,11 @@ public class GuardService extends AccessibilityService {
     private static final long SPLIT_SETTLE_MS = 400;
     private ScheduledExecutorService refresher;
     private final Handler main = new Handler(Looper.getMainLooper());
+    /**
+     * The connected guard, so a push can ask it to re-check at once
+     * ({@link #refreshNow()}); null while the Accessibility service is off.
+     */
+    private static volatile GuardService instance;
     private long lastCoverAt = 0;
     /** Apps installed since the guard started that a parent has not approved. */
     private volatile Set<String> awaitingApproval = Collections.emptySet();
@@ -90,33 +98,10 @@ public class GuardService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        instance = this;
         refresher = Executors.newSingleThreadScheduledExecutor();
         refresher.execute(this::checkBoots);
-        refresher.scheduleWithFixedDelay(() -> {
-            if (GuardApi.refreshStatus(this)) {
-                GuardApi.reportOfflineUnlockIfDue(this);
-                GuardApi.flushTamper(this);
-            }
-            // Layer 2: re-apply the device-owner enforcement (uninstall block,
-            // safe-boot / factory-reset restrictions) while this is a device owner,
-            // and put Android's own lock screen up once when a screen-time lock
-            // starts (the Accessibility cover below is then the way back in).
-            DeviceOwnerGuard.enforce(this);
-            boolean hard = hardLockWanted();
-            if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
-            hardLocked = hard;
-            // Layer 2: a remote wipe a parent queued (Phase 12 MDM) erases the
-            // phone. Only a device owner may, so the pure decision gates it.
-            if (DeviceOwnerRules.shouldWipe(DeviceOwnerGuard.isOwner(this), GuardApi.wipeRequested(this))) {
-                DeviceOwnerGuard.wipeData(this);
-            }
-            syncWebFilter();
-            checkInstalls();
-            checkFilterBypass();
-            checkMultiUser();
-            // A lock that starts while the child is already in an app.
-            main.post(this::checkCurrentWindow);
-        }, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
+        refresher.scheduleWithFixedDelay(this::tick, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
         refresher.scheduleWithFixedDelay(() -> main.post(this::checkWarning),
                 WARNING_CHECK_SECONDS, WARNING_CHECK_SECONDS, TimeUnit.SECONDS);
         // A new install is held at once, not at the next refresh.
@@ -133,6 +118,51 @@ public class GuardService extends AccessibilityService {
         IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
         filter.addDataScheme("package");
         ContextCompat.registerReceiver(this, installs, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * One refresh: read the server's status, re-apply the device-owner
+     * enforcement, and re-check the screen in front. Runs on the refresher
+     * thread every {@link #REFRESH_SECONDS}, and at once when a push says a
+     * parent's lock or unlock has just landed ({@link #refreshNow()}).
+     */
+    private void tick() {
+        if (GuardApi.refreshStatus(this)) {
+            GuardApi.reportOfflineUnlockIfDue(this);
+            GuardApi.flushTamper(this);
+        }
+        // Layer 2: re-apply the device-owner enforcement (uninstall block,
+        // safe-boot / factory-reset restrictions) while this is a device owner,
+        // and put Android's own lock screen up once when a screen-time lock
+        // starts (the Accessibility cover below is then the way back in).
+        DeviceOwnerGuard.enforce(this);
+        boolean hard = hardLockWanted();
+        if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
+        hardLocked = hard;
+        // Layer 2: a remote wipe a parent queued (Phase 12 MDM) erases the
+        // phone. Only a device owner may, so the pure decision gates it.
+        if (DeviceOwnerRules.shouldWipe(DeviceOwnerGuard.isOwner(this), GuardApi.wipeRequested(this))) {
+            DeviceOwnerGuard.wipeData(this);
+        }
+        syncWebFilter();
+        checkInstalls();
+        checkFilterBypass();
+        checkMultiUser();
+        // A lock that starts while the child is already in an app.
+        main.post(this::checkCurrentWindow);
+    }
+
+    /**
+     * A parent's lock or unlock just arrived by push: refresh the status and
+     * re-check the screen at once, instead of waiting up to
+     * {@link #REFRESH_SECONDS} for the next tick. Does nothing when the
+     * Accessibility guard is not connected, since then there is no cover to
+     * raise or take down.
+     */
+    static void refreshNow() {
+        GuardService s = instance;
+        if (s == null || s.refresher == null) return;
+        s.refresher.execute(s::tick);
     }
 
     @Override
@@ -497,6 +527,7 @@ public class GuardService extends AccessibilityService {
             }
         }
         if (refresher != null) refresher.shutdownNow();
+        if (instance == this) instance = null;
         return super.onUnbind(intent);
     }
 }

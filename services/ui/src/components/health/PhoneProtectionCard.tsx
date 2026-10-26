@@ -108,6 +108,24 @@ export default function PhoneProtectionCard() {
           </ol>
         </>
       )}
+      {!guard.deviceOwner && (
+        <div className="space-y-1 rounded-xl border border-white/10 bg-black/20 p-3" data-testid="phone-protection-device-owner">
+          <p className="text-xs text-slate-300">
+            For a real lock (and to make Jarvis impossible to uninstall), set this phone up as a{' '}
+            <b>device owner</b>. On a computer with <code>adb</code>, run this once:
+          </p>
+          <code
+            className="block break-words rounded-lg bg-black/40 px-2 py-1 font-mono text-[11px] text-emerald-200"
+            data-testid="phone-protection-device-owner-command"
+          >
+            adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver
+          </code>
+          <p className="text-[11px] text-slate-400">
+            This only works on a phone with <b>no accounts signed in</b> (a freshly factory-reset phone). Android refuses it
+            otherwise, so remove every account or factory reset the phone, run the command before signing in, then sign in to Jarvis.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

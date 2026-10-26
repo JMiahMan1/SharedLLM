@@ -166,6 +166,16 @@ final class PushNotice {
         return "find_phone".equals(kind) || "find_phone".equals(tag);
     }
 
+    /**
+     * A screen-time notice: a parent's pause (lock or unlock), or a bedtime,
+     * school or daily-limit notice. The phone applies a lock or unlock at once
+     * rather than at the next minute's refresh ({@link GuardService#refreshNow()}).
+     * The gateway tags every one of these {@code screen-time:<user>}.
+     */
+    boolean isScreenTime() {
+        return "family_safety".equals(category) && tag.startsWith("screen-time:");
+    }
+
     /** An alarm or phone-targeted timer that should ring on the Android alarm stream. */
     boolean isAlarmRing() {
         return "timers".equals(category) && ("alarm".equals(kind) || ringPhone || priority >= 5);

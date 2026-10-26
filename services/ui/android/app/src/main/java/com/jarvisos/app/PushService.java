@@ -340,6 +340,10 @@ public class PushService extends Service {
                 FindPhoneService.startAlarm(this, notice.title, notice.body);
             }
             PushNotifier.show(this, notice);
+            if (notice.isScreenTime()) {
+                // A parent's lock or unlock takes effect at once, not within the minute.
+                GuardService.refreshNow();
+            }
         } catch (Exception e) {
             // One bad notice must not end the stream or the poll.
             Log.w(TAG, "could not show notice " + notice.id + ": " + e.getMessage());

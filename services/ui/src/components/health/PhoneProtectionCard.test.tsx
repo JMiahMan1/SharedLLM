@@ -46,6 +46,21 @@ describe('PhoneProtectionCard', () => {
     expect(await screen.findByTestId('phone-protection-on')).toHaveTextContent('Jarvis is protected on this phone');
   });
 
+  it('shows the one-time device-owner command when the phone is not one', async () => {
+    vi.mocked(Guard.status).mockResolvedValue({ adminActive: true, deviceOwner: false, guardEnabled: true });
+    renderCard();
+    const block = await screen.findByTestId('phone-protection-device-owner');
+    expect(block).toHaveTextContent('adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver');
+    expect(block).toHaveTextContent('no accounts signed in');
+  });
+
+  it('hides the device-owner guidance once the phone is a device owner', async () => {
+    vi.mocked(Guard.status).mockResolvedValue({ adminActive: true, deviceOwner: true, guardEnabled: true });
+    renderCard();
+    await screen.findByTestId('phone-protection-on');
+    expect(screen.queryByTestId('phone-protection-device-owner')).not.toBeInTheDocument();
+  });
+
   it("is not shown on an adult's phone or off Android", async () => {
     vi.mocked(Guard.status).mockResolvedValue({ adminActive: false, deviceOwner: false, guardEnabled: false });
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue({ protected: false } as never);
