@@ -317,7 +317,16 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
                 docker tag "\$repo:\$SHA_TAG" "\$repo:latest"
                 echo "Pinned \$service to \$SHA_TAG"
             else
-                echo "[WARN] No image tagged \$SHA_TAG for \$service; using whatever :latest holds."
+                # This commit changed nothing this image is built from (a
+                # compose-only or docs-only push), so CI never retagged it. Pull
+                # :latest rather than trusting whatever the local daemon holds:
+                # a stale local :latest is how a recreate once came up on an
+                # image four hours older than the one in the registry.
+                if docker pull -q "\$repo:latest" >/dev/null 2>&1; then
+                    echo "[WARN] No image tagged \$SHA_TAG for \$service; refreshed :latest from the registry."
+                else
+                    echo "[WARN] No image tagged \$SHA_TAG for \$service; could not reach the registry, using the local :latest."
+                fi
             fi
         done
     fi
