@@ -161,6 +161,11 @@ _TEST_ENV_DEFAULTS = {
     # real device list. Set at import time by two execution test modules before
     # conftest's isolation fixture existed.
     "DEVICE_REGISTRY_PATH": ":memory:",
+    # Certificate-expiry alerts: watch nothing in tests. The public names live in
+    # the developer's .env, so an unpinned value would make the alerting tests
+    # depend on whose machine ran them (tests/unit/test_config_env_isolation.py
+    # caught exactly this for ALERT_TLS_HOSTS).
+    "ALERT_TLS_HOSTS": "",
     # --- Gateway-only configuration ---
     #
     # services/gateway/config.py is a SECOND config module (separate from
