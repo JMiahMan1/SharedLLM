@@ -347,12 +347,13 @@ buttons show a busy state instead of inviting a second click.
 - A photo or a voice note appeared in the feed only once the upload returned and the thread refetched,
   so a large one looked like nothing had happened. Both now show a pending bubble as soon as they are
   sent, which goes away as soon as the real message is in the thread.
+- A phone with the app closed never learned that a call was happening: the in-app banner is a
+  client-side poll. Joining a call now sends one push to the room's other members (category `call`,
+  "Michele is on a family call", opening the calls tab), claimed by the first joiner for fifteen
+  minutes so a group where everybody taps Join does not produce a notice each.
 
 **Open (rough).**
 
-- A phone with the app closed never learns a call is happening: `activeCalls` is a client-side 5 s
-  poll and the call handler sends no notice. A real call push needs a notification category and its
-  delivery rules, so it is deliberately left for a focused change rather than guessed at here.
 - There is no typing indicator, and it is not a cheap add: Talk's typing signal is a websocket
   feature while this integration is HTTP-only, so it needs a websocket client rather than a poll.
   Read state is real either way (`receiptFor`/`last_common_read`).
