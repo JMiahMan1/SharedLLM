@@ -15,6 +15,7 @@ import ActiveMinutesCard from '../components/health/ActiveMinutesCard';
 import StreaksCard from '../components/health/StreaksCard';
 import MicroLessonCard from '../components/health/MicroLessonCard';
 import CoachCard from '../components/health/CoachCard';
+import JarvisUseCard from '../components/health/JarvisUseCard';
 import CheersCard from '../components/health/CheersCard';
 import HealthConnectCard from '../components/health/HealthConnectCard';
 import GuardianLink from '../components/guardian/GuardianLink';
@@ -71,6 +72,7 @@ const Health = () => {
             {on('cheers') && <CheersCard />}
             {on('lessons') && <MicroLessonCard />}
             {on('coach') && <CoachCard />}
+            {on('jarvis_use') && <JarvisUseCard />}
             {on('fasting') && <FastingCard />}
             {on('weekly_digest') && <WeeklyDigestCard />}
             {on('family_challenge') && <FamilyChallengeCard />}

@@ -24,6 +24,7 @@ import aiohttp
 import redis.asyncio as redis
 from fastapi import HTTPException
 
+from services.common import jarvis_use
 from services.common.secrets import secret_matches
 from services.telemetry import guardian, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
@@ -454,6 +455,19 @@ def create_app():
     ):
         rc = _redis()
         return {"status": "SUCCESS", "events": await store.list_activity(rc, user, limit)}
+
+    @application.get("/api/telemetry/use/{user}")
+    async def get_use(
+        user: str, days: int = Query(default=7, ge=1, le=90), _: bool = Depends(require_internal)
+    ):
+        """What one person does most inside Jarvis (Phase 10), from their own feed.
+
+        Only the derived summary leaves here - the top in-app features and a
+        count - never the raw events, so a member sees their own picture while
+        the stream behind it stays the parents'."""
+        rc = _redis()
+        events = await store.list_activity(rc, user, store.ACTIVITY_MAX)
+        return {"status": "SUCCESS", "use": jarvis_use.summarize(events, days=days)}
 
     @application.post("/api/telemetry/usage")
     async def record_usage(body: dict = Body(...), _: bool = Depends(require_internal)):

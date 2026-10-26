@@ -6,7 +6,7 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`.
-- Live: `https://jarvis.sumemail.com` - version **1.5.2**, OTA bundle `git_sha` **41115ca6**
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca6d4c8**
   (APK `versionCode` **452**, 2026-10-25; every app service redeployed at that tip, 0 new errors
   after). APK: CI builds one per push under `services/ui/**`; the native work below needs the
   newest APK on the phones. Family guard Phase 11 and the family member page
@@ -782,11 +782,8 @@ lock/wipe. **Not started.**
   expired API key: it polls `/api/users/me/theme` (401) and `/health/ready` every ~4.5 s, since
   2026-10-24 20:00 UTC (~360 refused calls an hour). Not on the Mac; likely another tool's test
   browser. Ask Jeremiah to stop it or give it a valid login.
-- **TLS (2026-10-25):** `jarvis.sumemail.com` HTTPS ends at nginx on 192.168.2.30 (ssh `whoogle@`).
-  The `*.sumemail.com` wildcard expired 03:29 UTC because its Cloudflare DNS token is IP-filtered and
-  the house IP is now 184.190.1.22. jarvis, abs, ai, books, docket and games now have their own
-  nginx-validated certs (to 2027-01-23, auto-renew); backup `/root/nginx-backup-20261025040845`.
-  Jeremiah: add 184.190.1.22 to the token's IP filter (or remove it) so the wildcard renews again.
+- **TLS:** every host (jarvis, abs, ai, books, docket, games) serves its own nginx-validated certificate
+  (to 2027-01-23, auto-renew), so the old `*.sumemail.com` wildcard is not needed. Its renewal is skipped.
 - Stale MA player and HA entity named after a user JSON blob: remove by hand in MA → Settings →
   Players.
 - **Phase 12 (device management / MDM)**: not started - see "Phase 12 - device management (MDM)"

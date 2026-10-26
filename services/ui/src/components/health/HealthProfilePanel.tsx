@@ -587,6 +587,8 @@ export default function HealthProfilePanel() {
             >
               <option value="sleep">Sleep</option>
               <option value="nutrition">Nutrition</option>
+              {/* An adult may open their own phone use; a minor's is the parents'. */}
+              {!profile?.kid_mode && !profile?.kid_mode_locked && <option value="digital">Phone use</option>}
             </select>
           </label>
           <button

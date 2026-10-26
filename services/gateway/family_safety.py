@@ -40,6 +40,8 @@ STALE_FIX_S = 15 * 60
 #: Seconds before the same person can send another SOS or On my way.
 SOS_COOLDOWN_S = 60
 ON_MY_WAY_COOLDOWN_S = 5 * 60
+#: Seconds before the same member's phone can be rung again.
+FIND_PHONE_COOLDOWN_S = 30
 
 
 async def _caller(request: Request) -> str:
@@ -188,6 +190,30 @@ async def find_phone(request: Request):
     if not await notices.find_phone(user):
         raise HTTPException(status_code=502, detail="Could not reach your phone")
     return {"status": "SUCCESS", "message": "Your phone is ringing."}
+
+
+@router.post("/api/guardian/find-phone/{user}")
+async def ring_member_phone(request: Request, user: str):
+    """Ring another member's phone: a parent's Find my phone for a child.
+
+    Only someone the visibility rule allows - a minor's parent, or the person
+    themselves - may ring a phone (identity's ``may-view-raw``). It sends the
+    same notice the watch's button does, so the phone answers it the same way,
+    and a short cooldown per person keeps it from nagging.
+    """
+    from services.gateway.main import _raw_data_access
+
+    subject = user.strip().lower()
+    if not subject:
+        raise HTTPException(status_code=422, detail="A member is required")
+    await _raw_data_access(request, subject)  # 401/403 unless the caller may see this member
+    cooldown = await _start_cooldown(
+        "find_phone", subject, FIND_PHONE_COOLDOWN_S, "That phone is already ringing."
+    )
+    if not await notices.find_phone(subject):
+        await _end_cooldown(cooldown)
+        raise HTTPException(status_code=502, detail="Could not reach that phone")
+    return {"status": "SUCCESS", "message": "The phone is ringing."}
 
 
 def place_payload(body: Any, family: list[str]) -> dict[str, Any]:

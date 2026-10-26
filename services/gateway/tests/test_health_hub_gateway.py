@@ -213,3 +213,64 @@ def test_active_minutes_composes_geo_and_the_health_store(client, monkeypatch):
     steps_call = next(kw for url, kw in seen if url.endswith("/steps/sources"))
     assert steps_call["params"]["user_id"] == "dad" and steps_call["params"]["days"] == 3
     assert client.get("/api/health/active-minutes", params={"day": "21-10-2026"}).status_code == 422
+
+
+# --- the digital family scope (an adult opens their own phone use) ----------
+
+
+def _family_client(monkeypatch, days):
+    """Patch the caller, the health answer and the telemetry read for /family."""
+    async def _ident(_request):
+        return {"user": "michele", "is_admin": False}
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", _ident)
+    family = {
+        "viewer": "michele",
+        "day": "2026-10-21",
+        "people": [{"user_id": "jeremiah", "scopes": ["digital"], "digital": {"shared": True}}],
+    }
+
+    class _Health:
+        async def request(self, method, url, **kw):
+            return _Resp(family)
+
+    @asynccontextmanager
+    async def fake_health():
+        yield _Health()
+
+    seen: list[tuple[str, dict]] = []
+
+    class _Telemetry:
+        async def get(self, url, **kw):
+            seen.append((url, kw))
+            if days is None:
+                raise RuntimeError("telemetry down")
+            return _Resp({"status": "SUCCESS", "days": days})
+
+    @asynccontextmanager
+    async def fake_telemetry():
+        yield _Telemetry()
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", fake_health)
+    monkeypatch.setattr(gateway_main, "borrow_http_client", fake_telemetry)
+    return seen
+
+
+def test_the_digital_scope_is_filled_from_telemetry(client, monkeypatch):
+    seen = _family_client(monkeypatch, [{"day": "2026-10-21", "millis": 3_600_000}])
+    body = client.get("/api/health/family", params={"day": "2026-10-21"}).json()
+    assert body["people"][0]["digital"] == {
+        "shared": True, "available": True, "screen_time_min": 60, "day": "2026-10-21"}
+    assert any(url.endswith("/api/telemetry/usage/jeremiah") for url, _kw in seen)
+
+
+def test_the_digital_scope_says_when_no_day_was_reported(client, monkeypatch):
+    _family_client(monkeypatch, [])
+    digital = client.get("/api/health/family", params={"day": "2026-10-21"}).json()["people"][0]["digital"]
+    assert digital["available"] is True and digital["screen_time_min"] is None
+
+
+def test_the_digital_scope_is_unavailable_when_telemetry_is_down(client, monkeypatch):
+    _family_client(monkeypatch, None)
+    digital = client.get("/api/health/family", params={"day": "2026-10-21"}).json()["people"][0]["digital"]
+    assert digital["available"] is False and digital["screen_time_min"] is None

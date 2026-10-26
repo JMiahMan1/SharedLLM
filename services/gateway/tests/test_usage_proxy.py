@@ -120,3 +120,25 @@ def test_usage_is_refused_to_anyone_the_rule_does_not_allow(client, monkeypatch)
     assert r.status_code == 403
     assert cap["rule"] == [{"viewer": "u1", "subject": "kiddo"}]
     assert cap["calls"] == []  # telemetry is never asked
+
+
+def test_my_jarvis_use_asks_telemetry_for_the_callers_own_summary(client, monkeypatch):
+    payload = {"status": "SUCCESS", "use": {"has_data": True, "top": [{"label": "Bible", "count": 3}]}}
+    cap = _patch_telemetry(monkeypatch, payload=payload)
+
+    r = client.get("/api/activity/use", params={"days": 14})
+
+    assert r.status_code == 200
+    assert r.json()["use"]["top"][0] == {"label": "Bible", "count": 3}
+    call = cap["calls"][0]
+    assert call["verb"] == "get"
+    # Always the caller, never a named subject.
+    assert call["url"].endswith("/api/telemetry/use/u1")
+    assert call["params"] == {"days": 14}
+
+
+def test_my_jarvis_use_clamps_the_window(client, monkeypatch):
+    cap = _patch_telemetry(monkeypatch, payload={"status": "SUCCESS", "use": {}})
+    client.get("/api/activity/use", params={"days": 999})
+    assert cap["calls"][0]["params"] == {"days": 90}
+

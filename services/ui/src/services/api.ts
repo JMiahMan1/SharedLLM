@@ -29,6 +29,7 @@ import type {
   ShareRecipient,
   FamilyRecord,
   UsageDay,
+  JarvisUse,
   ScreenRules,
   ScreenTimeStatus,
   ScreenTimeRequest,
@@ -951,6 +952,12 @@ export const api = {
     return resp.data;
   },
 
+  /** What the caller does most inside Jarvis (Phase 10), from their own feed. */
+  async getJarvisUse(days = 7): Promise<{ status: string; use: JarvisUse }> {
+    const resp = await apiClient.get('/api/activity/use', { params: { days } });
+    return resp.data;
+  },
+
   /** Time left today and whether the phone should be locked (the member or their parents). */
   async getScreenTimeStatus(username: string): Promise<ScreenTimeStatus> {
     const resp = await apiClient.get(`/api/screen-time/${encodeURIComponent(username)}/status`);
@@ -1133,6 +1140,12 @@ export const api = {
 
   async getGuardianActivity(username: string, limit = 100): Promise<{ events: ActivityEvent[] }> {
     const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}`, { params: { limit } });
+    return resp.data;
+  },
+
+  /** Ring another member's phone (a parent's Find my phone for a child). */
+  async ringMemberPhone(username: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/guardian/find-phone/${encodeURIComponent(username)}`);
     return resp.data;
   },
 

@@ -5408,6 +5408,30 @@ async def get_usage(request: Request, user: str, days: int = 7):
     return await _parents_only_telemetry(request, user, f"/api/telemetry/usage/{user}", {"days": days})
 
 
+@app.get("/api/activity/use")
+async def my_jarvis_use(request: Request, days: int = 7):
+    """What the caller does most inside Jarvis (Phase 10), from their own feed.
+
+    Only ever the caller's own derived summary - the top in-app features and a
+    count - never the raw activity stream, which stays parents-only
+    (``/api/guardian/activity/{user}``). The person is resolved here, so no one
+    can ask for anyone else's picture.
+    """
+    creds = await _resolve_identity_from_request(request)
+    user = str((creds or {}).get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    days = max(1, min(days, 90))
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/use/{user}",
+            params={"days": days},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+    return await _proxy_json_response(resp)
+
+
+
 @app.get("/api/guardian/recap/{user}")
 async def guardian_recap(request: Request, user: str, day: str = ""):
     """A child's week for their parents: screen time, apps, media, sites, how
@@ -13532,7 +13556,49 @@ async def put_health_share(request: Request):
 
 @app.get("/api/health/family")
 async def get_health_family(request: Request, day: str | None = None):
-    return await _health_json("GET", "/family", request, params={"day": day})
+    """The scopes family members chose to share, with the digital one filled in.
+
+    The health store holds only the grant for a ``digital`` scope (an adult
+    opening their own phone use to someone); the number lives in telemetry, so
+    the gateway fills it in for the owners who shared it. A failed read leaves
+    it null and said so, never a zero.
+    """
+    family = await _health_json("GET", "/family", request, params={"day": day})
+    return await _fill_digital_scopes(family)
+
+
+async def _fill_digital_scopes(family: dict) -> dict:
+    people = family.get("people") if isinstance(family, dict) else None
+    if not people:
+        return family
+    day = family.get("day")
+    wanted = [p for p in people if isinstance(p, dict) and (p.get("digital") or {}).get("shared")]
+    if not wanted:
+        return family
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        for person in wanted:
+            owner = person.get("user_id")
+            days = None
+            try:
+                resp = await client.get(
+                    f"{TELEMETRY_SVC}/api/telemetry/usage/{owner}",
+                    params={"days": 7},
+                    headers=headers,
+                )
+                if resp.status == 200:
+                    days = ((await resp.json(content_type=None)) or {}).get("days") or []
+            except Exception as exc:
+                log.warning("[health] could not read %s's phone use for a share: %s", owner, exc)
+                days = None
+            today = next((d for d in days if str(d.get("day")) == day), None) if days else None
+            person["digital"] = {
+                "shared": True,
+                "available": days is not None,
+                "screen_time_min": round(int(today.get("millis") or 0) / 60000) if today else None,
+                "day": day,
+            }
+    return family
 
 
 @app.get("/api/health/export")

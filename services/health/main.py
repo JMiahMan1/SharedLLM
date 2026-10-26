@@ -563,8 +563,8 @@ class ShareIn(BaseModel):
     @field_validator("scope")
     @classmethod
     def _scope(cls, value: str) -> str:
-        if value not in ("sleep", "nutrition", "cycle"):
-            raise ValueError("scope must be sleep, nutrition or cycle")
+        if value not in ("sleep", "nutrition", "cycle", "digital"):
+            raise ValueError("scope must be sleep, nutrition, cycle or digital")
         return value
 
 
@@ -1748,6 +1748,14 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
                     detail="A minor can only share cycle data with their designated mother or trusted adult.",
                 )
 
+    if body.scope == "digital" and body.enabled:
+        # A minor's digital wellbeing is the parents'; it is not theirs to open.
+        if _is_minor(session.get(HealthProfile, user)):
+            raise HTTPException(
+                status_code=422,
+                detail="Phone use sharing is for adults; a child's belongs to their parents.",
+            )
+
     row = session.exec(
         select(HealthShare).where(
             HealthShare.owner == user,
@@ -1829,6 +1837,12 @@ def family_summary(
                 # is the last period's start date, and the text speaks to the
                 # owner ("your period is late") rather than to a viewer.
             }
+        if "digital" in scopes:
+            # The health store holds no phone data. The grant is the whole of
+            # what is stored here; the gateway fills the number in from
+            # telemetry for the owners who chose to share it, and a viewer
+            # never reads the raw feed behind it.
+            entry["digital"] = {"shared": True}
         people.append(entry)
     return {"viewer": viewer, "day": day, "people": people}
 

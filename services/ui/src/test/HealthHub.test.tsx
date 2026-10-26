@@ -63,6 +63,7 @@ const ALL_ON: HealthSummary['profile']['metrics'] = {
   cheers: true,
   lessons: true,
   coach: true,
+  jarvis_use: true,
   fasting: false,
 };
 

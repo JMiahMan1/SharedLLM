@@ -540,6 +540,22 @@ class TestSharingAndExport:
         body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "michele"}).json()
         assert body["people"] == []
 
+    def test_a_digital_scope_projects_as_a_grant_only(self, client):
+        # An adult opens their own digital wellbeing to someone. The health
+        # store holds only the grant; the gateway fills the number in from
+        # telemetry, so nothing about the phone is invented here.
+        assert client.put("/shares", json={"viewer": "michele", "scope": "digital"}).status_code == 200
+        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "michele"}).json()
+        assert body["people"] == [
+            {"user_id": "jeremiah", "scopes": ["digital"], "digital": {"shared": True}}
+        ]
+
+    def test_a_minor_cannot_open_their_phone_use(self, client):
+        client.put("/profile", json={"kid_mode": True})
+        response = client.put("/shares", json={"viewer": "michele", "scope": "digital"})
+        assert response.status_code == 422
+        assert "adults" in response.json()["detail"]
+
     def test_you_cannot_share_with_yourself(self, client):
         response = client.put("/shares", json={"viewer": "jeremiah", "scope": "sleep"})
         assert response.status_code == 422

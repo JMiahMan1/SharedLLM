@@ -300,6 +300,15 @@ export interface UsageDay {
   apps?: Array<{ package: string; millis: number; last_use?: number | null }>;
 }
 
+/** What someone does most inside Jarvis (Phase 10), derived from their own feed. */
+export interface JarvisUse {
+  days: number;
+  window_start: string;
+  has_data: boolean;
+  total: number;
+  top: Array<{ label: string; count: number }>;
+}
+
 export interface WebFilterRules {
   enabled?: boolean;
   /** Adult and malware sites blocked by the family-safe resolver. */
@@ -1745,6 +1754,7 @@ export type HealthMetricSwitch =
   | 'cheers'
   | 'lessons'
   | 'coach'
+  | 'jarvis_use'
   | 'fasting';
 
 export interface SleepSession {
@@ -2060,7 +2070,7 @@ export interface FoodSearchItem {
 
 export interface HealthShare {
   viewer: string;
-  scope: 'sleep' | 'nutrition' | 'cycle';
+  scope: 'sleep' | 'nutrition' | 'cycle' | 'digital';
 }
 
 export interface HealthFamilyPerson {
@@ -2095,6 +2105,17 @@ export interface HealthFamilyPerson {
       title: string;
       tips: string[];
     } | null;
+  };
+  /**
+   * An adult's opt-in share of their own digital wellbeing. The health store
+   * holds the grant; the gateway fills the day's screen time in from telemetry.
+   * A day the phone reported nothing is null, and an unreadable one unavailable.
+   */
+  digital?: {
+    shared: boolean;
+    available: boolean;
+    screen_time_min: number | null;
+    day: string;
   };
 }
 
