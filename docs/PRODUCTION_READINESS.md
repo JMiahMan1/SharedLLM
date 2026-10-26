@@ -263,17 +263,30 @@ are the app shell, navigation plumbing and the older admin pages.
 - **BROKEN - form labels were not associated with their inputs** (162 `<label>`s app-wide, 20 with
   `htmlFor`, and no `id` on the inputs), so a screen reader announced "edit text, blank". Login is
   done; Identity and the rest of the app are still open.
+- **BROKEN - the crash screen was a developer console shown to children**: the raw stack trace, the
+  React component stack, a platform dump, a "For Developers" block and a GitHub Issues link, with the
+  first section expanded. It is now "Something went wrong" with one plain sentence, Try again and Go
+  home, and the technical material behind a collapsed "Technical details" disclosure.
+- **"Devices" meant two different things.** It is device management for a parent and a list of the
+  files a parent shares for a child, so the same word sent a child somewhere they had no reason to
+  look. The navigation and the page header now read "Shared files" for a member who is not an admin.
+
+**Checked, and not a defect.** The audit reported the developer pages (Workspaces, Artifacts,
+Knowledge, Docs) as offered to every role. They are not developer pages: `Workspaces` retitles itself
+for a member who is not an admin ("My Workspaces", "View your workspaces and shared resources",
+`services/ui/src/pages/Workspaces.tsx:590-593`), and `KnowledgeHub` (`:853`) and `Artifacts` (`:275`)
+hide their admin-only controls behind `isAdmin` checks; `Docs` is the documentation page. The one page
+that is genuinely admin-only, `Lab`, is already gated in both the navigation and the route. `Guardian`
+likewise has a test asserting it is shown to every role
+(`services/ui/src/components/layout/navItems.test.ts`), because a person's own week, prayer and
+wellbeing live there.
 
 **Open (rough).**
 
-- The crash screen is a developer console shown to children: raw stack trace, component stack, a
-  platform dump, a "For Developers" block and a GitHub link, expanded by default.
 - `/recipes` has no navigation entry anywhere; it is only reachable through Family, which mounts the
   same heavy component inline.
 - The Dashboard shows developer content to non-admins: service status with a placeholder subtitle and
   workspace rows with raw filesystem paths.
-- The developer pages (Workspaces, Artifacts, Knowledge, Docs) are offered to every role, so a child's
-  sidebar contains RAG and embeddings, and "Devices" means two different things depending on the role.
 - The page finder is desktop-only, so phones must scroll the More sheet to reach eleven pages.
 - Twenty-three destructive confirmations still use the browser's `window.confirm` while the app ships
   a styled modal, and several workspace actions have no busy state.
