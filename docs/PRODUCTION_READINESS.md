@@ -239,15 +239,21 @@ renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
   entry the person had ever logged, and `GET /metrics/{metric}` was unbounded in sample count. Both
   reads are capped (`MAX_FOOD_ENTRIES`, `MAX_METRIC_SAMPLES`) and say `truncated: true` rather than
   dropping rows without a word.
+- **ROUGH - B1** imported measures (HRV, SpO2, body fat) were stored and never shown - the profile
+  panel printed weight and resting heart rate and nothing else - and a mistyped reading could not be
+  removed, though `GET /metrics/{metric}` and `DELETE /metrics/{id}` both existed with no caller. The
+  Measurements section now shows every measure the summary returns, each with a history (the newest
+  thirty days, with the source) and a delete behind the app's confirm dialog.
+
+- **ROUGH - B3/B10** the export carried the cheers a person received but not the ones they sent, so a
+  backup or a move lost half of that history; it now has both directions. The README also described
+  the sharing scopes as `sleep|nutrition`, which stopped being true when cycle and digital wellbeing
+  were added.
 
 **Open.**
 
-- **ROUGH - B1** imported measures (HRV, SpO2, body fat) are invisible: there is no metric-history UI,
-  and a mistyped weight cannot be deleted, although the API for both exists and the docs promise a
-  weight trend.
-- **ROUGH - B3/B6/B7/B8/B9/B10** the export omits `cheers_sent`; a failed steps fetch reads as "no
-  reading yet"; "shared with you" renders nothing on error; the digital-wellbeing week bar has no day
-  labels; `getCheckins` has no caller; and the README describes a sharing scope that has since grown.
+- **ROUGH - B6/B7/B8/B9** a failed steps fetch reads as "no reading yet"; "shared with you" renders
+  nothing on error; the digital-wellbeing week bar has no day labels; and `getCheckins` has no caller.
 
 ### 3.5 UI/UX
 
