@@ -445,6 +445,67 @@ def test_abs_search_book_cover_uses_the_cover_field(client, upstream, ma):
     assert body["audiobooks"][0]["image"] == "/covers/b1.jpg"
 
 
+def test_a_music_assistant_cover_uses_the_proxy_id_the_image_proxy_can_fetch(client, ma):
+    """MA's ``path`` is the provider's URL, which the image proxy refuses to fetch.
+
+    Measured live 2026-10-26: every MA album and artist cover came back ``404
+    Failed to fetch image from upstream`` because the proxy only contacts hosts
+    the household configured (SSRF) and ``r2.theaudiodb.com`` is not one, so the
+    URL was rebased onto a configured base. ``proxy_id`` is MA's own cached copy
+    and MA serves it from its own host at ``/imageproxy/<proxy_id>``.
+    """
+    ma["responses"]["music/albums/library_items"] = [
+        {
+            "media_item": {
+                "uri": "library://album/1",
+                "name": "House of Miracles",
+                "media_type": "album",
+                "image": {
+                    "type": "thumb",
+                    "path": "https://r2.theaudiodb.com/images/media/album/thumb/rowlk61611438892.jpg",
+                    "provider": "theaudiodb",
+                    "remotely_accessible": True,
+                    "proxy_id": "f41a3f56c834d4b25a492e26285f6214bed22e4f8099f68e7008656a4f676809",
+                },
+            }
+        }
+    ]
+
+    body = client.get("/api/media/library/albums").json()
+
+    assert body["items"][0]["image"] == (
+        "/imageproxy/f41a3f56c834d4b25a492e26285f6214bed22e4f8099f68e7008656a4f676809"
+    )
+
+
+def test_a_plain_string_music_assistant_cover_is_left_alone(client, ma):
+    """Some providers hand back a bare string; it must not be rewritten."""
+    ma["responses"]["music/albums/library_items"] = [
+        {"media_item": {"uri": "library://album/2", "name": "B", "media_type": "album", "image": "https://example.test/a.jpg"}}
+    ]
+
+    body = client.get("/api/media/library/albums").json()
+
+    assert body["items"][0]["image"] == "https://example.test/a.jpg"
+
+
+def test_media_ma_image_shapes():
+    """Every shape MA sends, including the ones that used to become "" silently."""
+    from services.gateway.main import _media_ma_image
+
+    assert _media_ma_image({"proxy_id": "abc"}) == "/imageproxy/abc"
+    assert _media_ma_image({"proxy_id": "  abc  "}) == "/imageproxy/abc"
+    # No proxy_id: fall back to whatever URL the provider gave.
+    assert _media_ma_image({"path": "https://x.test/a.jpg"}) == "https://x.test/a.jpg"
+    assert _media_ma_image({"url": "https://x.test/b.jpg"}) == "https://x.test/b.jpg"
+    assert _media_ma_image("https://x.test/c.jpg") == "https://x.test/c.jpg"
+    # A list of candidates: the first usable one wins.
+    assert _media_ma_image([None, {}, {"proxy_id": "z"}]) == "/imageproxy/z"
+    assert _media_ma_image(None) == ""
+    assert _media_ma_image(7) == ""
+    assert _media_ma_image({"proxy_id": "   "}) == ""
+
+
 def test_library_rejects_an_unknown_tab(client):
     resp = client.get("/api/media/library/movies")
     assert resp.status_code == 422

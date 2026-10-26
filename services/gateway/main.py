@@ -14843,6 +14843,43 @@ class _MediaUpstreamError(Exception):
     """One media upstream (MA or ABS) is unavailable for this request."""
 
 
+def _media_ma_image(image: Any) -> str:
+    """The gateway-resolvable handle for a Music Assistant image.
+
+    MA sends a dict, e.g.::
+
+        {"type": "thumb",
+         "path": "https://r2.theaudiodb.com/images/media/album/thumb/rowlk61611438892.jpg",
+         "provider": "theaudiodb",
+         "remotely_accessible": true,
+         "proxy_id": "f41a3f56c834d4b25a492e26285f6214bed22e4f8099f68e7008656a4f676809"}
+
+    ``path`` is the *provider's* URL. The image proxy only contacts hosts the
+    household has configured (SSRF), so an external provider host is rebased
+    onto a configured base and the cover 404s - measured live 2026-10-26: every
+    album and artist image from MA came back ``404 Failed to fetch image from
+    upstream``. ``proxy_id`` is MA's own cached copy, which MA serves from its
+    own host at ``/imageproxy/<proxy_id>``, so that is the handle to hand on.
+    """
+    if isinstance(image, dict):
+        proxy_id = image.get("proxy_id")
+        if isinstance(proxy_id, str) and proxy_id.strip():
+            return f"/imageproxy/{proxy_id.strip()}"
+        for key in ("path", "url", "image_url"):
+            value = image.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    if isinstance(image, str):
+        return image
+    if isinstance(image, list):
+        for entry in image:
+            found = _media_ma_image(entry)
+            if found:
+                return found
+    return ""
+
+
 def _media_ma_item(raw: Any) -> dict:
     """Normalize a Music Assistant item mapping (or full item) to MediaItem kwargs.
 
@@ -14871,11 +14908,7 @@ def _media_ma_item(raw: Any) -> dict:
         album = album.get("name") or ""
     elif not isinstance(album, str):
         album = ""
-    image = item.get("image")
-    if isinstance(image, dict):
-        image = image.get("path") or ""
-    elif not isinstance(image, str):
-        image = ""
+    image = _media_ma_image(item.get("image"))
     duration = item.get("duration")
     try:
         duration = float(duration) if duration is not None else None
