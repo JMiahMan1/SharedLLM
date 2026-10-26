@@ -80,3 +80,22 @@ def test_feed_is_capped(client, rc, monkeypatch):
 
     listed = client.get("/api/telemetry/activity/kiddo", headers=HEADERS).json()["events"]
     assert [e["item"] for e in listed] == ["page 4", "page 3", "page 2"]
+
+
+def test_use_summarizes_in_app_features_without_the_raw_stream(client, rc):
+    for feature in ("media", "music", "bible", "sms"):
+        client.post(
+            "/api/telemetry/activity",
+            headers=HEADERS,
+            json={"user": "kiddo", "feature": feature, "item": "x"},
+        )
+    body = client.get("/api/telemetry/use/kiddo", headers=HEADERS).json()["use"]
+    # Music/video/podcasts group into one line; the phone's own collection (sms) is left out.
+    assert body["top"] == [{"label": "Music, video and podcasts", "count": 2}, {"label": "Bible", "count": 1}]
+    assert body["total"] == 3
+    assert "events" not in body
+
+
+def test_use_needs_the_internal_secret(client):
+    assert client.get("/api/telemetry/use/kiddo").status_code == 401
+

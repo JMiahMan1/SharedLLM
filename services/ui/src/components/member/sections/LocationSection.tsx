@@ -3,6 +3,7 @@ import { isAxiosError } from 'axios';
 import { Flag, Route as RouteIcon } from 'lucide-react';
 import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
+import FindPhoneCard from '../FindPhoneCard';
 import { MiniMapCard } from './OverviewSection';
 import { geoZonesQueryKey, zonePlaces } from '../../../lib/wanderQueries';
 import { localDay } from '../../../lib/healthHub';
@@ -74,6 +75,7 @@ export default function LocationSection({ username, name }: { username: string; 
       <div className="lg:col-span-2">
         <MiniMapCard username={username} height={340} />
       </div>
+      <FindPhoneCard username={username} name={name} />
       <TripsCard username={username} name={name} />
       <PlacesCard />
     </>

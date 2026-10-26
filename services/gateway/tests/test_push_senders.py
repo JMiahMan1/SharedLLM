@@ -432,6 +432,59 @@ def test_find_phone_says_so_when_the_phone_cannot_be_reached(safety_client, monk
     assert resp.status_code == 502 and resp.json()["detail"] == "Could not reach your phone"
 
 
+def _allow_raw(monkeypatch):
+    from services.gateway import main
+
+    async def allowed(request, subject):
+        return True
+
+    monkeypatch.setattr(main, "_raw_data_access", allowed)
+
+
+def test_a_parent_can_ring_a_childs_phone(safety_client, sent, monkeypatch):
+    _allow_raw(monkeypatch)
+    client, _ = safety_client
+    assert client.post("/api/guardian/find-phone/kiddo").json() == {
+        "status": "SUCCESS", "message": "The phone is ringing."}
+    assert len(sent) == 1 and sent[0]["user"] == "kiddo"
+    assert sent[0]["kind"] == "find_phone" and sent[0]["priority"] == 5
+
+
+def test_ringing_is_refused_when_the_visibility_rule_says_no(safety_client, sent, monkeypatch):
+    from services.gateway import main
+
+    async def refused(request, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can see this")
+
+    monkeypatch.setattr(main, "_raw_data_access", refused)
+    client, _ = safety_client
+    assert client.post("/api/guardian/find-phone/kiddo").status_code == 403
+    assert sent == []
+
+
+def test_ringing_waits_between_sends(safety_client, sent, monkeypatch):
+    _allow_raw(monkeypatch)
+    client, _ = safety_client
+    assert client.post("/api/guardian/find-phone/kiddo").status_code == 200
+    again = client.post("/api/guardian/find-phone/kiddo")
+    assert again.status_code == 429 and again.headers["Retry-After"] == "30"
+    assert again.json()["detail"].startswith("That phone is already ringing.")
+    assert len(sent) == 1  # the second ring never reached the phone
+
+
+def test_ringing_says_so_when_the_phone_cannot_be_reached(safety_client, monkeypatch):
+    _allow_raw(monkeypatch)
+
+    async def refused(payload, **kw):
+        return False
+
+    monkeypatch.setattr(notify, "send", refused)
+    client, _ = safety_client
+    resp = client.post("/api/guardian/find-phone/kiddo")
+    assert resp.status_code == 502 and resp.json()["detail"] == "Could not reach that phone"
+
+
+
 def test_sos_and_on_my_way_wait_between_sends(safety_client, sent):
     """One SOS a minute and one On my way every five minutes per person, with
     a 429 the app shows as is."""

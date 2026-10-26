@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Moon, Users, Utensils } from 'lucide-react';
+import { Moon, Smartphone, Users, Utensils } from 'lucide-react';
 import { formatMinutes } from '../../lib/healthHub';
 import { sharedCycleLine } from '../../lib/healthFamily';
 import { useFamilyDirectory } from '../chat/familyDirectory';
@@ -39,8 +39,9 @@ export default function SharedWithYouCard({
         {people.map((person) => {
           const name = lookup(person.user_id)?.display_name || person.user_id;
           const cycle = person.cycle;
+          const digital = person.digital;
           const cycleLine = sharedCycleLine(cycle);
-          const nothing = !person.sleep && !person.nutrition && !cycle;
+          const nothing = !person.sleep && !person.nutrition && !cycle && !digital;
           return (
             <li key={person.user_id} className="space-y-1.5 py-2.5 text-xs" data-testid={`shared-${person.user_id}`}>
               <p className="font-semibold text-slate-200">{name}</p>
@@ -65,6 +66,18 @@ export default function SharedWithYouCard({
                       : person.nutrition.calories !== null
                         ? `${Math.round(person.nutrition.calories).toLocaleString()} kcal logged`
                         : 'Food logged today'}
+                  </span>
+                </p>
+              )}
+              {digital && (
+                <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400" data-testid={`shared-digital-${person.user_id}`}>
+                  <Smartphone size={12} className="shrink-0 text-sky-300" aria-hidden />
+                  <span className="min-w-0 break-words">
+                    {!digital.available
+                      ? 'Phone use not available right now'
+                      : digital.screen_time_min === null
+                        ? 'No phone use reported today'
+                        : `${formatMinutes(digital.screen_time_min)} on the phone today`}
                   </span>
                 </p>
               )}

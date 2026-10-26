@@ -25,6 +25,7 @@ SWITCHES: dict[str, tuple[str, bool, bool]] = {
     "cheers": ("Cheers", True, False),
     "lessons": ("Lessons", True, False),
     "coach": ("Coach and reminders", True, False),
+    "jarvis_use": ("What you do in Jarvis", True, False),
     "fasting": ("Fasting window", False, True),
 }
 
