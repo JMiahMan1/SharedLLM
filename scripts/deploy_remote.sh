@@ -322,6 +322,34 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
         done
     fi
 
+    # Record what each service is running right now, so a failed health check
+    # can put it back. The image ID is used rather than a tag: a later build can
+    # retag ":latest", but nothing can change what a running container points at.
+    PREVIOUS_FILE=/tmp/sharedllm-deploy-previous
+    : > "\$PREVIOUS_FILE"
+    for service in $SERVICES; do
+        previous=\$(docker inspect --format '{{.Image}}' "sharedllm_\$service" 2>/dev/null || true)
+        [ -n "\$previous" ] && echo "\$service \$previous" >> "\$PREVIOUS_FILE"
+    done
+
+    # Put the previous images back. Every failure path below calls this, so a
+    # bad deploy leaves the stack on the last working build rather than on a
+    # broken one with the operator left to work out what it used to be.
+    roll_back() {
+        [ -s "\$PREVIOUS_FILE" ] || return 0
+        echo "[..] Rolling back to the images that were running before this deploy:"
+        while read -r service image; do
+            repo="ghcr.io/jmiahman1/sharedllm-\$service"
+            if docker tag "\$image" "\$repo:latest" 2>/dev/null; then
+                echo "     \$service -> \$image"
+            else
+                echo "     [WARN] Could not retag \$service back to \$image"
+            fi
+        done < "\$PREVIOUS_FILE"
+        # shellcheck disable=SC2086
+        docker compose up -d --force-recreate $SERVICES
+    }
+
     # shellcheck disable=SC2086
     # NO --remove-orphans: see deploy_local_build.sh. It deletes any container
     # missing from this checkout's compose file, including another author's
@@ -386,6 +414,7 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
         if docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 | grep -q "Traceback"; then
             echo "[FAIL] Application failed to start! Traceback detected."
             docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 || true
+            roll_back
             exit 1
         fi
 
@@ -399,6 +428,7 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
         echo "[FAIL] Timeout waiting for application startup at \$GATEWAY_HEALTH_URL."
         echo "Last 20 lines of logs:"
         docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 || echo "(no logs available for \$GATEWAY_CONTAINER)"
+        roll_back
         exit 1
     fi
 
@@ -407,6 +437,7 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     if [ -z "\$EXEC_CONTAINER" ]; then
         echo "[FAIL] Execution container not found! Compose may have left it in Created state."
         docker ps -a --filter 'name=execution' --format '{{.Names}} {{.Status}}'
+        roll_back
         exit 1
     fi
     echo "[OK] Execution container (\$EXEC_CONTAINER) is running."
