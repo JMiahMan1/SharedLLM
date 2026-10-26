@@ -542,6 +542,39 @@ async def _selected_owners(body: dict) -> list[str]:
     return out
 
 
+async def device_owner_reported(request: Request, username: str) -> bool:
+    """Whether the named member has a device that reported ``guard.deviceOwner``.
+
+    Used to gate the MDM lock audit: a screen-time "lock" is only a real OS
+    lock on a device-owner phone (otherwise it is the Accessibility soft cover),
+    so logging "locked a device" without one would be a false success. A lookup
+    that fails, or a member with no such device, answers ``False`` — a lie is
+    never logged. The caller's own devices come from the user-panel list, since
+    identity's per-member endpoint refuses the subject themselves.
+    """
+    from services.gateway.main import _identity_as_caller
+
+    name = (username or "").strip().lower()
+    if not name:
+        return False
+    try:
+        status, info = await _identity_as_caller(request, "GET", f"/api/family/devices/{name}")
+        if status == 200 and isinstance(info, dict):
+            rows = info.get("devices") or []
+        else:
+            status, info = await _identity_as_caller(request, "GET", "/api/user-panel/devices")
+            rows = ([d for d in info if isinstance(d, dict) and (d.get("owner_username") or "").lower() == name]
+                    if status == 200 and isinstance(info, list) else [])
+    except Exception as exc:  # a lookup failure is not a device that exists
+        log.warning("[mdm] device owner lookup for %s failed: %s", name, exc)
+        return False
+    for device in rows:
+        guard = (device.get("capabilities") or {}).get("guard") or {}
+        if guard.get("deviceOwner"):
+            return True
+    return False
+
+
 def _folder_or_404(folder: str) -> str:
     if folder not in SHARED_FOLDERS:
         raise HTTPException(status_code=404, detail=f"No shared folder named {folder!r}")
@@ -874,7 +907,8 @@ async def mdm_audit_log(request: Request, limit: int = 100):
 __all__ = [
     "AUDIT_MAX", "LIBRARY_BOOK_SUFFIXES", "LIBRARY_MAX_BOOKS", "MAX_LIBRARY_BOOK_BYTES", "MAX_UPLOAD_BYTES",
     "MDM_FILES_DIR",
-    "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file", "describe_library", "fetch_library_book",
+    "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file", "describe_library", "device_owner_reported",
+    "fetch_library_book",
     "file_path", "list_folder", "list_library_books", "normalise_path", "pushed_folders", "queue_wipe",
     "read_audit", "read_pushes", "read_wipes", "record_audit", "router", "set_push", "store_file",
     "wipe_requested",

@@ -5267,6 +5267,15 @@ async def proxy_recipe_fetch(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/recipes/sources")
+async def proxy_recipe_sources(request: Request):
+    """The source URLs already imported, so search does not offer them again."""
+    body = await request.json()
+    return await _proxy_execution_with_identity(
+        request, "/execute/recipes", {"action": "recipe_sources"}, as_user=body.get("as_user")
+    )
+
+
 @app.post("/api/recipes/import")
 async def proxy_recipe_import(request: Request):
     """Paste-a-link recipe import: read a page's schema.org recipe."""
@@ -6179,9 +6188,16 @@ async def screen_time_pause(request: Request, username: str):
             title, text = "Phone unpaused", "Your phone is back on."
         await _screen_time_notice([username], title, text, "/health")
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
-        # log (Phase 12) so "who locked a device, and when" has one answer.
-        mdm.record_audit("device_lock" if paused else "device_unlock", actor,
-                         target=subject, detail={"self": mine})
+        # log (Phase 12) so "who locked a device, and when" has one answer. A
+        # lock is only logged when the phone is a device owner and can really
+        # lock (Android's own lock screen / lock task): on any other phone the
+        # "lock" is only the Accessibility soft cover, and logging "locked a
+        # device" would be a false success.
+        if paused and not await mdm.device_owner_reported(request, subject):
+            log.info("[mdm] %s is not a device owner; the lock is a soft lock, not logged as a real lock", subject)
+        else:
+            mdm.record_audit("device_lock" if paused else "device_unlock", actor,
+                             target=subject, detail={"self": mine})
     return JSONResponse(status_code=status, content=body)
 
 
@@ -13496,6 +13512,12 @@ async def delete_health_food(entry_id: int, request: Request):
 @app.get("/api/health/food/search")
 async def search_health_food(request: Request, q: str, limit: int = 10):
     return await _health_json("GET", "/food/search", request, params={"q": q, "limit": limit})
+
+
+@app.post("/api/health/food/estimate")
+async def estimate_health_food(request: Request):
+    """Estimate a recipe's nutrition from the USDA seed (per ingredient)."""
+    return await _health_json("POST", "/food/estimate", request, body=await request.json())
 
 
 @app.get("/api/health/food/barcode/{code}")

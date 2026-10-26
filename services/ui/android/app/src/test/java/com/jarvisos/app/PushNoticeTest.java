@@ -171,6 +171,21 @@ public class PushNoticeTest {
     }
 
     @Test
+    public void aScreenTimeNoticeIsRecognisedByItsCategoryAndTag() {
+        PushNotice lock = PushNotice.parse("{\"id\":\"s1\",\"category\":\"family_safety\","
+                + "\"kind\":\"family_safety\",\"title\":\"Phone paused\",\"body\":\"A parent paused your phone.\","
+                + "\"tag\":\"screen-time:kid\"}");
+        assertTrue(lock.isScreenTime());
+        // A family-safety notice that is not screen time is left alone.
+        assertFalse(PushNotice.parse("{\"category\":\"family_safety\",\"title\":\"SOS\",\"body\":\"help\","
+                + "\"tag\":\"sos:kid\"}").isScreenTime());
+        // A screen-time tag under another category is not one either.
+        assertFalse(PushNotice.parse("{\"category\":\"general\",\"title\":\"x\",\"body\":\"y\","
+                + "\"tag\":\"screen-time:kid\"}").isScreenTime());
+        assertFalse(PushNotice.parse(CHAT).isScreenTime());
+    }
+
+    @Test
     public void alarmAndPhoneTimerNoticesRingOnTheAlarmStream() {
         PushNotice alarm = PushNotice.parse("{\"id\":\"a1\",\"category\":\"timers\",\"kind\":\"alarm\","
                 + "\"title\":\"🌅 Alarm: Wake up\",\"body\":\"Wake up (Morning Melody)\",\"priority\":5,"

@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
+import toast from 'react-hot-toast';
 import Devices from '../pages/Devices';
 import { renderWithProviders } from './render';
 import { server } from './setup';
+
+vi.mock('react-hot-toast', () => {
+  const toast = vi.fn();
+  return { default: Object.assign(toast, { success: vi.fn(), error: vi.fn() }) };
+});
 
 /**
  * The device-management page (HANDOVER.md Phase 12): the inventory, the
@@ -24,6 +30,17 @@ const inventory = {
     { username: 'dad', display_name: 'Dad', device_count: null, readable: false, reason: 'Only the father or an admin can see device details' },
   ],
   generated_at: '2026-10-25T10:00:00Z',
+};
+
+const softDevice = {
+  devices: [
+    {
+      ...inventory.devices[0],
+      capabilities: { guard: { deviceOwner: false, guardEnabled: true, webFilterActive: true, reportedAt: '2026-10-25T10:00:00Z' } },
+    },
+  ],
+  members: inventory.members,
+  generated_at: inventory.generated_at,
 };
 
 const folders = {
@@ -55,6 +72,7 @@ const auditEvents = {
 beforeEach(() => {
   pushed = [];
   wiped = [];
+  vi.clearAllMocks();
   server.use(
     http.get('/api/mdm/devices', () => HttpResponse.json(inventory)),
     http.get('/api/mdm/files', () => HttpResponse.json(folders)),
@@ -62,6 +80,7 @@ beforeEach(() => {
     http.get('/api/mdm/library/books', () => HttpResponse.json(libraryBooks)),
     http.get('/api/mdm/audit', () => HttpResponse.json(auditEvents)),
     http.get('/api/mdm/files/school/worksheet.pdf', () => new HttpResponse(new Blob(['worksheet']), { headers: { 'Content-Type': 'application/pdf' } })),
+    http.post('/api/screen-time/:username/pause', () => HttpResponse.json({ rules: {} })),
     http.post('/api/mdm/devices/update', async ({ request }) => {
       pushed.push((await request.json()) as Record<string, unknown>);
       return HttpResponse.json({ status: 'SUCCESS', sent: 1, owners: ['kid'], version: '2.0.0' });
@@ -87,6 +106,21 @@ describe('Devices page', () => {
     renderWithProviders(<Devices />);
     fireEvent.click(await screen.findByTestId('mdm-update-kid-phone-0001'));
     await waitFor(() => expect(pushed).toEqual([{ device_keys: ['kid-phone-0001'] }]));
+  });
+
+  it('says "Locked" on a device-owner phone, where the lock is real', async () => {
+    renderWithProviders(<Devices />);
+    fireEvent.click(await screen.findByTestId('mdm-lock-kid-phone-0001'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Locked'));
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('not truly locked'), expect.anything());
+  });
+
+  it('never claims a real lock when the phone is not a device owner', async () => {
+    server.use(http.get('/api/mdm/devices', () => HttpResponse.json(softDevice)));
+    renderWithProviders(<Devices />);
+    fireEvent.click(await screen.findByTestId('mdm-lock-kid-phone-0001'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('not truly locked'), expect.anything()));
+    expect(toast.success).not.toHaveBeenCalledWith('Locked');
   });
 
   it('gates the remote wipe behind a confirmation', async () => {

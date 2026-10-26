@@ -3,6 +3,8 @@ package com.jarvisos.app;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -42,6 +44,79 @@ public class GuardScreenActivity extends ComponentActivity {
     /** A parent already said no. */
     static final String EXTRA_DENIED = "denied";
 
+    /**
+     * How often a kiosk lock re-checks the cached status, so a lock a parent
+     * lifts remotely (or a window that opens) releases the pin without waiting
+     * for the child to find a way out.
+     */
+    private static final long KIOSK_CHECK_MS = 5000;
+    /** This screen is the locked cover, not a tamper/app/install/permission/bypass screen. */
+    private boolean lockedMode = false;
+    /** Android's lock-task (kiosk) mode is holding this screen: release it when it goes. */
+    private boolean kiosk = false;
+    private final Handler kioskCheck = new Handler(Looper.getMainLooper());
+    private final Runnable kioskTick = new Runnable() {
+        @Override
+        public void run() {
+            if (!kiosk) return;
+            if (!lockTaskWanted()) {
+                // A parent lifted the lock (or their unlock window opened): leave the kiosk.
+                finish();
+                return;
+            }
+            kioskCheck.postDelayed(this, KIOSK_CHECK_MS);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (lockedMode && lockTaskWanted()) enterKiosk();
+    }
+
+    @Override
+    protected void onDestroy() {
+        kioskCheck.removeCallbacks(kioskTick);
+        releaseKiosk();
+        super.onDestroy();
+    }
+
+    /**
+     * Whether Android's lock-task (kiosk) mode should hold this screen now: a
+     * device owner, on a protected phone, locked, and not inside a parent's
+     * unlock window (see {@link DeviceOwnerRules#lockTask}). On any other phone
+     * this is false and the screen is only the Accessibility soft cover.
+     */
+    private boolean lockTaskWanted() {
+        return DeviceOwnerRules.lockTask(DeviceOwnerGuard.isOwner(this), GuardApi.isProtected(this),
+                GuardApi.isLocked(this), GuardApi.isUnlocked(this));
+    }
+
+    /** Pin the phone to this screen: allow Jarvis, then start lock task. */
+    private void enterKiosk() {
+        DeviceOwnerGuard.enterLockTask(this);
+        try {
+            startLockTask();
+            kiosk = true;
+            kioskCheck.removeCallbacks(kioskTick);
+            kioskCheck.postDelayed(kioskTick, KIOSK_CHECK_MS);
+        } catch (Exception ignored) {
+            // Not allowlisted (older Android, or no longer device owner): the soft cover still shows.
+        }
+    }
+
+    /** Leave lock task and drop the allowlist, so the phone is free again. */
+    private void releaseKiosk() {
+        if (!kiosk) return;
+        kiosk = false;
+        try {
+            stopLockTask();
+        } catch (Exception ignored) {
+            // Never actually in lock task.
+        }
+        DeviceOwnerGuard.exitLockTask(this);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -52,6 +127,8 @@ public class GuardScreenActivity extends ComponentActivity {
         boolean permission = MODE_PERMISSION.equals(mode);
         boolean bypass = MODE_BYPASS.equals(mode);
         boolean denied = getIntent().getBooleanExtra(EXTRA_DENIED, false);
+        // The plain locked cover (bedtime, school, the day's time, a pause), not one of the others.
+        lockedMode = !tamper && !appOff && !install && !permission && !bypass;
         String app = getIntent().getStringExtra(EXTRA_APP);
         String appName = app == null || app.isEmpty() ? "This app" : app;
 

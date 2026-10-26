@@ -118,6 +118,8 @@ function AppControls({ owner }: { owner: string }) {
 function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () => void }) {
   const [showApps, setShowApps] = useState(false);
   const guard = device.capabilities?.guard;
+  // Only a device-owner phone can really lock itself; the rest is a soft cover.
+  const deviceOwner = Boolean(guard?.deviceOwner);
   const facts: Array<[string, string]> = [
     ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
     ['Model', [device.manufacturer, device.model].filter(Boolean).join(' ') || 'unknown'],
@@ -133,7 +135,17 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
   });
   const lock = useMutation({
     mutationFn: (resume: boolean) => api.pauseScreenTime(device.owner_username, resume ? { resume: true } : {}),
-    onSuccess: (_r, resume) => toast.success(resume ? 'Unlocked' : 'Locked'),
+    onSuccess: (_r, resume) => {
+      if (resume) {
+        toast.success('Unlocked');
+      } else if (deviceOwner) {
+        toast.success('Locked');
+      } else {
+        // Never claim a lock Android did not really apply: without device owner
+        // this is only the Accessibility soft cover (see PhoneProtectionCard).
+        toast('Soft lock sent — this phone is not a device owner, so it is not truly locked', { icon: '⚠️' });
+      }
+    },
     onError: (e: Error) => toast.error(e.message || 'Could not change the lock'),
   });
   const wipe = useMutation({
