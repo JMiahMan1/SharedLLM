@@ -86,7 +86,10 @@ describe('item helpers', () => {
     expect(playRequestFor({ uri: 'library://track/1', name: 'T', media_type: 'track' })).toEqual({ kind: 'uri', uri: 'library://track/1', title: 'T' });
     expect(playRequestFor({ uri: 'abs://b1', name: 'B', media_type: 'audiobook', duration: 600 })).toEqual({ kind: 'abs', id: 'b1', title: 'B', durationSec: 600 });
     expect(playRequestFor({ uri: 'abs://p1', name: 'P', media_type: 'podcast' })).toBeNull();
-    expect(playRequestFor({ uri: 'library://artist/1', name: 'A', media_type: 'artist' })).toBeNull();
+    // An artist plays: Music Assistant expands the artist URI into every track.
+    expect(playRequestFor({ uri: 'library://artist/1', name: 'A', media_type: 'artist' })).toEqual({ kind: 'uri', uri: 'library://artist/1', title: 'A' });
+    expect(playRequestFor({ uri: 'abs://author/a', name: 'A', media_type: 'author' })).toBeNull();
+    expect(playRequestFor({ uri: 'library://chapter/1', name: 'C', media_type: 'chapter' })).toBeNull();
     expect(playRequestFor({ uri: '', name: 'X', media_type: 'track' })).toBeNull();
   });
 

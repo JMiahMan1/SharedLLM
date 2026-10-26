@@ -489,6 +489,96 @@ def test_a_plain_string_music_assistant_cover_is_left_alone(client, ma):
     assert body["items"][0]["image"] == "https://example.test/a.jpg"
 
 
+def _ma_artist(name: str, uri: str, artist_type: str) -> dict:
+    return {
+        "media_item": {
+            "uri": uri,
+            "name": name,
+            "media_type": "artist",
+            "artist_type": artist_type,
+            "is_playable": True,
+            "provider_mappings": [
+                {
+                    "provider_domain": "opensubsonic" if artist_type == "singer" else "audiobookshelf",
+                    "provider_instance": "library",
+                }
+            ],
+        }
+    }
+
+
+def test_the_artists_tab_leaves_out_book_authors_and_narrators(client, ma):
+    """The Artists tab is music.
+
+    Measured live 2026-10-26: MA's 500 artists are 198 ``singer`` and 301
+    ``author``/``narrator`` from the audiobook library. An author has no albums
+    to open and nothing to play, so tapping one was a dead end. ``is_playable``
+    is True for all of them, so ``artist_type`` is the only honest signal.
+    """
+    ma["responses"]["music/artists/library_items"] = [
+        _ma_artist("Brandon Lake", "library://artist/11", "singer"),
+        _ma_artist("Adam Verner", "library://artist/343", "narrator"),
+        _ma_artist("Andy Crouch", "library://artist/220", "author"),
+    ]
+
+    body = client.get("/api/media/library/artists").json()
+
+    assert [item["name"] for item in body["items"]] == ["Brandon Lake"]
+
+
+def test_an_artist_ma_does_not_label_is_still_listed(client, ma):
+    """Only the two known book roles are dropped; anything else is left alone."""
+    entry = _ma_artist("Someone", "library://artist/9", "singer")
+    del entry["media_item"]["artist_type"]
+    ma["responses"]["music/artists/library_items"] = [entry]
+
+    body = client.get("/api/media/library/artists").json()
+
+    assert [item["name"] for item in body["items"]] == ["Someone"]
+
+
+def test_search_keeps_book_authors_out_of_the_artists_bucket(client, ma):
+    ma["responses"]["music/search"] = {
+        "artists": [
+            _ma_artist("Brandon Lake", "library://artist/11", "singer"),
+            _ma_artist("Alex Jennings", "library://artist/344", "narrator"),
+        ]
+    }
+
+    body = client.get("/api/media/search", params={"q": "brandon"}).json()
+
+    assert [item["name"] for item in body["artists"]] == ["Brandon Lake"]
+
+
+def test_a_favorited_book_author_is_not_a_favorite_artist(client, ma):
+    ma["responses"]["music/tracks/library_items"] = []
+    ma["responses"]["music/albums/library_items"] = []
+    ma["responses"]["music/playlists/library_items"] = []
+    ma["responses"]["music/artists/library_items"] = [
+        _ma_artist("Brandon Lake", "library://artist/11", "singer"),
+        _ma_artist("Amy Crouch - Foreword", "library://artist/221", "author"),
+    ]
+
+    body = client.get("/api/media/favorites").json()
+
+    assert [item["name"] for item in body["items"]] == ["Brandon Lake"]
+
+
+def test_media_is_book_person_shapes():
+    from services.gateway.main import _media_is_book_person
+
+    assert _media_is_book_person({"artist_type": "author"}) is True
+    assert _media_is_book_person({"artist_type": "NARRATOR"}) is True
+    assert _media_is_book_person({"artist_type": " narrator "}) is True
+    assert _media_is_book_person({"media_item": {"artist_type": "author"}}) is True
+    assert _media_is_book_person({"artist_type": "singer"}) is False
+    assert _media_is_book_person({"artist_type": ""}) is False
+    assert _media_is_book_person({}) is False
+    assert _media_is_book_person({"artist_type": None}) is False
+    assert _media_is_book_person("Adam Verner") is False
+    assert _media_is_book_person(None) is False
+
+
 def test_media_ma_image_shapes():
     """Every shape MA sends, including the ones that used to become "" silently."""
     from services.gateway.main import _media_ma_image

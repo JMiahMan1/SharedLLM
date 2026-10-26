@@ -76,7 +76,16 @@ describe('CollectionPage (P5-T4)', () => {
     renderAt('/media/artist/library/1');
     expect(await screen.findByRole('heading', { name: 'Albums' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Neon Nights/ })).toHaveAttribute('href', '/media/album/library/1');
-    expect(screen.queryByRole('button', { name: 'Shuffle' })).not.toBeInTheDocument();
+  });
+
+  it('plays every work by an artist from the artist page', async () => {
+    server.use(http.get('/api/media/item', () => HttpResponse.json({
+      ...albumFixture, uri: 'library://artist/1', name: 'The Synthwave Collective', media_type: 'artist', artist: '',
+      children: [{ ...albumFixture.children[0], uri: 'library://album/1', name: 'Neon Nights', media_type: 'album' }],
+    })));
+    renderAt('/media/artist/library/1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Play all' }));
+    await waitFor(() => expect(web.state.play).toHaveBeenCalledWith('library://artist/1'));
   });
 
   it('says when an item is gone, when tracks could not load, and when it all failed', async () => {

@@ -14880,6 +14880,29 @@ def _media_ma_image(image: Any) -> str:
     return ""
 
 
+# Music Assistant's artists listing mixes real musicians with the audiobook
+# library's authors and narrators: measured live 2026-10-26, its 500 artists
+# split into 198 ``artist_type='singer'`` (opensubsonic) and 301
+# ``'author'``/``'narrator'`` (audiobookshelf). An author has no albums to
+# browse and nothing to play, so it is a dead end in the Artists list - the
+# books themselves are in the Audiobooks tab, which already shows the author
+# as the book's author. ``is_playable`` is True for every one of them (MA can
+# "play" an artist by expanding it), so ``artist_type`` is the only honest
+# signal. Only these two known book roles are dropped: anything MA does not
+# label is left alone rather than guessed at.
+_MEDIA_BOOK_PERSON_TYPES = frozenset({"author", "narrator"})
+
+
+def _media_is_book_person(raw: Any) -> bool:
+    """Whether an MA artist entry is really an audiobook author or narrator."""
+    if not isinstance(raw, dict):
+        return False
+    item = raw.get("media_item")
+    if not isinstance(item, dict):
+        item = raw
+    return str(item.get("artist_type") or "").strip().lower() in _MEDIA_BOOK_PERSON_TYPES
+
+
 def _media_ma_item(raw: Any) -> dict:
     """Normalize a Music Assistant item mapping (or full item) to MediaItem kwargs.
 
@@ -14983,9 +15006,19 @@ async def _media_ma_rpc(
     return result
 
 
-async def _media_ma_items(request: Request, command: str, args: dict | None = None, *, timeout: float = _MEDIA_UPSTREAM_TIMEOUT) -> list[dict]:
+async def _media_ma_items(
+    request: Request,
+    command: str,
+    args: dict | None = None,
+    *,
+    timeout: float = _MEDIA_UPSTREAM_TIMEOUT,
+    drop: Any = None,
+) -> list[dict]:
     result = await _media_ma_rpc(request, command, args, timeout=timeout)
-    return [_media_ma_item(entry) for entry in _media_ma_list(result)]
+    entries = _media_ma_list(result)
+    if drop is not None:
+        entries = [entry for entry in entries if not drop(entry)]
+    return [_media_ma_item(entry) for entry in entries]
 
 
 async def _media_exec_audiobookshelf(creds: Any, params: dict, *, timeout: float = _MEDIA_EXEC_TIMEOUT) -> dict:
@@ -15120,7 +15153,13 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
         for key, value in ma_result.items():
             bucket = str(key).lower()
             if bucket in buckets and isinstance(value, list):
-                buckets[bucket].extend(_media_ma_item(entry) for entry in value)
+                entries = value
+                if bucket == "artists":
+                    # Book authors and narrators are not artists (see
+                    # _media_is_book_person); the books are in the Audiobooks
+                    # bucket, where the author is already shown.
+                    entries = [entry for entry in entries if not _media_is_book_person(entry)]
+                buckets[bucket].extend(_media_ma_item(entry) for entry in entries)
     if isinstance(abs_detail, dict):
         buckets["audiobooks"].extend(_media_abs_book_item(b) for b in abs_detail.get("books") or [])
         for podcast in abs_detail.get("podcasts") or []:
@@ -15313,7 +15352,15 @@ async def get_media_library(tab: str, request: Request, offset: int = 0, limit: 
     if order_by:
         args["order_by"] = order_by
     try:
-        items = await _media_ma_items(request, f"music/{ma_tab}/library_items", args, timeout=_MEDIA_EXEC_TIMEOUT)
+        items = await _media_ma_items(
+            request,
+            f"music/{ma_tab}/library_items",
+            args,
+            timeout=_MEDIA_EXEC_TIMEOUT,
+            # The Artists tab is music: MA's book authors and narrators are not
+            # artists and have nothing to open, so they are not listed here.
+            drop=_media_is_book_person if tab == "artists" else None,
+        )
     except _MediaUpstreamError as e:
         errors.ma = str(e)
         items = []
@@ -15327,13 +15374,14 @@ async def get_media_favorites(request: Request, limit: int = 50):
     errors = MediaErrorInfo()
     limit = max(1, min(limit, 200))
 
-    async def favorite(media_type: str) -> list[dict]:
+    async def favorite(media_type: str, drop: Any = None) -> list[dict]:
         try:
             return await _media_ma_items(
                 request,
                 f"music/{media_type}/library_items",
                 {"limit": limit, "favorite": True},
                 timeout=_MEDIA_EXEC_TIMEOUT,
+                drop=drop,
             )
         except _MediaUpstreamError as e:
             if errors.ma is None:
@@ -15341,7 +15389,12 @@ async def get_media_favorites(request: Request, limit: int = 50):
             return []
 
     tracks, albums, artists, playlists = await asyncio.gather(
-        favorite("tracks"), favorite("albums"), favorite("artists"), favorite("playlists")
+        favorite("tracks"),
+        favorite("albums"),
+        # A favorited book author is not a favorite artist (see
+        # _media_is_book_person).
+        favorite("artists", _media_is_book_person),
+        favorite("playlists"),
     )
     return MediaFavoritesResponse(items=tracks + albums + artists + playlists, errors=errors).model_dump(by_alias=True)
 

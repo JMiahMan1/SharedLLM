@@ -41,7 +41,12 @@ export const KIND_LABEL: Record<ItemKind, string> = {
 /** What playing `item` asks for, or null when it is not directly playable. */
 export function playRequestFor(item: ItemLike): PlayRequest | null {
   const kind = itemKind(item);
-  if (kind === 'artist' || kind === 'author' || kind === 'chapter') return null;
+  // An author has no works of its own and a chapter is reached through its
+  // book, so neither plays. An artist does: Music Assistant expands an artist
+  // URI into every track it has, which is what "play the artist" means. (Book
+  // authors and narrators never reach here - the gateway keeps them out of the
+  // Artists list, see _media_is_book_person.)
+  if (kind === 'author' || kind === 'chapter') return null;
   const absId = absItemId(item.uri);
   if (absId) {
     // An Audiobookshelf podcast plays through its episodes (MA URIs).
