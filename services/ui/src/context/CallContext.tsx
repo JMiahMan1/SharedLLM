@@ -21,6 +21,10 @@ import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
 const RING_INTERVAL_MS = 2_500;
+// A drop-in call nobody answers used to chime every 2.5 seconds until somebody
+// dismissed the banner, so a phone left on a table rang all afternoon. The
+// banner stays up; the ringing stops after a minute.
+const RING_MAX_MS = 60_000;
 
 export type CallStatus = 'connecting' | 'connected' | 'ended' | 'error';
 
@@ -1103,12 +1107,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const bannerCall = call ? undefined : activeCalls.find((active) => !dismissed.includes(active.token));
   const bannerToken = bannerCall?.token;
 
-  // Ring until the call is answered, dismissed or ended: the chime sounds once,
-  // then repeats so a phone in a pocket still gets attention.
+  // Ring until the call is answered, dismissed or ended - but not forever. The
+  // chime repeats so a phone in a pocket still gets attention, and gives up
+  // after a minute so an unanswered call cannot ring all afternoon. The banner
+  // stays up either way.
   useEffect(() => {
     if (!bannerToken) return;
     playDropInChime();
-    const timer = window.setInterval(playDropInChime, RING_INTERVAL_MS);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (Date.now() - startedAt >= RING_MAX_MS) {
+        window.clearInterval(timer);
+        return;
+      }
+      playDropInChime();
+    }, RING_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [bannerToken]);
 
