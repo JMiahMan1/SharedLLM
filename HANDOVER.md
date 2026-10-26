@@ -5,17 +5,18 @@ Every claim below was verified against the live system unless marked **planned**
 
 ## 0. Snapshot
 
-- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `3dd0b11c`.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **1f59d07d**
-  (APK `versionCode` **461**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
+- Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`, tip `eca4d83f`.
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **eca4d83f**
+  (APK `versionCode` **462**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). Deploys landed on 2026-10-26: **13** (gateway + ui,
-  `1f59d07d`), **14** (gateway, `7a4f083d`) and **15** (gateway + rag, `6604bd7a`), each verified with
-  0 ERROR lines in the touched services' logs since the deploy. APK: CI builds one per push under
-  `services/ui/**`, and the APK `versionCode` rebuilds per push (461 is current; 460 was the
-  previous), so the native work below needs the newest APK on the phones. APK 461 already carries
-  the full-screen guard overlay and its "Ask for more time" / "Message a parent" buttons. Family
-  guard Phase 11, the family member page (`/family/member/<child>`), the Family Guardian page
-  (`/guardian`) and the MDM/Devices work are live.
+  `1f59d07d`), **14** (gateway, `7a4f083d`), **15** (gateway + rag, `6604bd7a`) and **16**
+  (gateway + ui, `eca4d83f`), each verified with 0 ERROR lines in the touched services' logs since
+  the deploy. APK: CI builds one per push under `services/ui/**` and the APK `versionCode` rebuilds
+  per push (462 is current; 461 was the previous), so the native work below needs the newest APK on
+  the phones. **APK 462** carries the guard overlay that draws over a tablet's taskbar and
+  navigation strip, with "Ask for more time" and "Message a parent" painted over the lock as a sheet
+  instead of taking it down. Family guard Phase 11, the family member page (`/family/member/<child>`),
+  the Family Guardian page (`/guardian`) and the MDM/Devices work are live.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
