@@ -313,11 +313,14 @@ export interface JarvisUse {
   top: Array<{ label: string; count: number }>;
 }
 
+export type WebFilterCategory = 'social' | 'gaming' | 'streaming' | 'chat' | 'gambling' | 'vpn';
+
 export interface WebFilterRules {
   enabled?: boolean;
   /** Adult and malware sites blocked by the family-safe resolver. */
   adult?: boolean;
   safe_search?: boolean;
+  categories?: WebFilterCategory[];
   block?: string[];
   allow?: string[];
   /** Sites a parent allowed for a while ("ask a parent"): domain to when it runs out. */
@@ -389,6 +392,8 @@ export interface ScreenTimeStatus {
   permission_gating?: PermissionGroup[];
   /** The allow list the web filter honours now (own list plus sites allowed for a while). */
   web_allow?: string[];
+  /** The block list the web filter honours now (own list plus blocked categories). */
+  web_block?: string[];
   /** The member's own 7-day screen-time summary (daily average, daily totals, top apps). */
   week?: {
     days_reported: number;

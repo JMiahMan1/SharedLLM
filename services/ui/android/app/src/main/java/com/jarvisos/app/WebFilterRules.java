@@ -50,6 +50,49 @@ public final class WebFilterRules {
             "doh.mullvad.net", "dns.mullvad.net",
             "dns.controld.com", "freedns.controld.com"));
 
+    /**
+     * One-tap website categories a parent can block on a child's web filter.
+     * Matches {@code WEB_FILTER_CATEGORIES} in {@code services/common/screen_time.py}.
+     */
+    static final Map<String, List<String>> CATEGORY_DOMAINS;
+    static {
+        Map<String, List<String>> m = new java.util.HashMap<>();
+        m.put("social", java.util.Arrays.asList(
+                "tiktok.com", "musical.ly", "instagram.com", "cdninstagram.com",
+                "snapchat.com", "sc-cdn.net", "facebook.com", "fb.com", "fbcdn.net",
+                "threads.net", "x.com", "twitter.com", "twimg.com", "reddit.com",
+                "redd.it", "pinterest.com", "tumblr.com", "bereal.com", "bsky.app",
+                "mastodon.social"));
+        m.put("gaming", java.util.Arrays.asList(
+                "roblox.com", "rbxcdn.com", "steampowered.com", "steamcommunity.com",
+                "epicgames.com", "fortnite.com", "ea.com", "battle.net", "blizzard.com",
+                "riotgames.com", "leagueoflegends.com", "valorant.com", "itch.io",
+                "poki.com", "crazygames.com", "coolmathgames.com", "hoodamath.com",
+                "krunker.io", "agar.io", "slither.io", "chess.com"));
+        m.put("streaming", java.util.Arrays.asList(
+                "netflix.com", "nflxvideo.net", "twitch.tv", "ttvnw.net", "kick.com",
+                "hulu.com", "disneyplus.com", "max.com", "hbomax.com", "primevideo.com",
+                "peacocktv.com", "paramountplus.com", "crunchyroll.com", "pluto.tv",
+                "tubitv.com", "roku.com", "dailymotion.com", "vimeo.com"));
+        m.put("chat", java.util.Arrays.asList(
+                "discord.com", "discordapp.com", "discord.gg", "telegram.org", "t.me",
+                "whatsapp.com", "signal.org", "kik.com", "omegle.com", "monkey.app",
+                "yubo.live", "aminoapps.com", "4chan.org", "4channel.org", "8kun.top",
+                "quora.com"));
+        m.put("gambling", java.util.Arrays.asList(
+                "draftkings.com", "fanduel.com", "betmgm.com", "caesars.com",
+                "bet365.com", "stake.com", "roobet.com", "pokerstars.com", "bovada.lv",
+                "betway.com", "888casino.com", "unibet.com", "prizepicks.com",
+                "underdogfantasy.com"));
+        m.put("vpn", java.util.Arrays.asList(
+                "hide.me", "hidemyass.com", "nordvpn.com", "expressvpn.com",
+                "surfshark.com", "protonvpn.com", "mullvad.net", "windscribe.com",
+                "psiphon.ca", "torproject.org", "croxyproxy.com", "proxysite.com",
+                "kproxy.com", "hidester.com", "4everproxy.com", "vpnbook.com",
+                "privateinternetaccess.com", "cyberghostvpn.com"));
+        CATEGORY_DOMAINS = java.util.Collections.unmodifiableMap(m);
+    }
+
     public static final class Decision {
         public final Kind kind;
         /** FORWARD: the resolver to ask. SAFE: the safe-search host to answer with. */
@@ -107,6 +150,25 @@ public final class WebFilterRules {
         if (allowUntilMs != null) {
             for (Map.Entry<String, Long> e : allowUntilMs.entrySet()) {
                 if (e.getValue() != null && e.getValue() > nowMs && !out.contains(e.getKey())) out.add(e.getKey());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The block list the filter honours now: the parent's own block list plus
+     * every domain in the categories the parent switched on.
+     */
+    public static List<String> activeBlock(Collection<String> block, Collection<String> categories) {
+        List<String> out = new ArrayList<>();
+        if (block != null) out.addAll(block);
+        if (categories != null) {
+            for (String cat : categories) {
+                List<String> domains = CATEGORY_DOMAINS.get(cat);
+                if (domains == null) continue;
+                for (String d : domains) {
+                    if (!out.contains(d)) out.add(d);
+                }
             }
         }
         return out;

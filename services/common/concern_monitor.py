@@ -100,7 +100,7 @@ def _excerpt(text: str, start: int, end: int, width: int = 40) -> str:
 def _texts(event: dict[str, Any]) -> Iterable[str]:
     """The human text an activity event carries."""
     detail = event.get("detail") if isinstance(event.get("detail"), dict) else {}
-    for value in (event.get("item"), detail.get("body"), detail.get("title"), detail.get("text")):
+    for value in (event.get("item"), detail.get("sender"), detail.get("body"), detail.get("title"), detail.get("text")):
         if isinstance(value, str) and value.strip():
             yield value
 

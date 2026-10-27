@@ -114,4 +114,16 @@ public class WebFilterRulesTest {
         assertEquals(true, WebFilterRules.shouldOffer(offered, "reddit.com", 29 * 60_000L));
         assertEquals(true, WebFilterRules.shouldOffer(offered, "tiktok.com", 31 * 60_000L));
     }
+
+    @Test
+    public void blockedCategoriesExpandIntoActiveBlockWhileAllowStillWins() {
+        List<String> block = WebFilterRules.activeBlock(
+                java.util.Collections.singletonList("custom.example"),
+                Arrays.asList("social", "gaming"));
+        assertEquals(Kind.BLOCK, WebFilterRules.decide("www.instagram.com", true, true, block, ALLOW).kind);
+        assertEquals(Kind.BLOCK, WebFilterRules.decide("www.roblox.com", true, true, block, ALLOW).kind);
+        assertEquals(Kind.BLOCK, WebFilterRules.decide("custom.example", true, true, block, ALLOW).kind);
+        // An explicitly allowed site inside a blocked category still opens.
+        assertEquals(Kind.FORWARD, WebFilterRules.decide("help.reddit.com", true, true, block, ALLOW).kind);
+    }
 }

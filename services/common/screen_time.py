@@ -112,6 +112,51 @@ def _window(now: datetime, start: time | None, end: time | None) -> tuple[bool, 
 # each one; anything not listed here is never gated.
 PERMISSION_GROUPS = ("location", "camera", "microphone", "contacts", "sms", "phone", "photos", "calendar", "nearby")
 
+# One-tap website categories a parent can block on a child's web filter
+# (Qustodio / Family Link style). An entry in web_filter.allow (or allow_until)
+# still wins over a blocked category so a parent can allow one site inside it.
+WEB_FILTER_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "social": (
+        "tiktok.com", "musical.ly", "instagram.com", "cdninstagram.com",
+        "snapchat.com", "sc-cdn.net", "facebook.com", "fb.com", "fbcdn.net",
+        "threads.net", "x.com", "twitter.com", "twimg.com", "reddit.com",
+        "redd.it", "pinterest.com", "tumblr.com", "bereal.com", "bsky.app",
+        "mastodon.social",
+    ),
+    "gaming": (
+        "roblox.com", "rbxcdn.com", "steampowered.com", "steamcommunity.com",
+        "epicgames.com", "fortnite.com", "ea.com", "battle.net", "blizzard.com",
+        "riotgames.com", "leagueoflegends.com", "valorant.com", "itch.io",
+        "poki.com", "crazygames.com", "coolmathgames.com", "hoodamath.com",
+        "krunker.io", "agar.io", "slither.io", "chess.com",
+    ),
+    "streaming": (
+        "netflix.com", "nflxvideo.net", "twitch.tv", "ttvnw.net", "kick.com",
+        "hulu.com", "disneyplus.com", "max.com", "hbomax.com", "primevideo.com",
+        "peacocktv.com", "paramountplus.com", "crunchyroll.com", "pluto.tv",
+        "tubitv.com", "roku.com", "dailymotion.com", "vimeo.com",
+    ),
+    "chat": (
+        "discord.com", "discordapp.com", "discord.gg", "telegram.org", "t.me",
+        "whatsapp.com", "signal.org", "kik.com", "omegle.com", "monkey.app",
+        "yubo.live", "aminoapps.com", "4chan.org", "4channel.org", "8kun.top",
+        "quora.com",
+    ),
+    "gambling": (
+        "draftkings.com", "fanduel.com", "betmgm.com", "caesars.com",
+        "bet365.com", "stake.com", "roobet.com", "pokerstars.com", "bovada.lv",
+        "betway.com", "888casino.com", "unibet.com", "prizepicks.com",
+        "underdogfantasy.com",
+    ),
+    "vpn": (
+        "hide.me", "hidemyass.com", "nordvpn.com", "expressvpn.com",
+        "surfshark.com", "protonvpn.com", "mullvad.net", "windscribe.com",
+        "psiphon.ca", "torproject.org", "croxyproxy.com", "proxysite.com",
+        "kproxy.com", "hidester.com", "4everproxy.com", "vpnbook.com",
+        "privateinternetaccess.com", "cyberghostvpn.com",
+    ),
+}
+
 
 def next_lock(rules: dict[str, Any], now: datetime, remaining_min: int | None) -> tuple[datetime | None, str | None]:
     """When the phone next locks on its own (within a day) and why.
@@ -160,6 +205,17 @@ def active_allow(web_filter: dict[str, Any] | None, now: datetime) -> list[str]:
             ends = ends.replace(tzinfo=now.tzinfo)
         if ends > now and domain not in out:
             out.append(domain)
+    return out
+
+
+def active_block(web_filter: dict[str, Any] | None) -> list[str]:
+    """The parent's block list plus every domain in their blocked categories."""
+    wf = web_filter or {}
+    out = list(wf.get("block") or [])
+    for cat in wf.get("categories") or []:
+        for domain in WEB_FILTER_CATEGORIES.get(str(cat)) or ():
+            if domain not in out:
+                out.append(domain)
     return out
 
 
@@ -317,4 +373,5 @@ def evaluate(
         "install_approval": rules.get("install_approval") is not False,
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
+        "web_block": active_block(rules.get("web_filter")),
     }

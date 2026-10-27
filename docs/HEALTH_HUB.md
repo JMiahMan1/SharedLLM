@@ -754,7 +754,19 @@ point.
       filter → Allow), covers the VPN's Disconnect dialog, and reports `filter_disabled` if it
       is revoked. DNS and packet framing are pure, JVM-tested classes (`DnsMessage`, `IpUdp`).
       Known gaps: a browser set to its own secure DNS (DoH) or Android's strict Private DNS
-      bypasses a DNS filter; categories are Cloudflare's (no per-category choice).
+      bypasses a DNS filter; **one-tap category blocks** (`social`, `gaming`, `streaming`, `chat`,
+      `gambling`, `vpn` in `services/common/screen_time.py:WEB_FILTER_CATEGORIES`,
+      `WebFilterRules.activeBlock` and `WebFilterControls.tsx`, shipped 2026-10-27) complement
+      Cloudflare's adult/malware resolver, while `allow`/`allow_until` still wins over a blocked
+      category.
+      **Notification / social monitoring built (2026-10-27):** `MediaSessionListenerService`
+      (`onNotificationPosted`) and `SocialNotificationMonitor` (pure, JVM-tested) extract incoming
+      social/chat notifications on a protected child's phone when `monitoring != "off"`, deduplicate
+      within 10 minutes, ignore system/media-transport/ongoing/SMS packages, and post them to
+      `/api/activity` (`feature: "social"`, `event: "notification"`, `detail: {package, sender,
+      body}`) so `concern_monitor`, the local-LLM `second_pass`, and `guardian_recap` (`comms`
+      `social_messages` / `social_apps`) cover Snapchat, Instagram, Discord, WhatsApp, and other
+      messaging apps alongside SMS.
       **"Ask a parent" built (2026-10-24, needs the next APK and a device check):** when the filter
       blocks a site - the parent's block list, or the family-safe resolver's 0.0.0.0 answer, now
       also counted as `blocked` in the web activity - the phone shows "… is blocked" with an "Ask
