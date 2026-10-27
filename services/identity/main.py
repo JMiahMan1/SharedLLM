@@ -4492,6 +4492,22 @@ def _clean_screen_rules(body: dict) -> dict:
         ):
             raise HTTPException(status_code=422, detail="app_limits must map package names to whole minutes from 0 to 1440")
         out["app_limits"] = {k.strip(): v for k, v in list(limits.items())[:200]}
+    if body.get("app_allow_until") is not None:
+        until = body["app_allow_until"]
+        if not isinstance(until, dict) or any(
+            not isinstance(p, str) or not _PACKAGE.match(p.strip()) or not isinstance(v, str) for p, v in until.items()
+        ):
+            raise HTTPException(status_code=422, detail="app_allow_until must map package names to ISO times")
+        now = datetime.now(UTC)
+        kept_apps: dict = {}
+        for p, v in until.items():
+            try:
+                ends = datetime.fromisoformat(v)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="app_allow_until must map package names to ISO times") from exc
+            if (ends if ends.tzinfo else ends.replace(tzinfo=UTC)) > now:
+                kept_apps[p.strip()] = v
+        out["app_allow_until"] = kept_apps
     # The phone's web filter (step 5): on/off, the family-safe resolver for adult
     # and malware sites, safe search, and the parent's own block and allow lists.
     if body.get("web_filter") is not None:
@@ -4583,8 +4599,8 @@ def put_screen_rules(username: str, body: dict, session: Session = Depends(get_s
         raise HTTPException(status_code=403, detail="Only a parent can set a minor's screen time")
     rules = _clean_screen_rules(body or {})
     current = _screen_rules(session, subject.username)
-    for key in ("paused", "paused_until"):  # a pause survives a rules edit
-        if key in current:
+    for key in ("paused", "paused_until", "app_allow_until"):  # a pause or temporary app unblock survives a rules edit
+        if key in current and key not in rules:
             rules[key] = current[key]
     _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
@@ -4708,7 +4724,7 @@ def give_screen_time_bonus(username: str, body: dict, session: Session = Depends
 
 # --- asking a parent first: new apps, permissions, blocked sites (Phase 11 step 5) ---
 
-GUARD_REQUEST_KINDS = ("app", "permission", "site")
+GUARD_REQUEST_KINDS = ("app", "app_unblock", "permission", "site")
 
 
 def _guard_request_read(r: GuardRequest) -> dict:
@@ -4734,7 +4750,7 @@ def _guard_approvals(session: Session, username: str) -> dict:
 
 def _clean_guard_target(kind: str, target: str) -> str:
     target = target.strip()
-    if kind == "app":
+    if kind in ("app", "app_unblock"):
         if not _PACKAGE.match(target):
             raise HTTPException(status_code=422, detail="target must be an app package")
         return target
@@ -4752,7 +4768,7 @@ def _clean_guard_target(kind: str, target: str) -> str:
 
 @app.post("/api/guard/requests")
 def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A child asks a parent first: ``{"kind": "app"|"permission"|"site", "target", "label"?, "note"?}``.
+    """A child asks a parent first: ``{"kind": "app"|"app_unblock"|"permission"|"site", "target", "label"?, "note"?}``.
 
     The phone asks again after a restart, so a request already waiting is
     returned as it is (``notify`` empty: the parents heard the first time), and
@@ -4760,7 +4776,7 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
     """
     kind = str((body or {}).get("kind") or "")
     if kind not in GUARD_REQUEST_KINDS:
-        raise HTTPException(status_code=422, detail="kind must be app, permission or site")
+        raise HTTPException(status_code=422, detail="kind must be app, app_unblock, permission or site")
     target = _clean_guard_target(kind, str((body or {}).get("target") or ""))
     parents = _parents_of(session, caller)
     if not parents:
@@ -4771,7 +4787,7 @@ def ask_a_parent(body: dict, session: Session = Depends(get_session), caller: Us
         )
     ).all()
     latest = max(existing, key=lambda r: (r.created_at, r.id or 0)) if existing else None
-    if latest is not None and (latest.status == "pending" or kind != "site"):
+    if latest is not None and (latest.status == "pending" or kind not in ("site", "app_unblock")):
         return {"request": _guard_request_read(latest), "notify": []}
     request = GuardRequest(
         username=caller.username,
@@ -4797,8 +4813,8 @@ def list_guard_requests(status: str = "pending", session: Session = Depends(get_
 
 @app.post("/api/guard/requests/{request_id}")
 def decide_guard_request(request_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent answers: ``{"approve": bool}``; a site may add ``{"minutes": n}``
-    (allowed for a while) or ``{"always": true}`` (added to the allow list)."""
+    """A parent answers: ``{"approve": bool}``; a site or app_unblock may add
+    ``{"minutes": n}`` (allowed for a while) or ``{"always": true}``."""
     request = session.get(GuardRequest, request_id)
     if request is None:
         raise HTTPException(status_code=404, detail="No such request")
@@ -4826,6 +4842,32 @@ def decide_guard_request(request_id: int, body: dict, session: Session = Depends
             until[request.target] = request.until
         wf["allow_until"] = until
         rules["web_filter"] = wf
+        _save_screen_rules(session, subject.username, rules, caller.username)
+    elif approve and request.kind == "app_unblock":
+        minutes = (body or {}).get("minutes")
+        always = bool((body or {}).get("always"))
+        if minutes is None and not always:
+            minutes = 60
+        if not always and (not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= 1440):
+            raise HTTPException(status_code=422, detail="Allow an app for 1 to 1440 minutes, or always")
+        rules = _screen_rules(session, subject.username)
+        until = dict(rules.get("app_allow_until") or {})
+        if always:
+            rules["blocked_apps"] = [p for p in rules.get("blocked_apps") or [] if p != request.target]
+            limits = dict(rules.get("app_limits") or {})
+            limits.pop(request.target, None)
+            if limits:
+                rules["app_limits"] = limits
+            else:
+                rules.pop("app_limits", None)
+            until.pop(request.target, None)
+        else:
+            request.until = (now + timedelta(minutes=minutes)).isoformat()
+            until[request.target] = request.until
+        if until:
+            rules["app_allow_until"] = until
+        else:
+            rules.pop("app_allow_until", None)
         _save_screen_rules(session, subject.username, rules, caller.username)
     request.status = "approved" if approve else "denied"
     request.decided_by = caller.username

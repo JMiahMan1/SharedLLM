@@ -44,7 +44,7 @@ from services.common.guidance import guidance as _guidance
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
 from services.common.relay import until_either_ends
-from services.common.screen_time import evaluate as evaluate_screen_time
+from services.common.screen_time import evaluate as evaluate_screen_time, weekly_report as weekly_screen_time
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
@@ -5911,7 +5911,7 @@ async def screen_time_status(request: Request, username: str):
     status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params={"day": day})
     if status != 200:
         raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
-    usage = await _own_telemetry(username, "usage", {"days": 1})
+    usage = await _own_telemetry(username, "usage", {"days": 7})
     today = next((d for d in usage if d.get("day") == day), {})
     used_ms = today.get("millis") or 0
     apps_ms = {
@@ -5936,6 +5936,7 @@ async def screen_time_status(request: Request, username: str):
         # A parent queued a remote wipe (Phase 12 MDM): the phone's guard reads
         # this and erases itself. False unless one was explicitly queued.
         "wipe_requested": mdm.wipe_requested(username),
+        "week": weekly_screen_time(usage, now.date()),
         **state,
     }
     # The phone and the father read it all; the mother reads it without the
@@ -6099,6 +6100,7 @@ async def guard_tamper(request: Request):
 
 _GUARD_ASK_TITLES = {
     "app": ("New app to approve", "{name} installed {what} and is waiting for your OK."),
+    "app_unblock": ("Unblock an app?", "{name} asks to use {what}{note}."),
     "permission": ("Permission to approve", "{name} wants to give {what}."),
     "site": ("Website to allow?", "{name} asks to open {what}{note}."),
 }
@@ -6169,6 +6171,8 @@ async def decide_guard_request(request: Request, request_id: int, payload: dict)
             title, line = "Not this time", f"A parent said no to {what}."
         elif decided.get("kind") == "site" and decided.get("until"):
             title, line = "Website allowed", f"You can open {what} for a while."
+        elif decided.get("kind") == "app_unblock" and decided.get("until"):
+            title, line = "App unlocked", f"You can use {what} for a while."
         else:
             title, line = "Approved", f"A parent said yes to {what}."
         await _screen_time_notice(body.get("notify") or [], title, line, "/fitness")

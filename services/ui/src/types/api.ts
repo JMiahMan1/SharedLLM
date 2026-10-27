@@ -344,6 +344,8 @@ export interface ScreenRules {
   /** App control: packages switched off, and per-app daily minutes. */
   blocked_apps?: string[];
   app_limits?: Record<string, number>;
+  /** Apps a parent allowed for a while ("ask a parent"): package to when it runs out. */
+  app_allow_until?: Record<string, string>;
   /** The phone's web filter: on/off, family-safe resolver, safe search, own lists. */
   web_filter?: WebFilterRules;
   /** New apps wait for a parent's OK (on unless switched off). */
@@ -387,6 +389,14 @@ export interface ScreenTimeStatus {
   permission_gating?: PermissionGroup[];
   /** The allow list the web filter honours now (own list plus sites allowed for a while). */
   web_allow?: string[];
+  /** The member's own 7-day screen-time summary (daily average, daily totals, top apps). */
+  week?: {
+    days_reported: number;
+    total_min: number;
+    daily_avg_min: number;
+    days: Array<{ day: string; minutes: number }>;
+    top_apps: Array<{ package: string; minutes: number }>;
+  };
 }
 
 /** Linking the caller's own Spotify: set up on this server, and their link. */
@@ -528,8 +538,8 @@ export interface GuardianConcern {
 export interface GuardRequest {
   id: number;
   username: string;
-  kind: 'app' | 'permission' | 'site';
-  /** A package (app), "package|group" (permission) or a domain (site). */
+  kind: 'app' | 'app_unblock' | 'permission' | 'site';
+  /** A package (app or app_unblock), "package|group" (permission) or a domain (site). */
   target: string;
   label: string;
   note: string;

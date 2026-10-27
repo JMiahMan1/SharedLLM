@@ -336,6 +336,7 @@ public class GuardService extends AccessibilityService {
         Intent cover = new Intent(this, GuardScreenActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(GuardScreenActivity.EXTRA_MODE, mode)
+                .putExtra(GuardScreenActivity.EXTRA_PACKAGE, pkg)
                 .putExtra(GuardScreenActivity.EXTRA_APP, UnifiedPushDistributor.label(this, pkg))
                 .putExtra(GuardScreenActivity.EXTRA_DENIED,
                         InstallApprovals.denied(pkg, GuardApi.appApprovals(this)));

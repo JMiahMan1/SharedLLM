@@ -29,7 +29,8 @@ Semantics follow Family Link and Qustodio:
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from collections import Counter
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -162,12 +163,34 @@ def active_allow(web_filter: dict[str, Any] | None, now: datetime) -> list[str]:
     return out
 
 
-def apps_state(rules: dict[str, Any], apps_used_ms: dict[str, int] | None) -> tuple[list[str], dict[str, int]]:
+def active_app_allow(rules: dict[str, Any] | None, now: datetime | None) -> set[str]:
+    """Apps a parent allowed for a while ('ask a parent') that have not run out."""
+    if now is None:
+        return set()
+    out: set[str] = set()
+    for pkg, until in ((rules or {}).get("app_allow_until") or {}).items():
+        try:
+            ends = datetime.fromisoformat(str(until))
+        except ValueError:
+            continue
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=now.tzinfo)
+        if ends > now:
+            out.add(str(pkg))
+    return out
+
+
+def apps_state(
+    rules: dict[str, Any],
+    apps_used_ms: dict[str, int] | None,
+    now: datetime | None = None,
+) -> tuple[list[str], dict[str, int]]:
     """Which apps are blocked now, and minutes left for each app with a limit.
 
-    An always-allowed app is never blocked, whatever the lists say.
+    An always-allowed app, or one inside a parent's temporary unblock window, is
+    never blocked, whatever the lists say.
     """
-    allowed = set(always_allowed(rules))
+    allowed = set(always_allowed(rules)) | active_app_allow(rules, now)
     used = apps_used_ms or {}
     blocked = [pkg for pkg in rules.get("blocked_apps") or [] if pkg not in allowed]
     left: dict[str, int] = {}
@@ -179,6 +202,39 @@ def apps_state(rules: dict[str, Any], apps_used_ms: dict[str, int] | None) -> tu
         if remaining == 0 and pkg not in blocked:
             blocked.append(pkg)
     return blocked, left
+
+
+def weekly_report(usage_days: list[dict[str, Any]] | None, today: date) -> dict[str, Any]:
+    """A member's own 7-day screen-time summary (the last 7 days ending ``today``).
+
+    Pure and derived: daily totals, daily average and top apps, without raw
+    session timestamps or parent-only surveillance fields.
+    """
+    start = today - timedelta(days=6)
+    in_window = [
+        d for d in (usage_days or [])
+        if isinstance(d, dict) and start.isoformat() <= str(d.get("day") or "") <= today.isoformat()
+    ]
+    in_window.sort(key=lambda d: str(d.get("day") or ""))
+    days_out: list[dict[str, Any]] = []
+    apps: Counter[str] = Counter()
+    for d in in_window:
+        mins = max(0, int(d.get("millis") or 0)) // 60000
+        days_out.append({"day": str(d.get("day")), "minutes": mins})
+        for app in d.get("apps") or []:
+            if isinstance(app, dict) and app.get("package"):
+                app_mins = max(0, int(app.get("millis") or 0)) // 60000
+                if app_mins > 0:
+                    apps[str(app["package"])] += app_mins
+    total = sum(d["minutes"] for d in days_out)
+    reported = len(days_out)
+    return {
+        "days_reported": reported,
+        "total_min": total,
+        "daily_avg_min": round(total / reported) if reported else 0,
+        "days": days_out,
+        "top_apps": [{"package": p, "minutes": m} for p, m in apps.most_common(5) if m > 0],
+    }
 
 
 def evaluate(
@@ -237,7 +293,7 @@ def evaluate(
         locked, reason, until = True, "limit", midnight
     else:
         locked, reason, until = False, None, None
-    blocked_apps, app_minutes_left = apps_state(rules, apps_used_ms)
+    blocked_apps, app_minutes_left = apps_state(rules, apps_used_ms, now)
     lock_at, lock_reason = (None, None) if locked else next_lock(rules, now, remaining)
 
     return {

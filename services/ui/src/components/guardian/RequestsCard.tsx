@@ -13,7 +13,7 @@ type Row =
   | { kind: 'time'; id: number; at: string; request: ScreenTimeRequest }
   | { kind: GuardRequest['kind']; id: number; at: string; request: GuardRequest };
 
-const ALL_KINDS: Kind[] = ['time', 'app', 'permission', 'site'];
+const ALL_KINDS: Kind[] = ['time', 'app', 'app_unblock', 'permission', 'site'];
 
 function historyLine(row: Row): string {
   if (row.kind === 'time') {
@@ -92,7 +92,7 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
                   </>
                 ) : (
                   <>
-                    {row.kind === 'site' ? (
+                    {row.kind === 'site' || row.kind === 'app_unblock' ? (
                       <>
                         <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, minutes: 60 } })}>Allow 1 hour</button>
                         <button type="button" className={yes} disabled={busy} onClick={() => decideGuard.mutate({ id: row.id, body: { approve: true, always: true } })}>Always allow</button>

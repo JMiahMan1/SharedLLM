@@ -37,7 +37,8 @@ public class GuardScreenActivity extends ComponentActivity {
     static final String MODE_PERMISSION = "permission";
     /** An app that gets around the web filter (FilterBypass), closed while the filter is on. */
     static final String MODE_BYPASS = "bypass";
-    /** The app's name, for the install and permission screens. */
+    /** The app's package and name, for the app-off, install and permission screens. */
+    static final String EXTRA_PACKAGE = "package";
     static final String EXTRA_APP = "app";
     /** A parent already said no. */
     static final String EXTRA_DENIED = "denied";
@@ -127,8 +128,9 @@ public class GuardScreenActivity extends ComponentActivity {
         // The plain locked cover (bedtime, school, the day's time, a pause), not one of the others.
         lockedMode = !tamper && !appOff && !install && !permission && !bypass;
 
-        View content = GuardScreenView.build(this, mode, getIntent().getStringExtra(EXTRA_APP),
-                getIntent().getBooleanExtra(EXTRA_DENIED, false), new GuardScreenView.Host() {
+        View content = GuardScreenView.build(this, mode, getIntent().getStringExtra(EXTRA_PACKAGE),
+                getIntent().getStringExtra(EXTRA_APP), getIntent().getBooleanExtra(EXTRA_DENIED, false),
+                new GuardScreenView.Host() {
                     @Override
                     public void onUnlocked() {
                         finish();

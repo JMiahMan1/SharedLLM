@@ -320,25 +320,29 @@ account is connected, everything above still works.
 
 ## Phase 11 - calorie budget and logging (Noom-style)
 
-- [ ] Per-person nutrition profile in the Health tab: age, height, weight, sex and
-      activity level. Adults get a daily calorie budget from Mifflin-St Jeor BMR ×
-      activity (minus a gentle deficit only when they ask); kids and teens get
-      age-appropriate guidance ranges, never weight-loss deficits.
+- [x] Per-person nutrition profile in the Health tab: age, height, weight, sex and
+      activity level (`HealthProfilePanel.tsx`, `services/health/scoring.py`). Adults get a
+      daily calorie budget from Mifflin-St Jeor BMR × activity (minus a gentle deficit only
+      when they ask); kids and teens get age-appropriate guidance ranges, never weight-loss
+      deficits (`calorie_target`, `macro_targets`).
 - [x] Log meals: a planned meal adds its per-serving nutrition to the day (portion
       picker ½, 1, 1½, 2) from the week plan's **Log tonight's dinner** or a recipe's
       **Log to Health**; a recipe without stated nutrition is entered by hand. Other
       foods are quick-added from Health → Nutrition.
-- [ ] Day view: calories eaten vs budget, protein/carbs/fat totals, and a simple
-      density colour (green / yellow / orange) like Noom's food colours.
-- [ ] Optional: weight trend for adults, weekly averages, per-person portions.
-- [ ] Keep it local: no coaching, no cloud, no streaks.
-- [ ] Tests: BMR/budget maths (pure), portion scaling, day totals, the day view UI.
-- [ ] Docs and deploy.
+- [x] Day view: calories eaten vs budget, protein/carbs/fat totals, and a simple
+      density colour (green / yellow / orange) like Noom's food colours (`food_density` in
+      `services/health/scoring.py`, rendered in `HealthNutrition.tsx`).
+- [x] Optional: weight trend for adults, weekly averages (`services/health/weekly.py`),
+      per-person portions.
+- [x] Keep it local: no coaching, no cloud, no streaks.
+- [x] Tests: BMR/budget maths (`services/health/tests/test_scoring.py`), portion scaling,
+      day totals, the day view UI (`src/components/health/HealthNutrition.test.tsx`).
+- [x] Docs and deploy.
 
 ## Acceptance
 
-- [ ] 100+ imported recipes on the Recipes page, filterable by level (and by appliance
+- [x] 100+ imported recipes on the Recipes page, filterable by level (and by appliance
       label when present).
-- [ ] Family tab reaches Recipes; a recipe shares to a chat in one tap.
-- [ ] A week's plan produces a tappable shopping list that survives regeneration.
-- [ ] Jarvis answers dinner questions from the imported set in chat.
+- [x] Family tab reaches Recipes; a recipe shares to a chat in one tap.
+- [x] A week's plan produces a tappable shopping list that survives regeneration.
+- [x] Jarvis answers dinner questions from the imported set in chat.

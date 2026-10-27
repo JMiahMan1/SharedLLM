@@ -36,6 +36,7 @@ export default function ScreenTimeCard() {
     enabled: Boolean(me),
     retry: false,
   });
+  const [askedApps, setAskedApps] = useState<Record<string, boolean>>({});
   const ask = useMutation({
     mutationFn: (minutes: number) => api.askForScreenTime(minutes, note.trim() || undefined),
     onSuccess: () => {
@@ -43,16 +44,27 @@ export default function ScreenTimeCard() {
       void queryClient.invalidateQueries({ queryKey: ['screen-time-requests', me] });
     },
   });
+  const askApp = useMutation({
+    mutationFn: (pkg: string) => api.askAParent('app_unblock', pkg, note.trim() || undefined, appName(pkg)),
+    onSuccess: (_data, pkg) => {
+      setAskedApps((prev) => ({ ...prev, [pkg]: true }));
+      void queryClient.invalidateQueries({ queryKey: ['guard-requests'] });
+    },
+  });
 
   const rules = status?.rules || {};
+  const blockedApps = status?.blocked_apps || [];
+  const week = status?.week;
   const hasRules = Boolean(
     rules.daily_limit_min !== undefined || rules.bedtime_start || rules.school_start || status?.paused
-      || Object.keys(rules.app_limits || {}).length > 0,
+      || Object.keys(rules.app_limits || {}).length > 0 || blockedApps.length > 0
+      || (week?.days_reported || 0) > 0,
   );
   if (!status || !hasRules) return null;
 
   const waiting = (pending?.requests || []).some((r) => r.username === me);
-  const askError = isAxiosError(ask.error) ? (ask.error.response?.data as { detail?: string })?.detail : null;
+  const failed = ask.error || askApp.error;
+  const askError = isAxiosError(failed) ? (failed.response?.data as { detail?: string })?.detail : null;
   const Icon = status.reason === 'bedtime' ? Moon : status.reason === 'school' ? School : status.reason === 'paused' ? Pause : Hourglass;
 
   return (
@@ -81,6 +93,51 @@ export default function ScreenTimeCard() {
             </li>
           ))}
         </ul>
+      )}
+
+      {blockedApps.length > 0 && (
+        <ul className="mt-2 space-y-1.5 text-xs text-slate-300" data-testid="screen-time-blocked-apps">
+          {blockedApps.map((pkg) => (
+            <li key={pkg} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
+              <span>{appName(pkg)} is off right now</span>
+              {askedApps[pkg] ? (
+                <span className="text-sky-300" data-testid={`asked-unblock-${pkg}`}>Asked a parent</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={askApp.isPending}
+                  onClick={() => askApp.mutate(pkg)}
+                  data-testid={`ask-unblock-${pkg}`}
+                  className="glass-button px-2.5 py-1 text-xs min-h-9"
+                >
+                  Ask a parent
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {week && week.days_reported > 0 && (
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 space-y-1.5 text-xs text-slate-300" data-testid="screen-time-week">
+          <p className="font-medium text-slate-100">
+            This week: {duration(week.daily_avg_min * 60000)} a day ({duration(week.total_min * 60000)} across {week.days_reported} {week.days_reported === 1 ? 'day' : 'days'})
+          </p>
+          {week.top_apps.length > 0 && (
+            <p className="text-slate-400" data-testid="screen-time-week-apps">
+              Most used: {week.top_apps.map((a) => `${appName(a.package)} (${duration(a.minutes * 60000)})`).join(', ')}
+            </p>
+          )}
+          {week.days.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5" data-testid="screen-time-week-days">
+              {week.days.map((d) => (
+                <span key={d.day} className="rounded-lg bg-white/5 px-2 py-0.5 text-[11px] text-slate-300">
+                  {d.day.slice(5)}: {duration(d.minutes * 60000)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {(rules.bedtime_start || rules.school_start) && !status.locked && (
