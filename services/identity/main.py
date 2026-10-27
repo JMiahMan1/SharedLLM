@@ -29,7 +29,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common.http import get_client, get_client_insecure
-from services.common.screen_time import PERMISSION_GROUPS
+from services.common.screen_time import PERMISSION_GROUPS, WEB_FILTER_CATEGORIES
 from services.common.secrets import secret_matches
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
@@ -4526,6 +4526,14 @@ def _clean_screen_rules(body: dict) -> dict:
                 if not isinstance(domains, list) or any(not isinstance(d, str) or not _DOMAIN.match(d.strip().lower()) for d in domains):
                     raise HTTPException(status_code=422, detail=f"web_filter.{key} must be domain names")
                 clean[key] = list(dict.fromkeys(d.strip().lower().rstrip(".") for d in domains))[:500]
+        if wf.get("categories") is not None:
+            cats = wf["categories"]
+            if not isinstance(cats, list) or any(c not in WEB_FILTER_CATEGORIES for c in cats):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"web_filter.categories must be among {', '.join(WEB_FILTER_CATEGORIES)}",
+                )
+            clean["categories"] = list(dict.fromkeys(cats))
         # Sites a parent allowed for a while ("ask a parent"): {domain: ISO end}.
         # Ones that already ran out are dropped here, so the list stays short.
         if wf.get("allow_until") is not None:

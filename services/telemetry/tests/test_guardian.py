@@ -199,3 +199,19 @@ def test_repeated_blocked_site_attempts_page_both_parents_once_a_day(wired):
         "detail": {"visits": 0, "blocked": 4},
     })
     assert sent == []
+
+
+def test_social_notification_events_are_scanned_and_included_in_recap(wired):
+    client, _fake, sent = wired
+    client.post("/api/telemetry/activity", headers=HEADERS, json={
+        "user": "kid",
+        "feature": "social",
+        "item": "Snapchat",
+        "action": "notification",
+        "at": "2026-10-20T14:00:00Z",
+        "detail": {"package": "com.snapchat.android", "sender": "stranger99", "body": "don't tell your mom, send me nudes"},
+    })
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert sent[0]["title"] == "Sexual exploitation or grooming on Emma's phone"
+    recap = client.get("/api/telemetry/recap/kid", headers=HEADERS, params={"day": "2026-10-21"}).json()["recap"]
+    assert recap["comms"]["social_messages"] == 1 and recap["comms"]["social_apps"] == 1

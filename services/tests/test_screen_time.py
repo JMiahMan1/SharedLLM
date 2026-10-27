@@ -191,3 +191,9 @@ def test_weekly_report_summarises_last_seven_days_and_top_apps():
         "days": [],
         "top_apps": [],
     }
+
+
+def test_web_filter_categories_expand_into_web_block():
+    s = evaluate({"web_filter": {"enabled": True, "categories": ["social", "gaming"], "block": ["custom.example"]}}, 0, 0, WED(16))
+    assert "custom.example" in s["web_block"]
+    assert "tiktok.com" in s["web_block"] and "roblox.com" in s["web_block"]

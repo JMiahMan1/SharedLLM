@@ -1162,8 +1162,13 @@ device-owner phone; app install/uninstall stays the screen rules.
   Android `GuardScreenView` + web `ScreenTimeCard`/`RequestsCard`), a child's own weekly screen-time
   report (`services/common/screen_time.py:weekly_report` on `/api/screen-time/{user}/status` +
   `ScreenTimeCard.tsx`), and a repeated-blocked-site alert (`services/telemetry/guardian.py:_check_blocked_site`,
-  threshold 5 blocked attempts per domain per day) (**shipped 2026-10-27**); (2) web-filter categories;
-  (3) notification/social monitoring; (4) a device-owner hardening batch; (5) remote app
+  threshold 5 blocked attempts per domain per day) (**shipped 2026-10-27**, `46939f34`);
+  (2) web-filter categories (`social`, `gaming`, `streaming`, `chat`, `gambling`, `vpn` in
+  `WEB_FILTER_CATEGORIES`, `WebFilterRules.activeBlock` and `WebFilterControls.tsx`) (**shipped
+  2026-10-27**); (3) notification/social monitoring (`SocialNotificationMonitor`,
+  `MediaSessionListenerService.onNotificationPosted`, `GuardApi.reportSocialNotification`,
+  `concern_monitor` + `guardian_recap` `social_messages`/`social_apps`) (**shipped 2026-10-27**);
+  (4) a device-owner hardening batch; (5) remote app
   install/uninstall; (6) kiosk/COSU; (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config
   + OS-update policy.
 - **OpenRouter**: the per-user OpenRouter tile is removed (`d517166f`) and there is no per-user

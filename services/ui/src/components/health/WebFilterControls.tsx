@@ -3,7 +3,16 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Globe } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
-import type { ScreenRules, WebFilterRules } from '../../types/api';
+import type { ScreenRules, WebFilterCategory, WebFilterRules } from '../../types/api';
+
+const CATEGORIES: Array<{ id: WebFilterCategory; label: string }> = [
+  { id: 'social', label: 'Social media' },
+  { id: 'gaming', label: 'Online gaming' },
+  { id: 'streaming', label: 'Video streaming' },
+  { id: 'chat', label: 'Chat & forums' },
+  { id: 'gambling', label: 'Gambling' },
+  { id: 'vpn', label: 'VPNs & proxies' },
+];
 
 /**
  * A parent's web filter for one child (Phase 11 step 5). The child's phone
@@ -37,8 +46,13 @@ export default function WebFilterControls({ username, name, rules }: { username:
       void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
     },
   });
-  const current: WebFilterRules = { enabled: false, adult: true, safe_search: true, block: [], allow: [], ...wf };
+  const current: WebFilterRules = { enabled: false, adult: true, safe_search: true, categories: [], block: [], allow: [], ...wf };
   const failure = isAxiosError(save.error) ? (save.error.response?.data as { detail?: string })?.detail || 'That did not save.' : save.error ? 'That did not save.' : null;
+  const toggleCategory = (cat: WebFilterCategory) => {
+    const selected = current.categories || [];
+    const next = selected.includes(cat) ? selected.filter((c) => c !== cat) : [...selected, cat];
+    save.mutate({ ...current, categories: next });
+  };
 
   const toggle = (key: 'enabled' | 'adult' | 'safe_search', label: string) => (
     <button
@@ -68,6 +82,33 @@ export default function WebFilterControls({ username, name, rules }: { username:
         {toggle('adult', 'Block adult & malware sites')}
         {toggle('safe_search', 'Safe search')}
       </div>
+      {current.enabled && (
+        <div className="space-y-2">
+          <p className="text-[11px] text-slate-400">Block categories</p>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3" data-testid="web-filter-categories">
+            {CATEGORIES.map((cat) => {
+              const on = (current.categories || []).includes(cat.id);
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  disabled={save.isPending}
+                  onClick={() => toggleCategory(cat.id)}
+                  data-testid={`web-filter-category-${cat.id}`}
+                  className={`min-h-10 rounded-xl border px-3 text-left text-xs flex items-center justify-between gap-2 disabled:opacity-50 ${
+                    on ? 'border-amber-400/40 bg-amber-400/10 text-slate-100' : 'border-white/10 bg-white/5 text-slate-400'
+                  }`}
+                >
+                  <span>{cat.label}</span>
+                  <span className="font-semibold">{on ? 'Blocked' : 'Allowed'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {current.enabled && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label className="block text-[11px] text-slate-400">

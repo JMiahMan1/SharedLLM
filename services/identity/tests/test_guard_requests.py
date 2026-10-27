@@ -146,3 +146,15 @@ def test_asking_a_parent_to_unblock_an_app_allows_for_an_hour_or_always(family):
     rules2 = family("kid").get("/api/screen-time/kid/rules").json()["rules"]
     assert rules2["blocked_apps"] == []
     assert "app_allow_until" not in rules2
+
+
+def test_web_filter_categories_are_validated_and_saved(family):
+    ok = family("dad").put("/api/screen-time/kid/rules", json={
+        "web_filter": {"enabled": True, "categories": ["social", "gaming", "social"]},
+    })
+    assert ok.status_code == 200
+    assert ok.json()["rules"]["web_filter"]["categories"] == ["social", "gaming"]
+    bad = family("dad").put("/api/screen-time/kid/rules", json={
+        "web_filter": {"enabled": True, "categories": ["unknown_category"]},
+    })
+    assert bad.status_code == 422

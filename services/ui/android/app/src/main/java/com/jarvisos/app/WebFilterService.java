@@ -103,7 +103,7 @@ public class WebFilterService extends VpnService {
             String name = DnsMessage.questionName(query);
             WebFilterRules.Decision d = WebFilterRules.decide(name,
                     wf.optBoolean("adult", true), wf.optBoolean("safe_search", true),
-                    GuardApi.strings(wf.optJSONArray("block")),
+                    WebFilterRules.activeBlock(GuardApi.strings(wf.optJSONArray("block")), GuardApi.strings(wf.optJSONArray("categories"))),
                     WebFilterRules.activeAllow(GuardApi.strings(wf.optJSONArray("allow")), untilMs(wf.optJSONObject("allow_until")),
                             System.currentTimeMillis()));
             if (d.kind == WebFilterRules.Kind.BLOCK) {

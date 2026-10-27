@@ -406,6 +406,33 @@ final class GuardApi {
         return wf != null && wf.optBoolean("enabled", false);
     }
 
+    /** The parent's content-monitoring mode for this phone ("all", "severe" or "off"). */
+    static String monitoringMode(Context context) {
+        JSONObject rules = lastStatus(context).optJSONObject("rules");
+        String mode = rules == null ? "" : rules.optString("monitoring", "");
+        return mode.isEmpty() ? "severe" : mode;
+    }
+
+    /** Post a social/chat notification from a watched minor's phone onto the activity feed. */
+    static void reportSocialNotification(Context context, String pkg, String label, String sender, String text) {
+        new Thread(() -> {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("feature", "social");
+                body.put("item", label == null || label.isEmpty() ? pkg : label);
+                body.put("event", "notification");
+                JSONObject detail = new JSONObject();
+                detail.put("package", pkg);
+                if (sender != null && !sender.isEmpty()) detail.put("sender", sender);
+                detail.put("body", text);
+                body.put("detail", detail);
+                send(context, "POST", "/api/activity", body.toString());
+            } catch (Exception ignored) {
+                // Best effort: notification monitoring never blocks the phone.
+            }
+        }).start();
+    }
+
     /** Tell the parents protection changed. Kept until the server takes it (see {@link #flushTamper}). */
     static void reportTamper(Context context, String event) {
         reportTamper(context, event, null);

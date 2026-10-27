@@ -93,6 +93,7 @@ def build(
         blocked[e["item"]] += int(detail.get("blocked") or 0)
     calls = [e for e in week_events if e.get("feature") == "calls"]
     texts = [e for e in week_events if e.get("feature") == "sms"]
+    social = [e for e in week_events if e.get("feature") == "social"]
     bible_days = {str(e.get("at"))[:10] for e in week_events if e.get("feature") == "bible"}
 
     # A hit the local model dismissed in context stays on record, out of the recap.
@@ -134,6 +135,8 @@ def build(
             "call_contacts": len({e.get("item") for e in calls if e.get("item")}),
             "messages": len(texts),
             "message_contacts": len({e.get("item") for e in texts if e.get("item")}),
+            "social_messages": len(social),
+            "social_apps": len({e.get("item") for e in social if e.get("item")}),
         },
         "faith": {"bible_days": len(bible_days)},
         "concerns": concern_list,
