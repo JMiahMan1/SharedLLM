@@ -239,7 +239,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
               return (
                 <div key={key}>
                   <div className="flex items-center mb-2">
-                    <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
+                    <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</span>
                     <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
                   </div>
                   {isSecret ? (
@@ -313,7 +313,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             return (
               <div key={key} className="space-y-2">
                 <div className="flex items-center mb-2">
-                  <label className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
+                  <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</span>
                   <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
                 </div>
                 {/* Chip display */}
@@ -863,11 +863,11 @@ const Identity = () => {
 
                 <div className="space-y-4 pt-4 border-t border-white/5">
                    <div>
-                      <label className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Display Name</label>
+                      <label htmlFor="identity-display-name" className="text-[9px] text-slate-500 uppercase font-black block mb-2 tracking-widest">Display Name</label>
                       {/* Keyed on the loaded name: defaultValue is read once, so
                           before the profile arrived the box stayed empty and
                           blurring it saved an empty name over the real one. */}
-                      <input
+                      <input id="identity-display-name"
                         key={fullUser ? `name-${fullUser.full_name ?? ''}` : 'name-loading'}
                         type="text"
                         aria-label="Display name"

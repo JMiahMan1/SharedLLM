@@ -650,8 +650,8 @@ const LocationPanel = () => {
 
         {/* Selector */}
         <div>
-          <label className="block text-xs text-slate-400 mb-1.5 font-medium">Active Traveling Vehicle</label>
-          <select
+          <label htmlFor="loc-active-vehicle" className="block text-xs text-slate-400 mb-1.5 font-medium">Active Traveling Vehicle</label>
+          <select id="loc-active-vehicle"
             value={assignedVehicleId || 'none'}
             onChange={(e) => handleSelectVehicle(e.target.value)}
             className="w-full bg-slate-800/80 border border-slate-700/80 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
@@ -823,8 +823,8 @@ const LocationPanel = () => {
 
                 {/* Manual / Auto-filled Fields */}
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Vehicle Name / Model</label>
-                  <input
+                  <label htmlFor="loc-vehicle-name" className="block text-[11px] text-slate-400 mb-1">Vehicle Name / Model</label>
+                  <input id="loc-vehicle-name"
                     type="text"
                     placeholder="e.g. 2022 Ford F-150"
                     value={newVehicleName}
@@ -836,8 +836,8 @@ const LocationPanel = () => {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Fuel Efficiency (MPG)</label>
-                    <input
+                    <label htmlFor="loc-vehicle-mpg" className="block text-[11px] text-slate-400 mb-1">Fuel Efficiency (MPG)</label>
+                    <input id="loc-vehicle-mpg"
                       type="number"
                       step="0.1"
                       placeholder="e.g. 18.5"
@@ -848,8 +848,8 @@ const LocationPanel = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Fuel Type</label>
-                    <select
+                    <label htmlFor="loc-vehicle-fuel-type" className="block text-[11px] text-slate-400 mb-1">Fuel Type</label>
+                    <select id="loc-vehicle-fuel-type"
                       value={newVehicleFuelType}
                       onChange={(e) => {
                         const ft = e.target.value;

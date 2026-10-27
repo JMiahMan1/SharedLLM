@@ -10,7 +10,6 @@ import {
   Star, 
   Power, 
   Tv, 
-  Lock, 
   Volume2, 
   Play, 
   Pause, 
@@ -486,7 +485,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const renderDeviceRow = (device: DeviceEntry) => {
     const isFav = pinnedDevices.includes(device.entity_id);
     const isDeviceActive = isActive(device.state);
-    const hasControl = hasControlPermission(device.entity_id);
     const room = deviceRoom(device);
 
     return (
@@ -504,11 +502,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
               <p className="text-xs font-semibold text-white group-hover:text-purple-300 transition-colors truncate">
                 {device.friendly_name || device.entity_id}
               </p>
-              {!hasControl && (
-                <span className="text-[9px] bg-red-950/40 border border-red-500/20 text-red-400 px-1 py-0.2 rounded flex items-center gap-0.5">
-                  <Lock size={8} /> Restricted
-                </span>
-              )}
             </div>
             <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
               <span>{getDomainLabel(device.domain)}</span>
@@ -536,7 +529,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           {getToggleAction(device.domain, device.state) ? (
             <button
               onClick={() => toggleDevice(device.entity_id, device.state)}
-              disabled={!hasControl || pendingEntity === device.entity_id}
+              disabled={pendingEntity === device.entity_id}
               className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 pointer-coarse:min-h-11 ${
                 isDeviceActive
                   ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'

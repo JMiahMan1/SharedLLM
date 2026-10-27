@@ -296,9 +296,13 @@ are the app shell, navigation plumbing and the older admin pages.
   behind it and focus was lost on close. A shared `useDialogFocus` hook now focuses the panel, traps
   Tab, closes on Escape and restores focus; it is wired into the modal, the chat sheet, the account
   menu and the mobile More sheet.
-- **BROKEN - form labels were not associated with their inputs** (162 `<label>`s app-wide, 20 with
-  `htmlFor`, and no `id` on the inputs), so a screen reader announced "edit text, blank". Login is
-  done; Identity and the rest of the app are still open.
+- **PARTLY FIXED - form labels were not associated with their inputs**, so a screen reader announced
+  "edit text, blank" (the audit found 20 of 162 labels with `htmlFor`). Login, the settings forms (DNS,
+  LLM, telemetry, location), the Identity display name and the Wander trip/vehicle fields are associated
+  now: 49 of the app's 161 labels carry `htmlFor`. Three `<label>`s that headed a group rather than one
+  control (the secret-field grid, the integration chip list and the route-locations block) became
+  `<span>`s, since a label with nothing to label announces a form field that is not there. 112 labels
+  still need an `id`.
 - **BROKEN - the crash screen was a developer console shown to children**: the raw stack trace, the
   React component stack, a platform dump, a "For Developers" block and a GitHub Issues link, with the
   first section expanded. It is now "Something went wrong" with one plain sentence, Try again and Go
@@ -750,10 +754,11 @@ lease, so a second replica stands down rather than double-posting.
   app that talks someone into it) could read and rewrite every request the app makes - the API key, the
   chat, the location reports. It now trusts the system store only, which is all the household's real
   certificate needs. Cleartext stays permitted for the reason recorded in §4.
-- **A11** `WidgetApi.DEFAULT_SERVER` falls back to the public domain for an unconfigured widget, so a
-  widget on a phone that has never signed in calls out rather than rendering "Sign in". (The baked-in home
-  coordinates are gone: with no home learned, the "away from home" check now answers "not away" instead of
-  comparing against the family's real address.)
+- **A11 (fixed)** `WidgetApi.DEFAULT_SERVER` fell back to the public domain for an unconfigured widget, so
+  a widget on a phone that had never signed in called out rather than rendering "Sign in". `serverUrl()`
+  now keeps a widget with no stored server signed out, and the constant turned out to have no readers at
+  all, so it is deleted. (The baked-in home coordinates are gone too: with no home learned, the "away from
+  home" check now answers "not away" instead of comparing against the family's real address.)
 - **B3** a first run with no accounts gives no in-app guidance; the seeded administrator is `default` with
   the password from `DEFAULT_ADMIN_PASSWORD`, which the person has to know from the docs (the startup
   warning above now says when that value is short or obvious, and when the administrator is still using
@@ -815,11 +820,66 @@ and probed the live stack read-only.
 
 **Open (rough).**
 
-- The device sheet's `hasControl` badge is unreachable dead UI (it is derived from the server-filtered
-  list, so it is always true).
-- `WidgetApi.DEFAULT_SERVER` remains the fallback address the setup screen suggests; a widget with no
-  configured server now stays signed out rather than calling it (fixed in §3.7's A11), but the constant
-  still names the public domain.
+- None. The `hasControl` badge that used to be listed here is gone: it was derived from the
+  server-filtered list inside the same `.map` that produced it, so it could never be false. The badge,
+  its `Lock` icon import and the extra `disabled` condition are removed; the server-filtered list stays
+  the single permission authority.
+
+### 3.11 The browser end-to-end suite (verified 2026-10-27)
+
+The Playwright suite in `services/ui/e2e/` (40 spec files; projects `hermetic-desktop` at 1440x900 and
+`hermetic-mobile` at Pixel 7) had not been run as a whole from this checkout, and it is not wired into
+CI: `.github/workflows/e2e-tests.yml` is a docker service-health pipeline and `UI CI` runs vitest, so a
+local run is the only place these specs speak. The first whole run reported **20 failures out of 166
+tests**. The last run is green: **156 passed, 10 skipped and no failures** in 13.1 minutes across both
+projects (the skips are the suite's own runtime guards - the phone-only layout checks and the tests that
+need live credentials or real media). The failures were worth the exercise: two of them were pages that
+blanked on a bad payload.
+
+**Fixed - two real crashes.**
+
+- **The Health page went blank on an incomplete summary.** `HealthToday` read `summary.sleep.score`,
+  `summary.nutrition.target` and `summary.water` straight after the loading and error branches, so any
+  payload that omitted a block threw and the error boundary replaced the whole screen. A proxy error or
+  a server whose shape has moved would have looked like a broken app rather than a failed read. It now
+  renders the page's own error card ("Today's summary came back incomplete...") with a retry. Regression
+  test in `services/ui/src/test/HealthHub.test.tsx`.
+- **Listen Now took the whole app down when a shelf list was missing.** `ListenNowPage`'s empty check
+  read `.length` off `home.data.playlists`, `.favorites` and `.radio`, which the shelves below already
+  defaulted with `?? []`. Because the crash unmounted `MobileShell` it also dropped the
+  `html.mobile-shell-lock` class, so `/media` could then be dragged sideways under the phone's system
+  bars - which is how `e2e/layout/mobile-viewport.spec.ts` caught it. The three lists are normalised
+  now. Regression test in `services/ui/src/features/media/__tests__/listenNow.test.tsx`.
+
+**Fixed - the specs were measuring the wrong screen or the wrong state.**
+
+- `hourly-steps.spec.ts` waited for the steps card on `/fitness`, but the Health page is tabbed and
+  today is the default tab, so the steps live under **Fitness**. It also never mocked
+  `/api/health/summary`, and the route fallback answered `[]`, which is what crashed the page above.
+  The spec clicks into the Fitness tab now and serves a complete summary (every hub switch on, because
+  `metricOn()` renders no card when a switch is off).
+- `climate-widget.spec.ts` asked for the `Widget options` button when the default dashboard mounts
+  several climate cells (strict-mode violation), measured a phone-width sheet at the desktop project's
+  1440, and asserted 44px thumb targets against a fine pointer. It now scopes to the first cell, sets a
+  412x915 viewport for the sheet test, and gates the thumb-target assertions on
+  `(pointer: coarse)` - the convention the rest of that file already used. Its mode-strip scroll check
+  sampled one frame after a smooth scroll and read 0 under load; it polls now.
+- `media/visual.spec.ts`'s eight failures were stale darwin baselines, predating `4ffe3b30` (the
+  sidebar gained Guardian, Devices and Recipes and lost the separated Lab/Admin entries; the album page
+  gained a back link). The diff was read before regenerating to confirm the current render is the
+  correct one. **These baselines are per-platform (`*-darwin.png`); do not regenerate them on Linux.**
+- `media/keyboard.spec.ts` failed once and passes on its own in 4.2s - a flake under parallel load, no
+  change made.
+- `themes/theme-contrast.spec.ts` measured `/communication`, which has been a `<Navigate to="/family"
+  replace />` since the family hub landed. That was the source of the one-off "Execution context was
+  destroyed" failure: `page.evaluate` was running while the redirect tore the page down. The route is out
+  of the page list (it measured `/family` under the wrong name), and `measurePage()` now waits out a late
+  navigation and re-measures the page it was asked for; a URL that never settles on the requested path
+  throws instead of quietly measuring another screen. All six themes pass on both projects.
+
+**Open.** Playwright is still not in CI, so these specs will drift again silently unless a workflow runs
+the two hermetic projects on Linux. The `hermetic-iphone` project cannot run on this Mac (WebKit), so the
+iPhone layout is unverified locally.
 
 ## 4. Deliberately left, with reasons
 

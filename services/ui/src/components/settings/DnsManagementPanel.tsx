@@ -158,8 +158,8 @@ export default function DnsManagementPanel() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Domain</label>
-              <input
+              <label htmlFor="dns-domain" className="block text-xs text-slate-400 mb-1">Domain</label>
+              <input id="dns-domain"
                 type="text"
                 value={form.domain}
                 onChange={(e) => setForm({ ...form, domain: e.target.value })}
@@ -170,8 +170,8 @@ export default function DnsManagementPanel() {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Record Type</label>
-              <select
+              <label htmlFor="dns-record-type" className="block text-xs text-slate-400 mb-1">Record Type</label>
+              <select id="dns-record-type"
                 value={form.record_type}
                 onChange={(e) => setForm({ ...form, record_type: e.target.value as 'A' | 'CNAME' })}
                 className="glass-input w-full text-sm"
@@ -183,14 +183,14 @@ export default function DnsManagementPanel() {
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">
+            <label htmlFor="dns-record-value" className="block text-xs text-slate-400 mb-1">
               {form.record_type === 'CNAME' ? 'Target Hostname' : 'IP Addresses'}
               {form.record_type === 'A' && form.values.length > 1 && (
                 <span className="ml-2 text-slate-500">(add multiple IPs for load balancing)</span>
               )}
             </label>
             {form.record_type === 'CNAME' ? (
-              <input
+              <input id="dns-record-value"
                 type="text"
                 value={form.values[0] || ''}
                 onChange={(e) => handleValueChange(0, e.target.value)}
@@ -201,7 +201,7 @@ export default function DnsManagementPanel() {
               <div className="space-y-2">
                 {form.values.map((value, index) => (
                   <div key={index} className="flex gap-2">
-                    <input
+                    <input id={index === 0 ? 'dns-record-value' : undefined}
                       type="text"
                       value={value}
                       onChange={(e) => handleValueChange(index, e.target.value)}
@@ -231,8 +231,8 @@ export default function DnsManagementPanel() {
           </div>
 
           <div>
-            <label className="block text-xs text-slate-400 mb-1">TTL (seconds)</label>
-            <input
+            <label htmlFor="dns-ttl" className="block text-xs text-slate-400 mb-1">TTL (seconds)</label>
+            <input id="dns-ttl"
               type="number"
               value={form.ttl}
               onChange={(e) => setForm({ ...form, ttl: parseInt(e.target.value) || 300 })}
@@ -376,8 +376,8 @@ function DnsFailoverSettings({ settings }: { settings: GlobalSetting[] }) {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Health Ports (comma-separated)</label>
-          <input
+          <label htmlFor="dns-health-ports" className="block text-xs text-slate-400 mb-1">Health Ports (comma-separated)</label>
+          <input id="dns-health-ports"
             type="text"
             value={healthPorts}
             onChange={(e) => setHealthPorts(e.target.value)}
@@ -387,8 +387,8 @@ function DnsFailoverSettings({ settings }: { settings: GlobalSetting[] }) {
           />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Health Path (optional)</label>
-          <input
+          <label htmlFor="dns-health-path" className="block text-xs text-slate-400 mb-1">Health Path (optional)</label>
+          <input id="dns-health-path"
             type="text"
             value={healthPath}
             onChange={(e) => setHealthPath(e.target.value)}

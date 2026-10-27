@@ -1128,10 +1128,10 @@ const Wander = () => {
 
             {/* Route Locations: editable display names + nearby place picker */}
             <div className="space-y-4">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <MapPinned size={14} className="text-purple-400" />
                 Route Locations
-              </label>
+              </span>
               {[
                 { target: 'start' as const, label: 'Starting Place', value: editStartName, setValue: setEditStartName, address: editStartAddress },
                 { target: 'end' as const, label: 'Destination', value: editEndName, setValue: setEditEndName, address: editEndAddress },
@@ -1194,11 +1194,11 @@ const Wander = () => {
 
             {/* Activity Type */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <label htmlFor="wander-activity-type" className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Activity size={14} className="text-purple-400" />
                 Activity Type
               </label>
-              <select
+              <select id="wander-activity-type"
                 value={editActivityType}
                 onChange={(e) => setEditActivityType(e.target.value)}
                 className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"
@@ -1216,11 +1216,11 @@ const Wander = () => {
 
             {/* Quick Vehicle Selector */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <label htmlFor="wander-saved-vehicle" className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Car size={14} className="text-purple-400" />
                 Choose Saved Vehicle
               </label>
-              <select
+              <select id="wander-saved-vehicle"
                 value={selectedVehicleId}
                 onChange={(e) => handleVehicleSelect(e.target.value)}
                 className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500"
@@ -1236,10 +1236,10 @@ const Wander = () => {
 
             {/* Vehicle Name input */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              <label htmlFor="wander-vehicle-name" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 Vehicle Name
               </label>
-              <input
+              <input id="wander-vehicle-name"
                 type="text"
                 value={editVehicleName}
                 onChange={(e) => setEditVehicleName(e.target.value)}
@@ -1252,10 +1252,10 @@ const Wander = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Fuel Type */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                <label htmlFor="wander-fuel-type" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   Fuel Type
                 </label>
-                <select
+                <select id="wander-fuel-type"
                   value={editFuelType}
                   onChange={(e) => setEditFuelType(e.target.value)}
                   className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
@@ -1269,10 +1269,10 @@ const Wander = () => {
 
               {/* MPG */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                <label htmlFor="wander-vehicle-mpg" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   Vehicle MPG
                 </label>
-                <input
+                <input id="wander-vehicle-mpg"
                   type="number"
                   step="0.1"
                   min="1"
@@ -1284,10 +1284,10 @@ const Wander = () => {
 
               {/* Price per Gallon */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                <label htmlFor="wander-fuel-price" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   Fuel Price ($/gal)
                 </label>
-                <input
+                <input id="wander-fuel-price"
                   type="number"
                   step="0.01"
                   min="0"
@@ -1300,10 +1300,10 @@ const Wander = () => {
 
             {/* Notes */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              <label htmlFor="wander-notes" className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 Notes
               </label>
-              <input
+              <input id="wander-notes"
                 type="text"
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
