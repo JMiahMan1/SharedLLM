@@ -29,7 +29,12 @@ def warn_periodically(
     other; ``message``/``args`` are the usual logging pair.
     """
     now = time.monotonic()
-    if now - _last_warned.get(key, 0.0) >= cooldown_s:
+    # `None` means "never warned", not "warned at monotonic 0". Using 0.0 as the
+    # sentinel meant the first failure only warned once the machine had been up
+    # for the whole cooldown: on a freshly booted host (a CI runner, a just
+    # restarted box) the first real failure logged at debug.
+    last = _last_warned.get(key)
+    if last is None or now - last >= cooldown_s:
         _last_warned[key] = now
         logger.warning(message, *args)
     else:
