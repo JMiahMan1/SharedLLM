@@ -244,6 +244,10 @@ class UserRead(BaseModel):
     #: listed, appears in the family pages, and cannot sign in - which is worth
     #: showing rather than leaving as a mystery "invalid username or password".
     has_password: bool = False
+    #: Whether the account still signs in with the seeded DEFAULT_ADMIN_PASSWORD.
+    #: It is the one credential a stranger can guess, so the Admin page says so
+    #: instead of leaving it in a log line nobody reads.
+    has_default_password: bool = False
     #: Household relationship and the mother account a child/teen belongs to.
     family_role: FamilyRole = "other"
     mother_username: str | None = None

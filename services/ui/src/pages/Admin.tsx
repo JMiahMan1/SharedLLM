@@ -798,6 +798,18 @@ const Admin = () => {
                             No password
                           </span>
                         )}
+                        {user.has_default_password === true && (
+                          // The seeded administrator password is the one
+                          // credential a stranger can guess, and a login page is
+                          // reachable from anywhere. The log line says so; this
+                          // is where somebody will actually see it.
+                          <span
+                            className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-red-300"
+                            title="This account still uses the seeded administrator password. Change it now with Set password."
+                          >
+                            Seeded password
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
                       <p className="mt-2 text-[11px] text-slate-500 truncate">
