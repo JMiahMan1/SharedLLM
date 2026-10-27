@@ -8,8 +8,40 @@ networks:
 
 services:
   dns:
+    image: ghcr.io/jmiahman1/sharedllm-dns:latest
+    build:
+      context: .
+      dockerfile: services/dns/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_dns
+    restart: unless-stopped
+    mem_limit: 256m
+    # Runs as the host user. It still binds 53 inside the container (published on
+    # 15353), which is what the capability is for, and it reads the Docker socket
+    # to discover containers, which is what the group is for - the socket is
+    # root:docker, mode 660.
+    user: "${PUID}:${PGID}"
+    group_add:
+      - "${DOCKER_GID}"
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      sharedllm:
+        ipv4_address: 172.26.0.254
+    ports:
+      - "15353:53/udp"
+      - "15353:53/tcp"
+    security_opt:
+      - label=disable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - DNS_PORT=53
       - UPSTREAM_DNS=${UPSTREAM_DNS:-1.1.1.1}
@@ -18,8 +50,19 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
 
   caddy:
+    image: ghcr.io/jmiahman1/sharedllm-caddy:latest
+    container_name: sharedllm_caddy
+    restart: unless-stopped
+    mem_limit: 256m
+    # The front door runs as the host user too: it is the one service a stranger
+    # reaches directly, so it should not be root. It still binds 80 and 443 inside
+    # the container (published on high host ports), which is what the capability
+    # is for; the two state volumes were chowned to match.
+    user: "${PUID}:${PGID}"
+    cap_add:
+      - NET_BIND_SERVICE
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       # The reverse proxy in front of this stack (docs/PUSH.md, "Limits").
       - PUBLIC_PROXY_IP=${PUBLIC_PROXY_IP:-127.0.0.1}
@@ -50,8 +93,24 @@ services:
       - 172.26.0.254
 
   identity:
+    image: ghcr.io/jmiahman1/sharedllm-identity:latest
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_identity
+    restart: unless-stopped
+    mem_limit: 1g
+    # Runs as the host user that owns ./data/identity, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -288,8 +347,25 @@ services:
         ipv4_address: 172.26.0.252
 
   logging:
+    image: ghcr.io/jmiahman1/sharedllm-logging:latest
+    build:
+      context: .
+      dockerfile: services/logging/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_logging
+    restart: unless-stopped
+    mem_limit: 512m
+    # Runs as the host user, not root: it writes nothing outside its own
+    # image, and a container that cannot write anywhere is one less thing to
+    # trust.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -314,8 +390,26 @@ services:
       - sharedllm
 
   automation:
+    image: ghcr.io/jmiahman1/sharedllm-automation:latest
+    build:
+      context: .
+      dockerfile: services/automation/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_automation
+    restart: unless-stopped
+    mem_limit: 512m
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
+    group_add:
+      - "${DOCKER_GID}"
+    security_opt:
+      - label=disable
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -341,8 +435,24 @@ services:
       - sharedllm
 
   telemetry:
+    image: ghcr.io/jmiahman1/sharedllm-telemetry:latest
+    build:
+      context: .
+      dockerfile: services/telemetry/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_telemetry
+    restart: unless-stopped
+    mem_limit: 512m
+    # Runs as the host user: it writes nothing outside its own image (its state
+    # is in Redis), so there is no reason for it to be root.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -371,8 +481,24 @@ services:
         ipv4_address: 172.26.0.253
 
   storage:
+    image: ghcr.io/jmiahman1/sharedllm-storage:latest
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_storage
+    restart: unless-stopped
+    mem_limit: 1g
+    # Runs as the host user that owns ./data/storage, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -455,8 +581,27 @@ services:
       - sharedllm
 
   ui:
+    image: ghcr.io/jmiahman1/sharedllm-ui:latest
+    build:
+      context: ./services/ui
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-ui}
+    container_name: sharedllm_ui
+    restart: unless-stopped
+    mem_limit: 256m
+    # nginx serves the app as the host user. It needs a writable cache (proxy
+    # and upload temp files - attachments can be 20 MB) and a writable /run for
+    # its pid, which is exactly what these two tmpfs mounts give it. Verified by
+    # running the published image as uid 1000 on the sharedllm network: static
+    # files 200, /api proxied to the gateway 200.
+    user: "${PUID}:${PGID}"
+    tmpfs:
+      - /var/cache/nginx:mode=1777,size=128m
+      - /var/run:mode=1777,size=8m
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - TZ=America/Phoenix
     depends_on:
@@ -467,8 +612,24 @@ services:
       - sharedllm
 
   bible:
+    image: ghcr.io/jmiahman1/sharedllm-bible:latest
+    build:
+      context: .
+      dockerfile: services/bible/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_bible
+    restart: unless-stopped
+    mem_limit: 512m
+    # Runs as the host user that owns ./data/bible, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -505,8 +666,24 @@ services:
   # Health hub store: profiles, sleep, check-ins, nutrition and open metric
   # ingestion. Activity stays in geo; this service only owns what geo does not.
   health:
+    image: ghcr.io/jmiahman1/sharedllm-health:latest
+    build:
+      context: .
+      dockerfile: services/health/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_health
+    restart: unless-stopped
+    mem_limit: 256m
+    # Runs as the host user that owns ./data/health, so nothing it writes is
+    # root-owned and a compromise does not start as root.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - HEALTH_DATABASE_URL=${HEALTH_DATABASE_URL:-sqlite:////data/health.db}
@@ -571,8 +748,25 @@ services:
       - sharedllm
 
   geo:
+    image: ghcr.io/jmiahman1/sharedllm-geo:latest
+    build:
+      context: .
+      dockerfile: services/geo/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_geo
+    restart: unless-stopped
+    mem_limit: 512m
+    # Runs as the host user, not root: it writes nothing outside its own
+    # image, and a container that cannot write anywhere is one less thing to
+    # trust.
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -648,8 +842,28 @@ services:
       - sharedllm
 
   control_plane:
+    image: ghcr.io/jmiahman1/sharedllm-control_plane:latest
+    build:
+      context: .
+      dockerfile: services/control_plane/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    hostname: control-plane.local
+    container_name: sharedllm_control_plane
+    restart: always
+    mem_limit: 1g
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
+    group_add:
+      - "${DOCKER_GID}"
+    security_opt:
+      - label=disable
+    privileged: true
     environment:
-      # Somewhere writable: with HOME unset the container inherits HOME=/ and any tool that wants a cache fails on the read-only root (pip-audit did).
+      # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
