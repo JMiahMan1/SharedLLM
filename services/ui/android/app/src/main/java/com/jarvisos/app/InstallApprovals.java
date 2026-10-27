@@ -24,11 +24,22 @@ public final class InstallApprovals {
     /** Apps that are new since the baseline and not approved: closed while that lasts. */
     public static Set<String> awaiting(boolean required, Collection<String> installed,
                                        Collection<String> baseline, Map<String, String> approvals) {
+        return awaiting(required, installed, baseline, approvals, null);
+    }
+
+    /**
+     * As above, with {@code preApproved} ({@code install_apps}): packages a
+     * parent explicitly requested or pre-approved for installation are never held.
+     */
+    public static Set<String> awaiting(boolean required, Collection<String> installed,
+                                       Collection<String> baseline, Map<String, String> approvals,
+                                       Collection<String> preApproved) {
         Set<String> out = new TreeSet<>();
         if (!required || installed == null) return out;
         for (String pkg : installed) {
             if (pkg == null || pkg.isEmpty() || GuardRules.OWN_PACKAGE.equals(pkg)) continue;
             if (baseline != null && baseline.contains(pkg)) continue;
+            if (preApproved != null && preApproved.contains(pkg)) continue;
             if (approvals != null && APPROVED.equals(approvals.get(pkg))) continue;
             out.add(pkg);
         }

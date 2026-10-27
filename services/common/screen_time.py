@@ -236,6 +236,34 @@ def active_app_allow(rules: dict[str, Any] | None, now: datetime | None) -> set[
     return out
 
 
+def uninstall_apps(rules: dict[str, Any] | None) -> list[str]:
+    """Packages a parent queued for removal from the child's phone (never safety core)."""
+    allowed = set(always_allowed(rules))
+    out: list[str] = []
+    for pkg in (rules or {}).get("uninstall_apps") or []:
+        if isinstance(pkg, str) and pkg and pkg not in allowed and pkg not in out:
+            out.append(pkg)
+    return out
+
+
+def install_apps(rules: dict[str, Any] | None) -> list[str]:
+    """Packages a parent queued or pre-approved for installation on the child's phone."""
+    out: list[str] = []
+    for pkg in (rules or {}).get("install_apps") or []:
+        if isinstance(pkg, str) and pkg and pkg not in out:
+            out.append(pkg)
+    return out
+
+
+def kiosk_apps(rules: dict[str, Any] | None) -> list[str]:
+    """Packages allowed alongside Jarvis and always_allowed when kiosk (COSU) mode is on."""
+    out: list[str] = []
+    for pkg in (rules or {}).get("kiosk_apps") or []:
+        if isinstance(pkg, str) and pkg and pkg not in out:
+            out.append(pkg)
+    return out
+
+
 def apps_state(
     rules: dict[str, Any],
     apps_used_ms: dict[str, int] | None,
@@ -244,11 +272,15 @@ def apps_state(
     """Which apps are blocked now, and minutes left for each app with a limit.
 
     An always-allowed app, or one inside a parent's temporary unblock window, is
-    never blocked, whatever the lists say.
+    never blocked, whatever the lists say. Apps queued for uninstall are also
+    blocked immediately so they cannot be opened while awaiting removal.
     """
     allowed = set(always_allowed(rules)) | active_app_allow(rules, now)
     used = apps_used_ms or {}
     blocked = [pkg for pkg in rules.get("blocked_apps") or [] if pkg not in allowed]
+    for pkg in uninstall_apps(rules):
+        if pkg not in allowed and pkg not in blocked:
+            blocked.append(pkg)
     left: dict[str, int] = {}
     for pkg, limit in (rules.get("app_limits") or {}).items():
         if pkg in allowed:
@@ -371,6 +403,10 @@ def evaluate(
         "next_lock_reason": lock_reason,
         # New apps wait for a parent's OK unless the parents switched that off.
         "install_approval": rules.get("install_approval") is not False,
+        "uninstall_apps": uninstall_apps(rules),
+        "install_apps": install_apps(rules),
+        "kiosk_mode": bool(rules.get("kiosk_mode")),
+        "kiosk_apps": kiosk_apps(rules),
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
         "web_block": active_block(rules.get("web_filter")),

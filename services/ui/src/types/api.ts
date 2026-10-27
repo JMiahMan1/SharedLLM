@@ -346,6 +346,13 @@ export interface ScreenRules {
   always_allowed?: string[];
   /** App control: packages switched off, and per-app daily minutes. */
   blocked_apps?: string[];
+  /** Packages a parent queued for remote uninstall on the phone. */
+  uninstall_apps?: string[];
+  /** Packages a parent queued or pre-approved for installation on the phone. */
+  install_apps?: string[];
+  /** COSU dedicated kiosk mode: only Jarvis, always_allowed and kiosk_apps may run. */
+  kiosk_mode?: boolean;
+  kiosk_apps?: string[];
   app_limits?: Record<string, number>;
   /** Apps a parent allowed for a while ("ask a parent"): package to when it runs out. */
   app_allow_until?: Record<string, string>;
@@ -389,6 +396,10 @@ export interface ScreenTimeStatus {
   next_lock_at?: string | null;
   next_lock_reason?: 'bedtime' | 'school' | 'limit' | null;
   install_approval?: boolean;
+  uninstall_apps?: string[];
+  install_apps?: string[];
+  kiosk_mode?: boolean;
+  kiosk_apps?: string[];
   permission_gating?: PermissionGroup[];
   /** The allow list the web filter honours now (own list plus sites allowed for a while). */
   web_allow?: string[];

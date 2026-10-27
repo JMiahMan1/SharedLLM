@@ -109,6 +109,21 @@ public final class GuardRules {
                                 Collection<String> alwaysAllowed, String launcher,
                                 Collection<String> blockedApps, Collection<String> awaitingApproval,
                                 boolean filterOn, Collection<String> bypassApps) {
+        return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher,
+                blockedApps, awaitingApproval, filterOn, bypassApps, false, null);
+    }
+
+    /**
+     * As above, with COSU {@code kioskMode}: when {@code kioskMode} is true on a
+     * protected phone outside a parent's unlock window, any app not in
+     * {@code kioskApps} (or {@link #exempt}) is closed with {@link Action#BLOCK_APP}.
+     */
+    public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
+                                String pkg, String cls, String text,
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps, Collection<String> awaitingApproval,
+                                boolean filterOn, Collection<String> bypassApps,
+                                boolean kioskMode, Collection<String> kioskApps) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
@@ -118,6 +133,7 @@ public final class GuardRules {
 
         if (exempt(pkg, launcher, alwaysAllowed)) return Action.ALLOW;
         if (locked) return Action.BLOCK_LOCKED;
+        if (protectedPhone && kioskMode && (kioskApps == null || !kioskApps.contains(pkg))) return Action.BLOCK_APP;
         if (blockedApps != null && blockedApps.contains(pkg)) return Action.BLOCK_APP;
         if (protectedPhone && filterOn && bypassApps != null && bypassApps.contains(pkg)) return Action.BLOCK_BYPASS;
         if (protectedPhone && awaitingApproval != null && awaitingApproval.contains(pkg)) return Action.BLOCK_INSTALL;
@@ -194,7 +210,8 @@ public final class GuardRules {
      */
     static final Set<String> TAMPER_TEXTS = new HashSet<>(Arrays.asList(
             "factory reset", "erase all data", "erase everything",
-            "usage access", "add user", "user & account", "users"));
+            "usage access", "add user", "user & account", "users",
+            "date & time", "date and time", "developer options", "usb debugging"));
 
     /** A screen that would uninstall Jarvis or switch its protection off. */
     static boolean isTamperScreen(String pkg, String lowerCls, String lowerText) {

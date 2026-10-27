@@ -29,8 +29,13 @@ an existing mechanism is how the two drift apart:
 - **Lock / unlock** is the existing screen-time pause
   (`POST /api/screen-time/{user}/pause`). The Devices page's Lock button calls
   it; the pause route appends to the audit log.
-- **App install / uninstall control** is the existing screen rules
-  (`install_approval` and `blocked_apps` on `PUT /api/screen-time/{user}/rules`).
+- **App install / uninstall and COSU kiosk control** is the existing screen rules
+  (`install_approval`, `blocked_apps`, `uninstall_apps`, `install_apps`, `kiosk_mode`
+  and `kiosk_apps` on `PUT /api/screen-time/{user}/rules`). On a device-owner phone,
+  `DeviceOwnerGuard` silently uninstalls packages in `uninstall_apps` via
+  `PackageInstaller.uninstall`, suspends `blocked_apps` at the OS level via
+  `setPackagesSuspended`, installs verified APKs silently via `PackageInstaller.Session`,
+  and sets the COSU lock-task allowlist (`setLockTaskPackages`) when `kiosk_mode` is on.
 
 ## No invented values
 

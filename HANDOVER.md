@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `764ebd31`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `22015e14`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **764ebd31**
-  (APK `versionCode` **490**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **22015e14**
+  (APK `versionCode` **493**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
   dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
@@ -1165,12 +1165,20 @@ device-owner phone; app install/uninstall stays the screen rules.
   threshold 5 blocked attempts per domain per day) (**shipped 2026-10-27**, `46939f34`);
   (2) web-filter categories (`social`, `gaming`, `streaming`, `chat`, `gambling`, `vpn` in
   `WEB_FILTER_CATEGORIES`, `WebFilterRules.activeBlock` and `WebFilterControls.tsx`) (**shipped
-  2026-10-27**); (3) notification/social monitoring (`SocialNotificationMonitor`,
+  2026-10-27**, `22015e14`); (3) notification/social monitoring (`SocialNotificationMonitor`,
   `MediaSessionListenerService.onNotificationPosted`, `GuardApi.reportSocialNotification`,
-  `concern_monitor` + `guardian_recap` `social_messages`/`social_apps`) (**shipped 2026-10-27**);
-  (4) a device-owner hardening batch; (5) remote app
-  install/uninstall; (6) kiosk/COSU; (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config
-  + OS-update policy.
+  `concern_monitor` + `guardian_recap` `social_messages`/`social_apps`) (**shipped 2026-10-27**,
+  `22015e14`); (4) a device-owner hardening batch (`DISALLOW_INSTALL_UNKNOWN_SOURCES*`,
+  `DISALLOW_CONFIG_DATE_TIME`, `DISALLOW_APPS_CONTROL`, `DISALLOW_MOUNT_PHYSICAL_MEDIA`,
+  always-on VPN via `setAlwaysOnVpnPackage`, and OS-level package suspension via
+  `setPackagesSuspended` in `DeviceOwnerRules`/`DeviceOwnerGuard`) (**shipped 2026-10-27**);
+  (5) remote app install/uninstall (`uninstall_apps` + `install_apps` in `screen_rules`,
+  silent `PackageInstaller.uninstall` and `PackageInstaller.Session` in `DeviceOwnerGuard` +
+  `ApkInstallPlugin`, pre-approval in `InstallApprovals`, and controls on `Devices.tsx`)
+  (**shipped 2026-10-27**); (6) kiosk/COSU (`kiosk_mode` + `kiosk_apps` in `screen_rules`,
+  `DeviceOwnerRules.kioskPackages` + `setLockTaskPackages` on device owner, and Layer 1
+  `GuardRules.decide` enforcement on non-device-owner phones) (**shipped 2026-10-27**);
+  (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config + OS-update policy.
 - **OpenRouter**: the per-user OpenRouter tile is removed (`d517166f`) and there is no per-user
   OpenRouter credential; OpenRouter is the global Settings > LLM setting.
 

@@ -244,6 +244,9 @@ public class ApkInstallPlugin extends Plugin {
     }
 
     private static void launchInstaller(Context context, File apk) {
+        if (DeviceOwnerGuard.isOwner(context) && DeviceOwnerGuard.installApkSilently(context, apk)) {
+            return;
+        }
         Uri apkUri = FileProvider.getUriForFile(
             context, context.getPackageName() + ".fileprovider", apk);
         Intent intent = new Intent(Intent.ACTION_VIEW);

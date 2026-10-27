@@ -197,3 +197,25 @@ def test_web_filter_categories_expand_into_web_block():
     s = evaluate({"web_filter": {"enabled": True, "categories": ["social", "gaming"], "block": ["custom.example"]}}, 0, 0, WED(16))
     assert "custom.example" in s["web_block"]
     assert "tiktok.com" in s["web_block"] and "roblox.com" in s["web_block"]
+
+
+def test_uninstall_install_and_kiosk_rules_in_evaluate():
+    s = evaluate(
+        {
+            "uninstall_apps": ["com.roblox.client", "com.jarvisos.app"],
+            "install_apps": ["org.khanacademy.android"],
+            "kiosk_mode": True,
+            "kiosk_apps": ["org.khanacademy.android", "com.duolingo"],
+        },
+        0,
+        0,
+        WED(16),
+    )
+    # Jarvis safety core is never in uninstall_apps or blocked_apps; roblox is in both.
+    assert s["uninstall_apps"] == ["com.roblox.client"]
+    assert "com.roblox.client" in s["blocked_apps"]
+    assert "com.jarvisos.app" not in s["blocked_apps"]
+    assert s["install_apps"] == ["org.khanacademy.android"]
+    assert s["kiosk_mode"] is True
+    assert s["kiosk_apps"] == ["org.khanacademy.android", "com.duolingo"]
+

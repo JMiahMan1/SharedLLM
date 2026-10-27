@@ -240,4 +240,23 @@ public class GuardRulesTest {
         assertEquals(true, overlay(false, true, true, false, ""));
         assertEquals(true, overlay(false, true, true, false, null));
     }
+
+    @Test
+    public void dateAndTimeAndDeveloperOptionsSettingsAreCoveredAsTamper() {
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "Date & time Set time automatically"));
+        assertEquals(Action.BLOCK_TAMPER, decide(true, false, false,
+                "com.android.settings", "com.android.settings.SubSettings", "Developer options USB debugging"));
+    }
+
+    @Test
+    public void kioskModeBlocksAppsNotInKioskAllowlist() {
+        List<String> kiosk = Arrays.asList("org.khanacademy.android");
+        assertEquals(Action.ALLOW, GuardRules.decide(true, false, false, "org.khanacademy.android", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, false, null, true, kiosk));
+        assertEquals(Action.ALLOW, GuardRules.decide(true, false, false, "com.jarvisos.app", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, false, null, true, kiosk));
+        assertEquals(Action.BLOCK_APP, GuardRules.decide(true, false, false, "com.android.chrome", "", "",
+                ALLOWED, LAUNCHER, BLOCKED, null, false, null, true, kiosk));
+    }
 }

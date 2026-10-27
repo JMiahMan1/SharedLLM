@@ -886,8 +886,19 @@ point.
       `DevicePolicyManager` at device-admin enable and on every status refresh (`DeviceOwnerGuard`;
       the decisions are in pure, JVM-tested `DeviceOwnerRules`): `setUninstallBlocked` on Jarvis's
       own package, so Android refuses the uninstall outright (beyond Layer 1's dialog cover), and
-      `addUserRestriction` for `DISALLOW_SAFE_BOOT` (safe mode no longer starts without the guard)
-      and `DISALLOW_FACTORY_RESET` (the reset is refused, so a phone cannot be wiped to escape). A
+      `addUserRestriction` for `DISALLOW_SAFE_BOOT` (safe mode no longer starts without the guard),
+      `DISALLOW_FACTORY_RESET` (the reset is refused, so a phone cannot be wiped to escape),
+      `DISALLOW_USER_SWITCH`, `DISALLOW_ADD_USER`, `DISALLOW_DEBUGGING_FEATURES`, `DISALLOW_CONFIG_VPN`,
+      `DISALLOW_CONFIG_PRIVATE_DNS`, `DISALLOW_INSTALL_UNKNOWN_SOURCES`,
+      `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY`, `DISALLOW_CONFIG_DATE_TIME`,
+      `DISALLOW_APPS_CONTROL`, and `DISALLOW_MOUNT_PHYSICAL_MEDIA`. In addition (built 2026-10-27),
+      `DeviceOwnerGuard.enforce` configures Android's always-on VPN (`setAlwaysOnVpnPackage`) when
+      the web filter is wanted, suspends blocked and unapproved apps at the OS launcher level
+      (`setPackagesSuspended`), silently uninstalls packages queued in `rules.uninstall_apps` via
+      `PackageInstaller.uninstall`, silently installs verified APKs on device-owner phones via
+      `PackageInstaller.Session`, and applies a dedicated COSU kiosk allowlist
+      (`rules.kiosk_mode` + `rules.kiosk_apps`) via `setLockTaskPackages` (and Layer 1 `GuardRules`
+      on non-device-owner phones). A
       screen-time lock (a parent's Pause / Lock now, bedtime, school, the day's limit) is then a
       **real OS lock**: `lockNow()` puts Android's own lock screen up once when a lock starts,
       while the cover activity pinned with lock-task (kiosk) mode still shows why and offers the
