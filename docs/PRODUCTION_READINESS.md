@@ -715,9 +715,12 @@ lease, so a second replica stands down rather than double-posting.
   eight-character, all-lowercase placeholder word in `DEFAULT_ADMIN_PASSWORD`. Neither was visible
   anywhere. Identity now logs both at startup (`_warn_about_sign_in`: a short or obvious
   `DEFAULT_ADMIN_PASSWORD`, an administrator still using it, and every account that has no password), the
-  account list reports `has_password`, and the Admin page marks those rows **No password** so a parent can
-  set one from the same screen. Rotating the administrator's password itself is the household's call: the
-  `.env` value seeds a new database and is not meant to stay in use.
+  account list reports `has_password` and `has_default_password`, and the Admin page marks those rows
+  **No password** and **Seeded password** so a parent can act from the same screen. The seeded-password
+  flag is computed by comparing the account's stored hash against `DEFAULT_ADMIN_PASSWORD` and cached
+  against that hash, so it clears itself the moment the password is changed and the PBKDF2 comparison
+  runs once per account rather than on every account list. Rotating the administrator's password itself
+  is the household's call: the `.env` value seeds a new database and is not meant to stay in use.
 
 **Open (rough).**
 
@@ -738,6 +741,64 @@ lease, so a second replica stands down rather than double-posting.
   unauthenticated caller should not be able to learn, so this stays documented rather than built.
 - The Android fixes above compile and are covered by the existing unit tests, but they need a real phone
   (Android 15 or 16 for the `dataSync` cap) to be confirmed in the field.
+
+### 3.10 Home Assistant, Wander and the knowledge hub (audited 2026-10-27)
+
+An independent read-only audit of the three areas no earlier pass had covered: device control, trips
+and fuel, and storage/artifacts/RAG. It traced each UI call to its gateway route and upstream handler
+and probed the live stack read-only.
+
+**Fixed.**
+
+- **A failure no longer reads as an empty house.** The Home Assistant routes answer a refused or
+  failed command as a FAILURE body with **HTTP 200**, and the widgets trusted it: `callHaService` and
+  `toggleDevice` toasted "Command sent" for a lock the person was not allowed to touch (and for a TV
+  that was off), `getDeviceStates` rendered "No favourite devices yet", `Remote` said there were no TVs
+  or speakers, and the entity picker said "No entities found" when `/api/entities` had answered an
+  empty list because Home Assistant was unreachable. The API layer now throws on a FAILURE body for all
+  of them (the pattern `Remote`'s transport call always used), `/api/entities` answers a real 502 with a
+  message, the entity dropdown has an error state with a retry, and `get_states` grew a `strict` mode so
+  `entity_search` can tell an unreachable Home Assistant from a house with no entities.
+- **A store outage no longer reads as no data.** Geo's `/trips` answered `{trips: [], total_trips: 0}`
+  when Redis was down (Wander showed "No recorded trips found" and its error banner never appeared), and
+  `/vehicles` plus `/vehicles/assigned/{user}` answered empty payloads on Redis loss or any exception.
+  All three raise 503 now, and the location panel shows a named error with a retry for the vehicle list
+  and for the telemetry block - which used to print `0.0 mph`, `0.0 mi` and `$0.00` as if they were
+  measurements. Its Year/Make/Model lookups (which swallowed five separate failures into an empty select)
+  now share one error line, and the panel no longer falls back to a hardcoded username, so one person's
+  vehicle is never read or assigned while the profile is still loading.
+- **A failed folder read no longer reads as an empty folder.** `NextCloudClient.list_files` caught every
+  exception and returned `[]`, so wrong credentials or a Nextcloud outage rendered as "This folder is
+  empty." in the knowledge hub. It raises now (the UI already had an error branch), and storage's four
+  `detail=str(e)` responses were replaced with fixed messages and a logged cause.
+- **The knowledge hub's own reads are honest.** A failed Raven-lessons read rendered as "No Raven lessons
+  yet" (it now names the failure and offers a retry), and a failed stats read printed three confident
+  zeros beside a status chip that said "Unavailable" (the tiles show a dash). Lesson delete and edit
+  report the server's own words.
+- **Destructive taps ask.** Removing a home alert, releasing entity protection and deleting a vehicle
+  were each one unconfirmed tap; all three use the app's `confirmDialog` now, and the vehicle delete and
+  the artifact row actions show a busy state instead of inviting a second click.
+- **Opening a lock or a cover asks.** The garage case only prompted when presence said away; an
+  `unlock` or `open_cover` from the row or the device sheet is confirmed now.
+- **Place names are escaped in the trip map.** `TripLocationsMap` interpolated the user-editable start
+  and end names straight into popup HTML (the sibling `LiveFamilyMap` escapes its labels), so a family
+  member could store markup that ran for anyone who opened the trip. It uses `escapeHtml` now.
+- **Artifact preview and trip edit.** A failed preview fetch left the modal on "Preparing preview…"
+  forever (it now shows the error and a retry), the trip save no longer substitutes 25 MPG and $3.65 when
+  a field is blank or unparseable (it asks), and a cleared vehicle name is sent as `''` so it actually
+  clears instead of being dropped as `undefined`.
+- **Bounded and leak-free at the edges.** The collection inspector's `limit` is `Query(100, ge=1, le=500)`
+  at the gateway and in RAG (it was unbounded), RAG's collection listing raises 500 instead of answering
+  a 200 with `{"status": "ERROR"}`, and a semantic search that failed every upstream lookup answers 503
+  instead of "No specific context found", which presented a RAG outage as an empty index.
+
+**Open (rough).**
+
+- The device sheet's `hasControl` badge is unreachable dead UI (it is derived from the server-filtered
+  list, so it is always true).
+- `WidgetApi.DEFAULT_SERVER` remains the fallback address the setup screen suggests; a widget with no
+  configured server now stays signed out rather than calling it (fixed in §3.7's A11), but the constant
+  still names the public domain.
 
 ## 4. Deliberately left, with reasons
 
