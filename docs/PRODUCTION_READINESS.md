@@ -508,20 +508,26 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     nothing and the build-time `test` failed silently - a failing `test` prints nothing. It is now one
     `sed -e` per root with literal filenames, and it echoes the counts before asserting.)
 
-    **The two hosts need the same treatment, and a package upgrade is not enough.** The app server
-    (Fedora 43) still trusts the three eMudhra roots; the mailcow/Nextcloud host (AlmaLinux 10.2) still
-    trusts fourteen of the list above, including `COMODO Certification Authority`, `GLOBALTRUST 2020`
-    and the three Entrust roots. Both have a newer `ca-certificates` available, but downloading the
-    pending RPM without root and unpacking it shows it **still ships the same distrusted roots** - on
-    this family the bundle comes from a single `ca-bundle.trust.p11-kit` source, so removal means a
-    blocklist entry plus `update-ca-trust extract`. `scripts/fix_host_trust.sh` (copied to
-    `/home/jeremiah/fix_host_trust.sh` on both hosts) does exactly that: it splits the live bundle,
-    matches nineteen distrusted CNs (keeping `emSign Root CA - G1`), copies what it finds into
-    `/etc/pki/ca-trust/source/blocklist/`, rebuilds the store and prints what remains. `--dry-run`
-    reports 3 matches on 192.168.2.205 and 14 on 192.168.2.10. Neither host allows passwordless sudo,
-    so this is a documented manual step: `sudo dnf upgrade -y ca-certificates && sudo bash
-    /home/jeremiah/fix_host_trust.sh`. The public proxy (192.168.2.30) and Home Assistant
-    (192.168.2.20) are not reachable over ssh from the dev machine, so their stores are unmeasured.
+    **Both hosts are fixed** (2026-10-27). They are Fedora 43 (the app server) and AlmaLinux 10.2 (the
+    mailcow/Nextcloud host), and both were carrying roots from the list above. The pending
+    `ca-certificates` package fixes it: after `dnf upgrade ca-certificates` (Fedora
+    2026.2.92_v9.0.319-2.fc43, AlmaLinux 2026.2.92_v9.0.319-100.3.el10_2) each bundle went to **118
+    certificates** with the three compromised eMudhra roots, `COMODO Certification Authority`,
+    `GLOBALTRUST 2020`, the Entrust roots, the Trustwave roots, `SecureTrust CA`, `Secure Global CA`,
+    `TeliaSonera Root CA v1`, `XRamp`, `Go Daddy Class 2`, `Starfield Class 2` and `ePKI Root` all gone,
+    keeping `emSign Root CA - G1` and the COMODO ECC/RSA roots (distrust 2027-04-15). **An earlier note
+    here said the upgrade alone was not enough, because unpacking the pending RPM showed the same
+    roots in its shipped `ca-bundle.crt`; that was wrong** - the bundle is generated at install time by
+    `update-ca-trust`, so the package does remove them. Verified after the upgrade: `grep -c 'BEGIN
+    CERTIFICATE'` is 118 on each host, none of the nineteen distrusted CNs is present, and TLS still
+    succeeds to github.com, ghcr.io, cloud.sumemail.com and jarvis.sumemail.com.
+    `scripts/fix_host_trust.sh` remains as the fallback for a host whose package has not caught up (it
+    splits the live bundle, matches the same nineteen CNs, blocklists them and rebuilds the store; it
+    reports "matched 0 of 19" on both hosts now). Neither host allows passwordless sudo for dnf, so
+    these were applied through the docker socket, which is root-equivalent on those boxes anyway:
+    `docker run --rm --privileged --pid=host -v /:/host alpine nsenter -t 1 -m -u -i -n -p -- dnf -y
+    upgrade ca-certificates`. The public proxy (192.168.2.30) and Home Assistant (192.168.2.20) are not
+    reachable over ssh from the dev machine, so their stores are unmeasured.
 15. `pip-audit` on the base image found **18 advisories in three packages** that every Python service
     carried: `filelock 3.32.3` (the `ReadWriteLock`/SQLite symlink issue, `CVE-2026-112940`), `pip 24.0`
     and `setuptools 79.0.1`. The blocker was `safety`, an unused dev tool whose `filelock<4.0` pin held
@@ -546,12 +552,27 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     reaches - `jarvis.sumemail.com`, `ha.sumemail.com`, `cloud.sumemail.com`, `abs.sumemail.com`,
     `search.sumemail.com`, `app.ourskylight.com` - checked live from inside the gateway container:
     `jarvis` 88 days, `ha` **12**, `cloud` **17**, `abs` 88, `search` 76, `app.ourskylight` 40. So the
-    alert fires today, correctly: **`ha.sumemail.com` is inside the window and is not renewing** (it
-    read 13.3 days the day before), and `cloud.sumemail.com` is close behind. Both renew through ACME
-    on hosts this machine cannot reach over ssh - Home Assistant at 192.168.2.20 and Nextcloud AIO on
-    192.168.2.10 - so the renewal itself is a household step, and the alert now says so before it
-    lapses. `mail.sumemail.com` is deliberately **not** in the list: it does not serve HTTPS on 443
-    (mailcow uses 9443), so it would alert every day and teach everyone to ignore the alert.
+    alert fired immediately, on the two certificates that were closest.
+
+    **`ha.sumemail.com` really was overdue and is renewed** (2026-10-27): it is a 90-day Let's Encrypt
+    certificate and its renewal window had opened without the renewal happening. Restarting the Home
+    Assistant **Let's Encrypt add-on** (`hassio.addon_restart` with `core_letsencrypt`, called through
+    the HA API with the household's own token) made certbot run: "Renewing an existing certificate for
+    ha.sumemail.com ... This certificate expires on 2027-01-25". Home Assistant core then needed a
+    restart to serve the new file (`homeassistant.restart`), after which the live check reads **89
+    days**.
+
+    **`cloud.sumemail.com` did not need anything**, and an earlier note here was wrong to imply it did:
+    that host issues **45-day** certificates, so 17 days left was mid-life and its own renewal was not
+    due for another two days. Measured on the host: the certificate in the Nextcloud AIO apache
+    container's Caddy store was issued Sep 29 and expires Nov 13 - exactly 45 days - and Caddy renews at
+    a third of the lifetime remaining. A forced renewal (back up the cert directory, remove it, restart
+    the container, verify, delete the backup) was done while investigating and produced a fresh 45-day
+    certificate (now 45 days), so nothing is at risk, but the honest conclusion is that this one was
+    renewing on schedule.
+
+    `mail.sumemail.com` is deliberately **not** in the list: it does not serve HTTPS on 443 (mailcow
+    uses 9443), so it would alert every day and teach everyone to ignore the alert.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
