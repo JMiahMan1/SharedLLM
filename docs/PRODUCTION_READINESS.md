@@ -529,6 +529,18 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     `caddy` keep `/` until their next recreate - they write no caches, and nginx and Caddy have their
     own writable paths); the RAG embedder still returns 768-dimension vectors from the shared cache;
     and all sixteen services logged **zero** ERROR/Traceback/CRITICAL lines after the recreate.
+17. The certificate-expiry alert was watching **nothing**: `ALERT_TLS_HOSTS` was empty in the gateway's
+    environment and the `alert_tls_hosts` setting was `''`, so the 14-day warning had no hostnames and
+    every certificate could have expired unnoticed. It now watches the six the household actually
+    reaches - `jarvis.sumemail.com`, `ha.sumemail.com`, `cloud.sumemail.com`, `abs.sumemail.com`,
+    `search.sumemail.com`, `app.ourskylight.com` - checked live from inside the gateway container:
+    `jarvis` 88 days, `ha` **12**, `cloud` **17**, `abs` 88, `search` 76, `app.ourskylight` 40. So the
+    alert fires today, correctly: **`ha.sumemail.com` is inside the window and is not renewing** (it
+    read 13.3 days the day before), and `cloud.sumemail.com` is close behind. Both renew through ACME
+    on hosts this machine cannot reach over ssh - Home Assistant at 192.168.2.20 and Nextcloud AIO on
+    192.168.2.10 - so the renewal itself is a household step, and the alert now says so before it
+    lapses. `mail.sumemail.com` is deliberately **not** in the list: it does not serve HTTPS on 443
+    (mailcow uses 9443), so it would alert every day and teach everyone to ignore the alert.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
@@ -698,10 +710,11 @@ lease, so a second replica stands down rather than double-posting.
 
 **Open (rough).**
 
-- **A9** cleartext traffic and user-installed certificate authorities are enabled for every host
-  (`AndroidManifest.xml`, `capacitor.config.ts`, `res/xml/network_security_config.xml`). The household uses
-  HTTPS, so this is the accepted risk recorded in §4 rather than an oversight - but the user-CA trust in
-  particular is broader than it needs to be.
+- **A9 (partly fixed)** the user-installed certificate authorities are gone: `res/xml/network_security_config.xml`
+  trusted `user` certificates for every host, so any CA installed on the phone (or pushed onto it by an
+  app that talks someone into it) could read and rewrite every request the app makes - the API key, the
+  chat, the location reports. It now trusts the system store only, which is all the household's real
+  certificate needs. Cleartext stays permitted for the reason recorded in §4.
 - **A11** `WidgetApi.DEFAULT_SERVER` falls back to the public domain for an unconfigured widget, so a
   widget on a phone that has never signed in calls out rather than rendering "Sign in". (The baked-in home
   coordinates are gone: with no home learned, the "away from home" check now answers "not away" instead of
@@ -726,7 +739,8 @@ Everything here is a deliberate call, not an oversight.
   fine for private ranges only", and a phone pointed at a LAN `http://` server URL would stop
   working entirely if it were switched off. The household's own URL is
   `https://jarvis.sumemail.com`, and the APK updater now refuses any download URL whose host is not
-  the phone's configured server.
+  the phone's configured server. **The user-CA half of this is fixed**: the app no longer trusts
+  user-installed roots, so only the system store can vouch for a TLS connection.
 - **LOW - the live `.env` holds a GitHub token and a GitLab password.** `.env` is gitignored and
   untracked, so it is not a merge blocker; rotate the GitHub PAT if it is still live and keep `.env`
   out of archives and backups. The 1.9 GB `.tmp/` scratch directory holds the same class of secret
