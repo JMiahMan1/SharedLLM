@@ -22,7 +22,11 @@ Every claim below was verified against the live system unless marked **planned**
   trust-store step by hand** - neither allows passwordless sudo: `sudo dnf upgrade -y ca-certificates &&
   sudo bash /home/jeremiah/fix_host_trust.sh` on `192.168.2.205` (3 distrusted roots) and on
   `192.168.2.10` (14) - the package upgrade alone is not enough on this family, because the pending RPM
-  still ships the same roots. 2026-10-26 shipped, in order: the guard overlay with
+  still ships the same roots - **wrong: both hosts took the upgrade alone (118 certificates each, none
+  of the nineteen distrusted roots, TLS still working)**. The certificate-expiry alert now watches six
+  real hostnames, `ha.sumemail.com` was renewed through the HA Let's Encrypt add-on (12 -> 89 days), and
+  `cloud.sumemail.com` needs nothing (that host issues 45-day certificates, so 17 days left was
+  mid-life). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
   a family call), and the ops hardening (nightly backups, deploy rollback, SQLite WAL and additive
