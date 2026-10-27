@@ -141,11 +141,13 @@ public class GuardService extends AccessibilityService {
             GuardApi.reportOfflineUnlockIfDue(this);
             GuardApi.flushTamper(this);
         }
+        checkInstalls();
         // Layer 2: re-apply the device-owner enforcement (uninstall block,
-        // safe-boot / factory-reset restrictions) while this is a device owner,
+        // user restrictions, always-on VPN, suspended packages, remote
+        // uninstall, and COSU kiosk allowlist) while this is a device owner,
         // and put Android's own lock screen up once when a screen-time lock
         // starts (the Accessibility cover below is then the way back in).
-        DeviceOwnerGuard.enforce(this);
+        DeviceOwnerGuard.enforce(this, awaitingApproval, GuardNotices.userApps(this));
         boolean hard = hardLockWanted();
         if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
         hardLocked = hard;
@@ -155,7 +157,6 @@ public class GuardService extends AccessibilityService {
             DeviceOwnerGuard.wipeData(this);
         }
         syncWebFilter();
-        checkInstalls();
         checkFilterBypass();
         checkMultiUser();
         // A lock that starts while the child is already in an app, and the
@@ -211,7 +212,8 @@ public class GuardService extends AccessibilityService {
         return GuardRules.decide(
                 GuardApi.isProtected(this), GuardApi.isLocked(this), GuardApi.isUnlocked(this),
                 pkg, cls, text, GuardApi.alwaysAllowed(this), launcher, GuardApi.blockedApps(this),
-                awaitingApproval, GuardApi.webFilterWanted(this), bypassApps);
+                awaitingApproval, GuardApi.webFilterWanted(this), bypassApps,
+                GuardApi.kioskMode(this), GuardApi.kioskApps(this));
     }
 
     /** The window in front just changed. */
@@ -412,7 +414,8 @@ public class GuardService extends AccessibilityService {
             Set<String> installed = GuardNotices.userApps(this);
             Set<String> baseline = GuardApi.installBaseline(this, installed);
             Map<String, String> approvals = GuardApi.appApprovals(this);
-            Set<String> waiting = InstallApprovals.awaiting(GuardApi.installApprovalRequired(this), installed, baseline, approvals);
+            Set<String> waiting = InstallApprovals.awaiting(
+                    GuardApi.installApprovalRequired(this), installed, baseline, approvals, GuardApi.installApps(this));
             awaitingApproval = waiting;
             for (String pkg : InstallApprovals.toAsk(waiting, approvals)) {
                 GuardApi.askParent(this, "app", pkg, UnifiedPushDistributor.label(this, pkg));

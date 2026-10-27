@@ -158,3 +158,23 @@ def test_web_filter_categories_are_validated_and_saved(family):
         "web_filter": {"enabled": True, "categories": ["unknown_category"]},
     })
     assert bad.status_code == 422
+
+
+def test_uninstall_install_and_kiosk_rules_are_validated_and_saved(family):
+    ok = family("dad").put("/api/screen-time/kid/rules", json={
+        "uninstall_apps": ["com.roblox.client", "com.roblox.client"],
+        "install_apps": ["org.khanacademy.android"],
+        "kiosk_mode": True,
+        "kiosk_apps": ["org.khanacademy.android"],
+    })
+    assert ok.status_code == 200
+    rules = ok.json()["rules"]
+    assert rules["uninstall_apps"] == ["com.roblox.client"]
+    assert rules["install_apps"] == ["org.khanacademy.android"]
+    assert rules["kiosk_mode"] is True
+    assert rules["kiosk_apps"] == ["org.khanacademy.android"]
+    bad = family("dad").put("/api/screen-time/kid/rules", json={
+        "uninstall_apps": ["not a package"],
+    })
+    assert bad.status_code == 422
+

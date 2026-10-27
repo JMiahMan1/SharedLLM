@@ -1,6 +1,7 @@
 package com.jarvisos.app;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -23,6 +24,20 @@ import java.util.Set;
  *   - DISALLOW_DEBUGGING_FEATURES closes adb / USB debugging as a way in,
  *   - DISALLOW_CONFIG_VPN and DISALLOW_CONFIG_PRIVATE_DNS keep the web filter
  *     from being switched off from Settings,
+ *   - DISALLOW_INSTALL_UNKNOWN_SOURCES and DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY
+ *     keep APK sideloading off,
+ *   - DISALLOW_CONFIG_DATE_TIME prevents shifting the clock or timezone to
+ *     escape bedtime, school hours or daily budgets,
+ *   - DISALLOW_APPS_CONTROL prevents force-stopping or clearing app storage in
+ *     Settings,
+ *   - DISALLOW_MOUNT_PHYSICAL_MEDIA prevents mounting external USB/SD storage,
+ *   - always-on VPN keeps WebFilterService connected across reboots when the
+ *     parents want the web filter on,
+ *   - OS-level package suspension greys out and blocks launching apps in
+ *     blocked_apps or awaiting install approval,
+ *   - remote uninstall removes packages in uninstall_apps silently,
+ *   - COSU kiosk mode pins the lock-task allowlist to Jarvis, always_allowed
+ *     and kiosk_apps,
  *   - a screen-time lock is a real OS lock (lockNow plus lock-task / kiosk
  *     mode, which pins the phone to the guard screen), not only going home.
  * A parent's unlock window lifts the lock (they can use the phone); the uninstall
@@ -46,11 +61,23 @@ public final class DeviceOwnerRules {
     public static final String DISALLOW_CONFIG_VPN = "no_config_vpn";
     /** Android's UserManager.DISALLOW_CONFIG_PRIVATE_DNS value: Private DNS cannot be moved off the filter. */
     public static final String DISALLOW_CONFIG_PRIVATE_DNS = "no_config_private_dns";
+    /** Android's UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES value: no sideloading APKs. */
+    public static final String DISALLOW_INSTALL_UNKNOWN_SOURCES = "no_install_unknown_sources";
+    /** Android's UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY value: device-wide sideload block. */
+    public static final String DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY = "no_install_unknown_sources_globally";
+    /** Android's UserManager.DISALLOW_CONFIG_DATE_TIME value: clock/timezone cannot be shifted around budgets. */
+    public static final String DISALLOW_CONFIG_DATE_TIME = "no_config_date_time";
+    /** Android's UserManager.DISALLOW_APPS_CONTROL value: no force-stopping or clearing app storage in Settings. */
+    public static final String DISALLOW_APPS_CONTROL = "no_control_apps";
+    /** Android's UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA value: no mounting external USB/SD media. */
+    public static final String DISALLOW_MOUNT_PHYSICAL_MEDIA = "no_physical_media";
 
     private static final Set<String> RESTRICTIONS = Collections.unmodifiableSet(
             new LinkedHashSet<>(Arrays.asList(DISALLOW_SAFE_BOOT, DISALLOW_FACTORY_RESET,
                     DISALLOW_USER_SWITCH, DISALLOW_ADD_USER, DISALLOW_DEBUGGING_FEATURES,
-                    DISALLOW_CONFIG_VPN, DISALLOW_CONFIG_PRIVATE_DNS)));
+                    DISALLOW_CONFIG_VPN, DISALLOW_CONFIG_PRIVATE_DNS,
+                    DISALLOW_INSTALL_UNKNOWN_SOURCES, DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY,
+                    DISALLOW_CONFIG_DATE_TIME, DISALLOW_APPS_CONTROL, DISALLOW_MOUNT_PHYSICAL_MEDIA)));
 
     private DeviceOwnerRules() {}
 
@@ -76,6 +103,151 @@ public final class DeviceOwnerRules {
     /** Whether to lift the uninstall block: the server says this is no longer a minor's phone. */
     public static boolean unblockUninstall(boolean deviceOwner, boolean protectedPhone, boolean statusKnown) {
         return deviceOwner && statusKnown && !protectedPhone;
+    }
+
+    /**
+     * Package name to configure as Android's always-on VPN on a device-owner
+     * protected phone when the web filter is wanted; null otherwise.
+     */
+    public static String alwaysOnVpnPackage(boolean deviceOwner, boolean protectedPhone,
+                                            boolean webFilterWanted, String jarvisPackage) {
+        if (!deviceOwner || !protectedPhone || !webFilterWanted) return null;
+        if (jarvisPackage == null || jarvisPackage.isEmpty()) return null;
+        return jarvisPackage;
+    }
+
+    /**
+     * Whether to clear the always-on VPN package: when the server has spoken and
+     * either the phone is no longer a minor's or the web filter was switched off.
+     */
+    public static boolean clearAlwaysOnVpn(boolean deviceOwner, boolean protectedPhone,
+                                           boolean webFilterWanted, boolean statusKnown) {
+        return deviceOwner && statusKnown && (!protectedPhone || !webFilterWanted);
+    }
+
+    /**
+     * Packages to suspend at the OS level ({@code setPackagesSuspended(..., true)})
+     * on a device-owner protected phone outside a parent's unlock window. Never
+     * suspends Jarvis itself, {@link GuardRules#NEVER_LOCKED} or {@code alwaysAllowed}.
+     */
+    public static Set<String> packagesToSuspend(boolean deviceOwner, boolean protectedPhone, boolean unlocked,
+                                                Collection<String> blockedApps, Collection<String> awaitingApproval,
+                                                Collection<String> alwaysAllowed, String jarvisPackage) {
+        if (!deviceOwner || !protectedPhone || unlocked) return Collections.emptySet();
+        Set<String> out = new LinkedHashSet<>();
+        addSuspendable(out, blockedApps, alwaysAllowed, jarvisPackage);
+        addSuspendable(out, awaitingApproval, alwaysAllowed, jarvisPackage);
+        return out;
+    }
+
+    private static void addSuspendable(Set<String> out, Collection<String> candidates,
+                                       Collection<String> alwaysAllowed, String jarvisPackage) {
+        if (candidates == null) return;
+        for (String pkg : candidates) {
+            if (pkg == null || pkg.isEmpty()) continue;
+            if (pkg.equals(jarvisPackage) || GuardRules.NEVER_LOCKED.contains(pkg)) continue;
+            if (alwaysAllowed != null && alwaysAllowed.contains(pkg)) continue;
+            out.add(pkg);
+        }
+    }
+
+    /**
+     * Packages previously suspended by Jarvis that should now be unsuspended
+     * because a parent unblocked or approved them, opened an unlock window, or
+     * the server said this is no longer a minor's phone.
+     */
+    public static Set<String> packagesToUnsuspend(boolean deviceOwner, boolean statusKnown,
+                                                  Collection<String> previouslySuspended,
+                                                  Collection<String> nowSuspended) {
+        if (!deviceOwner || !statusKnown || previouslySuspended == null || previouslySuspended.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String pkg : previouslySuspended) {
+            if (pkg == null || pkg.isEmpty()) continue;
+            if (nowSuspended == null || !nowSuspended.contains(pkg)) {
+                out.add(pkg);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Packages a parent queued for remote uninstall ({@code uninstall_apps})
+     * that are currently installed on this device-owner protected phone. Never
+     * uninstalls Jarvis itself, {@link GuardRules#NEVER_LOCKED} or {@code alwaysAllowed}.
+     */
+    public static Set<String> packagesToUninstall(boolean deviceOwner, boolean protectedPhone,
+                                                  Collection<String> uninstallApps,
+                                                  Collection<String> installedApps,
+                                                  Collection<String> alwaysAllowed,
+                                                  String jarvisPackage) {
+        if (!deviceOwner || !protectedPhone || uninstallApps == null || installedApps == null) {
+            return Collections.emptySet();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String pkg : uninstallApps) {
+            if (pkg == null || pkg.isEmpty()) continue;
+            if (pkg.equals(jarvisPackage) || GuardRules.NEVER_LOCKED.contains(pkg)) continue;
+            if (alwaysAllowed != null && alwaysAllowed.contains(pkg)) continue;
+            if (installedApps.contains(pkg)) out.add(pkg);
+        }
+        return out;
+    }
+
+    /**
+     * Packages a parent queued for remote install ({@code install_apps}) that
+     * are not yet installed on this protected phone.
+     */
+    public static Set<String> packagesToInstall(boolean protectedPhone,
+                                                Collection<String> installApps,
+                                                Collection<String> installedApps) {
+        if (!protectedPhone || installApps == null) return Collections.emptySet();
+        Set<String> out = new LinkedHashSet<>();
+        for (String pkg : installApps) {
+            if (pkg == null || pkg.isEmpty()) continue;
+            if (installedApps == null || !installedApps.contains(pkg)) {
+                out.add(pkg);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether COSU dedicated kiosk mode is active on a device-owner phone right
+     * now (protected, not unlocked, not screen-time locked, and kioskMode on).
+     */
+    public static boolean kioskActive(boolean deviceOwner, boolean protectedPhone,
+                                      boolean locked, boolean unlocked, boolean kioskMode) {
+        return deviceOwner && protectedPhone && !locked && !unlocked && kioskMode;
+    }
+
+    /**
+     * Lock-task allowlist for COSU kiosk mode on a device-owner phone: Jarvis,
+     * {@link GuardRules#NEVER_LOCKED}, {@code alwaysAllowed} and {@code kioskApps}.
+     */
+    public static Set<String> kioskPackages(boolean deviceOwner, boolean protectedPhone,
+                                            boolean locked, boolean unlocked, boolean kioskMode,
+                                            Collection<String> kioskApps,
+                                            Collection<String> alwaysAllowed,
+                                            String jarvisPackage) {
+        if (!kioskActive(deviceOwner, protectedPhone, locked, unlocked, kioskMode)) {
+            return Collections.emptySet();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        if (jarvisPackage != null && !jarvisPackage.isEmpty()) out.add(jarvisPackage);
+        out.addAll(GuardRules.NEVER_LOCKED);
+        if (alwaysAllowed != null) {
+            for (String pkg : alwaysAllowed) {
+                if (pkg != null && !pkg.isEmpty()) out.add(pkg);
+            }
+        }
+        if (kioskApps != null) {
+            for (String pkg : kioskApps) {
+                if (pkg != null && !pkg.isEmpty()) out.add(pkg);
+            }
+        }
+        return out;
     }
 
     /**

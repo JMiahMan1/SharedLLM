@@ -39,6 +39,7 @@ final class GuardApi {
     static final String KEY_BYPASS_REPORTED = "guard_bypass_reported";
     static final String KEY_FILTER_PROMPT_AT = "guard_filter_prompt_at";
     static final String KEY_GUARD_BOOT = "guard_boot_count";
+    static final String KEY_SUSPENDED_PACKAGES = "guard_suspended_packages";
     static final int TAMPER_QUEUE_MAX = 30;
     private static final Object TAMPER_LOCK = new Object();
     private static final java.util.concurrent.atomic.AtomicBoolean FLUSHING = new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -264,6 +265,36 @@ final class GuardApi {
     /** Apps blocked now (a parent switched them off, or their own minutes ran out). */
     static Set<String> blockedApps(Context context) {
         return strings(lastStatus(context).optJSONArray("blocked_apps"));
+    }
+
+    /** Apps a parent queued for remote uninstall on this phone. */
+    static Set<String> uninstallApps(Context context) {
+        return strings(lastStatus(context).optJSONArray("uninstall_apps"));
+    }
+
+    /** Apps a parent queued or pre-approved for installation on this phone. */
+    static Set<String> installApps(Context context) {
+        return strings(lastStatus(context).optJSONArray("install_apps"));
+    }
+
+    /** Whether COSU dedicated kiosk mode is enabled for this phone. */
+    static boolean kioskMode(Context context) {
+        return lastStatus(context).optBoolean("kiosk_mode", false);
+    }
+
+    /** Apps allowed alongside Jarvis and always_allowed when kiosk mode is on. */
+    static Set<String> kioskApps(Context context) {
+        return strings(lastStatus(context).optJSONArray("kiosk_apps"));
+    }
+
+    /** Packages Jarvis suspended on the last device-owner sync. */
+    static Set<String> suspendedPackages(Context context) {
+        Set<String> saved = prefs(context).getStringSet(KEY_SUSPENDED_PACKAGES, null);
+        return saved == null ? new HashSet<String>() : new HashSet<>(saved);
+    }
+
+    static void setSuspendedPackages(Context context, Set<String> packages) {
+        prefs(context).edit().putStringSet(KEY_SUSPENDED_PACKAGES, new HashSet<>(packages)).apply();
     }
 
     /** A JSON list of strings as a set (empty when missing). */

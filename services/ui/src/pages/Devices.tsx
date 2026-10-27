@@ -60,7 +60,7 @@ function Panel({ title, icon: Icon, children, aside }: { title: string; icon: Lu
   );
 }
 
-/** App install/uninstall control: the existing screen rules, exposed per device. */
+/** App install/uninstall and COSU kiosk control: the existing screen rules, exposed per device. */
 function AppControls({ owner }: { owner: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -69,8 +69,18 @@ function AppControls({ owner }: { owner: string }) {
     retry: false,
   });
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [uninstall, setUninstall] = useState<string | null>(null);
+  const [install, setInstall] = useState<string | null>(null);
+  const [kioskApps, setKioskApps] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (rules: { install_approval?: boolean; blocked_apps?: string[] }) => api.setScreenRules(owner, rules),
+    mutationFn: (rules: {
+      install_approval?: boolean;
+      blocked_apps?: string[];
+      uninstall_apps?: string[];
+      install_apps?: string[];
+      kiosk_mode?: boolean;
+      kiosk_apps?: string[];
+    }) => api.setScreenRules(owner, { ...data?.rules, ...rules }),
     onSuccess: () => {
       toast.success('App control saved');
       queryClient.invalidateQueries({ queryKey: ['screen-status', owner] });
@@ -80,7 +90,12 @@ function AppControls({ owner }: { owner: string }) {
   if (isLoading) return <p className="text-xs text-slate-500">Loading app control…</p>;
   if (error || !data) return <p className="text-xs text-amber-300/90">App control could not be read for @{owner}.</p>;
   const installApproval = data.install_approval ?? false;
-  const currentBlocked = blocked ?? (data.blocked_apps ?? []).join(', ');
+  const kioskMode = data.kiosk_mode ?? data.rules?.kiosk_mode ?? false;
+  const currentBlocked = blocked ?? (data.rules?.blocked_apps ?? data.blocked_apps ?? []).join(', ');
+  const currentUninstall = uninstall ?? (data.uninstall_apps ?? data.rules?.uninstall_apps ?? []).join(', ');
+  const currentInstall = install ?? (data.install_apps ?? data.rules?.install_apps ?? []).join(', ');
+  const currentKioskApps = kioskApps ?? (data.kiosk_apps ?? data.rules?.kiosk_apps ?? []).join(', ');
+  const parsePackages = (raw: string) => raw.split(',').map((p) => p.trim()).filter(Boolean);
   return (
     <div className="space-y-2 border-t border-white/5 pt-2" data-testid={`mdm-app-controls-${owner}`}>
       <label className="flex items-center justify-between gap-2 text-xs text-slate-200">
@@ -103,14 +118,59 @@ function AppControls({ owner }: { owner: string }) {
           data-testid={`mdm-blocked-apps-${owner}`}
         />
       </label>
+      <label className="block text-xs text-slate-300">
+        Remote uninstall packages (removed silently on device-owner phones, blocked everywhere)
+        <input
+          className="glass-input mt-1 w-full bg-black/30 text-sm"
+          value={currentUninstall}
+          placeholder="com.roblox.client, com.zhiliaoapp.musically"
+          onChange={(e) => setUninstall(e.target.value)}
+          data-testid={`mdm-uninstall-apps-${owner}`}
+        />
+      </label>
+      <label className="block text-xs text-slate-300">
+        Pre-approved / required install packages (comma separated)
+        <input
+          className="glass-input mt-1 w-full bg-black/30 text-sm"
+          value={currentInstall}
+          placeholder="org.khanacademy.android, com.duolingo"
+          onChange={(e) => setInstall(e.target.value)}
+          data-testid={`mdm-install-apps-${owner}`}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-2 pt-1 text-xs text-slate-200">
+        <span>Dedicated kiosk (COSU) mode — only allow Jarvis, calls/texts, and the kiosk apps below</span>
+        <input
+          type="checkbox"
+          checked={kioskMode}
+          disabled={save.isPending}
+          onChange={(e) => save.mutate({ kiosk_mode: e.target.checked })}
+          data-testid={`mdm-kiosk-mode-${owner}`}
+        />
+      </label>
+      <label className="block text-xs text-slate-300">
+        Kiosk allowed packages (comma separated)
+        <input
+          className="glass-input mt-1 w-full bg-black/30 text-sm"
+          value={currentKioskApps}
+          placeholder="org.khanacademy.android, com.sirma.mobile.bible.android"
+          onChange={(e) => setKioskApps(e.target.value)}
+          data-testid={`mdm-kiosk-apps-${owner}`}
+        />
+      </label>
       <button
         type="button"
-        disabled={save.isPending || blocked === null}
-        onClick={() => save.mutate({ blocked_apps: currentBlocked.split(',').map((p) => p.trim()).filter(Boolean) })}
+        disabled={save.isPending || (blocked === null && uninstall === null && install === null && kioskApps === null)}
+        onClick={() => save.mutate({
+          blocked_apps: parsePackages(currentBlocked),
+          uninstall_apps: parsePackages(currentUninstall),
+          install_apps: parsePackages(currentInstall),
+          kiosk_apps: parsePackages(currentKioskApps),
+        })}
         className={`glass-button px-4 text-xs ${TOUCH}`}
         data-testid={`mdm-blocked-save-${owner}`}
       >
-        {save.isPending ? <Loader2 size={14} className="animate-spin" /> : null} Save blocked apps
+        {save.isPending ? <Loader2 size={14} className="animate-spin" /> : null} Save app &amp; kiosk lists
       </button>
     </div>
   );

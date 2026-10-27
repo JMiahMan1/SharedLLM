@@ -4477,12 +4477,18 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(apps, list) or any(not isinstance(a, str) or not a.strip() for a in apps):
             raise HTTPException(status_code=422, detail="always_allowed must be package names")
         out["always_allowed"] = [a.strip() for a in apps][:50]
-    # App control (step 5): apps blocked outright, and per-app daily minutes.
-    if body.get("blocked_apps") is not None:
-        apps = body["blocked_apps"]
-        if not isinstance(apps, list) or any(not isinstance(a, str) or not _PACKAGE.match(a.strip()) for a in apps):
-            raise HTTPException(status_code=422, detail="blocked_apps must be package names")
-        out["blocked_apps"] = list(dict.fromkeys(a.strip() for a in apps))[:200]
+    # App control (step 5): apps blocked outright, per-app daily minutes,
+    # remote install/uninstall lists, and COSU kiosk mode.
+    for pkg_list_key in ("blocked_apps", "uninstall_apps", "install_apps", "kiosk_apps"):
+        if body.get(pkg_list_key) is not None:
+            apps = body[pkg_list_key]
+            if not isinstance(apps, list) or any(not isinstance(a, str) or not _PACKAGE.match(a.strip()) for a in apps):
+                raise HTTPException(status_code=422, detail=f"{pkg_list_key} must be package names")
+            out[pkg_list_key] = list(dict.fromkeys(a.strip() for a in apps))[:200]
+    if body.get("kiosk_mode") is not None:
+        if not isinstance(body["kiosk_mode"], bool):
+            raise HTTPException(status_code=422, detail="kiosk_mode must be true or false")
+        out["kiosk_mode"] = body["kiosk_mode"]
     if body.get("app_limits") is not None:
         limits = body["app_limits"]
         if not isinstance(limits, dict) or any(
