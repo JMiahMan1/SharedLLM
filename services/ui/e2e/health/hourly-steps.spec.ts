@@ -63,6 +63,59 @@ async function mockHealth(page: Page, opts: { hourly?: boolean } = {}) {
     const p = url.pathname;
     const json = (body: unknown) => route.fulfill({ json: body });
     if (p === '/api/users/me') return route.fallback();
+    if (p === '/api/health/summary') {
+      // The Health page reads one block per area and threw on a payload that
+      // lacked them; the fallback below returns an array, which is what these
+      // tests used to hit. A real summary keeps the page on its own screen.
+      return json({
+        user_id: 'admin',
+        day: today,
+        profile: {
+          user_id: 'admin',
+          exists: true,
+          display_name: 'Admin',
+          birth_year: 1985,
+          height_cm: 168,
+          sex: 'female',
+          activity_level: 'moderate',
+          goal: 'maintain',
+          units: 'metric',
+          kid_mode: false,
+          sleep_need_minutes: 480,
+          water_goal_ml: 2000,
+          weekly_active_minutes: 150,
+          // Every hub card on, which is what the real profile does by default:
+          // a switch that is off renders no card at all.
+          metrics: {
+            readiness: true, checkin: true, sleep: true, nutrition: true, water: true,
+            steps: true, active_minutes: true, streaks: true, weekly_digest: true,
+            family_challenge: true, cheers: true, lessons: true, coach: true,
+            jarvis_use: true, fasting: false,
+          },
+          metric_catalog: [],
+          updated_at: today,
+        },
+        defaults_used: [],
+        sleep: { last_night: null, score: null, need_minutes: 480, history: [] },
+        readiness: null,
+        checkin: null,
+        nutrition: {
+          user_id: 'admin',
+          day: today,
+          entries_count: 0,
+          logged: false,
+          totals: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 },
+          meals: {},
+          target: { kind: 'unavailable', min: null, max: null, bmr: null, tdee: null, goal: 'maintain', note: '', missing: [], deficit_allowed: true, protein_g: null, carbs_g: null, fat_g: null },
+        },
+        water: { ml: 0, goal_ml: 2000, percent: 0, logged: false },
+        metrics: {},
+        resting_hr_baseline: null,
+        activity: null,
+        cycle: null,
+        alerts: [],
+      });
+    }
     if (p === '/api/geo/steps/ranges') {
       const payload = ranges(url.searchParams.get('range') || 'W');
       // Older builds and phones that have not reported hours: the keys are
@@ -99,6 +152,15 @@ async function mockHealth(page: Page, opts: { hourly?: boolean } = {}) {
     return route.fulfill({ json: [] });
   });
   return { unhandled };
+}
+
+/** The Health page is tabbed: the step history lives under Fitness and Today is
+ * the default, so a bare /fitness visit never renders the cards these tests
+ * measure. */
+async function openFitness(page: Page) {
+  await page.goto('/fitness');
+  await page.getByRole('tab', { name: 'Fitness' }).click();
+  await settle(page);
 }
 
 /** The Health page keeps a 30 s step-sync timer and a location heartbeat, so the
@@ -171,9 +233,7 @@ test.describe('hourly step chart on a phone', () => {
     await seedAuth(page);
     await mockHealth(page);
     page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-    await page.goto('/fitness');
-
-    await settle(page);
+    await openFitness(page);
     await page.getByTestId('range-D').click();
     await expect(page.getByTestId('step-hour-chart')).toBeVisible();
 
@@ -194,8 +254,7 @@ test.describe('hourly step chart on a phone', () => {
   test('the busy hours are emphasised and the empty hours are not silent', async ({ page }) => {
     await seedAuth(page);
     await mockHealth(page);
-    await page.goto('/fitness');
-    await settle(page);
+    await openFitness(page);
     await page.getByTestId('range-D').click();
     await expect(page.getByTestId('step-hour-chart')).toBeVisible();
 
@@ -207,8 +266,7 @@ test.describe('hourly step chart on a phone', () => {
   test('a phone with no hourly data is told so', async ({ page }) => {
     await seedAuth(page);
     await mockHealth(page, { hourly: false });
-    await page.goto('/fitness');
-    await settle(page);
+    await openFitness(page);
     await page.getByTestId('range-D').click();
 
     await expect(page.getByTestId('hour-chart-missing')).toBeVisible();

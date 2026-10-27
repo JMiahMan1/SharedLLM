@@ -37,6 +37,12 @@ export default function ListenNowPage() {
   const books = useBooksInProgress();
 
   const recent = useMemo(() => home.data?.recent ?? [], [home.data]);
+  // A shelf list that is missing from the payload is empty, not a crash: the
+  // empty check below used to read `.length` off these three directly, and a
+  // server that omitted them took the whole app to the error boundary.
+  const playlists = home.data?.playlists ?? [];
+  const favorites = home.data?.favorites ?? [];
+  const radio = home.data?.radio ?? [];
   // Books in progress, with their artwork and length from the home payload.
   const continueCards = useMemo<CardModel[]>(() => {
     const byUri = new Map(recent.map((i) => [i.uri, i]));
@@ -69,8 +75,8 @@ export default function ListenNowPage() {
   const maProblem = serviceProblem('Music Assistant', errors?.ma);
   const absProblem = serviceProblem('Audiobookshelf', errors?.abs ?? books.data?.notice ?? (books.isError ? 'Audiobookshelf is unreachable' : null));
   const notConnected = /not connected/.test(maProblem ?? '') && (/not connected/.test(absProblem ?? '') || !absProblem);
-  const nothingAtAll = home.data && continueCards.length === 0 && !recent.length && !home.data.playlists.length
-    && !home.data.favorites.length && !home.data.radio.length;
+  const nothingAtAll = home.data && continueCards.length === 0 && !recent.length && !playlists.length
+    && !favorites.length && !radio.length;
 
   const card = ({ key, item, progress, label }: CardModel) => {
     const req = playRequestFor(item);
@@ -133,12 +139,12 @@ export default function ListenNowPage() {
           ) : null}
           {shelf('Continue listening', continueCards.map(card), { seeAll: '/media/library/audiobooks' })}
           {shelf('Recently played', items(recent))}
-          {shelf('Your playlists', items(home.data?.playlists ?? []), {
+          {shelf('Your playlists', items(playlists), {
             seeAll: '/media/library/playlists',
             empty: maProblem || nothingAtAll ? null : <EmptyState title="No playlists yet" detail="Playlists you make in your music library appear here." />,
           })}
-          {shelf('Favorites', items(home.data?.favorites ?? []), { seeAll: '/media/library/favorites' })}
-          {shelf('Radio', items(home.data?.radio ?? []), { seeAll: '/media/library/radio' })}
+          {shelf('Favorites', items(favorites), { seeAll: '/media/library/favorites' })}
+          {shelf('Radio', items(radio), { seeAll: '/media/library/radio' })}
         </>
       )}
 

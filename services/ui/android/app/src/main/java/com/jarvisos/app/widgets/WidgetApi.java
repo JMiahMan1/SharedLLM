@@ -21,14 +21,6 @@ import org.json.JSONObject;
 public final class WidgetApi {
     private static final String TAG = "JarvisWidgetApi";
     private static final int TIMEOUT_MS = 12000;
-    /**
-     * The household's public address, for the app's setup screen to suggest.
-     *
-     * Deliberately not a fallback for {@link #serverUrl}: a widget on a phone
-     * that has never stored a server must not guess one.
-     */
-    public static final String DEFAULT_SERVER = "https://jarvis.sumemail.com";
-
     private WidgetApi() {}
 
     public static SharedPreferences prefs(Context context) {

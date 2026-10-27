@@ -36,6 +36,19 @@ describe('Listen Now', () => {
     expect(screen.getByRole('status', { name: 'Loading your playlists' })).toBeInTheDocument();
   });
 
+  it('a payload without the shelf lists renders the empty state instead of crashing', async () => {
+    // The empty check read `.length` off playlists/favorites/radio directly, so
+    // a payload that omitted them took the whole app to the error boundary.
+    web.state = player();
+    server.use(
+      http.get('/api/media/home', () => HttpResponse.json({})),
+      http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json({ status: 'ok', books: [] })),
+    );
+    renderWithProviders(<Media />);
+
+    expect(await screen.findByText('Nothing here yet')).toBeInTheDocument();
+  });
+
   it('UX-44 shows time left on a book with a known length, else the percentage', async () => {
     web.state = player();
     serveHome({ recent: [mediaItem({ uri: 'abs://b1', name: 'Long Book', media_type: 'audiobook', duration: 36000 })] });

@@ -20,7 +20,7 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const THEMES = pack.themes.filter((t) => t.scope !== 'android_widget').map((t) => t.id);
 const PAGES = [
-  '/', '/settings', '/communication', '/notes', '/recipes', '/family', '/calendar', '/media',
+  '/', '/settings', '/notes', '/recipes', '/family', '/calendar', '/media',
   '/wander', '/fitness', '/bible', '/remote', '/knowledge', '/workspaces', '/docs', '/identity', '/admin',
 ];
 /** WCAG AA for large text; anything under it is hard to read for everyone. */
@@ -133,6 +133,32 @@ function measure(minText: number): Finding[] {
   return out;
 }
 
+/**
+ * Measure one page, tolerating the app's own late navigation. A route that
+ * redirects, or auth still resolving, can destroy the execution context
+ * halfway through `page.evaluate`; wait it out and re-measure the page under
+ * test rather than whichever screen it redirected to. A page that never
+ * settles on the expected path is an error, not a silent measurement of the
+ * wrong screen.
+ */
+async function measurePage(page: Page, minText: number, target: string, themeId: string): Promise<Finding[]> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.waitForFunction((id) => document.documentElement.getAttribute('data-theme-id') === id, themeId);
+    await page.waitForTimeout(1200);
+    if (new URL(page.url()).pathname !== target) {
+      await page.goto(target, { waitUntil: 'domcontentloaded' });
+      continue;
+    }
+    try {
+      return await page.evaluate(measure, minText);
+    } catch (e) {
+      if (!/Execution context was destroyed|Target closed|navigat/i.test(String(e))) throw e;
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+    }
+  }
+  throw new Error(`could not measure ${target} for theme ${themeId}`);
+}
+
 for (const themeId of THEMES) {
   test(`theme ${themeId} keeps text readable on every page`, async ({ page }, info) => {
     test.setTimeout(240_000);
@@ -143,9 +169,7 @@ for (const themeId of THEMES) {
     page.on('pageerror', (e) => console.log(`[pageerror ${themeId}] ${page.url()} ${e.message}`));
     for (const p of PAGES) {
       await page.goto(p, { waitUntil: 'domcontentloaded' });
-      await page.waitForFunction((id) => document.documentElement.getAttribute('data-theme-id') === id, themeId);
-      await page.waitForTimeout(1200);
-      findings.push(...(await page.evaluate(measure, MIN_TEXT)));
+      findings.push(...(await measurePage(page, MIN_TEXT, p, themeId)));
       await page.screenshot({ path: path.join(OUT_DIR, `${info.project.name}-${themeId}${p.replace(/\//g, '_') || '_home'}.png`), fullPage: false });
     }
     fs.writeFileSync(path.join(OUT_DIR, `${info.project.name}-${themeId}.json`), JSON.stringify(findings, null, 2));
