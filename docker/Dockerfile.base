@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim-tiny \
     ssh-client \
     gnupg \
+    ca-certificates \
     tesseract-ocr \
     poppler-utils \
     file \
@@ -40,6 +41,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Bring the trust store up to what the root programs trust today.
+#
+# This image's ca-certificates is a 2025-04-19 Mozilla snapshot and Debian trixie
+# has no newer package, so the bundle still trusts roots that have since been
+# distrusted: the eight eMudhra/emSign intermediates whose private keys turned out
+# to be recoverable (October 2026), the COMODO root (TLS distrust April 2026),
+# GLOBALTRUST 2020, the Entrust roots, the Trustwave roots, and older ones such as
+# XRamp, Go Daddy Class 2, Starfield Class 2, SecureTrust and TeliaSonera. curl,
+# Python and every service in this stack read this store rather than a browser's,
+# so a browser update does not reach them. `emSign Root CA - G1` is deliberately
+# kept: the root programs kept it too. Nineteen names are listed and eighteen
+# exist in this bundle (`emSign ECC Root CA - G3` was never in Debian's), which is
+# what the assertion below allows for.
+RUN for root in \
+        emSign_Root_CA_-_C1 \
+        emSign_ECC_Root_CA_-_C3 \
+        emSign_ECC_Root_CA_-_G3 \
+        COMODO_Certification_Authority \
+        GLOBALTRUST_2020 \
+        Entrust_Root_Certification_Authority \
+        Entrust_Root_Certification_Authority_-_G2 \
+        Entrust_Root_Certification_Authority_-_EC1 \
+        Entrust.net_Premium_2048_Secure_Server_CA \
+        Trustwave_Global_Certification_Authority \
+        Trustwave_Global_ECC_P256_Certification_Authority \
+        Trustwave_Global_ECC_P384_Certification_Authority \
+        SecureTrust_CA \
+        Secure_Global_CA \
+        TeliaSonera_Root_CA_v1 \
+        XRamp_Global_CA_Root \
+        Go_Daddy_Class_2_CA \
+        Starfield_Class_2_CA \
+        ePKI_Root_Certification_Authority \
+    ; do \
+        sed -i "s|^mozilla/$${root}\.crt|!mozilla/$${root}.crt|" /etc/ca-certificates.conf; \
+    done \
+ && update-ca-certificates --fresh > /dev/null \
+ && test "$(grep -c '^!mozilla/' /etc/ca-certificates.conf)" -ge 18 \
+ && echo "trust store refreshed: $(grep -c '^mozilla/' /etc/ca-certificates.conf) roots enabled, $(grep -c '^!mozilla/' /etc/ca-certificates.conf) distrusted roots disabled"
 
 # CPU-only PyTorch (no CUDA libs), needed by RAG/gateway for embedding models
 RUN pip install --no-cache-dir torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
