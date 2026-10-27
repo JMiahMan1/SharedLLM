@@ -2784,7 +2784,13 @@ async def get_entities(request: Request):
             timeout=aiohttp.ClientTimeout(total=15.0),
         )
         if resp.status != 200:
-            return {"entities": []}
+            # An empty list here made a Home Assistant outage look like a house
+            # with no entities, in the dropdown an admin uses to add an alert or
+            # a lock. Answer an error the UI can show instead.
+            raise HTTPException(
+                status_code=502,
+                detail="Could not read the entities from Home Assistant",
+            )
         data = await resp.json()
         # Home Assistant accepts almost anything as an entity id. One install
         # carried a media_player whose id was a serialized user record; it
@@ -2805,8 +2811,14 @@ async def get_entities(request: Request):
                 for e in entities
             ]
         }
-    except Exception:
-        return {"entities": []}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.warning(f"[entities] Home Assistant read failed: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not read the entities from Home Assistant",
+        ) from e
 
 
 # --- Middleware & Security ---
@@ -7257,6 +7269,7 @@ async def global_search(q: str, request: Request):
     users = list(dict.fromkeys([jarvis_user, nc_user]))
 
     merged: dict[str, dict] = {}
+    failures = 0
     for user_id in users:
         try:
             resp = await get_http_client().post(
@@ -7266,6 +7279,7 @@ async def global_search(q: str, request: Request):
                 timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status != 200:
+                failures += 1
                 continue
             data = await resp.json()
             for r in data.get("results", []):
@@ -7274,7 +7288,13 @@ async def global_search(q: str, request: Request):
                     continue
                 merged[content] = r
         except Exception as e:
+            failures += 1
             log.error(f"Search proxy failed for user {user_id}: {e}")
+
+    if users and failures == len(users):
+        # Every lookup failed. Answering "no specific context found" would
+        # present a RAG outage as an empty index.
+        raise HTTPException(status_code=503, detail="Search is unavailable right now")
 
     results = list(merged.values())
     results.sort(key=lambda r: (r.get("score") or 0.0), reverse=True)
@@ -8778,7 +8798,9 @@ async def get_storage_status(request: Request):
     return await _proxy_json_response(resp)
 
 @app.get("/api/storage/collection/{collection_name}")
-async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
+async def get_collection_docs(
+    collection_name: str, request: Request, limit: int = Query(100, ge=1, le=500)
+):
     """Raw rows of one RAG collection: the Admin page's collection inspector.
 
     Admin only. It used to fall back to the first (admin) user when the caller

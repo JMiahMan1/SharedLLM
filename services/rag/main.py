@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import redis
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
@@ -869,7 +869,9 @@ async def get_stats(user_id: str = "default"):
 
 
 @app.get("/rag/collection/{collection_name}", dependencies=[Depends(require_internal)])
-async def list_collection_documents(collection_name: str, user_id: str = "default", limit: int = 100):
+async def list_collection_documents(
+    collection_name: str, user_id: str = "default", limit: int = Query(100, ge=1, le=500)
+):
     try:
         target_user = "default" if collection_name == "system_capabilities" else user_id
         rows = _conn().execute(
@@ -890,7 +892,8 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
         }
     except Exception as e:
         log.error(f"Failed to list collection {collection_name}: {e}")
-        return {"status": "ERROR", "message": str(e)}
+        # A 200 with {"status": "ERROR"} is not an error to any HTTP client.
+        raise HTTPException(status_code=500, detail="Could not list that collection") from e
 
 
 @app.get("/rag/learning", dependencies=[Depends(require_internal)])

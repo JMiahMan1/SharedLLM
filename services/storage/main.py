@@ -398,7 +398,7 @@ async def list_provider_entries(req: IndexScanRequest):
         return {"status": "SUCCESS", "count": len(result_entries), "entries": result_entries}
     except Exception as e:
         log.error(f"List failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Could not list that folder") from e
 
 @app.post("/providers/fetch", dependencies=[Depends(_require_internal_secret)])
 async def fetch_provider_file(req: ProviderFetchRequest):
@@ -454,7 +454,7 @@ async def fetch_provider_file(req: ProviderFetchRequest):
         raise
     except Exception as e:
         log.error(f"Fetch failed for {req.path}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Could not fetch that file") from e
 
 
 @app.post("/providers/search", dependencies=[Depends(_require_internal_secret)])
@@ -508,7 +508,7 @@ async def write_provider_content(req: ProviderWriteRequest):
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider write failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Could not write that file") from e
 
 
 @app.post("/providers/mirror", dependencies=[Depends(_require_internal_secret)])
@@ -523,4 +523,4 @@ async def mirror_provider_directory(req: ProviderMirrorRequest):
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider mirror failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Could not mirror those files") from e

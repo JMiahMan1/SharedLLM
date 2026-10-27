@@ -199,10 +199,19 @@ async def find_mass_config_entry(ha_url: str, ha_token: str) -> str:
             return entry_id
     return ""
 
-async def get_states(ha_url: str, ha_token: str, account: str = "") -> list:
-    """Retrieve all states from HA."""
+async def get_states(ha_url: str, ha_token: str, account: str = "", strict: bool = False) -> list:
+    """Retrieve all states from HA.
+
+    ``strict`` makes a failed read raise instead of returning an empty list.
+    Most callers only want the states and treat an outage as "nothing to do",
+    but a route that answers a person has to be able to tell an unreachable
+    Home Assistant from a house with no entities - otherwise it says "found 0
+    matching entities", which is a claim about their home.
+    """
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get states.")
+        if strict:
+            raise RuntimeError("Home Assistant URL is not configured")
         return []
 
     headers = {"Authorization": f"Bearer {ha_token}"}
@@ -221,6 +230,8 @@ async def get_states(ha_url: str, ha_token: str, account: str = "") -> list:
             if status in (401, 403):
                 await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
             log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
+            if strict:
+                raise
             return []  # Ensure empty list on error
 
 async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:

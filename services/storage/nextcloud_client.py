@@ -126,8 +126,12 @@ class NextCloudClient:
             xml_content = await resp.read()
             return self._parse_dav_response(xml_content)
         except Exception as e:
+            # This used to return an empty list, so a Nextcloud outage or wrong
+            # credentials rendered as "This folder is empty." - a claim about the
+            # person's files. Raise instead: the caller answers an error the UI
+            # already knows how to show.
             log.error(f"Failed to list files in {remote_path}: {e}")
-            return []
+            raise
 
     async def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         entries: list[StorageEntry] = []
