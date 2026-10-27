@@ -267,8 +267,8 @@ const TelemetryAdminPanel = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Offline Alert Threshold</label>
-            <input
+            <label htmlFor="telemetry-offline-threshold" className="block text-xs font-semibold text-slate-400 mb-1.5">Offline Alert Threshold</label>
+            <input id="telemetry-offline-threshold"
               type="number"
               value={telemetryOfflineThreshold}
               onChange={(e) => setTelemetryOfflineThreshold(Number(e.target.value))}
@@ -280,8 +280,8 @@ const TelemetryAdminPanel = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1.5">Group ID</label>
-            <input
+            <label htmlFor="telemetry-group-id" className="block text-xs font-semibold text-slate-400 mb-1.5">Group ID</label>
+            <input id="telemetry-group-id"
               type="text"
               value={telemetryGroupId}
               onChange={(e) => setTelemetryGroupId(e.target.value)}
@@ -539,8 +539,8 @@ const TelemetryAdminPanel = () => {
                         <span className="text-sm text-white">Availability Tracking</span>
                       </label>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Offline Alert (min)</label>
-                        <input
+                        <label htmlFor="telemetry-offline-minutes" className="block text-xs font-semibold text-slate-400 mb-1.5">Offline Alert (min)</label>
+                        <input id="telemetry-offline-minutes"
                           type="number"
                           value={editOfflineThreshold}
                           onChange={(e) => setEditOfflineThreshold(Number(e.target.value))}

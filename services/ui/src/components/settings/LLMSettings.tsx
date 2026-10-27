@@ -131,8 +131,8 @@ const LLMSettings: React.FC = () => {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Local LLM URL</label>
-                <input 
+                <label htmlFor="llm-local-url" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Local LLM URL</label>
+                <input id="llm-local-url" 
                   type="text" 
                   value={getSetting('llm_local_url')} 
                   onChange={e => setDrafts({...drafts, llm_local_url: e.target.value})}
@@ -142,8 +142,8 @@ const LLMSettings: React.FC = () => {
                 <p className="text-[9px] text-slate-600 mt-1">Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.</p>
               </div>
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API URL</label>
-                <input 
+                <label htmlFor="llm-cloud-url" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API URL</label>
+                <input id="llm-cloud-url" 
                   type="text" 
                   value={getSetting('llm_cloud_url')} 
                   onChange={e => setDrafts({...drafts, llm_cloud_url: e.target.value})}
@@ -152,10 +152,10 @@ const LLMSettings: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API Key</label>
+                <label htmlFor="llm-cloud-api-key" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Cloud API Key</label>
                 <div className="relative">
                   <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <input 
+                  <input id="llm-cloud-api-key" 
                     type="password" 
                     value={getSetting('llm_cloud_api_key')} 
                     onChange={e => setDrafts({...drafts, llm_cloud_api_key: e.target.value})}
@@ -170,8 +170,8 @@ const LLMSettings: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Vision OCR Proxy URL</label>
-                <input 
+                <label htmlFor="llm-vision-ocr-url" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Vision OCR Proxy URL</label>
+                <input id="llm-vision-ocr-url" 
                   type="text" 
                   value={getSetting('vision_ocr_proxy_url')} 
                   onChange={e => setDrafts({...drafts, vision_ocr_proxy_url: e.target.value})}
@@ -180,10 +180,10 @@ const LLMSettings: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">System Timezone</label>
+                <label htmlFor="llm-timezone" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">System Timezone</label>
                 <div className="relative">
                   <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <select
+                  <select id="llm-timezone"
                     value={getSetting('timezone')}
                     onChange={e => setDrafts({...drafts, timezone: e.target.value})}
                     className="glass-input w-full text-xs pl-10 bg-black/40"
