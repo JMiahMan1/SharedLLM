@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { escapeHtml } from '../../lib/avatarMarker';
 
 export interface TripEndpoint {
   name: string;
@@ -54,7 +55,7 @@ export default function TripLocationsMap({ start, end, path = [] }: TripLocation
           iconSize: [16, 16],
           iconAnchor: [8, 8],
         }),
-      }).addTo(map).bindPopup(`<b>Start</b><br/>${start.name}`);
+      }).addTo(map).bindPopup(`<b>Start</b><br/>${escapeHtml(start.name)}`);
       bounds.push([start.lat, start.lon]);
     }
 
@@ -66,7 +67,7 @@ export default function TripLocationsMap({ start, end, path = [] }: TripLocation
           iconSize: [16, 16],
           iconAnchor: [8, 8],
         }),
-      }).addTo(map).bindPopup(`<b>Destination</b><br/>${end.name}`);
+      }).addTo(map).bindPopup(`<b>Destination</b><br/>${escapeHtml(end.name)}`);
       bounds.push([end.lat, end.lon]);
     }
 

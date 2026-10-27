@@ -48,6 +48,7 @@ import {
 import { buildFamilyCards, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
 import toast from 'react-hot-toast';
+import { errorText } from '../lib/errorText';
 import {
   Users,
   Car,
@@ -232,7 +233,11 @@ const Wander = () => {
     ]);
   }, [tripsQuery, vehiclesQuery, peopleQuery, locationsQuery, zonesQuery, trigger]);
 
-  const loadError = tripsQuery.isError || peopleQuery.isError || zonesQuery.isError;
+  // Every query the page renders from: a failed vehicle list or live-location
+  // feed used to leave a silently empty dropdown and no banner at all.
+  const loadError =
+    tripsQuery.isError || peopleQuery.isError || zonesQuery.isError ||
+    vehiclesQuery.isError || locationsQuery.isError;
 
   // Open the trip-locations map modal for a given trip
   const openTripLocations = useCallback(async (trip: Trip) => {
@@ -398,12 +403,27 @@ const Wander = () => {
     trigger('medium');
     setIsSavingTrip(true);
     try {
+      // A blank or unparseable figure used to be saved as 25 MPG and $3.65,
+      // which put invented numbers in the trip's cost. Ask instead.
+      const mpgText = String(editMpg).trim();
+      const mpg = Number(mpgText);
+      if (mpgText && (!Number.isFinite(mpg) || mpg <= 0)) {
+        toast.error('Fuel economy has to be a number above zero.');
+        return;
+      }
+      const costText = String(editCostPerGallon).trim();
+      const cost = Number(costText);
+      if (costText && (!Number.isFinite(cost) || cost < 0)) {
+        toast.error('Fuel price has to be a number.');
+        return;
+      }
       const payload: TripUpdatePayload = {
         vehicle_id: selectedVehicleId || undefined,
-        vehicle_name: editVehicleName.trim() || undefined,
+        // '' clears the name on the server; undefined would leave the old one.
+        vehicle_name: editVehicleName.trim(),
         fuel_type: editFuelType,
-        mpg: Number(editMpg) > 0 ? Number(editMpg) : 25.0,
-        cost_per_gallon: Number(editCostPerGallon) >= 0 ? Number(editCostPerGallon) : 3.65,
+        ...(mpgText ? { mpg } : {}),
+        ...(costText ? { cost_per_gallon: cost } : {}),
         activity_type: editActivityType,
         notes: editNotes.trim() || undefined,
         start_name: editStartName.trim() || undefined,
@@ -423,11 +443,7 @@ const Wander = () => {
       );
       setEditingTrip(null);
     } catch (err: unknown) {
-      const errorMsg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : 'Failed to update trip.';
-      toast.error(errorMsg || 'Failed to update trip.');
+      toast.error(errorText(err, 'Could not update the trip'));
     } finally {
       setIsSavingTrip(false);
     }
@@ -458,11 +474,7 @@ const Wander = () => {
       toast.success(shareSelection.length > 0 ? 'Trip shared!' : 'Sharing removed');
       setSharingTrip(null);
     } catch (err: unknown) {
-      const errorMsg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : 'Failed to share trip.';
-      toast.error(errorMsg || 'Failed to share trip.');
+      toast.error(errorText(err, 'Could not share the trip'));
     } finally {
       setIsSavingShare(false);
     }

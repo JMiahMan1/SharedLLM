@@ -171,7 +171,7 @@ function StepsSection({ source, userId }: { source: string; userId: string }) {
 }
 
 function BatterySection({ deviceKey }: { deviceKey: string }) {
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, isError } = useQuery({
     queryKey: ['device-battery', deviceKey],
     queryFn: () => api.getDeviceBattery(deviceKey, 24),
   });
@@ -179,6 +179,10 @@ function BatterySection({ deviceKey }: { deviceKey: string }) {
     .filter((r) => r.pct != null)
     .map((r) => ({ at: Date.parse(r.at), value: r.pct as number }));
   if (isLoading) return <p className="text-xs text-slate-500">Loading battery history…</p>;
+  // "Not enough battery reports" is a claim about the device; a failed read is
+  // not the same thing (the sibling BatteryHistory in CompanionDevicesPanel
+  // already says so).
+  if (isError) return <p className="text-xs text-amber-200">Could not read this device's battery history.</p>;
   if (points.length < 2) {
     return (
       <p className="text-xs text-slate-500" data-testid="device-battery-empty">

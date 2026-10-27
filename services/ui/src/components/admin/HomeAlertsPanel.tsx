@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import type { UserProfile } from '../../types/api';
 import EntitySearchDropdown from '../ui/EntitySearchDropdown';
 import HelpTooltip from '../ui/HelpTooltip';
+import { confirmDialog } from '../ui/confirmDialog';
 import {
   HOME_ALERT_EVENTS,
   loadHomeAlerts,
@@ -223,7 +224,16 @@ export const HomeAlertsPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
               <button
                 type="button"
                 disabled={saveMutation.isPending}
-                onClick={() => saveMutation.mutate(removeHomeAlert(alerts, alert))}
+                onClick={async () => {
+                  // Removing an alert was one unconfirmed tap.
+                  const ok = await confirmDialog({
+                    title: 'Remove this alert?',
+                    body: `Stop watching ${alert.entity_id} for ${HOME_ALERT_EVENTS[alert.event].label.toLowerCase()}?`,
+                    confirmLabel: 'Remove',
+                    danger: true,
+                  });
+                  if (ok) saveMutation.mutate(removeHomeAlert(alerts, alert));
+                }}
                 className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40 pointer-coarse:min-h-11"
                 aria-label={`Remove ${alert.entity_id} ${HOME_ALERT_EVENTS[alert.event].label}`}
               >
