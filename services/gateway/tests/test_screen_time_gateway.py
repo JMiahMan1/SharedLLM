@@ -378,6 +378,20 @@ def test_a_permission_request_reads_in_plain_words_and_the_answer_reaches_the_ch
     assert client.post("/api/guard/requests/7", json={"approve": True, "minutes": 60}).status_code == 200
     assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "Website allowed"
 
+    answers[("POST", "/guard/requests")] = (200, {
+        "request": {"id": 9, "username": "kid", "kind": "app_unblock", "target": "com.roblox.client", "label": "Roblox", "note": "cousins"},
+        "notify": ["dad"],
+    })
+    assert client.post("/api/guard/requests", json={"kind": "app_unblock", "target": "com.roblox.client", "label": "Roblox", "note": "cousins"}).status_code == 200
+    assert sent[-1]["title"] == "Unblock an app?" and "kid asks to use Roblox" in sent[-1]["body"]
+
+    answers[("POST", "/guard/requests/9")] = (200, {
+        "request": {"username": "kid", "kind": "app_unblock", "target": "com.roblox.client", "label": "Roblox", "status": "approved", "until": "2026-10-21T17:00:00-07:00"},
+        "notify": ["kid"],
+    })
+    assert client.post("/api/guard/requests/9", json={"approve": True, "minutes": 60}).status_code == 200
+    assert sent[-1]["user"] == "kid" and sent[-1]["title"] == "App unlocked" and "You can use Roblox for a while." in sent[-1]["body"]
+
 
 def test_a_parents_answer_to_a_more_time_request_reaches_the_child(wired):
     client, calls, sent, answers = wired

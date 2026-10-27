@@ -47,7 +47,7 @@ export default function AppsWebSection({ username, name }: { username: string; n
   const rules = status?.can_manage ? status.rules : null;
   return (
     <>
-      <RequestsCard username={username} name={name} kinds={['app', 'permission', 'site']} />
+      <RequestsCard username={username} name={name} kinds={['app', 'app_unblock', 'permission', 'site']} />
       {isLoading || isError || !rules ? (
         <MemberCard
           title="Apps and websites"
@@ -64,7 +64,7 @@ export default function AppsWebSection({ username, name }: { username: string; n
         </>
       )}
       <RecentWebCard username={username} />
-      <RequestsCard username={username} name={name} kinds={['app', 'permission', 'site']} history />
+      <RequestsCard username={username} name={name} kinds={['app', 'app_unblock', 'permission', 'site']} history />
     </>
   );
 }

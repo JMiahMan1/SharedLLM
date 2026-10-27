@@ -17,6 +17,7 @@ vi.mock('../../services/api', async (importOriginal) => {
       getScreenTimeStatus: vi.fn(),
       getScreenTimeRequests: vi.fn(),
       askForScreenTime: vi.fn(),
+      askAParent: vi.fn(),
       setScreenRules: vi.fn(),
       pauseScreenTime: vi.fn(),
       giveScreenTimeBonus: vi.fn(),
@@ -75,6 +76,32 @@ describe('ScreenTimeCard (the member)', () => {
     }));
     wrap(<ScreenTimeCard />);
     expect(await screen.findByTestId('screen-time-apps')).toHaveTextContent('YouTube: used up for today');
+  });
+
+  it('lets the child ask a parent to unblock a blocked app and shows their own weekly report', async () => {
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({
+      blocked_apps: ['com.roblox.client'],
+      week: {
+        days_reported: 3,
+        total_min: 180,
+        daily_avg_min: 60,
+        days: [
+          { day: '2026-10-19', minutes: 45 },
+          { day: '2026-10-20', minutes: 60 },
+          { day: '2026-10-21', minutes: 75 },
+        ],
+        top_apps: [{ package: 'com.google.android.youtube', minutes: 90 }],
+      },
+    }));
+    vi.mocked(api.askAParent).mockResolvedValue({ request: { id: 9 } as never });
+    wrap(<ScreenTimeCard />);
+
+    expect(await screen.findByTestId('screen-time-week')).toHaveTextContent('This week: 1 h a day (3 h across 3 days)');
+    expect(screen.getByTestId('screen-time-week-apps')).toHaveTextContent('Most used: YouTube (1 h 30 min)');
+    fireEvent.change(screen.getByLabelText('What is the extra time for?'), { target: { value: 'playing with cousins' } });
+    fireEvent.click(screen.getByTestId('ask-unblock-com.roblox.client'));
+    await waitFor(() => expect(api.askAParent).toHaveBeenCalledWith('app_unblock', 'com.roblox.client', 'playing with cousins', 'Roblox'));
+    expect(await screen.findByTestId('asked-unblock-com.roblox.client')).toHaveTextContent('Asked a parent');
   });
 
   it('stays out of the way when no rules are set', async () => {

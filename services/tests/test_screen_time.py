@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from services.common.screen_time import evaluate
+from services.common.screen_time import evaluate, weekly_report
 
 TZ = ZoneInfo("America/Phoenix")
 WED = lambda h, m=0: datetime(2026, 10, 21, h, m, tzinfo=TZ)  # noqa: E731 - a Wednesday
@@ -137,3 +137,57 @@ def test_a_site_allowed_for_a_while_counts_only_until_it_runs_out():
     }
     assert evaluate({"web_filter": wf}, 0, 0, WED(16))["web_allow"] == ["khanacademy.org", "minecraft.net"]
     assert evaluate({"web_filter": wf}, 0, 0, WED(18))["web_allow"] == ["khanacademy.org"]
+
+
+def test_an_app_allowed_for_a_while_is_unblocked_until_its_window_runs_out():
+    rules = {
+        "blocked_apps": ["com.roblox.client"],
+        "app_limits": {"com.google.android.youtube": 30},
+        "app_allow_until": {
+            "com.roblox.client": "2026-10-21T17:00:00-07:00",
+            "com.google.android.youtube": "2026-10-21T17:00:00-07:00",
+        },
+    }
+    apps = {"com.google.android.youtube": 45 * 60000}
+    during = evaluate(rules, 45 * 60000, 0, WED(16), apps)
+    assert during["blocked_apps"] == []
+    after = evaluate(rules, 45 * 60000, 0, WED(18), apps)
+    assert set(after["blocked_apps"]) == {"com.roblox.client", "com.google.android.youtube"}
+
+
+def test_weekly_report_summarises_last_seven_days_and_top_apps():
+    usage = [
+        {"day": "2026-10-10", "millis": 999 * 60000},  # outside 7-day window
+        {
+            "day": "2026-10-19",
+            "millis": 60 * 60000,
+            "apps": [{"package": "com.spotify.music", "millis": 40 * 60000}],
+        },
+        {
+            "day": "2026-10-21",
+            "millis": 120 * 60000,
+            "apps": [
+                {"package": "com.google.android.youtube", "millis": 90 * 60000},
+                {"package": "com.spotify.music", "millis": 30 * 60000},
+            ],
+        },
+    ]
+    report = weekly_report(usage, date(2026, 10, 21))
+    assert report["days_reported"] == 2
+    assert report["total_min"] == 180
+    assert report["daily_avg_min"] == 90
+    assert report["days"] == [
+        {"day": "2026-10-19", "minutes": 60},
+        {"day": "2026-10-21", "minutes": 120},
+    ]
+    assert report["top_apps"] == [
+        {"package": "com.google.android.youtube", "minutes": 90},
+        {"package": "com.spotify.music", "minutes": 70},
+    ]
+    assert weekly_report([], date(2026, 10, 21)) == {
+        "days_reported": 0,
+        "total_min": 0,
+        "daily_avg_min": 0,
+        "days": [],
+        "top_apps": [],
+    }

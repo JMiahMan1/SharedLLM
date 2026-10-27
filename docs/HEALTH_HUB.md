@@ -664,6 +664,11 @@ point.
 - [x] **Web activity.** The on-device filter sums sites visited and blocked attempts per
       domain and posts them every five minutes to the activity feed (`feature: web`, event
       `visit` or `blocked`, counts in `detail`); parents-only like the rest of the feed.
+      **Repeated-blocked-site alert built (2026-10-27):** when a child's `feature: "web"` events
+      reach 5 or more blocked attempts on the same domain in a household day
+      (`services/telemetry/guardian.py:_check_blocked_site`), telemetry sends a deduplicated
+      `family_safety` notice (`kind: "blocked_site"`, `once: "blocked_site:{user}:{domain}:{day}"`)
+      to both parents once for that domain that day.
 
 ### Guarding
 
@@ -682,7 +687,10 @@ point.
       (`ScreenRules`, `ScreenTimeRequest`; only a minor's parents may change them, the child may
       read theirs); the gateway serves `GET /api/screen-time/{user}/status` from the rules plus
       today's reported use, and sends the notices. Screens: `ScreenTimeCard` (the child, Health →
-      Today) and `ScreenTimeControls` (a parent, under the child in the phone-use card).
+      Today, now also showing the child's own derived 7-day weekly screen-time report — daily
+      average, total, per-day breakdown and top apps from `services/common/screen_time.py:weekly_report`
+      on `GET /api/screen-time/{user}/status`, built 2026-10-27) and `ScreenTimeControls` (a parent,
+      under the child in the phone-use card).
       **4b (next): enforcement on the phone** - the Android app reads the status and locks
       everything but the always-allowed apps; this needs an Accessibility service and a device
       check, and pairs with tamper resistance below.
@@ -697,6 +705,13 @@ point.
       always-allowed apps are never blocked. The guard closes a blocked app (`GuardRules`
       `BLOCK_APP`) with "That app is off for now" while the rest of the phone works, and the
       child's card shows minutes left per limited app.
+      **"Ask a parent to unblock" on a blocked app built (2026-10-27):** both the Android
+      blocked-app cover (`GuardScreenView` `MODE_APP` → "Ask a parent to unblock") and the web
+      `ScreenTimeCard` (`ask-unblock-*`) let a child ask a parent to unblock a switched-off or
+      time-exhausted app (`POST /api/guard/requests` with `kind: "app_unblock"` and an optional
+      note). Parents can approve for an hour (`rules.app_allow_until: {pkg: ISO}`, respected by
+      `screen_time.active_app_allow`) or always (removing the package from `blocked_apps` and
+      `app_limits`) from `RequestsCard` or the push notification button.
       **Install approvals, permission gating and the one-minute warning built (2026-10-24, needs
       the next APK and a device check):** one request store for "ask a parent first", identity's
       `GuardRequest` (`POST/GET /api/guard/requests`, `POST /api/guard/requests/{id}`; kinds `app`,

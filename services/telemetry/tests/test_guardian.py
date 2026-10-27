@@ -161,3 +161,41 @@ def test_an_unreachable_model_falls_back_to_the_phrase_list_with_a_logged_reason
     review = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["review"]
     assert review == {"by": "phrases", "reason": "local model unavailable: connection refused"}
     assert "using the phrase list" in caplog.text
+
+
+def test_repeated_blocked_site_attempts_page_both_parents_once_a_day(wired):
+    client, _fake, sent = wired
+    # Fewer than 5 blocked attempts on a domain do not page parents.
+    client.post("/api/telemetry/activity", headers=HEADERS, json={
+        "user": "kid",
+        "feature": "web",
+        "item": "bad.example",
+        "action": "blocked",
+        "detail": {"visits": 0, "blocked": 3},
+    })
+    assert sent == []
+
+    # Crossing 5 blocked attempts on the same domain pages both parents once that day.
+    client.post("/api/telemetry/activity", headers=HEADERS, json={
+        "user": "kid",
+        "feature": "web",
+        "item": "bad.example",
+        "action": "blocked",
+        "detail": {"visits": 0, "blocked": 2},
+    })
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert sent[0]["kind"] == "blocked_site"
+    assert sent[0]["title"] == "Blocked site on Emma's phone"
+    assert "bad.example (5 blocked attempts today)" in sent[0]["body"]
+    assert sent[0]["once"].startswith("blocked_site:kid:bad.example:")
+
+    # Further blocked attempts on the same domain the same day do not re-page.
+    sent.clear()
+    client.post("/api/telemetry/activity", headers=HEADERS, json={
+        "user": "kid",
+        "feature": "web",
+        "item": "bad.example",
+        "action": "blocked",
+        "detail": {"visits": 0, "blocked": 4},
+    })
+    assert sent == []

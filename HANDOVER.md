@@ -1017,22 +1017,22 @@ Corpus side: the CC0 Food.com dataset carries per-recipe nutrition (verify
 per-serving vs per-recipe on first download); computed values only as fallback
 via recipe-scrapers → ingredient-parser-NLP → seed match.
 
-### `docs/RECIPES.md` - Phases 0-10 largely built, rest planned
+### `docs/RECIPES.md` - Phases 0-11 built
 
 Phases 0-1 are shipped: the importer (`scripts/import_recipes.py`) filters the
 CC0 Food.com corpus by the kid level rules, ranks by staples/few ingredients/
 short time and renders level-tagged markdown notes (per-serving `foodcom`
 nutrition, scaled to 7 servings) - 120 notes live in Nextcloud `Recipes/`.
 The Recipes page shares any recipe into a family chat and has a Teach Jarvis
-RAG-sync button (`cb530641`). Phases 2-10 are now largely built: the weekly meal
+RAG-sync button (`cb530641`). Phases 2-11 are built: the weekly meal
 plan and shopping list (Phases 3-4), search & import over the offline FTS index
 plus TheMealDB and schema.org paste-a-link with a duplicate guard (Phase 8,
 `6932452c`), photo/handwriting import through Alpaca OCR with an editable draft
-(Phase 9, `b891938b`), and the Health tab connection - per-serving nutrition, the
+(Phase 9, `b891938b`), the Health tab connection - per-serving nutrition, the
 "Estimate from ingredients (USDA)" fallback, the "Dinner tonight" card and
-planned-vs-eaten logging (Phase 10, `b891938b` + `6932452c`). Remaining: the
-Noom-style calorie budget and logging (Phase 11) and the Phase 10 optional daily
-targets / weekly averages.
+planned-vs-eaten logging (Phase 10, `b891938b` + `6932452c`), and the Noom-style
+calorie budget, macro targets, food density bands and weekly averages (Phase 11,
+`services/health/scoring.py`, `services/health/weekly.py`, `HealthNutrition.tsx`).
 
 ### `docs/HEALTH_HUB.md` - largely built
 
@@ -1158,10 +1158,14 @@ device-owner phone; app install/uninstall stays the screen rules.
 - **Family Link / Qustodio / Bark research (2026-10-25):** there are no supported public APIs for
   device control (only reverse-engineered Home Assistant bridges), so their best features are being
   rebuilt natively. Build order (cheap parenting wins first): (1) the cheap parenting wins - an
-  "Ask a parent" unblock on the blocked-app screen, a child's own weekly screen-time report, and a
-  repeated-blocked-site alert; (2) web-filter categories; (3) notification/social monitoring;
-  (4) a device-owner hardening batch; (5) remote app install/uninstall; (6) kiosk/COSU;
-  (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config + OS-update policy.
+  "Ask a parent" unblock on the blocked-app screen (`kind: "app_unblock"`, `rules.app_allow_until`,
+  Android `GuardScreenView` + web `ScreenTimeCard`/`RequestsCard`), a child's own weekly screen-time
+  report (`services/common/screen_time.py:weekly_report` on `/api/screen-time/{user}/status` +
+  `ScreenTimeCard.tsx`), and a repeated-blocked-site alert (`services/telemetry/guardian.py:_check_blocked_site`,
+  threshold 5 blocked attempts per domain per day) (**shipped 2026-10-27**); (2) web-filter categories;
+  (3) notification/social monitoring; (4) a device-owner hardening batch; (5) remote app
+  install/uninstall; (6) kiosk/COSU; (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config
+  + OS-update policy.
 - **OpenRouter**: the per-user OpenRouter tile is removed (`d517166f`) and there is no per-user
   OpenRouter credential; OpenRouter is the global Settings > LLM setting.
 

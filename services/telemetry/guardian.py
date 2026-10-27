@@ -35,6 +35,7 @@ log = logging.getLogger("telemetry.guardian")
 CHILDREN_CACHE_SECONDS = 300
 RECAP_HOUR = 18  # Sunday, household time
 RECAP_TICK_SECONDS = 900
+BLOCKED_SITE_ALERT_THRESHOLD = 5  # blocked attempts on one domain in a day before paging parents
 
 _children_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 SETTINGS_CACHE_SECONDS = 60
@@ -81,6 +82,47 @@ def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any],
         "once": f"concern:{child['username']}:{concern['category']}:{day}",
         "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "level": concern["level"]},
     }
+
+
+def _blocked_site_notice(parent: str, child: dict[str, Any], domain: str, count: int, day: str) -> dict[str, Any]:
+    name = child.get("display_name") or child["username"]
+    return {
+        "user": parent,
+        "category": "family_safety",
+        "kind": "blocked_site",
+        "priority": 3,
+        "title": f"Blocked site on {name}'s phone",
+        "body": f"{name}'s phone tried to open {domain} ({count} blocked attempts today).",
+        "tag": f"blocked_site:{child['username']}:{domain}",
+        "once": f"blocked_site:{child['username']}:{domain}:{day}",
+        "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "domain": domain, "count": count},
+    }
+
+
+async def _check_blocked_site(rc, child: dict[str, Any], event: dict[str, Any], deliver: Deliver, day: str) -> None:
+    """Page both parents once a day when a child repeatedly hits the same blocked domain."""
+    if str(event.get("feature") or "") != "web" or child.get("monitoring") == "off":
+        return
+    domain = str(event.get("item") or "").strip().lower()
+    detail = event.get("detail") if isinstance(event.get("detail"), dict) else {}
+    try:
+        blocked = int(detail.get("blocked") or (1 if event.get("action") == "blocked" else 0))
+    except (TypeError, ValueError):
+        blocked = 0
+    if not domain or blocked <= 0:
+        return
+    count_key = f"tel:blocked_site_count:{child['username']}:{domain}:{day}"
+    total = int(await rc.get(count_key) or 0) + blocked
+    await rc.set(count_key, str(total), ex=2 * 86400)
+    if total < BLOCKED_SITE_ALERT_THRESHOLD:
+        return
+    if not await rc.set(f"tel:blocked_site_sent:{child['username']}:{domain}:{day}", "1", nx=True, ex=2 * 86400):
+        return
+    for parent in child.get("parents") or []:
+        try:
+            await deliver(_blocked_site_notice(parent, child, domain, total, day))
+        except Exception as exc:
+            log.warning("blocked-site notice to %s failed: %s", parent, exc)
 
 
 async def _model_settings(session) -> dict[str, str]:
@@ -138,12 +180,13 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
         child = (await children(session)).get(str(event.get("user") or ""))
         if not child:
             return []
+        day = household_now().date().isoformat()
+        await _check_blocked_site(rc, child, event, deliver, day)
         found = concern_monitor.scan_event(event)
         if not found:
             return []
         found = await second_pass(session, event, found)
         await store.add_concerns(rc, child["username"], found)
-        day = household_now().date().isoformat()
         for concern in found:
             if not concern_monitor.pages_parent(concern, child.get("monitoring")):
                 continue

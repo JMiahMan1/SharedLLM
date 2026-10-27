@@ -190,16 +190,22 @@ final class GuardApi {
     }
 
     /**
-     * Ask a parent first: a new app ("app", package), an app's permission
-     * ("permission", "package|group") or a blocked site ("site", domain).
-     * Call off the main thread. Returns an error to show, or null.
+     * Ask a parent first: a new app ("app", package), a blocked app
+     * ("app_unblock", package), an app's permission ("permission",
+     * "package|group") or a blocked site ("site", domain). Call off the main
+     * thread. Returns an error to show, or null.
      */
     static String askParent(Context context, String kind, String target, String label) {
+        return askParent(context, kind, target, label, null);
+    }
+
+    static String askParent(Context context, String kind, String target, String label, String note) {
         try {
             JSONObject body = new JSONObject();
             body.put("kind", kind);
             body.put("target", target);
             if (label != null && !label.isEmpty()) body.put("label", label);
+            if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
             HttpResult r = send(context, "POST", "/api/guard/requests", body.toString());
             if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
             if (r.status == 200) return null;

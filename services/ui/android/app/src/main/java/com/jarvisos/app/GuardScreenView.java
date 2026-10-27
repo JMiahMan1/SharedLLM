@@ -49,6 +49,10 @@ final class GuardScreenView {
     private GuardScreenView() {}
 
     static View build(Context context, String mode, String app, boolean denied, Host host) {
+        return build(context, mode, "", app, denied, host);
+    }
+
+    static View build(Context context, String mode, String pkg, String app, boolean denied, Host host) {
         boolean tamper = GuardScreenActivity.MODE_TAMPER.equals(mode);
         boolean appOff = GuardScreenActivity.MODE_APP.equals(mode);
         boolean install = GuardScreenActivity.MODE_INSTALL.equals(mode);
@@ -135,7 +139,12 @@ final class GuardScreenView {
         // The sheets are painted over the lock; the lock itself is never taken
         // down for them, so a child always has a way back.
         Sheet sheet = new Sheet(context);
-        if (!tamper && !install && !permission && !bypass) {
+        if (appOff && pkg != null && !pkg.isEmpty()) {
+            Button askApp = new Button(context);
+            askApp.setText("Ask a parent to unblock");
+            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, sheet, pkg, appName)));
+            root.addView(askApp);
+        } else if (!tamper && !install && !permission && !bypass) {
             Button ask = new Button(context);
             ask.setText("Ask for more time");
             ask.setOnClickListener(v -> sheet.show(askCard(context, sheet)));
@@ -280,6 +289,49 @@ final class GuardScreenView {
             String why = note.getText().toString().trim();
             new Thread(() -> {
                 String problem = GuardApi.askMoreTime(context, minutes[0], why);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    send.setEnabled(true);
+                    if (problem == null) {
+                        status.setTextColor(Color.parseColor("#86EFAC"));
+                        status.setText("Asked. A parent will answer soon.");
+                    } else {
+                        status.setTextColor(Color.parseColor("#FCD34D"));
+                        status.setText(problem);
+                    }
+                });
+            }).start();
+        });
+        card.addView(send);
+        card.addView(status);
+        card.addView(closeButton(context, sheet));
+        return card;
+    }
+
+    /** "Ask a parent to unblock": asks a parent to allow a blocked or time-limited app. */
+    private static View askAppCard(Context context, Sheet sheet, String pkg, String appName) {
+        LinearLayout card = card(context);
+        card.addView(heading(context, "Ask to use " + appName));
+        TextView hint = text(context, "Your parents can allow it for an hour or for good.", 14);
+        hint.setTextColor(Color.parseColor("#94A3B8"));
+        card.addView(hint);
+
+        EditText note = new EditText(context);
+        note.setHint("Why? (optional)");
+        note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        note.setTextColor(Color.WHITE);
+        note.setHintTextColor(Color.parseColor("#64748B"));
+        card.addView(note);
+
+        TextView status = statusLine(context);
+        Button send = new Button(context);
+        send.setText("Ask a parent");
+        send.setOnClickListener(v -> {
+            send.setEnabled(false);
+            status.setTextColor(Color.parseColor("#94A3B8"));
+            status.setText("Asking...");
+            String why = note.getText().toString().trim();
+            new Thread(() -> {
+                String problem = GuardApi.askParent(context, "app_unblock", pkg, appName, why);
                 new Handler(Looper.getMainLooper()).post(() -> {
                     send.setEnabled(true);
                     if (problem == null) {

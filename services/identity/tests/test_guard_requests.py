@@ -115,3 +115,34 @@ def test_rules_keep_new_keys_and_drop_runout_allows(family):
     assert rules["web_filter"]["allow_until"] == {"b.example": future}
     assert family("dad").put("/api/screen-time/kid/rules", json={"permission_gating": ["xray"]}).status_code == 422
     assert family("dad").put("/api/screen-time/kid/rules", json={"install_approval": "yes"}).status_code == 422
+
+
+def test_asking_a_parent_to_unblock_an_app_allows_for_an_hour_or_always(family):
+    family("dad").put("/api/screen-time/kid/rules", json={
+        "blocked_apps": ["com.roblox.client"],
+        "app_limits": {"com.google.android.youtube": 30},
+    })
+    ask = family("kid").post("/api/guard/requests", json={
+        "kind": "app_unblock",
+        "target": "com.roblox.client",
+        "label": "Roblox",
+        "note": "playing with cousins",
+    })
+    assert ask.status_code == 200
+    assert set(ask.json()["notify"]) == {"dad", "mom"}
+    rid = ask.json()["request"]["id"]
+    decided = family("dad").post(f"/api/guard/requests/{rid}", json={"approve": True, "minutes": 60}).json()["request"]
+    until = datetime.fromisoformat(decided["until"])
+    assert timedelta(minutes=59) < until - datetime.now(UTC) <= timedelta(minutes=60)
+    rules = family("kid").get("/api/screen-time/kid/rules").json()["rules"]
+    assert rules["app_allow_until"] == {"com.roblox.client": decided["until"]}
+
+    # Once answered, the child can ask again later; approving with always=True removes the block and limit.
+    rid2 = family("kid").post("/api/guard/requests", json={
+        "kind": "app_unblock",
+        "target": "com.roblox.client",
+    }).json()["request"]["id"]
+    family("mom").post(f"/api/guard/requests/{rid2}", json={"approve": True, "always": True})
+    rules2 = family("kid").get("/api/screen-time/kid/rules").json()["rules"]
+    assert rules2["blocked_apps"] == []
+    assert "app_allow_until" not in rules2

@@ -1047,8 +1047,13 @@ export const api = {
   },
 
   /** A child asks a parent first (the phone asks for new apps and permissions itself). */
-  async askAParent(kind: GuardRequest['kind'], target: string, note?: string): Promise<{ request: GuardRequest }> {
-    const resp = await apiClient.post('/api/guard/requests', { kind, target, ...(note ? { note } : {}) });
+  async askAParent(kind: GuardRequest['kind'], target: string, note?: string, label?: string): Promise<{ request: GuardRequest }> {
+    const resp = await apiClient.post('/api/guard/requests', {
+      kind,
+      target,
+      ...(note ? { note } : {}),
+      ...(label ? { label } : {}),
+    });
     return resp.data;
   },
 
