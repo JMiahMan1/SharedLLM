@@ -488,9 +488,14 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     --only-upgrade ca-certificates`; `trixie-security` currently offers nothing newer than
     `20250419+deb13u1`, measured), and the eighteen distrusted roots that are actually present are
     disabled in `/etc/ca-certificates.conf` with a build-time assertion. `emSign Root CA - G1` is
-    deliberately kept, because the root programs kept it. Verified in the real image: the bundle goes
-    from 148 to 130 certificates, every targeted root is disabled, and TLS still succeeds to
-    github.com, ghcr.io, huggingface.co, cloudflare.com and jarvis.sumemail.com.
+    deliberately kept, because the root programs kept it. Verified in the real image and then in the
+    running containers after the rebuild: the bundle goes from 148 to 130 certificates,
+    `grep -c '^!mozilla/' /etc/ca-certificates.conf` is 18, and TLS still succeeds to github.com,
+    ghcr.io, huggingface.co, pypi.org, cloud.sumemail.com, ha.sumemail.com, jarvis.sumemail.com and
+    google.com. (The first CI attempt failed because the `RUN` used `$${root}` in a shell loop: Docker
+    hands the string to the shell unchanged, so `$$` expanded to the shell's own PID, the `sed` matched
+    nothing and the build-time `test` failed silently - a failing `test` prints nothing. It is now one
+    `sed -e` per root with literal filenames, and it echoes the counts before asserting.)
 
     **The two hosts need the same treatment, and a package upgrade is not enough.** The app server
     (Fedora 43) still trusts the three eMudhra roots; the mailcow/Nextcloud host (AlmaLinux 10.2) still
@@ -516,6 +521,14 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
 16. Most non-root services ran with `HOME=/` (automation, bible, caddy, control_plane, dns, geo, health,
     identity, logging, storage, telemetry, ui), so any tool that wanted a cache failed on the read-only
     root - `pip-audit` in identity died with `PermissionError: '/.cache'`. Each now sets `HOME=/tmp`.
+
+    Verified after deploying every service on the new base (2026-10-26): `pip-audit` reports **no known
+    vulnerabilities** in all fourteen Python services (including `workspace_runtime`, which had 55, and
+    `execution`, which had 18); `pillow` is **13.0.0** everywhere, so the containers still on older
+    images are gone; `docker exec <c> printenv HOME` is `/tmp` for every service that had `/` (`ui` and
+    `caddy` keep `/` until their next recreate - they write no caches, and nginx and Caddy have their
+    own writable paths); the RAG embedder still returns 768-dimension vectors from the shared cache;
+    and all sixteen services logged **zero** ERROR/Traceback/CRITICAL lines after the recreate.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
