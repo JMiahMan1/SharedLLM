@@ -63,7 +63,7 @@ test('moves playback to one de-duplicated speaker', async ({ page }) => {
 
   await expect.poll(() => ma.sentCommands.find(
     (entry) => entry.command === 'player_queues/transfer',
-  )).toBeTruthy();
+  ), { timeout: 1500 }).toBeTruthy();
   const transfer = ma.sentCommands.find((entry) => entry.command === 'player_queues/transfer');
   expect(transfer?.args).toMatchObject({
     source_queue_id: 'hermetic-web-player',
@@ -71,7 +71,7 @@ test('moves playback to one de-duplicated speaker', async ({ page }) => {
   });
   await expect.poll(() => ma.sentCommands.some(
     (entry) => entry.command === 'players/cmd/pause',
-  )).toBe(true);
+  ), { timeout: 1500 }).toBe(true);
 
   await expect(page.getByTestId('output-sheet')).toBeHidden();
   await expect(page.getByTestId('now-playing-sheet')).toBeHidden();

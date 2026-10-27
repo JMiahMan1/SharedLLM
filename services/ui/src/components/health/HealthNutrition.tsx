@@ -599,6 +599,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                 type="text"
                 value={manual.name}
                 onChange={(event) => setManual({ ...manual, name: event.target.value })}
+                aria-label="Food name"
                 placeholder="Food name"
                 className="glass-input h-10 w-full px-3 text-sm pointer-coarse:h-11"
               />
@@ -606,6 +607,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                 type="text"
                 value={manual.brand}
                 onChange={(event) => setManual({ ...manual, brand: event.target.value })}
+                aria-label="Brand"
                 placeholder="Brand (optional)"
                 className="glass-input h-10 w-full px-3 text-xs pointer-coarse:h-11"
               />

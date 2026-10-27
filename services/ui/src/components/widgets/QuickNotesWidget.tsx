@@ -187,12 +187,14 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }}
             className="glass-input w-full px-3 py-2 text-sm"
+            aria-label="Note title"
             placeholder="Note title..."
           />
           <textarea
             value={newNote}
             onChange={(e) => setNewNote(e.target.value)}
             className="glass-input w-full px-3 py-2 text-sm resize-none"
+            aria-label="Note content"
             placeholder="Note content..."
             rows={2}
           />

@@ -1155,6 +1155,7 @@ const KnowledgeHub = () => {
           <textarea
             value={editDraft}
             onChange={(e) => setEditDraft(e.target.value)}
+            aria-label="Lesson text"
             rows={12}
             className="w-full bg-black/20 border border-white/10 rounded-lg p-3 text-sm text-white font-mono focus:outline-none focus:border-indigo-500 transition-colors resize-y"
           />

@@ -298,6 +298,7 @@ const AnnouncementsPanel = () => {
               value={timerTitle}
               onChange={(event) => setTimerTitle(event.target.value)}
               className="glass-input min-h-11 flex-1 min-w-0 text-base sm:text-sm"
+              aria-label="Timer name"
               placeholder="Timer name"
             />
             <input

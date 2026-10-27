@@ -163,6 +163,7 @@ export interface NowPlayingItem {
   album: string
   image: string
   durationSec: number
+  isLive?: boolean
 }
 
 /** A remote output as the store knows it: fed by the status poll, Music

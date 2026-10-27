@@ -826,10 +826,11 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   </h4>
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-slate-500">
-                      <span>Brightness</span>
+                      <label htmlFor="device-sheet-brightness">Brightness</label>
                       <span>{brightness}%</span>
                     </div>
                     <input
+                      id="device-sheet-brightness"
                       type="range"
                       min="1"
                       max="100"
@@ -1046,10 +1047,11 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   {/* Volume Slider */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><Volume2 size={12} /> Volume</span>
+                      <label htmlFor="device-sheet-volume" className="flex items-center gap-1"><Volume2 size={12} /> Volume</label>
                       <span>{volume}%</span>
                     </div>
                     <input
+                      id="device-sheet-volume"
                       type="range"
                       min="1"
                       max="100"

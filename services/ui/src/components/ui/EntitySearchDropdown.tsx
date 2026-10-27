@@ -182,6 +182,7 @@ export default function EntitySearchDropdown({
             setSearch('');
             setIsOpen(true);
           }}
+          aria-label={placeholder || 'Search entities'}
           placeholder={placeholder}
           className="glass-input w-full pl-9 pr-8"
         />

@@ -109,6 +109,7 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
                   onChange={(e) => rename(p.id, e.target.value)}
                   className="flex-1 rounded-lg border px-2 py-1 text-sm font-bold outline-none"
                   style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
+                  aria-label="Person name"
                   placeholder="Person name"
                 />
                 <button onClick={() => deletePerson(p.id)} className="p-1" style={{ color: 'var(--os-ember-deep)' }} aria-label={`Delete ${p.name}`}>

@@ -89,6 +89,7 @@ const ServerConfigBanner = () => {
               <input
                 value={serverInput}
                 onChange={(e) => setServerInput(e.target.value)}
+                aria-label="Server URL"
                 placeholder={DEFAULT_SERVER_URL}
                 className="flex-1 min-w-0 px-2 min-h-11 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
               />
@@ -120,6 +121,7 @@ const ServerConfigBanner = () => {
             <input
               value={serverInput}
               onChange={(e) => setServerInput(e.target.value)}
+              aria-label="Server URL"
               placeholder={serverUrl || DEFAULT_SERVER_URL}
               className="flex-1 min-w-0 px-2 min-h-11 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
             />

@@ -18,14 +18,11 @@ Every claim below was verified against the live system unless marked **planned**
   longer trusts the roots the root programs have distrusted (18 disabled, a 130-certificate bundle,
   `emSign Root CA - G1` kept), the three pip/setuptools/filelock advisories every service carried are
   gone (`pip-audit`: no known vulnerabilities in all fourteen Python services), `pillow` is 13.0.0
-  everywhere, and every non-root service has a writable `HOME`. **The two hosts still need the
-  trust-store step by hand** - neither allows passwordless sudo: `sudo dnf upgrade -y ca-certificates &&
-  sudo bash /home/jeremiah/fix_host_trust.sh` on `192.168.2.205` (3 distrusted roots) and on
-  `192.168.2.10` (14) - the package upgrade alone is not enough on this family, because the pending RPM
-  still ships the same roots - **wrong: both hosts took the upgrade alone (118 certificates each, none
-  of the nineteen distrusted roots, TLS still working)**. The certificate-expiry alert now watches six
-  real hostnames, `ha.sumemail.com` was renewed through the HA Let's Encrypt add-on (12 -> 89 days), and
-  `cloud.sumemail.com` needs nothing (that host issues 45-day certificates, so 17 days left was
+  everywhere, and every non-root service has a writable `HOME`. **Both hosts (`192.168.2.205` and
+  `192.168.2.10`) also have upgraded trust stores** (`dnf upgrade ca-certificates`: 118 certificates
+  each, none of the nineteen distrusted roots present, TLS verified). The certificate-expiry alert now
+  watches six real hostnames, `ha.sumemail.com` was renewed through the HA Let's Encrypt add-on (12 -> 89
+  days), and `cloud.sumemail.com` needs nothing (that host issues 45-day certificates, so 17 days left was
   mid-life). 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
@@ -71,6 +68,24 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-27` **Form-label & control accessibility completion and Media Overhaul QA ledger (53/53 PASS)**
+  (`docs/PRODUCTION_READINESS.md` §3.5, `docs/MEDIA_OVERHAUL_QA.md`). **Form labels and controls:** every
+  `<label>` in the UI (168 total: 59 `htmlFor`/`id` + 109 single-control wrappers) is now associated with
+  a single control, the two multi-control `<label>` wrappers (`HealthProfilePanel.tsx`,
+  `ThemePackageManager.tsx`) now name their primary control via `htmlFor`/`id` and give the secondary
+  control its own `aria-label`, and all remaining visible `<input>`, `<select>` and `<textarea>` controls
+  across 22 files carry an explicit `<label>` or `aria-label` (enforced by
+  `services/ui/src/test/formLabels.test.ts`). **Media Overhaul QA ledger (`P6-T5`):** fixed `UX-12` so
+  `NowPlayingCard` and `ActiveOutputCard` show `Live stream` only when `item.isLive` is true (radio/stream
+  items in `store/ingest.ts`) and render a `.skeleton` scrubber (`data-testid="scrubber-skeleton"`) while a
+  normal track's duration is still loading (`__tests__/mediaStore.test.ts`,
+  `__tests__/liveAndOverlays.test.tsx`); added the missing E2E assertions for `UX-33` (`slow` CLS < 0.05 in
+  `e2e/media/listen-now.spec.ts`), `UX-41` (1500 ms `expect.poll` in `listen-now.spec.ts` and
+  `output.spec.ts`), `UX-47` (mobile mini-player floating above the bottom bar during scroll in
+  `now-playing.spec.ts`), `UX-48` (844×390 landscape controls reachable in `now-playing.spec.ts`) and
+  `UX-51` (persisted output choice restored across reload in `persistence.spec.ts`), bringing
+  `docs/MEDIA_OVERHAUL_QA.md` to **53/53 PASS**.
+
 - `2026-10-27` **The trust store, the advisories, and the last three un-audited areas**
   (`docs/PRODUCTION_READINESS.md` §3.7 items 14-17 and §3.10). **The certificate trust store was
   rebuilt:** the base image's bundle was a 2025-04-19 Mozilla snapshot and still trusted roots the
@@ -79,18 +94,17 @@ Every claim below was verified against the live system unless marked **planned**
   four Entrust roots and the Trustwave/SecureTrust/TeliaSonera/XRamp/Go Daddy/Starfield/ePKI roots.
   `ca-certificates` is now named and upgraded on every build, and the eighteen distrusted roots that
   are actually present are disabled with a build-time assertion (148 certificates down to 130, TLS
-  still working to github.com, ghcr.io, huggingface.co, cloudflare.com and our own hosts). **The two
-  hosts need the same step by hand** - neither allows passwordless sudo, and the pending RPM still
-  ships the same roots, so `scripts/fix_host_trust.sh` (also at `/home/jeremiah/fix_host_trust.sh` on
-  both) adds a blocklist entry and rebuilds the store: 3 roots on the app server, 14 on the mailcow
-  host. **Every Python service audits clean:** `pip-audit` found 18 advisories in filelock/pip/
+  still working to github.com, ghcr.io, huggingface.co, cloudflare.com and our own hosts). **Both hosts
+  (`192.168.2.205` and `192.168.2.10`) were upgraded too** (`dnf upgrade ca-certificates`: 118
+  certificates each, none of the nineteen distrusted roots present, and `scripts/fix_host_trust.sh` kept
+  as a fallback). **Every Python service audits clean:** `pip-audit` found 18 advisories in filelock/pip/
   setuptools that every service carried; the unused `safety` (which pinned `filelock<4`) is gone and
   the three are pinned to their fixed versions, so all fourteen services now report no known
   vulnerabilities, and `pillow` is 13.0.0 everywhere. **Every non-root service got a writable `HOME`**
   (twelve of them ran with `HOME=/`, which made any tool that wants a cache fail). **The
   certificate-expiry alert now watches something:** `alert_tls_hosts` was empty, so it watched
-  nothing; it now covers six real hostnames, and `ha.sumemail.com` is inside the 14-day window and not
-  renewing (12 days) - a household step, on a host this machine cannot reach. **The app no longer
+  nothing; it now covers six real hostnames, and `ha.sumemail.com` was renewed through the HA Let's
+  Encrypt add-on (12 -> 89 days). **The app no longer
   trusts user-installed CAs** (system roots only, §3.9 A9). **A seeded administrator password is
   visible:** the account list marks an account that still signs in with `DEFAULT_ADMIN_PASSWORD`
   (alongside the "No password" mark for the two members who cannot sign in at all). **And the last

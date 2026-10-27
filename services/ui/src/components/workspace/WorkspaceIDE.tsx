@@ -1826,6 +1826,7 @@ export default function WorkspaceIDE({
               <input
                 value={commitMsg}
                 onChange={(e) => setCommitMsg(e.target.value)}
+                aria-label="Commit message"
                 placeholder="Commit message…"
                 disabled={!gitEnabled}
                 className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
@@ -2013,6 +2014,7 @@ export default function WorkspaceIDE({
                       <input
                         value={refineInput}
                         onChange={(e) => setRefineInput(e.target.value)}
+                        aria-label="Refine last mission"
                         placeholder={`Refine last mission #${missions[0].id}…`}
                         className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none"
                       />
@@ -2138,6 +2140,7 @@ export default function WorkspaceIDE({
                       <textarea
                         value={sdPrompt}
                         onChange={(e) => setSdPrompt(e.target.value)}
+                        aria-label="Image prompt"
                         placeholder="Prompt for generate / edit / face swap…"
                         rows={3}
                         className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
@@ -2146,6 +2149,7 @@ export default function WorkspaceIDE({
                         <select
                           value={sdModel}
                           onChange={(e) => setSdModel(e.target.value)}
+                          aria-label="Image model"
                           className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-indigo-500 outline-none"
                         >
                           {imageModels.map((m) => (

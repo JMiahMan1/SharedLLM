@@ -71,3 +71,42 @@ test('browser back closes the sheet without leaving the page', async ({ page }) 
   await expect(sheet).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Jarvis Dashboard', level: 1 })).toBeVisible();
 });
+
+test('UX-47 mini-player floats above the mobile bottom bar without overlapping it during scroll', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'mobile bottom-nav spacing check');
+  const { ma } = await setupPlayerMocks(page);
+  await startTrack(page, ma);
+  await goToPage(page, 'home');
+
+  const mini = page.getByTestId('mini-player');
+  const homeTab = page.getByRole('link', { name: 'Home', exact: true });
+  await expect(mini).toBeVisible();
+  await expect(homeTab).toBeVisible();
+
+  const miniBefore = await mini.boundingBox();
+  const navBox = await homeTab.boundingBox();
+  expect(miniBefore).not.toBeNull();
+  expect(navBox).not.toBeNull();
+  // Mini-player sits above the bottom nav with a gap (never overlaps).
+  expect(miniBefore!.y + miniBefore!.height).toBeLessThanOrEqual(navBox!.y);
+
+  await page.evaluate(() => window.scrollBy(0, 200));
+  const miniAfter = await mini.boundingBox();
+  expect(miniAfter).not.toBeNull();
+  expect(miniAfter!.y + miniAfter!.height).toBeLessThanOrEqual(navBox!.y);
+});
+
+test('UX-48 Now Playing controls stay reachable in 844x390 landscape', async ({ page }) => {
+  const { ma } = await setupPlayerMocks(page);
+  await startTrack(page, ma);
+  await goToPage(page, 'home');
+  await page.setViewportSize({ width: 844, height: 390 });
+
+  const sheet = await openSheetFromMiniPlayer(page);
+  const pauseBtn = sheet.getByRole('button', { name: 'Pause' });
+  await pauseBtn.scrollIntoViewIfNeeded();
+  await expect(pauseBtn).toBeVisible();
+  const slider = sheet.getByRole('slider', { name: 'Playback position' });
+  await slider.scrollIntoViewIfNeeded();
+  await expect(slider).toBeVisible();
+});

@@ -581,10 +581,11 @@ export default function HealthProfilePanel() {
         <div className="mt-3 flex flex-wrap items-end gap-2">
           {!kid && (
             <>
-              <label className="text-[11px] text-slate-500">
+              <label htmlFor="health-log-weight" className="text-[11px] text-slate-500">
                 Log weight
                 <div className="mt-1 flex gap-1">
                   <input
+                    id="health-log-weight"
                     type="number"
                     min={1}
                     step={0.1}
