@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `f22e300d`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `300f0336`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **f22e300d**
-  (APK `versionCode` **489**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **300f0336**
+  (APK `versionCode` **490**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
   dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
@@ -33,9 +33,14 @@ Every claim below was verified against the live system unless marked **planned**
   migrations, per-loop worker leases, jittered retries, a digest-pinned base image whose Python
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
-  services' logs since it landed. APK: CI builds one per push under `services/ui/**` and the APK
-  `versionCode` rebuilds per push (489 is current; 488 was the previous), so the native work below
-  needs the newest APK on the phones. **APK 489** carries the guard overlay that draws over a
+  services' logs since it landed. **2026-10-27 shipped `300f0336`**: the whole browser suite was run
+  and its findings fixed (guards for an incomplete health summary and for missing media shelves, plus
+  the harness corrections), form labels were associated across the settings and trip screens, and the
+  unreachable "Restricted" device badge was removed. The `ui` service was the only one recreated; its
+  logs are clean and the four service probes pass. APK: CI builds one per push under `services/ui/**`
+  and the APK `versionCode` rebuilds per push (490 is current; 489 was the previous), so the native
+  work below needs the newest APK on the phones. **APK 490** carries the same guard overlay plus the
+  current UI bundle; **APK 489** carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
