@@ -475,6 +475,32 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     the admin log tail, the workspace mission list, Raven's lessons, the notification feed, the two
     media searches, the unified search and the favourites list are all bounded now (`Query(..., ge=1,
     le=...)`), and an absurd page size is a 422 rather than a whole table.
+14. The base image's trust store was a **2025-04-19 Mozilla snapshot** and `ca-certificates` was not
+    even named in the apt install list, so no rebuild ever refreshed it. It still trusted roots the
+    root programs have since distrusted - the **eMudhra/emSign roots** (the eight intermediates whose
+    private keys turned out to be recoverable, October 2026; Mozilla removed `emSign ECC Root CA - G3`
+    on Oct 20 and `emSign Root CA - C1` / `emSign ECC Root CA - C3` on Oct 21, and eMudhra left the
+    TLS business on Oct 22), `COMODO Certification Authority` (TLS distrust April 2026),
+    `GLOBALTRUST 2020`, the four Entrust roots, the three Trustwave roots plus `SecureTrust CA` and
+    `Secure Global CA`, `TeliaSonera Root CA v1`, `XRamp`, `Go Daddy Class 2`, `Starfield Class 2` and
+    `ePKI Root`. That matters because curl, Python and every service here read this store - a browser
+    update does not reach them. The package is now named and upgraded on every build (`apt-get install
+    --only-upgrade ca-certificates`; `trixie-security` currently offers nothing newer than
+    `20250419+deb13u1`, measured), and the eighteen distrusted roots that are actually present are
+    disabled in `/etc/ca-certificates.conf` with a build-time assertion. `emSign Root CA - G1` is
+    deliberately kept, because the root programs kept it. Verified in the real image: the bundle goes
+    from 148 to 130 certificates, every targeted root is disabled, and TLS still succeeds to
+    github.com, ghcr.io, huggingface.co, cloudflare.com and jarvis.sumemail.com.
+15. `pip-audit` on the base image found **18 advisories in three packages** that every Python service
+    carried: `filelock 3.32.3` (the `ReadWriteLock`/SQLite symlink issue, `CVE-2026-112940`), `pip 24.0`
+    and `setuptools 79.0.1`. The blocker was `safety`, an unused dev tool whose `filelock<4.0` pin held
+    the image back; it is gone, and `pip==26.2.2`, `setuptools==84.2.1`, `filelock==4.2.4` are pinned
+    now (`pip-audit` then reports no known vulnerabilities, and the embedder still returns 768 dims).
+    `pillow`'s 37 advisories needed no change: the current base already resolves `pillow 13.0.0` via
+    `fastembed 0.9.1`, so the containers still reporting `pillow 12.3.0` were simply on older images.
+16. Most non-root services ran with `HOME=/` (automation, bible, caddy, control_plane, dns, geo, health,
+    identity, logging, storage, telemetry, ui), so any tool that wanted a cache failed on the read-only
+    root - `pip-audit` in identity died with `PermissionError: '/.cache'`. Each now sets `HOME=/tmp`.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
 debug. They now warn once and then stay quiet for fifteen minutes
