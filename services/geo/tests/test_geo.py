@@ -303,12 +303,37 @@ def test_telemetry_moving(client, monkeypatch):
     assert "traveling at" in data["speech"]
 
 
-def test_vehicles_empty_by_default(client):
+def test_vehicles_report_a_store_outage_rather_than_no_vehicles(client):
+    """A store outage used to answer {"vehicles": []}.
+
+    The panel renders that as "No vehicles configured yet. Click Add Vehicle",
+    which is a claim about the household's data when the truth is that we could
+    not ask. It is a 503 now, and the panel says so.
+    """
+    r = client.get("/vehicles")
+    assert r.status_code == 503
+
+
+def test_vehicles_empty_by_default(client, monkeypatch):
+    import services.geo.main as geo
+
+    store: dict = {}
+
+    class FakeRedis:
+        async def hgetall(self, key):
+            return store.get(key, {})
+
+    async def fake_get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(geo, "get_redis", fake_get_redis)
+
     r = client.get("/vehicles")
     assert r.status_code == 200
     data = r.json()
     assert "vehicles" in data
     assert isinstance(data["vehicles"], list)
+    assert data["vehicles"] == []
 
 
 def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):

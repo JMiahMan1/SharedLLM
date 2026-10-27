@@ -1724,15 +1724,18 @@ async def get_vehicles():
     """List all user-configured vehicles (no mock data)."""
     r = await get_redis()
     if not r:
-        return {"vehicles": []}
+        raise HTTPException(status_code=503, detail="Vehicle store unavailable")
     try:
         data = await r.hgetall("geo:vehicles")
-        if not data:
-            return {"vehicles": []}
-        return {"vehicles": [json.loads(v) for v in data.values()]}
     except Exception as e:
+        # Returning [] here made a Redis outage look like "no vehicles
+        # configured", which the panel then invited the person to fix by adding
+        # one they already had.
         log.warning(f"[Geo] Error listing vehicles: {e}")
+        raise HTTPException(status_code=503, detail="Could not read the vehicles") from e
+    if not data:
         return {"vehicles": []}
+    return {"vehicles": [json.loads(v) for v in data.values()]}
 
 
 @app.post("/vehicles")
@@ -1768,7 +1771,7 @@ async def get_assigned_vehicle(user_id: str):
     r = await get_redis()
     clean_user = user_id.split(".")[-1].lower()
     if not r:
-        return {"user_id": clean_user, "vehicle_id": None, "vehicle": None}
+        raise HTTPException(status_code=503, detail="Vehicle store unavailable")
     vehicle_id = await r.get(f"geo:user_vehicle:{clean_user}")
     vehicle = None
     if vehicle_id and vehicle_id != "none":
@@ -2745,7 +2748,10 @@ async def get_trips(
     """
     r = await get_redis()
     if not r:
-        return {"trips": [], "total_trips": 0}
+        # An empty list reads as "no trips yet" and Wander says so. The store
+        # being down is not the same thing, and the client already knows how to
+        # show this (its load-error banner).
+        raise HTTPException(status_code=503, detail="Trip store unavailable")
 
     admin = str(is_admin or "").lower() in {"1", "true", "yes"}
     # Bounded: the client asks for the whole history (Wander groups it by

@@ -2293,7 +2293,12 @@ async def execute_entity_search(req: EntitySearchRequest):
     if not ctx.is_admin:
         permissions = await load_entity_permissions(ctx.user, ctx.is_admin)
 
-    all_states = await ha_client.get_states(ha_url, ha_token) or []
+    try:
+        all_states = await ha_client.get_states(ha_url, ha_token, strict=True)
+    except Exception as e:
+        # An empty list here used to mean "found 0 matching entities", which
+        # reads as a fact about the house rather than a failed read.
+        return _fail(f"Could not reach Home Assistant to search: {type(e).__name__}.", "entity_search")
     results = []
 
     search_terms = req.query.lower().split()
