@@ -491,6 +491,21 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     deliberately kept, because the root programs kept it. Verified in the real image: the bundle goes
     from 148 to 130 certificates, every targeted root is disabled, and TLS still succeeds to
     github.com, ghcr.io, huggingface.co, cloudflare.com and jarvis.sumemail.com.
+
+    **The two hosts need the same treatment, and a package upgrade is not enough.** The app server
+    (Fedora 43) still trusts the three eMudhra roots; the mailcow/Nextcloud host (AlmaLinux 10.2) still
+    trusts fourteen of the list above, including `COMODO Certification Authority`, `GLOBALTRUST 2020`
+    and the three Entrust roots. Both have a newer `ca-certificates` available, but downloading the
+    pending RPM without root and unpacking it shows it **still ships the same distrusted roots** - on
+    this family the bundle comes from a single `ca-bundle.trust.p11-kit` source, so removal means a
+    blocklist entry plus `update-ca-trust extract`. `scripts/fix_host_trust.sh` (copied to
+    `/home/jeremiah/fix_host_trust.sh` on both hosts) does exactly that: it splits the live bundle,
+    matches nineteen distrusted CNs (keeping `emSign Root CA - G1`), copies what it finds into
+    `/etc/pki/ca-trust/source/blocklist/`, rebuilds the store and prints what remains. `--dry-run`
+    reports 3 matches on 192.168.2.205 and 14 on 192.168.2.10. Neither host allows passwordless sudo,
+    so this is a documented manual step: `sudo dnf upgrade -y ca-certificates && sudo bash
+    /home/jeremiah/fix_host_trust.sh`. The public proxy (192.168.2.30) and Home Assistant
+    (192.168.2.20) are not reachable over ssh from the dev machine, so their stores are unmeasured.
 15. `pip-audit` on the base image found **18 advisories in three packages** that every Python service
     carried: `filelock 3.32.3` (the `ReadWriteLock`/SQLite symlink issue, `CVE-2026-112940`), `pip 24.0`
     and `setuptools 79.0.1`. The blocker was `safety`, an unused dev tool whose `filelock<4.0` pin held
