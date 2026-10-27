@@ -44,8 +44,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Bring the trust store up to what the root programs trust today.
 #
-# This image's ca-certificates is a 2025-04-19 Mozilla snapshot and Debian trixie
-# has no newer package, so the bundle still trusts roots that have since been
+# The package is upgraded first, so a future Debian bundle is picked up on a
+# rebuild; today `trixie-security` offers nothing newer than the installed
+# 20250419+deb13u1, which is a 2025-04-19 Mozilla snapshot, so the bundle still
+# trusts roots that have since been
 # distrusted: the eight eMudhra/emSign intermediates whose private keys turned out
 # to be recoverable (October 2026), the COMODO root (TLS distrust April 2026),
 # GLOBALTRUST 2020, the Entrust roots, the Trustwave roots, and older ones such as
@@ -55,7 +57,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # kept: the root programs kept it too. Nineteen names are listed and eighteen
 # exist in this bundle (`emSign ECC Root CA - G3` was never in Debian's), which is
 # what the assertion below allows for.
-RUN for root in \
+RUN apt-get update \
+ && apt-get install -y --only-upgrade --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && for root in \
         emSign_Root_CA_-_C1 \
         emSign_ECC_Root_CA_-_C3 \
         emSign_ECC_Root_CA_-_G3 \
@@ -154,11 +159,25 @@ RUN pip install --no-cache-dir \
     isort==9.0.2 \
     pre_commit==4.7.0 \
     bandit==1.9.4 \
-    safety==3.8.1 \
     pip_audit==2.10.1 \
     httpx==0.28.1 \
     requests-mock==1.12.1 \
     responses==0.26.3
+
+# The packaging tools ship in this image and both had 2026 advisories: pip 24.0
+# carries seven (fixed in 25.3 through 26.2) and setuptools 79.0.1 two (fixed in
+# 83.0.0 and 84.1.0). filelock 3.32.3 is in the same position - 4.2.1 fixes a
+# ReadWriteLock issue where SQLite reopened the lock database and its side files
+# by name, so a planted symlink or journal file in a writable parent could cause
+# an overwrite or unlink (CVE-2026-112940 and two siblings). `safety` used to be
+# installed here; it is not used by CI or any script, it pins filelock<4.0, and
+# that pin was what kept this image on the vulnerable filelock. pip-audit and
+# bandit remain for scanning. This runs last so the installs above still use the
+# resolver they were tested with.
+RUN pip install --no-cache-dir --upgrade \
+    pip==26.2.2 \
+    setuptools==84.2.1 \
+    filelock==4.2.4
 
 # Pre-download nomic-ai/nomic-embed-text-v1.5 model (cached across all services).
 # The download lands in /tmp/fastembed_cache owned by root, and the services that
