@@ -62,6 +62,35 @@ Every claim below was verified against the live system unless marked **planned**
 
 ### Recently shipped (newest first)
 
+- `2026-10-27` **The trust store, the advisories, and the last three un-audited areas**
+  (`docs/PRODUCTION_READINESS.md` §3.7 items 14-17 and §3.10). **The certificate trust store was
+  rebuilt:** the base image's bundle was a 2025-04-19 Mozilla snapshot and still trusted roots the
+  root programs have distrusted - the eMudhra/emSign roots whose intermediates turned out to have
+  recoverable private keys in October 2026, COMODO Certification Authority, GLOBALTRUST 2020, the
+  four Entrust roots and the Trustwave/SecureTrust/TeliaSonera/XRamp/Go Daddy/Starfield/ePKI roots.
+  `ca-certificates` is now named and upgraded on every build, and the eighteen distrusted roots that
+  are actually present are disabled with a build-time assertion (148 certificates down to 130, TLS
+  still working to github.com, ghcr.io, huggingface.co, cloudflare.com and our own hosts). **The two
+  hosts need the same step by hand** - neither allows passwordless sudo, and the pending RPM still
+  ships the same roots, so `scripts/fix_host_trust.sh` (also at `/home/jeremiah/fix_host_trust.sh` on
+  both) adds a blocklist entry and rebuilds the store: 3 roots on the app server, 14 on the mailcow
+  host. **Every Python service audits clean:** `pip-audit` found 18 advisories in filelock/pip/
+  setuptools that every service carried; the unused `safety` (which pinned `filelock<4`) is gone and
+  the three are pinned to their fixed versions, so all fourteen services now report no known
+  vulnerabilities, and `pillow` is 13.0.0 everywhere. **Every non-root service got a writable `HOME`**
+  (twelve of them ran with `HOME=/`, which made any tool that wants a cache fail). **The
+  certificate-expiry alert now watches something:** `alert_tls_hosts` was empty, so it watched
+  nothing; it now covers six real hostnames, and `ha.sumemail.com` is inside the 14-day window and not
+  renewing (12 days) - a household step, on a host this machine cannot reach. **The app no longer
+  trusts user-installed CAs** (system roots only, §3.9 A9). **A seeded administrator password is
+  visible:** the account list marks an account that still signs in with `DEFAULT_ADMIN_PASSWORD`
+  (alongside the "No password" mark for the two members who cannot sign in at all). **And the last
+  three un-audited areas are done:** Home Assistant and device control, Wander, and
+  storage/artifacts/RAG - a failed read no longer renders as an empty house, an empty folder or a row
+  of zeros, destructive taps ask in the app's own dialog, opening a lock or a cover asks, trip-map
+  place names are escaped, and the RAG search answers 503 instead of pretending the index is empty
+  (§3.10).
+
 - `2026-10-26` **Android client, account lifecycle and first-load weight** (the tail of the
   production-readiness program; `docs/PRODUCTION_READINESS.md` §3.9). **Signing out now signs out:**
   `logout` awaited nothing before navigating, and on Android the key is mirrored into the native
