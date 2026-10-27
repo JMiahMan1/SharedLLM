@@ -59,6 +59,7 @@ const Artifacts = () => {
   const [hardDelete, setHardDelete] = useState<Artifact | null>(null);
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const limit = 50;
 
   const usage = useQuery({
@@ -140,11 +141,17 @@ const Artifacts = () => {
   const openPreview = useMutation({
     mutationFn: (artifact: Artifact) => api.getArtifactDownloadUrl(artifact.id),
     onSuccess: (data) => setPreviewUrl(data.url),
-    onError: (error) => toast.error(errorText(error, 'Could not open the artifact')),
+    // The modal renders "Preparing preview…" until previewUrl is set, so a
+    // failure used to leave it there for good. Keep the message on screen.
+    onError: (error) => {
+      setPreviewError(errorText(error, 'Could not open the artifact'));
+      toast.error(errorText(error, 'Could not open the artifact'));
+    },
   });
 
   const openPreviewFor = (artifact: Artifact) => {
     setPreviewUrl('');
+    setPreviewError(null);
     setPreview(artifact);
     openPreview.mutate(artifact);
   };
@@ -287,17 +294,19 @@ const Artifacts = () => {
                     <>
                       <button
                         onClick={() => openPreviewFor(artifact)}
+                        disabled={openPreview.isPending && openPreview.variables?.id === artifact.id}
                         aria-label={`Preview ${title(artifact)}`}
                         title="Preview"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
                       >
                         <Eye size={17} />
                       </button>
                       <button
                         onClick={() => download.mutate(artifact)}
+                        disabled={download.isPending && download.variables?.id === artifact.id}
                         aria-label={`Download ${title(artifact)}`}
                         title="Download"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
                       >
                         <Download size={17} />
                       </button>
@@ -311,9 +320,10 @@ const Artifacts = () => {
                       </button>
                       <button
                         onClick={() => remove.mutate(artifact)}
+                        disabled={remove.isPending && remove.variables?.id === artifact.id}
                         aria-label={`Delete ${title(artifact)}`}
-                        title="Delete"
-                        className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10"
+                        title="Delete (recoverable for a day)"
+                        className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
                       >
                         <Trash2 size={17} />
                       </button>
@@ -323,6 +333,7 @@ const Artifacts = () => {
                     <>
                       <button
                         onClick={() => restore.mutate(artifact)}
+                        disabled={restore.isPending && restore.variables?.id === artifact.id}
                         className="px-2.5 py-1.5 rounded-lg text-xs text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 flex items-center gap-1.5"
                       >
                         <RotateCcw size={14} /> Restore
@@ -367,7 +378,18 @@ const Artifacts = () => {
       )}
 
       <Modal isOpen={Boolean(preview)} onClose={() => { setPreview(null); setPreviewUrl(''); }} title={preview ? title(preview) : 'Artifact'} size="4xl">
-        {!previewUrl ? (
+        {previewError ? (
+          <div className="text-sm text-amber-200">
+            {previewError}
+            <button
+              type="button"
+              onClick={() => preview && openPreview.mutate(preview)}
+              className="mt-2 block font-semibold text-amber-300 underline hover:text-amber-200"
+            >
+              Try again
+            </button>
+          </div>
+        ) : !previewUrl ? (
           <p className="text-sm text-slate-400">Preparing preview…</p>
         ) : preview?.kind === 'image' ? (
           <img src={previewUrl} alt={preview.name} className="max-h-[70vh] mx-auto rounded-xl" />

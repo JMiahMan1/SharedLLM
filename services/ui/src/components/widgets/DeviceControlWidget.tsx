@@ -30,6 +30,7 @@ import {
 import toast from 'react-hot-toast';
 import TokenBridge from '../../plugins/tokenBridge';
 import { confirmDialog } from '../ui/confirmDialog';
+import { errorText } from '../../lib/errorText';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -122,6 +123,9 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   // Assignments & Users
   const [assignments, setAssignments] = useState<{ id: number; device_id: string; username: string }[]>([]);
   const [allUsers, setAllUsers] = useState<{ username: string; display_name?: string }[]>([]);
+  const [pendingEntity, setPendingEntity] = useState<string | null>(null);
+  // The assignment read is separate: a failure used to look like "nobody can use this".
+  const [assignmentsError, setAssignmentsError] = useState(false);
 
   // Detailed modal
   const [selectedDevice, setSelectedDevice] = useState<DeviceEntry | null>(null);
@@ -182,9 +186,12 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     try {
       const userDevices = await api.getDevices();
       setAssignments(userDevices);
+      setAssignmentsError(false);
     } catch (err) {
       console.error('Failed to load device assignments:', err);
-      // Non-fatal; keep whatever assignments we already had
+      // Keep whatever assignments we already had, but say the read failed: the
+      // "who can use it" boxes otherwise render an authoritative empty set.
+      setAssignmentsError(true);
     }
 
     // Who devices can be shared with, for the assignment panel (isolated).
@@ -258,19 +265,41 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       }
     }
 
+    // Opening a lock or a cover was a single unconfirmed tap, and the garage
+    // case above only asked when presence said away.
+    const opensSomething =
+      service === 'unlock' || service === 'open_cover' || service === 'turn_on' && /(lock|garage|cover|gate)/.test(entityId.toLowerCase());
+    if (opensSomething && !wantsGarageOpen) {
+      const ok = await confirmDialog({
+        title: 'Open it?',
+        body: `Send ${service.replace('_', ' ')} to ${entityId}?`,
+        confirmLabel: 'Open',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
+    setPendingEntity(entityId);
     try {
-      await apiClient.post('/execute/ha_service', {
+      const resp = await apiClient.post('/execute/ha_service', {
         domain,
         service,
         entity_id: entityId,
         service_data: serviceData ?? null,
       });
+      // A refused command arrives as a FAILURE body with HTTP 200, so this used
+      // to toast "Command sent" for a device the person may not touch.
+      if (resp.data?.status === 'FAILURE') {
+        throw new Error(resp.data.message || 'Home Assistant refused that');
+      }
       toast.success('Command sent');
       // Refresh device states in background after HA executes
       loadDevices();
     } catch (err) {
       console.error('HA Service Error:', err);
-      toast.error('Failed to send command. Check Home Assistant connection.');
+      toast.error(errorText(err, 'Could not send that command. Check Home Assistant.'));
+    } finally {
+      setPendingEntity(null);
     }
   }, [hasControlPermission, loadDevices, isAwayFromHome]);
 
@@ -507,7 +536,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           {getToggleAction(device.domain, device.state) ? (
             <button
               onClick={() => toggleDevice(device.entity_id, device.state)}
-              disabled={!hasControl}
+              disabled={!hasControl || pendingEntity === device.entity_id}
               className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 pointer-coarse:min-h-11 ${
                 isDeviceActive
                   ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
@@ -1083,9 +1112,17 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 <legend className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
                   <Shield size={12} className="text-indigo-400" /> Who can use it
                 </legend>
-                <p className="text-[10px] text-slate-500">
-                  Everyone ticked can control it, as can anyone whose role covers every device.
-                </p>
+                {assignmentsError ? (
+                  // An unticked box is a claim about access; say when we could
+                  // not read who actually has it.
+                  <p className="text-[10px] text-amber-200">
+                    Could not read who can use this device. Reopen the panel to try again.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-slate-500">
+                    Everyone ticked can control it, as can anyone whose role covers every device.
+                  </p>
+                )}
                 {allUsers.map((u) => (
                   <label key={u.username} className="flex items-center gap-3 min-h-11 rounded-xl px-3 bg-slate-950/20 text-sm text-slate-200">
                     <input

@@ -6,6 +6,10 @@ import type { EntityProtection, UserProfile } from '../types/api';
 import { renderWithProviders } from './render';
 import { server } from './setup';
 
+
+// Destructive actions draw the app's own dialog now, not the browser's.
+vi.mock('../components/ui/confirmDialog', () => ({ confirmDialog: vi.fn(async () => true) }));
+
 vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }));

@@ -4,8 +4,10 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import Toggle from '../ui/Toggle';
+import { confirmDialog } from '../ui/confirmDialog';
 import LocationBackgroundNotice from './LocationBackgroundNotice';
 import toast from 'react-hot-toast';
+import { errorText } from '../../lib/errorText';
 import {
   MapPin,
   Satellite,
@@ -102,6 +104,9 @@ const LocationPanel = () => {
   const [lookupOptions, setLookupOptions] = useState<Array<{ text: string; value: string }>>([]);
   const [lookupOption, setLookupOption] = useState('');
   const [isLoadingLookup, setIsLoadingLookup] = useState(false);
+  // The Year/Make/Model lookups used to fail into an empty select with no
+  // message at all.
+  const [lookupError, setLookupError] = useState<string | null>(null);
   const [fuelPriceSource, setFuelPriceSource] = useState('');
   const [fuelPriceZip, setFuelPriceZip] = useState('');
   const [isLoadingFuelPrice, setIsLoadingFuelPrice] = useState(false);
@@ -109,62 +114,49 @@ const LocationPanel = () => {
   const [isLoadingVin, setIsLoadingVin] = useState(false);
   const [lastFetchedPrices, setLastFetchedPrices] = useState<{ regular?: number | null; midgrade?: number | null; premium?: number | null; diesel?: number | null } | null>(null);
 
-  const username = user?.username || 'jeremiah';
+  // No fallback to a name: reading the admin's vehicle while the profile is
+  // still loading would show one person's car to another.
+  const username = user?.username;
+  const [loadErrors, setLoadErrors] = useState<{ vehicles?: string; telemetry?: string }>({});
+  const [deletingVehicleId, setDeletingVehicleId] = useState<string | null>(null);
 
   const refreshData = useCallback(async () => {
-    try {
-      setLoadingTelemetry(true);
-      const [vehRes, assignRes, telemRes] = await Promise.allSettled([
-        api.getVehicles(),
-        api.getAssignedVehicle(username),
-        api.getGeoTelemetry(username, 24)
-      ]);
+    if (!username) return;
+    setLoadingTelemetry(true);
+    const [vehRes, assignRes, telemRes] = await Promise.allSettled([
+      api.getVehicles(),
+      api.getAssignedVehicle(username),
+      api.getGeoTelemetry(username, 24),
+    ]);
 
-      if (vehRes.status === 'fulfilled' && vehRes.value?.vehicles) {
-        setVehicles(vehRes.value.vehicles);
-      }
-      if (assignRes.status === 'fulfilled' && assignRes.value) {
-        setAssignedVehicleId(assignRes.value.vehicle_id || null);
-      }
-      if (telemRes.status === 'fulfilled' && telemRes.value) {
-        setTelemetry(telemRes.value);
-      }
-    } catch (err) {
-      console.error('Failed to load location/vehicle data:', err);
-    } finally {
-      setLoadingTelemetry(false);
+    // Each source is reported separately. A failed read used to leave the panel
+    // saying "No vehicles configured yet" and a telemetry block of zeros, as if
+    // those were facts about the household.
+    const errors: { vehicles?: string; telemetry?: string } = {};
+    if (vehRes.status === 'fulfilled' && vehRes.value?.vehicles) {
+      setVehicles(vehRes.value.vehicles);
+    } else if (vehRes.status === 'rejected') {
+      errors.vehicles = errorText(vehRes.reason, 'Could not read your vehicles');
     }
+    if (assignRes.status === 'fulfilled' && assignRes.value) {
+      setAssignedVehicleId(assignRes.value.vehicle_id || null);
+    }
+    if (telemRes.status === 'fulfilled' && telemRes.value) {
+      setTelemetry(telemRes.value);
+    } else if (telemRes.status === 'rejected') {
+      errors.telemetry = errorText(telemRes.reason, 'Could not read the vehicle telemetry');
+    }
+    setLoadErrors(errors);
+    setLoadingTelemetry(false);
   }, [username]);
 
   useEffect(() => {
-    let active = true;
-    const init = async () => {
-      try {
-        const [vehRes, assignRes, telemRes] = await Promise.allSettled([
-          api.getVehicles(),
-          api.getAssignedVehicle(username),
-          api.getGeoTelemetry(username, 24)
-        ]);
-
-        if (!active) return;
-        if (vehRes.status === 'fulfilled' && vehRes.value?.vehicles) {
-          setVehicles(vehRes.value.vehicles);
-        }
-        if (assignRes.status === 'fulfilled' && assignRes.value) {
-          setAssignedVehicleId(assignRes.value.vehicle_id || null);
-        }
-        if (telemRes.status === 'fulfilled' && telemRes.value) {
-          setTelemetry(telemRes.value);
-        }
-      } catch (err) {
-        console.error('Failed to load location/vehicle data:', err);
-      }
-    };
-    void init();
-    return () => {
-      active = false;
-    };
-  }, [username]);
+    // Deferred a tick: the loader sets a loading flag immediately, and setting
+    // state synchronously inside an effect cascades a render (and React warns
+    // about it).
+    const id = window.setTimeout(() => void refreshData(), 0);
+    return () => window.clearTimeout(id);
+  }, [refreshData]);
 
   const handleToggleTracking = () => {
     trigger('light');
@@ -179,6 +171,7 @@ const LocationPanel = () => {
     trigger('light');
     const newId = vehicleId === 'none' ? null : vehicleId;
     try {
+      if (!username) return;
       await api.assignVehicle(username, newId);
       setAssignedVehicleId(newId);
       toast.success(newId ? 'Designated vehicle updated' : 'No vehicle designated');
@@ -229,6 +222,7 @@ const LocationPanel = () => {
 
       // If user had no vehicle assigned, assign this one automatically
       if (!assignedVehicleId) {
+        if (!username) return;
         await api.assignVehicle(username, vehicleId);
         setAssignedVehicleId(vehicleId);
       }
@@ -244,6 +238,15 @@ const LocationPanel = () => {
 
   const handleDeleteVehicle = async (vehicleId: string, vehicleName: string) => {
     trigger('medium');
+    // One tap used to remove a vehicle profile outright.
+    const ok = await confirmDialog({
+      title: 'Delete this vehicle?',
+      body: `Remove ${vehicleName}? Its fuel economy and cost settings are gone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    setDeletingVehicleId(vehicleId);
     try {
       await api.deleteVehicle(vehicleId);
       toast.success(`Removed ${vehicleName}`);
@@ -253,7 +256,9 @@ const LocationPanel = () => {
       await refreshData();
     } catch (err) {
       console.error('Failed to delete vehicle:', err);
-      toast.error('Could not delete vehicle');
+      toast.error(errorText(err, 'Could not delete that vehicle'));
+    } finally {
+      setDeletingVehicleId(null);
     }
   };
 
@@ -263,8 +268,8 @@ const LocationPanel = () => {
       const data = await api.getVehicleLookupYears();
       const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
       setLookupYears([...items].reverse());
-    } catch {
-      console.error('Failed to load vehicle years');
+    } catch (err) {
+      setLookupError(errorText(err, 'Could not reach the vehicle database'));
     }
   };
 
@@ -277,13 +282,14 @@ const LocationPanel = () => {
     setLookupModels([]);
     setLookupOptions([]);
     if (!year) return;
+    setLookupError(null);
     try {
       setIsLoadingLookup(true);
       const data = await api.getVehicleLookupMakes(parseInt(year));
       const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
       setLookupMakes(items);
-    } catch {
-      console.error('Failed to load makes');
+    } catch (err) {
+      setLookupError(errorText(err, 'Could not reach the vehicle database'));
     } finally {
       setIsLoadingLookup(false);
     }
@@ -296,13 +302,14 @@ const LocationPanel = () => {
     setLookupModels([]);
     setLookupOptions([]);
     if (!make || !lookupYear) return;
+    setLookupError(null);
     try {
       setIsLoadingLookup(true);
       const data = await api.getVehicleLookupModels(parseInt(lookupYear), make);
       const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
       setLookupModels(items);
-    } catch {
-      console.error('Failed to load models');
+    } catch (err) {
+      setLookupError(errorText(err, 'Could not reach the vehicle database'));
     } finally {
       setIsLoadingLookup(false);
     }
@@ -322,8 +329,8 @@ const LocationPanel = () => {
       if (items.length === 1) {
         handleOptionChange((items[0] as { text: string; value: string }).value);
       }
-    } catch {
-      console.error('Failed to load options');
+    } catch (err) {
+      setLookupError(errorText(err, 'Could not reach the vehicle database'));
     } finally {
       setIsLoadingLookup(false);
     }
@@ -522,6 +529,21 @@ const LocationPanel = () => {
           </button>
         </div>
 
+        {loadErrors.telemetry && (
+          // The tiles below used to print 0.0 mph, 0.0 mi and $0.00 on a failed
+          // read - numbers that look measured but are not.
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            {loadErrors.telemetry}
+            <button
+              type="button"
+              onClick={() => void refreshData()}
+              className="mt-1 block font-semibold text-amber-300 underline hover:text-amber-200"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
         {/* Status Badges Grid */}
         <div className="grid grid-cols-2 gap-2.5">
           {/* Current Zone */}
@@ -552,8 +574,8 @@ const LocationPanel = () => {
             </div>
             <p className="text-white text-sm font-semibold truncate">
               {telemetry?.is_moving
-                ? `${typeof telemetry?.current_speed_mph === 'number' ? telemetry.current_speed_mph.toFixed(0) : '0'} mph`
-                : telemetry?.dwell_time_formatted || 'Stationary'}
+                ? `${typeof telemetry?.current_speed_mph === 'number' ? telemetry.current_speed_mph.toFixed(0) : '—'} mph`
+                : telemetry?.dwell_time_formatted || (telemetry ? 'Stationary' : '—')}
             </p>
             <p className="text-[11px] text-slate-400 truncate mt-0.5">
               {telemetry?.is_moving ? 'Traveling' : `Stationary for ${telemetry?.dwell_time_formatted || '0m'}`}
@@ -567,7 +589,7 @@ const LocationPanel = () => {
               <span>Top Speed Today</span>
             </div>
             <p className="text-white text-sm font-semibold">
-              {typeof telemetry?.top_speed_mph === 'number' ? `${telemetry.top_speed_mph.toFixed(1)} mph` : '0.0 mph'}
+              {typeof telemetry?.top_speed_mph === 'number' ? `${telemetry.top_speed_mph.toFixed(1)} mph` : '—'}
             </p>
           </div>
 
@@ -578,7 +600,7 @@ const LocationPanel = () => {
               <span>Traveled Today</span>
             </div>
             <p className="text-white text-sm font-semibold">
-              {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
+              {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '—'}
             </p>
           </div>
         </div>
@@ -602,6 +624,10 @@ const LocationPanel = () => {
           </div>
         )}
       </div>
+
+      {lookupError && (
+        <p className="text-xs text-amber-200">{lookupError}</p>
+      )}
 
       {/* 3. Vehicle Designation & Travel Cost */}
       <div className="glass-panel rounded-2xl p-4 space-y-4">
@@ -656,7 +682,7 @@ const LocationPanel = () => {
               <div>
                 <p className="text-[10px] text-slate-400">Distance</p>
                 <p className="text-xs font-bold text-white">
-                  {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
+                  {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '—'}
                 </p>
               </div>
               <div>
@@ -912,7 +938,18 @@ const LocationPanel = () => {
             )}
 
             {/* List of Vehicles */}
-            {vehicles.length === 0 ? (
+            {loadErrors.vehicles ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                {loadErrors.vehicles}
+                <button
+                  type="button"
+                  onClick={() => void refreshData()}
+                  className="mt-1 block font-semibold text-amber-300 underline hover:text-amber-200"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : vehicles.length === 0 ? (
               <div className="text-center py-4 text-xs text-slate-400">
                 No vehicles configured yet. Click "Add Vehicle" above to configure your car or truck.
               </div>
@@ -954,8 +991,9 @@ const LocationPanel = () => {
                         </button>
                       )}
                       <button
-                        onClick={() => handleDeleteVehicle(v.id, v.name)}
-                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                        onClick={() => void handleDeleteVehicle(v.id, v.name)}
+                        disabled={deletingVehicleId === v.id}
+                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
                         title="Delete vehicle"
                       >
                         <Trash2 size={14} />

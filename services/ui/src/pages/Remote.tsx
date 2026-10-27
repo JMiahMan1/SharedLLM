@@ -44,6 +44,12 @@ const Remote = () => {
     queryKey: ['remote-media-status'],
     queryFn: async () => {
       const resp = await api.mediaStatus();
+      // The handler answers "Could not retrieve HA states." as a FAILURE body
+      // with HTTP 200, which left this list empty and the page saying there are
+      // no TVs or speakers in the house.
+      if (resp.status === 'FAILURE') {
+        throw new Error(resp.message || 'Could not read your players');
+      }
       const all = ((resp.detail as { all_players?: MediaStatus[] } | undefined)?.all_players || [])
         .filter((p) => p.entity_id && p.entity_id !== 'web_player');
       // TVs first, then whatever is reachable.

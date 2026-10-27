@@ -6,6 +6,7 @@ import { api } from '../../services/api';
 import type { EntityProtection, UserProfile } from '../../types/api';
 import EntitySearchDropdown from '../ui/EntitySearchDropdown';
 import HelpTooltip from '../ui/HelpTooltip';
+import { confirmDialog } from '../ui/confirmDialog';
 
 /**
  * Admin control over which Home Assistant entities normal users may touch.
@@ -243,14 +244,24 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
               <button
                 type="button"
                 disabled={saveMutation.isPending}
-                onClick={() =>
-                  saveMutation.mutate({
-                    entityId: protection.entity_id,
-                    protected: false,
-                    permitted: [],
-                    note: null,
-                  })
-                }
+                onClick={async () => {
+                  // Releasing protection removes a security lock; one tap was
+                  // enough, and it is not a thing to do by accident.
+                  const ok = await confirmDialog({
+                    title: 'Release this protection?',
+                    body: `Stop guarding ${protection.entity_id}? Anyone who can reach Home Assistant can use it again.`,
+                    confirmLabel: 'Release',
+                    danger: true,
+                  });
+                  if (ok) {
+                    saveMutation.mutate({
+                      entityId: protection.entity_id,
+                      protected: false,
+                      permitted: [],
+                      note: null,
+                    });
+                  }
+                }}
                 className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40 pointer-coarse:min-h-11"
                 aria-label={`Release protection for ${protection.entity_id}`}
               >

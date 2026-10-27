@@ -2484,6 +2484,12 @@ export const api = {
 
   async getEntities(): Promise<{ entity_id: string; friendly_name: string; state: string; domain: string }[]> {
     const resp = await apiClient.get('/api/entities');
+    // A FAILURE body (no Home Assistant credentials) used to return an empty
+    // list, so the dropdown said "No entities found" instead of naming the
+    // missing configuration.
+    if (resp.data?.status === 'FAILURE') {
+      throw new Error(resp.data.message || 'Could not read the entities');
+    }
     return resp.data.entities || [];
   },
 
@@ -3736,6 +3742,12 @@ export const api = {
       state: null,
       limit: 500,
     });
+    // The execution service answers a refused or failed read as a FAILURE body
+    // with HTTP 200. Left alone, that rendered as "No favourite devices yet" -
+    // a claim about the house when the truth was that we could not ask.
+    if (resp.data?.status === 'FAILURE') {
+      throw new Error(resp.data.message || 'Could not read your devices');
+    }
     return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
       const ts = e.last_updated || e.last_changed;
       let lastActivated: number | undefined;
@@ -3763,6 +3775,12 @@ export const api = {
       entity_id: entityId,
       service_data: null,
     });
+    // A refused command arrives as a FAILURE body with HTTP 200, so without
+    // this the widget toasted "Command sent" for a lock it was not allowed to
+    // touch. `Remote`'s transport call has always checked it; now these do too.
+    if (resp.data?.status === 'FAILURE') {
+      throw new Error(resp.data.message || 'Home Assistant refused that');
+    }
     return resp.data;
   },
 
@@ -3782,6 +3800,9 @@ export const api = {
       entity_id: entityId,
       service_data: serviceData ?? null,
     });
+    if (resp.data?.status === 'FAILURE') {
+      throw new Error(resp.data.message || 'Home Assistant refused that');
+    }
     return resp.data;
   },
 

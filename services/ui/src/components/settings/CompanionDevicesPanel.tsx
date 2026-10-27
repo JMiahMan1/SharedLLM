@@ -143,6 +143,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
       setFound(list);
     },
     onError: () => setFound([]),
+    // `discover.isError` is what tells the empty state apart from a failed scan.
   });
 
   const start = useMutation({
@@ -217,7 +218,12 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                     <Loader2 size={16} className="animate-spin" /> Looking for devices on your network…
                   </p>
                 )}
-                {found && found.length === 0 && !discover.isPending && (
+                {discover.isError && !discover.isPending && (
+                  <p className="text-sm text-amber-200">
+                    Could not search the network. Try again, or enter the address below.
+                  </p>
+                )}
+                {!discover.isError && found && found.length === 0 && !discover.isPending && (
                   <p className="text-sm text-slate-400">No new devices found. Enter its address below.</p>
                 )}
                 {found?.map((d) => (

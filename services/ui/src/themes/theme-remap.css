@@ -146,6 +146,7 @@
 [data-theme-scheme="dark"] .text-amber-300\/70 { color: color-mix(in srgb, oklch(87.9% 0.169 91.605) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-400\/70 { color: color-mix(in srgb, oklch(82.8% 0.189 84.429) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-amber-500\/40 { color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 85%, transparent) !important; }
+[data-theme-scheme="dark"] .text-amber-500\/60 { color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-emerald-400\/70 { color: color-mix(in srgb, oklch(76.5% 0.177 163.223) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-400\/60 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-400\/70 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
@@ -307,6 +308,7 @@
 [data-theme-scheme="light"] .text-amber-400\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-500 { color: oklch(55.5% 0.163 48.998) !important; }
 [data-theme-scheme="light"] .text-amber-500\/40 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 40%, transparent) !important; }
+[data-theme-scheme="light"] .text-amber-500\/60 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-amber-500\/80 { color: color-mix(in srgb, oklch(55.5% 0.163 48.998) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-blue-300 { color: oklch(48.8% 0.243 264.376) !important; }
 [data-theme-scheme="light"] .text-blue-400 { color: oklch(48.8% 0.243 264.376) !important; }

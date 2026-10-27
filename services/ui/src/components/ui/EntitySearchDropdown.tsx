@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { createPortal } from 'react-dom';
+import { errorText } from '../../lib/errorText';
 
 interface EntitySearchDropdownProps {
   value: string;
@@ -32,7 +33,12 @@ export default function EntitySearchDropdown({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { data: entities = [] } = useQuery({
+  const {
+    data: entities = [],
+    isError: entitiesError,
+    error: entitiesErrorObj,
+    refetch: refetchEntities,
+  } = useQuery({
     queryKey: ['ha-entities'],
     queryFn: () => api.getEntities(),
     staleTime: 60_000,
@@ -110,7 +116,21 @@ export default function EntitySearchDropdown({
       className="entity-dropdown-portal fixed z-[100] max-h-64 overflow-auto rounded-xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl"
       style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
     >
-      {filtered.length === 0 ? (
+      {entitiesError ? (
+        // A failed read is not "no entities found": an admin adding an alert or
+        // a lock needs to know the difference before concluding the house has
+        // none.
+        <div className="px-4 py-3 text-sm text-amber-200">
+          {errorText(entitiesErrorObj, 'Could not load entities')}
+          <button
+            type="button"
+            onClick={() => void refetchEntities()}
+            className="mt-1 block text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+          >
+            Try again
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="px-4 py-3 text-sm text-slate-500">No entities found</div>
       ) : (
         <ul className="py-1">

@@ -156,6 +156,9 @@ const KnowledgeHub = () => {
   const {
     data: learnings,
     isLoading: learningsLoading,
+    isError: learningsError,
+    error: learningsErrorObj,
+    refetch: refetchLearnings,
   } = useQuery({
     queryKey: ['raven-learnings', learningSort],
     queryFn: () => api.getRavenLearnings(200, learningSort),
@@ -221,7 +224,7 @@ const KnowledgeHub = () => {
       toast.success('Lesson deleted');
       queryClient.invalidateQueries({ queryKey: ['raven-learnings'] });
     },
-    onError: () => toast.error('Failed to delete lesson'),
+    onError: (err: Error) => toast.error(errorDetail(err, 'Could not delete that lesson')),
   });
 
   const saveLearningMutation = useMutation({
@@ -232,7 +235,7 @@ const KnowledgeHub = () => {
       setEditLearning(null);
       queryClient.invalidateQueries({ queryKey: ['raven-learnings'] });
     },
-    onError: () => toast.error('Failed to update lesson'),
+    onError: (err: Error) => toast.error(errorDetail(err, 'Could not update that lesson')),
   });
 
   const indexMutation = useMutation({
@@ -430,7 +433,7 @@ const KnowledgeHub = () => {
           <div className="relative z-10">
             <p className="text-sm font-medium text-slate-400">Total Chunks</p>
             <h3 className="text-4xl font-bold text-white mt-2">
-              {statsLoading ? '...' : stats?.total_chunks?.toLocaleString() ?? '0'}
+              {statsLoading ? '...' : statsError ? '—' : stats?.total_chunks?.toLocaleString() ?? '0'}
             </h3>
             {stats?.breakdown && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-slate-500">
@@ -453,7 +456,7 @@ const KnowledgeHub = () => {
           <div className="relative z-10">
             <p className="text-sm font-medium text-slate-400">Documents Ingested</p>
             <h3 className="text-4xl font-bold text-indigo-400 mt-2">
-              {statsLoading ? '...' : stats?.total_documents?.toLocaleString() ?? '0'}
+              {statsLoading ? '...' : statsError ? '—' : stats?.total_documents?.toLocaleString() ?? '0'}
             </h3>
             {stats?.breakdown && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] font-black uppercase tracking-tighter text-indigo-400/50">
@@ -478,9 +481,11 @@ const KnowledgeHub = () => {
             <h3 className="text-xl font-bold text-white mt-2">
               {statsLoading
                 ? '...'
-                : stats?.last_indexed
-                  ? new Date(stats.last_indexed).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-                  : 'Never'}
+                : statsError
+                  ? '—'
+                  : stats?.last_indexed
+                    ? new Date(stats.last_indexed).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                    : 'Never'}
             </h3>
             <div className="mt-4 flex flex-wrap gap-2">
                {Object.entries(stats?.breakdown ?? {}).filter(([, s]) => s.chunks > 0).map(([name]) => (
@@ -767,6 +772,22 @@ const KnowledgeHub = () => {
             <div className="glass-panel p-6 text-center text-slate-500 text-sm">
                <RefreshCw size={18} className="animate-spin mx-auto mb-2 text-indigo-400" />
                Loading Raven lessons…
+            </div>
+         ) : learningsError ? (
+            // A failed read used to render as "No Raven lessons yet", which says
+            // the brain has learned nothing rather than that we could not ask.
+            <div className="glass-panel p-6 text-center border-amber-500/30">
+               <Brain size={28} className="mx-auto mb-2 text-amber-500/60" />
+               <p className="text-amber-200 text-sm font-medium">
+                 {errorDetail(learningsErrorObj, 'Could not load Raven lessons')}
+               </p>
+               <button
+                 type="button"
+                 onClick={() => void refetchLearnings()}
+                 className="glass-button mt-3 inline-flex min-h-10 items-center px-3 text-xs font-semibold pointer-coarse:min-h-11"
+               >
+                 Try again
+               </button>
             </div>
          ) : !learnings || learnings.items.length === 0 ? (
             <div className="glass-panel p-6 text-center border-white/5">
