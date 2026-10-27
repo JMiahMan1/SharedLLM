@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trust only the system roots.
+
+  This used to also trust `user` certificates, which means any CA a person (or a
+  malicious app prompting them) installs on the phone could read and rewrite
+  every request the app makes - the API key, the chat, the location reports. The
+  household's own server uses a real certificate, so the system store is enough.
+
+  Cleartext stays permitted because a server URL can be a plain http:// address
+  on the LAN, and Android's network security config cannot express "private
+  ranges only" (see docs/PRODUCTION_READINESS.md, the accepted risk).
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>
