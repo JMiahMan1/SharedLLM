@@ -6,9 +6,9 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `300f0336`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `764ebd31`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **300f0336**
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **764ebd31**
   (APK `versionCode` **490**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
@@ -30,11 +30,12 @@ Every claim below was verified against the live system unless marked **planned**
   migrations, per-loop worker leases, jittered retries, a digest-pinned base image whose Python
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
-  services' logs since it landed. **2026-10-27 shipped `300f0336`**: the whole browser suite was run
-  and its findings fixed (guards for an incomplete health summary and for missing media shelves, plus
-  the harness corrections), form labels were associated across the settings and trip screens, and the
-  unreachable "Restricted" device badge was removed. The `ui` service was the only one recreated; its
-  logs are clean and the four service probes pass. APK: CI builds one per push under `services/ui/**`
+  services' logs since it landed. **2026-10-27 shipped `300f0336` and `764ebd31`**: the whole browser suite
+  was run and its findings fixed (guards for an incomplete health summary and for missing media shelves,
+  plus the harness corrections), every `<label>` and visible form control across the UI was associated
+  (`src/test/formLabels.test.ts`), the Media Overhaul QA ledger reached 53/53 PASS (`UX-12`, `UX-32`,
+  `UX-33`, `UX-41`, `UX-47`, `UX-48`, `UX-51`), and the unreachable "Restricted" device badge was removed.
+  The `ui` service was the only one recreated; its logs are clean and the four service probes pass. APK: CI builds one per push under `services/ui/**`
   and the APK `versionCode` rebuilds per push (490 is current; 489 was the previous), so the native
   work below needs the newest APK on the phones. **APK 490** carries the same guard overlay plus the
   current UI bundle; **APK 489** carries the guard overlay that draws over a
