@@ -183,6 +183,7 @@ export default function EntityMultiSelect({
             setIsOpen(true);
           }}
           onFocus={() => setIsOpen(true)}
+          aria-label={placeholder || 'Search entities'}
           placeholder={values.length === 0 ? placeholder : 'Add more entities...'}
           className="glass-input w-full pl-9"
         />

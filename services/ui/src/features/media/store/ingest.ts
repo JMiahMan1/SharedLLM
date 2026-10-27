@@ -22,7 +22,7 @@ export const VOLUME_GRACE_MS = 1500;
 export interface PlayerEventPayload {
   output_id: string;
   state?: string;
-  item?: { uri?: string; title?: string; artists?: string[]; album?: string; image?: string; duration?: number | null } | null;
+  item?: { uri?: string; title?: string; artists?: string[]; album?: string; image?: string; duration?: number | null; media_type?: string | null } | null;
   position?: number | null;
   position_updated_at?: string | number | null;
   volume?: number | null;
@@ -61,6 +61,14 @@ export const EMPTY_PLAYERS: PlayersState = { players: {}, volumeTouchedAt: {}, w
 export function toStatus(state: string | undefined | null): PlaybackStatus {
   if (state === 'playing' || state === 'paused' || state === 'buffering') return state;
   return 'idle';
+}
+
+/** True when the item kind or URI identifies a radio/live stream (UX-12). */
+export function isLiveItem(mediaType?: string | null, uri?: string | null): boolean {
+  return Boolean(
+    (mediaType && /^(radio|stream|live)$/i.test(mediaType))
+    || (uri && /:\/\/radio(\/|$)/i.test(uri)),
+  );
 }
 
 function isAvailable(state: string | undefined | null): boolean {
@@ -210,6 +218,7 @@ function patchFromStatus(row: MediaStatus, now: number): PlayerPatch {
           album: row.media_album ?? '',
           image: row.entity_picture ?? '',
           durationSec: Number(row.duration) || 0,
+          isLive: isLiveItem(row.media_type, row.media_content_id),
         }
       : null,
     position: typeof row.position === 'number' ? row.position : null,
@@ -237,6 +246,7 @@ function patchFromEvent(e: PlayerEventPayload, now: number): PlayerPatch {
           album: e.item.album ?? '',
           image: e.item.image ?? '',
           durationSec: Number(e.item.duration) || 0,
+          isLive: isLiveItem(e.item.media_type, e.item.uri),
         };
   return {
     status: e.state !== undefined ? toStatus(e.state) : undefined,

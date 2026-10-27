@@ -895,6 +895,7 @@ const Admin = () => {
                 type="text"
                 value={discoveryFilter}
                 onChange={(event) => setDiscoveryFilter(event.target.value)}
+                aria-label="Filter discovered users"
                 placeholder="Filter discovered users"
                 className="glass-input mb-4 w-full"
               />
@@ -1112,6 +1113,7 @@ const Admin = () => {
                     type="text"
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
+                    aria-label="Media group name"
                     placeholder="Group name (e.g., Living Room TVs)"
                     className="glass-input"
                   />
@@ -1195,6 +1197,7 @@ const Admin = () => {
                     type="text"
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
+                    aria-label="Light cluster name"
                     placeholder="Cluster name (e.g., Kitchen Lights)"
                     className="glass-input"
                   />
@@ -1278,12 +1281,14 @@ const Admin = () => {
                     type="text"
                     value={newPatternName}
                     onChange={(e) => setNewPatternName(e.target.value)}
+                    aria-label="Light pattern name"
                     placeholder="Pattern name (e.g., Movie Night)"
                     className="glass-input w-full"
                   />
                   <textarea
                     value={newPatternSteps}
                     onChange={(e) => setNewPatternSteps(e.target.value)}
+                    aria-label="Light pattern steps (JSON)"
                     placeholder='JSON steps: [{"brightness": 255, "color_temp": 300, "transition": 5}, {"brightness": 50, "delay": 30}]'
                     className="glass-input w-full min-h-[100px] font-mono text-xs"
                   />
@@ -1325,6 +1330,7 @@ const Admin = () => {
                   <select
                     value={executePatternName}
                     onChange={(e) => setExecutePatternName(e.target.value)}
+                    aria-label="Light pattern"
                     className="glass-input bg-black/30"
                   >
                     <option value="">Select pattern</option>
@@ -1335,6 +1341,7 @@ const Admin = () => {
                   <select
                     value={executeTargetCluster}
                     onChange={(e) => setExecuteTargetCluster(e.target.value)}
+                    aria-label="Target light cluster"
                     className="glass-input bg-black/30"
                   >
                     <option value="">Target cluster (optional)</option>
@@ -1448,6 +1455,7 @@ const Admin = () => {
                   <select
                     value={intercomSessionType}
                     onChange={(e) => setIntercomSessionType(e.target.value as 'twoway' | 'broadcast' | 'announcement')}
+                    aria-label="Intercom session type"
                     className="glass-input bg-black/30"
                   >
                     <option value="twoway">Two-Way</option>
@@ -1692,7 +1700,7 @@ const Admin = () => {
                 .map((setting) => (
                 <div key={setting.key} className="glass-card p-4 min-w-0">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="font-mono text-sm text-white break-all">{setting.key}</p>
+                    <label htmlFor={`admin-setting-${setting.key}`} className="font-mono text-sm text-white break-all">{setting.key}</label>
                     <button
                       onClick={() => saveSettingMutation.mutate({
                         key: setting.key,
@@ -1704,6 +1712,7 @@ const Admin = () => {
                     </button>
                   </div>
                   <input
+                    id={`admin-setting-${setting.key}`}
                     type="text"
                     value={settingsDrafts[setting.key] ?? setting.value}
                     onChange={(event) => setSettingsDrafts((current) => ({ ...current, [setting.key]: event.target.value }))}
@@ -2305,6 +2314,7 @@ const Admin = () => {
             <select
               value={inspectLimit}
               onChange={(e) => setInspectLimit(Number(e.target.value))}
+              aria-label="Rows to display"
               className="glass-input text-xs"
             >
               <option value={20}>20 rows</option>

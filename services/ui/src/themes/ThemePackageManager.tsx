@@ -209,6 +209,7 @@ export function ThemePackageManager({
           <input
             type="file"
             accept="application/json,.json"
+            aria-label="Theme pack JSON file"
             className="block w-full text-xs"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -219,6 +220,7 @@ export function ThemePackageManager({
             className="w-full h-28 rounded bg-black/30 border border-white/10 p-2 font-mono text-xs"
             value={importText}
             onChange={(e) => setImportText(e.target.value)}
+            aria-label="Theme pack JSON"
             placeholder='{"schemaVersion":1,"kind":"jarvis.health-theme-pack",...}'
             spellCheck={false}
           />
@@ -403,10 +405,11 @@ export function ThemePackageManager({
               'glow',
             ] as const
           ).map((key) => (
-            <label key={key} className="flex items-center gap-2 text-xs">
-              <span className="w-28 opacity-70">{key}</span>
+            <div key={key} className="flex items-center gap-2 text-xs">
+              <label htmlFor={`theme-token-${key}`} className="w-28 opacity-70">{key}</label>
               <input
                 type="color"
+                aria-label={`${key} color picker`}
                 className="w-8 h-6 rounded border-0 bg-transparent"
                 value={
                   typeof editing.tokens[key] === 'string' &&
@@ -423,6 +426,7 @@ export function ThemePackageManager({
                 }
               />
               <input
+                id={`theme-token-${key}`}
                 type="text"
                 className="flex-1 rounded bg-black/30 border border-white/10 px-1.5 py-0.5 font-mono"
                 value={String(editing.tokens[key] ?? '')}
@@ -434,7 +438,7 @@ export function ThemePackageManager({
                   )
                 }
               />
-            </label>
+            </div>
           ))}
           <label className="flex items-center gap-2 text-xs">
             <span className="w-28 opacity-70">radius</span>

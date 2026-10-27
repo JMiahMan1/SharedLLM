@@ -296,13 +296,15 @@ are the app shell, navigation plumbing and the older admin pages.
   behind it and focus was lost on close. A shared `useDialogFocus` hook now focuses the panel, traps
   Tab, closes on Escape and restores focus; it is wired into the modal, the chat sheet, the account
   menu and the mobile More sheet.
-- **PARTLY FIXED - form labels were not associated with their inputs**, so a screen reader announced
-  "edit text, blank" (the audit found 20 of 162 labels with `htmlFor`). Login, the settings forms (DNS,
-  LLM, telemetry, location), the Identity display name and the Wander trip/vehicle fields are associated
-  now: 49 of the app's 161 labels carry `htmlFor`. Three `<label>`s that headed a group rather than one
-  control (the secret-field grid, the integration chip list and the route-locations block) became
-  `<span>`s, since a label with nothing to label announces a form field that is not there. 112 labels
-  still need an `id`.
+- **FIXED - form labels and visible form controls were not all associated with an accessible name**, so a
+  screen reader announced "edit text, blank". Every `<label>` in the app (168 total: 59 via `htmlFor`/`id`
+  and 109 wrapping a single control) is now associated with exactly one form control, the two `<label>`s
+  that wrapped multiple controls (`HealthProfilePanel.tsx`, `ThemePackageManager.tsx`) now name their
+  primary control explicitly and give the secondary control its own `aria-label`, three `<label>`s that
+  headed a group rather than one control became `<span>`s, and all remaining visible `<input>`, `<select>`
+  and `<textarea>` elements across Admin, Identity, KnowledgeHub, Health, Location, Calendar, Family,
+  Settings, Workspaces, ThemePackageManager, widgets and shared UI dropdowns now carry an explicit
+  `<label>` or `aria-label`. Guarded by `services/ui/src/test/formLabels.test.ts`.
 - **BROKEN - the crash screen was a developer console shown to children**: the raw stack trace, the
   React component stack, a platform dump, a "For Developers" block and a GitHub Issues link, with the
   first section expanded. It is now "Something went wrong" with one plain sentence, Try again and Go
@@ -907,9 +909,7 @@ Everything here is a deliberate call, not an oversight.
   `delete:packages` and `user` are not, and a fine-grained token limited to the repositories the agent
   actually pushes to (Contents read/write, Metadata read) would do the same job with a fraction of the
   blast radius.
-- **The remaining audit findings are recorded above, not fixed.** §3.5 UI/UX (the theme tokens
-  bypassed by hardcoded colour classes in 216 files), §3.6 Family comms (the typing indicator, which
-  needs Talk's websocket rather than a poll) and §3.7 Backend readiness (the apt tool versions and the
-  Python transitive dependencies, the per-process state that would misbehave under a second replica,
-  and the services still running as root) each list what is still below the bar with `file:line` and
-  the smallest fix.
+- **The remaining audit findings are recorded above.** §3.5 UI/UX is fully closed (including form labels
+  and theme token remapping); §3.6 Family comms notes only the optional Talk websocket upgrade for typing
+  indicators; and §3.7 Backend readiness notes only the upstream Debian `trixie` base tool versions that
+  have no upstream patch yet (`sqlite3`, `tar`, `libexpat1`).

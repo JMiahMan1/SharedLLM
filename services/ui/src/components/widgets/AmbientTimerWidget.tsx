@@ -943,6 +943,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
             value={newDuration}
             onChange={(e) => setNewDuration(Math.max(1, Number(e.target.value)))}
             className="glass-input w-20 px-3 py-2 text-sm shrink-0"
+            aria-label="Timer duration in seconds"
             placeholder="Sec"
             min={1}
           />
@@ -951,6 +952,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             className="glass-input flex-1 px-3 py-2 text-sm min-w-0"
+            aria-label="Timer name"
             placeholder="Timer name..."
           />
           <button
@@ -965,8 +967,9 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
         {alertTargets.length > 0 && (
           <div className="flex items-center gap-2">
             {selectedDevice ? <Bell size={14} className="text-purple-400 shrink-0" /> : <BellOff size={14} className="text-slate-500 shrink-0" />}
-            <span className="text-xs text-slate-400">Alert via</span>
+            <label htmlFor="ambient-timer-alert-device" className="text-xs text-slate-400">Alert via</label>
             <select
+              id="ambient-timer-alert-device"
               value={selectedDevice}
               onChange={(e) => {
                 setSelectedDevice(e.target.value);

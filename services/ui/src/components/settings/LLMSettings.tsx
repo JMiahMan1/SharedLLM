@@ -236,9 +236,10 @@ const LLMSettings: React.FC = () => {
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
                       <role.icon size={14} className="text-slate-500" />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</span>
+                      <label htmlFor={`llm-local-${role.key}`} className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</label>
                     </div>
                     <select
+                      id={`llm-local-${role.key}`}
                       value={activeProvider === 'ollama' ? getSetting(role.key) : ''}
                       onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
                       disabled={activeProvider !== 'ollama'}
@@ -269,9 +270,10 @@ const LLMSettings: React.FC = () => {
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
                       <role.icon size={14} className="text-slate-500" />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</span>
+                      <label htmlFor={`llm-cloud-${role.key}`} className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</label>
                     </div>
                     <input 
+                      id={`llm-cloud-${role.key}`}
                       type="text" 
                       value={activeProvider === 'openrouter' ? getSetting(role.key) : ''} 
                       onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}

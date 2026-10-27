@@ -46,7 +46,18 @@ describe('ingest: the media store reducer', () => {
       steps: [[status(kitchen()), 0]],
       check: (s) => {
         expect(s.players[K]).toMatchObject({ name: 'Kitchen Speaker', status: 'playing', volume: 40, kind: 'ha', available: true });
-        expect(s.players[K].item).toEqual({ uri: 'library://track/1', title: 'Song A', artist: 'Artist A', album: 'Album A', image: '/art/a.jpg', durationSec: 200 });
+        expect(s.players[K].item).toEqual({ uri: 'library://track/1', title: 'Song A', artist: 'Artist A', album: 'Album A', image: '/art/a.jpg', durationSec: 200, isLive: false });
+      },
+    },
+    {
+      name: 'UX-12 marks radio and live streams as isLive from kind or URI, not from duration <= 0',
+      steps: [
+        [status(kitchen({ duration: 0, media_type: 'track', media_content_id: 'library://track/1' })), 0],
+        [{ type: 'player', output_id: 'ma:office', state: 'playing', item: { uri: 'library://radio/7', title: 'KEXP', duration: 0 } }, 10],
+      ],
+      check: (s) => {
+        expect(s.players[K].item?.isLive).toBe(false);
+        expect(s.players['ma:office'].item?.isLive).toBe(true);
       },
     },
     {

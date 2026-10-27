@@ -206,6 +206,7 @@ export default function DnsManagementPanel() {
                       value={value}
                       onChange={(e) => handleValueChange(index, e.target.value)}
                       className="glass-input flex-1 text-sm"
+                      aria-label={`IP address ${index + 1}`}
                       placeholder={`IP address ${index + 1}`}
                     />
                     {form.values.length > 1 && (

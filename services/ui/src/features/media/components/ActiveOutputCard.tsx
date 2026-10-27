@@ -9,6 +9,7 @@ import { imageWidth } from './image';
 import { NowPlayingCard, type NowPlayingView } from './NowPlayingCard';
 import { mediaKeys } from '../api/keys';
 import { useLivePosition } from '../engine/useLivePosition';
+import { isLiveItem } from '../store/ingest';
 import { useMediaStore } from '../store/mediaStore';
 import { useMediaScreen } from '../pages/MediaScreen';
 
@@ -66,6 +67,7 @@ export function ActiveOutputCard() {
         state: player.isPlaying ? 'playing' : player.mediaTitle ? 'paused' : 'idle',
         position: player.position,
         duration: player.duration,
+        isLive: isLiveItem(undefined, player.mediaUri),
         trackKey: player.mediaUri || player.mediaTitle || '',
       }
     : {
@@ -75,6 +77,7 @@ export function ActiveOutputCard() {
         state: remote?.status === 'buffering' ? 'playing' : remote?.status ?? 'idle',
         position: remotePosition,
         duration: remote?.item?.durationSec ?? 0,
+        isLive: Boolean(remote?.item?.isLive),
         trackKey: remote?.item?.uri || remote?.item?.title || '',
       };
 

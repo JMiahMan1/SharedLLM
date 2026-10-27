@@ -340,6 +340,7 @@ export default function HealthSleep() {
           type="text"
           value={note}
           onChange={(event) => setNote(event.target.value)}
+          aria-label="Morning note"
           placeholder="Anything worth remembering? (optional)"
           className="glass-input mt-3 h-10 w-full px-3 text-xs pointer-coarse:h-11"
         />

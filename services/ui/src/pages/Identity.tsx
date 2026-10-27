@@ -313,7 +313,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             return (
               <div key={key} className="space-y-2">
                 <div className="flex items-center mb-2">
-                  <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</span>
+                  <label htmlFor={`identity-list-${key}`} className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{label}</label>
                   <HelpTooltip docName="INTEGRATIONS.md" sectionTitle={name} label={label} />
                 </div>
                 {/* Chip display */}
@@ -334,6 +334,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
                 </div>
                 {/* Input to add new chip */}
                 <input
+                  id={`identity-list-${key}`}
                   type="text"
                   value={listInputs[key] || ''}
                   onChange={e => setListInputs(li => ({ ...li, [key]: e.target.value }))}

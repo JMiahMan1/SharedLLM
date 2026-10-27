@@ -5,6 +5,7 @@ import { useLivePosition, LIVE_POSITION_INTERVAL_MS } from '../engine/useLivePos
 import { useMediaStore } from '../store/mediaStore';
 import { MediaPlayerContext, type SharedPlayer } from '../../../context/webPlayerContext';
 import MediaOverlays from '../components/MediaOverlays';
+import { NowPlayingCard } from '../components/NowPlayingCard';
 
 const T0 = Date.parse('2026-10-24T12:00:00Z');
 
@@ -73,5 +74,60 @@ describe('MediaOverlays', () => {
     expect(screen.getByTestId('now-playing-sheet')).toBeTruthy();
     act(() => useMediaStore.getState().actions.openSheet('queue'));
     expect(useMediaStore.getState().sheets.queue).toBe(true);
+  });
+});
+
+describe('NowPlayingCard (UX-12)', () => {
+  const noop = () => {};
+  const baseProps = {
+    volume: 50,
+    muted: false,
+    busy: null,
+    isFavorite: false,
+    idleHint: '',
+    footer: null,
+    onPrevious: noop,
+    onTogglePlay: noop,
+    onNext: noop,
+    onVolumeChange: noop,
+    onMuteToggle: noop,
+    onSeek: noop,
+  };
+
+  it('shows a scrubber skeleton while track duration is still loading, and Live stream only for radio/stream items', () => {
+    const { rerender } = render(
+      <NowPlayingCard
+        {...baseProps}
+        view={{
+          title: 'Loading Track',
+          artist: 'Artist',
+          state: 'playing',
+          position: 0,
+          duration: 0,
+          isLive: false,
+          trackKey: 'library://track/1',
+        }}
+      />,
+    );
+    expect(screen.getByTestId('scrubber-skeleton')).toBeTruthy();
+    expect(screen.queryByLabelText('Live stream')).toBeNull();
+
+    rerender(
+      <NowPlayingCard
+        {...baseProps}
+        view={{
+          title: 'Jazz FM',
+          artist: 'Radio',
+          state: 'playing',
+          position: 0,
+          duration: 0,
+          isLive: true,
+          trackKey: 'library://radio/1',
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('scrubber-skeleton')).toBeNull();
+    expect(screen.getByLabelText('Live stream')).toBeTruthy();
+    expect(screen.getByText('Live')).toBeTruthy();
   });
 });

@@ -45,10 +45,41 @@ test('P5-T1 shows what plays around the house and takes control of it (journey 2
   const strip = page.getByRole('region', { name: 'Playing in your home' });
   await expect(strip.getByText('Morning Jazz')).toBeVisible();
   await strip.getByRole('button', { name: /Control Kitchen Speaker/ }).click();
-  await expect(page.getByRole('button', { name: /^Playing on Kitchen Speaker/ })).toBeVisible();
+  await expect.poll(
+    () => page.getByRole('button', { name: /^Playing on Kitchen Speaker/ }).isVisible(),
+    { timeout: 1500 },
+  ).toBe(true);
   // The card now drives the kitchen, and the strip no longer repeats it.
   await expect(page.getByText('Playing through Kitchen Speaker')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Playing in your home' })).toHaveCount(0);
+  api.assertNoUnmocked();
+});
+
+test('P5-T1 slow scenario keeps cumulative layout shift under 0.05 (UX-33)', async ({ page }) => {
+  await seedAuth(page);
+  await seedPlayerId(page);
+  await page.addInitScript(() => {
+    (window as unknown as { __cls: number }).__cls = 0;
+    try {
+      const obs = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as Array<PerformanceEntry & { hadRecentInput?: boolean; value?: number }>) {
+          if (!entry.hadRecentInput) {
+            (window as unknown as { __cls: number }).__cls += entry.value ?? 0;
+          }
+        }
+      });
+      obs.observe({ type: 'layout-shift', buffered: true });
+    } catch {
+      /* browser without layout-shift observer */
+    }
+  });
+  const api = await mockMediaApi(page, 'slow');
+  await page.goto('/media');
+  await expect(page.getByRole('status', { name: 'Loading recently played' })).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Loading recently played' })).toHaveCount(0, { timeout: 10000 });
+  await expect(page.getByText('Project Hail Mary').first()).toBeVisible();
+  const cls = await page.evaluate(() => (window as unknown as { __cls?: number }).__cls ?? 0);
+  expect(cls).toBeLessThan(0.05);
   api.assertNoUnmocked();
 });
 

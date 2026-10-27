@@ -36,6 +36,8 @@ export interface NowPlayingView {
   state: 'playing' | 'paused' | 'idle';
   position: number;
   duration: number;
+  /** True only for radio/stream items (UX-12), never from duration <= 0. */
+  isLive?: boolean;
   /** Changes when the track changes (clears a leftover scrub position). */
   trackKey: string;
 }
@@ -75,7 +77,7 @@ export function NowPlayingCard({
   onFavoriteToggle?: () => void;
   onSeek?: (seconds: number) => void;
 }) {
-  const { title, artist, coverUrl, state, position, duration, trackKey } = view;
+  const { title, artist, coverUrl, state, position, duration, isLive, trackKey } = view;
   const active = state !== 'idle';
 
   return (
@@ -113,7 +115,7 @@ export function NowPlayingCard({
         )}
       </div>
 
-      {active && duration > 0 && (
+      {active && !isLive && duration > 0 && (
         <Scrubber
           position={position}
           duration={duration}
@@ -123,12 +125,17 @@ export function NowPlayingCard({
           className="relative mt-3"
         />
       )}
-      {active && duration <= 0 && (
+      {active && isLive && (
         <div className="relative mt-3 flex items-center gap-2 py-2" aria-label="Live stream">
           <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse motion-reduce:animate-none" aria-hidden />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
           <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
           <span className="text-[11px] text-slate-500 font-mono">{formatDuration(position)}</span>
+        </div>
+      )}
+      {active && !isLive && duration <= 0 && (
+        <div className="relative mt-3 py-2" aria-label="Track progress loading" data-testid="scrubber-skeleton">
+          <div className="skeleton h-1.5 w-full rounded-full" />
         </div>
       )}
 

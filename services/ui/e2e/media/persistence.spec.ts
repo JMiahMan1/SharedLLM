@@ -39,3 +39,37 @@ test('keeps the browser player alive across pages', async ({ page }) => {
   expect(sendspin.connections).toBe(1);
   expect(sendspin.closes).toBe(0);
 });
+
+test('UX-51 restores the persisted output choice across a full page reload', async ({ page }) => {
+  await setupPlayerMocks(page, {
+    mediaStatus: {
+      status: 'SUCCESS',
+      message: 'ok',
+      service: 'media',
+      detail: {
+        active: null,
+        available: [],
+        all_players: [
+          {
+            entity_id: 'media_player.kitchen',
+            friendly_name: 'Kitchen Speaker',
+            state: 'playing',
+            media_title: 'Morning Jazz',
+            media_artist: 'Trio',
+            volume_level: 0.3,
+            ma_player_id: 'kitchen',
+          },
+        ],
+      },
+    },
+  });
+  await page.goto('/media');
+  await page.getByRole('region', { name: 'Playing in your home' })
+    .getByRole('button', { name: /Control Kitchen Speaker/ })
+    .click();
+  await expect(page.getByRole('button', { name: /^Playing on Kitchen Speaker/ })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: /^Playing on Kitchen Speaker/ })).toBeVisible();
+  await expect(page.getByText('Playing through Kitchen Speaker')).toBeVisible();
+});

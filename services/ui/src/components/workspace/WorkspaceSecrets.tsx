@@ -123,6 +123,7 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
               <input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
+                aria-label="Secret key"
                 placeholder="KEY"
                 className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1.5 font-mono text-slate-200 outline-none focus:border-indigo-400"
               />
@@ -131,6 +132,7 @@ export function WorkspaceSecrets({ workspace, onClose }: WorkspaceSecretsProps) 
                   type={reveal['new'] ? 'text' : 'password'}
                   value={newValue}
                   onChange={(e) => setNewValue(e.target.value)}
+                  aria-label="Secret value"
                   placeholder="value"
                   className="w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 font-mono text-slate-200 outline-none focus:border-indigo-400"
                 />

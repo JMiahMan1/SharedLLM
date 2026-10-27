@@ -747,6 +747,7 @@ const LocationPanel = () => {
                   <div className="flex items-center gap-1.5 pb-1">
                     <input
                       type="text"
+                      aria-label="Vehicle VIN"
                       placeholder="Enter 17-digit VIN to auto-fill..."
                       value={lookupVin}
                       onChange={(e) => setLookupVin(e.target.value)}
@@ -770,6 +771,7 @@ const LocationPanel = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select
+                      aria-label="Vehicle year"
                       value={lookupYear}
                       onChange={(e) => handleYearChange(e.target.value)}
                       onFocus={() => lookupYears.length === 0 && loadLookupYears()}
@@ -781,6 +783,7 @@ const LocationPanel = () => {
                       ))}
                     </select>
                     <select
+                      aria-label="Vehicle make"
                       value={lookupMake}
                       onChange={(e) => handleMakeChange(e.target.value)}
                       disabled={!lookupYear || lookupMakes.length === 0}
@@ -794,6 +797,7 @@ const LocationPanel = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select
+                      aria-label="Vehicle model"
                       value={lookupModel}
                       onChange={(e) => handleModelChange(e.target.value)}
                       disabled={!lookupMake || lookupModels.length === 0}
@@ -805,6 +809,7 @@ const LocationPanel = () => {
                       ))}
                     </select>
                     <select
+                      aria-label="Vehicle trim or engine"
                       value={lookupOption}
                       onChange={(e) => handleOptionChange(e.target.value)}
                       disabled={!lookupModel || lookupOptions.length === 0}
@@ -877,11 +882,12 @@ const LocationPanel = () => {
 
                 {/* Fuel Price Lookup */}
                 <div className="space-y-1.5">
-                  <label className="block text-[11px] text-slate-400">
+                  <label htmlFor="location-vehicle-cost" className="block text-[11px] text-slate-400">
                     Cost per {newVehicleFuelType === 'electric' ? 'kWh' : 'Gallon'} ($)
                   </label>
                   <div className="flex gap-2">
                     <input
+                      id="location-vehicle-cost"
                       type="number"
                       step="0.01"
                       placeholder="e.g. 3.49"
@@ -893,6 +899,7 @@ const LocationPanel = () => {
                     <div className="flex gap-1">
                       <input
                         type="text"
+                        aria-label="ZIP code"
                         placeholder="ZIP code"
                         value={fuelPriceZip}
                         onChange={(e) => setFuelPriceZip(e.target.value)}

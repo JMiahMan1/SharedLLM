@@ -183,6 +183,7 @@ export const NetworkPanel: FC = () => {
             type="search"
             value={logQuery}
             onChange={(e) => setLogQuery(e.target.value)}
+            aria-label="Search the log"
             placeholder="Search the log"
             className="glass-input mb-3 w-full min-h-11 px-3 text-sm"
           />

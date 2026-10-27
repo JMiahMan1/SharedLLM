@@ -483,6 +483,7 @@ export default function HealthCycle() {
             value={periodNote}
             onChange={(event) => setPeriodNote(event.target.value)}
             maxLength={200}
+            aria-label="Period note"
             placeholder="Note (optional)"
             className="glass-input mt-2 h-9 w-full px-2 text-xs pointer-coarse:h-10"
           />
@@ -521,6 +522,7 @@ export default function HealthCycle() {
               type="date"
               value={selectedDay}
               max={today}
+              aria-label="Symptom date"
               onChange={(event) => setSelectedDay(event.target.value)}
               className="glass-input h-8 px-2 text-[11px] pointer-coarse:h-9"
             />
@@ -590,6 +592,7 @@ export default function HealthCycle() {
                 <select
                   value={guardian || data.guardian_username || ''}
                   onChange={(event) => setGuardian(event.target.value)}
+                  aria-label="Mother or trusted adult"
                   className="glass-input h-9 min-w-32 flex-1 px-2 text-xs capitalize pointer-coarse:h-10"
                 >
                   <option value="">Choose…</option>
@@ -655,6 +658,7 @@ export default function HealthCycle() {
               <select
                 value={shareViewer}
                 onChange={(event) => setShareViewer(event.target.value)}
+                aria-label="Share cycle with"
                 className="glass-input h-9 min-w-32 flex-1 px-2 text-xs capitalize pointer-coarse:h-10"
               >
                 <option value="">Choose a person…</option>
