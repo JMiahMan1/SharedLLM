@@ -38,6 +38,20 @@ def test_it_warns_again_once_the_cooldown_expires(caplog):
     assert [record.levelname for record in caplog.records] == ["WARNING", "WARNING"]
 
 
+def test_the_first_failure_warns_on_a_freshly_booted_machine(caplog, monkeypatch):
+    """A short uptime must not silence the first warning.
+
+    `time.monotonic()` counts from boot, so on a machine that started seconds
+    ago it returns a small number. Comparing it against a 0.0 sentinel made the
+    first failure log at debug until the host had been up for the cooldown,
+    which is how this failed in CI.
+    """
+    monkeypatch.setattr(logging_utils.time, "monotonic", lambda: 5.0)
+    with caplog.at_level(logging.DEBUG):
+        warn_periodically(logging.getLogger("t"), "fresh", "boom")
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+
+
 def test_two_failures_do_not_silence_each_other(caplog):
     log = logging.getLogger("t")
     with caplog.at_level(logging.DEBUG):
