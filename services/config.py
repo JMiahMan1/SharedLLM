@@ -52,13 +52,30 @@ def _net_url(name: str, default: str = "") -> str:
     """Resolve a service URL for the current network mode.
 
     Reads ``{NETWORK_MODE}_{name}_SVC_URL`` (the network-aware BRIDGE_*/HOST_*
-    set defined in .env) only. No fallback to legacy ``{name}_SVC_URL`` or
-    hardcoded defaults: if the appropriate network-mode variable is not set
-    the caller receives ``default`` (empty string by default) and must fail fast.
+    set defined in .env) only. No fallback to legacy ``{name}_SVC_URL``: if the
+    appropriate network-mode variable is not set the caller receives ``default``
+    and must cope with it.
+
+    An unset variable is only worth a warning when there is no default to fall
+    back to. Every caller below passes the address that is right for the compose
+    network, so warning "Service connectivity may fail" for them was fourteen
+    lines a day of a problem that has never happened (measured 2026-10-27) - and
+    a log that cries wolf is worse than a quiet one. The debug line keeps the
+    fact for anyone reading a service's log closely.
     """
     val = os.getenv(f"{NETWORK_MODE.upper()}_{name}_SVC_URL")
     if not val:
-        logging.warning(f"WARNING: {NETWORK_MODE.upper()}_{name}_SVC_URL is not set in the environment. Service connectivity may fail.")
+        if default:
+            logging.debug(
+                "%s_%s_SVC_URL is not set; using the built-in default %s",
+                NETWORK_MODE.upper(), name, default,
+            )
+        else:
+            logging.warning(
+                "WARNING: %s_%s_SVC_URL is not set in the environment and there is no "
+                "default. Service connectivity may fail.",
+                NETWORK_MODE.upper(), name,
+            )
     return val or default
 
 # --- Identity service endpoint (bootstrap only) ---
