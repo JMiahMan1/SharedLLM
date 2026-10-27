@@ -282,7 +282,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
               className={`
                 w-full text-left px-4 py-2 text-sm transition-colors
                 ${item.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-[#334155] cursor-pointer'}
-                ${item.danger ? 'text-[#f87171]' : 'text-[#e2e8f0]'}
+                ${item.danger ? 'text-red-400' : 'text-slate-200'}
               `}
               onClick={() => {
                 item.action();

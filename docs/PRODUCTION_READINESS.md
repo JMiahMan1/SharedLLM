@@ -332,6 +332,17 @@ generator with `--check` and fails when the committed file is out of date, so a 
 silently escape the theme - which is why the "216 files use hardcoded colours" count is not a defect: the
 classes are the input to the generator, not a bypass of it.
 
+The one class of colour the generator cannot map is an arbitrary hex value, and it covers those only
+when they are near-black or near-white (luminance below 0.05 or above 0.6, mapped to the theme's
+darkest and lightest neutrals). Measured across `src`: twelve distinct hex classes in use, of which
+only four are outside that range - `text-[#94a3b8]`, `text-[#f87171]`, `border-[#334155]` and
+`hover:bg-[#334155]`, all four inside the workspace terminal's right-click menu. Three of them are
+chrome that reads correctly either way, but `text-[#f87171]` was a light red on what becomes a light
+surface under a light theme - about 2.3:1, below the 4.5:1 the rest of the app holds to. It is now
+`text-red-400` (and the neighbouring `text-[#e2e8f0]` is `text-slate-200`), which the generator maps
+per scheme, so a danger item in that menu is legible in every theme. The terminal's deliberately dark
+chrome is left alone: a terminal that turns light because the app did would be the wrong fix.
+
 **Fixed since the audit** (each gated and shipped): `/recipes` has a navigation entry; the Dashboard's
 service-status and workspaces sections are admin-only and the placeholder subtitle is gone; the build
 hash is admin-only in the sidebar and the dashboard header; the page finder works on a phone; the
