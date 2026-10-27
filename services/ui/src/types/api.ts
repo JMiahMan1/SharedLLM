@@ -121,6 +121,8 @@ export interface UserProfileRaw {
   is_system_default?: boolean;
   /** False when the account has no password at all: it cannot sign in. */
   has_password?: boolean;
+  /** Whether the account still signs in with the seeded admin password. */
+  has_default_password?: boolean;
   family_role?: FamilyRole;
   mother_username?: string | null;
   /** Derived: child/teen. Their activity sharing cannot be switched off. */

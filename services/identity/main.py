@@ -1014,10 +1014,31 @@ def get_me(user: User = Depends(require_api_key), session: Session = Depends(get
     return me
 
 
+# username -> (password hash it was computed against, result). Keyed on the hash
+# so a password change invalidates it without a restart, and so the expensive
+# PBKDF2 comparison happens once per account rather than on every account list.
+_PLACEHOLDER_PASSWORD_CACHE: dict[str, tuple[str, bool]] = {}
+
+
+def _uses_seeded_password(user: User) -> bool:
+    """Whether this account still signs in with DEFAULT_ADMIN_PASSWORD."""
+    stored = user.password_hash or ""
+    if not stored:
+        return False
+    cached = _PLACEHOLDER_PASSWORD_CACHE.get(user.username)
+    if cached and cached[0] == stored:
+        return cached[1]
+    raw = _admin_password_from_env()
+    result = bool(raw) and verify_password(raw, stored)
+    _PLACEHOLDER_PASSWORD_CACHE[user.username] = (stored, result)
+    return result
+
+
 def _user_read(session: Session, user: User) -> UserRead:
     """A user as the API shows them, with their roles and what those allow."""
     read = UserRead.model_validate(user)
     read.has_password = bool(user.password_hash)
+    read.has_default_password = _uses_seeded_password(user)
     read.family_role = user.family_role if user.family_role in roles.FAMILY_ROLES else "other"
     read.mother_username = user.mother_username or None
     read.is_minor = read.family_role in roles.MINOR_FAMILY_ROLES

@@ -227,4 +227,20 @@ describe('Admin page', () => {
     const row = chips[0].closest('.glass-card');
     expect(row?.textContent).toContain('Kaleb');
   });
+
+  it('says when an account still uses the seeded administrator password', async () => {
+    // The seeded password is the one credential a stranger can guess, and the
+    // login page is reachable from anywhere. It used to be a log line only.
+    server.use(
+      http.get('/api/users', () => HttpResponse.json([
+        { id: 1, username: 'default', full_name: 'Default', is_admin: true, is_system_default: true, has_password: true, has_default_password: true },
+        { id: 2, username: 'leo', full_name: 'Leo', is_admin: false, is_system_default: false, has_password: true, has_default_password: false },
+      ])),
+    );
+    renderWithProviders(<Admin />);
+
+    const chips = await screen.findAllByText('Seeded password');
+    expect(chips).toHaveLength(1);
+    expect(chips[0].closest('.glass-card')?.textContent).toContain('Default');
+  });
 });
