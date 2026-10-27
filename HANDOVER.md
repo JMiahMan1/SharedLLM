@@ -6,14 +6,23 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `0d83efc5`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `a5b791b8`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
 - Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **efef4f23**
   (APK `versionCode` **486**, 2026-10-26; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
   dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
-  docker group for socket reads, nginx got two writable tmpfs mounts instead of an image change). 2026-10-26 shipped, in order: the guard overlay with
+  docker group for socket reads, nginx got two writable tmpfs mounts instead of an image change).
+  The **base image** was rebuilt and every service recreated on it on 2026-10-26: the trust store no
+  longer trusts the roots the root programs have distrusted (18 disabled, a 130-certificate bundle,
+  `emSign Root CA - G1` kept), the three pip/setuptools/filelock advisories every service carried are
+  gone (`pip-audit`: no known vulnerabilities in all fourteen Python services), `pillow` is 13.0.0
+  everywhere, and every non-root service has a writable `HOME`. **The two hosts still need the
+  trust-store step by hand** - neither allows passwordless sudo: `sudo dnf upgrade -y ca-certificates &&
+  sudo bash /home/jeremiah/fix_host_trust.sh` on `192.168.2.205` (3 distrusted roots) and on
+  `192.168.2.10` (14) - the package upgrade alone is not enough on this family, because the pending RPM
+  still ships the same roots. 2026-10-26 shipped, in order: the guard overlay with
   its chat and override paths, the media artwork and artist fixes, the security gates, the health
   fixes, the UI and accessibility pass, the family-comms fixes (including a push when somebody starts
   a family call), and the ops hardening (nightly backups, deploy rollback, SQLite WAL and additive
