@@ -190,6 +190,27 @@ export default function HealthToday({ onNavigate }: Props) {
     );
   }
 
+  // The summary is one object with a block per area, and everything below reads
+  // into those blocks. A proxy error or a server whose shape has moved used to
+  // throw on the first `summary.sleep.score`, and the error boundary took the
+  // whole screen - a blank page rather than a message. Say we could not read the
+  // day instead, and let Try again re-ask.
+  if (!summary.sleep || !summary.nutrition || !summary.water) {
+    return (
+      <div className="glass-panel rounded-2xl border border-white/5 p-6 text-center" data-testid="health-today-error">
+        <AlertCircle className="mx-auto text-amber-300" size={22} />
+        <p className="mt-2 text-sm text-slate-300">Today&apos;s summary came back incomplete, so there is nothing to show yet.</p>
+        <button
+          type="button"
+          onClick={() => summaryQuery.refetch()}
+          className="glass-button mt-3 min-h-11 px-4 text-xs"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
   const readiness = summary.readiness;
   const readinessTone = scoreTone(readiness?.score);
   const sleep = summary.sleep;

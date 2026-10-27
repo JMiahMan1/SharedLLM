@@ -245,6 +245,16 @@ describe('HealthToday', () => {
     expect(screen.getByText('Set up your health profile')).toBeInTheDocument();
   });
 
+  it('says the day could not be read when the summary is missing a block', async () => {
+    // A proxy error or a server whose shape has moved used to throw on
+    // `summary.sleep.score` and take the whole screen to the error boundary.
+    getHealthSummary.mockResolvedValue(summary({ sleep: undefined }));
+    renderWithClient(<HealthToday onNavigate={() => {}} />);
+
+    expect(await screen.findByTestId('health-today-error')).toBeInTheDocument();
+    expect(screen.getByText(/came back incomplete/)).toBeInTheDocument();
+  });
+
   it('saves a one-tap check-in', async () => {
     getHealthSummary.mockResolvedValue(summary());
     renderWithClient(<HealthToday onNavigate={() => {}} />);
