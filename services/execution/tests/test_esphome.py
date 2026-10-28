@@ -713,3 +713,59 @@ async def test_esphome_ota_falls_back_to_web_server_when_tcp_3232_refused(one_de
     fake_http.assert_awaited_once_with("192.168.2.87", 80, firmware, filename="s3_speaker.bin", password=None)
 
 
+@pytest.mark.asyncio
+async def test_ota_refuses_non_admin_member(one_device):
+    """Non-admin callers cannot trigger OTA updates."""
+    import base64
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    req = EsphomeRequest(
+        user_context=UserContext(user="alice", is_admin=False),
+        action="ota",
+        device="office-light",
+        params={"firmware_b64": base64.b64encode(b"firmware").decode("ascii")},
+    )
+    res = await handle_esphome(req)
+    assert res.status == "FAILURE"
+    assert "administrator" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_member_guard_allows_safe_controls_and_blocks_restarts(one_device):
+    """Members may control lights and media, but maintenance commands (restart/reboot) are denied."""
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    # Blocked: Restart button
+    restart_btn = aioesphomeapi.ButtonInfo(key=10, name="Restart Device", object_id="restart_device")
+    api_cls, _ = _mock_api_class([restart_btn])
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        res = await handle_esphome(
+            EsphomeRequest(
+                user_context=UserContext(user="alice", is_admin=False),
+                action="call",
+                device="office-light",
+                entity="restart_device",
+            )
+        )
+    assert res.status == "FAILURE"
+    assert "admin" in res.message.lower()
+
+    # Allowed: Safe light control
+    light_ent = aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")
+    api_cls2, inst2 = _mock_api_class([light_ent])
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls2):
+        res2 = await handle_esphome(
+            EsphomeRequest(
+                user_context=UserContext(user="alice", is_admin=False),
+                action="call",
+                device="office-light",
+                entity="office_light",
+                params={"state": True},
+            )
+        )
+    assert res2.status == "SUCCESS"
+
+
+

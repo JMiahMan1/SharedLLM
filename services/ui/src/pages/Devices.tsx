@@ -266,10 +266,12 @@ function formatEntityState(ent: EsphomeEntityRow): string | null {
 
 function EsphomeDeviceSection({
   device,
+  isAdmin = true,
   onOpenDetails,
   onRefresh,
 }: {
   device: MdmDevice;
+  isAdmin?: boolean;
   onOpenDetails: () => void;
   onRefresh: () => void;
 }) {
@@ -364,9 +366,18 @@ function EsphomeDeviceSection({
   const sensorEntities = (entities ?? []).filter(
     (e) => SENSOR_DOMAINS.has((e.domain || '').toLowerCase()) && formatEntityState(e) !== null,
   );
-  const controlEntities = (entities ?? []).filter(
-    (e) => !SENSOR_DOMAINS.has((e.domain || '').toLowerCase()),
-  );
+  const controlEntities = (entities ?? []).filter((e) => {
+    const domain = (e.domain || '').toLowerCase();
+    if (SENSOR_DOMAINS.has(domain)) return false;
+    if (!isAdmin) {
+      if (domain === 'update') return false;
+      const name = `${e.object_id || ''} ${e.name || ''}`.toLowerCase();
+      if (/(restart|reboot|factory|reset|safe mode|shutdown|firmware|ota|update|wifi|encryption|api key|provision)/i.test(name)) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-2" data-testid={`mdm-esphome-${device.device_key}`}>
@@ -794,38 +805,40 @@ function EsphomeDeviceSection({
           </div>
         )}
 
-        <div
-          className="border-t border-white/10 pt-2 flex flex-wrap items-center gap-2"
-          data-testid={`mdm-esphome-ota-box-${device.device_key}`}
-        >
-          <input
-            type="password"
-            aria-label={`OTA password for ${device.label || target}`}
-            value={otaPassword}
-            onChange={(e) => setOtaPassword(e.target.value)}
-            placeholder="OTA password (optional)"
-            className="glass-input w-44 bg-black/30 px-2.5 py-1 text-xs"
-            data-testid={`mdm-esphome-ota-pass-${device.device_key}`}
-          />
-          <label
-            className={`glass-button inline-flex cursor-pointer items-center gap-1.5 px-3 text-xs ${TOUCH}`}
+        {isAdmin && (
+          <div
+            className="border-t border-white/10 pt-2 flex flex-wrap items-center gap-2"
+            data-testid={`mdm-esphome-ota-box-${device.device_key}`}
           >
-            {otaUpload.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            Upload firmware (.bin) OTA
             <input
-              type="file"
-              accept=".bin,.bin.gz,.ota"
-              className="hidden"
-              disabled={otaUpload.isPending}
-              data-testid={`mdm-esphome-ota-${device.device_key}`}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) otaUpload.mutate(file);
-                e.target.value = '';
-              }}
+              type="password"
+              aria-label={`OTA password for ${device.label || target}`}
+              value={otaPassword}
+              onChange={(e) => setOtaPassword(e.target.value)}
+              placeholder="OTA password (optional)"
+              className="glass-input w-44 bg-black/30 px-2.5 py-1 text-xs"
+              data-testid={`mdm-esphome-ota-pass-${device.device_key}`}
             />
-          </label>
-        </div>
+            <label
+              className={`glass-button inline-flex cursor-pointer items-center gap-1.5 px-3 text-xs ${TOUCH}`}
+            >
+              {otaUpload.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              Upload firmware (.bin) OTA
+              <input
+                type="file"
+                accept=".bin,.bin.gz,.ota"
+                className="hidden"
+                disabled={otaUpload.isPending}
+                data-testid={`mdm-esphome-ota-${device.device_key}`}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) otaUpload.mutate(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -838,15 +851,17 @@ function EsphomeDeviceSection({
         >
           {probe.isPending ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />} Ping &amp; list entities
         </button>
-        <button
-          type="button"
-          disabled={syncJarvis.isPending}
-          onClick={() => syncJarvis.mutate()}
-          className={`glass-button px-3 text-xs ${TOUCH}`}
-          data-testid={`mdm-esphome-sync-${device.device_key}`}
-        >
-          {syncJarvis.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Sync Jarvis key &amp; URL
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            disabled={syncJarvis.isPending}
+            onClick={() => syncJarvis.mutate()}
+            className={`glass-button px-3 text-xs ${TOUCH}`}
+            data-testid={`mdm-esphome-sync-${device.device_key}`}
+          >
+            {syncJarvis.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Sync Jarvis key &amp; URL
+          </button>
+        )}
         <button
           type="button"
           onClick={onOpenDetails}
@@ -862,10 +877,14 @@ function EsphomeDeviceSection({
 
 function DeviceCard({
   device,
+  members = [],
+  isAdmin = true,
   onRefresh,
   onOpenDetails,
 }: {
   device: MdmDevice;
+  members?: MdmMember[];
+  isAdmin?: boolean;
   onRefresh: () => void;
   onOpenDetails: (device: MdmDevice) => void;
 }) {
@@ -904,6 +923,15 @@ function DeviceCard({
         ...(batteryText ? ([['Battery', batteryText]] as Array<[string, string]>) : []),
         ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
       ];
+
+  const assignOwner = useMutation({
+    mutationFn: (username: string) => api.assignCompanionDevice(device.device_key, username),
+    onSuccess: (_res, username) => {
+      toast.success(username ? `Assigned to ${username}` : 'Device unassigned');
+      onRefresh();
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not assign device owner'),
+  });
 
   const update = useMutation({
     mutationFn: () => api.pushMdmAppUpdate({ device_keys: [device.device_key] }),
@@ -955,7 +983,24 @@ function DeviceCard({
             {devicePlatformLabel(device)} · {deviceKindLabel(device.kind)} · {device.device_key}
           </span>
         </span>
-        {esphome && (
+        {isAdmin && members.length > 0 && (
+          <select
+            aria-label={`Owner for ${device.label || device.device_key}`}
+            value={device.owner_username || ''}
+            disabled={assignOwner.isPending}
+            onChange={(e) => assignOwner.mutate(e.target.value)}
+            className="glass-input bg-black/30 px-2.5 py-1 text-xs text-slate-200"
+            data-testid={`mdm-device-owner-${device.device_key}`}
+          >
+            <option value="">(Unassigned)</option>
+            {members.map((m) => (
+              <option key={m.username} value={m.username}>
+                {m.display_name || m.username}
+              </option>
+            ))}
+          </select>
+        )}
+        {isAdmin && esphome && (
           <select
             aria-label={`Device type for ${device.label || device.device_key}`}
             value={ESPHOME_KIND_OPTIONS.includes(device.kind as (typeof ESPHOME_KIND_OPTIONS)[number]) ? device.kind : 'assistant'}
@@ -971,7 +1016,7 @@ function DeviceCard({
             ))}
           </select>
         )}
-        {!esphome && (device.kind === 'phone' || device.kind === 'tablet') && (
+        {isAdmin && !esphome && (device.kind === 'phone' || device.kind === 'tablet') && (
           <button
             type="button"
             disabled={reclassify.isPending}
@@ -994,6 +1039,7 @@ function DeviceCard({
       {esphome ? (
         <EsphomeDeviceSection
           device={device}
+          isAdmin={isAdmin}
           onOpenDetails={() => onOpenDetails(device)}
           onRefresh={onRefresh}
         />
@@ -1233,23 +1279,61 @@ function AuditLogPanel() {
 
 export default function Devices() {
   const user = useAuth().user;
-  const isAdmin = Boolean(user?.is_admin);
+  const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.username === 'default');
   const queryClient = useQueryClient();
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
+  const myDevices = useQuery({ queryKey: ['my-companion-devices'], queryFn: () => api.getCompanionDevices(), enabled: !isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
 
   if (!isAdmin) {
     return (
       <div className={PAGE}>
         <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
-          {/* The navigation calls this "Shared files" for a member who is not
-              an admin, because that is all it is to them: the device inventory
-              below is a parent's view. */}
-          <h1 className="text-xl font-bold text-white sm:text-2xl">Shared files</h1>
-          <p className="mt-0.5 text-xs text-slate-400">Files your parents share with you.</p>
+          <h1 className="text-xl font-bold text-white sm:text-2xl">My Devices &amp; Files</h1>
+          <p className="mt-0.5 text-xs text-slate-400">Your assigned companion devices, controls, and shared family files.</p>
         </header>
+
+        <Panel
+          title="My devices"
+          icon={Cpu}
+          aside={<span className="text-xs text-slate-500">{myDevices.data?.length ?? 0} device(s)</span>}
+        >
+          {myDevices.isLoading && <p className="p-4 text-sm text-slate-500">Loading your devices…</p>}
+          {myDevices.data && myDevices.data.length === 0 && (
+            <p className="p-4 text-sm text-slate-500" data-testid="my-devices-empty">
+              No devices currently assigned to you. An administrator can assign an ESPHome watch, speaker, or smart display.
+            </p>
+          )}
+          <ul className="divide-y divide-white/5">
+            {myDevices.data?.map((d) => (
+              <DeviceCard
+                key={d.device_key}
+                device={{
+                  ...d,
+                  platform: isEsphomeDevice(d) ? 'esphome' : 'android',
+                  owner_username: d.owner_username || user?.username,
+                  owner_display_name: user?.display_name || user?.username,
+                } as unknown as MdmDevice}
+                isAdmin={false}
+                onRefresh={() => queryClient.invalidateQueries({ queryKey: ['my-companion-devices'] })}
+                onOpenDetails={(dev) => setDetailDevice(dev)}
+              />
+            ))}
+          </ul>
+        </Panel>
+
         <SharedFilesPanel />
+
+        {detailDevice && (
+          <DeviceDetailSheet
+            device={{
+              ...(detailDevice as unknown as CompanionDevice),
+              registered_by: detailDevice.registered_by || (isEsphomeDevice(detailDevice) ? 'paired' : 'self'),
+            }}
+            onClose={() => setDetailDevice(null)}
+          />
+        )}
       </div>
     );
   }
@@ -1284,6 +1368,8 @@ export default function Devices() {
             <DeviceCard
               key={d.device_key}
               device={d}
+              members={members}
+              isAdmin={true}
               onRefresh={() => queryClient.invalidateQueries({ queryKey: ['mdm-devices'] })}
               onOpenDetails={(dev) => setDetailDevice(dev)}
             />

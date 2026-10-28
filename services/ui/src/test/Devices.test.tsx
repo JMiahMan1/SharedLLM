@@ -445,6 +445,41 @@ describe('Devices page', () => {
     fireEvent.change(fileInput, { target: { files: [fwFile] } });
     await waitFor(() => expect(otaTarget).toBe('Kitchen Hub'));
   });
+
+  it('allows an administrator to assign an ESPHome device to a family member', async () => {
+    let assignedOwner: string | null = null;
+    server.use(
+      http.get('/api/users/me', () =>
+        HttpResponse.json({ id: 1, username: 'dad', is_admin: true, family_role: 'father' }),
+      ),
+      http.get('/api/mdm/devices', () =>
+        HttpResponse.json({
+          devices: [
+            {
+              device_key: 'esphome:watch',
+              kind: 'watch',
+              platform: 'esphome',
+              label: 'Jarvis Watch',
+              owner_username: null,
+            },
+          ],
+          members: [
+            { username: 'dad', display_name: 'Dad', readable: true },
+            { username: 'kid', display_name: 'Kid', readable: true },
+          ],
+        }),
+      ),
+      http.patch('/api/user-panel/devices/:deviceKey', async ({ request }) => {
+        const body = (await request.json()) as { owner_username?: string };
+        assignedOwner = body.owner_username ?? null;
+        return HttpResponse.json({ device_key: 'esphome:watch', owner_username: assignedOwner });
+      }),
+    );
+    renderWithProviders(<Devices />);
+    const ownerSelect = await screen.findByTestId('mdm-device-owner-esphome:watch');
+    fireEvent.change(ownerSelect, { target: { value: 'kid' } });
+    await waitFor(() => expect(assignedOwner).toBe('kid'));
+  });
 });
 
 describe('Devices page for a child', () => {
@@ -489,5 +524,30 @@ describe('Devices page for a child', () => {
     } finally {
       URL.createObjectURL = realCreate;
     }
+  });
+
+  it('shows assigned ESPHome devices to a child with user controls and hides OTA/sync', async () => {
+    server.use(
+      childMe,
+      forMe([]),
+      http.get('/api/user-panel/devices', () =>
+        HttpResponse.json([
+          {
+            device_key: 'esphome:watch',
+            kind: 'watch',
+            label: "Kid's Watch",
+            owner_username: 'kid',
+            esphome_version: '2026.9.0',
+            hardware: 'ESP32-S3',
+          },
+        ]),
+      ),
+    );
+    renderWithProviders(<Devices />);
+    expect(await screen.findByText("Kid's Watch")).toBeInTheDocument();
+    // Non-admin controls: Ping button exists, but OTA upload and Jarvis sync are hidden!
+    expect(screen.getByTestId('mdm-esphome-probe-esphome:watch')).toBeInTheDocument();
+    expect(screen.queryByTestId('mdm-esphome-ota-box-esphome:watch')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mdm-esphome-sync-esphome:watch')).not.toBeInTheDocument();
   });
 });

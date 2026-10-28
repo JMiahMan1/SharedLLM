@@ -53,7 +53,7 @@ CODE_EDITING_SHELL_COMMANDS = {
     "ln", "xargs",
 }
 VERIFICATION_SHELL_COMMANDS = {
-    "black", "eslint", "flake8", "pytest", "python", "python3", "git", "gh"
+    "black", "eslint", "flake8", "pytest", "python", "python3", "git", "gh", "esphome", "yamllint"
 }
 # Truly dangerous system-level commands; never allowed regardless of context
 SYSTEM_BLOCKLIST_COMMANDS = {
@@ -1163,9 +1163,35 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         elif ext == ".json" or forced == "json":
             await _lint_step("python3", ["-m", "json.tool"])
 
-        # YAML
-        elif ext in (".yaml", ".yml") or forced == "yamllint":
-            await _lint_step("yamllint", ["-d", "relaxed"])
+        # YAML / ESPHome
+        elif ext in (".yaml", ".yml") or forced in ("yamllint", "esphome"):
+            is_esphome_file = forced == "esphome"
+            if not is_esphome_file:
+                try:
+                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                        head = f.read(2048)
+                        if "esphome:" in head or "esp32:" in head or "esp8266:" in head or "substitutions:" in head:
+                            is_esphome_file = True
+                except Exception:
+                    pass
+            ran = False
+            if is_esphome_file:
+                ran = await _lint_step("esphome", ["config"], label="esphome config")
+                if not ran:
+                    ran = await _lint_step("yamllint", ["-d", "relaxed"])
+            else:
+                ran = await _lint_step("yamllint", ["-d", "relaxed"])
+
+            if not ran:
+                # Syntax fallback when external tools are absent
+                rc, out, err = await _run(["python3", "-c", "import yaml, sys; yaml.safe_load(open(sys.argv[1]))", str(abs_path)])
+                if rc == 0:
+                    verified = True
+                    results.append({"tool": "pyyaml", "returncode": 0, "output": "YAML syntax is valid"})
+                elif rc > 0:
+                    verified = True
+                    passed = False
+                    results.append({"tool": "pyyaml", "returncode": rc, "output": out or err or "Invalid YAML syntax"})
 
         # Dockerfile
         elif os.path.basename(req.path) == "Dockerfile" or forced == "hadolint":

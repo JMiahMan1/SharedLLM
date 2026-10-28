@@ -37,8 +37,9 @@ def _failure(e: Exception, service: str, target: str) -> ExecutionResult:
 
 async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
     ctx = req.user_context
+    is_admin = bool(ctx.is_admin)
     log.info(
-        f"[esphome] user={ctx.user} device={req.device} "
+        f"[esphome] user={ctx.user} is_admin={is_admin} device={req.device} "
         f"action={req.action} entity={req.entity}"
     )
     service = "esphome"
@@ -46,7 +47,7 @@ async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
         # A paired device belongs to the user who paired it.
         cfg = await esphome_client.get_device(req.device)
         owner = cfg.get("owner")
-        if owner and owner != ctx.user.lower() and not ctx.is_admin:
+        if owner and owner != ctx.user.lower() and not is_admin:
             return ExecutionResult(
                 status="FAILURE",
                 message=f"'{req.device}' is linked to another user.",
@@ -87,6 +88,12 @@ async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
             )
 
         if req.action == "ota":
+            if not is_admin:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="Only an administrator can perform OTA firmware updates on ESPHome devices.",
+                    service=service,
+                )
             params = req.params or {}
             fw_b64 = params.get("firmware_b64")
             if not fw_b64 or not isinstance(fw_b64, str):
@@ -127,7 +134,8 @@ async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
                 message="An entity name is required for action 'call'.",
                 service=service,
             )
-        result = await esphome_client.call_entity(req.device, req.entity, req.params)
+        authorize_cb = None if is_admin else esphome_client.member_guard
+        result = await esphome_client.call_entity(req.device, req.entity, req.params, authorize=authorize_cb)
         log.info(f"[esphome] command sent: {result}")
         return ExecutionResult(
             status="SUCCESS",

@@ -3942,6 +3942,34 @@ export const api = {
     return api.updateSetting('esphome_devices', JSON.stringify(devices));
   },
 
+  async flashWorkspaceEsphome(
+    workspaceId: string,
+    payload: { device: string; path: string; password?: string; ota_port?: number },
+  ): Promise<{ status: string; message: string; device: string; filename: string; detail?: Record<string, unknown> }> {
+    try {
+      const resp = await apiClient.post(`/api/workspaces/${encodeURIComponent(workspaceId)}/esphome/flash`, payload, {
+        timeout: 120000,
+      });
+      return resp.data;
+    } catch (error) {
+      return rethrowWithServerDetail(error, 'Could not flash ESPHome device from workspace');
+    }
+  },
+
+  async validateWorkspaceEsphome(
+    workspaceId: string,
+    path: string,
+  ): Promise<ExecutionResponse> {
+    try {
+      const resp = await apiClient.post(`/api/workspaces/${encodeURIComponent(workspaceId)}/esphome/validate`, { path }, {
+        timeout: 45000,
+      });
+      return resp.data;
+    } catch (error) {
+      return rethrowWithServerDetail(error, 'Could not validate ESPHome configuration');
+    }
+  },
+
   async getSystemHealth(): Promise<SystemHealthStatus> {
     const resp = await apiClient.get('/api/admin/services/health');
     return resp.data;

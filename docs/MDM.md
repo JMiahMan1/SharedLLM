@@ -62,6 +62,32 @@ Not every registered device is an Android phone:
      - **Sync Jarvis key & URL** (`POST /execute/esphome` `action: "configure_jarvis"`) to re-provision the Jarvis endpoint URL and a fresh device API key over the encrypted Noise channel.
      - **Battery, steps & history** (`DeviceDetailSheet`) to inspect 24-hour battery discharge, watch step counts, and recent telemetry events.
 
+### Multi-User Access Control & Device Assignment
+
+1. **Admin Assignment & Authority:**
+   - Administrators (users with `is_admin: true`, `is_system_default: true`, `family_role: "father"`, or `username: "default"`) have full control over all registered devices.
+   - Admins can assign ESPHome devices to specific family members via the owner dropdown on `Devices.tsx` or `PATCH /api/user-panel/devices/{device_key}`. This updates both the user-panel device registry in identity and synchronizes the owner in `GlobalSetting("esphome_devices")`.
+   - Admins see the comprehensive MDM inventory, full device controls, OTA firmware upload panels, Jarvis URL/key sync buttons, and workspace flashing dialogs.
+2. **Family Member (Non-Admin) Permissions:**
+   - Non-admin users see only their assigned ESPHome companion devices (plus unassigned devices) in the "My Devices" section on `Devices.tsx`.
+   - Everyday functions are permitted through `esphome_client.member_guard`: volume adjustments, mute/unmute, media player controls (`play`, `pause`, `stop`), light toggles and brightness sliders, option selects, numbers, and text/chat messaging.
+   - Maintenance and destructive controls are strictly blocked for non-admins (`EsphomePermissionError` / HTTP 403): device restarts, factory resets, safe mode, configuration buttons, and Jarvis key/URL re-provisioning.
+   - **OTA updates are strictly Admin-only**: non-admins cannot upload OTA firmware binaries or trigger flashing; the UI hides OTA controls, and backend execution enforces admin authorization on all OTA actions.
+
+### Workspace ESPHome Studio: Edit, Test with Jarvis, and Flash
+
+Workspaces (`services/ui/src/components/workspace/WorkspaceIDE.tsx`) provide an integrated ESPHome Studio for developing and maintaining firmware configurations:
+
+1. **Edit & Assist with Jarvis:**
+   - Workspace IDE includes an "Ask Jarvis" button on ESPHome YAML configurations (`.yaml` / `.yml`), launching an interactive session with Jarvis to review schemas, configure pins, sensors, displays, and LVGL pages.
+2. **Test & Validate Configurations:**
+   - `POST /api/workspaces/{workspace_id}/esphome/validate` invokes workspace verification via `services/execution/handlers/workspace.py:handle_workspace_lint`.
+   - Automatically detects ESPHome YAML files and executes `esphome config`, falling back gracefully to `yamllint` or PyYAML syntax checks if the full ESPHome CLI is not pre-installed.
+3. **Flash ESPHome Devices (Admin Only):**
+   - `POST /api/workspaces/{workspace_id}/esphome/flash` allows admins to select a compiled `.bin` firmware artifact from the workspace and push it directly to any ESPHome companion device.
+   - Streams the binary to the device via native ESPHome TCP port 3232 (falling back to web server port 80).
+   - Records the flash action, workspace ID, firmware path, and target device in `audit.json` under `esphome_ota`.
+
 ## No invented values
 
 The rule for the whole page: show real data or an explicit loading, empty or

@@ -588,6 +588,17 @@ export const server = setupServer(
     apiKeys = apiKeys.filter((key) => String(key.id) !== String(params.keyId));
     return HttpResponse.json({ success: true });
   }),
+  http.get('/api/user-panel/devices', () => HttpResponse.json([])),
+  http.patch('/api/user-panel/devices/:deviceKey', async ({ params, request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    return HttpResponse.json({
+      device_key: params.deviceKey,
+      kind: body.kind || 'assistant',
+      label: body.label || '',
+      owner_username: body.owner_username || null,
+      registered_by: 'admin',
+    });
+  }),
   http.get('/api/communication/timers', () => HttpResponse.json(timers)),
   http.get('/api/communication/timers/devices', () => HttpResponse.json({
     devices: [

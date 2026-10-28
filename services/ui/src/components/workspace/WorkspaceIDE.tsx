@@ -37,9 +37,13 @@ import {
   UserRound,
   ScanText,
   FolderUp,
+  Zap,
+  CheckCircle2,
+  Cpu,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
 import { api, type RavenMission, type Workspace } from '../../services/api';
 import type {
   AiCapability,
@@ -262,6 +266,21 @@ export default function WorkspaceIDE({
     open: false,
     text: '',
     count: 0,
+  });
+
+  const user = useAuth().user;
+  const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.username === 'default');
+  const [showFlashModal, setShowFlashModal] = useState(false);
+  const [flashDevice, setFlashDevice] = useState('');
+  const [flashPath, setFlashPath] = useState('');
+  const [flashPassword, setFlashPassword] = useState('');
+  const [flashing, setFlashing] = useState(false);
+
+  const { data: esphomeDevs } = useQuery({
+    queryKey: ['esphome-devices-ws'],
+    queryFn: () => api.getEsphomeDevices(),
+    enabled: isAdmin,
+    retry: false,
   });
 
   // Root-relative file path -> short git status letter (M/?/A/D/...). Used to
@@ -1291,6 +1310,57 @@ export default function WorkspaceIDE({
     });
   }, []);
 
+  const testEsphomeConfig = useCallback(async (filePath?: string) => {
+    const targetPath = filePath || active?.path;
+    if (!targetPath) return;
+    setProblems({ open: true, text: `Validating ESPHome config in ${targetPath}…`, count: 0 });
+    try {
+      const res = await api.validateWorkspaceEsphome(workspace.id, targetPath);
+      const text = (res as { output?: string })?.output ?? res?.message ?? JSON.stringify(res);
+      const count = (text.match(/error|warning|issue|❌|⚠️/gi) ?? []).length;
+      setProblems({ open: true, text, count });
+      if (res?.status === 'SUCCESS' && count === 0) {
+        toast.success('ESPHome configuration is valid!');
+      } else if (res?.status === 'FAILURE') {
+        toast.error(res.message || 'ESPHome configuration errors found');
+      }
+    } catch (e: unknown) {
+      setProblems({ open: true, text: `Validation failed: ${apiErr(e)}`, count: 1 });
+      toast.error(`Validation failed: ${apiErr(e)}`);
+    }
+  }, [active, workspace.id]);
+
+  const askJarvisEsphome = useCallback((filePath?: string) => {
+    const targetPath = filePath || active?.path || 'ESPHome configuration';
+    const prompt = `Help me edit and improve the ESPHome configuration in "${targetPath}". Please check the components, wifi settings, pins, and sensors.`;
+    void startChat(prompt, 'auto');
+  }, [active, startChat]);
+
+  const runFlashEsphome = useCallback(async () => {
+    if (!flashDevice.trim()) {
+      toast.error('Select a target ESPHome device');
+      return;
+    }
+    if (!flashPath.trim()) {
+      toast.error('Specify a firmware binary path (.bin)');
+      return;
+    }
+    setFlashing(true);
+    try {
+      const res = await api.flashWorkspaceEsphome(workspace.id, {
+        device: flashDevice.trim(),
+        path: flashPath.trim(),
+        password: flashPassword.trim() || undefined,
+      });
+      toast.success(res.message || `Flashed ${res.filename} to ${flashDevice}`);
+      setShowFlashModal(false);
+    } catch (e: unknown) {
+      toast.error(apiErr(e) || 'Failed to flash device');
+    } finally {
+      setFlashing(false);
+    }
+  }, [flashDevice, flashPath, flashPassword, workspace.id]);
+
   const refineLastMission = useCallback(async () => {
     const last = missions[0];
     if (!last) {
@@ -1927,6 +1997,47 @@ export default function WorkspaceIDE({
                   )}
                 </div>
               )}
+
+              <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3 flex flex-col gap-2" data-testid="ws-esphome-studio">
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-indigo-300 font-semibold">
+                  <span>ESPHome Studio</span>
+                  <Cpu size={14} />
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Edit configurations, test YAML syntax and platform components, use Jarvis for assistance, and flash OTA.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void testEsphomeConfig()}
+                  disabled={!active?.path?.endsWith('.yaml') && !active?.path?.endsWith('.yml')}
+                  className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 disabled:opacity-40"
+                  data-testid="ws-tools-esphome-validate"
+                >
+                  <CheckCircle2 size={13} /> Validate Active YAML
+                </button>
+                <button
+                  type="button"
+                  onClick={() => askJarvisEsphome()}
+                  disabled={!active}
+                  className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded bg-fuchsia-600/20 text-fuchsia-300 hover:bg-fuchsia-600/30 disabled:opacity-40"
+                  data-testid="ws-tools-esphome-jarvis"
+                >
+                  <MessageSquare size={13} /> Ask Jarvis to Edit
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (active?.path?.endsWith('.bin')) setFlashPath(active.path);
+                      setShowFlashModal(true);
+                    }}
+                    className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded bg-amber-600/20 text-amber-300 hover:bg-amber-600/30"
+                    data-testid="ws-tools-esphome-flash"
+                  >
+                    <Zap size={13} /> Flash to ESPHome Device
+                  </button>
+                )}
+              </div>
               {toolOutput && (
                 <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-[60vh] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
                   {toolOutput}
@@ -2443,6 +2554,42 @@ export default function WorkspaceIDE({
                       <button onClick={validateFile} className="px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200" title="Validate / lint file">
                         Validate
                       </button>
+                      {Boolean(active.path.endsWith('.yaml') || active.path.endsWith('.yml')) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void testEsphomeConfig()}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50"
+                            title="Test & validate ESPHome YAML config"
+                            data-testid="ws-esphome-validate-btn"
+                          >
+                            <CheckCircle2 size={13} /> Test ESPHome
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => askJarvisEsphome()}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-fuchsia-600/30 text-fuchsia-300 hover:bg-fuchsia-600/50"
+                            title="Ask Jarvis to review or edit this ESPHome config"
+                            data-testid="ws-esphome-ask-btn"
+                          >
+                            <MessageSquare size={13} /> Ask Jarvis
+                          </button>
+                        </>
+                      )}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (active.path.endsWith('.bin')) setFlashPath(active.path);
+                            setShowFlashModal(true);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-amber-600/30 text-amber-300 hover:bg-amber-600/50"
+                          title="Flash firmware to ESPHome device via OTA (Admin only)"
+                          data-testid="ws-esphome-flash-btn"
+                        >
+                          <Zap size={13} /> Flash Device
+                        </button>
+                      )}
                       <button onClick={gitDiffView} disabled={gitBusy || !gitEnabled} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200 disabled:opacity-40" title="View diff in editor">
                         <GitPullRequest size={13} /> Diff
                       </button>
@@ -2695,6 +2842,95 @@ export default function WorkspaceIDE({
             )}
           </div>
         </>
+      )}
+
+      {showFlashModal && isAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1322] p-5 shadow-2xl text-slate-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Zap size={18} className="text-amber-400" />
+                <h3 className="text-sm font-semibold text-white">Flash ESPHome Device (OTA)</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFlashModal(false)}
+                className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1">Target ESPHome Device</label>
+                <select
+                  value={flashDevice}
+                  onChange={(e) => setFlashDevice(e.target.value)}
+                  className="w-full glass-input bg-black/40 px-3 py-2 text-xs text-slate-200"
+                  data-testid="ws-flash-device-select"
+                >
+                  <option value="">Select an ESPHome device…</option>
+                  {(esphomeDevs ?? []).map((d) => (
+                    <option key={d.name} value={d.name}>
+                      {d.friendly_name || d.name} ({d.host}:{d.port || 6053})
+                    </option>
+                  ))}
+                </select>
+                {(esphomeDevs ?? []).length === 0 && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    No ESPHome devices found in settings. Add one in Admin &gt; Hardware or pair one.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">Firmware binary path in workspace (.bin)</label>
+                <input
+                  type="text"
+                  value={flashPath}
+                  onChange={(e) => setFlashPath(e.target.value)}
+                  placeholder="e.g. .esphome/build/smart-speaker/build/smart-speaker.bin"
+                  className="w-full glass-input bg-black/40 px-3 py-2 text-xs text-slate-200 font-mono"
+                  data-testid="ws-flash-path-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">OTA Password (optional)</label>
+                <input
+                  type="password"
+                  value={flashPassword}
+                  onChange={(e) => setFlashPassword(e.target.value)}
+                  placeholder="Leave blank if no OTA password"
+                  className="w-full glass-input bg-black/40 px-3 py-2 text-xs text-slate-200"
+                  data-testid="ws-flash-password-input"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-white/10 pt-3">
+              <button
+                type="button"
+                disabled={flashing}
+                onClick={() => setShowFlashModal(false)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={flashing || !flashDevice || !flashPath}
+                onClick={() => void runFlashEsphome()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-40"
+                data-testid="ws-flash-confirm-btn"
+              >
+                {flashing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                {flashing ? 'Flashing…' : 'Flash Firmware (OTA)'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
