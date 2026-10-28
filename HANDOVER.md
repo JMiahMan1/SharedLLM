@@ -48,7 +48,10 @@ Every claim below was verified against the live system unless marked **planned**
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
-  live.
+  live. **After that deploy:** `5d04ee6a` pinned the base image's apt toolchain (CI built the full base
+  and all 14 services from it), `e4fe72a5`..`df0be064` put the browser suite in CI, and
+  `df4ba93e`..`ddf12490` added the calendar check and the test/docs fixes; none of those changes the
+  running UI, so the live app is still `300f0336`.
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -74,6 +77,38 @@ Every claim below was verified against the live system unless marked **planned**
     service calls need `X-Internal-Secret`, present as `INTERNAL_SECRET`).
 
 ### Recently shipped (newest first)
+
+- `2026-10-27` **Production-readiness close-out: the pinned base toolchain, the browser suite in CI, and the whole-suite bug check** (`docs/PRODUCTION_READINESS.md` §3.5, §3.7, §3.8, §3.11).
+  - **Base image:** all 34 Debian packages are pinned to the versions resolved from the pinned
+    `python:3.11-slim` digest (`5d04ee6a`), so a rebuild can no longer move a tool version silently; the
+    trust-store layer now only edits the blocklist and rebuilds the bundle (130 certificates, 18
+    disabled). CI `Build & Push Images` `40630608244` built the full base plus all 14 services from the
+    pins.
+  - **Browser suite:** the whole Playwright run (both hermetic projects, 166 tests) is green - **156
+    passed, 10 skipped, 0 failed in 13.1 minutes**. It found and fixed two real crashes (`HealthToday` on
+    an incomplete summary, `ListenNowPage` on a missing shelf list) plus harness bugs (hourly-steps on the
+    wrong tab and without a summary mock, climate strict-mode/viewport/pointer assumptions, the
+    theme-contrast spec measuring `/communication`, which is a redirect to `/family`), and refreshed the
+    eight stale darwin baselines (`717763e0`). A nightly **UI E2E** workflow now runs both projects on
+    Ubuntu 24.04 (`ubuntu-latest` is 26.04, which Playwright 1.59.1 refuses), skipping the darwin-only
+    visuals and uploading the report (`e4fe72a5`, `2bc94114`, `df0be064`).
+  - **First Linux runs:** they found two real test bugs, now fixed - the hourly-step chart read the
+    browser clock and saw the mocked 8am bar as "ahead" (the spec pins 20:00 UTC), and the tab-lock test
+    could claim in the same millisecond as the app and lose the id tie-break (the claim is now 2 ms
+    later) (`87c97cad`, `92764fae`).
+  - **Calendar:** the "When" field now refuses blank, impossible (`2026-02-31`, `25:99`) and
+    digit-leading malformed values in the browser, with the server's parse error still the fallback
+    (`df4ba93e`).
+  - **Bug check:** the backend suite ran **6010 passed / 1 failed / 41 skipped / 205 deselected (12m17s)**;
+    the one failure was a stale guardian-recap expectation (the recap gained `social_messages` and
+    `social_apps`), fixed. UI: **291 files / 2227 tests passed**, typecheck and eslint clean, build
+    succeeded.
+  - **A11y:** the form-label item is closed - 168 labels (59 `htmlFor`/`id`, 109 single-control wrappers),
+    enforced by `formLabels.test.ts` (`ddf12490`); the unreachable "Restricted" badge, its `Lock` import,
+    its extra `disabled` condition and its now-unused `bg-red-950/40` CSS rule are gone (`300f0336`).
+  - **Deployed:** `300f0336` is live (only `sharedllm_ui` recreated; OTA `300f0336`, APK **490**,
+    `/health` 200, 0 ERROR lines, image digest matched, probes 4/4). The later commits are
+    CI/tests/docs/base-pin only, so the live app is unchanged.
 
 - `2026-10-27` **ESPHome Multi-User Access Control, Admin Device Assignment, and Workspace Studio (Edit, Test with Jarvis, Flash)** (`docs/MDM.md`).
   - **Admin Device Assignment:** Admins (`is_admin`, `is_system_default`, `family_role: "father"`, or `username: "default"`) can control and assign ESPHome nodes (watches, speakers, screens, lights) to specific family members via `PATCH /api/user-panel/devices/{device_key}`, synchronizing both the identity device registry and `GlobalSetting("esphome_devices")`.
@@ -1041,14 +1076,14 @@ Corpus side: the CC0 Food.com dataset carries per-recipe nutrition (verify
 per-serving vs per-recipe on first download); computed values only as fallback
 via recipe-scrapers → ingredient-parser-NLP → seed match.
 
-### `docs/RECIPES.md` - Phases 0-11 built
+### `docs/RECIPES.md` - Phases 0-6 and 8-11 built
 
 Phases 0-1 are shipped: the importer (`scripts/import_recipes.py`) filters the
 CC0 Food.com corpus by the kid level rules, ranks by staples/few ingredients/
 short time and renders level-tagged markdown notes (per-serving `foodcom`
 nutrition, scaled to 7 servings) - 120 notes live in Nextcloud `Recipes/`.
 The Recipes page shares any recipe into a family chat and has a Teach Jarvis
-RAG-sync button (`cb530641`). Phases 2-11 are built: the weekly meal
+RAG-sync button (`cb530641`). Phases 2-6 and 8-11 are built: the weekly meal
 plan and shopping list (Phases 3-4), search & import over the offline FTS index
 plus TheMealDB and schema.org paste-a-link with a duplicate guard (Phase 8,
 `6932452c`), photo/handwriting import through Alpaca OCR with an editable draft
@@ -1057,6 +1092,10 @@ plus TheMealDB and schema.org paste-a-link with a duplicate guard (Phase 8,
 planned-vs-eaten logging (Phase 10, `b891938b` + `6932452c`), and the Noom-style
 calorie budget, macro targets, food density bands and weekly averages (Phase 11,
 `services/health/scoring.py`, `services/health/weekly.py`, `HealthNutrition.tsx`).
+**Still open:** Phase 7 (the Skylight Meals connector; the auth/session/frame helpers already
+exist in `services/execution/main.py`, but the meals JSON:API payloads cannot be verified without a
+real Skylight account), the assistant's write action in Phase 5, and staple-overlap ranking (needs
+an ingredient index first; the plan shelf carries titles only).
 
 ### `docs/HEALTH_HUB.md` - largely built
 
@@ -1150,9 +1189,9 @@ device-owner phone; app install/uninstall stays the screen rules.
   E2E run (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test --project=live`) - are still
   outstanding; the 1.6.0 version bump is done (`c9c640dd`). P6-T5 (UX ledger pass) and P7-T3 to
   P7-T5 (screen-reader labels and the now-playing announcement, performance budget, image sizing)
-  shipped 2026-10-25 (`0316f940`). The hermetic media E2E passes for `hermetic-desktop` and
-  `hermetic-mobile` apart from known-flaky specs; the `hermetic-iphone` project needs
-  `npx playwright install` locally.
+  shipped 2026-10-25 (`0316f940`). The whole hermetic suite (both projects, 166 tests) is green -
+  156 passed, 10 skipped, 0 failed - and runs nightly in CI (`ui-e2e.yml`); the `hermetic-iphone`
+  project needs WebKit, which this Mac does not have, so the iPhone layout is still unverified.
 - Health: the veg challenge (steps shipped as a family challenge); the family challenge's labelled
   "guideline goal" for members with no goal of their own still needs Jeremiah's yes/no under the
   no-fallback rule.
@@ -1247,9 +1286,10 @@ device-owner phone; app install/uninstall stays the screen rules.
    com.jarvisos.app/.GuardAdminReceiver`, one-time adb, or QR/`ACTION_PROVISION_MANAGED_DEVICE` at a
    factory reset, not implemented). The web-filter bypass blocks (unsupported browsers, split
    screen, safe mode) shipped.
-4. Finish the media Phase 8 device checks (above) and Phase 9: the final full gate, the full hermetic
-   E2E on all projects, and one `LIVE=1` run against the dev server
-   (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test --project=live`).
+4. Finish the media Phase 8 device checks (above) and Phase 9: the final full gate and one `LIVE=1`
+   run against the dev server (`LIVE=1 UI_URL=… TEST_USER=… TEST_PASS=… npx playwright test
+   --project=live`). The hermetic desktop and mobile projects are green locally and nightly in CI;
+   `hermetic-iphone` (WebKit) is still unverified.
 5. Keep the plan docs and this handover updated in the same commit as the code.
 
 ## 6. Where the details live

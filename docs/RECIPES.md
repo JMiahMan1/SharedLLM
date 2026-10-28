@@ -1,11 +1,11 @@
 # Recipes and meal planning
 
-Status: **Phases 0-5 and 8-10 built** - the importer (`scripts/import_recipes.py`) renders the
+Status: **Phases 0-6 and 8-11 built** - the importer (`scripts/import_recipes.py`) renders the
 first level-balanced note set; the Recipes page (plan, shopping list, search, link and
 photo import, the duplicate-import guard) and the Health connection (recipe logging, the
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
-editor's nutrition summary) are live. Phase 7 (Skylight), the assistant's write action in
-Phase 5, staple-overlap ranking and Phase 11's per-person budget are still open. The
+editor's nutrition summary) are live. Phase 7 (Skylight) and the assistant's write action in
+Phase 5 are still open, as is staple-overlap ranking (the one Phase 6 item not built). The
 meal-planning half of Phase 6 - plan parsing and grocery-list merging - is built and tested:
 the plan editor and the shopping list are plain markdown under `Recipes/`, and
 `services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
