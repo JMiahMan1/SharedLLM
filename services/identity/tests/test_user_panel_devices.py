@@ -187,6 +187,33 @@ class TestDeviceReclassification:
         client.post(REGISTER, json=_phone_payload(form_factor="tablet"))
         assert client.post(REGISTER, json=_phone_payload()).json()["kind"] == "tablet"
 
+    def test_a_known_tablet_model_without_form_factor_infers_tablet(self, client: TestClient, session: Session):
+        """Older app builds (e.g. build 447 on Samsung Galaxy Tab S6 Lite SM-P620)
+        omitted form_factor; known tablet models are classified as tablets."""
+        resp = client.post(
+            REGISTER,
+            json=_phone_payload(device_key="tab-s6-lite-01", model="SM-P620", manufacturer="samsung"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "tablet"
+        assert session.exec(select(Device).where(Device.device_key == "tab-s6-lite-01")).one().kind == "tablet"
+
+    def test_migrate_device_kinds_reclassifies_existing_tablet_models(self, session: Session):
+        _client(session)
+        dev = Device(
+            device_key="legacy-tab-0001",
+            kind="phone",
+            model="SM-P620",
+            manufacturer="samsung",
+            registered_by="self",
+            owner_username="michele",
+        )
+        session.add(dev)
+        session.commit()
+        main._migrate_device_kinds(session)
+        session.refresh(dev)
+        assert dev.kind == "tablet"
+
 
 class TestVisibility:
     def test_a_normal_user_sees_only_their_own(self, client: TestClient, session: Session):
@@ -278,6 +305,19 @@ class TestAssignment:
     def test_an_unknown_device_is_404(self, session: Session):
         _client(session)
         assert login(session, "jeremiah").patch("/api/user-panel/devices/ghost", json={"owner_username": "michele"}).status_code == 404
+
+    def test_an_admin_can_reclassify_kind_and_label(self, client: TestClient, session: Session):
+        client.post(REGISTER, json=_phone_payload(device_key="mobile-reclass-1"))
+        admin = login(session, "jeremiah")
+        resp = admin.patch(
+            "/api/user-panel/devices/mobile-reclass-1",
+            json={"kind": "tablet", "label": "Family Tablet"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "tablet"
+        assert resp.json()["label"] == "Family Tablet"
+        bad = admin.patch("/api/user-panel/devices/mobile-reclass-1", json={"kind": "spaceship"})
+        assert bad.status_code == 422
 
 
 class TestTelemetryIngest:

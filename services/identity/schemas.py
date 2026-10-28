@@ -619,6 +619,8 @@ class DeviceClaim(BaseModel):
 
 class DeviceAssign(BaseModel):
     owner_username: str | None = None
+    kind: str | None = None
+    label: str | None = None
 
 
 class BatteryReading(BaseModel):

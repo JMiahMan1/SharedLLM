@@ -386,3 +386,42 @@ def test_library_fetch_is_a_refusal_when_the_shelf_is_not_configured(world):
     resp = client.post("/api/mdm/library/books/file", json={"path": "/Books/Text/x.pdf"})
     assert resp.status_code == 409
 
+
+# --- device awareness (phones vs tablets vs ESPHome companion nodes) --------
+
+
+def test_device_platform_distinguishes_android_from_esphome():
+    assert mdm.device_platform({"device_key": "phone-1", "kind": "phone"}) == "android"
+    assert mdm.device_platform({"device_key": "tab-1", "kind": "tablet"}) == "android"
+    assert mdm.device_platform({"device_key": "esphome:744dbd2c9728", "kind": "watch"}) == "esphome"
+    assert mdm.device_platform({"device_key": "node-1", "kind": "assistant", "esphome_version": "2026.9.0"}) == "esphome"
+
+
+def test_update_push_refuses_esphome_devices(world):
+    client, state = world
+    state["updates"] = {"bundle_available": True, "apk_available": True, "version": "2.0.0"}
+    resp = client.post("/api/mdm/devices/update", json={"device_keys": ["esphome:744dbd2c9728"]})
+    assert resp.status_code == 422
+    assert "ESPHome" in resp.json()["detail"]
+
+
+def test_wipe_refuses_esphome_devices(world):
+    client, _ = world
+    resp = client.post("/api/mdm/devices/esphome:744dbd2c9728/wipe", json={"confirm": True})
+    assert resp.status_code == 409
+    assert "ESPHome" in resp.json()["detail"]
+
+
+def test_wipe_uses_tablet_noun_for_tablet_devices(world):
+    client, state = world
+    state["internal"]["/api/internal/device-registered/kid-tab-0001"] = (200, {"owner": "kid"})
+    state["devices"]["/api/family/devices/kid"] = (
+        200,
+        {"devices": [{"device_key": "kid-tab-0001", "kind": "tablet", "capabilities": {"guard": {"deviceOwner": True}}}]},
+    )
+    resp = client.post("/api/mdm/devices/kid-tab-0001/wipe", json={"confirm": True})
+    assert resp.status_code == 200
+    assert "tablet" in resp.json()["delivery"]
+    mdm.clear_wipe("kid-tab-0001")
+
+

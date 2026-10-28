@@ -180,6 +180,128 @@ describe('Devices page', () => {
     expect(await screen.findByTestId('mdm-library-books')).toBeInTheDocument();
     expect(await screen.findByText('Pilgrim - Bunyan.epub')).toBeInTheDocument();
   });
+
+  it('distinguishes tablets and ESPHome watches with platform-aware controls', async () => {
+    const esphomeCalls: Array<Record<string, unknown>> = [];
+    server.use(
+      http.get('/api/mdm/devices', () =>
+        HttpResponse.json({
+          devices: [
+            {
+              device_key: 'kid-tab-0001',
+              kind: 'tablet',
+              platform: 'android',
+              label: "Madelyn's Galaxy Tab",
+              manufacturer: 'samsung',
+              model: 'SM-P620',
+              os_version: '16',
+              os_build: 'UP1A',
+              app_version: '1.9.0',
+              app_build: '493',
+              last_seen_at: '2026-10-25T10:00:00Z',
+              first_seen_at: '2026-10-01T10:00:00Z',
+              last_ip_address: '192.168.2.42',
+              battery: { at: '2026-10-25T10:00:00Z', pct: 84, usb: false },
+              capabilities: { guard: { deviceOwner: true, guardEnabled: true, webFilterActive: true } },
+              owner_username: 'madelyn',
+              owner_display_name: 'Madelyn',
+            },
+            {
+              device_key: 'esphome:744dbd2c9728',
+              kind: 'watch',
+              platform: 'esphome',
+              registered_by: 'paired',
+              label: 'Jarvis Watch',
+              manufacturer: null,
+              model: null,
+              os_version: null,
+              os_build: null,
+              app_version: '1.4.6',
+              app_build: null,
+              esphome_version: '2026.9.0',
+              hardware: 'esp32-s3-devkitc-1',
+              last_seen_at: '2026-10-25T10:05:00Z',
+              first_seen_at: '2026-10-01T10:00:00Z',
+              last_ip_address: '192.168.2.105',
+              battery: { at: '2026-10-25T10:05:00Z', pct: 72, usb: false },
+              capabilities: {},
+              owner_username: 'jeremiah',
+              owner_display_name: 'Jeremiah',
+            },
+          ],
+          members: [
+            { username: 'madelyn', display_name: 'Madelyn', device_count: 1, readable: true, reason: null },
+            { username: 'jeremiah', display_name: 'Jeremiah', device_count: 1, readable: true, reason: null },
+          ],
+          generated_at: '2026-10-25T10:05:00Z',
+        }),
+      ),
+      http.post('/execute/esphome', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        esphomeCalls.push(body);
+        if (body.action === 'list') {
+          return HttpResponse.json({
+            status: 'SUCCESS',
+            service: 'execution',
+            message: 'Listed 2 entities',
+            detail: {
+              device_info: {
+                name: 'jarvis-watch',
+                friendly_name: 'Jarvis Watch',
+                model: 'esp32-s3-devkitc-1',
+                esphome_version: '2026.9.0',
+              },
+              entities: [
+                { domain: 'button', object_id: 'find_watch_buzzer', name: 'Find Watch Buzzer' },
+                { domain: 'sensor', object_id: 'watch_battery', name: 'Watch Battery' },
+              ],
+            },
+          });
+        }
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          service: 'execution',
+          message: 'Configured Jarvis Watch',
+        });
+      }),
+    );
+
+    renderWithProviders(<Devices />);
+
+    // Tablet shows Android · Tablet badge and tablet-specific MDM controls
+    expect(await screen.findByTestId('mdm-device-badge-kid-tab-0001')).toHaveTextContent('Android · Tablet · kid-tab-0001');
+    expect(screen.getByTestId('mdm-kind-toggle-kid-tab-0001')).toHaveTextContent('Mark as phone');
+    expect(screen.getByTestId('mdm-guard-kid-tab-0001')).toBeInTheDocument();
+
+    // ESPHome watch shows ESPHome · Watch badge, hardware/firmware facts, and ESPHome native controls (no Android guard/wipe)
+    expect(screen.getByTestId('mdm-device-badge-esphome:744dbd2c9728')).toHaveTextContent('ESPHome · Watch · esphome:744dbd2c9728');
+    expect(screen.getByTestId('mdm-esphome-esphome:744dbd2c9728')).toHaveTextContent('ESPHome companion device');
+    expect(screen.getByText('esp32-s3-devkitc-1')).toBeInTheDocument();
+    expect(screen.getByText('2026.9.0')).toBeInTheDocument();
+    expect(screen.queryByTestId('mdm-guard-esphome:744dbd2c9728')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mdm-wipe-esphome:744dbd2c9728')).not.toBeInTheDocument();
+
+    // Probe ESPHome entities and trigger a button entity
+    fireEvent.click(screen.getByTestId('mdm-esphome-probe-esphome:744dbd2c9728'));
+    expect(await screen.findByTestId('mdm-esphome-entities-esphome:744dbd2c9728')).toHaveTextContent('Find Watch Buzzer');
+    fireEvent.click(screen.getByTestId('mdm-esphome-call-esphome:744dbd2c9728-find_watch_buzzer'));
+    await waitFor(() =>
+      expect(esphomeCalls).toEqual([
+        { action: 'list', device: 'Jarvis Watch' },
+        { action: 'call', device: 'Jarvis Watch', entity: 'find_watch_buzzer', params: null },
+      ]),
+    );
+
+    // Sync Jarvis key & URL
+    fireEvent.click(screen.getByTestId('mdm-esphome-sync-esphome:744dbd2c9728'));
+    await waitFor(() =>
+      expect(esphomeCalls[2]).toEqual({
+        action: 'configure_jarvis',
+        device: 'Jarvis Watch',
+        params: null,
+      }),
+    );
+  });
 });
 
 describe('Devices page for a child', () => {

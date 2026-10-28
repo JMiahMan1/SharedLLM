@@ -448,12 +448,17 @@ export interface MemberDevice {
   device_key: string;
   kind: string;
   label: string;
+  registered_by?: string;
+  entity_id?: string | null;
   model: string | null;
   manufacturer: string | null;
   os_version: string | null;
   os_build: string | null;
   app_version: string | null;
   app_build: string | null;
+  esphome_version?: string | null;
+  hardware?: string | null;
+  platform?: 'android' | 'esphome' | string;
   last_ip_address: string | null;
   last_seen_at: string | null;
   first_seen_at: string | null;

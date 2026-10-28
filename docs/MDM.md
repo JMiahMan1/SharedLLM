@@ -14,7 +14,9 @@ one source of truth for devices, screen rules and the family list. The page is
 | Piece | Route | Who |
 |---|---|---|
 | Device inventory | `GET /api/mdm/devices` | father / admin |
+| Device kind / label / owner update | `PATCH /api/user-panel/devices/{key}` | admin |
 | App-update push | `POST /api/mdm/devices/update` | admin |
+| Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`) | authenticated / admin |
 | Shared School and Library folders | `GET/POST/DELETE /api/mdm/files*` | admin |
 | A child's own folders | `GET /api/mdm/files/for-me` | any member |
 | One shared file | `GET /api/mdm/files/{folder}/{name}` | any member |
@@ -36,6 +38,22 @@ an existing mechanism is how the two drift apart:
   `PackageInstaller.uninstall`, suspends `blocked_apps` at the OS level via
   `setPackagesSuspended`, installs verified APKs silently via `PackageInstaller.Session`,
   and sets the COSU lock-task allowlist (`setLockTaskPackages`) when `kiosk_mode` is on.
+
+## Device awareness: Phones vs Tablets vs ESPHome companion nodes
+
+Not every registered device is an Android phone:
+
+1. **Android Phones (`kind: "phone"`, `platform: "android"`) & Android Tablets (`kind: "tablet"`, `platform: "android"`)**
+   - `services/identity/main.py:infer_mobile_kind` resolves mobile form factors from `form_factor` when reported by `JarvisDeviceInfo`, and falls back to model-string inference for known tablet models (`SM-T*`, `SM-X*`, `SM-P*` Samsung Galaxy Tab models such as `SM-P620` and `SM-X520`, `Galaxy Tab`, `Pixel Tablet`, `iPad`, `TB-*`). Startup migration `_migrate_device_kinds` upgrades existing self-registered tablet rows in SQLite that were created by older app builds before `form_factor` existed.
+   - Admins can also reclassify any mobile device between `phone` and `tablet` in one click on `Devices.tsx` via `PATCH /api/user-panel/devices/{device_key}`.
+   - Tablets render with a `<Tablet>` icon, `Android · Tablet` badge, `Form factor: Tablet` fact row, and tablet-accurate lock/wipe copy (`"this tablet"` instead of `"this phone"`).
+2. **ESPHome Companion Devices (`kind: "watch" | "assistant" | "light"`, `platform: "esphome"`)**
+   - Devices such as the ESPHome-based `Jarvis Watch` (`esphome:744dbd2c9728`, `esp32-s3-devkitc-1`) do not run Android and do not have Android `Protection` flags (`Device admin`, `Device owner`, `Screen guard`, `Web filter`) or Android APK/lock/wipe actions.
+   - `GET /api/mdm/devices` tags every device with `platform: "esphome" | "android"`. `POST /api/mdm/devices/update` and `POST /api/mdm/devices/{key}/wipe` refuse ESPHome targets (`422` / `409`).
+   - On `Devices.tsx` (and `DevicesSection.tsx` on the family member page), ESPHome devices show their hardware (`esp32-s3-devkitc-1`), ESPHome build (`2026.9.0`), project firmware version (`1.4.6`), and battery state, alongside native ESPHome controls:
+     - **Ping & list entities** (`POST /execute/esphome` `action: "list"`) to probe the node over the ESPHome native TCP protocol and trigger controllable `button`, `switch` and `light` entities (`action: "call"`). `services/execution/esphome_client.py` resolves devices by exact name, slugified friendly label (`"Jarvis Watch"` -> `"jarvis-watch"`), or `device_key`.
+     - **Sync Jarvis key & URL** (`POST /execute/esphome` `action: "configure_jarvis"`) to re-provision the Jarvis endpoint URL and a fresh device API key over the encrypted Noise channel.
+     - **Battery, steps & history** (`DeviceDetailSheet`) to inspect 24-hour battery discharge, watch step counts, and recent telemetry events.
 
 ## No invented values
 

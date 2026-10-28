@@ -3849,11 +3849,19 @@ export const api = {
     return resp.data;
   },
 
-  // Admin: give a companion device to a user ('' unassigns it).
+  // Admin: give a companion device to a user ('' unassigns it) or update its kind/label.
   async assignCompanionDevice(deviceKey: string, ownerUsername: string): Promise<CompanionDevice> {
     const resp = await apiClient.patch(`/api/user-panel/devices/${encodeURIComponent(deviceKey)}`, {
       owner_username: ownerUsername,
     });
+    return resp.data;
+  },
+
+  async updateCompanionDevice(
+    deviceKey: string,
+    body: { owner_username?: string; kind?: string; label?: string },
+  ): Promise<CompanionDevice> {
+    const resp = await apiClient.patch(`/api/user-panel/devices/${encodeURIComponent(deviceKey)}`, body);
     return resp.data;
   },
 
@@ -3867,6 +3875,15 @@ export const api = {
     const resp = await apiClient.post('/execute/esphome', {
       action: 'list',
       device,
+    });
+    return resp.data;
+  },
+
+  async esphomeConfigureJarvis(device: string, jarvisUrl?: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/esphome', {
+      action: 'configure_jarvis',
+      device,
+      params: jarvisUrl ? { jarvis_url: jarvisUrl } : null,
     });
     return resp.data;
   },
