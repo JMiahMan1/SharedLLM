@@ -40,18 +40,20 @@ Every claim below was verified against the live system unless marked **planned**
   ESPHome Studio (edit, test with Jarvis, flash).
   Recreated `identity`, `gateway`, and `ui` on `192.168.2.205`; verified 0 ERROR lines in logs
   and 200 OK on `/health`. APK: CI builds one per push under `services/ui/**`
-  and the APK `versionCode` rebuilds per push (**499** is current; 498 was the previous), so the native
-  work below needs the newest APK on the phones. **APK 499** carries the updated UI bundle (including
+  and the APK `versionCode` rebuilds per push (**501** is current; 499 shipped with the `978c35e1`
+  deploy), so the native work below needs the newest APK on the phones. **APK 501** carries the updated UI bundle (including
   `DevicePolicyCard.tsx` and Geofence alerts) alongside `DeviceOwnerGuard` OS update policies, always-on
   VPN lockdown, Wi-Fi networks configuration, and trusted CA certificates provisioning; **APK 489**
   carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
-  live. **After that deploy:** `5d04ee6a` pinned the base image's apt toolchain (CI built the full base
-  and all 14 services from it), `e4fe72a5`..`df0be064` put the browser suite in CI, and
-  `df4ba93e`..`ddf12490` added the calendar check and the test/docs fixes; none of those changes the
-  running UI, so the live app is still `300f0336`.
+  live. **After that deploy:** `300f0336` shipped the form-label and badge work (APK 490), then
+  `978c35e1` (Batch (8) MDM policies) was deployed on top (OTA `978c35e1`, APK 499). The commits after
+  it - `5d04ee6a` (pinned base apt toolchain; CI built the full base and all 14 services from it),
+  `e4fe72a5`..`df0be064` (the browser suite in CI) and `df4ba93e`..`ddf12490` (the calendar check and
+  the test/docs fixes) - are base-pin/CI/tests/docs only, so the running app is still `978c35e1`; the
+  APK artifact has since been rebuilt (**501**).
   - Nextcloud bot account **`jarvis`** (display "Jarvis") exists; its login is only in the
     server `.env` (`JARVIS_BOT_NC_USER`/`JARVIS_BOT_NC_PASS`).
   - **TLS certificate renewed (2026-10-25)**: the public proxy (`PUBLIC_PROXY_IP`, 192.168.2.30) now serves a
@@ -106,9 +108,22 @@ Every claim below was verified against the live system unless marked **planned**
   - **A11y:** the form-label item is closed - 168 labels (59 `htmlFor`/`id`, 109 single-control wrappers),
     enforced by `formLabels.test.ts` (`ddf12490`); the unreachable "Restricted" badge, its `Lock` import,
     its extra `disabled` condition and its now-unused `bg-red-950/40` CSS rule are gone (`300f0336`).
-  - **Deployed:** `300f0336` is live (only `sharedllm_ui` recreated; OTA `300f0336`, APK **490**,
-    `/health` 200, 0 ERROR lines, image digest matched, probes 4/4). The later commits are
-    CI/tests/docs/base-pin only, so the live app is unchanged.
+  - **Deployed:** `300f0336` went live first (only `sharedllm_ui` recreated; OTA `300f0336`, APK
+    **490**, `/health` 200, 0 ERROR lines, image digest matched, probes 4/4), then the MDM batch
+    `978c35e1` was deployed on top of it (OTA `978c35e1`, APK 499). The commits after `978c35e1` are
+    base-pin/CI/tests/docs only, so the running app is `978c35e1` with the APK artifact now at **501**.
+  - **CI:** the Linux `UI E2E` run for `87c97cad` finished **green in 9m45s** (`40632434194`), which
+    proves the hourly-step clock pin and the Ubuntu 24.04 runner on CI; the earlier failures were the
+    clock bug (`df0be064`) and the 26.04 runner (`2bc94114`), both fixed.
+  - **Live finding (2026-10-28, needs hands-on):** `scripts/check_service_urls.py` is **2/4** -
+    `audiobookshelf` (`https://abs.sumemail.com/ping`) and `nextcloud`
+    (`https://cloud.sumemail.com/status.php`) both time out, while `music_assistant` and the `gateway`
+    pass. The names resolve correctly (`abs`/`jarvis` -> 184.190.1.29, `cloud` -> 184.190.1.22, from the
+    household DNS on port 15353) and both backends are on `192.168.2.10`: port 13378 accepts TCP but
+    never answers (25 s timeout for Audiobookshelf), 8080 answers 400 once then times out, and SSH to
+    that host stalls at "banner exchange" while ICMP is clean (0% loss). `jarvis.sumemail.com/health`
+    is 200 and the rest of the stack is up, so the fault is on `192.168.2.10` (app-layer hang, likely
+    overload or a resolver lookup that never returns) - not reachable from here without a working SSH.
 
 - `2026-10-27` **ESPHome Multi-User Access Control, Admin Device Assignment, and Workspace Studio (Edit, Test with Jarvis, Flash)** (`docs/MDM.md`).
   - **Admin Device Assignment:** Admins (`is_admin`, `is_system_default`, `family_role: "father"`, or `username: "default"`) can control and assign ESPHome nodes (watches, speakers, screens, lights) to specific family members via `PATCH /api/user-panel/devices/{device_key}`, synchronizing both the identity device registry and `GlobalSetting("esphome_devices")`.
