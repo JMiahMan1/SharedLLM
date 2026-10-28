@@ -1170,8 +1170,9 @@ device-owner phone; app install/uninstall stays the screen rules.
   audit log) have shipped (see "Phase 12 - device management (MDM)" above and `docs/MDM.md`). Open:
   per-device update notices (the push plumbing is per user), and a wipe still needs a device-owner
   phone.
-- Devices: the tablet/phone split is a screen-width heuristic, so a very large phone reads as a
-  tablet (`72835c17`).
+- Devices: the form factor is Android's own smallest-screen-width rule (600dp and up is a tablet,
+  `DeviceInfoPlugin`/`72835c17`), not a UI width guess; a very large phone or an unfolded foldable can
+  therefore still be classified as a tablet, which is the platform's own answer.
 - Family guard (device owner): the Layer 2 restrictions, the new Settings-page tamper matches, the
   **kiosk lock-task mode** and the **real OS lock** all require a one-time device-owner provisioning
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver` on a phone with no accounts
