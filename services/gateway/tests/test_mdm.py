@@ -497,4 +497,13 @@ def test_workspace_esphome_flash_reads_file_and_calls_execution_ota(world):
     assert len(events) >= 1
 
 
+def test_a_book_content_type_does_not_depend_on_the_host_mime_table():
+    """The slim base image ships no mime table and Python 3.11 does not know the
+    book formats, so the Library names them itself instead of trusting
+    ``mimetypes`` (which served EPUBs as ``application/octet-stream``)."""
+    assert mdm.library_content_type("Book - A.epub") == "application/epub+zip"
+    assert mdm.library_content_type("A.MOBI") == "application/x-mobipocket-ebook"
+    assert mdm.library_content_type("notes.notabook") == "application/octet-stream"
+
+
 

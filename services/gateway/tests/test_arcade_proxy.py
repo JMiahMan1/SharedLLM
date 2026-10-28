@@ -6,9 +6,6 @@ import pytest
 from fastapi import HTTPException
 
 # Mock dependencies before importing main (same preamble as test_calendar_proxy).
-mock_redis = MagicMock()
-sys.modules["redis"] = mock_redis
-sys.modules["redis.asyncio"] = mock_redis
 sys.modules["fastembed"] = MagicMock()
 sys.modules["intent_engine"] = MagicMock()
 sys.modules["background_worker"] = MagicMock()

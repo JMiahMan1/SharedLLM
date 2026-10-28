@@ -81,8 +81,30 @@ def loaded(session: Session, corpus_file: Path) -> Session:
 
 
 @pytest.fixture
-def client(engine, monkeypatch) -> TestClient:
-    monkeypatch.setattr(bible_main.app.state, "engine", engine)
+def set_engine():
+    """Point ``app.state.engine`` at a test engine, and put the old one back.
+
+    ``monkeypatch.setattr`` cannot be used for this. Starlette's ``State``
+    serves its attributes from an inner dict through ``__getattr__`` and
+    ``__setattr__``, and pytest 9.2 restores the value it found in
+    ``vars(target)`` - which holds only ``_state``. It records "nothing was
+    there" and its undo deletes the attribute, so every later test in the
+    session reads a missing ``app.state.engine`` and errors.
+    """
+    previous = bible_main.app.state.engine
+
+    def _set(value):
+        bible_main.app.state.engine = value
+
+    try:
+        yield _set
+    finally:
+        bible_main.app.state.engine = previous
+
+
+@pytest.fixture
+def client(engine, set_engine) -> TestClient:
+    set_engine(engine)
     with TestClient(bible_main.app, headers={"X-Internal-Secret": SECRET}) as c:
         yield c
 

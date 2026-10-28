@@ -269,9 +269,9 @@ def test_a_piece_past_the_end_is_a_400(loaded_client: TestClient, monkeypatch):
     assert "99" in resp.json()["detail"]
 
 
-def test_a_piece_needs_the_internal_secret(engine, monkeypatch):
+def test_a_piece_needs_the_internal_secret(engine, monkeypatch, set_engine):
     _small_pieces(monkeypatch)
-    monkeypatch.setattr(bible_main.app.state, "engine", engine)
+    set_engine(engine)
     with TestClient(bible_main.app) as raw:
         resp = raw.get("/narration/chunk", params={"ref": "Gen 1", "version": "kjv", "index": 0})
     assert resp.status_code == 403
