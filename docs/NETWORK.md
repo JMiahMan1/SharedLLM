@@ -28,7 +28,7 @@ so at the time, and the router's in-memory log was gone by the next day.
 Run, from a machine that can ssh to the router and the Jarvis server:
 
 ```
-scripts/router_setup.sh root@192.168.2.1 32100 jeremiah@192.168.2.205 /home/jeremiah/SharedLLM
+scripts/router_setup.sh root@<router> 32100 <user>@<server> /home/<user>/SharedLLM
 ```
 
 It saves a configuration backup to `~/Desktop` first (`sysupgrade -b`), then on

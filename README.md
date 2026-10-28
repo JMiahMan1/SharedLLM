@@ -57,7 +57,7 @@ Images are built by GitHub Actions on push to `microservices`; nothing is
 built on the server.
 
 ```bash
-bash scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <service> [<service>...]
+bash scripts/deploy_remote.sh <user>@<server> /home/<user>/SharedLLM <service> [<service>...]
 ```
 
 See `CONTRIBUTING.md` for the project rules (including deploys) and `docs/SCRIPTS.md` for the scripts.

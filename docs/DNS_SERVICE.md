@@ -59,7 +59,7 @@ default true), only the IPs that answer are returned:
 - If no candidate answers, the **last address that did** is returned, not the
   whole pool.
 
-Example: `jeremiah-home-desktop.local` (the Ollama / audio box) lists several
+Example: `<desktop-host>.local` (the Ollama / audio box) lists several
 addresses; the answer is whichever is up.
 
 ## Settings
@@ -76,8 +76,8 @@ addresses; the answer is whichever is up.
 ## Checking it
 
 ```bash
-dig A jeremiah-home-desktop.local @172.26.0.254          # on the server
-docker exec sharedllm_execution getent hosts jeremiah-home-desktop.local
+dig A <desktop-host>.local @172.26.0.254          # on the server
+docker exec sharedllm_execution getent hosts <desktop-host>.local
 ```
 
 Tests: `services/dns/tests/` (health-aware mappings, upstream timeout and
