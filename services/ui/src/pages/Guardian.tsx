@@ -12,6 +12,7 @@ import JournalCard from '../components/guardian/JournalCard';
 import RequestsCard from '../components/guardian/RequestsCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GeofenceAlertsCard from '../components/guardian/GeofenceAlertsCard';
+import DevicePolicyCard from '../components/guardian/DevicePolicyCard';
 import ConcernsCard from '../components/member/ConcernsCard';
 import DevicesSection from '../components/member/sections/DevicesSection';
 import ScreenTimeControls from '../components/health/ScreenTimeControls';
@@ -173,8 +174,9 @@ function GuardianChildren() {
         <GuidanceCard username={child.username} name={name} />
         <JournalCard username={child.username} name={name} />
         <ScreenTimeControls username={child.username} name={name} />
-        {/* Guard state and tamper reports: the father and admins only (the
+        {/* Guard state, MDM device policies, and tamper reports: the father and admins only (the
             server refuses anyone else, the mother included). */}
+        {status?.technical && <DevicePolicyCard username={child.username} name={name} />}
         {status?.technical && <DevicesSection username={child.username} name={name} />}
       </div>
     </div>

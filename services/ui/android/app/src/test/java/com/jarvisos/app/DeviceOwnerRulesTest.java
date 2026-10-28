@@ -168,4 +168,60 @@ public class DeviceOwnerRulesTest {
         assertFalse(DeviceOwnerRules.shouldWipe(true, false)); // nothing was requested
         assertFalse(DeviceOwnerRules.shouldWipe(false, true)); // not device owner: Android would refuse it
     }
+
+    @Test
+    public void effectiveUpdatePolicyResolvesCorrectly() {
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_AUTOMATIC,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, true, "automatic"));
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_WINDOWED,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, true, "windowed"));
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_POSTPONE,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, true, "postpone"));
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_DEFAULT,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, true, "default"));
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_DEFAULT,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, true, "unknown"));
+
+        // Only for device owner on protected phone
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_DEFAULT,
+                DeviceOwnerRules.effectiveUpdatePolicy(false, true, "automatic"));
+        assertEquals(DeviceOwnerRules.UPDATE_POLICY_DEFAULT,
+                DeviceOwnerRules.effectiveUpdatePolicy(true, false, "automatic"));
+    }
+
+    @Test
+    public void validWindowChecksMinutesRange() {
+        assertTrue(DeviceOwnerRules.validWindow(0, 1440));
+        assertTrue(DeviceOwnerRules.validWindow(120, 360));
+        assertFalse(DeviceOwnerRules.validWindow(-1, 360));
+        assertFalse(DeviceOwnerRules.validWindow(120, 1441));
+        assertFalse(DeviceOwnerRules.validWindow(null, 360));
+        assertFalse(DeviceOwnerRules.validWindow(120, null));
+    }
+
+    @Test
+    public void alwaysOnVpnLockdownRequiresDeviceOwnerAndProtected() {
+        assertTrue(DeviceOwnerRules.alwaysOnVpnLockdown(true, true, true));
+        assertFalse(DeviceOwnerRules.alwaysOnVpnLockdown(true, true, false));
+        assertFalse(DeviceOwnerRules.alwaysOnVpnLockdown(false, true, true));
+        assertFalse(DeviceOwnerRules.alwaysOnVpnLockdown(true, false, true));
+    }
+
+    @Test
+    public void cleanSsidSanitizesAndClamps() {
+        assertNull(DeviceOwnerRules.cleanSsid(null));
+        assertNull(DeviceOwnerRules.cleanSsid("   "));
+        assertEquals("Home-WiFi", DeviceOwnerRules.cleanSsid("  Home-WiFi  "));
+        String longSsid = "0123456789012345678901234567890123456789";
+        assertEquals(32, DeviceOwnerRules.cleanSsid(longSsid).length());
+    }
+
+    @Test
+    public void cleanCaCertPemValidatesCertificate() {
+        assertNull(DeviceOwnerRules.cleanCaCertPem(null));
+        assertNull(DeviceOwnerRules.cleanCaCertPem("not a cert"));
+        String validPem = "  -----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----  ";
+        assertEquals("-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----",
+                DeviceOwnerRules.cleanCaCertPem(validPem));
+    }
 }

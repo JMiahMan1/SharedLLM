@@ -320,11 +320,33 @@ export interface WebFilterRules {
   /** Adult and malware sites blocked by the family-safe resolver. */
   adult?: boolean;
   safe_search?: boolean;
+  lockdown?: boolean;
   categories?: WebFilterCategory[];
   block?: string[];
   allow?: string[];
   /** Sites a parent allowed for a while ("ask a parent"): domain to when it runs out. */
   allow_until?: Record<string, string>;
+}
+
+export type OsUpdatePolicyType = 'default' | 'automatic' | 'windowed' | 'postpone';
+
+export interface OsUpdatePolicy {
+  policy?: OsUpdatePolicyType;
+  window_start_min?: number;
+  window_end_min?: number;
+}
+
+export interface WifiNetworkConfig {
+  ssid: string;
+  password?: string;
+  hidden?: boolean;
+  security?: 'open' | 'wpa2' | 'wpa3' | 'wep';
+}
+
+export interface CaCertConfig {
+  alias: string;
+  cert_pem: string;
+  enabled?: boolean;
 }
 
 /** The kinds of permission a parent can approve first, app by app. */
@@ -368,6 +390,14 @@ export interface ScreenRules {
   photo_scan?: boolean;
   /** Place arrival / departure geofence alerts per zone. */
   geofence_alerts?: Record<string, { arrive?: boolean; depart?: boolean }>;
+  /** System update policy configuration (MDM). */
+  os_update_policy?: OsUpdatePolicy;
+  /** Household Wi-Fi network configurations provisioned to devices. */
+  wifi_networks?: WifiNetworkConfig[];
+  /** Trusted CA root certificates provisioned to devices. */
+  ca_certs?: CaCertConfig[];
+  /** Strict always-on VPN lockdown (no internet without VPN). */
+  vpn_lockdown?: boolean;
   paused?: boolean;
   paused_until?: string;
 }
@@ -405,6 +435,10 @@ export interface ScreenTimeStatus {
   kiosk_mode?: boolean;
   kiosk_apps?: string[];
   permission_gating?: PermissionGroup[];
+  os_update_policy?: OsUpdatePolicy;
+  wifi_networks?: WifiNetworkConfig[];
+  ca_certs?: CaCertConfig[];
+  vpn_lockdown?: boolean;
   /** The allow list the web filter honours now (own list plus sites allowed for a while). */
   web_allow?: string[];
   /** The block list the web filter honours now (own list plus blocked categories). */

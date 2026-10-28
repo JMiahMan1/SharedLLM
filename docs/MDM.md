@@ -39,6 +39,12 @@ an existing mechanism is how the two drift apart:
   `PackageInstaller.uninstall`, suspends `blocked_apps` at the OS level via
   `setPackagesSuspended`, installs verified APKs silently via `PackageInstaller.Session`,
   and sets the COSU lock-task allowlist (`setLockTaskPackages`) when `kiosk_mode` is on.
+- **OS updates, VPN lockdown, Wi-Fi provisioning, and CA certificates (Batch 8)**:
+  - `os_update_policy` (`default`, `automatic`, `windowed`, `postpone`) configures Android system update installation via `DevicePolicyManager.setSystemUpdatePolicy`, with optional maintenance window start and end times in minutes from midnight.
+  - `vpn_lockdown`: when enabled, `DeviceOwnerGuard` passes `lockdownEnabled: true` to `setAlwaysOnVpnPackage`, blocking any device network traffic if the Jarvis web filter VPN is disconnected.
+  - `wifi_networks`: household Wi-Fi credentials (`ssid`, `password`, `security`, `hidden`) provisioned directly to child devices via `WifiManager`.
+  - `ca_certs`: household X.509 root CA certificates installed directly into the device's trusted credentials store via `dpm.installCaCert` and `dpm.uninstallCaCert`.
+  - Parents and administrators manage these policies via `DevicePolicyCard.tsx` on the Guardian page.
 
 ## Device awareness: Phones vs Tablets vs ESPHome companion nodes
 

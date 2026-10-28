@@ -264,6 +264,71 @@ def kiosk_apps(rules: dict[str, Any] | None) -> list[str]:
     return out
 
 
+OS_UPDATE_POLICIES = ("default", "automatic", "windowed", "postpone")
+
+
+def os_update_policy(rules: dict[str, Any] | None) -> dict[str, Any]:
+    """OS update policy configuration for managed devices."""
+    raw = (rules or {}).get("os_update_policy")
+    if not isinstance(raw, dict):
+        return {"policy": "default", "window_start_min": None, "window_end_min": None}
+    policy = raw.get("policy") if raw.get("policy") in OS_UPDATE_POLICIES else "default"
+    start = raw.get("window_start_min") if isinstance(raw.get("window_start_min"), int) and 0 <= raw.get("window_start_min") <= 1440 else None
+    end = raw.get("window_end_min") if isinstance(raw.get("window_end_min"), int) and 0 <= raw.get("window_end_min") <= 1440 else None
+    return {"policy": policy, "window_start_min": start, "window_end_min": end}
+
+
+def wifi_networks(rules: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Household Wi-Fi configurations provisioned to child devices."""
+    raw = (rules or {}).get("wifi_networks")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict) and isinstance(item.get("ssid"), str) and item["ssid"].strip():
+            ssid = item["ssid"].strip()[:32]
+            sec = item.get("security") if item.get("security") in ("open", "wpa2", "wpa3", "wep") else "wpa2"
+            net = {
+                "ssid": ssid,
+                "password": str(item.get("password") or ""),
+                "hidden": bool(item.get("hidden", False)),
+                "security": sec,
+            }
+            if not any(x["ssid"] == ssid for x in out):
+                out.append(net)
+    return out
+
+
+def ca_certs(rules: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Household trusted CA / TLS root certificates provisioned to devices."""
+    raw = (rules or {}).get("ca_certs")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict) and isinstance(item.get("alias"), str) and isinstance(item.get("cert_pem"), str):
+            alias = item["alias"].strip()[:64]
+            pem = item["cert_pem"].strip()
+            if alias and pem and not any(x["alias"] == alias for x in out):
+                out.append({
+                    "alias": alias,
+                    "cert_pem": pem,
+                    "enabled": bool(item.get("enabled", True)),
+                })
+    return out
+
+
+def vpn_lockdown(rules: dict[str, Any] | None) -> bool:
+    """Whether network traffic is blocked without active VPN."""
+    r = rules or {}
+    if r.get("vpn_lockdown") is True:
+        return True
+    wf = r.get("web_filter")
+    if isinstance(wf, dict) and wf.get("lockdown") is True:
+        return True
+    return False
+
+
 def apps_state(
     rules: dict[str, Any],
     apps_used_ms: dict[str, int] | None,
@@ -410,4 +475,8 @@ def evaluate(
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
         "web_block": active_block(rules.get("web_filter")),
+        "os_update_policy": os_update_policy(rules),
+        "wifi_networks": wifi_networks(rules),
+        "ca_certs": ca_certs(rules),
+        "vpn_lockdown": vpn_lockdown(rules),
     }

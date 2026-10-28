@@ -87,9 +87,10 @@ final class DeviceOwnerGuard {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             String vpnPkg = DeviceOwnerRules.alwaysOnVpnPackage(owner, prot, filterWanted, ownPkg);
+            boolean lockdown = DeviceOwnerRules.alwaysOnVpnLockdown(owner, prot, GuardApi.vpnLockdown(context));
             if (vpnPkg != null) {
                 try {
-                    dpm.setAlwaysOnVpnPackage(admin, vpnPkg, false);
+                    dpm.setAlwaysOnVpnPackage(admin, vpnPkg, lockdown);
                 } catch (Exception ignored) {
                     // VPN service not ready yet; GuardService starts it on the next tick.
                 }
@@ -121,6 +122,86 @@ final class DeviceOwnerGuard {
             }
             if (known || !nowSuspended.isEmpty()) {
                 GuardApi.setSuspendedPackages(context, nowSuspended);
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            String effPolicy = DeviceOwnerRules.effectiveUpdatePolicy(owner, prot, GuardApi.osUpdatePolicyType(context));
+            try {
+                if (DeviceOwnerRules.UPDATE_POLICY_AUTOMATIC.equals(effPolicy)) {
+                    dpm.setSystemUpdatePolicy(admin, android.app.admin.SystemUpdatePolicy.createAutomaticInstallPolicy());
+                } else if (DeviceOwnerRules.UPDATE_POLICY_WINDOWED.equals(effPolicy)) {
+                    Integer start = GuardApi.osUpdateWindowStart(context);
+                    Integer end = GuardApi.osUpdateWindowEnd(context);
+                    if (DeviceOwnerRules.validWindow(start, end)) {
+                        dpm.setSystemUpdatePolicy(admin, android.app.admin.SystemUpdatePolicy.createWindowedInstallPolicy(start, end));
+                    } else {
+                        dpm.setSystemUpdatePolicy(admin, null);
+                    }
+                } else if (DeviceOwnerRules.UPDATE_POLICY_POSTPONE.equals(effPolicy)) {
+                    dpm.setSystemUpdatePolicy(admin, android.app.admin.SystemUpdatePolicy.createPostponeInstallPolicy());
+                } else {
+                    dpm.setSystemUpdatePolicy(admin, null);
+                }
+            } catch (Exception ignored) {
+                // Policy could not be set on this device firmware.
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            org.json.JSONArray certs = GuardApi.caCerts(context);
+            if (certs != null && owner && prot) {
+                for (int i = 0; i < certs.length(); i++) {
+                    org.json.JSONObject c = certs.optJSONObject(i);
+                    if (c == null) continue;
+                    String pem = DeviceOwnerRules.cleanCaCertPem(c.optString("cert_pem", ""));
+                    boolean enabled = c.optBoolean("enabled", true);
+                    if (pem == null) continue;
+                    try {
+                        java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+                        java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(pem.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        java.security.cert.Certificate cert = cf.generateCertificate(bis);
+                        byte[] der = cert.getEncoded();
+                        if (enabled) {
+                            if (!dpm.hasCaCertInstalled(admin, der)) {
+                                dpm.installCaCert(admin, der);
+                            }
+                        } else {
+                            if (dpm.hasCaCertInstalled(admin, der)) {
+                                dpm.uninstallCaCert(admin, der);
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // Certificate format or installation issue
+                    }
+                }
+            }
+        }
+        org.json.JSONArray wifis = GuardApi.wifiNetworks(context);
+        if (wifis != null && owner && prot) {
+            try {
+                android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wm != null) {
+                    for (int i = 0; i < wifis.length(); i++) {
+                        org.json.JSONObject net = wifis.optJSONObject(i);
+                        if (net == null) continue;
+                        String ssid = DeviceOwnerRules.cleanSsid(net.optString("ssid", ""));
+                        if (ssid == null) continue;
+                        String password = net.optString("password", "");
+                        boolean hidden = net.optBoolean("hidden", false);
+                        String sec = net.optString("security", "wpa2");
+                        android.net.wifi.WifiConfiguration conf = new android.net.wifi.WifiConfiguration();
+                        conf.SSID = "\"" + ssid + "\"";
+                        conf.hiddenSSID = hidden;
+                        if ("open".equalsIgnoreCase(sec) || password.isEmpty()) {
+                            conf.allowedKeyManagement.set(android.net.wifi.WifiConfiguration.KeyMgmt.NONE);
+                        } else {
+                            conf.preSharedKey = "\"" + password + "\"";
+                            conf.allowedKeyManagement.set(android.net.wifi.WifiConfiguration.KeyMgmt.WPA_PSK);
+                        }
+                        wm.addNetwork(conf);
+                    }
+                }
+            } catch (Exception ignored) {
+                // WifiManager not available or restricted on this device.
             }
         }
         Set<String> toUninstall = DeviceOwnerRules.packagesToUninstall(

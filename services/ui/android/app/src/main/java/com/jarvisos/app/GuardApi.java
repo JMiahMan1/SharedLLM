@@ -451,6 +451,73 @@ final class GuardApi {
         return rules.optBoolean("photo_scan", true);
     }
 
+    /** Configured OS update policy type: default, automatic, windowed, postpone. */
+    static String osUpdatePolicyType(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONObject oup = status.optJSONObject("os_update_policy");
+        if (oup == null) {
+            JSONObject rules = status.optJSONObject("rules");
+            if (rules != null) oup = rules.optJSONObject("os_update_policy");
+        }
+        return oup != null ? oup.optString("policy", DeviceOwnerRules.UPDATE_POLICY_DEFAULT) : DeviceOwnerRules.UPDATE_POLICY_DEFAULT;
+    }
+
+    /** Maintenance window start minute from midnight (0-1440), or null if not windowed. */
+    static Integer osUpdateWindowStart(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONObject oup = status.optJSONObject("os_update_policy");
+        if (oup == null) {
+            JSONObject rules = status.optJSONObject("rules");
+            if (rules != null) oup = rules.optJSONObject("os_update_policy");
+        }
+        if (oup != null && oup.has("window_start_min") && !oup.isNull("window_start_min")) {
+            return oup.optInt("window_start_min");
+        }
+        return null;
+    }
+
+    /** Maintenance window end minute from midnight (0-1440), or null if not windowed. */
+    static Integer osUpdateWindowEnd(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONObject oup = status.optJSONObject("os_update_policy");
+        if (oup == null) {
+            JSONObject rules = status.optJSONObject("rules");
+            if (rules != null) oup = rules.optJSONObject("os_update_policy");
+        }
+        if (oup != null && oup.has("window_end_min") && !oup.isNull("window_end_min")) {
+            return oup.optInt("window_end_min");
+        }
+        return null;
+    }
+
+    /** Whether always-on VPN lockdown is requested. */
+    static boolean vpnLockdown(Context context) {
+        JSONObject status = lastStatus(context);
+        if (status.optBoolean("vpn_lockdown", false)) return true;
+        JSONObject rules = status.optJSONObject("rules");
+        if (rules != null && rules.optBoolean("vpn_lockdown", false)) return true;
+        JSONObject wf = rules == null ? null : rules.optJSONObject("web_filter");
+        return wf != null && wf.optBoolean("lockdown", false);
+    }
+
+    /** Configured Wi-Fi networks for household child devices. */
+    static JSONArray wifiNetworks(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONArray arr = status.optJSONArray("wifi_networks");
+        if (arr != null) return arr;
+        JSONObject rules = status.optJSONObject("rules");
+        return rules != null ? rules.optJSONArray("wifi_networks") : null;
+    }
+
+    /** Trusted CA certificates provisioned for household child devices. */
+    static JSONArray caCerts(Context context) {
+        JSONObject status = lastStatus(context);
+        JSONArray arr = status.optJSONArray("ca_certs");
+        if (arr != null) return arr;
+        JSONObject rules = status.optJSONObject("rules");
+        return rules != null ? rules.optJSONArray("ca_certs") : null;
+    }
+
     /** Post a social/chat notification from a watched minor's phone onto the activity feed. */
     static void reportSocialNotification(Context context, String pkg, String label, String sender, String text) {
         new Thread(() -> {
