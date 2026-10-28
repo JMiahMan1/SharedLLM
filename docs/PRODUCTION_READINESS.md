@@ -501,9 +501,9 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     `GLOBALTRUST 2020`, the four Entrust roots, the three Trustwave roots plus `SecureTrust CA` and
     `Secure Global CA`, `TeliaSonera Root CA v1`, `XRamp`, `Go Daddy Class 2`, `Starfield Class 2` and
     `ePKI Root`. That matters because curl, Python and every service here read this store - a browser
-    update does not reach them. The package is now named and upgraded on every build (`apt-get install
-    --only-upgrade ca-certificates`; `trixie-security` currently offers nothing newer than
-    `20250419+deb13u1`, measured), and the eighteen distrusted roots that are actually present are
+    update does not reach them. The package is now pinned with the rest of the apt toolchain
+    (`ca-certificates=20250419+deb13u1`; a newer bundle is a deliberate pin bump, not a silent rebuild
+    change), and the eighteen distrusted roots that are actually present are
     disabled in `/etc/ca-certificates.conf` with a build-time assertion. `emSign Root CA - G1` is
     deliberately kept, because the root programs kept it. Verified in the real image and then in the
     running containers after the rebuild: the bundle goes from 148 to 130 certificates,
@@ -585,10 +585,15 @@ debug. They now warn once and then stay quiet for fifteen minutes
 (`services/common/logging_utils.py`'s `warn_periodically`, used by execution's media-player
 discovery and geo's zone cache).
 
-**Open, should fix before merge.** The base image's apt tools are still installed unpinned (the
-`FROM` line, every Python package the Dockerfile names, and the interpreter are pinned, but the
-Debian packages `apt-get install` resolves at build time can move - the digest fixes the release, not
-the tool versions).
+**Fixed - the apt toolchain is pinned.** The base image's apt tools were installed unpinned: the
+`FROM` line, every Python package the Dockerfile names, and the interpreter were pinned, but the
+Debian packages `apt-get install` resolved at build time could move - the digest fixes the release,
+not the tool versions. All 34 packages are now `package=version` in `docker/Dockerfile.base`
+(`dnsutils` and `ssh-client` are virtual packages, so `bind9-dnsutils` and `openssh-client` carry the
+pin), with a comment that the build fails rather than silently moving when Debian retires a version.
+Verified by building the apt and trust-store layers from the same digest: every pin resolved,
+`ca-certificates` stayed at `20250419+deb13u1`, the store is 130 certificates with 18 disabled, and TLS
+to github.com and ghcr.io still succeeded.
 
 **Checked: a blanket constraints file is not the way to pin the rest.** A
 `docker/constraints.txt` was generated from the built image's `pip freeze` (194 pins) and dry-run
@@ -909,7 +914,8 @@ Everything here is a deliberate call, not an oversight.
   `delete:packages` and `user` are not, and a fine-grained token limited to the repositories the agent
   actually pushes to (Contents read/write, Metadata read) would do the same job with a fraction of the
   blast radius.
-- **The remaining audit findings are recorded above.** §3.5 UI/UX is fully closed (including form labels
-  and theme token remapping); §3.6 Family comms notes only the optional Talk websocket upgrade for typing
+- **The remaining audit findings are recorded above.** §3.5 UI/UX's only open item is form labels: 49
+  of 161 carry `htmlFor`, the settings, trip and vehicle fields are done, and 112 still need an `id`.
+  §3.6 Family comms notes only the optional Talk websocket upgrade for typing
   indicators; and §3.7 Backend readiness notes only the upstream Debian `trixie` base tool versions that
   have no upstream patch yet (`sqlite3`, `tar`, `libexpat1`).
