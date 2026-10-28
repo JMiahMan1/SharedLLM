@@ -85,6 +85,29 @@ describe('CalendarApp', () => {
     expect(updates[0]).not.toHaveProperty('start_time');
   });
 
+  it('lets a written time through but refuses an impossible one', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarApp />);
+
+    await user.click(await screen.findByRole('button', { name: /dentist/i }));
+    const dialog = await screen.findByRole('dialog');
+    const when = within(dialog).getByLabelText('When');
+    const save = within(dialog).getByRole('button', { name: /save/i });
+
+    // Free text is dateparser's job; the client must not over-police it.
+    await user.clear(when);
+    await user.type(when, 'Friday 3pm');
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    expect(save).toBeEnabled();
+
+    // A well-formed but impossible date used to need a server round trip.
+    await user.clear(when);
+    await user.type(when, '2026-02-31 10:00');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/does not exist/i);
+    expect(save).toBeDisabled();
+    expect(updates).toHaveLength(0);
+  });
+
   it('opens a read-only subscription event without edit or delete', async () => {
     const user = userEvent.setup();
     renderWithProviders(<CalendarApp />);
