@@ -364,6 +364,10 @@ export interface ScreenRules {
   permission_gating?: PermissionGroup[];
   /** Content monitoring: what pages a parent at once. */
   monitoring?: 'all' | 'severe' | 'off';
+  /** Photo and video safety scanning (Bark / Qustodio style). */
+  photo_scan?: boolean;
+  /** Place arrival / departure geofence alerts per zone. */
+  geofence_alerts?: Record<string, { arrive?: boolean; depart?: boolean }>;
   paused?: boolean;
   paused_until?: string;
 }

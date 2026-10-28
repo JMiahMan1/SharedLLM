@@ -126,13 +126,80 @@ async def _check_blocked_site(rc, child: dict[str, Any], event: dict[str, Any], 
 
 
 async def _model_settings(session) -> dict[str, str]:
-    """llm_local_url and guardian_monitor_model from identity (cached a minute)."""
+    """llm_local_url, guardian_monitor_model and vision settings from identity (cached a minute)."""
     global _settings_cache
     if _settings_cache and _settings_cache[0] > time.monotonic():
         return _settings_cache[1]
-    found = await notices.identity_settings(session, ("llm_local_url", "guardian_monitor_model"))
+    found = await notices.identity_settings(
+        session, ("llm_local_url", "guardian_monitor_model", "vision_ocr_proxy_url", "vision_ocr_model")
+    )
     _settings_cache = (time.monotonic() + SETTINGS_CACHE_SECONDS, found)
     return found
+
+
+async def scan_media_item(
+    session,
+    child: dict[str, Any],
+    media_type: str,
+    file_name: str,
+    image_b64: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Scan one image or thumbnail from a child's device using local vision model.
+
+    Returns the concern dict if a concern is detected, else None.
+    The raw image data is NEVER stored to protect child privacy.
+    """
+    if child.get("monitoring") == "off" or child.get("photo_scan") is False:
+        return None
+    try:
+        settings = await _model_settings(session)
+    except Exception as exc:
+        log.warning("media scan: model settings could not be read: %s", exc)
+        return None
+
+    url = settings.get("vision_ocr_proxy_url") or settings.get("llm_local_url") or ""
+    model = settings.get("vision_ocr_model") or settings.get("guardian_monitor_model") or "qwen2.5-vl:7b"
+    if not url:
+        log.info("media scan: no vision endpoint configured")
+        return None
+
+    payload = {
+        "model": model,
+        "messages": concern_review.media_messages(media_type, file_name, image_b64),
+        "temperature": 0,
+        "max_tokens": 200,
+        "stream": False,
+    }
+    try:
+        content = await llm.chat_content(
+            session, f"{url.rstrip('/')}/v1/chat/completions", payload, MODEL_TIMEOUT_SECONDS
+        )
+        verdict = concern_review.parse_media_verdict(content)
+        if not verdict["concern"]:
+            return None
+        cat = verdict["category"]
+        spec = concern_monitor.CATEGORIES.get(cat, concern_monitor.CATEGORIES["sexual"])
+        concern = {
+            "category": cat,
+            "label": spec["label"],
+            "level": verdict["level"],
+            "excerpt": verdict["description"] or f"Safety concern in {media_type} '{file_name}'",
+            "feature": "media",
+            "action": f"{media_type}_scan",
+            "file_name": file_name,
+            "at": household_now().isoformat(),
+            "review": {
+                "by": "vision",
+                "model": model,
+                "verdict": "confirmed",
+                "reason": verdict["reason"],
+            },
+        }
+        return concern
+    except Exception as exc:
+        log.warning("media scan error for %s (%s): %s", child.get("username"), file_name, exc)
+        return None
 
 
 async def _ask_model(session, url: str, model: str, concern: dict[str, Any], text: str) -> dict[str, Any]:

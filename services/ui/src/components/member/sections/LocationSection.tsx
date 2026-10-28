@@ -7,6 +7,7 @@ import FindPhoneCard from '../FindPhoneCard';
 import { MiniMapCard } from './OverviewSection';
 import { geoZonesQueryKey, zonePlaces } from '../../../lib/wanderQueries';
 import { localDay } from '../../../lib/healthHub';
+import GeofenceAlertsCard from '../../guardian/GeofenceAlertsCard';
 import type { Trip, TripLocation } from '../../../types/api';
 
 const placeName = (l: TripLocation | undefined) => l?.zone || l?.name || l?.address || 'somewhere';
@@ -69,6 +70,7 @@ function PlacesCard() {
   );
 }
 
+
 export default function LocationSection({ username, name }: { username: string; name: string }) {
   return (
     <>
@@ -78,6 +80,7 @@ export default function LocationSection({ username, name }: { username: string; 
       <FindPhoneCard username={username} name={name} />
       <TripsCard username={username} name={name} />
       <PlacesCard />
+      <GeofenceAlertsCard username={username} name={name} />
     </>
   );
 }

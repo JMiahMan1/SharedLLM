@@ -68,6 +68,10 @@ def as_viewer(monkeypatch):
                 return _Resp(200, ACTIVITY)
             return _Resp(200, CONCERNS)
 
+        async def post(self, url, **kw):
+            calls.append(url)
+            return _Resp(200, {"status": "SUCCESS", "concern": False})
+
     @asynccontextmanager
     async def fake():
         yield _Client()
@@ -170,3 +174,15 @@ def test_the_status_drops_guard_and_approval_states_for_the_mother(identity):
 def test_stripping_reaches_every_depth_and_keeps_personal_fields():
     body = {"a": [{"device_key": "x", "name": "Pixel", "nested": {"ip": "1.2.3.4", "steps": 10}}], "token": "t"}
     assert strip_technical(body) == {"a": [{"name": "Pixel", "nested": {"steps": 10}}]}
+
+
+def test_guardian_media_scan_proxies_to_telemetry(as_viewer):
+    act, calls = as_viewer
+    resp = act("kid").post(
+        "/api/guardian/media/scan",
+        json={"file_name": "pic.jpg", "image_b64": "ZXNwaG9tZQ=="},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "SUCCESS"
+    assert any("/api/telemetry/media/scan" in c for c in calls)
+

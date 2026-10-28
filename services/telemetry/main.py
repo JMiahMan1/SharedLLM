@@ -449,6 +449,48 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "concerns": list(reversed(await store.list_concerns(rc, user)))[:limit]}
 
+    @application.post("/api/telemetry/media/scan")
+    async def scan_media(
+        body: dict[str, Any], _: bool = Depends(require_internal)
+    ):
+        """Scan a photo or video thumbnail from a child's phone for safety concerns."""
+        user = str(body.get("user") or "").strip().lower()
+        if not user:
+            raise HTTPException(status_code=422, detail="user is required")
+        file_name = str(body.get("file_name") or "media.jpg").strip()
+        media_type = str(body.get("media_type") or "image").strip().lower()
+        image_b64 = str(body.get("image_b64") or body.get("thumbnail_b64") or "").strip()
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        if not image_b64:
+            raise HTTPException(status_code=422, detail="image_b64 or thumbnail_b64 is required")
+
+        rc = _redis()
+        client = _client()
+        child = (await guardian.children(client)).get(user)
+        if not child:
+            return {"status": "SUCCESS", "scanned": False, "reason": "not_a_monitored_child"}
+
+        concern = await guardian.scan_media_item(
+            client, child, media_type, file_name, image_b64, metadata
+        )
+        if concern:
+            await store.add_concerns(rc, user, [concern])
+            day = guardian.household_now().date().isoformat()
+            if guardian.concern_monitor.pages_parent(concern, child.get("monitoring")):
+                for parent in child.get("parents") or []:
+                    try:
+                        await deliver_notice(guardian._concern_notice(parent, child, concern, day))
+                    except Exception as exc:
+                        log.warning("concern notice to %s failed: %s", parent, exc)
+            return {
+                "status": "SUCCESS",
+                "concern": True,
+                "category": concern["category"],
+                "level": concern["level"],
+                "label": concern["label"],
+            }
+        return {"status": "SUCCESS", "concern": False}
+
     @application.get("/api/telemetry/activity/{user}")
     async def get_activity(
         user: str, limit: int = Query(default=50, le=200), _: bool = Depends(require_internal)

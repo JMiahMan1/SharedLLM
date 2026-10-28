@@ -253,12 +253,16 @@ def test_a_parent_sets_the_web_filter(family):
 
 
 def test_the_guardian_list_names_each_child_their_parents_and_sensitivity(family):
-    assert family("mom").put("/api/screen-time/kid/rules", json={"monitoring": "all"}).status_code == 200
+    assert family("mom").put("/api/screen-time/kid/rules", json={"monitoring": "all", "photo_scan": True, "geofence_alerts": {"zone.school": {"arrive": True, "depart": True}}}).status_code == 200
     assert family("mom").put("/api/screen-time/kid/rules", json={"monitoring": "loud"}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"photo_scan": "yes"}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"geofence_alerts": {"bad_zone": {}}}).status_code == 422
     children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
     assert set(children) == {"kid", "sib"}  # the adult child is not monitored
     assert set(children["kid"]["parents"]) == {"dad", "mom"}
     assert children["kid"]["monitoring"] == "all" and children["sib"]["monitoring"] == "severe"
+    assert children["kid"]["photo_scan"] is True
+    assert children["kid"]["geofence_alerts"] == {"zone.school": {"arrive": True, "depart": True}}
 
 
 def test_the_talk_journal_is_the_authors_unless_shared(family):

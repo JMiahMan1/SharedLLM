@@ -4577,6 +4577,27 @@ def _clean_screen_rules(body: dict) -> dict:
         if body["monitoring"] not in ("all", "severe", "off"):
             raise HTTPException(status_code=422, detail="monitoring must be all, severe or off")
         out["monitoring"] = body["monitoring"]
+    # Photo & video safety scanning for children (step 7)
+    if body.get("photo_scan") is not None:
+        if not isinstance(body["photo_scan"], bool):
+            raise HTTPException(status_code=422, detail="photo_scan must be true or false")
+        out["photo_scan"] = body["photo_scan"]
+    # Geofence presence alerts per child (step 7): {zone_id: {"arrive": bool, "depart": bool}}
+    if body.get("geofence_alerts") is not None:
+        ga = body["geofence_alerts"]
+        if not isinstance(ga, dict):
+            raise HTTPException(status_code=422, detail="geofence_alerts must be an object")
+        clean_ga: dict = {}
+        for zid, cfg in ga.items():
+            if not isinstance(zid, str) or not re.fullmatch(r"zone\.[a-z0-9_]+", zid.strip()):
+                raise HTTPException(status_code=422, detail="geofence_alerts keys must be zone entity ids (e.g. zone.home)")
+            if not isinstance(cfg, dict):
+                raise HTTPException(status_code=422, detail="geofence_alerts values must be objects")
+            clean_ga[zid.strip()] = {
+                "arrive": bool(cfg.get("arrive", False)),
+                "depart": bool(cfg.get("depart", False)),
+            }
+        out["geofence_alerts"] = clean_ga
     return out
 
 
@@ -5279,11 +5300,14 @@ def internal_guardian_children(session: Session = Depends(get_session), _: None 
         parents = _parents_of(session, child)
         if not parents:
             continue
+        rules = _screen_rules(session, child.username)
         out.append({
             "username": child.username,
             "display_name": child.display_name or child.username,
             "parents": parents,
-            "monitoring": _screen_rules(session, child.username).get("monitoring") or "severe",
+            "monitoring": rules.get("monitoring") or "severe",
+            "photo_scan": rules.get("photo_scan", True),
+            "geofence_alerts": rules.get("geofence_alerts") or {},
         })
     return {"children": out}
 

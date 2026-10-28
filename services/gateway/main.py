@@ -5605,6 +5605,25 @@ async def guardian_activity(request: Request, user: str, limit: int = 100):
     return await _parents_only_telemetry(request, user, f"/api/telemetry/activity/{user}", {"limit": max(1, min(limit, 200))})
 
 
+@app.post("/api/guardian/media/scan")
+async def guardian_media_scan(request: Request):
+    """Scan an image or video thumbnail from a child's phone for safety concerns."""
+    creds = await _resolve_identity_from_request(request)
+    me = str((creds or {}).get("user") or "").strip()
+    if not me:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json() or {}
+    user = str(body.get("user") or me).strip().lower()
+    if user != me:
+        await _raw_data_access(request, user)
+    payload = {**body, "user": user}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(f"{TELEMETRY_SVC}/api/telemetry/media/scan", json=payload, headers=headers)
+        data = await resp.json(content_type=None)
+        return JSONResponse(status_code=resp.status, content=data)
+
+
 @app.get("/api/family/member/{user}/devices")
 async def family_member_devices(request: Request, user: str):
     """A child's devices with their technical side (model, OS, app version and

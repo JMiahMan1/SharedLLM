@@ -669,11 +669,39 @@ async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0) -> None:
         log.warning(f"[Geo] Stop tracking failed for {user}: {e}")
 
 
+_guardian_children_cache: dict = {"at": 0.0, "children": {}}
+
+
+async def _guardian_children_cached() -> dict[str, dict]:
+    """Fetch minor children with their parents and geofence alerts from identity."""
+    now = time.monotonic()
+    if _guardian_children_cache["at"] > now:
+        return _guardian_children_cache["children"]
+    try:
+        async with get_client_insecure() as client, client.get(
+            f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/guardian/children",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                by_name = {c["username"]: c for c in (data or {}).get("children") or [] if c.get("username")}
+                _guardian_children_cache["at"] = now + 60.0
+                _guardian_children_cache["children"] = by_name
+                return by_name
+    except Exception as e:
+        log.warning(f"[Geo] Guardian children lookup failed: {e}")
+    return _guardian_children_cache.get("children", {})
+
+
 async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     dedupe = f"geo:presence_notified:{person}:{zone['entity_id']}:{kind}"
     if not await r.set(dedupe, "1", ex=PRESENCE_REPEAT_S, nx=True):
         return
     name = person.title()
+    child_info = (await _guardian_children_cached()).get(person)
+    if child_info and child_info.get("display_name"):
+        name = child_info["display_name"]
     if kind == "arrived":
         title, body = f"{name} arrived at {zone['name']}", ""
     else:
@@ -685,14 +713,34 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
                     body = f"Home in about {max(1, round(eta['duration_s'] / 60))} min by road."
             except HTTPException:
                 pass
+
+    # Child-specific geofence alerts (Batch 7):
+    # Parents configure arrival/departure alerts for places (School, Home, Activities) per child.
+    notified_parents = set()
+    data = {"person": person, "zone": zone["entity_id"], "event": kind}
+    url = f"/wander?person={person}"
+    if child_info:
+        alerts = child_info.get("geofence_alerts") or {}
+        zone_alert = alerts.get(zone["entity_id"]) or {}
+        alert_on = (kind == "arrived" and zone_alert.get("arrive")) or (kind == "departed" and zone_alert.get("depart"))
+        if alert_on:
+            child_label = child_info.get("display_name") or name
+            geo_title = f"{child_label} arrived at {zone['name']}" if kind == "arrived" else f"{child_label} left {zone['name']}"
+            for parent in child_info.get("parents") or []:
+                if parent == person:
+                    continue
+                notified_parents.add(parent)
+                await _send_notice(notify.notice(
+                    parent, "family_safety", geo_title, body, url=url, priority=4, data={**data, "geofence": True},
+                    tag=f"geofence:{person}:{zone['entity_id']}", actions=[notify.view_action(url, "Map")]
+                ))
+
     # An important place (a school) is a family_safety notice for the people
     # chosen for it; everyone else gets the ordinary arrival or departure.
     place = (await safety.place_settings(r)).get(zone["entity_id"], {})
     chosen = set(place.get("notify") or []) if place.get("important") else set()
-    data = {"person": person, "zone": zone["entity_id"], "event": kind}
-    url = f"/wander?person={person}"
     for viewer in await _tracked_users(r):
-        if viewer == person or not await _viewer_may_see(viewer, person):
+        if viewer == person or viewer in notified_parents or not await _viewer_may_see(viewer, person):
             continue
         if place.get("important") and (not chosen or viewer in chosen):
             await _send_notice(notify.notice(

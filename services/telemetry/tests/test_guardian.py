@@ -215,3 +215,60 @@ def test_social_notification_events_are_scanned_and_included_in_recap(wired):
     assert sent[0]["title"] == "Sexual exploitation or grooming on Emma's phone"
     recap = client.get("/api/telemetry/recap/kid", headers=HEADERS, params={"day": "2026-10-21"}).json()["recap"]
     assert recap["comms"]["social_messages"] == 1 and recap["comms"]["social_apps"] == 1
+
+
+def test_media_scan_detects_concern_and_pages_parents(wired, monkeypatch):
+    client, _fake, sent = wired
+    async def _vision_settings(_session):
+        return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
+    async def _vision_chat(_session, url, payload, timeout):
+        return '{"concern": true, "category": "sexual", "level": "severe", "description": "Suggestive photo detected", "reason": "Contains explicit nudity"}'
+    monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
+    monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
+
+    resp = client.post(
+        "/api/telemetry/media/scan",
+        headers=HEADERS,
+        json={
+            "user": "kid",
+            "file_name": "photo_123.jpg",
+            "media_type": "image",
+            "image_b64": "ZXNwaG9tZQ==",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["concern"] is True
+    assert resp.json()["category"] == "sexual"
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert sent[0]["title"] == "Sexual content on Emma's phone"
+    concerns = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
+    assert len(concerns) >= 1
+    assert concerns[0]["category"] == "sexual"
+    assert concerns[0]["feature"] == "media"
+
+
+def test_media_scan_clean_image_leaves_no_concern(wired, monkeypatch):
+    client, _fake, sent = wired
+    async def _vision_settings(_session):
+        return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
+    async def _vision_chat(_session, url, payload, timeout):
+        return '{"concern": false, "reason": "clean scenery photo"}'
+    monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
+    monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
+
+    resp = client.post(
+        "/api/telemetry/media/scan",
+        headers=HEADERS,
+        json={
+            "user": "kid",
+            "file_name": "landscape.jpg",
+            "media_type": "image",
+            "image_b64": "ZXNwaG9tZQ==",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["concern"] is False
+    assert sent == []
+    concerns = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
+    assert concerns == []
+

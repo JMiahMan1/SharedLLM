@@ -2863,8 +2863,9 @@ export default function WorkspaceIDE({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Target ESPHome Device</label>
+                <label htmlFor="ws-flash-device-select" className="block text-slate-400 mb-1">Target ESPHome Device</label>
                 <select
+                  id="ws-flash-device-select"
                   value={flashDevice}
                   onChange={(e) => setFlashDevice(e.target.value)}
                   className="w-full glass-input bg-black/40 px-3 py-2 text-xs text-slate-200"
@@ -2885,8 +2886,9 @@ export default function WorkspaceIDE({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Firmware binary path in workspace (.bin)</label>
+                <label htmlFor="ws-flash-path-input" className="block text-slate-400 mb-1">Firmware binary path in workspace (.bin)</label>
                 <input
+                  id="ws-flash-path-input"
                   type="text"
                   value={flashPath}
                   onChange={(e) => setFlashPath(e.target.value)}
@@ -2897,8 +2899,9 @@ export default function WorkspaceIDE({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">OTA Password (optional)</label>
+                <label htmlFor="ws-flash-password-input" className="block text-slate-400 mb-1">OTA Password (optional)</label>
                 <input
+                  id="ws-flash-password-input"
                   type="password"
                   value={flashPassword}
                   onChange={(e) => setFlashPassword(e.target.value)}

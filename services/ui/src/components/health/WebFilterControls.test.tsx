@@ -44,7 +44,7 @@ describe('WebFilterControls (a parent)', () => {
     fireEvent.click(screen.getByTestId('web-filter-save'));
     await waitFor(() => expect(api.setScreenRules).toHaveBeenCalled());
     expect(vi.mocked(api.setScreenRules).mock.calls[0][1].web_filter).toEqual({
-      enabled: true, adult: true, safe_search: false, block: ['tiktok.com', 'www.reddit.com'], allow: ['khanacademy.org'],
+      enabled: true, adult: true, safe_search: false, categories: [], block: ['tiktok.com', 'www.reddit.com'], allow: ['khanacademy.org'],
     });
   });
 });
