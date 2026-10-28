@@ -1,15 +1,17 @@
 # Recipes and meal planning
 
-Status: **Phases 0-5, 8-10 built** - the importer (`scripts/import_recipes.py`) renders the
+Status: **Phases 0-5 and 8-10 built** - the importer (`scripts/import_recipes.py`) renders the
 first level-balanced note set; the Recipes page (plan, shopping list, search, link and
 photo import, the duplicate-import guard) and the Health connection (recipe logging, the
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
-editor's nutrition summary) are live. Phase 7 (Skylight) and the remaining Phase 6/11
-polish are still open. The meal-planning half of Phase 6 - staple-overlap ranking, plan parsing
-and grocery-list merging - is unbuilt scope rather than unfinished work: the Recipes page ships
-the plan editor and the shopping list as plain markdown under `Recipes/`, and no staple ranking,
-plan parser or list merger exists in `services/ui/src`. Live: version 1.6.0 (the deployed commit
-is in `HANDOVER.md` §0, which is the file that tracks it).
+editor's nutrition summary) are live. Phase 7 (Skylight), the assistant's write action in
+Phase 5, staple-overlap ranking and Phase 11's per-person budget are still open. The
+meal-planning half of Phase 6 - plan parsing and grocery-list merging - is built and tested:
+the plan editor and the shopping list are plain markdown under `Recipes/`, and
+`services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
+ranking is the one part not built, because the shelf lists titles and the list is assembled by
+fetching each uncooked recipe's body - a ranking needs an ingredient index first. Live: version
+1.6.0 (the deployed commit is in `HANDOVER.md` §0, which is the file that tracks it).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
 then turn them into a weekly plan and a shared shopping list. Every artefact stays a plain
@@ -144,18 +146,22 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 Shipped since this list was written: `services/ui/src/test/recipeImport.test.ts`,
 `recipeNutrition.test.ts`, `recipeEaten.test.ts` and `recipeShare.test.ts` cover the importer,
 the nutrition estimate, the Dinner-tonight comparison and share-to-chat, and
-`services/ui/src/pages/Recipes.test.tsx` covers the page (including the photo import). The
-typecheck / lint / full-suite / build gates run on every change. Staple ranking, plan parsing and
-list merging do not exist yet, so there is nothing to test for them - they are the unbuilt half
-of this phase.
+`services/ui/src/pages/Recipes.test.tsx` covers the page (including the photo import).
+`services/ui/src/lib/mealPlan.ts` and `shoppingList.ts`, with `test/mealPlan.test.ts` and
+`test/shoppingList.test.ts`, cover plan parsing, surprise fill and list merging;
+`pages/RecipesPlan.test.tsx` covers the day pick, cooked tick, save, build list, share and dinner
+log. The typecheck / lint / full-suite / build gates run on every change, and the browser suite
+runs nightly in CI.
 
-- [ ] Unit tests for filtering, staple ranking, scaling, plan parsing and list merging
-      (backend pytest where pure; UI vitest for the plan/list generators) - only the filtering
-      and scaling halves exist.
-- [ ] UI tests: share-to-chat on a recipe, plan editor writes the note, list keeps ticks.
-- [ ] `npm run typecheck`, `npm run lint`, full test suites, `npm run build`.
-- [ ] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc; commit; deploy
-      `execution gateway ui` as needed; verify live.
+- [x] Unit tests for filtering, scaling, plan parsing and list merging (backend pytest where pure;
+      UI vitest for the plan/list generators).
+- [x] UI tests: share-to-chat on a recipe, plan editor writes the note, list keeps ticks.
+- [x] `npm run typecheck`, `npm run lint`, full test suites, `npm run build`.
+- [x] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc.
+- [ ] Staple-overlap ranking: not built. The shelf API lists titles, and the shopping list fetches
+      each uncooked recipe's body, so ranking needs an ingredient index (or a server-side ingredient
+      field) and a place to show it. Left out rather than guessed at.
+- [ ] Deploy and verify live after the next Recipes change (a doc-only pass needs no deploy).
 
 ## Phase 7 - Skylight integration
 
@@ -316,7 +322,7 @@ account is connected, everything above still works.
       its planned-vs-eaten comparison (`MealsCard.test.tsx`, `src/test/recipeEaten.test.ts`)
       and the USDA estimate (`services/health/tests/test_recipe_estimate.py`,
       `src/pages/Recipes.test.tsx`).
-- [ ] Docs and deploy.
+- [x] Docs and deploy (live in 1.6.0, 2026-10-27).
 
 ## Phase 11 - calorie budget and logging (Noom-style)
 
