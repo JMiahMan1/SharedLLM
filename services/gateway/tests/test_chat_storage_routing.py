@@ -11,11 +11,8 @@ from services.gateway import main as gateway_main
 from services.gateway.main import app
 from services.identity.models import GlobalSetting
 
-_mock_redis_async = MagicMock()
-_mock_redis = MagicMock()
-_mock_redis.asyncio = _mock_redis_async
-sys.modules['redis'] = _mock_redis
-sys.modules['redis.asyncio'] = _mock_redis_async
+# `redis` is a real gateway requirement and is left in sys.modules: stubbing it
+# makes pytest 9.2's monkeypatch undo delete `redis.asyncio` from the mock.
 
 # Provide default model values so get_test_settings() doesn't raise
 

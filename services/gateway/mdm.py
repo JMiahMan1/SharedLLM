@@ -102,6 +102,40 @@ LIBRARY_BOOK_SUFFIXES = frozenset({
     ".htmlz", ".lit", ".mobi", ".pdb", ".pdf", ".rtf", ".txt",
 })
 
+#: Content types for those formats. The base image is a slim Debian with no
+#: ``/etc/mime.types`` and Python 3.11's built-in table does not know the book
+#: formats, so ``mimetypes.guess_type`` alone offered an EPUB as
+#: ``application/octet-stream`` - a reader downloads that instead of opening it.
+#: Name the formats the Library serves here and leave the host table as fallback.
+LIBRARY_BOOK_TYPES = {
+    ".azw": "application/vnd.amazon.ebook",
+    ".azw3": "application/vnd.amazon.ebook",
+    ".cbz": "application/vnd.comicbook+zip",
+    ".cbr": "application/vnd.comicbook-rar",
+    ".djvu": "image/vnd.djvu",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".epub": "application/epub+zip",
+    ".fb2": "application/x-fictionbook+xml",
+    ".htmlz": "application/zip",
+    ".lit": "application/x-ms-reader",
+    ".mobi": "application/x-mobipocket-ebook",
+    ".pdb": "application/vnd.palm",
+    ".pdf": "application/pdf",
+    ".rtf": "application/rtf",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def library_content_type(name: str) -> str:
+    """The content type to serve a book file with.
+
+    The formats above are named rather than left to ``mimetypes``, which reads
+    the host's mime table: the base image ships none and its Python does not know
+    the book formats, so the platform table is only the fallback.
+    """
+    suffix = Path(str(name or "")).suffix.lower()
+    return LIBRARY_BOOK_TYPES.get(suffix) or mimetypes.guess_type(str(name or ""))[0] or "application/octet-stream"
+
 #: A file name: no path separator, no control characters, bounded length.
 _NAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 
@@ -498,7 +532,7 @@ async def fetch_library_book(path: str) -> tuple[bytes, str, str]:
     except (ValueError, TypeError) as exc:
         raise ConnectionError("The family library returned content that could not be read.") from exc
     name = wanted.rsplit("/", 1)[-1]
-    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    content_type = library_content_type(name)
     return content, name, content_type
 
 
@@ -1217,7 +1251,8 @@ __all__ = [
     "MDM_FILES_DIR",
     "SHARED_FOLDERS", "WIPE_TTL_S", "clear_wipe", "delete_file", "describe_library", "device_owner_reported",
     "fetch_library_book",
-    "file_path", "list_folder", "list_library_books", "normalise_path", "pushed_folders", "queue_wipe",
+    "file_path", "library_content_type", "list_folder", "list_library_books", "normalise_path", "pushed_folders",
+    "queue_wipe",
     "read_audit", "read_pushes", "read_wipes", "real_lock_reported", "record_audit", "router", "set_push", "store_file",
     "wipe_requested",
 ]

@@ -9,9 +9,6 @@ import pytest
 # any module is imported. A literal in this file would be a second source of
 # truth that only agrees when collection order happens to be favourable.
 
-mock_redis = MagicMock()
-sys.modules["redis"] = mock_redis
-sys.modules["redis.asyncio"] = mock_redis
 sys.modules["fastembed"] = MagicMock()
 sys.modules["intent_engine"] = MagicMock()
 sys.modules["background_worker"] = MagicMock()

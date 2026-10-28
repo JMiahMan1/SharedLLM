@@ -514,8 +514,8 @@ def test_an_upload_of_the_wrong_kind_is_refused_before_anything_is_written(
     assert list(target.iterdir()) == []
 
 
-def test_the_admin_routes_need_the_internal_secret(engine, monkeypatch):
-    monkeypatch.setattr(bible_main.app.state, "engine", engine)
+def test_the_admin_routes_need_the_internal_secret(engine, set_engine):
+    set_engine(engine)
     with TestClient(bible_main.app) as bare:
         assert bare.get("/admin/imports").status_code == 403
         assert bare.post("/admin/imports", json={"code": "kjv"}).status_code == 403

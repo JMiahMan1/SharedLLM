@@ -4,10 +4,11 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-# Mock dependencies before importing main
-mock_redis = MagicMock()
-sys.modules["redis"] = mock_redis
-sys.modules["redis.asyncio"] = mock_redis
+# Mock the optional dependencies before importing main. `redis` is not one of
+# them: it is a gateway requirement imported by the gateway modules, and
+# stubbing it in sys.modules made pytest 9.2's monkeypatch undo delete
+# `redis.asyncio` (its old value is read from the mock's `__dict__`, where the
+# attribute never was) and broke every later test that patched it.
 sys.modules["fastembed"] = MagicMock()
 sys.modules["intent_engine"] = MagicMock()
 sys.modules["background_worker"] = MagicMock()
