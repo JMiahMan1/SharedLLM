@@ -124,6 +124,27 @@ Every claim below was verified against the live system unless marked **planned**
     that host stalls at "banner exchange" while ICMP is clean (0% loss). `jarvis.sumemail.com/health`
     is 200 and the rest of the stack is up, so the fault is on `192.168.2.10` (app-layer hang, likely
     overload or a resolver lookup that never returns) - not reachable from here without a working SSH.
+  - **Bug check, SOA CI (2026-10-28):** `SOA Microservices CI` had been red on every recent commit, and
+    the cause was **pytest 9.2's monkeypatch undo**. It now records a patched attribute's old value from
+    the target's `__dict__` instead of `getattr` (pytest's fix for #10644), so for objects that serve
+    attributes dynamically - Starlette's `State`, a `MagicMock` standing in for a module - it recorded
+    "nothing was there" and its undo *deleted* the attribute instead of restoring it. CI installs pytest
+    unpinned (9.2.0; this checkout's `.venv` has 9.1.1), so: the bible `client` fixture patched
+    `app.state.engine`, the first test that used it deleted the attribute, and the other **183** tests
+    that need it errored (`State object has no attribute 'engine'`) - a `set_engine` fixture now saves and
+    restores the value itself; and five gateway test modules stubbed `sys.modules["redis"]` with a
+    `MagicMock` even though `redis` is a real gateway requirement, so patching `redis.asyncio` deleted the
+    attribute from the mock and broke `test_mission_pause_resume` and `test_raven_streaming` - the stubs
+    are gone. The same pass found a real production defect: the MDM library served EPUBs as
+    `application/octet-stream`, because the slim base image ships no `/etc/mime.types` and Python 3.11's
+    built-in table does not know the book formats (the CI runner only passed because its image carries the
+    mime table). The fifteen library formats are named in `mdm.LIBRARY_BOOK_TYPES` now, with a unit test.
+    Verified in a `python:3.11-slim` container with pytest 9.2.0 (the CI configuration) - `services/bible/tests`
+    711 passed with the 183 errors gone, both gateway redis tests fixed, `services/gateway/tests/test_mdm.py`
+    34 passed - and the touched files pass locally (`29c3d285`). `SOA Microservices CI` `40638142530`
+    passed in **11m47s** on the first attempt (the first green run on this branch in many commits), and
+    `SharedLLM E2E Pipeline` `40638142533` and `Build & Push Images` `40638142537` for the same commit
+    passed too.
 
 - `2026-10-27` **ESPHome Multi-User Access Control, Admin Device Assignment, and Workspace Studio (Edit, Test with Jarvis, Flash)** (`docs/MDM.md`).
   - **Admin Device Assignment:** Admins (`is_admin`, `is_system_default`, `family_role: "father"`, or `username: "default"`) can control and assign ESPHome nodes (watches, speakers, screens, lights) to specific family members via `PATCH /api/user-panel/devices/{device_key}`, synchronizing both the identity device registry and `GlobalSetting("esphome_devices")`.
