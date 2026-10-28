@@ -923,8 +923,8 @@ Everything here is a deliberate call, not an oversight.
   `delete:packages` and `user` are not, and a fine-grained token limited to the repositories the agent
   actually pushes to (Contents read/write, Metadata read) would do the same job with a fraction of the
   blast radius.
-- **The remaining audit findings are recorded above.** §3.5 UI/UX's only open item is form labels: 49
-  of 161 carry `htmlFor`, the settings, trip and vehicle fields are done, and 112 still need an `id`.
-  §3.6 Family comms notes only the optional Talk websocket upgrade for typing
-  indicators; and §3.7 Backend readiness notes only the upstream Debian `trixie` base tool versions that
-  have no upstream patch yet (`sqlite3`, `tar`, `libexpat1`).
+- **The remaining audit findings are recorded above.** §3.5 UI/UX is closed: the theme tokens are
+  generated and checked, and every form label and control now has an accessible name
+  (`src/test/formLabels.test.ts`). §3.6 Family comms notes only the optional Talk websocket upgrade for
+  typing indicators; and §3.7 Backend readiness notes only the upstream Debian `trixie` base tool
+  versions that have no upstream patch yet (`sqlite3`, `tar`, `libexpat1`).
