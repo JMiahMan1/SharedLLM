@@ -687,10 +687,15 @@ lease, so a second replica stands down rather than double-posting.
   reason and the page says "Type the recipe instead", so a dead desktop is a message rather than a
   blank draft.
 
+- **Calendar: an impossible time is caught in the field, not after a round trip.** "When" accepts
+  anything dateparser reads, but a well-formed date that does not exist (`2026-02-31 10:00`) or an hour
+  of 25 used to be sent and refused by the server. The edit sheet and the Add form now check
+  `YYYY-MM-DD[ HH:MM]` themselves, show the reason inline (`role="alert"`) and disable Save/Add; free
+  text such as "Friday 3pm" is still left to dateparser rather than over-policed. Regression test in
+  `CalendarApp.test.tsx`.
+
 **Open (rough).**
 
-- The calendar's "When" field is still free text validated on the server; the client only explains the
-  server's parse error after the fact rather than catching it first.
 - `docs/RECIPES.md`'s Phase 6 (tests) and Phase 7 (Skylight) remain as that file describes.
 
 ### 3.9 The Android client and the account lifecycle (audited 2026-10-26)

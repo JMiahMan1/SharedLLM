@@ -42,6 +42,37 @@ const mustSucceed = async (pending: Promise<ExecutionResponse>): Promise<Executi
   }
   throw new Error(message);
 };
+/**
+ * Catch the date shapes the server cannot read before a request is sent: an
+ * impossible day (2026-02-31) or hour (25:99) looks well-formed here and only
+ * fails after the round trip. Free text ("Friday 3pm") is left to dateparser,
+ * which is better at it than a client-side grammar.
+ */
+const whenError = (raw: string): string | null => {
+  const value = raw.trim();
+  if (!value) return 'Enter a time.';
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2}))?$/);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    const hour = iso[4] === undefined ? 0 : Number(iso[4]);
+    const minute = iso[5] === undefined ? 0 : Number(iso[5]);
+    const date = new Date(year, month - 1, day, hour, minute);
+    if (
+      date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day ||
+      hour > 23 || minute > 59
+    ) {
+      return 'That date or time does not exist. Use YYYY-MM-DD HH:MM.';
+    }
+    return null;
+  }
+  if (/^\d/.test(value)) {
+    return 'Write the date as YYYY-MM-DD HH:MM, or use words like "tomorrow 5pm".';
+  }
+  return null;
+};
+
 /** Minutes-before choices for phone event reminders (0 = off). */
 const REMINDER_CHOICES = [0, 10, 15, 30, 60, 120];
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -303,6 +334,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
   const initialStart = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const [summary, setSummary] = useState(event.summary);
   const [startInput, setStartInput] = useState(initialStart);
+  const whenProblem = whenError(startInput);
   // Edit and delete act on this one event (Skylight id / Nextcloud UID); the
   // title is only a fallback for an event that has no id.
   const target = event.id ? { event_id: event.id } : { query: event.summary };
@@ -385,6 +417,9 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
           {!readOnly && (
             <p className="mt-1 text-[11px]" style={{ color: 'var(--os-ink-faint)' }}>24-hour date/time, or e.g. "Friday 3pm". The length stays the same.</p>
           )}
+          {!readOnly && whenProblem && (
+            <p role="alert" className="mt-1 text-[11px] font-semibold" style={{ color: 'var(--os-ember-deep)' }}>{whenProblem}</p>
+          )}
         </div>
         {event.location && (
           <p className="flex items-center gap-1 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
@@ -412,7 +447,7 @@ const EditEventModal = ({ event, onClose, people, readOnly }: { event: CalendarE
             </button>
             {!readOnly && (
               <button
-                disabled={!summary.trim() || updateMut.isPending}
+                disabled={!summary.trim() || !!whenProblem || updateMut.isPending}
                 onClick={() => updateMut.mutate()}
                 className="min-h-11 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60"
                 style={{ background: 'var(--os-ember)' }}
@@ -437,6 +472,7 @@ const CalendarApp = () => {
   const [showSources, setShowSources] = useState(false);
   const [summary, setSummary] = useState('');
   const [startInput, setStartInput] = useState('');
+  const addWhenProblem = startInput.trim() ? whenError(startInput) : null;
   const [addIntegration, setAddIntegration] = useState('');
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const addTitleRef = useRef<HTMLInputElement | null>(null);
@@ -826,9 +862,12 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
               <option value="">Default ({integrationMeta(detail?.default).label})</option>
               {writable.map((i) => <option key={i.type} value={i.type}>{integrationMeta(i.type).label}</option>)}
             </select>
-            <button disabled={addMutation.isPending} onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
+            <button disabled={addMutation.isPending || !!addWhenProblem} onClick={() => { if (!summary.trim() || !startInput.trim()) { toast.error('Enter a title and time'); return; } addMutation.mutate(); }} className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-4 text-[10px] font-black uppercase tracking-widest text-[var(--os-on-ember)] disabled:opacity-60" style={{ background: 'var(--os-ember)' }}><Plus size={14} />Add</button>
           </div>
         </div>
+        {addWhenProblem && (
+          <p role="alert" className="mt-2 text-[11px] font-semibold" style={{ color: 'var(--os-ember-deep)' }}>{addWhenProblem}</p>
+        )}
       </div>
 
       {showSources && (
