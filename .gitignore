@@ -49,3 +49,7 @@ docs/DOC_VALIDATION_REPORT.md
 
 # macOS
 .DS_Store
+
+# Local notes: written for the household (its own hosts, accounts and history).
+# Kept on disk, never committed.
+HANDOVER.md

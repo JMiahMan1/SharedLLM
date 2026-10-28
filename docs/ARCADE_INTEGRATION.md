@@ -37,7 +37,7 @@ re-implement.
   the six highest-rated games with ≥1 vote, else best benchmark score.
 - **UI**: `services/ui/src/components/family/ArcadeGames.tsx` on the Family →
   Games tab: featured shelf, full list, star ratings, plays, play links.
-- **Config**: `ALPACA_ARCADE_URL` (default `http://jeremiah-home-desktop.local:5001`)
+- **Config**: `ALPACA_ARCADE_URL` (default `http://<desktop-host>.local:5001`)
   is the gateway's server-side fetch target; `ALPACA_ARCADE_PUBLIC_URL`
   (default `https://games.sumemail.com`) is the browser-facing play host. The
   public URL must be reachable from phones and the native app, and must be

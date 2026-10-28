@@ -106,7 +106,7 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
 
 ```json
 {
-  "user": "michele",
+  "user": "<member>",
   "category": "chat",
   "kind": "chat",
   "title": "Jeremiah",

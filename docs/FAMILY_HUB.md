@@ -246,7 +246,7 @@ sampling at the backend's default 20 steps; the `image_edit_steps` setting sends
 a lower count (the rapid edit models are made for about 4 to 8), and a model
 switch on the desktop adds about a minute. Until this was fixed the gateway
 forwarded the JSON body straight to the legacy `ALPACA_SD_URL`
-(`jeremiah-home-desktop.local:8081`), which the server cannot reach and which
+(`<desktop-host>.local:8081`), which the server cannot reach and which
 only takes multipart, so every press answered 502 in under 100ms.
 
 Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit`

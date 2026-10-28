@@ -93,7 +93,7 @@ Architecture decision records:
 bash doc_validator.sh
 
 # Deploy (images are built by CI; never on the server)
-bash scripts/deploy_remote.sh jeremiah@192.168.2.205 /home/jeremiah/SharedLLM <service> [...]
+bash scripts/deploy_remote.sh <user>@<server> /home/<user>/SharedLLM <service> [...]
 
 # Test
 python3 -m pytest -q                         # full Python suite

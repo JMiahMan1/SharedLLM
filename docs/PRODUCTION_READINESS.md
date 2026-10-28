@@ -23,7 +23,7 @@ not "multi-region, on-call rota, 99.99%". The bar is:
    fails. This is the whole complaint that started this pass: the media page "semi-worked".
 2. **Nothing is fake.** Every number, image, list and status is real data or an explicit
    loading / empty / error state. No placeholder that looks like data, no invented default.
-   (Standing rule in HANDOVER §1.)
+   (The standing rule: a failure is shown as a failure, never as empty data.)
 3. **Nothing is a dead end.** Every screen answers "what now?" - a next action, a back path, or an
    explanation of why it is empty.
 4. **It is honest about failure.** If an upstream (Home Assistant, Music Assistant, Nextcloud,
@@ -60,7 +60,7 @@ not "multi-region, on-call rota, 99.99%". The bar is:
 
 ## 2. Method
 
-1. Read the HANDOVER and the per-feature docs; treat them as claims to verify, not facts.
+1. Read the per-feature docs; treat them as claims to verify, not facts.
 2. Walk each area in the running app (or its code where a live walk is impossible), on a phone-sized
    viewport and a desktop one.
 3. Probe the live system read-only where a claim can be settled by evidence.

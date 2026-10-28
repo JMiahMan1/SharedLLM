@@ -1,6 +1,6 @@
 # Health Hub: the best of the health apps in one
 
-Status: **live, partially built (updated 2026-10-25): phases 1-5 core, cycle tracking (recorded always, shown on request), family sharing/export, the USDA food seed, digital wellbeing (Phase 10) and digital guardianship (Phase 11) are deployed; the last open non-device items (the Jarvis-use card, the adult `digital` share scope and a parent ringing a child's phone) are built.** See HANDOVER.md for the live commit.
+Status: **live, partially built (updated 2026-10-25): phases 1-5 core, cycle tracking (recorded always, shown on request), family sharing/export, the USDA food seed, digital wellbeing (Phase 10) and digital guardianship (Phase 11) are deployed; the last open non-device items (the Jarvis-use card, the adult `digital` share scope and a parent ringing a child's phone) are built.** The live commit is recorded in the project's local handover notes, which are kept out of the repository.
 Companion plans: `docs/RECIPES.md` (Phases 10-11 carry the recipe-nutrition and
 calorie-budget work that this hub consumes), `docs/HEALTH_STEPS.md` (step counting,
 already live).

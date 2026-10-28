@@ -1,6 +1,6 @@
 # Device management (MDM)
 
-Phase 12 of `HANDOVER.md`: a parent's view and control of the family's phones,
+Phase 12 of the device-management plan: a parent's view and control of the family's phones,
 tablets and companion devices, on the family's own server. Nothing here talks to
 a paid MDM; it is the existing device registry, screen rules and OTA flow with
 one surface over them.

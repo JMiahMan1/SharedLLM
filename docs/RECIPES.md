@@ -11,7 +11,7 @@ the plan editor and the shopping list are plain markdown under `Recipes/`, and
 `services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
 ranking is the one part not built, because the shelf lists titles and the list is assembled by
 fetching each uncooked recipe's body - a ranking needs an ingredient index first. Live: version
-1.6.0 (the deployed commit is in `HANDOVER.md` §0, which is the file that tracks it).
+1.6.0 (the deployed commit is tracked in the project's local handover notes, which are kept out of the repository).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
 then turn them into a weekly plan and a shared shopping list. Every artefact stays a plain

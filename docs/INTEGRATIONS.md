@@ -28,7 +28,7 @@ setting, a JSON list:
 
 ```json
 [{"entity_id": "binary_sensor.front_doorbell", "event": "doorbell", "people": []},
- {"entity_id": "cover.garage_door", "event": "garage_open", "people": ["michele"], "minutes": 20},
+ {"entity_id": "cover.garage_door", "event": "garage_open", "people": ["<member>"], "minutes": 20},
  {"entity_id": "sensor.washer_power", "event": "appliance_done", "people": [], "watts": 10}]
 ```
 
