@@ -4523,7 +4523,7 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(wf, dict):
             raise HTTPException(status_code=422, detail="web_filter must be an object")
         clean: dict = {}
-        for key in ("enabled", "adult", "safe_search"):
+        for key in ("enabled", "adult", "safe_search", "lockdown"):
             if wf.get(key) is not None:
                 if not isinstance(wf[key], bool):
                     raise HTTPException(status_code=422, detail=f"web_filter.{key} must be true or false")
@@ -4598,6 +4598,60 @@ def _clean_screen_rules(body: dict) -> dict:
                 "depart": bool(cfg.get("depart", False)),
             }
         out["geofence_alerts"] = clean_ga
+    # Batch (8): OS-update policy, Wi-Fi networks, CA certs, and VPN lockdown
+    if body.get("os_update_policy") is not None:
+        oup = body["os_update_policy"]
+        if not isinstance(oup, dict):
+            raise HTTPException(status_code=422, detail="os_update_policy must be an object")
+        clean_oup: dict = {}
+        if oup.get("policy") is not None:
+            if oup["policy"] not in ("default", "automatic", "windowed", "postpone"):
+                raise HTTPException(status_code=422, detail="os_update_policy.policy must be default, automatic, windowed or postpone")
+            clean_oup["policy"] = oup["policy"]
+        for key in ("window_start_min", "window_end_min"):
+            if oup.get(key) is not None:
+                val = oup[key]
+                if not isinstance(val, int) or isinstance(val, bool) or not 0 <= val <= 1440:
+                    raise HTTPException(status_code=422, detail=f"os_update_policy.{key} must be whole minutes from 0 to 1440")
+                clean_oup[key] = val
+        out["os_update_policy"] = clean_oup
+    if body.get("wifi_networks") is not None:
+        raw_wifi = body["wifi_networks"]
+        if not isinstance(raw_wifi, list):
+            raise HTTPException(status_code=422, detail="wifi_networks must be a list")
+        clean_wifi: list[dict] = []
+        for item in raw_wifi:
+            if not isinstance(item, dict) or not isinstance(item.get("ssid"), str) or not item["ssid"].strip():
+                raise HTTPException(status_code=422, detail="wifi_networks items must have a non-empty ssid")
+            clean_wifi.append({
+                "ssid": item["ssid"].strip()[:32],
+                "password": str(item.get("password") or ""),
+                "hidden": bool(item.get("hidden", False)),
+                "security": item.get("security") if item.get("security") in ("open", "wpa2", "wpa3", "wep") else "wpa2",
+            })
+        out["wifi_networks"] = clean_wifi[:20]
+    if body.get("ca_certs") is not None:
+        raw_certs = body["ca_certs"]
+        if not isinstance(raw_certs, list):
+            raise HTTPException(status_code=422, detail="ca_certs must be a list")
+        clean_certs: list[dict] = []
+        for item in raw_certs:
+            if not isinstance(item, dict) or not isinstance(item.get("alias"), str) or not isinstance(item.get("cert_pem"), str):
+                raise HTTPException(status_code=422, detail="ca_certs items must have alias and cert_pem")
+            alias = item["alias"].strip()[:64]
+            pem = item["cert_pem"].strip()
+            if not alias or not pem:
+                raise HTTPException(status_code=422, detail="ca_certs alias and cert_pem cannot be empty")
+            clean_certs.append({
+                "alias": alias,
+                "cert_pem": pem,
+                "enabled": bool(item.get("enabled", True)),
+            })
+        out["ca_certs"] = clean_certs[:20]
+    if body.get("vpn_lockdown") is not None:
+        if not isinstance(body["vpn_lockdown"], bool):
+            raise HTTPException(status_code=422, detail="vpn_lockdown must be true or false")
+        out["vpn_lockdown"] = body["vpn_lockdown"]
     return out
 
 

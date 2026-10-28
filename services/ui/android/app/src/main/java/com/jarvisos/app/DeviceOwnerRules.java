@@ -284,4 +284,59 @@ public final class DeviceOwnerRules {
     public static boolean shouldWipe(boolean deviceOwner, boolean wipeRequested) {
         return deviceOwner && wipeRequested;
     }
+
+    public static final String UPDATE_POLICY_DEFAULT = "default";
+    public static final String UPDATE_POLICY_AUTOMATIC = "automatic";
+    public static final String UPDATE_POLICY_WINDOWED = "windowed";
+    public static final String UPDATE_POLICY_POSTPONE = "postpone";
+
+    /**
+     * Resolves the effective OS update policy for a device-owner protected phone.
+     * Returns "default" if not device owner, not protected, or unsupported policy.
+     */
+    public static String effectiveUpdatePolicy(boolean deviceOwner, boolean protectedPhone, String policyType) {
+        if (!deviceOwner || !protectedPhone || policyType == null) return UPDATE_POLICY_DEFAULT;
+        if (UPDATE_POLICY_AUTOMATIC.equals(policyType)
+                || UPDATE_POLICY_WINDOWED.equals(policyType)
+                || UPDATE_POLICY_POSTPONE.equals(policyType)) {
+            return policyType;
+        }
+        return UPDATE_POLICY_DEFAULT;
+    }
+
+    /**
+     * Whether daily maintenance window minutes are valid (0 <= minutes <= 1440).
+     */
+    public static boolean validWindow(Integer startMin, Integer endMin) {
+        return startMin != null && endMin != null
+                && startMin >= 0 && startMin <= 1440
+                && endMin >= 0 && endMin <= 1440;
+    }
+
+    /**
+     * Whether always-on VPN traffic should be strictly locked down (no internet without VPN).
+     */
+    public static boolean alwaysOnVpnLockdown(boolean deviceOwner, boolean protectedPhone, boolean vpnLockdownWanted) {
+        return deviceOwner && protectedPhone && vpnLockdownWanted;
+    }
+
+    /**
+     * Sanitizes a Wi-Fi SSID (trimming whitespace and clamping to max 32 bytes).
+     */
+    public static String cleanSsid(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) return null;
+        return trimmed.length() > 32 ? trimmed.substring(0, 32) : trimmed;
+    }
+
+    /**
+     * Validates and returns trimmed PEM content if valid X.509 certificate markers are present.
+     */
+    public static String cleanCaCertPem(String pem) {
+        if (pem == null) return null;
+        String trimmed = pem.trim();
+        if (!trimmed.contains("BEGIN CERTIFICATE")) return null;
+        return trimmed;
+    }
 }

@@ -69,7 +69,7 @@ describe('GeofenceAlertsCard', () => {
 
     await waitFor(() => {
       expect(savedRules).not.toBeNull();
-      const ga = savedRules?.geofence_alerts;
+      const ga = savedRules?.geofence_alerts as Record<string, { arrive?: boolean }> | undefined;
       expect(ga?.['zone.school']?.arrive).toBe(true);
     });
 

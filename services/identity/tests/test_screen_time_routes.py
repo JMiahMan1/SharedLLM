@@ -275,3 +275,36 @@ def test_the_talk_journal_is_the_authors_unless_shared(family):
     assert family("sib").post("/api/guardian/journal/kid", json={"text": "x"}).status_code == 403
     assert family("mom").delete(f"/api/guardian/journal/kid/{mine['id']}").status_code == 404  # only the author
     assert family("dad").delete(f"/api/guardian/journal/kid/{mine['id']}").status_code == 200
+
+
+def test_a_parent_sets_mdm_device_policies(family):
+    res = family("dad").put("/api/screen-time/kid/rules", json={
+        "os_update_policy": {
+            "policy": "windowed",
+            "window_start_min": 180,
+            "window_end_min": 360,
+        },
+        "wifi_networks": [
+            {"ssid": "FamilyHome", "password": "safe-password-123", "hidden": False, "security": "wpa2"},
+        ],
+        "ca_certs": [
+            {"alias": "JarvisRootCA", "cert_pem": "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----", "enabled": True},
+        ],
+        "vpn_lockdown": True,
+    })
+    assert res.status_code == 200
+    rules = family("kid").get("/api/screen-time/kid/rules").json()["rules"]
+    assert rules["os_update_policy"] == {"policy": "windowed", "window_start_min": 180, "window_end_min": 360}
+    assert len(rules["wifi_networks"]) == 1
+    assert rules["wifi_networks"][0]["ssid"] == "FamilyHome"
+    assert len(rules["ca_certs"]) == 1
+    assert rules["ca_certs"][0]["alias"] == "JarvisRootCA"
+    assert rules["vpn_lockdown"] is True
+
+    # Validation errors
+    assert family("mom").put("/api/screen-time/kid/rules", json={"os_update_policy": {"policy": "invalid"}}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"os_update_policy": {"window_start_min": 2000}}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"wifi_networks": [{"ssid": ""}]}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"ca_certs": [{"alias": ""}]}).status_code == 422
+    assert family("mom").put("/api/screen-time/kid/rules", json={"vpn_lockdown": "yes"}).status_code == 422
+

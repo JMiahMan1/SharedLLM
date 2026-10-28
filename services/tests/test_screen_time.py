@@ -219,3 +219,34 @@ def test_uninstall_install_and_kiosk_rules_in_evaluate():
     assert s["kiosk_mode"] is True
     assert s["kiosk_apps"] == ["org.khanacademy.android", "com.duolingo"]
 
+
+def test_os_update_wifi_certs_and_vpn_lockdown_in_evaluate():
+    rules = {
+        "os_update_policy": {
+            "policy": "windowed",
+            "window_start_min": 120,
+            "window_end_min": 360,
+        },
+        "wifi_networks": [
+            {"ssid": "Home-IoT", "password": "secret", "hidden": False, "security": "wpa2"},
+            {"ssid": "Home-IoT", "password": "ignored-dupe"},
+        ],
+        "ca_certs": [
+            {"alias": "JarvisRoot", "cert_pem": "-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----", "enabled": True},
+        ],
+        "vpn_lockdown": True,
+    }
+    s = evaluate(rules, 0, 0, WED(12))
+    assert s["os_update_policy"] == {"policy": "windowed", "window_start_min": 120, "window_end_min": 360}
+    assert len(s["wifi_networks"]) == 1
+    assert s["wifi_networks"][0]["ssid"] == "Home-IoT"
+    assert s["wifi_networks"][0]["password"] == "secret"
+    assert len(s["ca_certs"]) == 1
+    assert s["ca_certs"][0]["alias"] == "JarvisRoot"
+    assert s["vpn_lockdown"] is True
+
+    # web_filter.lockdown also enables vpn_lockdown
+    s2 = evaluate({"web_filter": {"lockdown": True}}, 0, 0, WED(12))
+    assert s2["vpn_lockdown"] is True
+
+
