@@ -202,9 +202,15 @@ describe('one tab plays (BUG-66)', () => {
     const disconnect = vi.fn();
     h.player = { ...h.player, disconnect };
     render(<App page="bible" onState={vi.fn()} />);
-    // This tab is playing, so it holds the lock; another tab now plays.
     const other = new TabLock({ channel: new FakeBroadcastChannel(CHANNEL_NAME), tabId: 'other-tab' });
-    act(() => other.claim());
+    // This tab is playing, so it holds the lock; another tab now plays. The
+    // claim must land in a later millisecond: two claims in the same tick are
+    // tie-broken by tab id, and this test's fixed id can sort either side of
+    // the app's random one (the flake that reddened CI).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      other.claim();
+    });
     expect(disconnect).toHaveBeenCalledTimes(1);
     expect(useMediaStore.getState().playingInOtherTab).toBe(true);
     other.dispose();
