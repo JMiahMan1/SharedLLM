@@ -203,3 +203,41 @@ async def test_an_important_place_is_family_safety_for_everyone_when_none_chosen
     await geo._presence_transition(r, "jeremiah", 33.30, -111.80, t)
     await geo._presence_transition(r, "jeremiah", 33.25, -111.70, t + 60)
     assert [(n["user"], n["category"]) for n in world.payloads] == [("michele", "family_safety")]
+
+
+@pytest.mark.asyncio
+async def test_child_geofence_arrival_and_departure_alerts(world, monkeypatch):
+    async def mock_children():
+        return {
+            "noah": {
+                "username": "noah",
+                "display_name": "Noah",
+                "parents": ["jeremiah", "michele"],
+                "geofence_alerts": {
+                    "zone.work": {"arrive": True, "depart": True},
+                },
+            }
+        }
+    monkeypatch.setattr(geo, "_guardian_children_cached", mock_children)
+    r = R()
+    t = time.time()
+    # Noah starts outside
+    await geo._presence_transition(r, "noah", 33.25, -111.70, t)
+    # Noah arrives at zone.work
+    await geo._presence_transition(r, "noah", 33.30, -111.80, t + 60)
+    by_user = {n["user"]: n for n in world.payloads}
+    assert "jeremiah" in by_user and "michele" in by_user
+    assert by_user["jeremiah"]["category"] == "family_safety"
+    assert by_user["jeremiah"]["title"] == "Noah arrived at Work"
+    assert by_user["jeremiah"]["data"]["geofence"] is True
+
+    # Noah leaves zone.work
+    world.payloads.clear()
+    world.clear()
+    await geo._presence_transition(r, "noah", 33.25, -111.70, t + 120)
+    by_user = {n["user"]: n for n in world.payloads}
+    assert "jeremiah" in by_user and "michele" in by_user
+    assert by_user["jeremiah"]["category"] == "family_safety"
+    assert by_user["jeremiah"]["title"] == "Noah left Work"
+    assert "Home in about 22 min by road" in by_user["jeremiah"]["body"]
+

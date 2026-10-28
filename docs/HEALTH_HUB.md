@@ -832,6 +832,13 @@ point.
       themselves), with a 30-second cooldown per person; `FindPhoneCard` on the member page's
       Location section (a parent's Find my phone). Tests: `services/gateway/tests/test_push_senders.py`,
       `services/ui/src/components/member/FindPhoneCard.test.tsx`.
+      **Child Geofences & Place Arrival/Departure Alerts built (2026-10-27):** Configurable per-child
+      place alerts for Home Assistant zones (`zone.[a-z0-9_]+`, such as School, Home, Church, Activities)
+      stored in `ScreenRules.geofence_alerts` (`arrive: bool`, `depart: bool`). When a child arrives or
+      departs from a configured place, `services/geo/main.py:_notify_presence` routes a direct `family_safety`
+      alert to their parents with an estimated ETA home upon departure (`GeofenceAlertsCard.tsx` on
+      Guardian and member Location pages). Tests: `services/geo/tests/test_presence_alerts.py`,
+      `services/ui/src/test/GeofenceAlertsCard.test.tsx`.
 - [ ] **Tamper resistance.** Device-admin uninstall protection, restart on boot
       (`BootReceiver` exists), split-screen/multi-user detection, tamper alerts to parents -
       with a parent access code as the offline unlock/verify escape hatch.
@@ -945,6 +952,18 @@ point.
       nonsense, the phrase list decides exactly as before; the reason is logged and kept on the
       hit (`review: {by: "phrases", reason}`), nothing is dropped. Set `guardian_monitor_model`
       in Settings → AI & Compute to turn it on.
+- [x] **Photo & video safety scanning (Bark parity; local vision AI; built 2026-10-27).**
+      Bark-style on-device media monitor (`PhotoScanMonitor.java`) flags new photos/videos (within
+      file size constraints and valid image/video extensions) and requests server scanning
+      via `POST /api/guardian/media/scan` -> `/api/telemetry/media/scan` when `photo_scan` is enabled.
+      Evaluated using household vision AI (`vision_ocr_proxy_url` / `llm_local_url` via
+      `services/common/concern_review.py:media_messages` and `parse_media_verdict`) across sexual
+      content/nudity, violence/weapons, drugs/alcohol, self-harm, and cyberbullying. Strict privacy
+      boundary: raw image/video binary bytes are **never** persisted to disk or databases; only the
+      AI concern verdict (`category`, `level`, `excerpt` description, and `review`) is recorded in
+      `tel:concerns:{child}`. Severe concerns immediately page both parents via `family_safety`
+      notices and are summarized in Sunday recaps. Tests: `services/telemetry/tests/test_guardian.py`,
+      `services/gateway/tests/test_family_member_page.py`, `PhotoScanMonitorTest.java`.
 - [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.

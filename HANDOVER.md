@@ -30,13 +30,14 @@ Every claim below was verified against the live system unless marked **planned**
   migrations, per-loop worker leases, jittered retries, a digest-pinned base image whose Python
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
-  services' logs since it landed. **2026-10-27 shipped `46939f34`, `22015e14`, `e518a7b1`, `5333e078`, `12dcd588`, and `e3840396`**:
-  the parenting & MDM batches (1)–(6) (app-unblock ask flow, child weekly screen-time report,
+  services' logs since it landed. **2026-10-27 shipped `46939f34`, `22015e14`, `e518a7b1`, `5333e078`, `12dcd588`, `e3840396`, and Batch (7)**:
+  the parenting & MDM batches (1)–(7) (app-unblock ask flow, child weekly screen-time report,
   repeated-blocked-site alert, web-filter categories, notification/social monitoring, device-owner
-  hardening, remote app install/uninstall, and COSU kiosk mode), device awareness (phones vs tablets
+  hardening, remote app install/uninstall, COSU kiosk mode, child geofence arrival/departure alerts,
+  and local vision AI photo/video safety scanning), device awareness (phones vs tablets
   vs ESPHome companion nodes), remote ESPHome monitoring, control, and OTA updates, multi-user
   permissions & admin device assignment, and Workspace ESPHome Studio (edit, test with Jarvis, flash).
-  Recreated `identity`, `gateway`, `execution`, and `ui` on `192.168.2.205`; verified 0 ERROR lines in logs
+  Recreated `identity`, `gateway`, `execution`, `telemetry`, `geo`, and `ui` on `192.168.2.205`; verified 0 ERROR lines in logs
   and 200 OK on `/health`. APK: CI builds one per push under `services/ui/**`
   and the APK `versionCode` rebuilds per push (497 is current; 493 was the previous), so the native
   work below needs the newest APK on the phones. **APK 497** carries the updated UI bundle; **APK 489**
@@ -82,10 +83,11 @@ Every claim below was verified against the live system unless marked **planned**
 - `2026-10-27` **Device awareness & full remote ESPHome monitoring, control, and OTA updates across Identity, Execution, Gateway MDM, and UI** (`docs/MDM.md`).
   - **Tablet classification & admin override:** `services/identity/main.py` (`infer_mobile_kind` + startup `_migrate_device_kinds`) automatically classifies known tablet models (`SM-T*`, `SM-X*`, `SM-P*` such as Madelyn's Samsung Galaxy Tab S6 Lite `SM-P620` and Noah's `SM-X520`) as `kind="tablet"` even when an older APK build omitted `form_factor`, and `PATCH /api/user-panel/devices/{device_key}` now accepts `kind` and `label` so an admin can toggle `Phone` ↔ `Tablet` (or reclassify an ESPHome node between `watch`, `speaker`, `screen`, `assistant` and `light`) from `Devices.tsx`.
   - **ESPHome-native remote monitoring, control & OTA (`Jarvis Watch`, `s3-speaker` smart speakers, `jarvis-screen` / `cyd` / `esphome-waveshare7` smart screens, voice assistants, lights):** `services/gateway/mdm.py` tags every inventory row with `platform: "android" | "esphome"` and refuses Android APK update pushes (`422`) and Android factory wipes (`409`) on ESPHome devices. `services/execution/esphome_client.py` subscribes to live entity states (`subscribe_states`), infers the node's profile (`infer_esphome_kind`: `watch`, `speaker`, `screen`, `light`, `assistant`), and returns live sensor/binary_sensor/text_sensor telemetry alongside controllable entities (`button`, `switch`, `light` with brightness & effect, `select`, `number`, `text`, `media_player` play/pause/stop/mute/volume, `update`) and exposed user services (`find_watch`, `set_time`, `set_glance`, `notify` on watches; `show_page`, `set_rotation`, `show_dlg` on LVGL wall panels). `POST /api/mdm/esphome/{device}/ota` (`action: "ota"`) streams compiled `.bin` firmware directly over ESPHome's native TCP OTA v1/v2 wire protocol on port `3232` (with gzip compression and optional MD5/SHA256 password auth, falling back to `web_server` `POST /update` on port `80`) and records an `esphome_ota` entry in `audit.json`.
-- `2026-10-27` **Parenting & MDM Batches (1)–(6): Cheap parenting wins, web-filter categories, social notification monitoring, device-owner hardening, remote app install/uninstall, and COSU kiosk mode** (`46939f34`, `22015e14`, `e518a7b1`; `docs/MDM.md`).
+- `2026-10-27` **Parenting & MDM Batches (1)–(7): Cheap parenting wins, web-filter categories, social notification monitoring, device-owner hardening, remote app install/uninstall, COSU kiosk mode, child geofences, and photo/video safety scanning** (`46939f34`, `22015e14`, `e518a7b1`; `docs/MDM.md`, `docs/HEALTH_HUB.md`).
   - **Batch (1):** "Ask a parent" unblock on the blocked-app screen (`kind: "app_unblock"`, `rules.app_allow_until`), child's own 7-day weekly screen-time report (`weekly_report`), and repeated-blocked-site alert (`BLOCKED_SITE_ALERT_THRESHOLD = 5`).
   - **Batch (2) & (3):** One-tap web-filter categories (`social`, `gaming`, `streaming`, `chat`, `gambling`, `vpn`) in `screen_time.py`, `WebFilterRules.java` and `WebFilterControls.tsx`; social notification monitoring (`SocialNotificationMonitor.java`, `MediaSessionListenerService.java`, `GuardApi.java`, `concern_monitor.py`, `guardian_recap.py`).
   - **Batch (4), (5) & (6):** 12 device-owner user restrictions (`DISALLOW_INSTALL_UNKNOWN_SOURCES*`, `DISALLOW_CONFIG_DATE_TIME`, `DISALLOW_APPS_CONTROL`, `DISALLOW_MOUNT_PHYSICAL_MEDIA`), always-on VPN (`setAlwaysOnVpnPackage`), OS-level package suspension (`setPackagesSuspended`), silent `PackageInstaller.uninstall` (`uninstall_apps`), silent `PackageInstaller.Session` APK install (`ApkInstallPlugin.java`), `install_apps` pre-approval (`InstallApprovals.java`), and COSU `kiosk_mode` / `kiosk_apps` (`DeviceOwnerRules.java`, `GuardRules.java`, `Devices.tsx`).
+  - **Batch (7):** Child Geofence Arrival/Departure alerts (`geofence_alerts` per place in `ScreenRules`, notifying parents with ETA home via `services/geo/main.py:_notify_presence` and UI `GeofenceAlertsCard.tsx`) and Photo & Video Safety Scanning (`PhotoScanMonitor.java` on Android, `POST /api/guardian/media/scan` -> `/api/telemetry/media/scan`, vision AI analysis via `concern_review.py:media_messages` and `parse_media_verdict` across nudity/sexual content, violence/weapons, drugs/alcohol, self-harm, cyberbullying; raw bytes strictly discarded for child privacy).
 
 - `2026-10-27` **Form-label & control accessibility completion and Media Overhaul QA ledger (53/53 PASS)**
   (`docs/PRODUCTION_READINESS.md` §3.5, `docs/MEDIA_OVERHAUL_QA.md`). **Form labels and controls:** every
@@ -1196,7 +1198,7 @@ device-owner phone; app install/uninstall stays the screen rules.
   (**shipped 2026-10-27**); (6) kiosk/COSU (`kiosk_mode` + `kiosk_apps` in `screen_rules`,
   `DeviceOwnerRules.kioskPackages` + `setLockTaskPackages` on device owner, and Layer 1
   `GuardRules.decide` enforcement on non-device-owner phones) (**shipped 2026-10-27**);
-  (7) geofences + photo/video scanning; (8) Wi-Fi/cert/VPN config + OS-update policy.
+  (7) geofences + photo/video scanning (**shipped 2026-10-27**); (8) Wi-Fi/cert/VPN config + OS-update policy.
 - **OpenRouter**: the per-user OpenRouter tile is removed (`d517166f`) and there is no per-user
   OpenRouter credential; OpenRouter is the global Settings > LLM setting.
 

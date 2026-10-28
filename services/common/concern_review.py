@@ -106,3 +106,71 @@ def phrase_only(concern: dict[str, Any], reason: str) -> dict[str, Any]:
 
 def dismissed(concern: dict[str, Any]) -> bool:
     return (concern.get("review") or {}).get("verdict") == "dismissed"
+
+
+def media_messages(media_type: str, file_name: str, image_b64: str) -> list[dict[str, Any]]:
+    """Build the vision completion chat prompt for evaluating a photo/video thumbnail."""
+    clean_b64 = image_b64
+    if "," in clean_b64:
+        clean_b64 = clean_b64.split(",", 1)[1]
+    clean_b64 = clean_b64.strip()
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You help Christian parents protect their children from harmful content on their phones. "
+                "Evaluate the image for safety concerns. Check for:\n"
+                "1. Sexual content, nudity, suggestive poses, underwear/lingerie, or pornography (category: 'sexual', level: 'high' or 'severe').\n"
+                "2. Real weapons, gore, physical violence, or threats (category: 'violence', level: 'severe').\n"
+                "3. Illegal drugs, pills, vaping, alcohol, or drug paraphernalia (category: 'drugs', level: 'high').\n"
+                "4. Self-harm, cutting, or suicide (category: 'self_harm', level: 'severe').\n"
+                "5. Cyberbullying, hate symbols, or harassment (category: 'bullying', level: 'high').\n"
+                "If safe, return JSON: {\"concern\": false, \"reason\": \"clean\"}.\n"
+                "If a concern is found, return JSON only: "
+                '{"concern": true, "category": "sexual"|"violence"|"drugs"|"self_harm"|"bullying", '
+                '"level": "severe"|"high"|"medium", "description": "short description of flagged content", '
+                '"reason": "explanation of concern"}.'
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Scanned from {media_type} file: '{file_name}'. Is there any safety concern?",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{clean_b64}"},
+                },
+            ],
+        },
+    ]
+
+
+def parse_media_verdict(content: str) -> dict[str, Any]:
+    """Parse a vision model's response for an image/thumbnail scan."""
+    raw = (content or "").strip()
+    fenced = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not fenced:
+        raise ValueError("the vision model did not answer with JSON")
+    try:
+        data = json.loads(fenced.group(0))
+    except json.JSONDecodeError as exc:
+        raise ValueError("the vision model's JSON could not be read") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("concern"), bool):
+        raise ValueError("the vision model answer had no true/false concern")
+    cat = str(data.get("category") or "sexual").strip().lower()
+    if cat not in CATEGORIES:
+        cat = "sexual"
+    level = data.get("level")
+    if level not in LEVELS:
+        level = CATEGORIES[cat]["level"]
+    return {
+        "concern": data["concern"],
+        "category": cat,
+        "level": level,
+        "description": str(data.get("description") or "").strip()[:200],
+        "reason": str(data.get("reason") or "").strip()[:200],
+    }
+

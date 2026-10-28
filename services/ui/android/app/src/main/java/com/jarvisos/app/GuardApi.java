@@ -444,6 +444,13 @@ final class GuardApi {
         return mode.isEmpty() ? "severe" : mode;
     }
 
+    /** Whether photo and video safety scanning is enabled (Bark-style). */
+    static boolean photoScanEnabled(Context context) {
+        JSONObject rules = lastStatus(context).optJSONObject("rules");
+        if (rules == null) return true;
+        return rules.optBoolean("photo_scan", true);
+    }
+
     /** Post a social/chat notification from a watched minor's phone onto the activity feed. */
     static void reportSocialNotification(Context context, String pkg, String label, String sender, String text) {
         new Thread(() -> {
@@ -460,6 +467,22 @@ final class GuardApi {
                 send(context, "POST", "/api/activity", body.toString());
             } catch (Exception ignored) {
                 // Best effort: notification monitoring never blocks the phone.
+            }
+        }).start();
+    }
+
+    /** Report a photo or video thumbnail to be scanned for safety concerns. */
+    static void reportMediaScan(Context context, String mediaType, String fileName, String thumbnailB64) {
+        if (!photoScanEnabled(context)) return;
+        new Thread(() -> {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("media_type", mediaType);
+                body.put("file_name", fileName);
+                body.put("image_b64", thumbnailB64);
+                send(context, "POST", "/api/guardian/media/scan", body.toString());
+            } catch (Exception ignored) {
+                // Best effort: media scanning never blocks the phone.
             }
         }).start();
     }

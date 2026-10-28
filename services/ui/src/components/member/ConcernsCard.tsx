@@ -11,7 +11,21 @@ const LEVEL: Record<ConcernLevel, { word: string; icon: typeof AlertTriangle; st
   medium: { word: 'Worth a look', icon: Info, style: 'border-white/10 bg-white/5 text-slate-300' },
 };
 
-const WHERE: Record<string, string> = { sms: 'a text message', web: 'a website', media: 'something played', page: 'an app', calls: 'a call' };
+const WHERE: Record<string, string> = {
+  sms: 'a text message',
+  web: 'a website',
+  media: 'something played',
+  media_scan: 'a photo or video',
+  page: 'an app',
+  calls: 'a call',
+};
+
+function whereText(feature?: string, action?: string): string {
+  if (feature === 'media' && (action?.includes('photo') || action?.includes('image') || action?.includes('video') || action?.includes('scan'))) {
+    return 'a photo or video';
+  }
+  return WHERE[feature || ''] || 'their activity';
+}
 
 /**
  * Bark-style concern cards: what content monitoring found, how serious it is,
@@ -48,7 +62,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                 {c.at && <span className="ml-auto font-normal text-[10px] opacity-70">{relativeTime(c.at)}</span>}
               </p>
               <p className="opacity-90">
-                In {WHERE[c.feature || ''] || 'their activity'}: “{c.excerpt}”
+                In {whereText(c.feature, c.action)}: “{c.excerpt}”
               </p>
               {c.review?.reason && <p className="opacity-80">{dismissed ? 'Probably fine: ' : ''}{c.review.reason}</p>}
               {starters.get(c.category) && (

@@ -1229,6 +1229,18 @@ export const api = {
     return resp.data;
   },
 
+  /** Submit a photo or video thumbnail to be scanned for safety concerns. */
+  async scanGuardianMedia(payload: {
+    user?: string;
+    file_name: string;
+    media_type?: string;
+    image_b64: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ status: string; concern: boolean; category?: string; level?: string; label?: string }> {
+    const resp = await apiClient.post('/api/guardian/media/scan', payload);
+    return resp.data;
+  },
+
   /** Household roster with family roles; parent/household-manager only. */
   async getFamily(): Promise<FamilyRecord[]> {
     const resp = await apiClient.get('/api/users/family');
