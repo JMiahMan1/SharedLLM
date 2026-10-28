@@ -4,50 +4,57 @@
 # arm64 builds both still resolve (checked 2026-10-26).
 FROM python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377
 
-# Install system deps once: common tools for all containers
+# Install system deps once: common tools for all containers.
+#
+# Every version is pinned to what a build from the digest above resolved on
+# 2026-10-27 (read from a throwaway container). Debian replaces these with
+# security updates, so a pin eventually stops resolving and fails the build
+# instead of silently moving the toolchain - bump it deliberately. dnsutils and
+# ssh-client are virtual packages, so the packages that provide them
+# (bind9-dnsutils, openssh-client) carry the pin.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    wget \
-    jq \
-    iputils-ping \
-    iputils-tracepath \
-    dnsutils \
-    net-tools \
-    iproute2 \
-    strace \
-    ltrace \
-    lsof \
-    procps \
-    tcpdump \
-    nano \
-    vim-tiny \
-    ssh-client \
-    gnupg \
-    ca-certificates \
-    tesseract-ocr \
-    poppler-utils \
-    file \
-    less \
-    tree \
-    xxd \
-    ripgrep \
-    fd-find \
-    fzf \
-    traceroute \
-    nmap \
-    netcat-openbsd \
-    xz-utils \
-    zip \
-    unzip \
+    git=1:2.47.3-0+deb13u1 \
+    curl=8.14.1-2+deb13u7 \
+    wget=1.25.0-2 \
+    jq=1.7.1-6+deb13u4 \
+    iputils-ping=3:20240905-3 \
+    iputils-tracepath=3:20240905-3 \
+    bind9-dnsutils=1:9.20.30-1~deb13u1 \
+    net-tools=2.10-1.3 \
+    iproute2=6.15.0-1 \
+    strace=6.13+ds-1 \
+    ltrace=0.7.91~git20230705.8eabf68-4+b1 \
+    lsof=4.99.4+dfsg-2 \
+    procps=2:4.0.4-9 \
+    tcpdump=4.99.5-2 \
+    nano=8.4-1+deb13u1 \
+    vim-tiny=2:9.1.1230-2 \
+    openssh-client=1:10.0p1-7+deb13u4 \
+    gnupg=2.4.7-21+deb13u1 \
+    ca-certificates=20250419+deb13u1 \
+    tesseract-ocr=5.5.0-1+b1 \
+    poppler-utils=25.03.0-5+deb13u4 \
+    file=1:5.46-5 \
+    less=668-1 \
+    tree=2.2.1-1 \
+    xxd=2:9.1.1230-2 \
+    ripgrep=14.1.1-1+b4 \
+    fd-find=10.2.0-1+b5 \
+    fzf=0.60.3-1+b2 \
+    traceroute=1:2.1.6-1 \
+    nmap=7.95+dfsg-3 \
+    netcat-openbsd=1.229-1 \
+    xz-utils=5.8.1-1+deb13u2 \
+    zip=3.0-15+deb13u1 \
+    unzip=6.0-29+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Bring the trust store up to what the root programs trust today.
 #
-# The package is upgraded first, so a future Debian bundle is picked up on a
-# rebuild; today `trixie-security` offers nothing newer than the installed
-# 20250419+deb13u1, which is a 2025-04-19 Mozilla snapshot, so the bundle still
-# trusts roots that have since been
+# The package is pinned with the rest of the toolchain (20250419+deb13u1, a
+# 2025-04-19 Mozilla snapshot), so a newer bundle is picked up by deliberately
+# bumping that pin, not silently on a rebuild. This snapshot still trusts roots
+# that have since been
 # distrusted: the eight eMudhra/emSign intermediates whose private keys turned out
 # to be recoverable (October 2026), the COMODO root (TLS distrust April 2026),
 # GLOBALTRUST 2020, the Entrust roots, the Trustwave roots, and older ones such as
@@ -57,10 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # kept: the root programs kept it too. Nineteen names are listed and eighteen
 # exist in this bundle (`emSign ECC Root CA - G3` was never in Debian's), which is
 # what the assertion below allows for.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/* \
- && sed -i \
+RUN sed -i \
  -e "s|^mozilla/emSign_Root_CA_-_C1\.crt|!mozilla/emSign_Root_CA_-_C1.crt|" \
  -e "s|^mozilla/emSign_ECC_Root_CA_-_C3\.crt|!mozilla/emSign_ECC_Root_CA_-_C3.crt|" \
  -e "s|^mozilla/emSign_ECC_Root_CA_-_G3\.crt|!mozilla/emSign_ECC_Root_CA_-_G3.crt|" \
