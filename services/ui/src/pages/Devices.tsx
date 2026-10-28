@@ -3,16 +3,31 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import {
-  BookOpen, Check, GraduationCap, History, Loader2, Lock, RefreshCw, ShieldAlert, Smartphone, Trash2, Unlock, Upload, X,
+  Activity, BookOpen, Check, Cpu, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Radio, RefreshCw, ShieldAlert, Smartphone, Tablet, Trash2, Unlock, Upload, Watch, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { relativeTime } from '../lib/wanderTrips';
-import { deviceKindLabel } from '../lib/deviceKind';
+import {
+  deviceKindLabel,
+  deviceNoun,
+  devicePlatformLabel,
+  esphomeTargetName,
+  isEsphomeDevice,
+} from '../lib/deviceKind';
 import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
-import type { MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
+import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
+import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
+
+const KIND_ICON: Record<string, LucideIcon> = {
+  phone: Smartphone,
+  tablet: Tablet,
+  watch: Watch,
+  assistant: Mic,
+  light: Lightbulb,
+};
 
 /**
  * Device management (MDM, HANDOVER.md Phase 12).
@@ -176,20 +191,210 @@ function AppControls({ owner }: { owner: string }) {
   );
 }
 
-function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () => void }) {
+interface EsphomeEntityRow {
+  domain?: string;
+  key?: number | string;
+  object_id?: string;
+  name?: string;
+}
+
+const CONTROLLABLE_DOMAINS = new Set(['button', 'switch', 'light']);
+
+function EsphomeDeviceSection({
+  device,
+  onOpenDetails,
+}: {
+  device: MdmDevice;
+  onOpenDetails: () => void;
+}) {
+  const target = esphomeTargetName(device);
+  const [entities, setEntities] = useState<EsphomeEntityRow[] | null>(null);
+  const [probeInfo, setProbeInfo] = useState<Record<string, unknown> | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
+
+  const probe = useMutation({
+    mutationFn: () => api.esphomeList(target),
+    onSuccess: (res) => {
+      if (res.status === 'FAILURE') {
+        setProbeError(res.message || 'Could not reach this ESPHome device.');
+        setEntities(null);
+        return;
+      }
+      setProbeError(null);
+      const detail = (res.detail ?? {}) as Record<string, unknown>;
+      setProbeInfo(
+        ((detail.device as Record<string, unknown>) ??
+          (detail.device_info as Record<string, unknown>) ??
+          null),
+      );
+      const list = Array.isArray(detail.entities) ? (detail.entities as EsphomeEntityRow[]) : [];
+      setEntities(list);
+      toast.success(`Connected to ${device.label || target} (${list.length} entities)`);
+    },
+    onError: (e: Error) => {
+      const msg = e.message || 'Could not reach this ESPHome device (it may be asleep or out of range).';
+      setProbeError(msg);
+      toast.error(msg);
+    },
+  });
+
+  const syncJarvis = useMutation({
+    mutationFn: () => api.esphomeConfigureJarvis(target),
+    onSuccess: (res) => {
+      if (res.status === 'FAILURE') {
+        toast.error(res.message || 'Could not sync Jarvis credentials to this device');
+        return;
+      }
+      toast.success(res.message || `Synced Jarvis URL and API key to ${device.label || target}`);
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not sync Jarvis credentials to this device'),
+  });
+
+  const triggerEntity = useMutation({
+    mutationFn: (entityName: string) => api.esphomeCommand(target, entityName),
+    onSuccess: (res, entityName) => {
+      if (res.status === 'FAILURE') {
+        toast.error(res.message || `Could not trigger ${entityName}`);
+        return;
+      }
+      toast.success(res.message || `Sent command to ${entityName}`);
+    },
+    onError: (e: Error) => toast.error(e.message || 'ESPHome command failed'),
+  });
+
+  return (
+    <div className="space-y-2" data-testid={`mdm-esphome-${device.device_key}`}>
+      <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-xs">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+          ESPHome companion device · native TCP API
+        </p>
+        <p className="mt-1 text-slate-300">
+          Managed over ESPHome native protocol rather than Android MDM. Wake the {deviceNoun(device.kind)} before probing or syncing credentials if it sleeps between checks.
+        </p>
+        {probeError && (
+          <p className="mt-1.5 text-amber-300" data-testid={`mdm-esphome-error-${device.device_key}`}>
+            {probeError}
+          </p>
+        )}
+        {probeInfo && (
+          <p className="mt-1.5 text-emerald-300" data-testid={`mdm-esphome-info-${device.device_key}`}>
+            Online · {[probeInfo.friendly_name || probeInfo.name, probeInfo.model, probeInfo.esphome_version ? `ESPHome ${String(probeInfo.esphome_version)}` : null].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {entities && (
+          <div className="mt-2 border-t border-white/10 pt-2" data-testid={`mdm-esphome-entities-${device.device_key}`}>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">
+              Exposed entities ({entities.length})
+            </p>
+            {entities.length === 0 ? (
+              <p className="mt-1 text-slate-500">No entities exposed on this node.</p>
+            ) : (
+              <ul className="mt-1 max-h-44 space-y-1 overflow-y-auto">
+                {entities.map((ent, idx) => {
+                  const domain = (ent.domain || '').toLowerCase();
+                  const label = ent.name || ent.object_id || String(ent.key ?? idx);
+                  const targetEntity = ent.object_id || ent.name || String(ent.key ?? '');
+                  const canTrigger = CONTROLLABLE_DOMAINS.has(domain) && Boolean(targetEntity);
+                  return (
+                    <li key={`${domain}-${targetEntity}-${idx}`} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-slate-200">
+                        {label} <span className="text-[10px] uppercase text-slate-500">({domain || 'entity'})</span>
+                      </span>
+                      {canTrigger && (
+                        <button
+                          type="button"
+                          disabled={triggerEntity.isPending}
+                          onClick={() => triggerEntity.mutate(targetEntity)}
+                          className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                          data-testid={`mdm-esphome-call-${device.device_key}-${targetEntity}`}
+                        >
+                          {domain === 'button' ? 'Press' : 'Toggle'}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={probe.isPending}
+          onClick={() => probe.mutate()}
+          className={`glass-button px-3 text-xs ${TOUCH}`}
+          data-testid={`mdm-esphome-probe-${device.device_key}`}
+        >
+          {probe.isPending ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />} Ping &amp; list entities
+        </button>
+        <button
+          type="button"
+          disabled={syncJarvis.isPending}
+          onClick={() => syncJarvis.mutate()}
+          className={`glass-button px-3 text-xs ${TOUCH}`}
+          data-testid={`mdm-esphome-sync-${device.device_key}`}
+        >
+          {syncJarvis.isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Sync Jarvis key &amp; URL
+        </button>
+        <button
+          type="button"
+          onClick={onOpenDetails}
+          className={`glass-button px-3 text-xs ${TOUCH}`}
+          data-testid={`mdm-details-${device.device_key}`}
+        >
+          <Activity size={14} /> Battery, steps &amp; history
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DeviceCard({
+  device,
+  onRefresh,
+  onOpenDetails,
+}: {
+  device: MdmDevice;
+  onRefresh: () => void;
+  onOpenDetails: (device: MdmDevice) => void;
+}) {
   const [showApps, setShowApps] = useState(false);
+  const esphome = isEsphomeDevice(device);
+  const noun = deviceNoun(device.kind);
+  const Icon = KIND_ICON[(device.kind || '').toLowerCase()] ?? (esphome ? Cpu : Smartphone);
   const guard = device.capabilities?.guard;
-  // A lock really covers the phone on a device owner (Android's own lock screen
-  // plus lock task) or on any phone with the screen guard on (the full-screen
+  // A lock really covers the phone/tablet on a device owner (Android's own lock screen
+  // plus lock task) or on any Android device with the screen guard on (the full-screen
   // Accessibility overlay). With the guard off it is only a notification.
   const reallyLocks = Boolean(guard?.deviceOwner || guard?.guardEnabled);
-  const facts: Array<[string, string]> = [
-    ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
-    ['Model', [device.manufacturer, device.model].filter(Boolean).join(' ') || 'unknown'],
-    ['Android', [device.os_version, device.os_build].filter(Boolean).join(' · ') || 'unknown'],
-    ['Jarvis app', device.app_version ? `${device.app_version}${device.app_build ? ` (build ${device.app_build})` : ''}` : 'unknown'],
-    ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
-  ];
+  const batteryText =
+    device.battery?.pct != null
+      ? `${Math.round(device.battery.pct)}%${device.battery.usb ? ' (charging)' : ''}`
+      : device.battery?.usb
+        ? 'on USB (charging)'
+        : null;
+
+  const facts: Array<[string, string]> = esphome
+    ? [
+        ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
+        ['Platform', `ESPHome · ${deviceKindLabel(device.kind)}`],
+        ['Hardware', device.hardware || device.model || 'unknown'],
+        ['ESPHome', device.esphome_version || 'unknown'],
+        ['Firmware', device.app_version || 'unknown'],
+        ...(batteryText ? ([['Battery', batteryText]] as Array<[string, string]>) : []),
+        ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
+      ]
+    : [
+        ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
+        ['Form factor', deviceKindLabel(device.kind)],
+        ['Model', [device.manufacturer, device.model].filter(Boolean).join(' ') || 'unknown'],
+        ['Android', [device.os_version, device.os_build].filter(Boolean).join(' · ') || 'unknown'],
+        ['Jarvis app', device.app_version ? `${device.app_version}${device.app_build ? ` (build ${device.app_build})` : ''}` : 'unknown'],
+        ...(batteryText ? ([['Battery', batteryText]] as Array<[string, string]>) : []),
+        ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
+      ];
 
   const update = useMutation({
     mutationFn: () => api.pushMdmAppUpdate({ device_keys: [device.device_key] }),
@@ -205,8 +410,8 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
         toast.success('Locked');
       } else {
         // Never claim a lock Android did not really apply: with the screen guard
-        // off this phone only shows a notification (see PhoneProtectionCard).
-        toast('Not locked — the screen guard is off on this phone, so it only got a notification', { icon: '⚠️' });
+        // off this device only shows a notification (see PhoneProtectionCard).
+        toast(`Not locked — the screen guard is off on this ${noun}, so it only got a notification`, { icon: '⚠️' });
       }
     },
     onError: (e: Error) => toast.error(e.message || 'Could not change the lock'),
@@ -219,15 +424,39 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
     },
     onError: (e: Error) => toast.error(e.message || 'Could not queue the wipe'),
   });
+  const reclassify = useMutation({
+    mutationFn: (nextKind: 'phone' | 'tablet') =>
+      api.updateCompanionDevice(device.device_key, { kind: nextKind }),
+    onSuccess: (_res, nextKind) => {
+      toast.success(`Marked as ${deviceKindLabel(nextKind)}`);
+      onRefresh();
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not update device type'),
+  });
+
+  const nextMobileKind: 'phone' | 'tablet' = device.kind === 'tablet' ? 'phone' : 'tablet';
 
   return (
     <li className="space-y-2 px-4 py-3 sm:px-6" data-testid={`mdm-device-${device.device_key}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Smartphone size={18} className="shrink-0 text-sky-400" />
+        <Icon size={18} className={`shrink-0 ${esphome ? 'text-indigo-400' : 'text-sky-400'}`} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-white">{device.label || device.model || deviceKindLabel(device.kind)}</span>
-          <span className="block text-xs text-slate-500">{deviceKindLabel(device.kind)} · {device.device_key}</span>
+          <span className="block text-xs text-slate-500" data-testid={`mdm-device-badge-${device.device_key}`}>
+            {devicePlatformLabel(device)} · {deviceKindLabel(device.kind)} · {device.device_key}
+          </span>
         </span>
+        {!esphome && (device.kind === 'phone' || device.kind === 'tablet') && (
+          <button
+            type="button"
+            disabled={reclassify.isPending}
+            onClick={() => reclassify.mutate(nextMobileKind)}
+            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-white/10"
+            data-testid={`mdm-kind-toggle-${device.device_key}`}
+          >
+            Mark as {deviceKindLabel(nextMobileKind).toLowerCase()}
+          </button>
+        )}
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         {facts.map(([k, v]) => (
@@ -237,58 +466,72 @@ function DeviceCard({ device, onRefresh }: { device: MdmDevice; onRefresh: () =>
           </div>
         ))}
       </dl>
-      <div className="rounded-xl border border-white/5 bg-black/20 p-2 text-xs">
-        <p className="text-[10px] uppercase tracking-wider text-slate-500">
-          Protection {guard?.reportedAt ? `· reported ${relativeTime(guard.reportedAt)}` : ''}
-        </p>
-        {guard ? (
-          <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1" data-testid={`mdm-guard-${device.device_key}`}>
-            {GUARD_ROWS.map((row) => (
-              <li key={row.key} className="flex justify-between gap-2">
-                <span className="text-slate-300">{row.label}</span>
-                <State on={guard[row.key] as boolean | undefined} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-1 text-slate-500">This device has not reported its protection yet.</p>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={update.isPending} onClick={() => update.mutate()}
-          className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-update-${device.device_key}`}>
-          {update.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Push update
-        </button>
-        <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(false)}
-          className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-lock-${device.device_key}`}>
-          <Lock size={14} /> Lock
-        </button>
-        <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(true)}
-          className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-unlock-${device.device_key}`}>
-          <Unlock size={14} /> Unlock
-        </button>
-        <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
-          className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
-          App control
-        </button>
-        <button
-          type="button"
-          disabled={wipe.isPending}
-          onClick={async () => {
-            if (await confirmDialog({
-              title: 'Erase this device?',
-              body: `This erases EVERYTHING on ${device.label || device.device_key}. It cannot be undone.`,
-              confirmLabel: 'Erase',
-              danger: true,
-            })) wipe.mutate();
-          }}
-          className={`glass-button border-red-500/30 bg-red-600/20 px-3 text-xs text-red-200 ${TOUCH}`}
-          data-testid={`mdm-wipe-${device.device_key}`}
-        >
-          <ShieldAlert size={14} /> Wipe…
-        </button>
-      </div>
-      {showApps && <AppControls owner={device.owner_username} />}
+      {esphome ? (
+        <EsphomeDeviceSection device={device} onOpenDetails={() => onOpenDetails(device)} />
+      ) : (
+        <>
+          <div className="rounded-xl border border-white/5 bg-black/20 p-2 text-xs">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">
+              Protection {guard?.reportedAt ? `· reported ${relativeTime(guard.reportedAt)}` : ''}
+            </p>
+            {guard ? (
+              <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1" data-testid={`mdm-guard-${device.device_key}`}>
+                {GUARD_ROWS.map((row) => (
+                  <li key={row.key} className="flex justify-between gap-2">
+                    <span className="text-slate-300">{row.label}</span>
+                    <State on={guard[row.key] as boolean | undefined} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-slate-500">This {noun} has not reported its protection yet.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={update.isPending} onClick={() => update.mutate()}
+              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-update-${device.device_key}`}>
+              {update.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Push update
+            </button>
+            <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(false)}
+              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-lock-${device.device_key}`}>
+              <Lock size={14} /> Lock
+            </button>
+            <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(true)}
+              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-unlock-${device.device_key}`}>
+              <Unlock size={14} /> Unlock
+            </button>
+            <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
+              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
+              App control
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenDetails(device)}
+              className={`glass-button px-3 text-xs ${TOUCH}`}
+              data-testid={`mdm-details-${device.device_key}`}
+            >
+              <Activity size={14} /> Details &amp; history
+            </button>
+            <button
+              type="button"
+              disabled={wipe.isPending}
+              onClick={async () => {
+                if (await confirmDialog({
+                  title: `Erase this ${noun}?`,
+                  body: `This erases EVERYTHING on ${device.label || device.device_key}. It cannot be undone.`,
+                  confirmLabel: 'Erase',
+                  danger: true,
+                })) wipe.mutate();
+              }}
+              className={`glass-button border-red-500/30 bg-red-600/20 px-3 text-xs text-red-200 ${TOUCH}`}
+              data-testid={`mdm-wipe-${device.device_key}`}
+            >
+              <ShieldAlert size={14} /> Wipe…
+            </button>
+          </div>
+          {showApps && <AppControls owner={device.owner_username} />}
+        </>
+      )}
     </li>
   );
 }
@@ -462,6 +705,7 @@ export default function Devices() {
   const user = useAuth().user;
   const isAdmin = Boolean(user?.is_admin);
   const queryClient = useQueryClient();
+  const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
 
@@ -488,7 +732,7 @@ export default function Devices() {
       <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
         <h1 className="text-xl font-bold text-white sm:text-2xl">Device management</h1>
         <p className="mt-0.5 text-xs text-slate-400">
-          Every family device, the shared School and Library folders, and remote actions.
+          Phones, tablets, ESPHome watches &amp; companion nodes, shared School and Library folders, and remote actions.
         </p>
       </header>
 
@@ -502,12 +746,17 @@ export default function Devices() {
         )}
         {inventory.data && inventory.data.devices.length === 0 && (
           <p className="p-4 text-sm text-slate-500" data-testid="mdm-empty">
-            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app.
+            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app; ESPHome watches and assistants are added by pairing.
           </p>
         )}
         <ul className="divide-y divide-white/5">
           {inventory.data?.devices.map((d) => (
-            <DeviceCard key={d.device_key} device={d} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['mdm-devices'] })} />
+            <DeviceCard
+              key={d.device_key}
+              device={d}
+              onRefresh={() => queryClient.invalidateQueries({ queryKey: ['mdm-devices'] })}
+              onOpenDetails={(dev) => setDetailDevice(dev)}
+            />
           ))}
         </ul>
         {members.some((m) => !m.readable) && (
@@ -529,6 +778,16 @@ export default function Devices() {
       {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
 
       <AuditLogPanel />
+
+      {detailDevice && (
+        <DeviceDetailSheet
+          device={{
+            ...(detailDevice as unknown as CompanionDevice),
+            registered_by: detailDevice.registered_by || (isEsphomeDevice(detailDevice) ? 'paired' : 'self'),
+          }}
+          onClose={() => setDetailDevice(null)}
+        />
+      )}
     </div>
   );
 }

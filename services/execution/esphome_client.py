@@ -27,6 +27,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 
 import aiohttp
@@ -140,6 +141,8 @@ async def _load_devices_from_identity() -> dict[str, dict]:
             # address it was given for Jarvis (reused when it is re-sent).
             "owner": (str(item["owner"]).strip().lower() or None) if item.get("owner") else None,
             "jarvis_url": (str(item["jarvis_url"]).strip() or None) if item.get("jarvis_url") else None,
+            "device_key": (str(item["device_key"]).strip().lower() or None) if item.get("device_key") else None,
+            "friendly_name": (str(item["friendly_name"]).strip() or None) if item.get("friendly_name") else None,
         }
     return devices
 
@@ -156,9 +159,35 @@ async def get_devices(force_refresh: bool = False) -> dict[str, dict]:
     return _device_cache
 
 
+def _resolve_device_cfg(devices: dict[str, dict], name: str) -> dict | None:
+    """Resolve a configured ESPHome device by exact name, slugified friendly
+    label ('Jarvis Watch' -> 'jarvis-watch'), stripped 'esphome:' prefix, or
+    stored device_key / friendly_name."""
+    raw = str(name or "").strip().lower()
+    if not raw:
+        return None
+    if raw in devices:
+        return devices[raw]
+    slug = re.sub(r"[\s_]+", "-", raw)
+    if slug in devices:
+        return devices[slug]
+    without_prefix = re.sub(r"^esphome:", "", raw)
+    if without_prefix in devices:
+        return devices[without_prefix]
+    slug_without_prefix = re.sub(r"[\s_]+", "-", without_prefix)
+    if slug_without_prefix in devices:
+        return devices[slug_without_prefix]
+    for cfg in devices.values():
+        dk = (cfg.get("device_key") or "").strip().lower()
+        fn = (cfg.get("friendly_name") or "").strip().lower()
+        if raw in (dk, fn) or (fn and re.sub(r"[\s_]+", "-", fn) == slug):
+            return cfg
+    return None
+
+
 async def get_device(name: str) -> dict:
     devices = await get_devices()
-    cfg = devices.get(str(name).strip().lower())
+    cfg = _resolve_device_cfg(devices, name)
     if cfg is None:
         known = ", ".join(sorted(devices)) or "(none)"
         raise EsphomeConfigError(

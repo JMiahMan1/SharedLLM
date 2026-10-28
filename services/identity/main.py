@@ -532,6 +532,7 @@ async def lifespan(app: FastAPI):
         _warn_about_sign_in(session)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
+        _migrate_device_kinds(session)
         roles.seed_default_roles(session)
         family_synced = False
         for existing in session.exec(select(User)).all():
@@ -6756,6 +6757,38 @@ def get_all_user_locations(x_internal_secret: str = Header(...)):
 # ---------------------------------------------------------------------------
 
 
+_TABLET_MODEL_RE = re.compile(
+    r"(?:^sm-[txp]\d|galaxy\s*tab|pixel\s*tablet|\bipad\b|^tb-[a-z0-9]|\btablet\b|^kfdowi|^kfmawi|^kftrwi|^kfonwi)",
+    re.IGNORECASE,
+)
+
+
+def infer_mobile_kind(form_factor: str | None, model: str | None) -> str:
+    """Resolve a mobile device's kind ('phone' or 'tablet') from an explicit
+    form_factor or, when absent, known tablet model strings (such as Samsung
+    Galaxy Tab SM-T*/SM-X*/SM-P* models)."""
+    ff = (form_factor or "").strip().lower()
+    if ff in MOBILE_DEVICE_KINDS:
+        return ff
+    m = (model or "").strip()
+    if m and _TABLET_MODEL_RE.search(m):
+        return "tablet"
+    return "phone"
+
+
+def _migrate_device_kinds(session: Session) -> None:
+    """Reclassify self-registered mobile rows whose model is a known tablet
+    (e.g. SM-P620 registered before form_factor detection existed)."""
+    dirty = False
+    for dev in session.exec(select(Device).where(Device.registered_by == "self", Device.kind == "phone")).all():
+        if infer_mobile_kind(None, dev.model) == "tablet":
+            dev.kind = "tablet"
+            session.add(dev)
+            dirty = True
+    if dirty:
+        session.commit()
+
+
 def _device_to_read(d: Device) -> DeviceRead:
     try:
         caps = json.loads(d.capabilities or "{}")
@@ -6866,7 +6899,7 @@ def register_device(
     if device is None:
         device = Device(
             device_key=key,
-            kind=body.form_factor or "phone",
+            kind=infer_mobile_kind(body.form_factor, body.model),
             registered_by="self",
             first_seen_at=now,
         )
@@ -6879,6 +6912,8 @@ def register_device(
         # The same install, corrected: it first reported as a phone and now
         # reports as a tablet (or the other way round).
         device.kind = body.form_factor
+    elif not body.form_factor and device.kind == "phone" and infer_mobile_kind(None, body.model or device.model) == "tablet":
+        device.kind = "tablet"
 
     device.owner_username = caller.username
     device.model = body.model or device.model
@@ -7125,6 +7160,13 @@ def update_device(
         if owner is None:
             raise HTTPException(status_code=404, detail=f"No such user: {body.owner_username}")
         device.owner_username = body.owner_username.lower()
+    if body.kind is not None:
+        new_kind = body.kind.strip().lower()
+        if new_kind not in DEVICE_KINDS:
+            raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(DEVICE_KINDS)}")
+        device.kind = new_kind
+    if body.label is not None:
+        device.label = body.label.strip()
     session.add(device)
     session.commit()
     session.refresh(device)

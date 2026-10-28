@@ -501,8 +501,29 @@ async def fetch_library_book(path: str) -> tuple[bytes, str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Identity lookups
+# Identity lookups & device platform helpers
 # ---------------------------------------------------------------------------
+
+ESPHOME_DEVICE_KINDS = frozenset({"watch", "assistant", "light"})
+
+
+def is_esphome_device(device: dict) -> bool:
+    """True when a device is an ESPHome / companion node rather than an Android phone or tablet."""
+    if not isinstance(device, dict):
+        return False
+    kind = str(device.get("kind") or "").strip().lower()
+    key = str(device.get("device_key") or "").strip().lower()
+    return bool(
+        kind in ESPHOME_DEVICE_KINDS
+        or device.get("esphome_version")
+        or key.startswith("esphome:")
+        or str(device.get("registered_by") or "").strip().lower() in ("paired", "adopted", "admin")
+    )
+
+
+def device_platform(device: dict) -> str:
+    """'esphome' for ESPHome companion nodes; 'android' for mobile phones and tablets."""
+    return "esphome" if is_esphome_device(device) else "android"
 
 
 async def _owner_of(device_key: str) -> str | None:
@@ -657,6 +678,7 @@ async def mdm_device_inventory(request: Request):
             for d in rows:
                 devices.append({
                     **d,
+                    "platform": device_platform(d),
                     "owner_username": d.get("owner_username") or username,
                     "owner_display_name": display,
                 })
@@ -683,6 +705,12 @@ async def mdm_push_app_update(request: Request):
 
     actor = await _require_admin(request)
     body = await _body(request)
+    raw_keys = [str(k).strip() for k in (body.get("device_keys") or []) if isinstance(k, str) and str(k).strip()]
+    if any(k.lower().startswith("esphome:") for k in raw_keys):
+        raise HTTPException(
+            status_code=422,
+            detail="ESPHome devices do not run the Android app; use ESPHome management instead.",
+        )
     owners = await _selected_owners(body)
     if not owners:
         raise HTTPException(status_code=422, detail="Select at least one device or person")
@@ -849,9 +877,14 @@ async def mdm_wipe_device(request: Request, device_key: str):
             detail="A remote wipe erases everything on the phone and cannot be undone; send confirm=true to proceed.",
         )
     key = device_key.strip()
+    if key.lower().startswith("esphome:"):
+        raise HTTPException(
+            status_code=409,
+            detail="ESPHome devices do not support Android factory wipe.",
+        )
     owner = await _owner_of(key)
     if not owner:
-        raise HTTPException(status_code=404, detail="No registered phone with that key")
+        raise HTTPException(status_code=404, detail="No registered device with that key")
     status, info = await _identity_as_caller(request, "GET", f"/api/family/devices/{owner}")
     if status != 200 or not isinstance(info, dict):
         detail = (info or {}).get("detail") if isinstance(info, dict) else None
@@ -860,16 +893,22 @@ async def mdm_wipe_device(request: Request, device_key: str):
     device = next((d for d in (info.get("devices") or []) if d.get("device_key") == key), None)
     if device is None:
         raise HTTPException(status_code=404, detail="That device does not belong to a member you can manage")
+    if is_esphome_device(device):
+        raise HTTPException(
+            status_code=409,
+            detail="ESPHome devices do not support Android factory wipe.",
+        )
+    noun = "tablet" if str(device.get("kind") or "").lower() == "tablet" else "phone"
     guard = (device.get("capabilities") or {}).get("guard") or {}
     if not guard.get("deviceOwner"):
         raise HTTPException(
             status_code=409,
-            detail="Remote wipe needs a device-owner phone; this device has not reported device owner.",
+            detail=f"Remote wipe needs a device-owner {noun}; this device has not reported device owner.",
         )
     record = queue_wipe(key, owner)
-    record_audit("device_wipe", actor, target=key, detail={"owner": owner})
+    record_audit("device_wipe", actor, target=key, detail={"owner": owner, "kind": device.get("kind")})
     return {"status": "queued", "device_key": key, "owner_username": owner, "queued_at": record["at"],
-            "delivery": "the phone erases itself on its next check-in"}
+            "delivery": f"the {noun} erases itself on its next check-in"}
 
 
 @router.get("/api/mdm/library/books")

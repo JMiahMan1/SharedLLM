@@ -500,3 +500,14 @@ async def test_pairing_gives_the_device_the_address_jarvis_was_reached_at(pairin
                                                   jarvis_url="https://jarvis.sumemail.com/"))
     assert res.status == "SUCCESS", res.message
     assert ("configure_jarvis", {"url": "https://jarvis.sumemail.com", "api_key": "sk-device"}) in calls["actions"]
+
+
+@pytest.mark.asyncio
+async def test_get_device_resolves_friendly_label_and_slug(one_device):
+    """'Office Light' (the friendly label stored in Identity's Device table)
+    resolves the 'office-light' entry in esphome_devices."""
+    cfg = await one_device.get_device("Office Light")
+    assert cfg["host"] == "192.168.2.87"
+    cfg_prefix = await one_device.get_device("esphome:Office Light")
+    assert cfg_prefix["host"] == "192.168.2.87"
+
