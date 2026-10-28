@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import {
-  Activity, BookOpen, Check, Cpu, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Radio, RefreshCw, ShieldAlert, Smartphone, Tablet, Trash2, Unlock, Upload, Watch, X,
+  Activity, Bell, BookOpen, Check, Clock, Cpu, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Monitor, Pause, Play, Radio, RefreshCw, RotateCw, ShieldAlert, Smartphone, Speaker, Square, Tablet, Trash2, Unlock, Upload, Volume2, VolumeX, Watch, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
@@ -13,6 +13,7 @@ import {
   deviceKindLabel,
   deviceNoun,
   devicePlatformLabel,
+  ESPHOME_KIND_OPTIONS,
   esphomeTargetName,
   isEsphomeDevice,
 } from '../lib/deviceKind';
@@ -25,6 +26,8 @@ const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
   tablet: Tablet,
   watch: Watch,
+  speaker: Speaker,
+  screen: Monitor,
   assistant: Mic,
   light: Lightbulb,
 };
@@ -196,21 +199,92 @@ interface EsphomeEntityRow {
   key?: number | string;
   object_id?: string;
   name?: string;
+  state?: string | number | boolean | null;
+  unit?: string;
+  options?: string[];
+  min_value?: number;
+  max_value?: number;
+  step?: number;
+  brightness_pct?: number;
+  volume_pct?: number;
+  muted?: boolean;
+  effect?: string;
+  effects?: string[];
 }
 
-const CONTROLLABLE_DOMAINS = new Set(['button', 'switch', 'light']);
+interface EsphomeServiceRow {
+  name?: string;
+  args?: string[];
+}
+
+const SENSOR_DOMAINS = new Set(['sensor', 'binary_sensor', 'text_sensor']);
+const CONTROLLABLE_DOMAINS = new Set([
+  'button',
+  'switch',
+  'light',
+  'select',
+  'number',
+  'text',
+  'media_player',
+  'update',
+]);
+
+const SCREEN_PAGES: Array<{ page: number; label: string }> = [
+  { page: 0, label: 'Home' },
+  { page: 1, label: 'Climate' },
+  { page: 2, label: 'Weather' },
+  { page: 3, label: 'Energy' },
+  { page: 4, label: 'Media' },
+  { page: 5, label: 'Settings' },
+];
+
+const SCREEN_DIALOGS: Array<{ dlg: number; label: string }> = [
+  { dlg: 1, label: 'Play On' },
+  { dlg: 2, label: 'Playlists' },
+  { dlg: 3, label: 'Clock' },
+  { dlg: 0, label: 'Close dialog' },
+];
+
+function formatEntityState(ent: EsphomeEntityRow): string | null {
+  if (ent.state === undefined || ent.state === null || ent.state === '') return null;
+  const domain = (ent.domain || '').toLowerCase();
+  if (domain === 'binary_sensor' || domain === 'switch') {
+    return ent.state ? 'on' : 'off';
+  }
+  if (domain === 'light') {
+    const onOff = ent.state ? 'on' : 'off';
+    return ent.brightness_pct != null && ent.state ? `${onOff} (${ent.brightness_pct}%)` : onOff;
+  }
+  if (domain === 'media_player') {
+    const parts = [String(ent.state)];
+    if (ent.volume_pct != null) parts.push(`${ent.volume_pct}%`);
+    if (ent.muted) parts.push('muted');
+    return parts.join(' · ');
+  }
+  return ent.unit ? `${ent.state} ${ent.unit}` : String(ent.state);
+}
 
 function EsphomeDeviceSection({
   device,
   onOpenDetails,
+  onRefresh,
 }: {
   device: MdmDevice;
   onOpenDetails: () => void;
+  onRefresh: () => void;
 }) {
+  const queryClient = useQueryClient();
   const target = esphomeTargetName(device);
   const [entities, setEntities] = useState<EsphomeEntityRow[] | null>(null);
+  const [services, setServices] = useState<EsphomeServiceRow[]>([]);
   const [probeInfo, setProbeInfo] = useState<Record<string, unknown> | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
+  const [numDrafts, setNumDrafts] = useState<Record<string, string>>({});
+  const [textDrafts, setTextDrafts] = useState<Record<string, string>>({});
+  const [glanceLine, setGlanceLine] = useState('');
+  const [notifyTitle, setNotifyTitle] = useState('');
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const [otaPassword, setOtaPassword] = useState('');
 
   const probe = useMutation({
     mutationFn: () => api.esphomeList(target),
@@ -218,6 +292,7 @@ function EsphomeDeviceSection({
       if (res.status === 'FAILURE') {
         setProbeError(res.message || 'Could not reach this ESPHome device.');
         setEntities(null);
+        setServices([]);
         return;
       }
       setProbeError(null);
@@ -228,7 +303,9 @@ function EsphomeDeviceSection({
           null),
       );
       const list = Array.isArray(detail.entities) ? (detail.entities as EsphomeEntityRow[]) : [];
+      const svcs = Array.isArray(detail.services) ? (detail.services as EsphomeServiceRow[]) : [];
       setEntities(list);
+      setServices(svcs);
       toast.success(`Connected to ${device.label || target} (${list.length} entities)`);
     },
     onError: (e: Error) => {
@@ -251,65 +328,463 @@ function EsphomeDeviceSection({
   });
 
   const triggerEntity = useMutation({
-    mutationFn: (entityName: string) => api.esphomeCommand(target, entityName),
-    onSuccess: (res, entityName) => {
+    mutationFn: (vars: { entityName: string; params?: Record<string, unknown> }) =>
+      api.esphomeCommand(target, vars.entityName, vars.params),
+    onSuccess: (res, vars) => {
       if (res.status === 'FAILURE') {
-        toast.error(res.message || `Could not trigger ${entityName}`);
+        toast.error(res.message || `Could not trigger ${vars.entityName}`);
         return;
       }
-      toast.success(res.message || `Sent command to ${entityName}`);
+      toast.success(res.message || `Sent command to ${vars.entityName}`);
     },
     onError: (e: Error) => toast.error(e.message || 'ESPHome command failed'),
   });
 
+  const otaUpload = useMutation({
+    mutationFn: (file: File) => api.uploadEsphomeOta(target, file, otaPassword),
+    onSuccess: (res) => {
+      toast.success(res.message || `Uploaded ${res.filename} to ${device.label || target}`);
+      queryClient.invalidateQueries({ queryKey: ['mdm-audit'] });
+      onRefresh();
+    },
+    onError: (e: Error) => toast.error(e.message || 'ESPHome OTA upload failed'),
+  });
+
+  const serviceNames = new Set(services.map((s) => (s.name || '').toLowerCase()).filter(Boolean));
+  const hasWatchActions =
+    serviceNames.has('find_watch') ||
+    serviceNames.has('set_time') ||
+    serviceNames.has('set_glance') ||
+    serviceNames.has('notify');
+  const hasScreenActions =
+    serviceNames.has('show_page') ||
+    serviceNames.has('set_rotation') ||
+    serviceNames.has('show_dlg');
+
+  const sensorEntities = (entities ?? []).filter(
+    (e) => SENSOR_DOMAINS.has((e.domain || '').toLowerCase()) && formatEntityState(e) !== null,
+  );
+  const controlEntities = (entities ?? []).filter(
+    (e) => !SENSOR_DOMAINS.has((e.domain || '').toLowerCase()),
+  );
+
   return (
     <div className="space-y-2" data-testid={`mdm-esphome-${device.device_key}`}>
-      <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-xs">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
-          ESPHome companion device · native TCP API
-        </p>
-        <p className="mt-1 text-slate-300">
-          Managed over ESPHome native protocol rather than Android MDM. Wake the {deviceNoun(device.kind)} before probing or syncing credentials if it sleeps between checks.
-        </p>
+      <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-xs space-y-2">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+            ESPHome companion device · native TCP API &amp; OTA
+          </p>
+          <p className="mt-1 text-slate-300">
+            Managed over ESPHome native protocol rather than Android MDM. Wake the {deviceNoun(device.kind)} before probing, controlling, or pushing OTA firmware if it sleeps between checks.
+          </p>
+        </div>
         {probeError && (
-          <p className="mt-1.5 text-amber-300" data-testid={`mdm-esphome-error-${device.device_key}`}>
+          <p className="text-amber-300" data-testid={`mdm-esphome-error-${device.device_key}`}>
             {probeError}
           </p>
         )}
         {probeInfo && (
-          <p className="mt-1.5 text-emerald-300" data-testid={`mdm-esphome-info-${device.device_key}`}>
-            Online · {[probeInfo.friendly_name || probeInfo.name, probeInfo.model, probeInfo.esphome_version ? `ESPHome ${String(probeInfo.esphome_version)}` : null].filter(Boolean).join(' · ')}
+          <p className="text-emerald-300" data-testid={`mdm-esphome-info-${device.device_key}`}>
+            Online · {[
+              probeInfo.friendly_name || probeInfo.name,
+              probeInfo.model,
+              probeInfo.esphome_version ? `ESPHome ${String(probeInfo.esphome_version)}` : null,
+              probeInfo.project_version ? `fw ${String(probeInfo.project_version)}` : null,
+            ].filter(Boolean).join(' · ')}
           </p>
         )}
+
+        {sensorEntities.length > 0 && (
+          <div className="border-t border-white/10 pt-2" data-testid={`mdm-esphome-telemetry-${device.device_key}`}>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">
+              Live telemetry ({sensorEntities.length})
+            </p>
+            <dl className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {sensorEntities.map((ent, idx) => {
+                const label = ent.name || ent.object_id || String(ent.key ?? idx);
+                const val = formatEntityState(ent);
+                return (
+                  <div
+                    key={`sensor-${ent.object_id || idx}`}
+                    className="rounded-lg border border-white/5 bg-black/25 px-2 py-1"
+                  >
+                    <dt className="truncate text-[10px] text-slate-400">{label}</dt>
+                    <dd className="truncate font-medium text-slate-100">{val}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        )}
+
+        {(hasWatchActions || hasScreenActions) && (
+          <div className="border-t border-white/10 pt-2 space-y-2" data-testid={`mdm-esphome-services-${device.device_key}`}>
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">
+              Device quick actions
+            </p>
+            {hasWatchActions && (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {serviceNames.has('find_watch') && (
+                    <button
+                      type="button"
+                      onClick={() => triggerEntity.mutate({ entityName: 'find_watch' })}
+                      className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[11px] text-sky-200 hover:bg-sky-500/20"
+                      data-testid={`mdm-esphome-svc-${device.device_key}-find_watch`}
+                    >
+                      <Bell size={12} /> Find watch
+                    </button>
+                  )}
+                  {serviceNames.has('set_time') && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        triggerEntity.mutate({
+                          entityName: 'set_time',
+                          params: { epoch: Math.floor(Date.now() / 1000) },
+                        })
+                      }
+                      className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[11px] text-sky-200 hover:bg-sky-500/20"
+                      data-testid={`mdm-esphome-svc-${device.device_key}-set_time`}
+                    >
+                      <Clock size={12} /> Sync clock
+                    </button>
+                  )}
+                </div>
+                {serviceNames.has('set_glance') && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      type="text"
+                      aria-label={`Glance text for ${device.label || target}`}
+                      value={glanceLine}
+                      onChange={(e) => setGlanceLine(e.target.value)}
+                      placeholder="Watch face glance text…"
+                      className="glass-input flex-1 min-w-[140px] bg-black/30 px-2 py-1 text-xs"
+                      data-testid={`mdm-esphome-glance-input-${device.device_key}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        triggerEntity.mutate({
+                          entityName: 'set_glance',
+                          params: { line: glanceLine },
+                        })
+                      }
+                      className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-sky-300 hover:bg-white/10"
+                      data-testid={`mdm-esphome-svc-${device.device_key}-set_glance`}
+                    >
+                      Set glance
+                    </button>
+                  </div>
+                )}
+                {serviceNames.has('notify') && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      type="text"
+                      aria-label={`Notification title for ${device.label || target}`}
+                      value={notifyTitle}
+                      onChange={(e) => setNotifyTitle(e.target.value)}
+                      placeholder="Title"
+                      className="glass-input w-28 bg-black/30 px-2 py-1 text-xs"
+                      data-testid={`mdm-esphome-notify-title-${device.device_key}`}
+                    />
+                    <input
+                      type="text"
+                      aria-label={`Notification message for ${device.label || target}`}
+                      value={notifyMsg}
+                      onChange={(e) => setNotifyMsg(e.target.value)}
+                      placeholder="Message to show on watch…"
+                      className="glass-input flex-1 min-w-[140px] bg-black/30 px-2 py-1 text-xs"
+                      data-testid={`mdm-esphome-notify-msg-${device.device_key}`}
+                    />
+                    <button
+                      type="button"
+                      disabled={!notifyTitle.trim() && !notifyMsg.trim()}
+                      onClick={() =>
+                        triggerEntity.mutate({
+                          entityName: 'notify',
+                          params: { title: notifyTitle.trim() || 'Jarvis', message: notifyMsg.trim() },
+                        })
+                      }
+                      className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-sky-300 hover:bg-white/10"
+                      data-testid={`mdm-esphome-svc-${device.device_key}-notify`}
+                    >
+                      Send notice
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {hasScreenActions && (
+              <div className="space-y-1.5">
+                {serviceNames.has('show_page') && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] text-slate-400 mr-1">Screen page:</span>
+                    {SCREEN_PAGES.map((p) => (
+                      <button
+                        key={p.page}
+                        type="button"
+                        onClick={() =>
+                          triggerEntity.mutate({ entityName: 'show_page', params: { page: p.page } })
+                        }
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                        data-testid={`mdm-esphome-page-${device.device_key}-${p.page}`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {serviceNames.has('set_rotation') && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] text-slate-400 mr-1">Orientation:</span>
+                    {[0, 180].map((angle) => (
+                      <button
+                        key={angle}
+                        type="button"
+                        onClick={() =>
+                          triggerEntity.mutate({ entityName: 'set_rotation', params: { angle } })
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                        data-testid={`mdm-esphome-rot-${device.device_key}-${angle}`}
+                      >
+                        <RotateCw size={11} /> {angle}°
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {serviceNames.has('show_dlg') && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] text-slate-400 mr-1">Dialog:</span>
+                    {SCREEN_DIALOGS.map((d) => (
+                      <button
+                        key={d.dlg}
+                        type="button"
+                        onClick={() =>
+                          triggerEntity.mutate({ entityName: 'show_dlg', params: { dlg: d.dlg } })
+                        }
+                        className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-white/10"
+                        data-testid={`mdm-esphome-dlg-${device.device_key}-${d.dlg}`}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {entities && (
-          <div className="mt-2 border-t border-white/10 pt-2" data-testid={`mdm-esphome-entities-${device.device_key}`}>
+          <div className="border-t border-white/10 pt-2" data-testid={`mdm-esphome-entities-${device.device_key}`}>
             <p className="text-[10px] uppercase tracking-wider text-slate-400">
               Exposed entities ({entities.length})
             </p>
             {entities.length === 0 ? (
               <p className="mt-1 text-slate-500">No entities exposed on this node.</p>
             ) : (
-              <ul className="mt-1 max-h-44 space-y-1 overflow-y-auto">
-                {entities.map((ent, idx) => {
+              <ul className="mt-1 max-h-64 space-y-1.5 overflow-y-auto">
+                {(controlEntities.length > 0 ? controlEntities : entities).map((ent, idx) => {
                   const domain = (ent.domain || '').toLowerCase();
                   const label = ent.name || ent.object_id || String(ent.key ?? idx);
                   const targetEntity = ent.object_id || ent.name || String(ent.key ?? '');
                   const canTrigger = CONTROLLABLE_DOMAINS.has(domain) && Boolean(targetEntity);
+                  const stateSummary = formatEntityState(ent);
                   return (
-                    <li key={`${domain}-${targetEntity}-${idx}`} className="flex items-center justify-between gap-2">
+                    <li
+                      key={`${domain}-${targetEntity}-${idx}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/5 bg-black/20 px-2 py-1"
+                    >
                       <span className="min-w-0 truncate text-slate-200">
-                        {label} <span className="text-[10px] uppercase text-slate-500">({domain || 'entity'})</span>
+                        {label}{' '}
+                        <span className="text-[10px] uppercase text-slate-500">({domain || 'entity'})</span>
+                        {stateSummary ? (
+                          <span className="ml-1.5 text-[11px] text-emerald-300">· {stateSummary}</span>
+                        ) : null}
                       </span>
-                      {canTrigger && (
-                        <button
-                          type="button"
-                          disabled={triggerEntity.isPending}
-                          onClick={() => triggerEntity.mutate(targetEntity)}
-                          className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
-                          data-testid={`mdm-esphome-call-${device.device_key}-${targetEntity}`}
+
+                      {canTrigger && (domain === 'button' || domain === 'switch' || domain === 'light' || domain === 'update') && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {domain === 'light' && (
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              aria-label={`Brightness for ${label}`}
+                              defaultValue={ent.brightness_pct ?? 80}
+                              onChange={(e) =>
+                                triggerEntity.mutate({
+                                  entityName: targetEntity,
+                                  params: { state: true, brightness_pct: Number(e.target.value) },
+                                })
+                              }
+                              className="w-20 accent-sky-400"
+                              data-testid={`mdm-esphome-bri-${device.device_key}-${targetEntity}`}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              triggerEntity.mutate({
+                                entityName: targetEntity,
+                                params:
+                                  typeof ent.state === 'boolean'
+                                    ? { state: !ent.state }
+                                    : undefined,
+                              })
+                            }
+                            className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-call-${device.device_key}-${targetEntity}`}
+                          >
+                            {domain === 'button' ? 'Press' : domain === 'update' ? 'Install' : 'Toggle'}
+                          </button>
+                        </div>
+                      )}
+
+                      {canTrigger && domain === 'select' && Array.isArray(ent.options) && ent.options.length > 0 && (
+                        <select
+                          aria-label={`${label} on ${device.label || target}`}
+                          value={typeof ent.state === 'string' && ent.options.includes(ent.state) ? ent.state : ent.options[0]}
+                          onChange={(e) =>
+                            triggerEntity.mutate({
+                              entityName: targetEntity,
+                              params: { option: e.target.value },
+                            })
+                          }
+                          className="glass-input bg-black/40 px-2 py-0.5 text-xs text-slate-100"
+                          data-testid={`mdm-esphome-select-${device.device_key}-${targetEntity}`}
                         >
-                          {domain === 'button' ? 'Press' : 'Toggle'}
-                        </button>
+                          {ent.options.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {canTrigger && domain === 'number' && (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            aria-label={`${label} value`}
+                            min={ent.min_value}
+                            max={ent.max_value}
+                            step={ent.step ?? 1}
+                            value={numDrafts[targetEntity] ?? (ent.state != null ? String(ent.state) : '')}
+                            onChange={(e) =>
+                              setNumDrafts((prev) => ({ ...prev, [targetEntity]: e.target.value }))
+                            }
+                            className="glass-input w-20 bg-black/40 px-2 py-0.5 text-xs text-slate-100"
+                            data-testid={`mdm-esphome-num-input-${device.device_key}-${targetEntity}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const raw = numDrafts[targetEntity] ?? (ent.state != null ? String(ent.state) : '0');
+                              const num = Number(raw);
+                              if (!Number.isNaN(num)) {
+                                triggerEntity.mutate({ entityName: targetEntity, params: { value: num } });
+                              }
+                            }}
+                            className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-num-set-${device.device_key}-${targetEntity}`}
+                          >
+                            Set
+                          </button>
+                        </div>
+                      )}
+
+                      {canTrigger && domain === 'text' && (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            aria-label={`${label} text`}
+                            value={textDrafts[targetEntity] ?? (typeof ent.state === 'string' ? ent.state : '')}
+                            onChange={(e) =>
+                              setTextDrafts((prev) => ({ ...prev, [targetEntity]: e.target.value }))
+                            }
+                            className="glass-input w-32 bg-black/40 px-2 py-0.5 text-xs text-slate-100"
+                            data-testid={`mdm-esphome-text-input-${device.device_key}-${targetEntity}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = textDrafts[targetEntity] ?? (typeof ent.state === 'string' ? ent.state : '');
+                              triggerEntity.mutate({ entityName: targetEntity, params: { value: val } });
+                            }}
+                            className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-text-set-${device.device_key}-${targetEntity}`}
+                          >
+                            Send
+                          </button>
+                        </div>
+                      )}
+
+                      {canTrigger && domain === 'media_player' && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              triggerEntity.mutate({
+                                entityName: targetEntity,
+                                params: { command: ent.state === 'playing' ? 'pause' : 'play' },
+                              })
+                            }
+                            aria-label={`Play or pause ${label}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-media-play-${device.device_key}-${targetEntity}`}
+                          >
+                            {ent.state === 'playing' ? <Pause size={11} /> : <Play size={11} />}
+                            {ent.state === 'playing' ? 'Pause' : 'Play'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              triggerEntity.mutate({
+                                entityName: targetEntity,
+                                params: { command: 'stop' },
+                              })
+                            }
+                            aria-label={`Stop ${label}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-media-stop-${device.device_key}-${targetEntity}`}
+                          >
+                            <Square size={11} /> Stop
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              triggerEntity.mutate({
+                                entityName: targetEntity,
+                                params: { command: ent.muted ? 'unmute' : 'mute' },
+                              })
+                            }
+                            aria-label={ent.muted ? `Unmute ${label}` : `Mute ${label}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-white/10"
+                            data-testid={`mdm-esphome-media-mute-${device.device_key}-${targetEntity}`}
+                          >
+                            {ent.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+                            {ent.muted ? 'Unmute' : 'Mute'}
+                          </button>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            aria-label={`Volume for ${label}`}
+                            defaultValue={ent.volume_pct ?? 60}
+                            onChange={(e) =>
+                              triggerEntity.mutate({
+                                entityName: targetEntity,
+                                params: { volume_pct: Number(e.target.value) },
+                              })
+                            }
+                            className="w-20 accent-sky-400"
+                            data-testid={`mdm-esphome-media-vol-${device.device_key}-${targetEntity}`}
+                          />
+                        </div>
                       )}
                     </li>
                   );
@@ -318,7 +793,41 @@ function EsphomeDeviceSection({
             )}
           </div>
         )}
+
+        <div
+          className="border-t border-white/10 pt-2 flex flex-wrap items-center gap-2"
+          data-testid={`mdm-esphome-ota-box-${device.device_key}`}
+        >
+          <input
+            type="password"
+            aria-label={`OTA password for ${device.label || target}`}
+            value={otaPassword}
+            onChange={(e) => setOtaPassword(e.target.value)}
+            placeholder="OTA password (optional)"
+            className="glass-input w-44 bg-black/30 px-2.5 py-1 text-xs"
+            data-testid={`mdm-esphome-ota-pass-${device.device_key}`}
+          />
+          <label
+            className={`glass-button inline-flex cursor-pointer items-center gap-1.5 px-3 text-xs ${TOUCH}`}
+          >
+            {otaUpload.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            Upload firmware (.bin) OTA
+            <input
+              type="file"
+              accept=".bin,.bin.gz,.ota"
+              className="hidden"
+              disabled={otaUpload.isPending}
+              data-testid={`mdm-esphome-ota-${device.device_key}`}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) otaUpload.mutate(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
       </div>
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -425,7 +934,7 @@ function DeviceCard({
     onError: (e: Error) => toast.error(e.message || 'Could not queue the wipe'),
   });
   const reclassify = useMutation({
-    mutationFn: (nextKind: 'phone' | 'tablet') =>
+    mutationFn: (nextKind: string) =>
       api.updateCompanionDevice(device.device_key, { kind: nextKind }),
     onSuccess: (_res, nextKind) => {
       toast.success(`Marked as ${deviceKindLabel(nextKind)}`);
@@ -446,6 +955,22 @@ function DeviceCard({
             {devicePlatformLabel(device)} · {deviceKindLabel(device.kind)} · {device.device_key}
           </span>
         </span>
+        {esphome && (
+          <select
+            aria-label={`Device type for ${device.label || device.device_key}`}
+            value={ESPHOME_KIND_OPTIONS.includes(device.kind as (typeof ESPHOME_KIND_OPTIONS)[number]) ? device.kind : 'assistant'}
+            disabled={reclassify.isPending}
+            onChange={(e) => reclassify.mutate(e.target.value)}
+            className="glass-input bg-black/30 px-2.5 py-1 text-xs text-slate-200"
+            data-testid={`mdm-esphome-kind-${device.device_key}`}
+          >
+            {ESPHOME_KIND_OPTIONS.map((k) => (
+              <option key={k} value={k}>
+                {deviceKindLabel(k)}
+              </option>
+            ))}
+          </select>
+        )}
         {!esphome && (device.kind === 'phone' || device.kind === 'tablet') && (
           <button
             type="button"
@@ -467,7 +992,11 @@ function DeviceCard({
         ))}
       </dl>
       {esphome ? (
-        <EsphomeDeviceSection device={device} onOpenDetails={() => onOpenDetails(device)} />
+        <EsphomeDeviceSection
+          device={device}
+          onOpenDetails={() => onOpenDetails(device)}
+          onRefresh={onRefresh}
+        />
       ) : (
         <>
           <div className="rounded-xl border border-white/5 bg-black/20 p-2 text-xs">
@@ -662,6 +1191,7 @@ function LibraryBooks() {
 /** Plain-language labels for the MDM audit actions (the server's action names). */
 const AUDIT_LABELS: Record<string, string> = {
   app_update_push: 'pushed an app update',
+  esphome_ota: 'flashed ESPHome firmware over the air',
   folder_push: 'pushed a shared folder',
   file_upload: 'uploaded a shared file',
   file_delete: 'removed a shared file',

@@ -6,6 +6,7 @@ lowest-latency FastPath commands) we can still drive ESPHome devices
 directly over their native TCP protocol.
 """
 
+import base64
 import logging
 
 import aioesphomeapi
@@ -81,6 +82,40 @@ async def handle_esphome(req: EsphomeRequest) -> ExecutionResult:
             return ExecutionResult(
                 status="SUCCESS",
                 message=f"'{req.device}' now reaches Jarvis at {url} with its own API key.",
+                service=service,
+                detail=data,
+            )
+
+        if req.action == "ota":
+            params = req.params or {}
+            fw_b64 = params.get("firmware_b64")
+            if not fw_b64 or not isinstance(fw_b64, str):
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="A base64-encoded firmware image (params.firmware_b64) is required for action 'ota'.",
+                    service=service,
+                )
+            try:
+                firmware_bytes = base64.b64decode(fw_b64, validate=True)
+            except (ValueError, TypeError) as exc:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=f"Invalid base64 firmware payload: {exc}",
+                    service=service,
+                )
+            data = await esphome_client.ota_update(
+                req.device,
+                firmware_bytes,
+                filename=str(params.get("filename") or "firmware.bin"),
+                password=(str(params["password"]).strip() or None) if params.get("password") else None,
+                ota_port=int(params.get("ota_port") or 3232),
+            )
+            return ExecutionResult(
+                status="SUCCESS",
+                message=(
+                    f"Uploaded {data['filename']} ({data['bytes']} bytes) to '{req.device}' "
+                    f"via {data['method']}. The device is rebooting into the new firmware."
+                ),
                 service=service,
                 detail=data,
             )

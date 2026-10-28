@@ -16,7 +16,8 @@ one source of truth for devices, screen rules and the family list. The page is
 | Device inventory | `GET /api/mdm/devices` | father / admin |
 | Device kind / label / owner update | `PATCH /api/user-panel/devices/{key}` | admin |
 | App-update push | `POST /api/mdm/devices/update` | admin |
-| Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`) | authenticated / admin |
+| Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`, `ota`) | authenticated / admin |
+| ESPHome OTA firmware upload | `POST /api/mdm/esphome/{device}/ota` | admin |
 | Shared School and Library folders | `GET/POST/DELETE /api/mdm/files*` | admin |
 | A child's own folders | `GET /api/mdm/files/for-me` | any member |
 | One shared file | `GET /api/mdm/files/{folder}/{name}` | any member |
@@ -47,11 +48,17 @@ Not every registered device is an Android phone:
    - `services/identity/main.py:infer_mobile_kind` resolves mobile form factors from `form_factor` when reported by `JarvisDeviceInfo`, and falls back to model-string inference for known tablet models (`SM-T*`, `SM-X*`, `SM-P*` Samsung Galaxy Tab models such as `SM-P620` and `SM-X520`, `Galaxy Tab`, `Pixel Tablet`, `iPad`, `TB-*`). Startup migration `_migrate_device_kinds` upgrades existing self-registered tablet rows in SQLite that were created by older app builds before `form_factor` existed.
    - Admins can also reclassify any mobile device between `phone` and `tablet` in one click on `Devices.tsx` via `PATCH /api/user-panel/devices/{device_key}`.
    - Tablets render with a `<Tablet>` icon, `Android · Tablet` badge, `Form factor: Tablet` fact row, and tablet-accurate lock/wipe copy (`"this tablet"` instead of `"this phone"`).
-2. **ESPHome Companion Devices (`kind: "watch" | "assistant" | "light"`, `platform: "esphome"`)**
-   - Devices such as the ESPHome-based `Jarvis Watch` (`esphome:744dbd2c9728`, `esp32-s3-devkitc-1`) do not run Android and do not have Android `Protection` flags (`Device admin`, `Device owner`, `Screen guard`, `Web filter`) or Android APK/lock/wipe actions.
+2. **ESPHome Companion Devices (`kind: "watch" | "speaker" | "screen" | "assistant" | "light"`, `platform: "esphome"`)**
+   - Devices such as the ESPHome-based `Jarvis Watch` (`esphome:744dbd2c9728`, `esp32-s3-devkitc-1`, `../ESP32-S3-Touch-LCD-1.69-Watch`), smart speakers (`../Home-Assistant-Smart-Speaker`), and smart screens / LVGL wall panels (`../jarvis-screen`, `../cyd`, `../esphome-waveshare7`) do not run Android and do not have Android `Protection` flags (`Device admin`, `Device owner`, `Screen guard`, `Web filter`) or Android APK/lock/wipe actions.
    - `GET /api/mdm/devices` tags every device with `platform: "esphome" | "android"`. `POST /api/mdm/devices/update` and `POST /api/mdm/devices/{key}/wipe` refuse ESPHome targets (`422` / `409`).
-   - On `Devices.tsx` (and `DevicesSection.tsx` on the family member page), ESPHome devices show their hardware (`esp32-s3-devkitc-1`), ESPHome build (`2026.9.0`), project firmware version (`1.4.6`), and battery state, alongside native ESPHome controls:
-     - **Ping & list entities** (`POST /execute/esphome` `action: "list"`) to probe the node over the ESPHome native TCP protocol and trigger controllable `button`, `switch` and `light` entities (`action: "call"`). `services/execution/esphome_client.py` resolves devices by exact name, slugified friendly label (`"Jarvis Watch"` -> `"jarvis-watch"`), or `device_key`.
+   - Admins can reclassify any ESPHome device between `watch`, `speaker`, `screen`, `assistant` and `light` on `Devices.tsx` via `PATCH /api/user-panel/devices/{device_key}`.
+   - On `Devices.tsx` (and `DevicesSection.tsx` on the family member page), ESPHome devices show their hardware (`esp32-s3-devkitc-1`), ESPHome build (`2026.9.0`), project firmware version (`1.4.6`), and battery state, alongside native ESPHome remote monitoring, control, and OTA update:
+     - **Ping, live telemetry & entity list** (`POST /execute/esphome` `action: "list"`): connects over the ESPHome native TCP API (`aioesphomeapi`), subscribes to live entity states (`subscribe_states`), infers the device profile (`infer_esphome_kind`: `watch`, `speaker`, `screen`, `light`, `assistant`), and returns live values + metadata (`unit_of_measurement`, `options`, `min_value`/`max_value`/`step`, `brightness_pct`, `volume_pct`, `muted`, `installed_version`/`latest_version`) alongside exposed user services (`services`).
+     - **Interactive domain & user-service controls** (`POST /execute/esphome` `action: "call"`):
+       - Controllable entities: `button` (`Press`), `switch` (`Toggle`), `light` (`Toggle` + brightness slider + effect), `select` (option dropdown), `number` (numeric input + `Set`), `text` (text input + `Send`, e.g. `jarvis_chat_input` on `cyd` / `jarvis-screen`), `media_player` (`Play`/`Pause`/`Stop`, `Mute`/`Unmute`, and volume slider for `s3-speaker` / `jarvis-screen`), and `update` (`Install`).
+       - Watch quick actions (when the watch exposes `find_watch`, `set_time`, `set_glance`, or `notify`): **Find watch**, **Sync clock**, **Set glance**, and **Send notice**.
+       - Smart screen / wall panel quick actions (when the screen exposes `show_page`, `set_rotation`, or `show_dlg`, e.g. `esphome-waveshare7` / `cyd`): page switcher (`Home`, `Now Playing`, `Lights`, `Settings`, `Weather`, `Intercom`), orientation (`0°` / `180°`), and dialog trigger (`Drop-In`, `Broadcast`, `Close`).
+     - **Remote OTA firmware update** (`POST /api/mdm/esphome/{device}/ota` -> `POST /execute/esphome` `action: "ota"`): uploads a compiled `.bin` (or `.bin.gz` / `.ota`) image and streams it directly to the node using ESPHome's native TCP OTA v1/v2 binary wire protocol on port `3232` (with gzip compression and optional MD5/SHA256 password authentication), falling back to the ESPHome `web_server` `POST /update` multipart endpoint on port `80` when TCP `3232` is closed. Every OTA flash is recorded in `audit.json` under `esphome_ota`.
      - **Sync Jarvis key & URL** (`POST /execute/esphome` `action: "configure_jarvis"`) to re-provision the Jarvis endpoint URL and a fresh device API key over the encrypted Noise channel.
      - **Battery, steps & history** (`DeviceDetailSheet`) to inspect 24-hour battery discharge, watch step counts, and recent telemetry events.
 

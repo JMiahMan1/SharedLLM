@@ -6,6 +6,8 @@ describe('deviceKindLabel', () => {
     ['phone', 'Phone'],
     ['tablet', 'Tablet'],
     ['watch', 'Watch'],
+    ['speaker', 'Smart speaker'],
+    ['screen', 'Smart screen'],
     ['assistant', 'Assistant'],
     ['light', 'Light'],
   ])('names %s as %s', (kind, label) => {

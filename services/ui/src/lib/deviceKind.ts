@@ -10,6 +10,8 @@ const LABELS: Record<string, string> = {
   phone: 'Phone',
   tablet: 'Tablet',
   watch: 'Watch',
+  speaker: 'Smart speaker',
+  screen: 'Smart screen',
   assistant: 'Assistant',
   light: 'Light',
 };
@@ -18,11 +20,16 @@ const NOUNS: Record<string, string> = {
   phone: 'phone',
   tablet: 'tablet',
   watch: 'watch',
+  speaker: 'smart speaker',
+  screen: 'smart screen',
   assistant: 'voice assistant',
   light: 'light',
 };
 
-const ESPHOME_KINDS = new Set(['watch', 'assistant', 'light']);
+export const ESPHOME_KIND_OPTIONS = ['watch', 'speaker', 'screen', 'assistant', 'light'] as const;
+export type EsphomeDeviceKind = (typeof ESPHOME_KIND_OPTIONS)[number];
+
+const ESPHOME_KINDS = new Set<string>(ESPHOME_KIND_OPTIONS);
 const ESPHOME_REGISTERED_BY = new Set(['paired', 'adopted', 'admin']);
 
 export interface DevicePlatformLike {

@@ -558,7 +558,7 @@ class UserWidgetUpdate(BaseModel):
 # User Panel: device registry
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "tablet", "assistant", "light", "watch")
+DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "light", "watch")
 
 
 class DeviceSelfRegister(BaseModel):

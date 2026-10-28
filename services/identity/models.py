@@ -328,17 +328,18 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
 # asserts that.
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "tablet", "assistant", "light", "watch")
+DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "light", "watch")
 
 #: Kinds that are a person's own mobile device. They self-register on login
 #: (``registered_by="self"``) and the sleep estimate joins their overnight use.
-#: ``assistant``, ``light`` and ``watch`` are companion devices, added by an
-#: admin or claimed through pairing, so they are deliberately not here.
+#: ``assistant``, ``speaker``, ``screen``, ``light`` and ``watch`` are companion
+#: devices, added by an admin or claimed through pairing, so they are
+#: deliberately not here.
 MOBILE_DEVICE_KINDS = ("phone", "tablet")
 
 #: Kinds that get the advanced panel. ``light`` is deliberately minimal: a
 #: light has no screen, no app, and nothing to install.
-ADVANCED_DEVICE_KINDS = ("phone", "tablet", "assistant", "watch")
+ADVANCED_DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "watch")
 
 NO_OPT_IN_EVENTS = frozenset(
     {
