@@ -34,7 +34,7 @@
 - `docs/ARCADE_INTEGRATION.md`: Alpaca arcade games in the Family hub
 - `docs/ENTITY_PROTECTION.md`: locking Home Assistant entities to admins and chosen users
 - `docs/ROLES.md`: roles and permissions short of admin, and devices shared by several users
-- `docs/MDM.md`: device management: inventory, update push, shared folders, the Calibre Library set, audit log and wipe
+- `docs/MDM.md`: device management (MDM): tablet/phone awareness, ESPHome companion control/OTA, OS update policies, always-on VPN lockdown, Wi-Fi & CA cert provisioning, and audit log
 - `docs/VOICE_RECOGNITION.md`: recognising who speaks at a Home Assistant voice satellite
 - `docs/THEMES.md`: Jarvis-wide theme packs, import/export, widget tinting
 

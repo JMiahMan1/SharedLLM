@@ -899,13 +899,17 @@ point.
       `DISALLOW_CONFIG_PRIVATE_DNS`, `DISALLOW_INSTALL_UNKNOWN_SOURCES`,
       `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY`, `DISALLOW_CONFIG_DATE_TIME`,
       `DISALLOW_APPS_CONTROL`, and `DISALLOW_MOUNT_PHYSICAL_MEDIA`. In addition (built 2026-10-27),
-      `DeviceOwnerGuard.enforce` configures Android's always-on VPN (`setAlwaysOnVpnPackage`) when
-      the web filter is wanted, suspends blocked and unapproved apps at the OS launcher level
-      (`setPackagesSuspended`), silently uninstalls packages queued in `rules.uninstall_apps` via
-      `PackageInstaller.uninstall`, silently installs verified APKs on device-owner phones via
-      `PackageInstaller.Session`, and applies a dedicated COSU kiosk allowlist
+      `DeviceOwnerGuard.enforce` configures Android's always-on VPN (`setAlwaysOnVpnPackage`), optionally
+      passing `lockdownEnabled: true` (`vpn_lockdown` / `web_filter.lockdown`) to block all network traffic
+      without active VPN, configures the OS system update policy (`setSystemUpdatePolicy`: `automatic`,
+      `windowed` maintenance window, `postpone`, `default`), provisions trusted household Wi-Fi networks
+      (`wifi_networks` via `WifiManager`), installs and removes trusted household X.509 root certificates
+      (`ca_certs` via `dpm.installCaCert` and `dpm.uninstallCaCert`), suspends blocked and unapproved apps
+      at the OS launcher level (`setPackagesSuspended`), silently uninstalls packages queued in
+      `rules.uninstall_apps` via `PackageInstaller.uninstall`, silently installs verified APKs on device-owner
+      phones via `PackageInstaller.Session`, and applies a dedicated COSU kiosk allowlist
       (`rules.kiosk_mode` + `rules.kiosk_apps`) via `setLockTaskPackages` (and Layer 1 `GuardRules`
-      on non-device-owner phones). A
+      on non-device-owner phones). Managed via `DevicePolicyCard.tsx` on the Guardian page (`/guardian`). A
       screen-time lock (a parent's Pause / Lock now, bedtime, school, the day's limit) is then a
       **real OS lock**: `lockNow()` puts Android's own lock screen up once when a lock starts,
       while the cover activity pinned with lock-task (kiosk) mode still shows why and offers the
