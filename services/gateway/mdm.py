@@ -691,6 +691,37 @@ async def mdm_device_inventory(request: Request):
             members.append({"username": username, "display_name": display, "device_count": None,
                             "readable": False,
                             "reason": detail or f"Could not read this member's devices (HTTP {status})"})
+
+    # For administrators, ensure unassigned / default ESPHome companion devices are also visible
+    from services.gateway.main import _caller_is_admin
+
+    if await _caller_is_admin(request):
+        seen_keys = {str(d.get("device_key")).lower() for d in devices if d.get("device_key")}
+        try:
+            status, all_registered = await _identity_as_caller(request, "GET", "/api/user-panel/devices")
+            if status == 200 and isinstance(all_registered, list):
+                for dev in all_registered:
+                    if not isinstance(dev, dict):
+                        continue
+                    key = str(dev.get("device_key") or "").lower()
+                    owner_u = (dev.get("owner_username") or "").strip().lower()
+                    if key and key not in seen_keys:
+                        # Include unassigned devices, default-owned devices, or ESPHome companion nodes
+                        if not owner_u or owner_u == "default" or is_esphome_device(dev):
+                            if not is_esphome_device(dev) and owner_u and owner_u != "default":
+                                continue
+                            seen_keys.add(key)
+                            devices.append({
+                                **dev,
+                                "platform": device_platform(dev),
+                                "owner_username": dev.get("owner_username") or None,
+                                "owner_display_name": (
+                                    "Default Admin" if owner_u == "default" else (dev.get("owner_username") or "(Unassigned)")
+                                ),
+                            })
+        except Exception as e:
+            log.warning("[mdm] unassigned device inventory supplement failed: %s", e)
+
     return {"devices": devices, "members": members, "generated_at": datetime.now(UTC).isoformat()}
 
 
@@ -1001,6 +1032,136 @@ async def mdm_esphome_ota(
         "sha256": sha256,
         **detail,
     }
+
+
+@router.post("/api/workspaces/{workspace_id}/esphome/flash")
+async def workspace_esphome_flash(
+    request: Request,
+    workspace_id: str,
+):
+    """Flash a firmware binary from the workspace to an ESPHome device (Admin only)."""
+    from services.gateway.main import _require_admin
+
+    actor = await _require_admin(request)
+    body = await _body(request)
+    device = (body.get("device") or "").strip()
+    if not device:
+        raise HTTPException(status_code=422, detail="An ESPHome device name or key is required")
+    path = (body.get("path") or body.get("firmware_path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=422, detail="A workspace firmware path (.bin) is required")
+
+    # Read the firmware binary from the workspace
+    try:
+        async with get_client().post(
+            f"{EXECUTION_SVC}/execute/workspace_file_read",
+            json={
+                "user_context": {"user": actor, "is_admin": True},
+                "workspace_id": workspace_id,
+                "path": path,
+                "encoding": "base64",
+            },
+            headers=_HEADERS,
+            timeout=_TIMEOUT,
+        ) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as exc:
+        log.warning("[mdm] reading workspace file %s failed: %s", path, exc)
+        raise HTTPException(status_code=502, detail="Could not read firmware from workspace") from exc
+
+    if not isinstance(data, dict) or data.get("status") != "SUCCESS":
+        msg = (data.get("message") if isinstance(data, dict) else None) or f"Could not read {path}"
+        raise HTTPException(status_code=404, detail=str(msg))
+
+    detail = data.get("detail") if isinstance(data.get("detail"), dict) else {}
+    fw_b64 = detail.get("content") or detail.get("base64")
+    if not fw_b64:
+        raise HTTPException(status_code=422, detail=f"No binary content in workspace file {path}")
+
+    filename = path.rsplit("/", 1)[-1]
+    password = (body.get("password") or "").strip() or None
+    ota_port = int(body.get("ota_port") or 3232)
+
+    payload = {
+        "user_context": {"user": actor, "is_admin": True},
+        "action": "ota",
+        "device": device,
+        "params": {
+            "firmware_b64": fw_b64,
+            "filename": filename,
+            "password": password,
+            "ota_port": ota_port,
+        },
+    }
+    try:
+        async with get_client().post(
+            f"{EXECUTION_SVC}/execute/esphome",
+            json=payload,
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=120.0),
+        ) as resp:
+            res_data = await resp.json(content_type=None)
+    except Exception as exc:
+        log.warning("[mdm] workspace esphome OTA failed for %s: %s", device, exc)
+        raise HTTPException(status_code=502, detail="The execution service could not be reached for ESPHome OTA.") from exc
+
+    if not isinstance(res_data, dict) or res_data.get("status") != "SUCCESS":
+        msg = (res_data.get("message") if isinstance(res_data, dict) else None) or "ESPHome OTA flash failed"
+        raise HTTPException(status_code=502, detail=str(msg))
+
+    ota_detail = res_data.get("detail") if isinstance(res_data.get("detail"), dict) else {}
+    record_audit(
+        "esphome_ota",
+        actor,
+        target=device,
+        detail={
+            "filename": filename,
+            "source": f"workspace:{workspace_id}:{path}",
+            "method": ota_detail.get("method") or "esphome_ota",
+            "bytes": ota_detail.get("bytes"),
+        },
+    )
+    return {
+        "status": "SUCCESS",
+        "message": res_data.get("message") or f"Flashed {filename} to {device}",
+        "device": device,
+        "filename": filename,
+        "detail": ota_detail,
+    }
+
+
+@router.post("/api/workspaces/{workspace_id}/esphome/validate")
+async def workspace_esphome_validate(
+    request: Request,
+    workspace_id: str,
+):
+    """Validate an ESPHome YAML configuration file in the workspace."""
+    from services.gateway.main import _require_authenticated
+
+    actor = await _require_authenticated(request)
+    body = await _body(request)
+    path = (body.get("path") or body.get("yaml_path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=422, detail="A YAML file path is required")
+
+    lint_req = {
+        "user_context": {"user": actor, "is_admin": True},
+        "workspace_id": workspace_id,
+        "path": path,
+        "linter": "esphome",
+    }
+    try:
+        async with get_client().post(
+            f"{EXECUTION_SVC}/execute/workspace_lint",
+            json=lint_req,
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=45.0),
+        ) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Execution service unreachable for lint") from exc
+
+    return data
 
 
 @router.get("/api/mdm/library/books")

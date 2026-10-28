@@ -2546,6 +2546,7 @@ def internal_validate_api_key(
         "user_id": user.id or 0,
         "is_admin": bool(user.is_admin),
         "is_system_default": bool(user.is_system_default),
+        "family_role": getattr(user, "family_role", "other"),
     }
 
 
@@ -6930,6 +6931,22 @@ def register_device(
     return _device_to_read(device)
 
 
+def _is_device_admin(user: User | None, session: Session | None = None) -> bool:
+    """Whether user may administer devices (Father, system default, is_admin, or devices.assign)."""
+    if not user:
+        return False
+    if (
+        bool(getattr(user, "is_admin", False))
+        or getattr(user, "username", "") == "default"
+        or bool(getattr(user, "is_system_default", False))
+        or getattr(user, "family_role", "") == "father"
+    ):
+        return True
+    if session is not None and roles.has_permission(session, user, "devices.assign"):
+        return True
+    return False
+
+
 @app.get("/api/user-panel/devices", response_model=list[DeviceRead])
 def list_user_panel_devices(
     session: Session = Depends(get_session),
@@ -6941,7 +6958,7 @@ def list_user_panel_devices(
     the app itself and not just from an admin screen.
     """
     stmt = select(Device)
-    if not caller.is_admin:
+    if not _is_device_admin(caller, session):
         stmt = stmt.where(Device.owner_username == caller.username)
     devices = session.exec(stmt).all()
     batteries = _latest_batteries(session, [d.device_key for d in devices])
@@ -7043,7 +7060,7 @@ def create_device(
     These have no account to log in with, so an admin declares them and assigns
     the owner. A phone or tablet must not be created here: it registers itself.
     """
-    if not admin.is_admin:
+    if not _is_device_admin(admin, session):
         raise HTTPException(status_code=403, detail="Admin only")
     kind = (body.kind or "").strip().lower()
     if kind not in DEVICE_KINDS:
@@ -7148,7 +7165,7 @@ def update_device(
     Assignment stays admin-side on purpose: a device being able to claim an
     owner would let anyone reassign the family's assistant by holding its key.
     """
-    if not admin.is_admin:
+    if not _is_device_admin(admin, session):
         raise HTTPException(status_code=403, detail="Admin only")
     device = session.exec(select(Device).where(Device.device_key == device_key)).first()
     if device is None:
@@ -7170,6 +7187,34 @@ def update_device(
     session.add(device)
     session.commit()
     session.refresh(device)
+
+    # Synchronize owner to esphome_devices setting if this device exists in it
+    try:
+        setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "esphome_devices")).first()
+        if setting and setting.value:
+            dev_list = json.loads(setting.value)
+            if isinstance(dev_list, list):
+                changed = False
+                for item in dev_list:
+                    if isinstance(item, dict):
+                        dname = str(item.get("name", "")).strip().lower()
+                        dkey = device_key.strip().lower()
+                        dlabel = (device.label or "").strip().lower()
+                        if (
+                            dname == dkey
+                            or f"esphome:{dname}" == dkey
+                            or dname == dkey.removeprefix("esphome:")
+                            or (dlabel and dname == dlabel)
+                        ):
+                            item["owner"] = device.owner_username or ""
+                            changed = True
+                if changed:
+                    setting.value = json.dumps(dev_list)
+                    session.add(setting)
+                    session.commit()
+    except Exception as e:
+        log.warning(f"Failed to sync owner to esphome_devices setting: {e}")
+
     return _device_to_read(device)
 
 

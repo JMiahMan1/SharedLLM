@@ -75,6 +75,57 @@ class EsphomeConfigError(RuntimeError):
     """Raised when the esphome_devices setting is missing or malformed."""
 
 
+class EsphomePermissionError(EsphomeConfigError):
+    """Raised when a non-admin asks for a control that only an admin may use."""
+
+
+# ---------------------------------------------------------------------------
+# Who may drive what: the member / admin split for ESPHome controls.
+#
+# An admin (the father, or the default admin) may do everything: assign the
+# node, flash firmware, re-provision it and press any of its buttons. The
+# person a node is assigned to (or anyone, on an unassigned shared node) gets
+# the everyday controls -- play/pause, mute, volume, lights, pages, notices --
+# but nothing that reboots, resets, re-pairs or re-flashes the device.
+# ---------------------------------------------------------------------------
+
+#: Entity domains a device's member may drive. Everything else is admin-only.
+MEMBER_DOMAINS = frozenset({
+    "media_player", "light", "switch", "button", "select", "number", "text", "fan", "cover", "siren", "service",
+})
+
+#: Names that mark an entity or user service as maintenance, whatever its domain.
+_ADMIN_ONLY_NAME = re.compile(
+    r"\b(restart|reboot|factory|reset|safe mode|shutdown|shut down|firmware|ota|update|upgrade|wifi|wi fi|"
+    r"encryption|api key|pair\w*|unpair\w*|provision\w*|configure\w*|debug|log level)\b"
+)
+
+
+def member_may_control(domain: str, name: str) -> bool:
+    """Whether a non-admin may run this control on a node they may use.
+
+    ``name`` is the entity's object_id and/or friendly name (or the user
+    service's name). The check is deliberately a short allow-list of domains
+    plus a deny-list of maintenance words, so a new "Restart" or "Factory
+    reset" button on some future device stays an admin's control by default.
+    """
+    dom = (domain or "").strip().lower()
+    if dom not in MEMBER_DOMAINS:
+        return False
+    normalized = re.sub(r"[\s_\-]+", " ", (name or "").strip().lower())
+    return not _ADMIN_ONLY_NAME.search(normalized)
+
+
+def member_guard(domain: str, name: str) -> None:
+    """Raise :class:`EsphomePermissionError` when a member may not run this control."""
+    if not member_may_control(domain, name):
+        label = (name or "").strip() or domain
+        raise EsphomePermissionError(
+            f"Only an admin can use '{label}' ({domain}). Members can play, pause, mute, change the "
+            "volume, switch lights and pages, and send notices."
+        )
+
+
 async def _identity_post(path: str, body: dict, *, bearer: str | None = None) -> tuple[int, dict]:
     """POST to Identity, as this service (internal secret) or as a user."""
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {"X-Internal-Secret": INTERNAL_SECRET}
@@ -609,8 +660,18 @@ def _media_command(value: str):
         raise ValueError(f"Invalid media player command '{value}'. Valid: {valid}") from None
 
 
-async def call_entity(device_name: str, entity_name: str, params: dict | None = None) -> dict:
-    """Send a command to one entity or script/service on a device; returns a result summary."""
+async def call_entity(
+    device_name: str,
+    entity_name: str,
+    params: dict | None = None,
+    authorize=None,
+) -> dict:
+    """Send a command to one entity or script/service on a device; returns a result summary.
+
+    ``authorize(domain, name)``, when given, is called once the target is
+    resolved on the device and before anything is sent; it raises to refuse
+    (``member_guard`` for a non-admin caller).
+    """
     cfg = await get_device(device_name)
     params = params or {}
 
@@ -621,6 +682,8 @@ async def call_entity(device_name: str, entity_name: str, params: dict | None = 
             if entity is None:
                 svc = _match_service(services, entity_name)
                 if svc is not None:
+                    if authorize is not None:
+                        authorize("service", str(getattr(svc, "name", "") or entity_name))
                     await _execute_user_service(client, svc, params)
                     return {"domain": "service", "name": getattr(svc, "name", entity_name), "params": params}
                 available = [
@@ -632,6 +695,11 @@ async def call_entity(device_name: str, entity_name: str, params: dict | None = 
                 )
             domain = _entity_domain(entity)
             key = entity.key
+            if authorize is not None:
+                authorize(
+                    domain,
+                    f"{getattr(entity, 'object_id', '') or ''} {getattr(entity, 'name', '') or ''}".strip(),
+                )
 
             if domain == "button":
                 client.button_command(key)

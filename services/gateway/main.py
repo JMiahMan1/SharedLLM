@@ -2462,7 +2462,13 @@ async def _acting_identity(request: Request) -> dict | None:
     ident = await _resolve_strict_identity(auth_header.split(" ", 1)[1])
     if not ident:
         return None
-    return {"user": str(ident["user"]), "is_admin": bool(ident.get("is_admin"))}
+    is_admin = bool(
+        ident.get("is_admin")
+        or ident.get("is_system_default")
+        or ident.get("family_role") == "father"
+        or ident.get("user") == "default"
+    )
+    return {"user": str(ident["user"]), "is_admin": is_admin, "family_role": ident.get("family_role")}
 
 
 async def _user_id_from_request(request: Request) -> str | None:

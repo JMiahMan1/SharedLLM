@@ -470,3 +470,31 @@ def test_wipe_uses_tablet_noun_for_tablet_devices(world):
     mdm.clear_wipe("kid-tab-0001")
 
 
+def test_workspace_esphome_flash_reads_file_and_calls_execution_ota(world):
+    client, state = world
+    state["internal"]["/execute/workspace_file_read"] = (
+        200,
+        {"status": "SUCCESS", "detail": {"content": "ZXNwaG9tZS1iaW4="}},  # base64 for 'esphome-bin'
+    )
+    state["internal"]["/execute/esphome"] = (
+        200,
+        {
+            "status": "SUCCESS",
+            "service": "esphome",
+            "message": "Flashed firmware",
+            "detail": {"method": "esphome_ota", "bytes": 11},
+        },
+    )
+    resp = client.post(
+        "/api/workspaces/ws-speaker/esphome/flash",
+        json={"device": "smart-speaker", "path": "smart-speaker.bin"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "SUCCESS"
+    assert body["device"] == "smart-speaker"
+    events = [e for e in mdm.read_audit() if e["action"] == "esphome_ota"]
+    assert len(events) >= 1
+
+
+
