@@ -840,9 +840,9 @@ and probed the live stack read-only.
 ### 3.11 The browser end-to-end suite (verified 2026-10-27)
 
 The Playwright suite in `services/ui/e2e/` (40 spec files; projects `hermetic-desktop` at 1440x900 and
-`hermetic-mobile` at Pixel 7) had not been run as a whole from this checkout, and it is not wired into
+`hermetic-mobile` at Pixel 7) had not been run as a whole from this checkout, and it was not wired into
 CI: `.github/workflows/e2e-tests.yml` is a docker service-health pipeline and `UI CI` runs vitest, so a
-local run is the only place these specs speak. The first whole run reported **20 failures out of 166
+local run was the only place these specs spoke. The first whole run reported **20 failures out of 166
 tests**. The last run is green: **156 passed, 10 skipped and no failures** in 13.1 minutes across both
 projects (the skips are the suite's own runtime guards - the phone-only layout checks and the tests that
 need live credentials or real media). The failures were worth the exercise: two of them were pages that
@@ -889,9 +889,11 @@ blanked on a bad payload.
   navigation and re-measures the page it was asked for; a URL that never settles on the requested path
   throws instead of quietly measuring another screen. All six themes pass on both projects.
 
-**Open.** Playwright is still not in CI, so these specs will drift again silently unless a workflow runs
-the two hermetic projects on Linux. The `hermetic-iphone` project cannot run on this Mac (WebKit), so the
-iPhone layout is unverified locally.
+**Now in CI, nightly.** `.github/workflows/ui-e2e.yml` runs the two hermetic Chromium projects on
+`ubuntu-latest` at 09:00 UTC and on demand, with `SKIP_VISUAL=1` because the media baselines are
+darwin-only (`playwright.config.ts` ignores `visual.spec.ts` for that run); the report is uploaded when
+a run fails. The `hermetic-iphone` project still cannot run on this Mac (WebKit) and is not in the
+workflow, so the iPhone layout is unverified.
 
 ## 4. Deliberately left, with reasons
 
