@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `22015e14`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `e3840396`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **22015e14**
-  (APK `versionCode` **493**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **e3840396**
+  (APK `versionCode` **497**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
   dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
@@ -30,15 +30,17 @@ Every claim below was verified against the live system unless marked **planned**
   migrations, per-loop worker leases, jittered retries, a digest-pinned base image whose Python
   packages are now pinned too, and identity, health, bible, storage, logging and geo now running as
   the host user rather than root). Every deploy was verified with 0 ERROR lines in the touched
-  services' logs since it landed. **2026-10-27 shipped `300f0336` and `764ebd31`**: the whole browser suite
-  was run and its findings fixed (guards for an incomplete health summary and for missing media shelves,
-  plus the harness corrections), every `<label>` and visible form control across the UI was associated
-  (`src/test/formLabels.test.ts`), the Media Overhaul QA ledger reached 53/53 PASS (`UX-12`, `UX-32`,
-  `UX-33`, `UX-41`, `UX-47`, `UX-48`, `UX-51`), and the unreachable "Restricted" device badge was removed.
-  The `ui` service was the only one recreated; its logs are clean and the four service probes pass. APK: CI builds one per push under `services/ui/**`
-  and the APK `versionCode` rebuilds per push (490 is current; 489 was the previous), so the native
-  work below needs the newest APK on the phones. **APK 490** carries the same guard overlay plus the
-  current UI bundle; **APK 489** carries the guard overlay that draws over a
+  services' logs since it landed. **2026-10-27 shipped `46939f34`, `22015e14`, `e518a7b1`, `5333e078`, `12dcd588`, and `e3840396`**:
+  the parenting & MDM batches (1)–(6) (app-unblock ask flow, child weekly screen-time report,
+  repeated-blocked-site alert, web-filter categories, notification/social monitoring, device-owner
+  hardening, remote app install/uninstall, and COSU kiosk mode), device awareness (phones vs tablets
+  vs ESPHome companion nodes), remote ESPHome monitoring, control, and OTA updates, multi-user
+  permissions & admin device assignment, and Workspace ESPHome Studio (edit, test with Jarvis, flash).
+  Recreated `identity`, `gateway`, `execution`, and `ui` on `192.168.2.205`; verified 0 ERROR lines in logs
+  and 200 OK on `/health`. APK: CI builds one per push under `services/ui/**`
+  and the APK `versionCode` rebuilds per push (497 is current; 493 was the previous), so the native
+  work below needs the newest APK on the phones. **APK 497** carries the updated UI bundle; **APK 489**
+  carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
   (`/family/member/<child>`), the Family Guardian page (`/guardian`) and the MDM/Devices work are
