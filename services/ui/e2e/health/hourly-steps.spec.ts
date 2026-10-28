@@ -254,6 +254,10 @@ test.describe('hourly step chart on a phone', () => {
   test('the busy hours are emphasised and the empty hours are not silent', async ({ page }) => {
     await seedAuth(page);
     await mockHealth(page);
+    // The chart reads the phone's clock to decide which hours are still ahead.
+    // 20:00 UTC is 08:00-10:00 local across every timezone, so the mocked 8am
+    // bar is never in the future - the 04:00 UTC CI run saw it as "ahead".
+    await page.clock.setFixedTime(new Date('2026-10-27T20:00:00Z'));
     await openFitness(page);
     await page.getByTestId('range-D').click();
     await expect(page.getByTestId('step-hour-chart')).toBeVisible();

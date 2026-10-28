@@ -43,7 +43,8 @@ def test_a_full_week():
     assert r["top_apps"][0] == {"package": "com.google.android.youtube", "minutes": 170}
     assert r["media"] == [{"title": "Lecrae - Blessings", "count": 2}]
     assert r["web"] == {"top": [{"domain": "khanacademy.org", "visits": 12}], "blocked": [{"domain": "tiktok.com", "count": 3}]}
-    assert r["comms"] == {"calls": 1, "call_contacts": 1, "messages": 2, "message_contacts": 1}
+    assert r["comms"] == {"calls": 1, "call_contacts": 1, "messages": 2, "message_contacts": 1,
+                           "social_messages": 0, "social_apps": 0}
     assert "secret text" not in str(r["comms"])
     assert r["faith"] == {"bible_days": 2}
     assert [c["category"] for c in r["concerns"]] == ["self_harm", "bullying"]  # severe first
