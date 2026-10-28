@@ -3898,6 +3898,35 @@ export const api = {
     return resp.data;
   },
 
+  async uploadEsphomeOta(
+    device: string,
+    file: File,
+    password?: string,
+  ): Promise<{
+    status: string;
+    message?: string;
+    device: string;
+    filename: string;
+    bytes: number;
+    sha256: string;
+    method?: string;
+  }> {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      if (password && password.trim()) {
+        form.append('password', password.trim());
+      }
+      const resp = await apiClient.post(`/api/mdm/esphome/${encodeURIComponent(device)}/ota`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      });
+      return resp.data;
+    } catch (error) {
+      return rethrowWithServerDetail(error, 'Could not upload firmware OTA to ESPHome device');
+    }
+  },
+
   async getEsphomeDevices(): Promise<EsphomeDevice[]> {
     const settings = await api.getSettings();
     const raw = settings.find(s => s.key === 'esphome_devices')?.value ?? '[]';

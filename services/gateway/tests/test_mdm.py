@@ -394,7 +394,52 @@ def test_device_platform_distinguishes_android_from_esphome():
     assert mdm.device_platform({"device_key": "phone-1", "kind": "phone"}) == "android"
     assert mdm.device_platform({"device_key": "tab-1", "kind": "tablet"}) == "android"
     assert mdm.device_platform({"device_key": "esphome:744dbd2c9728", "kind": "watch"}) == "esphome"
+    assert mdm.device_platform({"device_key": "esphome:s3-speaker", "kind": "speaker"}) == "esphome"
+    assert mdm.device_platform({"device_key": "esphome:fnk0104b", "kind": "screen"}) == "esphome"
     assert mdm.device_platform({"device_key": "node-1", "kind": "assistant", "esphome_version": "2026.9.0"}) == "esphome"
+
+
+def test_esphome_ota_uploads_firmware_and_records_audit(world):
+    client, state = world
+    fw_bytes = b"\xe9\x04\x02\x20" + b"esp32-s3-firmware-image"
+    state["internal"]["/execute/esphome"] = (
+        200,
+        {
+            "status": "SUCCESS",
+            "message": "Uploaded watch.bin to jarvis-watch",
+            "service": "esphome",
+            "detail": {
+                "device": "jarvis-watch",
+                "host": "192.168.2.105",
+                "method": "esphome_ota",
+                "ota_version": 2,
+            },
+        },
+    )
+    resp = client.post(
+        "/api/mdm/esphome/jarvis-watch/ota",
+        files={"file": ("watch.bin", fw_bytes, "application/octet-stream")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "SUCCESS"
+    assert body["method"] == "esphome_ota"
+    assert body["filename"] == "watch.bin"
+    assert body["bytes"] == len(fw_bytes)
+    events = mdm.read_audit()
+    assert events[0]["action"] == "esphome_ota"
+    assert events[0]["target"] == "jarvis-watch"
+    assert events[0]["detail"]["filename"] == "watch.bin"
+
+
+def test_esphome_ota_rejects_non_bin_files(world):
+    client, _ = world
+    resp = client.post(
+        "/api/mdm/esphome/jarvis-watch/ota",
+        files={"file": ("notes.txt", b"not a firmware binary", "text/plain")},
+    )
+    assert resp.status_code == 422
+    assert ".bin" in resp.json()["detail"]
 
 
 def test_update_push_refuses_esphome_devices(world):

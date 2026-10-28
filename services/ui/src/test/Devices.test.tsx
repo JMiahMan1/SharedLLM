@@ -302,6 +302,149 @@ describe('Devices page', () => {
       }),
     );
   });
+
+  it('monitors live telemetry, controls smart screens/speakers/watches, and pushes OTA firmware', async () => {
+    const esphomeCalls: Array<Record<string, unknown>> = [];
+    let otaTarget = '';
+    server.use(
+      http.get('/api/mdm/devices', () =>
+        HttpResponse.json({
+          devices: [
+            {
+              device_key: 'esphome:fnk0104b',
+              kind: 'screen',
+              platform: 'esphome',
+              label: 'Kitchen Hub',
+              owner_username: 'jeremiah',
+              owner_display_name: 'Jeremiah',
+              registered_by: 'adopted',
+              model: 'esp32-s3-devkitc-1',
+              manufacturer: null,
+              os_version: null,
+              os_build: null,
+              app_version: '2.1.0',
+              app_build: null,
+              esphome_version: '2026.9.0',
+              hardware: 'esp32-s3-devkitc-1',
+              last_ip_address: '192.168.2.120',
+              last_seen_at: '2026-10-25T10:02:00Z',
+              first_seen_at: '2026-10-01T00:00:00Z',
+              capabilities: {},
+              battery: null,
+            },
+          ],
+          members: [
+            { username: 'jeremiah', display_name: 'Jeremiah', device_count: 1, readable: true, reason: null },
+          ],
+          generated_at: '2026-10-25T10:05:00Z',
+        }),
+      ),
+      http.post('/execute/esphome', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        esphomeCalls.push(body);
+        if (body.action === 'list') {
+          return HttpResponse.json({
+            status: 'SUCCESS',
+            service: 'esphome',
+            message: 'Listed entities',
+            detail: {
+              device: {
+                name: 'Kitchen Hub',
+                friendly_name: 'Kitchen Hub',
+                model: 'esp32-s3-devkitc-1',
+                esphome_version: '2026.9.0',
+                project_version: '2.1.0',
+              },
+              entities: [
+                { domain: 'sensor', object_id: 'wifi_db', name: 'WiFi db', state: -54, unit: 'dBm' },
+                { domain: 'text_sensor', object_id: 'ssid', name: 'SSID', state: 'SummersLAN' },
+                { domain: 'select', object_id: 'wake_word_engine', name: 'Wake word engine', state: 'On device', options: ['In Home Assistant', 'On device'] },
+                { domain: 'number', object_id: 'screen_brightness', name: 'Screen Brightness', state: 75, min_value: 0, max_value: 100, step: 5 },
+                { domain: 'text', object_id: 'now_playing_title', name: 'Now Playing Title', state: 'Amazing Grace' },
+                { domain: 'media_player', object_id: 'smart_speaker', name: 'Smart Speaker', state: 'playing', volume_pct: 65, muted: false },
+              ],
+              services: [
+                { name: 'show_page', args: ['page'] },
+                { name: 'set_rotation', args: ['angle'] },
+                { name: 'find_watch', args: [] },
+              ],
+            },
+          });
+        }
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          service: 'esphome',
+          message: 'OK',
+        });
+      }),
+      http.post('/api/mdm/esphome/:device/ota', ({ params }) => {
+        otaTarget = String(params.device);
+        return HttpResponse.json({
+          status: 'SUCCESS',
+          message: 'Uploaded firmware.bin to Kitchen Hub',
+          device: otaTarget,
+          filename: 'firmware.bin',
+          bytes: 16,
+          sha256: 'abc123',
+          method: 'esphome_ota',
+        });
+      }),
+    );
+
+    renderWithProviders(<Devices />);
+
+    expect(await screen.findByTestId('mdm-device-badge-esphome:fnk0104b')).toHaveTextContent(
+      'ESPHome · Smart screen · esphome:fnk0104b',
+    );
+
+    // Probe device
+    fireEvent.click(screen.getByTestId('mdm-esphome-probe-esphome:fnk0104b'));
+
+    // Live telemetry grid shows WiFi db and SSID
+    const telemetry = await screen.findByTestId('mdm-esphome-telemetry-esphome:fnk0104b');
+    expect(telemetry).toHaveTextContent('-54 dBm');
+    expect(telemetry).toHaveTextContent('SummersLAN');
+
+    // Screen quick actions (show_page & set_rotation) + watch action (find_watch)
+    fireEvent.click(screen.getByTestId('mdm-esphome-page-esphome:fnk0104b-2'));
+    fireEvent.click(screen.getByTestId('mdm-esphome-rot-esphome:fnk0104b-180'));
+    fireEvent.click(screen.getByTestId('mdm-esphome-svc-esphome:fnk0104b-find_watch'));
+
+    // Domain controls: select, number, text, media_player
+    fireEvent.change(screen.getByTestId('mdm-esphome-select-esphome:fnk0104b-wake_word_engine'), {
+      target: { value: 'In Home Assistant' },
+    });
+    fireEvent.change(screen.getByTestId('mdm-esphome-num-input-esphome:fnk0104b-screen_brightness'), {
+      target: { value: '90' },
+    });
+    fireEvent.click(screen.getByTestId('mdm-esphome-num-set-esphome:fnk0104b-screen_brightness'));
+    fireEvent.change(screen.getByTestId('mdm-esphome-text-input-esphome:fnk0104b-now_playing_title'), {
+      target: { value: 'Be Thou My Vision' },
+    });
+    fireEvent.click(screen.getByTestId('mdm-esphome-text-set-esphome:fnk0104b-now_playing_title'));
+    fireEvent.click(screen.getByTestId('mdm-esphome-media-play-esphome:fnk0104b-smart_speaker'));
+
+    await waitFor(() =>
+      expect(esphomeCalls).toEqual([
+        { action: 'list', device: 'Kitchen Hub' },
+        { action: 'call', device: 'Kitchen Hub', entity: 'show_page', params: { page: 2 } },
+        { action: 'call', device: 'Kitchen Hub', entity: 'set_rotation', params: { angle: 180 } },
+        { action: 'call', device: 'Kitchen Hub', entity: 'find_watch', params: null },
+        { action: 'call', device: 'Kitchen Hub', entity: 'wake_word_engine', params: { option: 'In Home Assistant' } },
+        { action: 'call', device: 'Kitchen Hub', entity: 'screen_brightness', params: { value: 90 } },
+        { action: 'call', device: 'Kitchen Hub', entity: 'now_playing_title', params: { value: 'Be Thou My Vision' } },
+        { action: 'call', device: 'Kitchen Hub', entity: 'smart_speaker', params: { command: 'pause' } },
+      ]),
+    );
+
+    // Upload OTA firmware binary
+    const fileInput = screen.getByTestId('mdm-esphome-ota-esphome:fnk0104b');
+    const fwFile = new File([new Uint8Array([0xe9, 1, 2, 3])], 'fnk0104b-v2.2.0.bin', {
+      type: 'application/octet-stream',
+    });
+    fireEvent.change(fileInput, { target: { files: [fwFile] } });
+    await waitFor(() => expect(otaTarget).toBe('Kitchen Hub'));
+  });
 });
 
 describe('Devices page for a child', () => {

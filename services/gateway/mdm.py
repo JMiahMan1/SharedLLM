@@ -59,12 +59,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 
 from services.common import notify as _notify
 from services.common.http import get_client
-from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET, STORAGE_SVC
+from services.gateway.config import EXECUTION_SVC, IDENTITY_SVC, INTERNAL_SECRET, STORAGE_SVC
 
 log = logging.getLogger("gateway.mdm")
 
@@ -79,6 +79,8 @@ SHARED_FOLDERS = ("school", "library")
 MDM_FILES_DIR = Path(os.getenv("MDM_FILES_DIR", "/app/data/mdm_files"))
 #: A single uploaded file may not exceed this.
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+#: An ESPHome OTA firmware binary may not exceed 16 MB (largest ESP32 flash).
+MAX_ESPHOME_OTA_BYTES = 16 * 1024 * 1024
 #: How long a queued wipe is offered to the phone before it is ignored.
 WIPE_TTL_S = 24 * 3600
 #: The most recent MDM actions kept in the audit log.
@@ -504,7 +506,7 @@ async def fetch_library_book(path: str) -> tuple[bytes, str, str]:
 # Identity lookups & device platform helpers
 # ---------------------------------------------------------------------------
 
-ESPHOME_DEVICE_KINDS = frozenset({"watch", "assistant", "light"})
+ESPHOME_DEVICE_KINDS = frozenset({"watch", "assistant", "speaker", "screen", "light"})
 
 
 def is_esphome_device(device: dict) -> bool:
@@ -909,6 +911,96 @@ async def mdm_wipe_device(request: Request, device_key: str):
     record_audit("device_wipe", actor, target=key, detail={"owner": owner, "kind": device.get("kind")})
     return {"status": "queued", "device_key": key, "owner_username": owner, "queued_at": record["at"],
             "delivery": f"the {noun} erases itself on its next check-in"}
+
+
+@router.post("/api/mdm/esphome/{device}/ota")
+async def mdm_esphome_ota(
+    request: Request,
+    device: str,
+    file: UploadFile = File(...),
+    password: str | None = Form(default=None),
+    ota_port: int = Form(default=3232),
+):
+    """Push a compiled `.bin` firmware image over the air to an ESPHome device (admin).
+
+    Forwards the firmware payload to the execution service's ESPHome OTA client,
+    which speaks ESPHome's native TCP OTA v1/v2 protocol (port 3232) and falls
+    back to `web_server` `POST /update` (port 80) when applicable. Every OTA
+    flash is recorded in the MDM audit log.
+    """
+    from services.gateway.main import _require_admin
+
+    actor = await _require_admin(request)
+    target = (device or "").strip()
+    if not target:
+        raise HTTPException(status_code=422, detail="An ESPHome device name or key is required")
+    name = (file.filename or "firmware.bin").strip()
+    try:
+        _check_name(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not name.lower().endswith((".bin", ".bin.gz", ".ota")):
+        raise HTTPException(
+            status_code=422,
+            detail="ESPHome OTA requires a compiled firmware binary (.bin, .bin.gz, or .ota).",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="The uploaded firmware file is empty")
+    if len(content) > MAX_ESPHOME_OTA_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"The firmware file exceeds the {MAX_ESPHOME_OTA_BYTES // (1024 * 1024)} MB ESP32 flash limit",
+        )
+    payload = {
+        "user_context": {"user": actor, "is_admin": True},
+        "action": "ota",
+        "device": target,
+        "params": {
+            "firmware_b64": base64.b64encode(content).decode("ascii"),
+            "filename": name,
+            "password": (password or "").strip() or None,
+            "ota_port": int(ota_port or 3232),
+        },
+    }
+    try:
+        async with get_client().post(
+            f"{EXECUTION_SVC}/execute/esphome",
+            json=payload,
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=120.0),
+        ) as resp:
+            data = await resp.json(content_type=None)
+    except Exception as exc:
+        log.warning("[mdm] esphome OTA request to execution failed for %s: %s", target, exc)
+        raise HTTPException(status_code=502, detail="The execution service could not be reached for ESPHome OTA.") from exc
+
+    if not isinstance(data, dict) or data.get("status") != "SUCCESS":
+        msg = (data.get("message") or data.get("detail") if isinstance(data, dict) else None) or "ESPHome OTA update failed"
+        raise HTTPException(status_code=502, detail=str(msg))
+
+    detail = data.get("detail") if isinstance(data.get("detail"), dict) else {}
+    sha256 = hashlib.sha256(content).hexdigest()
+    record_audit(
+        "esphome_ota",
+        actor,
+        target=target,
+        detail={
+            "filename": name,
+            "size": len(content),
+            "sha256": sha256,
+            "method": detail.get("method") or "esphome_ota",
+        },
+    )
+    return {
+        "status": "SUCCESS",
+        "message": data.get("message") or f"Uploaded {name} to {target}",
+        "device": target,
+        "filename": name,
+        "bytes": len(content),
+        "sha256": sha256,
+        **detail,
+    }
 
 
 @router.get("/api/mdm/library/books")

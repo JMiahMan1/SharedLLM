@@ -511,3 +511,205 @@ async def test_get_device_resolves_friendly_label_and_slug(one_device):
     cfg_prefix = await one_device.get_device("esphome:Office Light")
     assert cfg_prefix["host"] == "192.168.2.87"
 
+
+@pytest.mark.asyncio
+async def test_list_entities_includes_live_states_and_metadata(one_device):
+    """list_entities subscribes to live states and returns sensor/select/number/media_player/light values."""
+    from services.execution.esphome_client import list_entities
+
+    entities = [
+        aioesphomeapi.SensorInfo(
+            key=10, name="Battery", object_id="battery", unit_of_measurement="%", accuracy_decimals=0
+        ),
+        aioesphomeapi.BinarySensorInfo(key=11, name="Charging", object_id="charging"),
+        aioesphomeapi.TextSensorInfo(key=12, name="Wi-Fi Network", object_id="wi_fi_network"),
+        aioesphomeapi.SelectInfo(
+            key=13, name="Power Mode", object_id="power_mode", options=["deep", "ble", "live"]
+        ),
+        aioesphomeapi.NumberInfo(
+            key=14, name="Screen Brightness", object_id="screen_brightness", min_value=0.0, max_value=100.0, step=5.0
+        ),
+        aioesphomeapi.LightInfo(key=15, name="Display Backlight", object_id="display_backlight"),
+        aioesphomeapi.MediaPlayerInfo(key=16, name="Smart Speaker", object_id="smart_speaker", supports_pause=True),
+        aioesphomeapi.TextInfo(key=17, name="Now Playing Title", object_id="now_playing_title", min_length=0, max_length=120),
+    ]
+    services = [
+        _svc("show_page", "page"),
+        _svc("set_rotation", "angle"),
+    ]
+    info = MagicMock(
+        friendly_name="Jarvis Screen",
+        name="fnk0104b",
+        esphome_version="2026.9.0",
+        model="esp32-s3-devkitc-1",
+        mac_address="AA:BB:CC:DD:EE:FF",
+        project_name="jarvis.fnk0104b",
+        project_version="2.1.0",
+        has_deep_sleep=False,
+        webserver_port=80,
+    )
+    info.name = "fnk0104b"
+    api_cls, instance = _mock_api_class(entities, device_info=info)
+    instance.device_info_and_list_entities = AsyncMock(return_value=(info, entities, services))
+
+    def fake_subscribe(on_state):
+        on_state(aioesphomeapi.SensorState(key=10, state=84.4, missing_state=False))
+        on_state(aioesphomeapi.BinarySensorState(key=11, state=True, missing_state=False))
+        on_state(aioesphomeapi.TextSensorState(key=12, state="SummersLAN", missing_state=False))
+        on_state(aioesphomeapi.SelectState(key=13, state="live", missing_state=False))
+        on_state(aioesphomeapi.NumberState(key=14, state=75.0, missing_state=False))
+        on_state(aioesphomeapi.LightState(key=15, state=True, brightness=0.8))
+        on_state(
+            aioesphomeapi.MediaPlayerEntityState(
+                key=16, state=aioesphomeapi.MediaPlayerState.PLAYING, volume=0.65, muted=False
+            )
+        )
+        on_state(aioesphomeapi.TextState(key=17, state="psalm 23", missing_state=False))
+
+    instance.subscribe_states.side_effect = fake_subscribe
+
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        data = await list_entities("office-light")
+
+    assert data["device"]["inferred_kind"] == "screen"
+    assert data["device"]["webserver_port"] == 80
+    assert data["has_speaker"] is True
+    by_oid = {e["object_id"]: e for e in data["entities"]}
+    assert by_oid["battery"]["state"] == 84
+    assert by_oid["battery"]["unit"] == "%"
+    assert by_oid["charging"]["state"] is True
+    assert by_oid["wi_fi_network"]["state"] == "SummersLAN"
+    assert by_oid["power_mode"]["state"] == "live"
+    assert by_oid["power_mode"]["options"] == ["deep", "ble", "live"]
+    assert by_oid["screen_brightness"]["state"] == 75.0
+    assert by_oid["screen_brightness"]["max_value"] == 100.0
+    assert by_oid["display_backlight"]["state"] is True
+    assert by_oid["display_backlight"]["brightness_pct"] == 80
+    assert by_oid["smart_speaker"]["state"] == "playing"
+    assert by_oid["smart_speaker"]["volume_pct"] == 65
+    assert by_oid["now_playing_title"]["state"] == "psalm 23"
+
+
+def test_infer_esphome_kind_recognizes_sibling_profiles():
+    from services.execution.esphome_client import infer_esphome_kind
+
+    watch_info = MagicMock(friendly_name="Jarvis Watch")
+    watch_info.name = "jarvis-watch"
+    assert infer_esphome_kind(watch_info, [], [_svc("find_watch")], "code") == "watch"
+
+    speaker_info = MagicMock(friendly_name="Smart Speaker")
+    speaker_info.name = "smart-speaker"
+    speaker_entities = [aioesphomeapi.MediaPlayerInfo(key=1, name="Speaker", object_id="smart_speaker")]
+    assert infer_esphome_kind(speaker_info, speaker_entities, [], "adopt") == "speaker"
+
+    screen_info = MagicMock(friendly_name="Waveshare 7 Screen")
+    screen_info.name = "waveshare-7-screen"
+    assert infer_esphome_kind(screen_info, [], [], "adopt") == "screen"
+
+    cyd_info = MagicMock(friendly_name="CYD Dashboard")
+    cyd_info.name = "jarvis-cyd2"
+    assert infer_esphome_kind(cyd_info, [], [_svc("show_page", "page")], "adopt") == "screen"
+
+    light_info = MagicMock(friendly_name="Office Light")
+    light_info.name = "office-light"
+    light_entities = [aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")]
+    assert infer_esphome_kind(light_info, light_entities, [], "adopt") == "light"
+
+
+@pytest.mark.asyncio
+async def test_call_entity_supports_text_select_number_media_and_services(one_device):
+    """call_entity controls text, select, number, media_player, and user services (watch/screen actions)."""
+    from services.execution.esphome_client import call_entity
+
+    entities = [
+        aioesphomeapi.TextInfo(key=21, name="Now Playing Title", object_id="now_playing_title"),
+        aioesphomeapi.SelectInfo(key=22, name="Power Mode", object_id="power_mode", options=["deep", "ble", "live"]),
+        aioesphomeapi.NumberInfo(key=23, name="Step Goal", object_id="step_goal", min_value=1000, max_value=50000, step=500),
+        aioesphomeapi.MediaPlayerInfo(key=24, name="Smart Speaker", object_id="smart_speaker"),
+    ]
+    show_page_svc = aioesphomeapi.UserService(
+        name="show_page",
+        key=99,
+        args=[aioesphomeapi.UserServiceArg(name="page", type=aioesphomeapi.UserServiceArgType.INT)],
+    )
+    api_cls, instance = _mock_api_class(entities)
+    instance.device_info_and_list_entities = AsyncMock(
+        return_value=(MagicMock(friendly_name="Smart Hub", name="smart-hub", esphome_version="2026.9.0", model="esp32-s3"), entities, [show_page_svc])
+    )
+    instance.execute_service = AsyncMock()
+
+    with patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
+        await call_entity("office-light", "now_playing_title", {"value": "Morning Hymn"})
+        instance.text_command.assert_called_once_with(21, "Morning Hymn")
+
+        await call_entity("office-light", "power_mode", {"option": "ble"})
+        instance.select_command.assert_called_once_with(22, "ble")
+
+        await call_entity("office-light", "step_goal", {"value": 12000})
+        instance.number_command.assert_called_once_with(23, 12000.0)
+
+        await call_entity("office-light", "smart_speaker", {"command": "play_pause", "volume_pct": 60})
+        instance.media_player_command.assert_called_once_with(
+            24,
+            command=aioesphomeapi.MediaPlayerCommand.PLAY,
+            volume=0.6,
+            media_url=None,
+            announcement=None,
+        )
+
+        svc_res = await call_entity("office-light", "show_page", {"page": "3"})
+        assert svc_res["domain"] == "service"
+        instance.execute_service.assert_awaited_once_with(show_page_svc, {"page": 3}, return_response=None)
+
+
+@pytest.mark.asyncio
+async def test_esphome_ota_update_via_native_protocol_and_handler(one_device):
+    """handle_esphome(action='ota') pushes a firmware binary via ESPHome's OTA protocol."""
+    import base64
+    from services.execution.handlers.esphome import handle_esphome
+    from services.execution.schemas import EsphomeRequest, UserContext
+
+    firmware = b"\xe9\x04\x02\x20" + b"jarvis-watch-firmware-payload" * 32
+    req = EsphomeRequest(
+        user_context=UserContext(user="jeremiah", is_admin=True),
+        action="ota",
+        device="office-light",
+        params={
+            "firmware_b64": base64.b64encode(firmware).decode("ascii"),
+            "filename": "watch-v1.3.0.bin",
+        },
+    )
+    fake_sync = MagicMock(
+        return_value={
+            "method": "esphome_ota",
+            "ota_version": 2,
+            "compressed": True,
+            "uploaded_bytes": 120,
+        }
+    )
+    with patch.object(one_device, "_esphome_native_ota_sync", fake_sync):
+        res = await handle_esphome(req)
+
+    assert res.status == "SUCCESS", res.message
+    assert res.detail["method"] == "esphome_ota"
+    assert res.detail["filename"] == "watch-v1.3.0.bin"
+    assert res.detail["bytes"] == len(firmware)
+    fake_sync.assert_called_once_with("192.168.2.87", 3232, firmware, None)
+
+
+@pytest.mark.asyncio
+async def test_esphome_ota_falls_back_to_web_server_when_tcp_3232_refused(one_device):
+    """When TCP port 3232 is refused, ota_update falls back to HTTP POST /update on port 80."""
+    from services.execution.esphome_client import ota_update
+
+    firmware = b"\xe9\x04\x02\x20" + b"speaker-firmware"
+    fake_http = AsyncMock(return_value={"method": "web_server", "uploaded_bytes": len(firmware)})
+    with patch.object(one_device, "_esphome_native_ota_sync", side_effect=ConnectionRefusedError("port 3232 closed")), \
+         patch.object(one_device, "_esphome_http_ota_push", fake_http):
+        res = await ota_update("office-light", firmware, filename="s3_speaker.bin")
+
+    assert res["method"] == "web_server"
+    assert res["bytes"] == len(firmware)
+    fake_http.assert_awaited_once_with("192.168.2.87", 80, firmware, filename="s3_speaker.bin", password=None)
+
+

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Plus, Search, Smartphone, Tablet, Watch, X, Cpu } from 'lucide-react';
+import { Battery, BatteryCharging, BatteryLow, Lightbulb, Loader2, Mic, Monitor, Plus, Search, Smartphone, Speaker, Tablet, Watch, X, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -23,6 +23,8 @@ const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
   tablet: Tablet,
   watch: Watch,
+  speaker: Speaker,
+  screen: Monitor,
   assistant: Mic,
   light: Lightbulb,
 };

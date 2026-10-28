@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { BatteryMedium, Check, Cpu, KeyRound, Lightbulb, Mic, ShieldAlert, Smartphone, Tablet, Watch, X } from 'lucide-react';
+import { BatteryMedium, Check, Cpu, KeyRound, Lightbulb, Mic, Monitor, ShieldAlert, Smartphone, Speaker, Tablet, Watch, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
@@ -13,6 +13,8 @@ const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
   tablet: Tablet,
   watch: Watch,
+  speaker: Speaker,
+  screen: Monitor,
   assistant: Mic,
   light: Lightbulb,
 };
