@@ -6,10 +6,10 @@ Every claim below was verified against the live system unless marked **planned**
 ## 0. Snapshot
 
 - Repo: `/Users/jeremiahsummers/Code/SharedLLM`, branch `microservices`. The last **deployed**
-  commit is `e3840396`; docs-only commits land on top of it, this file's own commits included, so
+  commit is `5f046ee3`; docs-only commits land on top of it, this file's own commits included, so
   read the tip from `git log` rather than from here.
-- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **e3840396**
-  (APK `versionCode` **497**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
+- Live: `https://jarvis.sumemail.com` - version **1.6.0**, OTA bundle `git_sha` **5f046ee3**
+  (APK `versionCode` **498**, 2026-10-27; `https://jarvis.sumemail.com/health` is 200 and
   `scripts/check_service_urls.py` is 4/4 PASS). **Every service in the stack now runs as the host user
   (uid 1000) rather than root** - identity, health, bible, storage, logging, geo, rag, caddy, telemetry,
   dns and ui, each probed first (caddy and dns keep `NET_BIND_SERVICE` for 80/443 and 53, dns keeps the
@@ -39,8 +39,8 @@ Every claim below was verified against the live system unless marked **planned**
   permissions & admin device assignment, and Workspace ESPHome Studio (edit, test with Jarvis, flash).
   Recreated `identity`, `gateway`, `execution`, `telemetry`, `geo`, and `ui` on `192.168.2.205`; verified 0 ERROR lines in logs
   and 200 OK on `/health`. APK: CI builds one per push under `services/ui/**`
-  and the APK `versionCode` rebuilds per push (497 is current; 493 was the previous), so the native
-  work below needs the newest APK on the phones. **APK 497** carries the updated UI bundle; **APK 489**
+  and the APK `versionCode` rebuilds per push (498 is current; 497 was the previous), so the native
+  work below needs the newest APK on the phones. **APK 498** carries the updated UI bundle; **APK 489**
   carries the guard overlay that draws over a
   tablet's taskbar and navigation strip, with "Ask for more time" and "Message a parent" painted over
   the lock as a sheet instead of taking it down. Family guard Phase 11, the family member page
