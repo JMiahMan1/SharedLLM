@@ -1,0 +1,55 @@
+name: UI E2E
+
+# The hermetic Playwright suite (desktop + phone Chromium). It is not on every
+# push because the whole run takes about fifteen minutes; a nightly run is
+# enough to notice drift, and workflow_dispatch runs it on demand.
+#
+# The media visual baselines are per-platform (`*-darwin.png`), so SKIP_VISUAL
+# keeps a Linux runner from comparing a Mac render with a Linux one (see
+# playwright.config.ts). The `hermetic-iphone` project needs WebKit and is not
+# part of this job.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: services/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/ui
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: services/ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the hermetic suite
+        working-directory: services/ui
+        env:
+          SKIP_VISUAL: '1'
+        run: npx playwright test --project=hermetic-desktop --project=hermetic-mobile --reporter=line --workers=2
+
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: services/ui/playwright-report
+          retention-days: 7
