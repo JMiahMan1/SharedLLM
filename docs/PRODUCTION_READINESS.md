@@ -892,8 +892,10 @@ blanked on a bad payload.
 **Now in CI, nightly.** `.github/workflows/ui-e2e.yml` runs the two hermetic Chromium projects on
 `ubuntu-latest` at 09:00 UTC and on demand, with `SKIP_VISUAL=1` because the media baselines are
 darwin-only (`playwright.config.ts` ignores `visual.spec.ts` for that run); the report is uploaded when
-a run fails. The `hermetic-iphone` project still cannot run on this Mac (WebKit) and is not in the
-workflow, so the iPhone layout is unverified.
+a run fails. GitHub only schedules the default branch's workflows, so while this work lives on
+`microservices` the job also runs whenever a spec or the workflow itself changes; the schedule and
+dispatch take over once it is on `main`. The `hermetic-iphone` project still cannot run on this Mac
+(WebKit) and is not in the workflow, so the iPhone layout is unverified.
 
 ## 4. Deliberately left, with reasons
 

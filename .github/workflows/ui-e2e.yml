@@ -1,8 +1,10 @@
 name: UI E2E
 
-# The hermetic Playwright suite (desktop + phone Chromium). It is not on every
-# push because the whole run takes about fifteen minutes; a nightly run is
-# enough to notice drift, and workflow_dispatch runs it on demand.
+# The hermetic Playwright suite (desktop + phone Chromium). A nightly run is
+# enough to notice drift in the app; on `microservices` it also runs whenever a
+# spec or this file changes, because GitHub only schedules and dispatches the
+# default branch's workflows. Once this file is on `main`, the schedule and
+# workflow_dispatch are the whole story.
 #
 # The media visual baselines are per-platform (`*-darwin.png`), so SKIP_VISUAL
 # keeps a Linux runner from comparing a Mac render with a Linux one (see
@@ -13,6 +15,11 @@ on:
   schedule:
     - cron: '0 9 * * *'
   workflow_dispatch:
+  push:
+    branches: [microservices]
+    paths:
+      - 'services/ui/e2e/**'
+      - '.github/workflows/ui-e2e.yml'
 
 permissions:
   contents: read
