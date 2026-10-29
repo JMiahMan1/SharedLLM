@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFamilyCards, placesAt, type Place } from './familyCards';
+import { buildFamilyCards, groupByPlace, placesAt, type FamilyMemberStatus, type Place } from './familyCards';
 
 const HOME: Place = { name: 'Home', lat: 33.1666, lon: -111.5648, radius: 100 };
 const WORK: Place = { name: 'Work', lat: 33.3, lon: -111.9, radius: 150 };
@@ -83,5 +83,48 @@ describe('placesAt', () => {
   it('lists the places containing a point, nearest first', () => {
     const big: Place = { name: 'Town', lat: 33.17, lon: -111.56, radius: 5000 };
     expect(placesAt(33.1666, -111.5648, [big, HOME])).toEqual(['Home', 'Town']);
+  });
+});
+
+describe('groupByPlace', () => {
+  const member = (over: Partial<FamilyMemberStatus> & { id: string; name: string }): FamilyMemberStatus => ({
+    zone: 'Away',
+    isMoving: false,
+    speedMph: 0,
+    battery: null,
+    source: 'app',
+    ...over,
+  });
+
+  it('groups people sharing a place and keeps everyone else on their own', () => {
+    const groups = groupByPlace([
+      member({ id: 'person.a', name: 'Ann', zone: 'School', inZones: ['zone.school'] }),
+      member({ id: 'person.b', name: 'Ben', zone: 'School', inZones: ['zone.school'] }),
+      member({ id: 'person.c', name: 'Cal', zone: 'Away' }),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].key).toBe('zone.school');
+    expect(groups[0].label).toBe('school');
+    expect(groups[0].members.map((m) => m.name)).toEqual(['Ann', 'Ben']);
+    expect(groups[1].key).toBe('solo:person.c');
+    expect(groups[1].members).toHaveLength(1);
+  });
+
+  it('never merges two people who are both just away', () => {
+    const groups = groupByPlace([
+      member({ id: 'person.a', name: 'Ann', zone: 'Away' }),
+      member({ id: 'person.b', name: 'Ben', zone: 'Away' }),
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(['solo:person.a', 'solo:person.b']);
+  });
+
+  it('groups by the place name when no zone entity id is known', () => {
+    const groups = groupByPlace([
+      member({ id: 'person.a', name: 'Ann', zone: 'Grandma' }),
+      member({ id: 'person.b', name: 'Ben', zone: 'Grandma' }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('place:grandma');
+    expect(groups[0].members).toHaveLength(2);
   });
 });

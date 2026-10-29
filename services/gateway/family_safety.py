@@ -263,9 +263,11 @@ async def put_place(request: Request, zone_id: str):
 # Place reminders ("remind me when I get home"): personal, so geo is always
 # asked for the caller's own reminders; a body can never name someone else.
 
-async def _geo_answer(method: str, path: str, user: str, json: Any = None) -> Any:
+async def _geo_call(method: str, path: str, params: dict[str, Any] | None = None, json: Any = None) -> Any:
+    """Call geo with the internal secret; turn its refusals into the same
+    status the browser should see."""
     try:
-        async with get_client().request(method, f"{GEO_SVC}{path}", params={"user": user}, json=json,
+        async with get_client().request(method, f"{GEO_SVC}{path}", params=params or {}, json=json,
                                          headers=_HEADERS, timeout=_TIMEOUT) as resp:
             answer = await resp.json(content_type=None)
             status = resp.status
@@ -277,6 +279,10 @@ async def _geo_answer(method: str, path: str, user: str, json: Any = None) -> An
         raise HTTPException(status_code=status if status in (404, 422, 503) else 502,
                             detail=str(detail or "The places service refused that"))
     return answer
+
+
+async def _geo_answer(method: str, path: str, user: str, json: Any = None) -> Any:
+    return await _geo_call(method, path, {"user": user}, json=json)
 
 
 @router.get("/api/geo/place-reminders")
@@ -304,3 +310,113 @@ async def add_place_reminder(request: Request):
 async def remove_place_reminder(request: Request, reminder_id: str):
     """Cancel one of the caller's place reminders (404 once it went off)."""
     return await _geo_answer("DELETE", f"/place-reminders/{reminder_id}", await _caller(request))
+
+
+# Saved places made from Wander: one shared family list plus each person's own.
+# Whoever adds a place owns it; only the owner or an admin may change or remove
+# one. Arriving at or leaving an important saved place sends the same
+# family_safety notice an important Home Assistant zone does.
+
+def saved_place_payload(body: Any, family: list[str]) -> dict[str, Any]:
+    """The place fields a caller may set. Only the keys they sent are forwarded,
+    so a change can never blank a field it did not mention."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object")
+    out: dict[str, Any] = {}
+    for key in ("name", "lat", "lon", "radius", "scope"):
+        if key in body:
+            out[key] = body[key]
+    if "important" in body:
+        if not isinstance(body["important"], bool):
+            raise HTTPException(status_code=422, detail="important must be true or false")
+        out["important"] = body["important"]
+    if "notify" in body:
+        notify_list = body["notify"]
+        if not isinstance(notify_list, list) or not all(isinstance(u, str) for u in notify_list):
+            raise HTTPException(status_code=422, detail="notify must be a list of usernames")
+        names = [u.strip().lower() for u in notify_list]
+        unknown = sorted(set(names) - set(family))
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Not in the family: {', '.join(unknown)}")
+        out["notify"] = list(dict.fromkeys(names))
+    return out
+
+
+async def _may_change_place(request: Request, place_id: str) -> str:
+    """The caller's username once they may change this place (owner or admin)."""
+    from services.gateway.main import _resolve_identity_from_request
+
+    creds = await _resolve_identity_from_request(request)
+    user = str(creds.get("user") or "").strip().lower()
+    answer = await _geo_call("GET", "/places", {"viewer": user})
+    place = next((p for p in (answer or {}).get("places") or [] if p.get("id") == place_id), None)
+    if not place:
+        raise HTTPException(status_code=404, detail="No such place")
+    if not creds.get("is_admin") and str(place.get("owner") or "").lower() != user:
+        raise HTTPException(status_code=403, detail="Only the person who added a place can change it")
+    return user
+
+
+async def _family_or_503() -> list[str]:
+    family = await notify.family()
+    if not family:
+        raise HTTPException(status_code=503, detail="Could not read the family list")
+    return family
+
+
+@router.get("/api/geo/saved-places")
+async def list_saved_places(request: Request):
+    """The saved places the caller may see: the family list plus their own."""
+    return await _geo_call("GET", "/places", {"viewer": await _caller(request)})
+
+
+@router.post("/api/geo/saved-places")
+async def add_saved_place(request: Request):
+    """Add a place the caller owns:
+    ``{name, lat, lon, radius?, scope?, important?, notify?}``."""
+    user = await _caller(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    payload = saved_place_payload(body, await _family_or_503())
+    return await _geo_call("POST", "/places", {"owner": user}, json=payload)
+
+
+@router.put("/api/geo/saved-places/{place_id}")
+async def update_saved_place(request: Request, place_id: str):
+    """Change a saved place the caller added (or any, as an admin)."""
+    await _may_change_place(request, place_id)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    payload = saved_place_payload(body, await _family_or_503())
+    return await _geo_call("PUT", f"/places/{place_id}", json=payload)
+
+
+@router.delete("/api/geo/saved-places/{place_id}")
+async def remove_saved_place(request: Request, place_id: str):
+    """Remove a saved place the caller added (or any, as an admin)."""
+    await _may_change_place(request, place_id)
+    return await _geo_call("DELETE", f"/places/{place_id}")
+
+
+@router.get("/api/geo/visit-suggestions")
+async def visit_suggestions(request: Request):
+    """Spots the caller keeps spending time at, worth saving as a place."""
+    return await _geo_call("GET", "/visit-suggestions", {"user": await _caller(request)})
+
+
+@router.post("/api/geo/visit-suggestions/dismiss")
+async def dismiss_visit_suggestion(request: Request):
+    """Stop suggesting a spot: ``{lat, lon}``."""
+    user = await _caller(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object")
+    payload = {k: body.get(k) for k in ("lat", "lon")}
+    return await _geo_call("POST", "/visit-suggestions/dismiss", {"user": user}, json=payload)

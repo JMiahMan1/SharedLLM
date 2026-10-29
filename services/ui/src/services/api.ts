@@ -5,7 +5,7 @@ import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type Of
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
-import type { ActiveCall } from '../types/api';
+import type { ActiveCall, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
   SongJob,
   VoiceCheck,
@@ -314,6 +314,9 @@ export type {
   ActivityWindow,
   AchievementsResponse,
   ActivityGoals,
+  SavedPlace,
+  SavedPlaceInput,
+  VisitSuggestion,
 } from '../types/api';
 
 declare module 'axios' {
@@ -1699,6 +1702,40 @@ export const api = {
   async setPlaceSettings(zoneId: string, settings: { important: boolean; notify: string[] }): Promise<{ zone: string; important: boolean; notify: string[] }> {
     const resp = await apiClient.put(`/api/geo/places/${encodeURIComponent(zoneId)}`, settings);
     return resp.data;
+  },
+
+  /** Places saved from Wander: the shared family list plus your own private ones. */
+  async getSavedPlaces(): Promise<SavedPlace[]> {
+    const resp = await apiClient.get('/api/geo/saved-places');
+    return resp.data?.places || [];
+  },
+
+  /** Add a place from Wander (family-wide, or private to you). */
+  async addSavedPlace(place: SavedPlaceInput): Promise<SavedPlace> {
+    const resp = await apiClient.post('/api/geo/saved-places', place);
+    return resp.data?.place;
+  },
+
+  /** Change a place you added (an admin may change any). */
+  async updateSavedPlace(placeId: string, place: SavedPlaceInput): Promise<SavedPlace> {
+    const resp = await apiClient.put(`/api/geo/saved-places/${encodeURIComponent(placeId)}`, place);
+    return resp.data?.place;
+  },
+
+  /** Remove a place you added (an admin may remove any). */
+  async deleteSavedPlace(placeId: string): Promise<void> {
+    await apiClient.delete(`/api/geo/saved-places/${encodeURIComponent(placeId)}`);
+  },
+
+  /** Spots someone keeps spending a long time at, worth offering to save. */
+  async getVisitSuggestions(): Promise<VisitSuggestion[]> {
+    const resp = await apiClient.get('/api/geo/visit-suggestions');
+    return resp.data?.suggestions || [];
+  },
+
+  /** Stop asking about a spot. */
+  async dismissVisitSuggestion(lat: number, lon: number): Promise<void> {
+    await apiClient.post('/api/geo/visit-suggestions/dismiss', { lat, lon });
   },
 
   /** Tell the rest of the family you are heading home (with the drive time when known). */

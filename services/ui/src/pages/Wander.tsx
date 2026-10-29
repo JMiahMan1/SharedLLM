@@ -45,7 +45,7 @@ import {
   userLocationsQuery,
   routeQueryKey,
 } from '../lib/wanderQueries';
-import { buildFamilyCards, type Place } from '../lib/familyCards';
+import { buildFamilyCards, groupByPlace, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
@@ -73,6 +73,8 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Layers,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -94,6 +96,9 @@ const Wander = () => {
   const currentUsername = (user?.username || '').toLowerCase();
 
   const [chosenMember, setFocusMember] = useState<string | null>(null);
+  // "Merge nearby" collapses people who are in the same place into one card.
+  const [mergeNearby, setMergeNearby] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [filterTab, setFilterTab] = useState<TripFilter>('all');
   // The all-trips view lives in the URL, so Android's back button closes it
   // like a native screen instead of leaving Wander.
@@ -214,6 +219,8 @@ const Wander = () => {
     }
     return byMember;
   }, [familyMembers, peopleDirectory]);
+  /** People grouped by the place they are in, for the "Merge nearby" view. */
+  const memberGroups = useMemo(() => groupByPlace(familyMembers), [familyMembers]);
   // A notice about someone opens Wander as ?person=<username>, focused on them
   // until another card is tapped.
   const personParam = searchParams.get('person')?.toLowerCase();
@@ -729,6 +736,157 @@ const Wander = () => {
             );
   };
 
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  const renderMemberCard = (member: FamilyMemberStatus) => {
+    const person = memberPeople.get(member.id);
+    return (
+      <div
+        key={member.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => setFocusMember(member.id)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setFocusMember(member.id); }}
+        title="Show on the live map"
+        className={`glass-card p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-lg cursor-pointer ${
+          focusMember === member.id ? 'border-purple-400/70 ring-1 ring-purple-400/40' : 'border-white/5 hover:border-purple-500/30'
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <UserAvatar
+              username={person?.username ?? member.id.replace(/^(person|user)\./, '')}
+              avatar={person?.avatar}
+              name={person?.display_name ?? member.name}
+              size={40}
+              className="shadow-md"
+            />
+            <div>
+              <h3 className="font-semibold text-slate-100 flex items-center gap-2">
+                {member.name}
+                {member.name.toLowerCase() === currentUsername && (
+                  <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    You
+                  </span>
+                )}
+              </h3>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <MapPin size={12} className="text-purple-400" />
+                <span>{member.zone}</span>
+                {member.accuracy != null && (
+                  <span className="text-[10px] text-slate-500" title="GPS accuracy">
+                    ±{Math.round(member.accuracy)} m
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {member.battery !== null && (
+            <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-900/60 px-2 py-1 rounded-lg border border-white/5">
+              <Battery size={13} className={member.battery < 20 ? 'text-rose-400' : 'text-emerald-400'} />
+              <span>{member.battery}%</span>
+            </div>
+          )}
+        </div>
+
+        {(member.inZones?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {member.inZones!.slice(0, 3).map((zone) => (
+              <span
+                key={zone}
+                className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25"
+              >
+                {zone.replace(/^zone\./, '').replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 text-slate-400">
+          <div className="flex items-center gap-1.5">
+            <Gauge size={13} className={member.isMoving ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+            <span>
+              {member.isMoving ? (
+                <span className="text-emerald-400 font-semibold">{member.speedMph} mph (In Motion)</span>
+              ) : (
+                'Stationary'
+              )}
+            </span>
+          </div>
+          {member.lastUpdated && (
+            <span className="text-[10px] text-slate-500" title={new Date(member.lastUpdated).toLocaleString()}>
+              {relativeTime(member.lastUpdated)}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  /** One card for everyone in the same place, with a tap to expand. */
+  const renderMergedCard = (group: MemberGroup) => {
+    const expanded = expandedGroups.includes(group.key);
+    const anyMoving = group.members.some((m) => m.isMoving);
+    const focusHere = group.members.some((m) => m.id === focusMember);
+    return (
+      <div
+        key={group.key}
+        role="button"
+        tabIndex={0}
+        data-testid={`merged-${group.key}`}
+        aria-expanded={expanded}
+        onClick={() => toggleGroup(group.key)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleGroup(group.key); }}
+        title={expanded ? 'Collapse this place' : 'Expand to see everyone here'}
+        className={`glass-card p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-lg cursor-pointer ${
+          focusHere ? 'border-purple-400/70 ring-1 ring-purple-400/40' : 'border-white/5 hover:border-purple-500/30'
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex -space-x-3 shrink-0">
+              {group.members.slice(0, 4).map((member) => {
+                const person = memberPeople.get(member.id);
+                return (
+                  <UserAvatar
+                    key={member.id}
+                    username={person?.username ?? member.id.replace(/^(person|user)\./, '')}
+                    avatar={person?.avatar}
+                    name={person?.display_name ?? member.name}
+                    size={40}
+                    className="shadow-md ring-2 ring-slate-900"
+                  />
+                );
+              })}
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-slate-100">{group.members.length} people</h3>
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <MapPin size={12} className="text-purple-400 shrink-0" />
+                <span className="truncate capitalize">{group.label}</span>
+              </div>
+            </div>
+          </div>
+          <span className="text-slate-400 shrink-0" aria-hidden>
+            {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-400 truncate">{group.members.map((m) => m.name).join(', ')}</p>
+
+        <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 text-slate-400">
+          <div className="flex items-center gap-1.5">
+            <Gauge size={13} className={anyMoving ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+            <span>{anyMoving ? 'Some in motion' : 'All stationary'}</span>
+          </div>
+          <span className="text-[10px] text-slate-500">{expanded ? 'Tap to collapse' : 'Tap to expand'}</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* A phone that stopped reporting must never look like "nobody moved". */}
@@ -796,7 +954,19 @@ const Wander = () => {
             <Users size={16} className="text-purple-400" />
             Family Presence
           </h2>
-          <span className="text-xs text-slate-500">Live HA / GPS status</span>
+          <button
+            type="button"
+            data-testid="merge-nearby"
+            aria-pressed={mergeNearby}
+            onClick={() => setMergeNearby((on) => !on)}
+            title={mergeNearby ? 'Show everyone separately' : 'Merge people who are in the same place'}
+            className={`glass-button min-h-9 px-3 text-xs flex items-center gap-1.5 ${
+              mergeNearby ? 'ring-1 ring-purple-400/50 text-purple-200' : 'text-slate-400'
+            }`}
+          >
+            <Layers size={14} />
+            {mergeNearby ? 'Merged' : 'Merge nearby'}
+          </button>
         </div>
 
         {/* Live GPS map renders whenever anyone is sharing, independent of HA presence */}
@@ -815,91 +985,13 @@ const Wander = () => {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {familyMembers.map((member) => {
-              const person = memberPeople.get(member.id);
-              return (
-              <div
-                key={member.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setFocusMember(member.id)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setFocusMember(member.id); }}
-                title="Show on the live map"
-                className={`glass-card p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-lg cursor-pointer ${
-                  focusMember === member.id ? 'border-purple-400/70 ring-1 ring-purple-400/40' : 'border-white/5 hover:border-purple-500/30'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <UserAvatar
-                      username={person?.username ?? member.id.replace(/^(person|user)\./, '')}
-                      avatar={person?.avatar}
-                      name={person?.display_name ?? member.name}
-                      size={40}
-                      className="shadow-md"
-                    />
-                    <div>
-                      <h3 className="font-semibold text-slate-100 flex items-center gap-2">
-                        {member.name}
-                        {member.name.toLowerCase() === currentUsername && (
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                            You
-                          </span>
-                        )}
-                      </h3>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                        <MapPin size={12} className="text-purple-400" />
-                        <span>{member.zone}</span>
-                        {member.accuracy != null && (
-                          <span className="text-[10px] text-slate-500" title="GPS accuracy">
-                            ±{Math.round(member.accuracy)} m
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {member.battery !== null && (
-                    <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-900/60 px-2 py-1 rounded-lg border border-white/5">
-                      <Battery size={13} className={member.battery < 20 ? 'text-rose-400' : 'text-emerald-400'} />
-                      <span>{member.battery}%</span>
-                    </div>
-                  )}
-                </div>
-
-                {(member.inZones?.length ?? 0) > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {member.inZones!.slice(0, 3).map((zone) => (
-                      <span
-                        key={zone}
-                        className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25"
-                      >
-                        {zone.replace(/^zone\./, '').replace(/_/g, ' ')}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 text-slate-400">
-                  <div className="flex items-center gap-1.5">
-                    <Gauge size={13} className={member.isMoving ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
-                    <span>
-                      {member.isMoving ? (
-                        <span className="text-emerald-400 font-semibold">{member.speedMph} mph (In Motion)</span>
-                      ) : (
-                        'Stationary'
-                      )}
-                    </span>
-                  </div>
-                  {member.lastUpdated && (
-                    <span className="text-[10px] text-slate-500" title={new Date(member.lastUpdated).toLocaleString()}>
-                      {relativeTime(member.lastUpdated)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              );
-            })}
+              {mergeNearby
+                ? memberGroups.map((group) =>
+                    group.members.length > 1 && !expandedGroups.includes(group.key)
+                      ? renderMergedCard(group)
+                      : group.members.map((member) => renderMemberCard(member)),
+                  )
+                : familyMembers.map((member) => renderMemberCard(member))}
             </div>
           </>
         )}
@@ -908,6 +1000,8 @@ const Wander = () => {
           places={places.filter((p) => p.id.startsWith('zone.'))}
           members={familyMembers.map((m) => ({ username: m.id.replace(/^(person|user)\./, '').toLowerCase(), name: m.name }))}
           canEdit={Boolean(user?.is_admin)}
+          currentUser={currentUsername}
+          isAdmin={Boolean(user?.is_admin)}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: geoZonesQueryKey() })}
         />
       </div>

@@ -2522,6 +2522,44 @@ export interface UserLiveLocation {
   updated_at?: number;
 }
 
+/** A place saved from Wander - a point + radius, shared with the family or private to its owner. */
+export interface SavedPlace {
+  id: string;
+  entity_id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  radius: number;
+  scope: 'family' | 'user';
+  owner: string;
+  important: boolean;
+  notify: string[];
+  created_at?: number;
+}
+
+/** What the Wander UI sends when adding or editing a saved place. */
+export interface SavedPlaceInput {
+  name?: string;
+  lat?: number;
+  lon?: number;
+  radius?: number;
+  scope?: 'family' | 'user';
+  important?: boolean;
+  notify?: string[];
+}
+
+/** A spot someone keeps spending a long time at, worth offering to save as a place. */
+export interface VisitSuggestion {
+  lat: number;
+  lon: number;
+  count: number;
+  total_s: number;
+  last_since: number;
+  last_ts: number;
+  /** A best-effort nearby name for the spot. */
+  place: string;
+}
+
 export type TelemetryReportType = 'health' | 'power';export type TelemetryReportPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface TelemetrySchedule {
