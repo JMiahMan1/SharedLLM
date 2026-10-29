@@ -178,3 +178,49 @@ def test_a_handwritten_card_keeps_the_raw_text_and_names_what_it_could_not_read(
     assert recipe["instructions"] == []
     # The card states no yield, so it stays empty rather than guessed.
     assert recipe["yield"] == ""
+
+
+def test_the_models_own_suggestions_are_passed_through_for_the_cook_to_accept():
+    draft = recipe_ocr.parse(
+        {
+            "recipe": {"title": "Sugar Cookies", "ingredients": ["1 cup sugar"], "steps": ["Bake."]},
+            "uncertain": ["eved water"],
+            "suggestions": {"eved water": ["cold water", "cold tap water"]},
+        }
+    )
+    assert draft["suggestions"] == {"eved water": ["cold water", "cold tap water"]}
+
+
+def test_a_near_miss_word_is_offered_a_fix_without_the_model():
+    # The model flagged it but proposed nothing, so the offline kitchen list fills in.
+    draft = recipe_ocr.parse(
+        {"recipe": {"ingredients": ["1 cup suger"], "steps": ["Bake."]}, "uncertain": ["1 cup suger"]}
+    )
+    assert draft["suggestions"]["1 cup suger"] == ["1 cup sugar"]
+
+
+def test_a_measure_the_model_could_not_read_offers_the_common_units():
+    draft = recipe_ocr.parse({"uncertain": ["2 ... vanilla"], "recipe": {}})
+    assert draft["suggestions"]["2 ... vanilla"] == ["2 tsp vanilla", "2 tbsp vanilla", "2 cup vanilla"]
+
+
+def test_a_flagged_word_with_no_honest_reading_gets_no_suggestion():
+    # "eved" is not close to any kitchen word, so nothing is invented for it.
+    draft = recipe_ocr.parse({"uncertain": ["eved water"], "recipe": {}})
+    assert draft["suggestions"]["eved water"] == []
+
+
+def test_a_where_it_was_note_is_stripped_before_reading_the_word():
+    draft = recipe_ocr.parse({"uncertain": ["simer (line 8)"], "recipe": {}})
+    # The suggestion is for the word, not the line annotation.
+    assert draft["suggestions"]["simer (line 8)"] == ["simmer"]
+
+
+def test_a_word_the_model_already_read_gets_no_suggestion():
+    draft = recipe_ocr.parse({"uncertain": ["1 cup sugar"], "recipe": {}})
+    assert draft["suggestions"]["1 cup sugar"] == []
+
+
+def test_a_plain_result_has_no_suggestions():
+    draft = recipe_ocr.parse({"full_text": "nothing structured here"})
+    assert draft["suggestions"] == {}

@@ -115,6 +115,7 @@ describe('Recipes', () => {
         notes: '',
       },
       uncertain: [],
+      suggestions: {},
       missing: ['title', 'ingredients', 'steps'],
     });
     noteAttachment.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'note_attachment' });
@@ -588,6 +589,7 @@ describe('Recipes', () => {
         notes: 'Best with butter.',
       },
       uncertain: ['salt (line 3)'],
+      suggestions: { 'salt (line 3)': ['1 tsp salt'] },
       missing: [],
     });
     noteAttachment.mockResolvedValue({
@@ -624,6 +626,49 @@ describe('Recipes', () => {
     // The link lands in the note on the second save.
     await waitFor(() => expect(writeNote).toHaveBeenCalledTimes(2));
     expect((writeNote.mock.calls[1][0] as { content: string }).content).toContain('.attachments.9/page.jpg');
+  });
+
+  it('offers a reading for a word the model could not read and applies it only when accepted', async () => {
+    readRecipePhoto.mockResolvedValue({
+      raw_text: 'Sugar Cookies\n2 ... vanilla',
+      recipe: {
+        title: 'Sugar Cookies',
+        description: '',
+        ingredients: ['1 cup sugar', '2 ... vanilla'],
+        instructions: ['Bake.'],
+        prep_minutes: null,
+        cook_minutes: null,
+        total_minutes: null,
+        yield: '',
+        image: null,
+        notes: '',
+      },
+      uncertain: ['2 ... vanilla'],
+      suggestions: { '2 ... vanilla': ['2 tsp vanilla', '2 tbsp vanilla'] },
+      missing: [],
+    });
+
+    renderRecipes();
+    await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+
+    const file = new File(['bytes'], 'card.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('Recipe photo'), { target: { files: [file] } });
+
+    const field = (await screen.findByLabelText('Correction for 2 ... vanilla')) as HTMLInputElement;
+    const draft = () => (screen.getByLabelText('Recipe draft') as HTMLTextAreaElement).value;
+
+    // The field starts on the best reading, but the draft is untouched.
+    expect(field.value).toBe('2 tsp vanilla');
+    expect(draft()).toContain('2 ... vanilla');
+
+    // An alternative chip swaps the field; Accept is what changes the draft.
+    fireEvent.click(screen.getByRole('button', { name: '2 tbsp vanilla' }));
+    expect(field.value).toBe('2 tbsp vanilla');
+    fireEvent.click(screen.getByLabelText('Accept correction for 2 ... vanilla'));
+
+    expect(draft()).toContain('2 tbsp vanilla');
+    expect(draft()).not.toContain('2 ... vanilla');
   });
 
   it('sends an open recipe to Skylight from the editor', async () => {

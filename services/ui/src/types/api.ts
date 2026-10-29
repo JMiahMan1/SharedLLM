@@ -3627,6 +3627,12 @@ export interface RecipePhotoDraft {
   };
   /** Words the model was unsure about, for a person to check before saving. */
   uncertain: string[];
+  /**
+   * Readings offered for each uncertain word (the model's own when it gave
+   * any, otherwise an offline near-miss guess), best first. Offered to the
+   * cook to accept or ignore - never applied on their own.
+   */
+  suggestions: Record<string, string[]>;
   /** Of title, ingredients and steps, the parts the photo did not yield. */
   missing: string[];
 }
