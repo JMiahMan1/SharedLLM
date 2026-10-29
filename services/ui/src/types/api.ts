@@ -514,7 +514,8 @@ export interface MemberDevices {
 
 /** One family device in the MDM inventory (HANDOVER.md Phase 12). */
 export interface MdmDevice extends MemberDevice {
-  owner_username: string;
+  /** The owner's username, or null for a device nobody has claimed yet. */
+  owner_username: string | null;
   owner_display_name: string;
   /** Device-scoped notices queued for this phone, waiting for its next check-in. */
   pending_notices?: number;

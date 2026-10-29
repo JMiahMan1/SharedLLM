@@ -41,7 +41,7 @@ const Health = () => {
   const on = (key: HealthMetricSwitch) => metricOn(profileQuery.data, key);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-3 px-1 pb-12 sm:space-y-4 sm:px-0" data-testid="health-page">
+    <div className="mx-auto w-full min-w-0 max-w-6xl space-y-3 px-1 pb-12 sm:space-y-4 sm:px-0" data-testid="health-page">
       <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
         <div className="flex items-center gap-3">
           <div className="shrink-0 rounded-xl border border-purple-500/20 bg-purple-500/10 p-2.5">

@@ -163,7 +163,13 @@ export default function Recipes() {
     staleTime: 300_000,
     retry: false,
   });
-  const skylightOff = skylightQuery.data?.configured === false;
+  const skylightOff =
+    skylightQuery.data?.configured === false
+    // A disabled account gets HTTP 400 from the gateway ("Skylight is disabled
+    // for your account"), which axios raises as an error - so the probe's own
+    // `configured` flag is not the only "off" signal. A network failure (no
+    // response) is not treated as off; the push endpoints report the real reason.
+    || (skylightQuery.error as { response?: { status?: number } } | null)?.response?.status === 400;
 
   // Which recipe the editor is showing. A read that lands after the person has
   // clicked another one must not paint over the one they are looking at.
@@ -778,7 +784,7 @@ export default function Recipes() {
   return (
     <div className="space-y-4" data-testid="recipes">
       <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <BookOpen size={16} className="text-orange-300" />
           <span className="text-sm font-semibold text-slate-200">Family recipes</span>
           {asUser === 'admin' && (

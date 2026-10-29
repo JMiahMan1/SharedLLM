@@ -132,29 +132,31 @@ export function HourHeatmap({ days, cells, max, title, testId, dayLabel }: {
   const hour = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric' });
   return (
     <figure className="space-y-1" data-testid={testId} aria-label={title}>
-      <div className="grid gap-[2px]" style={{ gridTemplateColumns: 'minmax(2.5rem, auto) repeat(24, minmax(0, 1fr))' }}>
-        {days.map((day) => (
-          <div key={day} className="contents">
-            <span className="pr-1 text-[9px] leading-3 text-slate-500 truncate">{dayLabel(day)}</span>
-            {Array.from({ length: 24 }, (_, h) => {
-              const count = at.get(`${day}|${h}`) || 0;
-              const shade = max ? 0.15 + 0.85 * (count / max) : 0;
-              return (
-                <span
-                  key={h}
-                  title={`${dayLabel(day)} ${hour(h)}: ${count} recorded`}
-                  className={`h-3 rounded-[2px] ${count ? 'bg-sky-400' : 'bg-white/5'}`}
-                  style={count ? { opacity: shade } : undefined}
-                  data-count={count}
-                />
-              );
-            })}
-          </div>
-        ))}
-        <span />
-        {Array.from({ length: 24 }, (_, h) => (
-          <span key={h} className="text-[9px] text-slate-500">{HOUR_TICKS.includes(h) ? hour(h) : ''}</span>
-        ))}
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[24rem] gap-[2px]" style={{ gridTemplateColumns: 'minmax(2.5rem, auto) repeat(24, minmax(0, 1fr))' }}>
+          {days.map((day) => (
+            <div key={day} className="contents">
+              <span className="pr-1 text-[9px] leading-3 text-slate-500 truncate">{dayLabel(day)}</span>
+              {Array.from({ length: 24 }, (_, h) => {
+                const count = at.get(`${day}|${h}`) || 0;
+                const shade = max ? 0.15 + 0.85 * (count / max) : 0;
+                return (
+                  <span
+                    key={h}
+                    title={`${dayLabel(day)} ${hour(h)}: ${count} recorded`}
+                    className={`h-3 rounded-[2px] ${count ? 'bg-sky-400' : 'bg-white/5'}`}
+                    style={count ? { opacity: shade } : undefined}
+                    data-count={count}
+                  />
+                );
+              })}
+            </div>
+          ))}
+          <span />
+          {Array.from({ length: 24 }, (_, h) => (
+            <span key={h} className="text-[9px] text-slate-500">{HOUR_TICKS.includes(h) ? hour(h) : ''}</span>
+          ))}
+        </div>
       </div>
       <figcaption className="text-[11px] text-slate-400">{title}</figcaption>
     </figure>

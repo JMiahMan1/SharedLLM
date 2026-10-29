@@ -38,7 +38,7 @@ export default function OfflineCodeSetting() {
           ? 'Set. It works on your children’s phones when they have no connection; a phone picks up a new code the next time you sign in on it while online.'
           : 'For when a child’s phone has no connection: 6 to 12 digits, yours only. Sign in once on each child’s phone while online so it learns the code.'}
       </p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           type="password"
           inputMode="numeric"
@@ -47,7 +47,7 @@ export default function OfflineCodeSetting() {
           placeholder={data.set ? 'New code' : '6-12 digits'}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 12))}
-          className="w-32 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+          className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100 sm:w-32"
         />
         <button
           type="button"
