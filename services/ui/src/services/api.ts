@@ -2817,6 +2817,23 @@ export const api = {
     return sources.filter((source): source is string => typeof source === 'string');
   },
 
+  /**
+   * Plan one dinner into the week plan from a sentence ("add chili to
+   * Tuesday"). The server reads the day from the sentence unless `day` is
+   * given, matches `recipe` against the Recipes shelf, and rewrites only that
+   * day's line. A plan it cannot read is reported, never replaced with an
+   * empty week.
+   */
+  async planMeal(body: {
+    text?: string;
+    day?: string;
+    recipe?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/plan', body, { timeout: 30_000 });
+    return resp.data;
+  },
+
   /** A recipe photo (or handwriting) read by the vision OCR into a draft; nothing is saved. */
   async readRecipePhoto(photo: Blob): Promise<RecipePhotoDraft> {
     const form = new FormData();

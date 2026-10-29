@@ -283,7 +283,10 @@ Bible reader uses. The header's **Teach Jarvis** button runs the notes RAG sync
 over `Recipes/` so Jarvis can answer from the shelf. A **Week plan** button
 opens this week's dinners: seven day slots that pick from the shelf, a tick
 for *cooked*, a surprise-me fill and a repeat warning; **Save plan** writes
-`Recipes/Meal plan.md` as a checklist note (`#meal-plan`). **Build shopping list** turns the
+`Recipes/Meal plan.md` as a checklist note (`#meal-plan`). The same plan is writable from chat:
+ask Jarvis to "add a slow-cooker meal to Tuesday" and its `MealPlanRequest` action reads the
+day from the sentence, matches the recipe against the shelf and rewrites only that day's line
+(a plan it cannot read is reported, never overwritten). **Build shopping list** turns the
 week's ingredients into `Recipes/Shopping list.md`, a tickable checklist that keeps what is
 already ticked when it is rebuilt. **Import a link** reads a recipe page's published
 schema.org data: paste the URL, preview the ingredients and steps, and **Save to Recipes**

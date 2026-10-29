@@ -40,6 +40,7 @@ def index_capabilities():
         "TVCastRequest": "Powers on a TV and casts media content.",
         "CalendarRequest": "Manages calendar events (list, add, delete, update).",
         "NoteRequest": "Manages personal notes and checklists.",
+        "MealPlanRequest": "Plans a dinner into the family's week plan note (Recipes/Meal plan.md) from a spoken request: the day is read from the sentence or from `day`, the recipe is matched against the Recipes shelf, and only that day's line is rewritten. A plan it cannot read is reported, never overwritten.",
         "BibleRequest": "Holy Bible reader, read-only: read passages, search verses, fetch study notes by edition, verse of the day, catalogue of installed translations (actions: read, search, study_notes, votd, catalogue). No state or mark writes.",
         "CalibreRequest": "Read-only personal Calibre book library: list the shelf, search by title/author/tag words, fetch one book's metadata or its text (actions: list, search, get_book, fetch_text). No delete or write actions exist.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",

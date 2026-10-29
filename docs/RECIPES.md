@@ -6,8 +6,9 @@ photo import, the duplicate-import guard) and the Health connection (recipe logg
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
 editor's nutrition summary) are live. Phase 7's Skylight Meals connector, API surface and
 UI actions are built and fake-HTTP tested (the live write paths are unverified - see below);
-the assistant's write action in Phase 5 is still open, as is staple-overlap ranking (the one
-Phase 6 item not built). The
+Phase 5's assistant write action is built too - Jarvis can plan a dinner into the week from a
+sentence ("add a slow-cooker meal to Tuesday"). Staple-overlap ranking (the one
+Phase 6 item not built) is still open. The
 meal-planning half of Phase 6 - plan parsing and grocery-list merging - is built and tested:
 the plan editor and the shopping list are plain markdown under `Recipes/`, and
 `services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
@@ -139,9 +140,16 @@ tortillas · eggs · potatoes · onions · garlic · frozen vegetables
 - [x] Share the plan and the shopping list to a family chat in one tap - Share plan and
       Share list buttons on the week plan open the same chat sheet recipes use; the message
       is a short summary (`🍽 This week's dinners:` / `🛒 Shopping list:`, capped at 25 items).
-- [ ] Jarvis answers from the set: "what can a 12-year-old make tonight?", "add a slow-cooker
+- [x] Jarvis answers from the set: "what can a 12-year-old make tonight?", "add a slow-cooker
       meal to Tuesday". Reading works through Teach Jarvis (the notes RAG sync over
-      `Recipes/`); the write action needs assistant tooling and is still open.
+      `Recipes/`); the write action is `MealPlanRequest` (`services/execution/handlers/
+      meal_plan.py`, route `POST /execute/meal_plan`, gateway `POST /api/recipes/plan`). It
+      reads the day from the sentence (a weekday, "today"/"tonight"/"tomorrow", or an explicit
+      `day`), matches the recipe against the `Recipes/` shelf (the note's own title wins; a
+      title with no note is planned as typed - the plan editor only ever picks from the shelf,
+      so no recipe is invented), and rewrites only that day's line in `Recipes/Meal plan.md`,
+      leaving the rest byte-for-byte. The plan is read and written through the ordinary note
+      API, and a read that fails is reported (the server's own words), never planned over.
 
 ## Phase 6 - tests, docs, deploy
 

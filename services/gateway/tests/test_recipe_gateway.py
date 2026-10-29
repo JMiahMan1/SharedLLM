@@ -130,3 +130,30 @@ def test_recipe_sources_proxies_the_duplicate_guard(client, monkeypatch):
     assert sent[0]["url"].endswith("/execute/recipes")
     assert sent[0]["json"]["action"] == "recipe_sources"
     assert sent[0]["json"]["user_context"]["user"] == "dad"
+
+
+def test_planning_a_meal_forwards_the_sentence_and_identity(client, monkeypatch):
+    sent = _proxy_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "message": "Planned Slow Cooker Chicken Chili for Tue.",
+            "service": "meal_plan",
+            "detail": {"day": "Tue", "recipe": "Slow Cooker Chicken Chili"},
+        },
+    )
+    body = client.post(
+        "/api/recipes/plan",
+        json={"text": "add a slow-cooker meal to Tuesday"},
+    ).json()
+    assert body["detail"]["day"] == "Tue"
+    assert sent[0]["url"].endswith("/execute/meal_plan")
+    assert sent[0]["json"]["text"] == "add a slow-cooker meal to Tuesday"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"
+
+
+def test_planning_a_meal_passes_an_already_resolved_day_and_recipe(client, monkeypatch):
+    sent = _proxy_fake(monkeypatch, {"status": "SUCCESS", "message": "Planned Pizza for Fri."})
+    client.post("/api/recipes/plan", json={"text": "plan something", "day": "Fri", "recipe": "Pizza"})
+    assert sent[0]["json"]["day"] == "Fri"
+    assert sent[0]["json"]["recipe"] == "Pizza"
