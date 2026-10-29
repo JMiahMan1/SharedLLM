@@ -16,6 +16,7 @@
  */
 import { Capacitor } from '@capacitor/core';
 import type { MobileFormFactor } from '../plugins/deviceInfo';
+import TokenBridge from '../plugins/tokenBridge';
 
 /**
  * Derive a stable id for this install, generated once and then persisted.
@@ -196,6 +197,17 @@ export async function registerThisDevice(): Promise<DeviceSelfRegisterResult> {
     }
 
     await postRegistration(payload);
+
+    // Mirror the key for the screen guard, which names this phone on its
+    // check-in so the server can hand it the notices queued for this device
+    // alone. A shell without the method keeps naming no device (its check-in
+    // simply gets no notices), and that must not look like a failed
+    // registration: the phone is registered either way.
+    try {
+      await TokenBridge.setDeviceKey({ deviceKey });
+    } catch {
+      // An older native shell has no such method.
+    }
     return { registered: true, device_key: deviceKey };
   } catch (err) {
     // Deliberately swallowed: telemetry must never stand between a user and

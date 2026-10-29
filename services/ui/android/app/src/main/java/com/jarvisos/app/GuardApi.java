@@ -58,15 +58,32 @@ final class GuardApi {
         String user = p.getString(TokenBridgePlugin.KEY_USERNAME, null);
         if (user == null || user.isEmpty()) return false;
         try {
-            String body = request(context, "GET",
-                    "/api/screen-time/" + URLEncoder.encode(user, "UTF-8") + "/status", null);
+            String body = request(context, "GET", statusPath(p, user), null);
             if (body == null) return false;
             new JSONObject(body); // only remember an answer that parses
             p.edit().putString(KEY_STATUS, body).apply();
+            showQueuedNotices(context);
             return true;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * The status path, naming this phone when it knows its own key so the server
+     * can answer with the notices queued for it alone (MDM).
+     *
+     * Without a key the answer carries no notices at all: a notice aimed at one
+     * phone must never be announced on another, and "not device-scoped" must not
+     * read as "nothing waiting".
+     */
+    private static String statusPath(SharedPreferences p, String user) throws Exception {
+        String path = "/api/screen-time/" + URLEncoder.encode(user, "UTF-8") + "/status";
+        String key = p.getString(TokenBridgePlugin.KEY_DEVICE_KEY, null);
+        if (key != null && !key.isEmpty()) {
+            path += "?device_key=" + URLEncoder.encode(key, "UTF-8");
+        }
+        return path;
     }
 
     static JSONObject lastStatus(Context context) {
@@ -74,6 +91,54 @@ final class GuardApi {
             return new JSONObject(prefs(context).getString(KEY_STATUS, "{}"));
         } catch (Exception e) {
             return new JSONObject();
+        }
+    }
+
+    /** The device-scoped notices this phone has shown, so a re-poll does not repeat them. */
+    static final String KEY_NOTICES_SHOWN = "guard_notices_shown";
+    private static final int SHOWN_MAX = 50;
+
+    /**
+     * Show the notices the server queued for this one phone (MDM), then tell the
+     * server they were shown so they stop coming.
+     *
+     * The ids are remembered here because the acknowledgement can fail: a server
+     * that is briefly unreachable must not turn one queued notice into a
+     * notification on every check-in. A notice whose acknowledgement never
+     * arrives is shown once and left in the server's queue (the Devices page
+     * still says it is waiting) until it expires.
+     */
+    private static void showQueuedNotices(Context context) {
+        JSONArray notices = lastStatus(context).optJSONArray("notices");
+        if (notices == null || notices.length() == 0) return;
+        SharedPreferences p = prefs(context);
+        Set<String> shown = new HashSet<>(p.getStringSet(KEY_NOTICES_SHOWN, new HashSet<>()));
+        JSONArray fresh = new JSONArray();
+        for (int i = 0; i < notices.length(); i++) {
+            JSONObject n = notices.optJSONObject(i);
+            if (n == null) continue;
+            String id = n.optString("id", "");
+            if (id.isEmpty() || shown.contains(id)) continue;
+            GuardNotices.queued(context, n.optString("title", "Jarvis"), n.optString("body", ""),
+                    n.optString("url", ""), n.optString("tag", ""));
+            fresh.put(id);
+        }
+        if (fresh.length() == 0) return;
+        if (!ackNotices(context, fresh)) return; // tried again on the next check-in
+        for (int i = 0; i < fresh.length(); i++) shown.add(fresh.optString(i));
+        if (shown.size() > SHOWN_MAX) shown.clear(); // the queue is the truth; this only stops a repeat
+        p.edit().putStringSet(KEY_NOTICES_SHOWN, shown).apply();
+    }
+
+    /** Tell the server which queued notices this phone has shown. */
+    private static boolean ackNotices(Context context, JSONArray ids) {
+        String key = prefs(context).getString(TokenBridgePlugin.KEY_DEVICE_KEY, null);
+        if (key == null || key.isEmpty()) return false;
+        try {
+            JSONObject body = new JSONObject().put("device_key", key).put("ids", ids);
+            return request(context, "POST", "/api/mdm/devices/notices/ack", body.toString()) != null;
+        } catch (Exception e) {
+            return false;
         }
     }
 

@@ -182,12 +182,31 @@ week does not announce a long-gone build. At most 20 notices wait per device,
 and the Devices page shows them as "Waiting" on that device until its next
 check-in.
 
+On the phone the guard does the work: the app mirrors its registration key into
+the native preferences at login (`TokenBridge.setDeviceKey`, kept in
+`TokenBridgePlugin.KEY_DEVICE_KEY`), `GuardApi.refreshStatus` names that key on
+its check-in, and each notice the answer carries is shown as an ordinary Jarvis
+notice on the Family safety channel (`GuardNotices.queued`), whose tap-through
+opens the page the server named - Settings, where the update installs. The guard
+remembers the ids it has shown and acks them, so a re-poll does not repeat a
+notice; a notice whose acknowledgement does not arrive is shown once and left in
+the queue (still "Waiting" on the page) until it expires. The registration key
+is not the push-stream id: `KEY_DEVICE_ID` is this install's push id, while the
+registration key is the one identity knows the device by. An older shell without
+the plugin method simply names no device, and its check-in gets no notices.
+
 ## What is still open
 
-- **The phone showing a queued notice.** The gateway queues it, hands it over on
-  the check-in and the Devices page shows it waiting; the guard does not yet
-  read `notices` on its poll or ack it (`GuardApi` / `GuardNotices`), so a
-  device-scoped notice is not yet shown on the phone itself.
+- **A queued notice waits for the next check-in.** It is handed over when the
+  phone next polls, so it is not an immediate push: a phone that is off or
+  offline is told when it comes back, which is the point of the queue, but a
+  parent expecting a notification within seconds should push to the person
+  instead. A phone whose notifications are switched off will not surface it
+  either, and the queue still clears, because the acknowledgement is what the
+  guard sends, not proof that a person saw it.
+- **The build is still one global version.** A device can be told without its
+  siblings hearing, but everyone installs the same build; targeting *which
+  device* is told is not targeting *which build* it gets.
 - **Wipe needs device owner.** Like the Phase 11 Layer 2 restrictions, it only
   takes effect on a phone provisioned as device owner
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`).
