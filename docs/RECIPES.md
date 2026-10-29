@@ -4,8 +4,10 @@ Status: **Phases 0-6 and 8-11 built** - the importer (`scripts/import_recipes.py
 first level-balanced note set; the Recipes page (plan, shopping list, search, link and
 photo import, the duplicate-import guard) and the Health connection (recipe logging, the
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
-editor's nutrition summary) are live. Phase 7 (Skylight) and the assistant's write action in
-Phase 5 are still open, as is staple-overlap ranking (the one Phase 6 item not built). The
+editor's nutrition summary) are live. Phase 7's Skylight Meals connector, API surface and
+UI actions are built and fake-HTTP tested (the live write paths are unverified - see below);
+the assistant's write action in Phase 5 is still open, as is staple-overlap ranking (the one
+Phase 6 item not built). The
 meal-planning half of Phase 6 - plan parsing and grocery-list merging - is built and tested:
 the plan editor and the shopping list are plain markdown under `Recipes/`, and
 `services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
@@ -171,38 +173,48 @@ reverse-engineered and documented by the community (JSON:API on
 `api.ourskylight.com`). This phase is optional and fail-safe: when no Skylight
 account is connected, everything above still works.
 
-- [ ] **Connect** - Settings card: Skylight email + password. Sign in with
-      `POST /sessions` (`User-Agent: SkylightMobile (web)`) and keep the
-      token with the user's credentials; list frames with `GET /frames` and
-      let the family pick one (default: the only frame).
-- [ ] **Connector** - small fail-safe module wrapping the endpoints: create a
-      Recipe Box recipe (`POST /frames/{id}/meals/recipes` with
-      `meal_category_id`, `summary`, `description` = `Ingredients:` block +
-      `Instructions:` block); plan a meal (`POST /frames/{id}/meals/sittings`
-      - when `meal_recipe_id` is set, leave `summary` blank or the API
-      returns 422); read the week (`GET .../meals/sittings?date_min&date_max`);
-      push a recipe's ingredients to the Skylight grocery list
-      (`POST .../add_to_grocery_list`), or write items directly
-      (`POST .../lists/{listId}/items`; delete only via
-      `DELETE .../list_items/bulk_destroy`).
-- [ ] **Recipes → Skylight** - "Send to Skylight" on a recipe card and in the
+- [x] **Connect** - Settings card: Skylight email + password (the Identity page's
+      `skylight_email`/`skylight_pass` fields, one shared household credential,
+      with a per-user `skylight_enabled` switch). Sign in via OAuth2 + PKCE and
+      resolve the frame from `GET /frames` (`_skylight_oauth_login`,
+      `_skylight_resolve_frame` in `services/execution/main.py`).
+- [x] **Connector** - fail-safe module in `services/execution/main.py`:
+      `_skylight_recipe_description` renders the note into the `Ingredients:` +
+      `Instructions:` free text; `_skylight_upsert_recipe` creates
+      (`POST .../meals/recipes`, `meal_category_id` required) or patches by
+      `summary` so re-sending updates instead of duplicating;
+      `_skylight_plan_sitting` plans a meal (`POST .../meals/sittings` - blank
+      `summary` when `meal_recipe_id` is set, or the API answers 422);
+      `_skylight_week_sittings` reads the week (`GET .../meals/sittings`), and a
+      failed read returns None rather than an empty plan;
+      `_skylight_add_recipe_to_grocery_list` (`POST .../add_to_grocery_list`) and
+      `_skylight_sync_grocery_list` (adds missing items, `DELETE
+      .../list_items/bulk_destroy` only when a replace is asked for).
+- [x] **Recipes → Skylight** - "Send to Skylight" on a recipe card and in the
       editor pushes it to the Recipe Box under Dinner (or the picked meal
       category); sending again updates the same recipe instead of duplicating.
-- [ ] **Meal plan → Skylight** - "Push week" writes each planned day as a
+- [x] **Meal plan → Skylight** - "Push week" writes each planned day as a
       dinner sitting (`add_to_grocery_list` off by default); shows what
       landed and surfaces failures as a toast, never a broken page.
-- [ ] **Shopping list → Skylight** - optional "Send to Skylight list" mirrors
-      the shopping list onto the frame's grocery list so it is tickable on the
-      display too.
+- [x] **Shopping list → Skylight** - "Send to Skylight list" mirrors the
+      shopping list onto the frame's grocery list (additive by default, so a
+      tick made on the display survives; the connector can bulk-delete for a
+      replace) so it is tickable on the display too.
 - [ ] **Fallback without credentials** - publish the week's dinners as
       calendar events into a calendar Skylight already syncs (Google/iCloud or
       a public ICS feed); the Skylight's unique email can also receive events.
-- [ ] **Tests** - fake-HTTP tests for sessions, frames, recipes, sittings
-      (blank-`summary` 422, array `data`, `instances` lagging) and grocery
-      list bulk delete; UI tests for connect, send-to-Skylight and push-week.
-- [ ] **Note** - the API is unofficial and may change with app updates: keep
-      the connector optional, conservative on rate, and never block the local
-      flows on it.
+- [x] **Tests** - fake-HTTP tests for recipes, sittings (blank-`summary` 422,
+      array `data`, `instances` lagging) and grocery list bulk delete
+      (`services/execution/tests/test_skylight_meals.py`), the gateway proxy
+      (`services/gateway/tests/test_skylight_meals_gateway.py`), the pure plan→date
+      mapping (`src/test/skylightMeals.test.ts`) and the UI send/push/mirror
+      actions (`src/pages/Recipes.test.tsx`, `src/pages/RecipesPlan.test.tsx`).
+      The write bodies were never sent to the household's real account; the
+      sitting's `date` field is the one shape inferred rather than probed.
+- [x] **Note** - the API is unofficial and may change with app updates: the
+      connector is optional, conservative on rate, and never blocks the local
+      flows on it (every push returns FAILURE on a bad read instead of a fake
+      success).
 
 ## Phase 8 - search and import (paste-a-link + TheMealDB shipped)
 

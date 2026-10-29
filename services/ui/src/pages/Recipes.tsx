@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Camera, Link2, Loader2, Plus, Save, Search, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
+import { BookOpen, CalendarDays, Camera, Link2, Loader2, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -18,6 +18,7 @@ import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
 import { PHOTO_LABEL, buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
+import { mirrorItems, plannedPushDays } from '../lib/skylightMeals';
 import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib/recipeNutrition';
 import { confirmDialog } from '../components/ui/confirmDialog';
 import {
@@ -110,6 +111,9 @@ export default function Recipes() {
   const [loggingPlanned, setLoggingPlanned] = useState(false);
   const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
+  // Which Skylight action is in flight ("week", "list", or a recipe title/path),
+  // so a second tap cannot send another.
+  const [skylightBusy, setSkylightBusy] = useState<string | null>(null);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -148,6 +152,18 @@ export default function Recipes() {
     retry: false,
   });
   const importedSources = useMemo(() => new Set(sourcesQuery.data ?? []), [sourcesQuery.data]);
+
+  // Whether the household's Skylight is connected, so the page can show a clear
+  // no-credentials state instead of a button that quietly does nothing. A false
+  // `configured` is the cheap credentials probe; a failed probe is not treated
+  // as "off" (the push endpoints report the real reason).
+  const skylightQuery = useQuery({
+    queryKey: ['skylight-meals'],
+    queryFn: () => api.getSkylightMeals(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const skylightOff = skylightQuery.data?.configured === false;
 
   // Which recipe the editor is showing. A read that lands after the person has
   // clicked another one must not paint over the one they are looking at.
@@ -449,6 +465,106 @@ export default function Recipes() {
     }
   };
 
+  // The one place the "not connected" state is turned into a message. It never
+  // lets a push look like it worked: the caller either sends or is told why not.
+  const skylightUnavailable = () => {
+    if (skylightOff) {
+      toast.error('Skylight is not connected. Add the account in Settings first.');
+      return true;
+    }
+    return false;
+  };
+
+  const sendRecipeToSkylight = async (recipeTitle: string, recipeBody: string) => {
+    if (skylightUnavailable()) return;
+    setSkylightBusy(recipeTitle);
+    try {
+      const res = await api.sendSkylightRecipe({ title: recipeTitle, body: recipeBody });
+      if (res.status === 'SUCCESS') toast.success(res.message || `Sent “${recipeTitle}” to Skylight`);
+      else toast.error(res.message || 'Skylight could not take that recipe');
+    } catch {
+      toast.error('Skylight could not take that recipe');
+    } finally {
+      setSkylightBusy(null);
+    }
+  };
+
+  // A card has no body in hand, so read the note first (like Share to chat).
+  const sendRecipeCardToSkylight = async (recipe: RecipeSummary) => {
+    if (skylightUnavailable()) return;
+    setSkylightBusy(recipe.path);
+    try {
+      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      if (res.status !== 'SUCCESS') {
+        toast.error(res.message || 'Could not read that recipe');
+        return;
+      }
+      const sent = await api.sendSkylightRecipe({ title: recipe.title, body: noteBody(res.message ?? '') });
+      if (sent.status === 'SUCCESS') toast.success(sent.message || `Sent “${recipe.title}” to Skylight`);
+      else toast.error(sent.message || 'Skylight could not take that recipe');
+    } catch {
+      toast.error('Skylight could not take that recipe');
+    } finally {
+      setSkylightBusy(null);
+    }
+  };
+
+  const pushWeekToSkylight = async () => {
+    if (skylightUnavailable()) return;
+    const days = plannedPushDays(plan);
+    if (days.length === 0) {
+      toast.error('Plan some dinners first');
+      return;
+    }
+    setSkylightBusy('week');
+    try {
+      const payload: Array<{ date: string; title: string; body: string }> = [];
+      for (const entry of days) {
+        const path = recipes.find((recipe) => recipe.title === entry.title)?.path ?? `${RECIPES_DIR}/${entry.title}.md`;
+        const res = await api.readNote(entry.title, STORAGE, path, asUser);
+        payload.push({
+          date: entry.date,
+          title: entry.title,
+          body: res.status === 'SUCCESS' ? noteBody(res.message ?? '') : '',
+        });
+      }
+      const out = await api.pushSkylightWeek({ days: payload });
+      const planned = out.planned?.length ?? 0;
+      const failed = out.failed?.length ?? 0;
+      if (planned > 0 && failed === 0) toast.success(`Pushed ${planned} dinner${planned === 1 ? '' : 's'} to Skylight`);
+      else if (planned > 0) toast.error(`Pushed ${planned}, but ${failed} could not be planned`);
+      else toast.error(out.message || 'Skylight could not take the week plan');
+    } catch {
+      toast.error('Skylight could not take the week plan');
+    } finally {
+      setSkylightBusy(null);
+    }
+  };
+
+  const sendListToSkylight = async () => {
+    if (skylightUnavailable()) return;
+    setSkylightBusy('list');
+    try {
+      const res = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
+      if (res.status !== 'SUCCESS' || !res.message) {
+        toast.error('Build the shopping list first');
+        return;
+      }
+      const items = mirrorItems(res.message);
+      if (items.length === 0) {
+        toast.error('The shopping list is empty');
+        return;
+      }
+      const out = await api.mirrorSkylightList({ items });
+      if (out.status === 'SUCCESS') toast.success(out.message || `Added ${out.added ?? 0} item(s) to the Skylight list`);
+      else toast.error(out.message || 'Skylight could not update the grocery list');
+    } catch {
+      toast.error('Skylight could not update the grocery list');
+    } finally {
+      setSkylightBusy(null);
+    }
+  };
+
   const clearPhoto = () => {
     setPhotoFile(null);
     setPhotoRaw('');
@@ -710,6 +826,11 @@ export default function Recipes() {
           </button>
           {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
         </div>
+        {skylightOff && (
+          <p className="text-[11px] text-amber-200" data-testid="skylight-off">
+            Skylight is not connected. Add the account in Settings to send recipes and the week plan.
+          </p>
+        )}
       </div>
 
       {importOpen && (
@@ -983,12 +1104,32 @@ export default function Recipes() {
             </button>
             <button
               type="button"
+              onClick={() => void sendListToSkylight()}
+              disabled={skylightBusy === 'list'}
+              data-testid="list-send-skylight"
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {skylightBusy === 'list' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              Send to Skylight list
+            </button>
+            <button
+              type="button"
               onClick={() => void savePlan()}
               disabled={planBusy}
               className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
             >
               {planBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save plan
+            </button>
+            <button
+              type="button"
+              onClick={() => void pushWeekToSkylight()}
+              disabled={skylightBusy === 'week'}
+              data-testid="plan-send-skylight"
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {skylightBusy === 'week' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              Push week
             </button>
           </div>
         </div>
@@ -1036,6 +1177,19 @@ export default function Recipes() {
                 className="min-h-11 min-w-0 flex-1 truncate text-left text-sm text-slate-100"
               >
                 {recipe.title}
+              </button>
+              <button
+                type="button"
+                aria-label={`Send ${recipe.title} to Skylight`}
+                onClick={() => void sendRecipeCardToSkylight(recipe)}
+                disabled={skylightBusy === recipe.path}
+                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
+              >
+                {skylightBusy === recipe.path ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Send size={14} />
+                )}
               </button>
               <button
                 type="button"
@@ -1089,6 +1243,20 @@ export default function Recipes() {
                   className="glass-button min-h-11 px-3 text-xs"
                 >
                   <Share2 size={14} /> Share to chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendRecipeToSkylight(selected.title, body)}
+                  disabled={skylightBusy === selected.title}
+                  data-testid="recipe-send-skylight"
+                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                >
+                  {skylightBusy === selected.title ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Send size={14} />
+                  )}
+                  Send to Skylight
                 </button>
                 <button
                   type="button"

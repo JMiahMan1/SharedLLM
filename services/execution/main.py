@@ -4119,6 +4119,344 @@ async def _skylight_setting(key: str) -> str:
         return ""
 
 
+# --- Skylight meals (Meals tab: Recipe Box, sittings, grocery list) ---------
+# The Meals tab is a small model of its own: a Recipe Box of recipes (a recipe's
+# name is `summary`; `description` is one free-text field carrying both the
+# ingredients and the method), "sittings" that place a recipe on a day, and a
+# grocery list. Everything is frame-scoped, so every call goes through
+# `_skylight_request`. A failed read returns None and is never flattened into an
+# empty plan: "nothing planned" and "we could not look" must stay different.
+
+_SKYLIGHT_HEADING_RE = re.compile(r"^#{1,6}\s*(.+?)\s*$")
+_SKYLIGHT_BULLET_RE = re.compile(r"^\s*[-*]\s*(?:\[[ xX]\]\s*)?(.+?)\s*$")
+_SKYLIGHT_STEP_RE = re.compile(r"^\s*\d+[.)]\s*(.+?)\s*$")
+
+
+def _skylight_recipe_sections(body: str) -> tuple[list[str], list[str]]:
+    """Split a recipe note into (ingredient lines, instruction lines).
+
+    Imported notes carry `## Ingredients` and `## Steps`; anything else falls
+    back to checkbox/bullet lines for ingredients and numbered lines for steps,
+    which is the loose shape the Skylight app itself writes.
+    """
+    ingredients: list[str] = []
+    instructions: list[str] = []
+    section = ""
+    for raw in (body or "").splitlines():
+        heading = _SKYLIGHT_HEADING_RE.match(raw)
+        if heading:
+            name = heading.group(1).strip().lower()
+            if "ingredient" in name:
+                section = "ingredients"
+            elif any(word in name for word in ("step", "instruction", "method", "direction")):
+                section = "steps"
+            else:
+                section = "other"
+            continue
+        if section == "steps":
+            step = _SKYLIGHT_STEP_RE.match(raw) or _SKYLIGHT_BULLET_RE.match(raw)
+            if step:
+                instructions.append(step.group(1).strip())
+            continue
+        # Ingredient bullets live under `## Ingredients` (or before any heading);
+        # other sections (Notes, Nutrition, ...) are left out.
+        if section in ("", "ingredients"):
+            bullet = _SKYLIGHT_BULLET_RE.match(raw)
+            if bullet:
+                ingredients.append(bullet.group(1).strip())
+                continue
+            if not section:
+                step = _SKYLIGHT_STEP_RE.match(raw)
+                if step:
+                    instructions.append(step.group(1).strip())
+    return ingredients, instructions
+
+
+def _skylight_recipe_description(body: str) -> str:
+    """The Recipe Box `description`: an Ingredients block + an Instructions block.
+
+    This is the loose free-text shape Skylight's own app writes (there is no
+    structured ingredient field on the resource), so `add_to_grocery_list` can
+    parse the ingredients back out server-side.
+    """
+    ingredients, instructions = _skylight_recipe_sections(body)
+    parts: list[str] = []
+    if ingredients:
+        parts.append("Ingredients:\n" + "\n".join(f"- {item}" for item in ingredients))
+    if instructions:
+        parts.append(
+            "Instructions:\n"
+            + "\n".join(f"{index}. {step}" for index, step in enumerate(instructions, 1))
+        )
+    return "\n\n".join(parts)
+
+
+def _skylight_category_to_item(raw: dict) -> dict:
+    attrs = raw.get("attributes", {}) or {}
+    return {
+        "id": str(raw.get("id")),
+        "label": attrs.get("label") or "",
+        "color": attrs.get("color"),
+        "icon": attrs.get("icon"),
+        "position": attrs.get("position"),
+        "enabled": attrs.get("enabled"),
+    }
+
+
+async def _skylight_meal_categories(session: dict) -> list[dict] | None:
+    """The planner's slots (Breakfast/Lunch/Dinner/Snack), or None on failure."""
+    result = await _skylight_request(session, "GET", "/meals/categories")
+    if result is None:
+        return None
+    return [_skylight_category_to_item(raw) for raw in result.get("data", [])]
+
+
+def _skylight_pick_category(categories: list[dict], wanted: str = "dinner") -> dict | None:
+    """The category whose label names `wanted`, else the first one offered."""
+    for category in categories:
+        if wanted in (category.get("label") or "").lower():
+            return category
+    return categories[0] if categories else None
+
+
+def _skylight_recipe_to_item(raw: dict) -> dict:
+    attrs = raw.get("attributes", {}) or {}
+    rel = raw.get("relationships", {}) or {}
+    category = (rel.get("meal_category") or {}).get("data") or {}
+    return {
+        "id": str(raw.get("id")),
+        "summary": attrs.get("summary") or "",
+        "description": attrs.get("description") or "",
+        "image_url": attrs.get("image_url"),
+        "source": attrs.get("source"),
+        "meal_category_id": str(category["id"]) if category.get("id") else None,
+    }
+
+
+async def _skylight_recipes(session: dict) -> list[dict] | None:
+    """Every recipe in the frame's Recipe Box, or None on a failed read."""
+    result = await _skylight_request(session, "GET", "/meals/recipes")
+    if result is None:
+        return None
+    return [_skylight_recipe_to_item(raw) for raw in result.get("data", [])]
+
+
+async def _skylight_upsert_recipe(
+    session: dict, summary: str, description: str, meal_category_id: str
+) -> dict | None:
+    """Create the Recipe Box recipe, or update the one that carries the same name.
+
+    Skylight has no title field and no unique key, so the name is the identity:
+    a recipe already in the box is patched instead of added again. Returns the
+    recipe, or None on failure -- including a failed lookup, because an update
+    that silently created a duplicate would be worse than an error.
+    """
+    existing = await _skylight_recipes(session)
+    if existing is None:
+        return None
+    wanted = summary.strip().lower()
+    match = next((r for r in existing if r["summary"].strip().lower() == wanted), None)
+    body = {
+        "meal_category_id": str(meal_category_id),
+        "summary": summary,
+        "description": description,
+    }
+    method, suffix = ("PATCH", f"/meals/recipes/{match['id']}") if match else ("POST", "/meals/recipes")
+    result = await _skylight_request(session, method, suffix, body)
+    if result is None:
+        return None
+    created = result.get("data") if isinstance(result, dict) else None
+    if isinstance(created, dict):
+        return _skylight_recipe_to_item(created)
+    return {
+        "id": match["id"] if match else None,
+        "summary": summary,
+        "description": description,
+        "meal_category_id": str(meal_category_id),
+    }
+
+
+def _skylight_sitting_to_item(raw: dict) -> dict:
+    attrs = raw.get("attributes", {}) or {}
+    rel = raw.get("relationships", {}) or {}
+    category = (rel.get("meal_category") or {}).get("data") or {}
+    recipe = (rel.get("meal_recipe") or {}).get("data") or {}
+    instances = attrs.get("instances") or []
+    return {
+        "id": str(raw.get("id")),
+        "summary": attrs.get("summary") or "",
+        "description": attrs.get("description") or "",
+        "note": attrs.get("note"),
+        "rrule": attrs.get("rrule"),
+        "recurring": bool(attrs.get("recurring")),
+        "draft": bool(attrs.get("draft")),
+        "instances": [str(instance) for instance in instances],
+        # The day a sitting lands on is its first instance; there is no start
+        # field. A recurring sitting's `instances` can lag the window, so a
+        # missing date stays None ("unknown"), never today's date.
+        "date": str(instances[0]) if instances else None,
+        "meal_category_id": str(category["id"]) if category.get("id") else None,
+        "meal_recipe_id": str(recipe["id"]) if recipe.get("id") else None,
+    }
+
+
+async def _skylight_week_sittings(
+    session: dict, date_min: str, date_max: str
+) -> list[dict] | None:
+    """The frame's meal sittings in a date window, or None on a failed read."""
+    result = await _skylight_request(
+        session, "GET", "/meals/sittings", params={"date_min": date_min, "date_max": date_max}
+    )
+    if result is None:
+        return None
+    return [_skylight_sitting_to_item(raw) for raw in result.get("data", [])]
+
+
+async def _skylight_plan_sitting(
+    session: dict,
+    date: str,
+    meal_recipe_id: str | None,
+    meal_category_id: str,
+    summary: str = "",
+) -> dict | None:
+    """Plan a recipe (or a free-text meal) into a day's slot.
+
+    `summary` MUST be blank when `meal_recipe_id` is set: Skylight takes the
+    name from the recipe and answers 422 to a sitting that names both. The body
+    otherwise carries the day in `date` and the slot in `meal_category_id`.
+    """
+    body: dict = {
+        "meal_category_id": str(meal_category_id),
+        "date": date,
+        "summary": "" if meal_recipe_id else summary,
+    }
+    if meal_recipe_id:
+        body["meal_recipe_id"] = str(meal_recipe_id)
+    result = await _skylight_request(session, "POST", "/meals/sittings", body)
+    if result is None:
+        return None
+    created = result.get("data") if isinstance(result, dict) else None
+    if isinstance(created, dict):
+        return _skylight_sitting_to_item(created)
+    return {
+        "id": None,
+        "date": date,
+        "summary": summary,
+        "meal_recipe_id": str(meal_recipe_id) if meal_recipe_id else None,
+    }
+
+
+async def _skylight_add_recipe_to_grocery_list(session: dict, recipe_id: str) -> bool:
+    """Queue a recipe's ingredients onto the frame's default grocery list.
+
+    Skylight parses the recipe's free-text `description` server-side, so the
+    items appear a few seconds after this returns; the destination is always the
+    list whose `default_grocery_list` is set, not a choice.
+    """
+    result = await _skylight_request(
+        session, "POST", f"/meals/recipes/{recipe_id}/add_to_grocery_list"
+    )
+    return result is not None
+
+
+def _skylight_list_to_item(raw: dict) -> dict:
+    attrs = raw.get("attributes", {}) or {}
+    rel = raw.get("relationships", {}) or {}
+    items_rel = (rel.get("list_items") or {}).get("data") or []
+    return {
+        "id": str(raw.get("id")),
+        "label": attrs.get("label") or "",
+        "kind": attrs.get("kind"),
+        "default_grocery_list": bool(attrs.get("default_grocery_list")),
+        "item_ids": [str(item["id"]) for item in items_rel if isinstance(item, dict) and item.get("id")],
+    }
+
+
+def _skylight_list_item_to_item(raw: dict) -> dict:
+    attrs = raw.get("attributes", {}) or {}
+    return {
+        "id": str(raw.get("id")),
+        "label": attrs.get("label") or "",
+        "status": attrs.get("status"),
+    }
+
+
+async def _skylight_lists(session: dict) -> tuple[list[dict], list[dict]] | None:
+    """The frame's lists and their side-loaded items, or None on a failed read."""
+    result = await _skylight_request(session, "GET", "/lists")
+    if result is None:
+        return None
+    lists = [_skylight_list_to_item(raw) for raw in result.get("data", [])]
+    items = [
+        _skylight_list_item_to_item(raw)
+        for raw in result.get("included", [])
+        if raw.get("type") == "list_item"
+    ]
+    return lists, items
+
+
+def _skylight_grocery_list(lists: list[dict]) -> dict | None:
+    """The frame's default grocery list, else its first list."""
+    for candidate in lists:
+        if candidate.get("default_grocery_list"):
+            return candidate
+    return lists[0] if lists else None
+
+
+async def _skylight_sync_grocery_list(
+    session: dict, items: list[str], replace: bool = False
+) -> dict | None:
+    """Mirror `items` onto the frame's default grocery list.
+
+    Items already present (matched on the label, case-insensitively) are left
+    alone, so ticks made on the display survive a re-push. With `replace` set,
+    items no longer on the list are removed through `bulk_destroy`; the default
+    is additive, so a mirror never wipes something the household added.
+    Returns {list_id, added, removed}, or None on failure.
+    """
+    found = await _skylight_lists(session)
+    if found is None:
+        return None
+    lists, all_items = found
+    grocery = _skylight_grocery_list(lists)
+    if not grocery:
+        return None
+
+    by_id = {item["id"]: item for item in all_items}
+    existing = [by_id[item_id] for item_id in grocery.get("item_ids", []) if item_id in by_id]
+    present = {item["label"].strip().lower() for item in existing}
+    wanted = [str(label).strip() for label in items if str(label).strip()]
+
+    added = 0
+    for label in wanted:
+        key = label.lower()
+        if key in present:
+            continue
+        result = await _skylight_request(
+            session, "POST", f"/lists/{grocery['id']}/list_items", {"label": label}
+        )
+        if result is None:
+            return None
+        present.add(key)
+        added += 1
+
+    removed = 0
+    if replace:
+        keep = {label.lower() for label in wanted}
+        doomed = [item["id"] for item in existing if item["label"].strip().lower() not in keep]
+        if doomed:
+            result = await _skylight_request(
+                session,
+                "DELETE",
+                f"/lists/{grocery['id']}/list_items/bulk_destroy",
+                {"ids": doomed},
+            )
+            if result is None:
+                return None
+            removed = len(doomed)
+    return {"list_id": grocery["id"], "added": added, "removed": removed}
+
+
 @app.post("/api/integrations/skylight/stars", dependencies=[Depends(require_internal)])
 async def push_skylight_stars(
     payload: dict,
@@ -4387,3 +4725,211 @@ async def create_skylight_calendar_event(
     if result is not None:
         return {"status": "SUCCESS", "message": "Event created", "event": result}
     return {"status": "FAILURE", "message": "Failed to create event"}
+
+
+@app.get("/api/integrations/skylight/meals", dependencies=[Depends(require_internal)])
+async def get_skylight_meals(
+    user: str | None = None,
+    x_internal_secret: str = Header(None),
+):
+    """Whether Skylight is connected, plus the planner's meal categories.
+
+    `configured` comes from the cheap credentials probe (no OAuth), so the
+    Recipes page can show its "not connected" state without a sign-in attempt.
+    When it is connected but the categories cannot be read, this says so
+    (FAILURE) instead of pretending the frame has no meal slots.
+    """
+    if not await _skylight_configured(user):
+        return {"status": "SUCCESS", "configured": False, "categories": []}
+    session = await _get_skylight_session(user)
+    if not session:
+        return {
+            "status": "FAILURE",
+            "configured": True,
+            "categories": [],
+            "message": "Skylight sign-in failed",
+        }
+    categories = await _skylight_meal_categories(session)
+    if categories is None:
+        return {
+            "status": "FAILURE",
+            "configured": True,
+            "categories": [],
+            "message": "Could not read the Skylight meal categories",
+        }
+    return {"status": "SUCCESS", "configured": True, "categories": categories}
+
+
+@app.get("/api/integrations/skylight/meals/week", dependencies=[Depends(require_internal)])
+async def get_skylight_meal_week(
+    user: str | None = None,
+    date_min: str | None = None,
+    date_max: str | None = None,
+    x_internal_secret: str = Header(None),
+):
+    """The frame's meal sittings for a date window (default: today + 6 days)."""
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight is not configured"}
+
+    start = date_min or date_cls.today().isoformat()
+    end = date_max or (date_cls.today() + timedelta(days=6)).isoformat()
+    sittings = await _skylight_week_sittings(session, start, end)
+    if sittings is None:
+        return {"status": "FAILURE", "message": "Failed to read the Skylight meal plan"}
+    return {"status": "SUCCESS", "sittings": sittings, "date_min": start, "date_max": end}
+
+
+@app.post("/api/integrations/skylight/meals/recipe", dependencies=[Depends(require_internal)])
+async def send_skylight_recipe(
+    body: dict | None = None,
+    user: str | None = None,
+    x_internal_secret: str = Header(None),
+):
+    """Send one recipe to the Recipe Box (idempotent: re-sending updates it).
+
+    Body: `title`, and either `body` (the recipe note, rendered into the
+    Ingredients + Instructions description) or a ready `description`; optional
+    `meal_category_id` (defaults to Dinner) and `add_to_grocery_list`.
+    """
+    body = body or {}
+    title = str(body.get("title") or "").strip()
+    if not title:
+        return {"status": "FAILURE", "message": "Give the recipe a name"}
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight is not configured"}
+
+    categories = await _skylight_meal_categories(session)
+    if categories is None:
+        return {"status": "FAILURE", "message": "Could not read the Skylight meal categories"}
+    wanted_id = str(body.get("meal_category_id") or "").strip()
+    category = next((c for c in categories if c["id"] == wanted_id), None) if wanted_id else None
+    if category is None:
+        category = _skylight_pick_category(categories, "dinner")
+    if category is None:
+        return {"status": "FAILURE", "message": "Skylight has no meal categories to file this under"}
+
+    description = str(body.get("description") or "") or _skylight_recipe_description(
+        str(body.get("body") or "")
+    )
+    if not description:
+        return {"status": "FAILURE", "message": "That recipe has no ingredients or steps to send"}
+
+    recipe = await _skylight_upsert_recipe(session, title, description, category["id"])
+    if recipe is None:
+        return {"status": "FAILURE", "message": "Skylight rejected the recipe"}
+
+    grocery = False
+    if body.get("add_to_grocery_list") and recipe.get("id"):
+        grocery = await _skylight_add_recipe_to_grocery_list(session, recipe["id"])
+    return {
+        "status": "SUCCESS",
+        "message": f"Sent “{title}” to the Skylight Recipe Box",
+        "recipe_id": recipe.get("id"),
+        "category_id": category["id"],
+        "grocery_list": grocery,
+    }
+
+
+@app.post("/api/integrations/skylight/meals/plan", dependencies=[Depends(require_internal)])
+async def push_skylight_week(
+    body: dict | None = None,
+    user: str | None = None,
+    x_internal_secret: str = Header(None),
+):
+    """Push the week's plan: each day becomes a dinner sitting.
+
+    Body: `days` = [{date, title, body}], optional `meal_category_id` (default
+    Dinner) and `add_to_grocery_list`. Each recipe is upserted into the Recipe
+    Box first (so a sitting can point at it), then planned; per-day failures are
+    collected rather than aborting the whole push.
+    """
+    body = body or {}
+    days = body.get("days") or []
+    if not isinstance(days, list) or not days:
+        return {"status": "FAILURE", "message": "There are no planned dinners to push"}
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight is not configured"}
+
+    categories = await _skylight_meal_categories(session)
+    if categories is None:
+        return {"status": "FAILURE", "message": "Could not read the Skylight meal categories"}
+    wanted_id = str(body.get("meal_category_id") or "").strip()
+    category = next((c for c in categories if c["id"] == wanted_id), None) if wanted_id else None
+    if category is None:
+        category = _skylight_pick_category(categories, "dinner")
+    if category is None:
+        return {"status": "FAILURE", "message": "Skylight has no meal categories to file this under"}
+
+    planned: list[dict] = []
+    failed: list[dict] = []
+    for day in days:
+        if not isinstance(day, dict):
+            failed.append({"date": None, "title": None, "reason": "malformed day"})
+            continue
+        date = str(day.get("date") or "").strip()
+        title = str(day.get("title") or "").strip()
+        if not date or not title:
+            failed.append({"date": date or None, "title": title or None, "reason": "missing date or recipe"})
+            continue
+        description = _skylight_recipe_description(str(day.get("body") or ""))
+        if not description:
+            failed.append({"date": date, "title": title, "reason": "no ingredients or steps"})
+            continue
+        recipe = await _skylight_upsert_recipe(session, title, description, category["id"])
+        if recipe is None:
+            failed.append({"date": date, "title": title, "reason": "recipe could not be saved"})
+            continue
+        sitting = await _skylight_plan_sitting(session, date, recipe.get("id"), category["id"])
+        if sitting is None:
+            failed.append({"date": date, "title": title, "reason": "sitting could not be planned"})
+            continue
+        planned.append(
+            {"date": date, "title": title, "recipe_id": recipe.get("id"), "sitting_id": sitting.get("id")}
+        )
+        if body.get("add_to_grocery_list") and recipe.get("id"):
+            await _skylight_add_recipe_to_grocery_list(session, recipe["id"])
+
+    if planned and not failed:
+        status = "SUCCESS"
+    elif planned:
+        status = "PARTIAL"
+    else:
+        status = "FAILURE"
+    return {"status": status, "planned": planned, "failed": failed, "category_id": category["id"]}
+
+
+@app.post("/api/integrations/skylight/meals/grocery", dependencies=[Depends(require_internal)])
+async def push_skylight_grocery(
+    body: dict | None = None,
+    user: str | None = None,
+    x_internal_secret: str = Header(None),
+):
+    """Mirror a shopping list onto the frame's default grocery list.
+
+    Body: `items` = ["2 lb chicken", ...], optional `replace` to also remove
+    items no longer on the list (via bulk_destroy). Additive by default.
+    """
+    body = body or {}
+    items = body.get("items")
+    if not isinstance(items, list):
+        return {"status": "FAILURE", "message": "items must be a list"}
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight is not configured"}
+
+    result = await _skylight_sync_grocery_list(
+        session, [str(item) for item in items], replace=bool(body.get("replace"))
+    )
+    if result is None:
+        return {"status": "FAILURE", "message": "Could not update the Skylight grocery list"}
+    return {
+        "status": "SUCCESS",
+        "message": f"Added {result['added']} item(s) to the Skylight grocery list",
+        **result,
+    }

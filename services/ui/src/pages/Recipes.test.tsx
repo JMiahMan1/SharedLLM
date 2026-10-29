@@ -32,6 +32,10 @@ vi.mock('../services/api', async (importOriginal) => {
       noteAttachment: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
+      getSkylightMeals: vi.fn(),
+      sendSkylightRecipe: vi.fn(),
+      pushSkylightWeek: vi.fn(),
+      mirrorSkylightList: vi.fn(),
     },
   };
 });
@@ -56,6 +60,10 @@ const readRecipePhoto = vi.mocked(api.readRecipePhoto);
 const noteAttachment = vi.mocked(api.noteAttachment);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
+const getSkylightMeals = vi.mocked(api.getSkylightMeals);
+const sendSkylightRecipe = vi.mocked(api.sendSkylightRecipe);
+const pushSkylightWeek = vi.mocked(api.pushSkylightWeek);
+const mirrorSkylightList = vi.mocked(api.mirrorSkylightList);
 
 function renderRecipes() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -113,6 +121,10 @@ describe('Recipes', () => {
       detail: { conversations: [{ token: 'room-1', display_name: 'Family' }] },
     } as never);
     sendTalkMessage.mockResolvedValue({ status: 'SUCCESS', message: '', service: 'talk_send' });
+    getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: true, categories: [] });
+    sendSkylightRecipe.mockResolvedValue({ status: 'SUCCESS', message: 'Sent “Pancakes” to the Skylight Recipe Box' });
+    pushSkylightWeek.mockResolvedValue({ status: 'SUCCESS', planned: [], failed: [] });
+    mirrorSkylightList.mockResolvedValue({ status: 'SUCCESS', added: 0, removed: 0 });
   });
 
   it('lists recipes from the Recipes folder in Nextcloud', async () => {
@@ -608,5 +620,48 @@ describe('Recipes', () => {
     // The link lands in the note on the second save.
     await waitFor(() => expect(writeNote).toHaveBeenCalledTimes(2));
     expect((writeNote.mock.calls[1][0] as { content: string }).content).toContain('.attachments.9/page.jpg');
+  });
+
+  it('sends an open recipe to Skylight from the editor', async () => {
+    readNote.mockResolvedValue({
+      status: 'SUCCESS',
+      message: '# Pancakes\nCategory: Recipes\n\n## Ingredients\n- [ ] flour\n\n## Steps\n1. Mix.',
+      service: 'note_read',
+    });
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Pancakes'));
+    await waitFor(() => expect(screen.getByTestId('recipe-send-skylight')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('recipe-send-skylight'));
+
+    await waitFor(() =>
+      expect(sendSkylightRecipe).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Pancakes', body: expect.stringContaining('flour') }),
+      ),
+    );
+  });
+
+  it('sends a recipe from its card, reading the note first', async () => {
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText('Send Pancakes to Skylight'));
+
+    await waitFor(() => expect(sendSkylightRecipe).toHaveBeenCalled());
+    expect(sendSkylightRecipe).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Pancakes', body: 'flour, milk' }),
+    );
+  });
+
+  it('shows the no-credentials state and never fakes a send', async () => {
+    getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: false, categories: [] });
+    renderRecipes();
+
+    await waitFor(() => expect(screen.getByTestId('skylight-off')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('Send Pancakes to Skylight'));
+
+    // Nothing was sent and the recipe note was not even read for the push.
+    expect(sendSkylightRecipe).not.toHaveBeenCalled();
   });
 });
