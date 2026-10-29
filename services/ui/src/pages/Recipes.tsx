@@ -35,6 +35,9 @@ import {
 
 export const RECIPES_DIR = 'Recipes';
 const STORAGE = 'nextcloud';
+// The model sometimes flags a word with where it was ("simmer (line 8)"); that
+// note is not part of the reading, so a fix replaces just the word itself.
+const LINE_NOTE = /\s*[([]\s*line\s*\d+[^)\]]*[)\]]\s*$|\s*[-–—]\s*line\s*\d+\s*$/i;
 
 interface RecipeSummary {
   title: string;
@@ -95,6 +98,9 @@ export default function Recipes() {
   const [photoRaw, setPhotoRaw] = useState('');
   const [photoDraft, setPhotoDraft] = useState('');
   const [photoUncertain, setPhotoUncertain] = useState<string[]>([]);
+  const [photoSuggestions, setPhotoSuggestions] = useState<Record<string, string[]>>({});
+  const [photoFixes, setPhotoFixes] = useState<Record<string, string>>({});
+  const [photoFixed, setPhotoFixed] = useState<string[]>([]);
   const [photoMissing, setPhotoMissing] = useState<string[]>([]);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -623,6 +629,9 @@ export default function Recipes() {
     setPhotoRaw('');
     setPhotoDraft('');
     setPhotoUncertain([]);
+    setPhotoSuggestions({});
+    setPhotoFixes({});
+    setPhotoFixed([]);
     setPhotoMissing([]);
   };
 
@@ -654,6 +663,9 @@ export default function Recipes() {
     setImported(null);
     setPhotoRaw('');
     setPhotoUncertain([]);
+    setPhotoSuggestions({});
+    setPhotoFixes({});
+    setPhotoFixed([]);
     setPhotoMissing([]);
     try {
       const draft = await api.readRecipePhoto(file);
@@ -666,6 +678,13 @@ export default function Recipes() {
       setPhotoFile(file);
       setPhotoRaw(draft.raw_text);
       setPhotoUncertain(draft.uncertain);
+      setPhotoSuggestions(draft.suggestions ?? {});
+      // Each flagged word starts on its best reading so accepting is one click.
+      setPhotoFixes(
+        Object.fromEntries(
+          draft.uncertain.map((phrase) => [phrase, (draft.suggestions?.[phrase]?.[0] ?? '').trim()]),
+        ),
+      );
       setPhotoMissing(draft.missing);
       setPhotoDraft(buildRecipeNote(importedPhoto, [PHOTO_LABEL]));
       setImported(importedPhoto);
@@ -677,6 +696,22 @@ export default function Recipes() {
     } finally {
       setReadingPhoto(false);
     }
+  };
+
+  // Apply one accepted reading to the draft. Nothing changes until this runs.
+  const applyPhotoFix = (phrase: string) => {
+    const value = (photoFixes[phrase] ?? '').trim();
+    if (!value) {
+      toast.error('Type the correction first');
+      return;
+    }
+    const target = phrase.replace(LINE_NOTE, '').trim();
+    if (target && photoDraft.includes(target)) {
+      setPhotoDraft(photoDraft.replace(target, value));
+      setPhotoFixed((prev) => (prev.includes(phrase) ? prev : [...prev, phrase]));
+      return;
+    }
+    toast.error('Could not find that line in the draft - edit it directly');
   };
 
   // Keep the original page with the recipe: upload the photo beside the note
@@ -1053,7 +1088,54 @@ export default function Recipes() {
                     <div>The photo did not give the {photoMissing.join(', ')} - fill them in before saving.</div>
                   ) : null}
                   {photoUncertain.length > 0 ? (
-                    <div>Check against the page: {photoUncertain.join('; ')}.</div>
+                    <div className="space-y-2" data-testid="recipe-photo-uncertain">
+                      <div>
+                        Check against the page - each one starts on a suggested reading you can
+                        accept or type over:
+                      </div>
+                      {photoUncertain.map((phrase) => {
+                        const readings = photoSuggestions[phrase] ?? [];
+                        const fixed = photoFixed.includes(phrase);
+                        return (
+                          <div key={phrase} className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`min-w-0 max-w-full truncate ${fixed ? 'line-through opacity-60' : ''}`}
+                              title={phrase}
+                            >
+                              {fixed ? '✓' : '•'} {phrase}
+                            </span>
+                            <input
+                              value={photoFixes[phrase] ?? ''}
+                              onChange={(event) =>
+                                setPhotoFixes((prev) => ({ ...prev, [phrase]: event.target.value }))
+                              }
+                              placeholder="Type the reading"
+                              aria-label={`Correction for ${phrase}`}
+                              className="glass-input min-w-0 flex-1 px-2 py-1 text-[11px]"
+                            />
+                            {readings.slice(1).map((reading) => (
+                              <button
+                                key={reading}
+                                type="button"
+                                onClick={() => setPhotoFixes((prev) => ({ ...prev, [phrase]: reading }))}
+                                className="glass-button shrink-0 px-2 py-1 text-[11px]"
+                                title={`Use "${reading}"`}
+                              >
+                                {reading}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => applyPhotoFix(phrase)}
+                              aria-label={`Accept correction for ${phrase}`}
+                              className="glass-button shrink-0 px-2 py-1 text-[11px]"
+                            >
+                              Accept
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : null}
                 </div>
               ) : null}

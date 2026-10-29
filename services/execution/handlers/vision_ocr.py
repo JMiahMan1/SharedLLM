@@ -163,13 +163,19 @@ async def vision_ocr_screenshot(
         '    "steps": ["Mix the dry ingredients.", "Bake for 30 minutes."],\n'
         '    "notes": "Any tips or notes written on the page"\n'
         "  },\n"
-        '  "uncertain": ["every word or number you were not sure of, with the line it was on"]\n'
+        '  "uncertain": ["every word or number you were not sure of, with the line it was on"],\n'
+        '  "suggestions": {"<an uncertain entry, copied exactly>": ["most likely reading", "another plausible reading"]}\n'
         "}\n\n"
         "RULES:\n"
         "- Never invent a quantity, time, ingredient or step that is not in the image.\n"
         "- A value you cannot read is null (or an empty list), never a guess.\n"
         "- Keep each ingredient and each step as its own list item.\n"
-        "- List anything you were unsure of in 'uncertain' so a person can check it."
+        "- List anything you were unsure of in 'uncertain' so a person can check it.\n"
+        "- For each 'uncertain' entry add a 'suggestions' entry: up to 3 readings that "
+        "fit the recipe, best first, keeping the same kind of word (a measure stays a "
+        "measure, an ingredient stays an ingredient). They are offered to the cook to "
+        "accept or ignore, so never change the recipe's meaning; leave a word out when "
+        "you cannot suggest anything better."
     )
     general_prompt = (
         "You are an expert Document AI and OCR vision assistant.\n"
@@ -247,12 +253,15 @@ async def vision_ocr_screenshot(
                 "subtext": result.get("subtext", ""),
                 "badge": result.get("badge", ""),
             }
-            # The recipe task returns a structured reading and any uncertain
-            # words; pass them through for services/common/recipe_ocr.py.
+            # The recipe task returns a structured reading, the words it was
+            # unsure of and any readings it offers; pass them through for
+            # services/common/recipe_ocr.py.
             if isinstance(result.get("recipe"), dict):
                 out["recipe"] = result["recipe"]
             if result.get("uncertain"):
                 out["uncertain"] = result["uncertain"]
+            if isinstance(result.get("suggestions"), dict):
+                out["suggestions"] = result["suggestions"]
             return out
         except json.JSONDecodeError:
             log.warning("Vision OCR failed to parse LLM response as JSON")

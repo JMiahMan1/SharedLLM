@@ -284,23 +284,32 @@ account is connected, everything above still works.
       plus the `vision_ocr_model` setting; no cloud key, nothing leaves the
       house). The recipe photo runs execution's `/execute/ocr` with
       `task="recipe"`; a new prompt in
-      `services/execution/handlers/vision_ocr.py` asks for strict JSON and the
-      uncertain words. No vision model configured fails with a one-line
-      explanation and the typing path stays.
+      `services/execution/handlers/vision_ocr.py` asks for strict JSON, the
+      uncertain words, and a few plausible readings for each of them. No vision
+      model configured fails with a one-line explanation and the typing path stays.
 - [x] Pipeline: photo → `services/common/recipe_ocr.py` normalizes the model's
       reading (title, servings, prep/cook/total time, ingredients, steps, notes,
-      uncertain words) → an **editable draft** (a textarea) beside the raw
-      transcription → Save to Recipes (`#photo-import` label), gateway
-      `POST /api/recipes/photo`.
+      uncertain words, suggested readings) → an **editable draft** (a textarea)
+      beside the raw transcription → Save to Recipes (`#photo-import` label),
+      gateway `POST /api/recipes/photo`.
 - [x] Handwriting: the model flags low-confidence words, the raw text stays for
-      comparison, and nothing saves without the person reviewing the draft.
+      comparison, and nothing saves without the person reviewing the draft. Each
+      flagged word gets a **suggestion** - the model's own readings when it gave
+      any, otherwise the closest kitchen words matched offline against a small
+      vocabulary (or a unit filled into a gap like `2 ... vanilla`) - shown in an
+      editable field that starts on the best reading, with the alternatives as
+      chips. Accepting one swaps it into the draft; nothing changes until then,
+      and the person can always type their own correction instead.
 - [x] Errors: no vision model configured → one-line explanation and the typing
       path stays; a photo with nothing readable names the parts that are missing
       rather than inventing them.
 - [x] Tests: the parser (`services/common/tests/test_recipe_ocr.py`), the
       gateway (stubbed OCR - `services/gateway/tests/test_recipe_gateway.py`)
-      and the UI draft edit + save + photo-keep
-      (`src/pages/Recipes.test.tsx`).
+      and the UI draft edit + save + photo-keep + accept-a-suggestion
+      (`src/pages/Recipes.test.tsx`). The parser and gateway tests use the
+      family's own pictures kept in `test/fixtures/recipes` (a handwritten card
+      and a nutrition label), and `test/local/test_recipe_ocr_live.py` runs the
+      real vision model over them (marked `local_only`, so CI skips it).
 
 ## Phase 10 - Health tab connection
 
