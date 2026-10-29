@@ -54,6 +54,21 @@ final class GuardNotices {
     }
 
     private static PushNotice notice(String tag, String title, String body, int priority, JSONArray actions) {
+        return notice(tag, title, body, priority, actions, null);
+    }
+
+    /**
+     * A notice a parent queued for this one phone (MDM): an app update waiting
+     * for it. Its tap-through opens the page the server named (Settings, where
+     * the update installs); a view action cannot carry an in-app path, so the
+     * page travels as the notice's own ``data.url``.
+     */
+    static void queued(Context context, String title, String body, String path, String tag) {
+        show(context, notice(tag, title, body, 3, null, path));
+    }
+
+    private static PushNotice notice(String tag, String title, String body, int priority,
+                                     JSONArray actions, String path) {
         try {
             JSONObject o = new JSONObject()
                     .put("category", CATEGORY)
@@ -62,6 +77,9 @@ final class GuardNotices {
                     .put("body", body)
                     .put("priority", priority);
             if (actions != null) o.put("actions", actions);
+            if (path != null && !path.isEmpty()) {
+                o.put("data", new JSONObject().put("url", path));
+            }
             return PushNotice.parse(o.toString());
         } catch (Exception e) {
             return null;

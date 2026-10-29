@@ -30,6 +30,13 @@ public class TokenBridgePlugin extends Plugin {
      */
     public static final String KEY_USERNAME = "jarvis_username";
     public static final String KEY_USER_ID = "jarvis_user_id";
+    /**
+     * This phone's registration key (the one identity knows it by), mirrored here
+     * so the screen guard can name itself on its check-in and be handed the
+     * notices queued for it -- an ordinary push cannot address one device. It is
+     * not {@link #KEY_DEVICE_ID}, which is only this install's push-stream id.
+     */
+    public static final String KEY_DEVICE_KEY = "jarvis_device_key";
     public static final String KEY_LAST_LAT = "last_lat";
     public static final String KEY_LAST_LNG = "last_lng";
     public static final String KEY_LAST_TS = "last_ts";
@@ -150,6 +157,26 @@ public class TokenBridgePlugin extends Plugin {
                 ed.remove(KEY_USER_ID);
             } else {
                 ed.putString(KEY_USER_ID, userId);
+            }
+        }
+        ed.apply();
+        call.resolve();
+    }
+
+    /**
+     * Mirror this phone's registration key for the screen guard, so its check-in
+     * can be answered with the notices queued for this device alone. An empty
+     * string forgets it (the guard then simply names no device).
+     */
+    @PluginMethod
+    public void setDeviceKey(PluginCall call) {
+        String deviceKey = call.getString("deviceKey");
+        SharedPreferences.Editor ed = prefs(getContext()).edit();
+        if (deviceKey != null) {
+            if (deviceKey.isEmpty()) {
+                ed.remove(KEY_DEVICE_KEY);
+            } else {
+                ed.putString(KEY_DEVICE_KEY, deviceKey);
             }
         }
         ed.apply();
