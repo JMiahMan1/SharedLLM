@@ -70,7 +70,7 @@ function Viewer({ target, onClose }: { target: ViewerTarget; onClose: () => void
     <div className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm" role="dialog" aria-label={`${target.name} preview`}>
       <header className="flex items-center gap-2 border-b border-white/10 bg-slate-900/90 px-3 py-2">
         <span className="min-w-0 flex-1 truncate text-sm text-white">{target.name}</span>
-        <a href={target.url} download={target.name} className={`glass-button px-3 text-xs ${TOUCH}`}>
+        <a href={target.url} download={target.name} className={`glass-button shrink-0 px-3 text-xs ${TOUCH}`}>
           <Download size={14} /> Download
         </a>
         <button type="button" onClick={onClose} aria-label="Close preview" className={`rounded-lg p-2 text-slate-300 hover:text-white ${TOUCH}`}>

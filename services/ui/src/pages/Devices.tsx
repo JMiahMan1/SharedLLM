@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import {
-  Activity, Bell, BookOpen, Check, Clock, Cpu, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Monitor, Pause, Play, Radio, RefreshCw, RotateCw, ShieldAlert, Smartphone, Speaker, Square, Tablet, Trash2, Unlock, Upload, Volume2, VolumeX, Watch, X,
+  Activity, Bell, BookOpen, Check, Clock, Cpu, Download, GraduationCap, History, KeyRound, Lightbulb, Loader2, Lock, Mic, Monitor, Pause, Play, Radio, RefreshCw, RotateCw, ShieldAlert, Smartphone, Speaker, Square, Tablet, Trash2, Unlock, Upload, Volume2, VolumeX, Watch, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../services/api';
+import { downloadBlobUrl } from '../lib/artifactKinds';
 import { useAuth } from '../context/AuthContext';
 import { relativeTime } from '../lib/wanderTrips';
 import {
@@ -67,8 +68,8 @@ function State({ on }: { on: boolean | undefined }) {
 function Panel({ title, icon: Icon, children, aside }: { title: string; icon: LucideIcon; children: React.ReactNode; aside?: React.ReactNode }) {
   return (
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10">
-      <header className="flex items-center justify-between gap-3 border-b border-white/5 bg-sky-500/5 px-4 py-3">
-        <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-400">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-sky-500/5 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-400">
           <Icon size={14} /> {title}
         </span>
         {aside}
@@ -890,6 +891,11 @@ function DeviceCard({
 }) {
   const [showApps, setShowApps] = useState(false);
   const esphome = isEsphomeDevice(device);
+  // The gateway refuses update/wipe for a key nothing owns (422) and the
+  // screen-time routes need a real owner, so a device with no owner can only be
+  // inspected - the owner-scoped actions are hidden rather than left to fail.
+  const owner = device.owner_username ?? '';
+  const hasOwner = Boolean(owner);
   const noun = deviceNoun(device.kind);
   const Icon = KIND_ICON[(device.kind || '').toLowerCase()] ?? (esphome ? Cpu : Smartphone);
   const guard = device.capabilities?.guard;
@@ -955,7 +961,7 @@ function DeviceCard({
     onError: (e: Error) => toast.error(e.message || 'Could not push the update'),
   });
   const lock = useMutation({
-    mutationFn: (resume: boolean) => api.pauseScreenTime(device.owner_username, resume ? { resume: true } : {}),
+    mutationFn: (resume: boolean) => api.pauseScreenTime(owner, resume ? { resume: true } : {}),
     onSuccess: (_r, resume) => {
       if (resume) {
         toast.success('Unlocked');
@@ -995,7 +1001,7 @@ function DeviceCard({
         <Icon size={18} className={`shrink-0 ${esphome ? 'text-indigo-400' : 'text-sky-400'}`} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-white">{device.label || device.model || deviceKindLabel(device.kind)}</span>
-          <span className="block text-xs text-slate-500" data-testid={`mdm-device-badge-${device.device_key}`}>
+          <span className="block truncate text-xs text-slate-500" data-testid={`mdm-device-badge-${device.device_key}`}>
             {devicePlatformLabel(device)} · {deviceKindLabel(device.kind)} · {device.device_key}
           </span>
         </span>
@@ -1005,7 +1011,7 @@ function DeviceCard({
             value={device.owner_username || ''}
             disabled={assignOwner.isPending}
             onChange={(e) => assignOwner.mutate(e.target.value)}
-            className="glass-input bg-black/30 px-2.5 py-1 text-xs text-slate-200"
+            className="glass-input max-w-[10rem] bg-black/30 px-2.5 py-1 text-xs text-slate-200"
             data-testid={`mdm-device-owner-${device.device_key}`}
           >
             <option value="">(Unassigned)</option>
@@ -1022,7 +1028,7 @@ function DeviceCard({
             value={ESPHOME_KIND_OPTIONS.includes(device.kind as (typeof ESPHOME_KIND_OPTIONS)[number]) ? device.kind : 'assistant'}
             disabled={reclassify.isPending}
             onChange={(e) => reclassify.mutate(e.target.value)}
-            className="glass-input bg-black/30 px-2.5 py-1 text-xs text-slate-200"
+            className="glass-input max-w-[10rem] bg-black/30 px-2.5 py-1 text-xs text-slate-200"
             data-testid={`mdm-esphome-kind-${device.device_key}`}
           >
             {ESPHOME_KIND_OPTIONS.map((k) => (
@@ -1066,7 +1072,7 @@ function DeviceCard({
               Protection {guard?.reportedAt ? `· reported ${relativeTime(guard.reportedAt)}` : ''}
             </p>
             {guard ? (
-              <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1" data-testid={`mdm-guard-${device.device_key}`}>
+              <ul className="mt-1 grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2" data-testid={`mdm-guard-${device.device_key}`}>
                 {GUARD_ROWS.map((row) => (
                   <li key={row.key} className="flex justify-between gap-2">
                     <span className="text-slate-300">{row.label}</span>
@@ -1079,22 +1085,26 @@ function DeviceCard({
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={update.isPending} onClick={() => update.mutate()}
-              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-update-${device.device_key}`}>
-              {update.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Push update
-            </button>
-            <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(false)}
-              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-lock-${device.device_key}`}>
-              <Lock size={14} /> Lock
-            </button>
-            <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(true)}
-              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-unlock-${device.device_key}`}>
-              <Unlock size={14} /> Unlock
-            </button>
-            <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
-              className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
-              App control
-            </button>
+            {hasOwner && (
+              <>
+                <button type="button" disabled={update.isPending} onClick={() => update.mutate()}
+                  className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-update-${device.device_key}`}>
+                  {update.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Push update
+                </button>
+                <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(false)}
+                  className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-lock-${device.device_key}`}>
+                  <Lock size={14} /> Lock
+                </button>
+                <button type="button" disabled={lock.isPending} onClick={() => lock.mutate(true)}
+                  className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-unlock-${device.device_key}`}>
+                  <Unlock size={14} /> Unlock
+                </button>
+                <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
+                  className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
+                  App control
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => onOpenDetails(device)}
@@ -1103,24 +1113,31 @@ function DeviceCard({
             >
               <Activity size={14} /> Details &amp; history
             </button>
-            <button
-              type="button"
-              disabled={wipe.isPending}
-              onClick={async () => {
-                if (await confirmDialog({
-                  title: `Erase this ${noun}?`,
-                  body: `This erases EVERYTHING on ${device.label || device.device_key}. It cannot be undone.`,
-                  confirmLabel: 'Erase',
-                  danger: true,
-                })) wipe.mutate();
-              }}
-              className={`glass-button border-red-500/30 bg-red-600/20 px-3 text-xs text-red-200 ${TOUCH}`}
-              data-testid={`mdm-wipe-${device.device_key}`}
-            >
-              <ShieldAlert size={14} /> Wipe…
-            </button>
+            {hasOwner && (
+              <button
+                type="button"
+                disabled={wipe.isPending}
+                onClick={async () => {
+                  if (await confirmDialog({
+                    title: `Erase this ${noun}?`,
+                    body: `This erases EVERYTHING on ${device.label || device.device_key}. It cannot be undone.`,
+                    confirmLabel: 'Erase',
+                    danger: true,
+                  })) wipe.mutate();
+                }}
+                className={`glass-button border-red-500/30 bg-red-600/20 px-3 text-xs text-red-200 ${TOUCH}`}
+                data-testid={`mdm-wipe-${device.device_key}`}
+              >
+                <ShieldAlert size={14} /> Wipe…
+              </button>
+            )}
           </div>
-          {showApps && <AppControls owner={device.owner_username} />}
+          {hasOwner && showApps && <AppControls owner={owner} />}
+          {!hasOwner && (
+            <p className="text-[11px] text-amber-200/90" data-testid={`mdm-no-owner-${device.device_key}`}>
+              Assign an owner above to push updates, lock or wipe this {noun}.
+            </p>
+          )}
         </>
       )}
     </li>
@@ -1132,7 +1149,22 @@ function FolderCard({ folder, members }: { folder: MdmFolder; members: MdmMember
   const label = folder.folder === 'school' ? 'School' : 'Library';
   const Icon = folder.folder === 'school' ? GraduationCap : BookOpen;
   const [selected, setSelected] = useState<string[]>(folder.pushed_to);
+  // Which file is being fetched, so a second tap cannot start another download.
+  const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['mdm-files'] });
+
+  // The route needs the API key, so a bare link would 401: fetch the bytes with
+  // the key and save them, the same way the child's own panel does.
+  const download = async (name: string) => {
+    setDownloadBusy(name);
+    try {
+      downloadBlobUrl(URL.createObjectURL(await api.getMdmFileBlob(folder.folder, name)), name);
+    } catch {
+      toast.error(`Could not download ${name}`);
+    } finally {
+      setDownloadBusy(null);
+    }
+  };
 
   const upload = useMutation({
     mutationFn: (file: File) => api.uploadMdmFile(folder.folder, file),
@@ -1163,8 +1195,13 @@ function FolderCard({ folder, members }: { folder: MdmFolder; members: MdmMember
           {folder.files.length === 0 && <li className="text-slate-500">No files in this folder yet.</li>}
           {folder.files.map((f) => (
             <li key={f.name} className="flex items-center justify-between gap-2">
-              <a className="min-w-0 truncate text-slate-200 hover:text-white"
-                href={`/api/mdm/files/${folder.folder}/${encodeURIComponent(f.name)}`}>{f.name}</a>
+              <button type="button" onClick={() => void download(f.name)} disabled={downloadBusy === f.name}
+                className={`flex min-w-0 flex-1 items-center gap-2 truncate text-left text-slate-200 hover:text-white disabled:opacity-60 ${TOUCH}`}>
+                {downloadBusy === f.name
+                  ? <Loader2 size={12} className="shrink-0 animate-spin" />
+                  : <Download size={12} className="shrink-0 text-slate-400" />}
+                <span className="min-w-0 truncate">{f.name}</span>
+              </button>
               <button type="button" onClick={() => remove.mutate(f.name)} aria-label={`Remove ${f.name}`}
                 className={`shrink-0 rounded-lg p-2 text-slate-400 hover:text-red-300 ${TOUCH}`}>
                 <Trash2 size={14} />

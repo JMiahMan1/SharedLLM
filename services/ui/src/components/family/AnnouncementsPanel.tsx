@@ -241,9 +241,9 @@ const AnnouncementsPanel = () => {
       <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
         <section className="glass-panel p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <Clock3 size={20} className="shrink-0 text-orange-300" />
-              <div>
+              <div className="min-w-0">
                 <h3 className="text-xl font-bold text-white">Active Timers</h3>
                 <p className="text-sm text-slate-400">Egg timers, alarms, and household reminders across ESPHome & mobile devices.</p>
               </div>
