@@ -1105,8 +1105,15 @@ export const api = {
     return resp.data;
   },
 
-  /** Push an app-update notice to the owners of the selected devices (admin). */
-  async pushMdmAppUpdate(body: { device_keys?: string[]; usernames?: string[] }): Promise<{ sent: number; owners: string[]; version: string }> {
+  /** Push an app-update notice to selected people, or to specific devices (admin).
+   *
+   * A person is pushed to on every device they are signed in on; a named device
+   * instead gets its own notice on its next check-in (``queued``), so one of a
+   * person's two devices can be told without telling the other.
+   */
+  async pushMdmAppUpdate(body: { device_keys?: string[]; usernames?: string[] }): Promise<{
+    sent: number; queued: number; owners: string[]; devices: string[]; version: string;
+  }> {
     const resp = await apiClient.post('/api/mdm/devices/update', body);
     return resp.data;
   },

@@ -101,7 +101,11 @@ beforeEach(() => {
     http.post('/api/screen-time/:username/pause', () => HttpResponse.json({ rules: {} })),
     http.post('/api/mdm/devices/update', async ({ request }) => {
       pushed.push((await request.json()) as Record<string, unknown>);
-      return HttpResponse.json({ status: 'SUCCESS', sent: 1, owners: ['kid'], version: '2.0.0' });
+      // A named device is queued for its own check-in; nothing is pushed to the
+      // person, whose other devices must not hear about it.
+      return HttpResponse.json({
+        status: 'SUCCESS', sent: 0, queued: 1, owners: [], devices: ['kid-phone-0001'], version: '2.0.0',
+      });
     }),
     http.post('/api/mdm/devices/:key/wipe', ({ params }) => {
       wiped.push(String(params.key));
@@ -120,10 +124,23 @@ describe('Devices page', () => {
     expect(screen.getByTestId('mdm-unreadable')).toHaveTextContent('Dad');
   });
 
-  it('pushes an update notice to the selected device', async () => {
+  it('queues the update notice for the selected device, not its owner', async () => {
     renderWithProviders(<Devices />);
     fireEvent.click(await screen.findByTestId('mdm-update-kid-phone-0001'));
     await waitFor(() => expect(pushed).toEqual([{ device_keys: ['kid-phone-0001'] }]));
+    // The toast says where it goes: an ordinary push would have reached every
+    // device the owner is signed in on.
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining('queued for this phone')));
+  });
+
+  it('shows a queued notice as still waiting for the phone to check in', async () => {
+    server.use(http.get('/api/mdm/devices', () => HttpResponse.json({
+      ...inventory,
+      devices: [{ ...inventory.devices[0], pending_notices: 1 }],
+    })));
+    renderWithProviders(<Devices />);
+    expect(await screen.findByText(/1 notice queued for this phone/)).toBeInTheDocument();
   });
 
   it('says "Locked" on a device-owner phone, where the lock is real', async () => {

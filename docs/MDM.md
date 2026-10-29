@@ -16,6 +16,7 @@ one source of truth for devices, screen rules and the family list. The page is
 | Device inventory | `GET /api/mdm/devices` | father / admin |
 | Device kind / label / owner update | `PATCH /api/user-panel/devices/{key}` | admin |
 | App-update push | `POST /api/mdm/devices/update` | admin |
+| A phone's own queued notices | `POST /api/mdm/devices/notices/ack` | the device's owner |
 | Direct ESPHome management | `POST /execute/esphome` (`list`, `call`, `configure_jarvis`, `ota`) | authenticated / admin |
 | ESPHome OTA firmware upload | `POST /api/mdm/esphome/{device}/ota` | admin |
 | Shared School and Library folders | `GET/POST/DELETE /api/mdm/files*` | admin |
@@ -158,14 +159,35 @@ status the phone already polls; the guard erases the phone on its next
 check-in. An old queued wipe is ignored so a phone that was offline for longer
 than that does not erase itself unexpectedly later.
 
+## Per-device notices
+
+An update notice can name a person or a device, and the two go to different
+places:
+
+- **A person** is pushed to (`sent`): the notice reaches every device they are
+  signed in on, because telemetry publishes it to that person's one ntfy topic.
+- **A device** is queued for (`queued`): the notice is written under the device
+  key in `notice_requests.json` and handed to that phone on its own check-in -
+  the screen-time status its guard already polls, the same way a queued wipe is.
+  Nothing is pushed to the person, so their other devices never hear about a
+  build that was meant for one of them.
+
+The phone names itself with `?device_key=…` on the status poll. The key only
+counts when identity says it belongs to the member whose status is being read,
+so one phone cannot read another's queue, and a check-in without a key gets no
+`notices` field at all. The phone acks what it has shown
+(`POST /api/mdm/devices/notices/ack`, the owner or an admin only), and an
+unshown notice is forgotten after seven days, so a phone that was off for a
+week does not announce a long-gone build. At most 20 notices wait per device,
+and the Devices page shows them as "Waiting" on that device until its next
+check-in.
+
 ## What is still open
 
-- **Per-device update notices.** The update push is per owner today: selecting
-  one of a person's two devices still notifies that person. The notice and push
-  plumbing is per user (telemetry stores subscriptions and the FCM token under
-  the username, and the app-update version is global), so there is no clean
-  device dimension to target; this needs a device-scoped delivery channel before
-  it can be honest.
+- **The phone showing a queued notice.** The gateway queues it, hands it over on
+  the check-in and the Devices page shows it waiting; the guard does not yet
+  read `notices` on its poll or ack it (`GuardApi` / `GuardNotices`), so a
+  device-scoped notice is not yet shown on the phone itself.
 - **Wipe needs device owner.** Like the Phase 11 Layer 2 restrictions, it only
   takes effect on a phone provisioned as device owner
   (`adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver`).

@@ -922,6 +922,11 @@ function DeviceCard({
         ['Jarvis app', device.app_version ? `${device.app_version}${device.app_build ? ` (build ${device.app_build})` : ''}` : 'unknown'],
         ...(batteryText ? ([['Battery', batteryText]] as Array<[string, string]>) : []),
         ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
+        // A queued notice has not been shown yet: this phone has not checked in
+        // since the parent pushed it.
+        ...(device.pending_notices
+          ? ([['Waiting', `${device.pending_notices} notice${device.pending_notices === 1 ? '' : 's'} queued for this ${noun}`]] as Array<[string, string]>)
+          : []),
       ];
 
   const assignOwner = useMutation({
@@ -935,7 +940,18 @@ function DeviceCard({
 
   const update = useMutation({
     mutationFn: () => api.pushMdmAppUpdate({ device_keys: [device.device_key] }),
-    onSuccess: (r) => toast.success(`Update notice sent to ${r.owners.join(', ')}`),
+    onSuccess: (r) => {
+      // A named device is queued for, not pushed to: say where it goes, because
+      // an ordinary push would reach every device its owner is signed in on.
+      if (r.queued) {
+        toast.success(`Update notice queued for this ${noun} — it shows when the app next checks in`);
+      } else if (r.owners.length) {
+        toast.success(`Update notice sent to ${r.owners.join(', ')}`);
+      } else {
+        toast.success('Update notice sent');
+      }
+      onRefresh();
+    },
     onError: (e: Error) => toast.error(e.message || 'Could not push the update'),
   });
   const lock = useMutation({
