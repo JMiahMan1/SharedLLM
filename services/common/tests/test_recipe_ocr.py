@@ -73,3 +73,108 @@ def test_junk_values_are_dropped_rather_than_invented():
 def test_an_hour_is_converted_to_minutes():
     recipe = recipe_ocr.parse({"recipe": {"title": "Roast", "cook_minutes": "1 hour"}})["recipe"]
     assert recipe["cook_minutes"] == 60
+
+
+#: A typed recipe card, transcribed as the vision model reads it off the page.
+TYPED_CARD_TEXT = """Grandma's Banana Bread
+Serves 8
+Prep 15 min | Cook 55 min | Total 1 hr 10 min
+
+Ingredients
+3 ripe bananas, mashed
+1/2 cup butter, melted
+3/4 cup sugar
+1 egg, beaten
+1 1/2 cups all-purpose flour
+1 tsp baking soda
+
+Directions
+Preheat the oven to 350F and grease a loaf pan.
+Mash the bananas and stir in the melted butter and sugar.
+Beat in the egg, then fold in the flour and baking soda.
+Bake for 55 minutes, until a toothpick comes out clean."""
+
+
+def test_a_typed_recipe_card_becomes_a_complete_draft():
+    draft = recipe_ocr.parse(
+        {
+            "full_text": TYPED_CARD_TEXT,
+            "recipe": {
+                "title": "Grandma's Banana Bread",
+                "servings": "8",
+                "prep_minutes": 15,
+                "cook_minutes": 55,
+                "total_minutes": 70,
+                "ingredients": [
+                    "3 ripe bananas, mashed",
+                    "1/2 cup butter, melted",
+                    "3/4 cup sugar",
+                    "1 egg, beaten",
+                    "1 1/2 cups all-purpose flour",
+                    "1 tsp baking soda",
+                ],
+                "steps": [
+                    "Preheat the oven to 350F and grease a loaf pan.",
+                    "Mash the bananas and stir in the melted butter and sugar.",
+                    "Beat in the egg, then fold in the flour and baking soda.",
+                    "Bake for 55 minutes, until a toothpick comes out clean.",
+                ],
+                "notes": "",
+            },
+            "uncertain": [],
+        }
+    )
+    assert draft["missing"] == []
+    assert draft["uncertain"] == []
+    assert draft["raw_text"].startswith("Grandma's Banana Bread")
+    recipe = draft["recipe"]
+    assert recipe["title"] == "Grandma's Banana Bread"
+    assert len(recipe["ingredients"]) == 6
+    assert recipe["ingredients"][0] == "3 ripe bananas, mashed"
+    assert len(recipe["instructions"]) == 4
+    assert recipe["prep_minutes"] == 15
+    assert recipe["cook_minutes"] == 55
+    assert recipe["total_minutes"] == 70
+    assert recipe["yield"] == "8"
+
+
+#: A handwritten index card: the model reads the title and the list but cannot
+#: make out the cooking step, and flags the words it had to guess at.
+HANDWRITTEN_CARD_TEXT = """Ma's Chili
+1 lb ground beef
+1 onion, chopped
+2 cans kidney beans
+1 big can tomatoes
+chili powder - a few spoons
+
+brown the meat w/ the onion, add the rest, simmer"""
+
+
+def test_a_handwritten_card_keeps_the_raw_text_and_names_what_it_could_not_read():
+    draft = recipe_ocr.parse(
+        {
+            "full_text": HANDWRITTEN_CARD_TEXT,
+            "recipe": {
+                "title": "Ma's Chili",
+                "ingredients": [
+                    "1 lb ground beef",
+                    "1 onion, chopped",
+                    "2 cans kidney beans",
+                    "1 big can tomatoes",
+                    "chili powder - a few spoons",
+                ],
+                "steps": [],
+            },
+            "uncertain": ["simmer (line 8)", "a few spoons (line 5)"],
+        }
+    )
+    # The step could not be read, so it is named rather than invented.
+    assert draft["missing"] == ["steps"]
+    assert draft["uncertain"] == ["simmer (line 8)", "a few spoons (line 5)"]
+    assert draft["raw_text"].startswith("Ma's Chili")
+    recipe = draft["recipe"]
+    assert recipe["title"] == "Ma's Chili"
+    assert recipe["ingredients"][0] == "1 lb ground beef"
+    assert recipe["instructions"] == []
+    # The card states no yield, so it stays empty rather than guessed.
+    assert recipe["yield"] == ""

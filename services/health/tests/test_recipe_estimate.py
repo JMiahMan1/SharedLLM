@@ -102,6 +102,27 @@ class TestEstimate:
         assert result["matched"] == 0
         assert result["totals"] is None
 
+    def test_estimates_a_real_recipe_ingredient_list(self, mini_seed_path):
+        """A full recipe's list walks through in one call, matching what it can."""
+        ingredients = [
+            "2 cups broccoli",  # the fixture seed can weigh this
+            "3 ripe bananas, mashed",
+            "1/2 cup butter, melted",
+            "3/4 cup sugar",
+            "1 egg, beaten",
+            "1 1/2 cups all-purpose flour",
+            "1 tsp baking soda",
+        ]
+        result = recipe_estimate.estimate_ingredients(ingredients, FoodSeed(mini_seed_path))
+        assert result["estimate"] is True
+        assert len(result["ingredients"]) == len(ingredients)
+        assert result["matched"] + result["unknown"] == len(ingredients)
+        assert result["ingredients"][0]["status"] == "matched"
+        for row in result["ingredients"]:
+            assert row["status"] in ("matched", "unknown")
+            if row["status"] == "unknown":
+                assert row["reason"]  # every skip names why, never a silent zero
+
 
 class TestEstimateEndpoint:
     def test_estimates_through_the_api(self, client, mini_seed_path, monkeypatch):
