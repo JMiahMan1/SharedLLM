@@ -38,6 +38,24 @@ describe('parseRecipeNutrition', () => {
     });
   });
 
+  it('reads a hand-typed line and leaves the source blank', () => {
+    // The example a person types into the note's own `## Nutrition` section.
+    const body = '## Nutrition\n*Per serving:* 280 kcal · 9 g fat · 31 g carbs · 21 g protein';
+    expect(parseRecipeNutrition(body)).toEqual({
+      status: 'ok',
+      perServing: {
+        calories: 280,
+        protein_g: 21,
+        carbs_g: 31,
+        fat_g: 9,
+        fiber_g: null,
+        sugar_g: null,
+        sodium_mg: null,
+        source: '',
+      },
+    });
+  });
+
   it('does not take saturated fat for fat', () => {
     const body = '## Nutrition\n*Per serving - foodcom:* 3 g sat fat · 200 kcal · 9 g fat · 10 g carbs · 4 g protein';
     const result = parseRecipeNutrition(body);

@@ -8,6 +8,9 @@ from services.execution.handlers import image_edit as image_edit_mod
 from services.execution.handlers import ocr as ocr_mod
 from services.execution.schemas import ImageEditRequest, OcrRequest
 
+#: The real photos kept for the import tests: a handwritten card and a label.
+_RECIPE_PHOTOS = Path(__file__).resolve().parents[3] / "test" / "fixtures" / "recipes"
+
 
 def _async(value):
     async def _inner():
@@ -111,6 +114,35 @@ async def test_ocr_inline_image_needs_no_workspace_and_leaves_no_file(monkeypatc
     assert result.status == "SUCCESS" and result.detail["full_text"] == "Calories 120"
     assert seen["task"] == "document"
     assert not Path(seen["path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_ocr_inline_accepts_a_real_photo_and_leaves_no_file(monkeypatch):
+    """The inline path the recipe photo import uses carries the real bytes and hands
+    the model a file it can actually open, then always cleans it up."""
+    image = (_RECIPE_PHOTOS / "sugar-cookies-card.png").read_bytes()
+    seen: dict = {}
+
+    async def fake_ocr(path, user_context=None, proxy_url=None, model=None, task="general"):
+        from PIL import Image
+
+        seen["path"], seen["task"] = path, task
+        with Image.open(path) as im:
+            seen["size"] = im.size
+        return {"full_text": "Sugar Cookies", "recipe": {"title": "Sugar Cookies"}, "uncertain": []}
+
+    monkeypatch.setattr(ocr_mod.vision_ocr, "vision_ocr_screenshot", fake_ocr)
+    req = _ocr_req(
+        workspace_id=None,
+        image_path=None,
+        image_base64=base64.b64encode(image).decode(),
+        task="recipe",
+    )
+    result = await ocr_mod.handle_ocr(req)
+    assert result.status == "SUCCESS"
+    assert seen["task"] == "recipe"
+    assert seen["size"] == (993, 600)  # the card's real size, decoded from the bytes
+    assert not Path(seen["path"]).exists()  # the temp file is always removed
 
 
 @pytest.mark.asyncio

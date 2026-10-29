@@ -1,12 +1,22 @@
 """Recipe photo import: the gateway reads a recipe photo through the vision OCR."""
+import base64
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from services.gateway import main as gateway_main
 from services.gateway.main import app
+
+#: The real photos kept for the import tests: a handwritten card and a label.
+RECIPE_PHOTOS = Path(__file__).resolve().parents[3] / "test" / "fixtures" / "recipes"
+
+
+def _photo(name: str) -> bytes:
+    """The actual bytes of a kept photo, so the upload path is exercised for real."""
+    return (RECIPE_PHOTOS / name).read_bytes()
 
 
 class _Resp:
@@ -85,6 +95,122 @@ def test_an_unreadable_photo_says_so_and_a_missing_one_is_refused(client, monkey
     assert client.post(
         "/api/recipes/photo", files={"other": ("x.jpg", b"x", "image/jpeg")}
     ).status_code == 422
+
+
+def test_a_typed_recipe_card_photo_round_trips_through_the_gateway(client, monkeypatch):
+    sent = _ocr_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "detail": {
+                "full_text": "Grandma's Banana Bread\nServes 8\nPrep 15 min | Cook 55 min",
+                "recipe": {
+                    "title": "Grandma's Banana Bread",
+                    "servings": "8",
+                    "prep_minutes": 15,
+                    "cook_minutes": 55,
+                    "total_minutes": 70,
+                    "ingredients": ["3 ripe bananas", "1/2 cup butter", "3/4 cup sugar"],
+                    "steps": ["Mash the bananas.", "Bake for 55 minutes."],
+                },
+                "uncertain": [],
+            },
+        },
+    )
+    body = client.post(
+        "/api/recipes/photo", files={"image": ("card.jpg", b"jpeg-bytes", "image/jpeg")}
+    ).json()
+    assert body["recipe"]["title"] == "Grandma's Banana Bread"
+    assert body["recipe"]["prep_minutes"] == 15 and body["recipe"]["cook_minutes"] == 55
+    assert body["recipe"]["yield"] == "8"
+    assert body["missing"] == [] and body["uncertain"] == []
+    assert sent[0]["json"]["task"] == "recipe"
+
+
+def test_a_handwritten_recipe_photo_names_what_could_not_be_read(client, monkeypatch):
+    _ocr_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "detail": {
+                "full_text": "Ma's Chili\n1 lb ground beef\n...simmer",
+                "recipe": {
+                    "title": "Ma's Chili",
+                    "ingredients": ["1 lb ground beef", "1 onion"],
+                    "steps": [],
+                },
+                "uncertain": ["simmer (line 8)"],
+            },
+        },
+    )
+    body = client.post(
+        "/api/recipes/photo", files={"image": ("card.jpg", b"jpeg-bytes", "image/jpeg")}
+    ).json()
+    assert body["recipe"]["title"] == "Ma's Chili"
+    assert body["recipe"]["instructions"] == []
+    assert body["missing"] == ["steps"]
+    assert body["uncertain"] == ["simmer (line 8)"]
+
+
+def test_the_real_handwritten_card_photo_travels_through_the_upload_path(client, monkeypatch):
+    """The picture the family actually scans goes through the same path: its real
+    bytes are base64'd onto the OCR call and the draft comes back to the page."""
+    image = _photo("sugar-cookies-card.png")
+    sent = _ocr_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "detail": {
+                "full_text": (
+                    "Sugar Cookies  Ann.\n1 cup sugar\n1 cup br. sugar\n1 cup shortening\n"
+                    "2 eggs\n2 teaspoon cr. of tartar\n2 teaspoon vanilla\n1 teaspoon soda\n"
+                    "2 1/4 cup flour - more if needed\n"
+                    "Roll in balls dip in cold water then in sugar. Bake at 350 15 min."
+                ),
+                "recipe": {
+                    "title": "Sugar Cookies",
+                    "servings": None,
+                    "ingredients": [
+                        "1 cup sugar",
+                        "1 cup br. sugar",
+                        "1 cup shortening",
+                        "2 eggs",
+                        "2 teaspoon cr. of tartar",
+                        "2 teaspoon vanilla",
+                        "1 teaspoon soda",
+                        "2 1/4 cup flour - more if needed",
+                    ],
+                    "steps": ["Roll in balls, dip in cold water then in sugar.", "Bake at 350 for 15 min."],
+                },
+                "uncertain": ["br. (line 2)", "cr. (line 5)"],
+            },
+        },
+    )
+    body = client.post(
+        "/api/recipes/photo",
+        files={"image": ("sugar-cookies-card.png", image, "image/png")},
+    ).json()
+    assert body["recipe"]["title"] == "Sugar Cookies"
+    assert len(body["recipe"]["ingredients"]) == 8
+    assert body["recipe"]["instructions"] == [
+        "Roll in balls, dip in cold water then in sugar.",
+        "Bake at 350 for 15 min.",
+    ]
+    assert body["missing"] == []
+    assert body["uncertain"] == ["br. (line 2)", "cr. (line 5)"]
+    # The real photo travelled, whole, base64-encoded, on the OCR call.
+    assert base64.b64decode(sent[0]["json"]["image_base64"]) == image
+    assert sent[0]["json"]["task"] == "recipe"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"
+
+
+def test_the_real_photos_are_readable_images():
+    """The kept photos are genuine images the OCR pipeline can open, not placeholders."""
+    from PIL import Image
+
+    for name in ("sugar-cookies-card.png", "food-label.webp"):
+        with Image.open(RECIPE_PHOTOS / name) as im:
+            assert im.width > 100 and im.height > 100
 
 
 class _ProxyResp:
