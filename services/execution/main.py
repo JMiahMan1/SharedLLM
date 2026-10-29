@@ -50,6 +50,7 @@ from services.execution.handlers import (
     groups,
     learning,
     light,
+    meal_plan,
     media,
     note,
     recipe_import,
@@ -101,6 +102,7 @@ from services.execution.schemas import (
     ListVoicesRequest,
     LLMInfoRequest,
     LogbookRequest,
+    MealPlanRequest,
     MediaPlayRequest,
     MediaStateSyncRequest,
     MediaStatusRequest,
@@ -958,6 +960,10 @@ async def execute_note(req: NoteRequest):
 @app.post("/execute/recipes", response_model=ExecutionResult)
 async def execute_recipes(req: RecipeRequest):
     return await recipe_import.handle_recipe(req)
+
+@app.post("/execute/meal_plan", response_model=ExecutionResult)
+async def execute_meal_plan(req: MealPlanRequest):
+    return await meal_plan.handle_meal_plan(req)
 
 @app.post("/execute/activity", response_model=ExecutionResult)
 async def execute_activity(req: ActivityRequest):

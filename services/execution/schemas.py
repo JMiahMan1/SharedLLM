@@ -449,6 +449,22 @@ class RecipeRequest(BaseRequest):
     id: int | None = None  # shelf_fetch: an offline index row
 
 
+class MealPlanRequest(BaseRequest):
+    """Plan one dinner into the week's meal-plan note from a spoken request.
+
+    The assistant turns "add a slow-cooker meal to Tuesday" into one call. The
+    day comes from the sentence (or ``day`` when the caller already resolved
+    it); the recipe name is ``recipe`` when the assistant found one, else the
+    phrase in the sentence. The handler owns nothing but the note: it reads and
+    rewrites ``Recipes/Meal plan.md`` through the ordinary note API.
+    """
+
+    user_context: UserContext
+    text: str | None = None  # the spoken sentence, e.g. "add a slow-cooker meal to Tuesday"
+    day: str | None = None  # an explicit plan day ("Tue" / "Tuesday") when already resolved
+    recipe: str | None = None  # an explicit recipe title when the assistant already found one
+
+
 # Timers / Alarms / Household Reminders
 class TimerRequest(BaseRequest):
     user_context: UserContext

@@ -484,6 +484,13 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("NoteRequest", SVC_EXECUTION, "POST", "/execute/note", False,
      "Notes: create, read, append, delete, list.",
      "payload fields: action, title, content, category, item, storage, directories, path."),
+    ("MealPlanRequest", SVC_EXECUTION, "POST", "/execute/meal_plan", False,
+     "Plan a dinner into the family's week plan note (Recipes/Meal plan.md) from a "
+     "spoken request: the day is read from the sentence (\"add a slow-cooker meal to "
+     "Tuesday\") or from `day`, the recipe is matched against the Recipes shelf, and "
+     "only that day's line is rewritten. A failed plan read is reported, never planned over.",
+     "payload fields: text, day, recipe. text is the spoken sentence; day (\"Tue\") and "
+     "recipe are optional when the caller already resolved them."),
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
      "Timers, alarms, and household reminders: create, list, pause, resume, reset, stop, cancel across one or multiple devices (speakers, ESPHome screens, mobile app).",
      "payload fields: action, type, id, query, title, duration_str, time_str, recurrence, target_device, target_devices, scope, emoji, sound, tts_enabled, esphome_script, flash_screen."),

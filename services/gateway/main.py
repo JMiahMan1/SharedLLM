@@ -5351,6 +5351,24 @@ async def proxy_recipe_import(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/recipes/plan")
+async def proxy_recipe_plan(request: Request):
+    """Plan a dinner into the week's meal plan from a spoken request.
+
+    The assistant's write action for the Recipes plan: the day is read from the
+    sentence (or passed in), the recipe is matched against the shelf, and the
+    one day line in ``Recipes/Meal plan.md`` is rewritten. A plan read that
+    fails is reported, never overwritten with an empty week.
+    """
+    body = await request.json()
+    payload = {
+        "text": body.get("text"),
+        "day": body.get("day"),
+        "recipe": body.get("recipe"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/meal_plan", payload, as_user=body.get("as_user"))
+
+
 _RECIPE_PHOTO_MAX_BYTES = 8 * 1024 * 1024
 
 

@@ -33,6 +33,16 @@ Create, read, append, or list notes in Nextcloud or local storage.
   - `{"tool": "NoteRequest", "action": "list"}`
   - `{"tool": "NoteRequest", "action": "read", "title": "Groceries"}`
 
+### MealPlanRequest
+Plan a dinner into the family's week plan (`Recipes/Meal plan.md`) from a spoken request.
+- Fields: `tool`, `text` (the sentence, e.g. `"add a slow-cooker meal to Tuesday"`).
+- Optional: `day` (a plan day such as `"Tue"` when you already resolved it), `recipe` (the exact recipe title when you found one on the Recipes shelf).
+- The day is read from `text` (or `day`); a recipe you name is matched against the Recipes shelf and the note's own title is used. Only that day's line changes - the rest of the week is left as it was.
+- Examples:
+  - `{"tool": "MealPlanRequest", "text": "add a slow-cooker meal to Tuesday"}`
+  - `{"tool": "MealPlanRequest", "text": "plan pizza for Friday", "recipe": "Pizza"}`
+- This tool has no delete action. A plan it cannot read is reported, never overwritten with an empty week.
+
 ### WorkspaceCreateRequest
 Create a new isolated workspace environment.
 - Fields: `tool`, `display_name` (or `name`), optional `id`.
