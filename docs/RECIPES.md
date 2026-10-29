@@ -1,19 +1,18 @@
 # Recipes and meal planning
 
-Status: **Phases 0-6 and 8-11 built** - the importer (`scripts/import_recipes.py`) renders the
+Status: **Phases 0-11 built** - the importer (`scripts/import_recipes.py`) renders the
 first level-balanced note set; the Recipes page (plan, shopping list, search, link and
 photo import, the duplicate-import guard) and the Health connection (recipe logging, the
 Dinner tonight card with a planned-vs-eaten comparison and a USDA-seed estimate, and the
 editor's nutrition summary) are live. Phase 7's Skylight Meals connector, API surface and
 UI actions are built and fake-HTTP tested (the live write paths are unverified - see below);
 Phase 5's assistant write action is built too - Jarvis can plan a dinner into the week from a
-sentence ("add a slow-cooker meal to Tuesday"). Staple-overlap ranking (the one
-Phase 6 item not built) is still open. The
+sentence ("add a slow-cooker meal to Tuesday"). Staple-overlap ranking is built too (see Phase 6),
+and Phase 7's no-credentials fallback publishes the week as an iCalendar feed with no Skylight
+account. The
 meal-planning half of Phase 6 - plan parsing and grocery-list merging - is built and tested:
 the plan editor and the shopping list are plain markdown under `Recipes/`, and
-`services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Staple-overlap
-ranking is the one part not built, because the shelf lists titles and the list is assembled by
-fetching each uncooked recipe's body - a ranking needs an ingredient index first. Live: version
+`services/ui/src/lib/mealPlan.ts` / `shoppingList.ts` parse and rebuild them. Live: version
 1.6.0 (the deployed commit is tracked in the project's local handover notes, which are kept out of the repository).
 
 Goal: fill the family's Recipes shelf with kid-tiered, fast and appliance-friendly meals,
@@ -168,9 +167,13 @@ runs nightly in CI.
 - [x] UI tests: share-to-chat on a recipe, plan editor writes the note, list keeps ticks.
 - [x] `npm run typecheck`, `npm run lint`, full test suites, `npm run build`.
 - [x] Update `docs/FAMILY_HUB.md` (Recipes section) and this doc.
-- [ ] Staple-overlap ranking: not built. The shelf API lists titles, and the shopping list fetches
-      each uncooked recipe's body, so ranking needs an ingredient index (or a server-side ingredient
-      field) and a place to show it. Left out rather than guessed at.
+- [x] Staple-overlap ranking. `POST /api/recipes/staples` (`recipe_staples` in
+      `services/execution/handlers/recipe_import.py`) reads each note's body server-side (the
+      listing carries titles only), scores it against the household staple list (ported from
+      `scripts/import_recipes.py`), caches by note version like the duplicate guard, and returns
+      the shelf ranked by staple count (ties alphabetical). The Recipes shelf has a "Rank by
+      staples" toggle that sorts the cards and shows each one's count; a read that fails leaves
+      that note at zero rather than failing the ranking.
 - [ ] Deploy and verify live after the next Recipes change (a doc-only pass needs no deploy).
 
 ## Phase 7 - Skylight integration
@@ -208,9 +211,13 @@ account is connected, everything above still works.
       shopping list onto the frame's grocery list (additive by default, so a
       tick made on the display survives; the connector can bulk-delete for a
       replace) so it is tickable on the display too.
-- [ ] **Fallback without credentials** - publish the week's dinners as
-      calendar events into a calendar Skylight already syncs (Google/iCloud or
-      a public ICS feed); the Skylight's unique email can also receive events.
+- [x] **Fallback without credentials** - "Add week to calendar (.ics)" in the plan action row
+      publishes the week's dinners as an iCalendar feed (`POST /api/recipes/plan/ics` ->
+      `build_plan_ics` in `services/execution/handlers/meal_plan.py`): one 18:00 dinner event
+      per planned day, UID'd by date so a republish replaces rather than duplicates. It reads
+      `Recipes/Meal plan.md` and writes nothing, so it needs no Skylight account - the household
+      subscribes the feed from a calendar Skylight already syncs (Google/iCloud or a public ICS
+      feed); the Skylight's unique email can also receive events.
 - [x] **Tests** - fake-HTTP tests for recipes, sittings (blank-`summary` 422,
       array `data`, `instances` lagging) and grocery list bulk delete
       (`services/execution/tests/test_skylight_meals.py`), the gateway proxy

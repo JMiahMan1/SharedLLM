@@ -17,8 +17,12 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
+import pytz
+from icalendar import Calendar, Event
+
+from services.config import TIMEZONE
 from services.execution.schemas import ExecutionResult, MealPlanRequest, NoteRequest
 
 from .note import handle_note, note_body
@@ -196,6 +200,56 @@ def apply_meal(body: str | None, day: str, title: str, cooked: bool | None = Non
     return "\n".join(lines)
 
 
+#: The local dinner hour the fallback feed publishes (Phase 7 no-credentials path).
+DINNER_HOUR = 18
+
+
+def plan_entries(body: str | None) -> list[tuple[str, str]]:
+    """(day, title) for every planned dinner in the note, in plan order."""
+    found: dict[str, str] = {}
+    for line in (body or "").split("\n"):
+        match = _DAY_LINE.match(line)
+        if not match:
+            continue
+        day = normalize_plan_day(match.group(2))
+        title = (match.group(3) or "").strip()
+        if day and title:
+            found[day] = title
+    return [(day, found[day]) for day in PLAN_DAYS if day in found]
+
+
+def build_plan_ics(body: str | None, today: date | None = None) -> tuple[str, int]:
+    """The week's planned dinners as an iCalendar feed (the no-credentials fallback).
+
+    One event per planned day, dated on this week's Monday-based dates at the
+    household's dinner hour, so a calendar the Skylight already syncs (Google,
+    iCloud, or a public ICS feed) shows the plan without the Skylight
+    connector. The UID is the date, so re-publishing replaces a day's event
+    instead of stacking a second copy. Returns the calendar text and the event
+    count.
+    """
+    base = today or date.today()
+    monday = base - timedelta(days=base.weekday())
+    tz = pytz.timezone(TIMEZONE)
+    calendar = Calendar()
+    calendar.add("prodid", "-//Jarvis OS//Meal plan//EN")
+    calendar.add("version", "2.0")
+    stamp = datetime.now(tz)
+    events = 0
+    for day, title in plan_entries(body):
+        when = monday + timedelta(days=PLAN_DAYS.index(day))
+        start = tz.localize(datetime.combine(when, time(hour=DINNER_HOUR)))
+        event = Event()
+        event.add("uid", f"meal-plan-{when.isoformat()}@jarvis-os")
+        event.add("dtstamp", stamp)
+        event.add("dtstart", start)
+        event.add("dtend", start + timedelta(hours=1))
+        event.add("summary", f"Dinner: {title}")
+        calendar.add_component(event)
+        events += 1
+    return calendar.to_ical().decode("utf-8"), events
+
+
 def _note_missing(message: str | None) -> bool:
     """A note-read failure that only means the note is not there yet."""
     return "not found" in (message or "").lower()
@@ -241,8 +295,34 @@ async def _recipe_title(req: MealPlanRequest, name: str) -> str:
     return match_recipe_title(name, titles)
 
 
+async def _plan_ics(req: MealPlanRequest) -> ExecutionResult:
+    """The week plan as an ICS feed, for the household's own calendar.
+
+    The no-credentials fallback for Phase 7: nothing is written and no Skylight
+    account is needed. A plan that cannot be read is reported; an empty plan is
+    named rather than published as an empty calendar.
+    """
+    body, failure = await _plan_body(req)
+    if failure is not None:
+        return failure
+    text, events = build_plan_ics(body)
+    if events == 0:
+        return ExecutionResult.fail(
+            "No dinners are planned yet, so there is nothing to publish.",
+            service="meal_plan",
+        )
+    return ExecutionResult.ok(
+        f"Ready to publish {events} dinner(s) to a calendar.",
+        service="meal_plan",
+        detail={"ics": text, "events": events},
+    )
+
+
 async def handle_meal_plan(req: MealPlanRequest) -> ExecutionResult:
-    """Plan one dinner into the week's meal plan."""
+    """Plan one dinner into the week's meal plan, or publish the week as ICS."""
+    if req.action == "ics":
+        return await _plan_ics(req)
+
     service = "meal_plan"
     day = normalize_plan_day(req.day) or resolve_plan_day(req.text)
     if not day:

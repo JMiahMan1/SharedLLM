@@ -372,7 +372,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
             </button>
           </div>
 
-          <div className="mt-3 flex gap-1" role="tablist" aria-label="How to add food">
+          <div className="mt-3 flex flex-wrap gap-1" role="tablist" aria-label="How to add food">
             {([
               ['search', 'Search'],
               ['manual', 'By hand'],

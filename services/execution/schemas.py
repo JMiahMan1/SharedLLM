@@ -443,7 +443,7 @@ class ActivityRequest(BaseRequest):
 
 class RecipeRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["url_import", "recipe_search", "shelf_fetch", "recipe_sources"]
+    action: Literal["url_import", "recipe_search", "shelf_fetch", "recipe_sources", "recipe_staples"]
     url: str | None = None  # url_import: the page to read
     query: str | None = None  # themealdb_search / recipe_search: what to look for
     id: int | None = None  # shelf_fetch: an offline index row
@@ -457,9 +457,15 @@ class MealPlanRequest(BaseRequest):
     it); the recipe name is ``recipe`` when the assistant found one, else the
     phrase in the sentence. The handler owns nothing but the note: it reads and
     rewrites ``Recipes/Meal plan.md`` through the ordinary note API.
+
+    ``action="ics"`` is the no-credentials fallback: it reads the same note and
+    hands back the week's dinners as an iCalendar feed instead of writing, for
+    the household's calendar (Google/iCloud/a public ICS feed) to pick up when
+    the Skylight connector is not set up.
     """
 
     user_context: UserContext
+    action: Literal["plan", "ics"] = "plan"
     text: str | None = None  # the spoken sentence, e.g. "add a slow-cooker meal to Tuesday"
     day: str | None = None  # an explicit plan day ("Tue" / "Tuesday") when already resolved
     recipe: str | None = None  # an explicit recipe title when the assistant already found one

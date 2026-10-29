@@ -116,7 +116,7 @@ export default function VoiceFoodDraft({
 
   return (
     <div className="mt-3 space-y-3" data-testid="voice-food">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={async () => {
@@ -128,14 +128,14 @@ export default function VoiceFoodDraft({
           }}
           disabled={transcribe.isPending}
           aria-pressed={recording}
-          className={`flex min-h-11 items-center gap-2 rounded-xl border px-3 text-xs font-semibold ${
+          className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-xs font-semibold ${
             recording ? 'animate-pulse border-rose-500/40 bg-rose-500/20 text-rose-100' : 'border-white/10 bg-white/[0.03] text-slate-200'
           }`}
         >
           {transcribe.isPending ? <Loader2 size={14} className="animate-spin" /> : recording ? <Square size={14} /> : <Mic size={14} />}
           {recording ? 'Stop' : transcribe.isPending ? 'Listening back…' : 'Say what you ate'}
         </button>
-        <span className="text-[11px] text-slate-500">e.g. “two eggs and a slice of toast”</span>
+        <span className="min-w-0 text-[11px] text-slate-500">e.g. “two eggs and a slice of toast”</span>
       </div>
       <label className="block text-[11px] text-slate-500">
         What you said (edit freely)
@@ -163,8 +163,8 @@ export default function VoiceFoodDraft({
           {rows.map((row, index) => (
             <div key={`${row.heard}-${index}`} className="rounded-xl border border-white/10 bg-white/[0.03] p-2.5 text-xs" data-testid={`voice-row-${index}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-slate-400">Heard “{row.heard}”</span>
-                <button type="button" onClick={() => update(index, { pick: -1 })} aria-label={`Leave out ${row.heard}`} className="flex h-11 w-11 items-center justify-center text-slate-500 hover:text-red-300">
+                <span className="min-w-0 truncate text-slate-400">Heard “{row.heard}”</span>
+                <button type="button" onClick={() => update(index, { pick: -1 })} aria-label={`Leave out ${row.heard}`} className="flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-red-300">
                   <X size={13} />
                 </button>
               </div>

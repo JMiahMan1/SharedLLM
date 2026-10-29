@@ -206,3 +206,49 @@ async def test_a_sentence_with_no_recipe_is_refused(store):
     assert result.status == "FAILURE"
     assert "what should i plan" in result.message.lower()
     assert store.puts == []
+
+
+# --- the no-credentials fallback: the week as an ICS feed -------------------
+
+
+def test_build_plan_ics_publishes_one_event_per_planned_day():
+    body = "#meal-plan\n\n- [x] Mon · Chicken Chili\n- [ ] Tue · Pizza\n- [ ] Wed ·\n"
+    text, events = meal_plan.build_plan_ics(body, today=date(2026, 10, 28))  # a Wednesday
+    assert events == 2
+    assert "BEGIN:VCALENDAR" in text and "BEGIN:VEVENT" in text
+    assert "Dinner: Chicken Chili" in text and "Dinner: Pizza" in text
+    # Monday of that week is 2026-10-26; the events sit on the plan's own dates.
+    assert "20261026T180000" in text and "20261027T180000" in text
+    # The empty day publishes nothing.
+    assert "Wed" not in text
+
+
+def test_build_plan_ics_uid_is_the_date_so_a_republish_replaces():
+    text, _ = meal_plan.build_plan_ics("- [ ] Mon · Chili", today=date(2026, 10, 28))
+    assert "meal-plan-2026-10-26@jarvis-os" in text
+
+
+async def test_plan_ics_reads_the_note_and_returns_the_feed(store):
+    store.files[PLAN] = "#meal-plan\n\n- [ ] Mon · Chicken Chili\n- [ ] Fri · Pizza\n"
+    result = await meal_plan.handle_meal_plan(request(action="ics"))
+    assert result.status == "SUCCESS"
+    assert result.service == "meal_plan"
+    assert result.detail["events"] == 2
+    assert "BEGIN:VCALENDAR" in result.detail["ics"]
+    # A read, never a write.
+    assert store.puts == []
+
+
+async def test_plan_ics_names_an_empty_plan(store):
+    store.files[PLAN] = "#meal-plan\n\n- [ ] Mon ·\n"
+    result = await meal_plan.handle_meal_plan(request(action="ics"))
+    assert result.status == "FAILURE"
+    assert "No dinners are planned" in result.message
+    assert store.puts == []
+
+
+async def test_plan_ics_reports_a_failed_read(store):
+    store.fail_reads = True
+    result = await meal_plan.handle_meal_plan(request(action="ics"))
+    assert result.status == "FAILURE"
+    assert store.puts == []
