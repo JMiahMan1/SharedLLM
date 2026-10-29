@@ -6,6 +6,7 @@ member, a push with no published build), and reach the shared-folder store.
 """
 import base64
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -112,9 +113,11 @@ def test_inventory_aggregates_and_marks_unreadable_members(world):
          "app_version": "1.9.0", "capabilities": {"guard": {"deviceOwner": True}}},
     ]})
     # dad's own devices are refused by identity; that is reported, not invented.
+    mdm.queue_notice("kid-phone-0001", "kid", "Jarvis app 2.0.0 is available", "Update now.")
     body = client.get("/api/mdm/devices").json()
     assert [d["device_key"] for d in body["devices"]] == ["kid-phone-0001"]
     assert body["devices"][0]["owner_display_name"] == "Kid"
+    assert body["devices"][0]["pending_notices"] == 1  # waiting for its next check-in
     members = {m["username"]: m for m in body["members"]}
     assert members["kid"]["readable"] is True and members["kid"]["device_count"] == 1
     assert members["dad"]["readable"] is False and members["dad"]["device_count"] is None
@@ -152,18 +155,140 @@ def test_update_push_notices_the_owner_without_a_parents_only_audience(world):
                         "version": "2.0.0", "apk_version_code": 412}
     resp = client.post("/api/mdm/devices/update", json={"usernames": ["kid"]})
     assert resp.status_code == 200 and resp.json()["sent"] == 1
+    assert resp.json()["queued"] == 0  # a person is pushed to, not queued for
     note = state["notices"][0]
     assert note["user"] == "kid" and note["category"] == "app_updates"
     assert "audience" not in note  # reaches the device owner, a minor included
     assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings"}]
 
 
-def test_update_push_resolves_a_device_key_to_its_owner(world):
+def test_update_push_queues_a_notice_for_the_named_device_not_the_person(world):
+    """Selecting one phone must not tell the person's other phone."""
     client, state = world
     state["updates"] = {"bundle_available": True, "apk_available": False, "version": "2.0.0"}
     state["internal"]["/api/internal/device-registered/kid-phone-0001"] = (200, {"registered": True, "owner": "kid"})
     resp = client.post("/api/mdm/devices/update", json={"device_keys": ["kid-phone-0001"]})
-    assert resp.status_code == 200 and resp.json()["owners"] == ["kid"]
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sent"] == 0 and body["queued"] == 1
+    assert body["owners"] == [] and body["devices"] == ["kid-phone-0001"]
+    assert state["notices"] == []  # no push at all went out to the person
+
+    queued = mdm.notices_for("kid-phone-0001")
+    assert len(queued) == 1
+    note = queued[0]
+    assert note["owner"] == "kid"
+    assert note["title"] == "Jarvis app 2.0.0 is available"
+    assert note["body"].startswith("Update now:")
+    assert note["url"] == "/settings" and note["tag"] == "mdm_app_update"
+    assert note["actions"] == [{"label": "Update now", "type": "view", "url": "/settings"}]
+    assert mdm.notices_for("kid-tab-0002") == []  # only the named phone
+
+
+def test_update_push_refuses_a_device_key_nothing_owns(world):
+    client, state = world
+    state["updates"] = {"bundle_available": True, "apk_available": True, "version": "2.0.0"}
+    resp = client.post("/api/mdm/devices/update", json={"device_keys": ["ghost-phone"]})
+    assert resp.status_code == 422 and "not a registered device" in resp.json()["detail"]
+    assert mdm.notices_for("ghost-phone") == []  # nothing queued for a key nothing owns
+    assert state["notices"] == []
+
+
+def test_update_push_refuses_esphome_devices(world):
+    client, state = world
+    state["updates"] = {"bundle_available": True, "apk_available": True, "version": "2.0.0"}
+    resp = client.post("/api/mdm/devices/update", json={"device_keys": ["esphome:744dbd2c9728"]})
+    assert resp.status_code == 422 and "ESPHome" in resp.json()["detail"]
+
+
+def test_a_notice_is_handed_only_to_the_phone_that_owns_it(world, monkeypatch):
+    client, state = world
+    state["internal"]["/api/internal/device-registered/kid-phone-0001"] = (200, {"registered": True, "owner": "kid"})
+    state["internal"]["/api/internal/device-registered/dad-phone-0003"] = (200, {"registered": True, "owner": "dad"})
+    state["devices"]["/api/screen-time/kid/rules"] = (200, {"rules": {}, "technical": True})
+
+    async def _no_usage(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(gateway_main, "_own_telemetry", _no_usage)
+    mine = mdm.queue_notice("kid-phone-0001", "kid", "Jarvis app 2.0.0 is available", "Update now.", url="/settings")
+    mdm.queue_notice("kid-tab-0002", "kid", "Jarvis app 2.0.0 is available", "Update now.", url="/settings")
+
+    handed = client.get("/api/screen-time/kid/status", params={"device_key": "kid-phone-0001"}).json()
+    assert [n["id"] for n in handed["notices"]] == [mine["id"]]
+
+    # A check-in that does not name itself gets no notices field at all, so
+    # "not device-scoped" never reads as "nothing waiting".
+    assert "notices" not in client.get("/api/screen-time/kid/status").json()
+    # Another member's key is not a way to read their queue.
+    assert "notices" not in client.get("/api/screen-time/kid/status", params={"device_key": "dad-phone-0003"}).json()
+    # Nor is a key nothing owns.
+    assert "notices" not in client.get("/api/screen-time/kid/status", params={"device_key": "ghost"}).json()
+
+
+def test_a_phone_acknowledges_the_notices_it_showed(world, monkeypatch):
+    client, state = world
+    state["internal"]["/api/internal/device-registered/kid-phone-0001"] = (200, {"registered": True, "owner": "kid"})
+    first = mdm.queue_notice("kid-phone-0001", "kid", "Jarvis app 2.0.0 is available", "Update now.")
+    second = mdm.queue_notice("kid-phone-0001", "kid", "Jarvis app 2.0.0 is available", "Update now.")
+
+    state["caller"] = "kid"
+    resp = client.post("/api/mdm/devices/notices/ack", json={"device_key": "kid-phone-0001", "ids": [first["id"]]})
+    assert resp.status_code == 200 and resp.json()["cleared"] == 1
+    assert [n["id"] for n in mdm.notices_for("kid-phone-0001")] == [second["id"]]
+
+    # Someone else's phone is not theirs to clear.
+    state["caller"] = "kate"
+    resp = client.post("/api/mdm/devices/notices/ack", json={"device_key": "kid-phone-0001", "ids": [second["id"]]})
+    assert resp.status_code == 403
+    assert len(mdm.notices_for("kid-phone-0001")) == 1
+
+    # An admin acts for the family (the Devices page).
+    async def _admin(_request):
+        return True
+
+    monkeypatch.setattr(gateway_main, "_caller_is_admin", _admin)
+    state["caller"] = "dad"
+    resp = client.post("/api/mdm/devices/notices/ack", json={"device_key": "kid-phone-0001", "ids": [second["id"]]})
+    assert resp.status_code == 200 and resp.json()["cleared"] == 1
+    assert mdm.notices_for("kid-phone-0001") == []
+
+
+def test_ack_refuses_a_request_that_would_drop_the_wrong_notices(world):
+    client, state = world
+    state["internal"]["/api/internal/device-registered/kid-phone-0001"] = (200, {"registered": True, "owner": "kid"})
+    mdm.queue_notice("kid-phone-0001", "kid", "Jarvis app 2.0.0 is available", "Update now.")
+    state["caller"] = "kid"
+
+    assert client.post("/api/mdm/devices/notices/ack", json={"ids": ["x"]}).status_code == 422
+    assert client.post("/api/mdm/devices/notices/ack",
+                       json={"device_key": "kid-phone-0001", "ids": []}).status_code == 422
+    assert client.post("/api/mdm/devices/notices/ack",
+                       json={"device_key": "ghost", "ids": ["x"]}).status_code == 422
+    assert len(mdm.notices_for("kid-phone-0001")) == 1  # nothing was dropped
+
+
+def test_queued_notices_are_capped_and_expire(tmp_path):
+    root = tmp_path / "m"
+    for i in range(mdm.NOTICE_MAX + 2):
+        mdm.queue_notice("phone", "kid", f"build {i}", "Update now.", root=root)
+    live = mdm.notices_for("phone", root=root)
+    assert len(live) == mdm.NOTICE_MAX and live[0]["title"] == "build 2"
+
+    # A notice older than the TTL is not offered: a phone that was off for a
+    # week does not suddenly announce a build that has been replaced.
+    stale = {"id": "old", "owner": "kid", "title": "old build", "body": "Update now.",
+             "at": (datetime.now(UTC) - timedelta(seconds=mdm.NOTICE_TTL_S + 60)).isoformat()}
+    data = mdm.read_notices(root)
+    data["phone"].append(stale)
+    (root / "notice_requests.json").write_text(json.dumps(data))
+    assert "old build" not in [n["title"] for n in mdm.notices_for("phone", root=root)]
+
+    assert mdm.clear_notices("phone", ["nope"], root=root) == 0
+    assert mdm.clear_notices("phone", [], root=root) == 0  # an empty list names nothing
+    assert mdm.clear_notices("phone", root=root) == mdm.NOTICE_MAX + 1  # the stale one goes too
+    assert mdm.notices_for("phone", root=root) == []
+    assert mdm.clear_notices("phone", root=root) == 0
 
 
 # --- shared folders --------------------------------------------------------

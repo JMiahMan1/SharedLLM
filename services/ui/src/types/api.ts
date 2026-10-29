@@ -516,6 +516,8 @@ export interface MemberDevices {
 export interface MdmDevice extends MemberDevice {
   owner_username: string;
   owner_display_name: string;
+  /** Device-scoped notices queued for this phone, waiting for its next check-in. */
+  pending_notices?: number;
 }
 
 /** A family member's row in the inventory: readable, or why it is not. */

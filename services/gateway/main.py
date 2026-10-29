@@ -5943,17 +5943,25 @@ async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
 
 
 @app.get("/api/screen-time/{username}/status")
-async def screen_time_status(request: Request, username: str):
+async def screen_time_status(request: Request, username: str, device_key: str | None = None):
     """Time left today and whether the phone should be locked now, and why.
 
     The member themselves or their parents may ask (identity decides); the
-    phone's lock reads this.
+    phone's lock reads this. A phone that names itself (``device_key``) also
+    gets the notices queued for *that* device - the one thing an ordinary push
+    cannot address (see ``services/gateway/mdm.py``).
     """
     now = _household_now()
     day = now.date().isoformat()
     status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params={"day": day})
     if status != 200:
         raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
+    # Only this member's own key counts. A key that does not resolve, or belongs
+    # to someone else, yields no device-scoped notices at all rather than
+    # another phone's queue.
+    device_key = (device_key or "").strip()
+    if device_key and not await mdm.device_owned_by(device_key, username):
+        device_key = ""
     usage = await _own_telemetry(username, "usage", {"days": 7})
     today = next((d for d in usage if d.get("day") == day), {})
     used_ms = today.get("millis") or 0
@@ -5979,6 +5987,11 @@ async def screen_time_status(request: Request, username: str):
         # A parent queued a remote wipe (Phase 12 MDM): the phone's guard reads
         # this and erases itself. False unless one was explicitly queued.
         "wipe_requested": mdm.wipe_requested(username),
+        # Notices queued for this one phone (an app-update push aimed at it).
+        # Only present when the phone named a key that is really its own, so a
+        # push to one phone is never announced on another, and "not
+        # device-scoped" never reads as "nothing waiting".
+        **({"notices": mdm.notices_for(device_key)} if device_key else {}),
         "week": weekly_screen_time(usage, now.date()),
         **state,
     }

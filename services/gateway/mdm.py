@@ -4,6 +4,7 @@ Phase 12 (HANDOVER.md). This module adds the pieces that did not exist:
 
 * ``GET  /api/mdm/devices``            - every family device in one list.
 * ``POST /api/mdm/devices/update``     - push an app-update notice to selected devices.
+* ``POST /api/mdm/devices/notices/ack``- a phone reports the notices it has shown.
 * ``POST /api/mdm/devices/{key}/wipe`` - queue a remote wipe on a device-owner phone.
 * ``GET/POST/DELETE /api/mdm/files*``  - the shared School and Library folders.
 * ``GET  /api/mdm/library/books``      - the read-only family Library set (Calibre).
@@ -25,6 +26,16 @@ or locked or wiped a device, and when. It is append-only and capped, like the
 telemetry activity feed, and the Devices page reads it back. A failed write is
 logged and the action still completes, so the log is best-effort rather than a
 way to make an MDM action fail.
+
+An update notice goes to a *device*, not to a person. An ordinary push reaches
+every device that person is signed in on (telemetry publishes it to the
+person's one ntfy topic), so "push to this phone" cannot be said with it. A
+device-scoped notice is queued here under the device key instead
+(``notice_requests.json``) and handed to that phone on its own check-in, the
+screen-time status its guard already polls - the same way a queued wipe is. The
+phone acks what it has shown, and an unshown notice is forgotten after
+``NOTICE_TTL_S``, so a phone that was off for a week does not suddenly announce
+a long-gone build.
 
 Two MDM actions are deliberately *not* reimplemented here, because the mechanism
 already exists and a second copy is how the two drift apart:
@@ -57,6 +68,7 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import aiohttp
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -321,6 +333,94 @@ def clear_wipe(device_key: str, root: Path | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Per-device notices (queue, hand over on check-in, ack)
+# ---------------------------------------------------------------------------
+
+#: An unshown notice is offered for a week and then ignored, so a phone that
+#: was off longer than that does not announce a build that has been replaced.
+NOTICE_TTL_S = 7 * 24 * 3600
+#: How many undelivered notices one device holds; the oldest is dropped.
+NOTICE_MAX = 20
+
+
+def _notices_path(root: Path | None = None) -> Path:
+    return _root(root) / "notice_requests.json"
+
+
+def read_notices(root: Path | None = None) -> dict:
+    return _read_json(_notices_path(root))
+
+
+def _notice_is_live(record: dict, now: datetime) -> bool:
+    try:
+        at = datetime.fromisoformat(str(record.get("at")))
+    except (TypeError, ValueError):
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return (now - at).total_seconds() <= NOTICE_TTL_S
+
+
+def queue_notice(device_key: str, owner: str, title: str, body: str, *,
+                 url: str | None = None, tag: str | None = None,
+                 actions: list | None = None, root: Path | None = None) -> dict:
+    """Queue one notice for one device; its phone shows it on its next check-in."""
+    data = read_notices(root)
+    queued = [n for n in (data.get(device_key) or []) if isinstance(n, dict)]
+    record = {
+        "id": uuid4().hex[:12],
+        "owner": (owner or "").strip().lower(),
+        "at": datetime.now(UTC).isoformat(),
+        "title": str(title)[:120],
+        "body": str(body)[:500],
+    }
+    if url:
+        record["url"] = str(url)[:300]
+    if tag:
+        record["tag"] = str(tag)[:80]
+    if actions:
+        record["actions"] = actions[:3]
+    queued.append(record)
+    data[device_key] = queued[-NOTICE_MAX:]
+    _write_json(_notices_path(root), data)
+    return record
+
+
+def notices_for(device_key: str, root: Path | None = None) -> list[dict]:
+    """This device's undelivered notices, oldest first; expired ones are dropped."""
+    now = datetime.now(UTC)
+    return [
+        n for n in (read_notices(root).get(device_key) or [])
+        if isinstance(n, dict) and _notice_is_live(n, now)
+    ]
+
+
+def clear_notices(device_key: str, ids: list | None = None, root: Path | None = None) -> int:
+    """Forget the notices a phone has shown; every notice when ``ids`` is None.
+
+    An empty list clears nothing rather than everything: a caller that meant to
+    name notices must not empty the queue by passing none.
+    """
+    data = read_notices(root)
+    if device_key not in data:
+        return 0
+    before = [n for n in (data.get(device_key) or []) if isinstance(n, dict)]
+    if ids is None:
+        after: list = []
+    else:
+        wanted = {str(i) for i in ids if str(i).strip()}
+        after = [n for n in before if str(n.get("id")) not in wanted]
+    removed = len(before) - len(after)
+    if after:
+        data[device_key] = after
+    else:
+        data.pop(device_key, None)
+    if removed:
+        _write_json(_notices_path(root), data)
+    return removed
+
+
+# ---------------------------------------------------------------------------
 # Audit log (append-only, capped, best-effort)
 # ---------------------------------------------------------------------------
 
@@ -562,6 +662,21 @@ def device_platform(device: dict) -> str:
     return "esphome" if is_esphome_device(device) else "android"
 
 
+def pending_notices(device: dict) -> int:
+    """How many device-scoped notices are waiting for this phone to check in."""
+    key = str(device.get("device_key") or "").strip()
+    return len(notices_for(key)) if key else 0
+
+
+async def device_owned_by(device_key: str, username: str) -> bool:
+    """Whether that device key belongs to that member, per identity's own answer."""
+    who = (username or "").strip().lower()
+    key = (device_key or "").strip()
+    if not who or not key:
+        return False
+    return (await _owner_of(key)) == who
+
+
 async def _owner_of(device_key: str) -> str | None:
     """The username a device key belongs to, from identity's internal lookup."""
     try:
@@ -576,27 +691,6 @@ async def _owner_of(device_key: str) -> str | None:
         return None
     owner = (data or {}).get("owner") if isinstance(data, dict) else None
     return str(owner).lower() if owner else None
-
-
-async def _selected_owners(body: dict) -> list[str]:
-    """The distinct owners named directly, or through their device keys."""
-    owners: list[str] = []
-    for name in body.get("usernames") or []:
-        if isinstance(name, str) and name.strip():
-            owners.append(name.strip().lower())
-    for key in body.get("device_keys") or []:
-        if not isinstance(key, str) or not key.strip():
-            continue
-        owner = await _owner_of(key.strip())
-        if owner:
-            owners.append(owner)
-    out: list[str] = []
-    seen: set[str] = set()
-    for owner in owners:
-        if owner not in seen:
-            seen.add(owner)
-            out.append(owner)
-    return out
 
 
 async def _guard_caps(request: Request, username: str) -> list[dict]:
@@ -717,6 +811,7 @@ async def mdm_device_inventory(request: Request):
                     "platform": device_platform(d),
                     "owner_username": d.get("owner_username") or username,
                     "owner_display_name": display,
+                    "pending_notices": pending_notices(d),
                 })
             members.append({"username": username, "display_name": display,
                             "device_count": len(rows), "readable": True, "reason": None})
@@ -752,6 +847,7 @@ async def mdm_device_inventory(request: Request):
                                 "owner_display_name": (
                                     "Default Admin" if owner_u == "default" else (dev.get("owner_username") or "(Unassigned)")
                                 ),
+                                "pending_notices": pending_notices(dev),
                             })
         except Exception as e:
             log.warning("[mdm] unassigned device inventory supplement failed: %s", e)
@@ -761,12 +857,17 @@ async def mdm_device_inventory(request: Request):
 
 @router.post("/api/mdm/devices/update")
 async def mdm_push_app_update(request: Request):
-    """Send an app-update notice to the owners of selected devices.
+    """Send an app-update notice to the selected devices or people.
 
+    A named *person* gets an ordinary push, which reaches every device they are
+    signed in on, because that is what the push channel can say. A named
+    *device* gets a queued notice for that phone alone (see the module
+    docstring): selecting one of a person's two phones no longer notifies both.
     The notice goes to the device owner (a minor included): ``audience`` stays
-    the default ``all``, unlike the whole-family publish notice in ``notices.py``
-    which is ``parents``-only. When no build is published the request is refused
-    with 409 rather than announcing an update nobody can install.
+    the default ``all``, unlike the whole-family publish notice in
+    ``notices.py`` which is ``parents``-only. When no build is published the
+    request is refused with 409 rather than announcing an update nobody can
+    install.
     """
     from services.gateway.main import _require_admin, get_app_update_version
 
@@ -778,9 +879,17 @@ async def mdm_push_app_update(request: Request):
             status_code=422,
             detail="ESPHome devices do not run the Android app; use ESPHome management instead.",
         )
-    owners = await _selected_owners(body)
-    if not owners:
+    people = [str(u).strip().lower() for u in (body.get("usernames") or []) if isinstance(u, str) and str(u).strip()]
+    if not raw_keys and not people:
         raise HTTPException(status_code=422, detail="Select at least one device or person")
+    # Every named device must be a real one: a queued notice for a key nothing
+    # owns would sit there forever and report a send that never happened.
+    devices: list[dict] = []
+    for key in raw_keys:
+        owner = await _owner_of(key)
+        if not owner:
+            raise HTTPException(status_code=422, detail=f"{key} is not a registered device")
+        devices.append({"device_key": key, "owner": owner})
 
     info = await get_app_update_version(request)
     bundle = bool(info.get("bundle_available"))
@@ -799,20 +908,58 @@ async def mdm_push_app_update(request: Request):
     if apk:
         available.append("a new app build to install")
     text = "Update now: " + " and ".join(available) + "."
+    title = f"Jarvis app {label} is available"
+    actions = [_notify.view_action("/settings", "Update now")]
     sent = 0
-    for owner in owners:
+    for owner in people:
         payload = _notify.notice(
-            owner, "app_updates", f"Jarvis app {label} is available", text,
-            url="/settings", tag="mdm_app_update",
-            actions=[_notify.view_action("/settings", "Update now")],
+            owner, "app_updates", title, text,
+            url="/settings", tag="mdm_app_update", actions=actions,
         )
         sent += int(await _notify.send(payload))
+    for device in devices:
+        queue_notice(
+            device["device_key"], device["owner"], title, text,
+            url="/settings", tag="mdm_app_update", actions=actions,
+        )
+    queued = len(devices)
     record_audit("app_update_push", actor, detail={
-        "owners": owners, "version": version, "apk_version_code": code,
-        "bundle_available": bundle, "apk_available": apk, "sent": sent,
+        "owners": people, "devices": [d["device_key"] for d in devices],
+        "version": version, "apk_version_code": code,
+        "bundle_available": bundle, "apk_available": apk, "sent": sent, "queued": queued,
     })
-    return {"status": "SUCCESS", "sent": sent, "owners": owners, "version": version,
+    return {"status": "SUCCESS", "sent": sent, "queued": queued, "owners": people,
+            "devices": [d["device_key"] for d in devices], "version": version,
             "apk_version_code": code, "bundle_available": bundle, "apk_available": apk}
+
+
+@router.post("/api/mdm/devices/notices/ack")
+async def mdm_ack_device_notices(request: Request):
+    """A phone reports the device-scoped notices it has shown, so they stop.
+
+    The caller must own the device (the phone acts as the signed-in child) or
+    be an admin; anything else is refused rather than silently clearing
+    another phone's notices. ``ids`` names what was shown - a phone that has
+    not shown anything has nothing to ack, and an empty list is refused so a
+    bug cannot quietly drop every queued notice.
+    """
+    from services.gateway.main import _caller_is_admin, _require_authenticated
+
+    caller = (await _require_authenticated(request) or "").strip().lower()
+    body = await _body(request)
+    device_key = str(body.get("device_key") or "").strip()
+    if not device_key:
+        raise HTTPException(status_code=422, detail="device_key is required")
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not [i for i in ids if str(i).strip()]:
+        raise HTTPException(status_code=422, detail="ids must name the notices that were shown")
+    owner = await _owner_of(device_key)
+    if not owner:
+        raise HTTPException(status_code=422, detail=f"{device_key} is not a registered device")
+    if owner != caller and not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail="Only the device's owner can acknowledge its notices")
+    cleared = clear_notices(device_key, ids)
+    return {"status": "SUCCESS", "cleared": cleared}
 
 
 @router.get("/api/mdm/files")
