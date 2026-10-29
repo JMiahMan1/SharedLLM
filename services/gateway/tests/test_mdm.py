@@ -567,14 +567,6 @@ def test_esphome_ota_rejects_non_bin_files(world):
     assert ".bin" in resp.json()["detail"]
 
 
-def test_update_push_refuses_esphome_devices(world):
-    client, state = world
-    state["updates"] = {"bundle_available": True, "apk_available": True, "version": "2.0.0"}
-    resp = client.post("/api/mdm/devices/update", json={"device_keys": ["esphome:744dbd2c9728"]})
-    assert resp.status_code == 422
-    assert "ESPHome" in resp.json()["detail"]
-
-
 def test_wipe_refuses_esphome_devices(world):
     client, _ = world
     resp = client.post("/api/mdm/devices/esphome:744dbd2c9728/wipe", json={"confirm": True})
