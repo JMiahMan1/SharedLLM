@@ -451,3 +451,84 @@ def _async_return(value):
         return value
 
     return inner
+
+
+# --- staple-overlap ranking: which dinners need nothing special ---
+
+
+def test_staple_matches_reads_the_household_list():
+    assert recipe_import.staple_matches("2 lb ground beef, 1 can tomatoes, 2 eggs, rice, cheese") == [
+        "ground meat",
+        "rice",
+        "canned tomatoes",
+        "cheese",
+        "eggs",
+    ]
+    # Case-insensitive, and a plain cake has no staples.
+    assert recipe_import.staple_matches("CHICKEN and GARLIC") == ["chicken", "garlic"]
+    assert recipe_import.staple_matches("flour, sugar, butter") == []
+    assert recipe_import.staple_matches(None) == []
+
+
+async def test_recipe_staples_ranks_the_shelf(monkeypatch):
+    notes = [
+        {"title": "Chili", "path": "Recipes/Chili.md", "modified": "a", "size": 10},
+        {"title": "Cake", "path": "Recipes/Cake.md", "modified": "b", "size": 20},
+        {"title": "Chicken Rice", "path": "Recipes/Chicken Rice.md", "modified": "c", "size": 30},
+    ]
+    bodies = {
+        "Recipes/Chili.md": "## Ingredients\n- [ ] ground beef\n- [ ] beans\n- [ ] canned tomatoes\n",
+        "Recipes/Cake.md": "## Ingredients\n- [ ] flour\n- [ ] sugar\n",
+        "Recipes/Chicken Rice.md": "## Ingredients\n- [ ] chicken\n- [ ] rice\n",
+    }
+
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: _FakeProvider())
+    monkeypatch.setattr(recipe_import, "_walk_webdav_dir", _async_return(notes))
+
+    async def fake_body(_provider, note):
+        return bodies[note["path"]]
+
+    monkeypatch.setattr(recipe_import, "_read_note_body", fake_body)
+    result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
+
+    assert result.status == "SUCCESS"
+    ranked = result.detail["ranked"]
+    # Chili (3 staples) first, then the 2-staple and 0-staple recipes.
+    assert [row["title"] for row in ranked] == ["Chili", "Chicken Rice", "Cake"]
+    assert ranked[0]["score"] == 3
+    assert ranked[0]["staples"] == ["ground meat", "canned tomatoes", "beans"]
+    assert ranked[-1]["score"] == 0
+    assert result.detail["notes"] == 3
+
+
+async def test_recipe_staples_ties_break_alphabetically(monkeypatch):
+    notes = [
+        {"title": "Zucchini", "path": "Recipes/Zucchini.md", "modified": "a", "size": 1},
+        {"title": "Apple", "path": "Recipes/Apple.md", "modified": "b", "size": 2},
+    ]
+
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: _FakeProvider())
+    monkeypatch.setattr(recipe_import, "_walk_webdav_dir", _async_return(notes))
+    monkeypatch.setattr(recipe_import, "_read_note_body", _async_return("eggs"))
+    result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
+
+    assert [row["title"] for row in result.detail["ranked"]] == ["Apple", "Zucchini"]
+
+
+async def test_recipe_staples_is_plain_without_a_nextcloud_account(monkeypatch):
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: None)
+    result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
+    assert result.status == "FAILURE"
+    assert "Nextcloud account" in result.message
+
+
+async def test_recipe_staples_reports_a_listing_failure(monkeypatch):
+    monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: _FakeProvider())
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("webdav down")
+
+    monkeypatch.setattr(recipe_import, "_walk_webdav_dir", boom)
+    result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
+    assert result.status == "FAILURE"
+    assert "Could not read the recipe shelf" in result.message

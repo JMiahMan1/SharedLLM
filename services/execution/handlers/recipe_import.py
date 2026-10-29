@@ -52,6 +52,38 @@ _SOURCE_CONCURRENCY = 4
 _SOURCE_CACHE_MAX = 512
 _source_cache: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
 
+# --- staple-overlap ranking -------------------------------------------------
+# The Recipes page can rank the shelf by how many household staples a recipe
+# uses, so "what can I cook tonight" floats up the dinners that need nothing
+# special. The shelf listing carries titles only, so the ingredients live in
+# each note's body; every body is read once and cached by its version, exactly
+# like the source guard above. The label set and patterns are the same ones the
+# offline importer uses (``scripts/import_recipes.py``) so the page and the
+# seed agree on what counts as a staple.
+_STAPLES: "tuple[tuple[str, re.Pattern[str]], ...]" = (
+    ("chicken", re.compile(r"\bchicken\b", re.I)),
+    ("ground meat", re.compile(r"\b(?:ground\s+(?:beef|turkey|chicken)|hamburger)\b", re.I)),
+    ("rice", re.compile(r"\brice\b", re.I)),
+    ("pasta", re.compile(r"\b(?:pasta|spaghetti|noodle|macaroni|penne|ziti)\b", re.I)),
+    ("canned tomatoes", re.compile(r"\btomato(?:es)?\b", re.I)),
+    ("beans", re.compile(r"\bbeans?\b", re.I)),
+    ("cheese", re.compile(r"\bcheese\b", re.I)),
+    ("tortillas", re.compile(r"\btortillas?\b", re.I)),
+    ("eggs", re.compile(r"\beggs?\b", re.I)),
+    ("potatoes", re.compile(r"\bpotato(?:es)?\b", re.I)),
+    ("onions", re.compile(r"\bonions?\b", re.I)),
+    ("garlic", re.compile(r"\bgarlic\b", re.I)),
+    ("frozen vegetables", re.compile(r"\bfrozen\s+(?:mixed\s+)?veg(?:etables?)?\b", re.I)),
+)
+_BODY_CACHE_MAX = 512
+_body_cache: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
+
+
+def staple_matches(text: str | None) -> list[str]:
+    """The staple labels a recipe's text mentions, in the list's own order."""
+    haystack = text or ""
+    return [label for label, pattern in _STAPLES if pattern.search(haystack)]
+
 
 def extract_source_url(text: str | None) -> str:
     """The URL on a note's ``Source:`` line, or ``""`` when it has none.
@@ -398,6 +430,77 @@ async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
     )
 
 
+async def _read_note_body(provider, note: dict) -> str:
+    """One note's readable body, cached by the note's version.
+
+    A read that fails is an empty body, never an error: ranking simply treats
+    that note as having no staples.
+    """
+    from ..http_client import request as http_request
+
+    url = provider.file_url(note["path"].lstrip("/"))
+    version = f"{note.get('modified', '')}|{note.get('size', 0)}"
+    cached = _body_cache.get(url)
+    if cached and cached[0] == version:
+        _body_cache.move_to_end(url)
+        return cached[1]
+    try:
+        resp = await http_request(
+            "GET", url, auth=(provider.username, provider.password), verify=False, timeout=20
+        )
+    except Exception as exc:  # one unreadable note must not fail the ranking
+        log.warning("[recipe_import] body read failed for %s: %s", note["path"], str(exc) or type(exc).__name__)
+        return ""
+    if resp["status_code"] != 200:
+        return ""
+    body = note_body(resp["text"])
+    _body_cache[url] = (version, body)
+    _body_cache.move_to_end(url)
+    while len(_body_cache) > _BODY_CACHE_MAX:
+        _body_cache.popitem(last=False)
+    return body
+
+
+async def _recipe_staples(req: RecipeRequest) -> ExecutionResult:
+    """The shelf ranked by how many household staples each recipe uses.
+
+    Reads every recipe note (the listing carries titles only, so the
+    ingredients live in the body) and counts the staple labels each mentions.
+    Ties break alphabetically so the order is stable between calls; a note that
+    cannot be read scores zero rather than failing the whole ranking.
+    """
+    provider = resolve_personal_data_provider(req.user_context)
+    if not provider:
+        return ExecutionResult.fail(missing_account_message(req.user_context), service="recipe_staples")
+    try:
+        notes = await _walk_webdav_dir(provider, _RECIPES_DIR)
+    except Exception as exc:  # a listing failure is reported, not a 500
+        log.warning("[recipe_import] recipe listing failed: %s", str(exc) or type(exc).__name__)
+        return ExecutionResult.fail("Could not read the recipe shelf right now.", service="recipe_staples")
+
+    gate = asyncio.Semaphore(_SOURCE_CONCURRENCY)
+
+    async def one(note: dict) -> dict:
+        async with gate:
+            body = await _read_note_body(provider, note)
+        staples = staple_matches(body)
+        return {
+            "title": note.get("title") or "",
+            "path": note.get("path") or "",
+            "score": len(staples),
+            "staples": staples,
+        }
+
+    ranked = list(await asyncio.gather(*(one(note) for note in notes)))
+    ranked.sort(key=lambda row: (-row["score"], row["title"].lower()))
+    best = ranked[0]["score"] if ranked else 0
+    return ExecutionResult.ok(
+        f"Ranked {len(ranked)} recipe(s); the best uses {best} staple(s).",
+        service="recipe_staples",
+        detail={"ranked": ranked, "notes": len(ranked)},
+    )
+
+
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
     if req.action == "recipe_search":
         return await _recipe_search(req)
@@ -405,6 +508,8 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
         return await _shelf_fetch(req)
     if req.action == "recipe_sources":
         return await _recipe_sources(req)
+    if req.action == "recipe_staples":
+        return await _recipe_staples(req)
     if req.action != "url_import":
         return ExecutionResult.fail(
             f"Unknown recipe action: {req.action}", service="recipe_import"

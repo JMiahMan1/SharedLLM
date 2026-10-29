@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Camera, Link2, Loader2, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
+import { BookOpen, CalendarDays, Camera, Download, Link2, Loader2, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
 import { noteBody } from '../lib/notesMeta';
 import { errorText } from '../lib/errorText';
 import { blobToBase64 } from '../lib/base64';
+import { downloadBlobUrl } from '../lib/artifactKinds';
 import { appendAttachment, attachmentMarkdown } from '../lib/noteAttachments';
 import { isKidMode } from '../lib/healthSwitches';
 import type { ExecutionResponse, RecipeEstimate } from '../types/api';
@@ -114,6 +115,10 @@ export default function Recipes() {
   // Which Skylight action is in flight ("week", "list", or a recipe title/path),
   // so a second tap cannot send another.
   const [skylightBusy, setSkylightBusy] = useState<string | null>(null);
+  // Phase 6 staple-overlap ranking: which recipes use the most household staples.
+  const [rankByStaples, setRankByStaples] = useState(false);
+  // Phase 7 no-credentials fallback: building the week's .ics download.
+  const [icsBusy, setIcsBusy] = useState(false);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
@@ -152,6 +157,21 @@ export default function Recipes() {
     retry: false,
   });
   const importedSources = useMemo(() => new Set(sourcesQuery.data ?? []), [sourcesQuery.data]);
+
+  // Phase 6: rank the shelf by how many household staples each recipe uses.
+  // Read only when the person asks for it (it reads every recipe note).
+  const staplesQuery = useQuery({
+    queryKey: ['recipe-staples', asUser ?? 'me'],
+    queryFn: () => api.recipeStaples(asUser),
+    enabled: rankByStaples,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const stapleRanks = useMemo(() => {
+    const ranks = new Map<string, { score: number; staples: string[] }>();
+    for (const row of staplesQuery.data ?? []) ranks.set(row.title, { score: row.score, staples: row.staples });
+    return ranks;
+  }, [staplesQuery.data]);
 
   // Whether the household's Skylight is connected, so the page can show a clear
   // no-credentials state instead of a button that quietly does nothing. A false
@@ -429,6 +449,33 @@ export default function Recipes() {
       toast.error('Could not save the week plan');
     } finally {
       setPlanBusy(false);
+    }
+  };
+
+  // Phase 7 no-credentials fallback: the week's dinners as an .ics the
+  // household's own calendar (Google/iCloud) can import, when Skylight is not
+  // set up. Nothing is written; the file is built from the saved note.
+  const downloadWeekIcs = async () => {
+    if (!PLAN_DAYS.some((day) => plan[day].title)) {
+      toast.error('Plan some dinners first');
+      return;
+    }
+    setIcsBusy(true);
+    try {
+      const out = await api.mealPlanIcs(asUser);
+      if (!out.ics) {
+        toast.error('No dinners are planned yet');
+        return;
+      }
+      downloadBlobUrl(
+        URL.createObjectURL(new Blob([out.ics], { type: 'text/calendar' })),
+        'meal-plan.ics',
+      );
+      toast.success(`Added ${out.events} dinner${out.events === 1 ? '' : 's'} to the calendar file`);
+    } catch {
+      toast.error('Could not build the calendar file');
+    } finally {
+      setIcsBusy(false);
     }
   };
 
@@ -754,9 +801,18 @@ export default function Recipes() {
   );
 
   const filterText = filter.trim().toLowerCase();
-  const visibleRecipes = filterText
+  const filteredRecipes = filterText
     ? recipes.filter((recipe) => recipe.title.toLowerCase().includes(filterText))
     : recipes;
+  // Phase 6: most staples first (ties alphabetical); unknown sorts last. Kept a
+  // plain derivation, not a memo, so it always reflects the latest rank read.
+  const visibleRecipes = rankByStaples
+    ? [...filteredRecipes].sort((a, b) => {
+        const scoreA = stapleRanks.get(a.title)?.score ?? -1;
+        const scoreB = stapleRanks.get(b.title)?.score ?? -1;
+        return scoreB - scoreA || a.title.localeCompare(b.title);
+      })
+    : filteredRecipes;
 
   // The open recipe's own stated nutrition, for the editor (Phase 10).
   const nutrition = useMemo(() => parseRecipeNutrition(body), [body]);
@@ -829,6 +885,15 @@ export default function Recipes() {
             className="glass-button min-h-11 px-3 text-xs"
           >
             <Link2 size={14} /> {importOpen ? 'Close import' : 'Import a link'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRankByStaples((on) => !on)}
+            aria-pressed={rankByStaples}
+            data-testid="rank-staples"
+            className={`glass-button min-h-11 px-3 text-xs ${rankByStaples ? 'ring-1 ring-emerald-400/50' : ''}`}
+          >
+            <Utensils size={14} /> {rankByStaples ? 'Ranked by staples' : 'Rank by staples'}
           </button>
           {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
         </div>
@@ -1137,6 +1202,16 @@ export default function Recipes() {
               {skylightBusy === 'week' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               Push week
             </button>
+            <button
+              type="button"
+              onClick={() => void downloadWeekIcs()}
+              disabled={icsBusy}
+              data-testid="plan-ics"
+              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {icsBusy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Add week to calendar (.ics)
+            </button>
           </div>
         </div>
       )}
@@ -1169,6 +1244,11 @@ export default function Recipes() {
               No recipes match “{filter.trim()}”.
             </p>
           )}
+          {rankByStaples && staplesQuery.isError && (
+            <p className="text-[11px] text-amber-200" data-testid="rank-staples-error">
+              Could not rank the shelf right now.
+            </p>
+          )}
           {visibleRecipes.map((recipe) => (
             <div
               key={recipe.path}
@@ -1184,6 +1264,17 @@ export default function Recipes() {
               >
                 {recipe.title}
               </button>
+              {rankByStaples && (
+                <span
+                  className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[10px] tabular-nums text-emerald-200"
+                  title={
+                    stapleRanks.get(recipe.title)?.staples.join(', ') || 'Reading staples…'
+                  }
+                  data-testid={`staple-chip-${recipe.path}`}
+                >
+                  {stapleRanks.get(recipe.title)?.score ?? '…'}
+                </span>
+              )}
               <button
                 type="button"
                 aria-label={`Send ${recipe.title} to Skylight`}

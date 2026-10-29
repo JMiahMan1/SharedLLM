@@ -27,6 +27,8 @@ vi.mock('../services/api', async (importOriginal) => {
       searchRecipes: vi.fn(),
       fetchRecipe: vi.fn(),
       recipeSources: vi.fn(),
+      recipeStaples: vi.fn(),
+      mealPlanIcs: vi.fn(),
       estimateRecipeNutrition: vi.fn(),
       readRecipePhoto: vi.fn(),
       noteAttachment: vi.fn(),
@@ -55,6 +57,7 @@ const importRecipe = vi.mocked(api.importRecipe);
 const searchRecipes = vi.mocked(api.searchRecipes);
 const fetchRecipe = vi.mocked(api.fetchRecipe);
 const recipeSources = vi.mocked(api.recipeSources);
+const recipeStaples = vi.mocked(api.recipeStaples);
 const estimateRecipeNutrition = vi.mocked(api.estimateRecipeNutrition);
 const readRecipePhoto = vi.mocked(api.readRecipePhoto);
 const noteAttachment = vi.mocked(api.noteAttachment);
@@ -96,6 +99,7 @@ describe('Recipes', () => {
     importRecipe.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     searchRecipes.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     recipeSources.mockResolvedValue([]);
+    recipeStaples.mockResolvedValue([]);
     readRecipePhoto.mockResolvedValue({
       raw_text: '',
       recipe: {
@@ -663,5 +667,30 @@ describe('Recipes', () => {
 
     // Nothing was sent and the recipe note was not even read for the push.
     expect(sendSkylightRecipe).not.toHaveBeenCalled();
+  });
+
+  it('ranks the shelf by staple overlap on request', async () => {
+    listNotes.mockResolvedValue(listResponse(['Pancakes', 'Chicken Chili']));
+    recipeStaples.mockResolvedValue([
+      { title: 'Chicken Chili', path: `${RECIPES_DIR}/Chicken Chili.md`, score: 3, staples: ['chicken', 'beans', 'cheese'] },
+      { title: 'Pancakes', path: `${RECIPES_DIR}/Pancakes.md`, score: 1, staples: ['eggs'] },
+    ]);
+    renderRecipes();
+    await waitFor(() => expect(screen.getByText('Chicken Chili')).toBeTruthy());
+
+    // Nothing is ranked until asked, and the raw key is never sent.
+    expect(recipeStaples).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('rank-staples'));
+
+    await waitFor(() => expect(recipeStaples).toHaveBeenCalledWith(undefined));
+    const chip = await screen.findByTestId(`staple-chip-${RECIPES_DIR}/Chicken Chili.md`);
+    expect(chip).toHaveTextContent('3');
+    expect(chip.getAttribute('title')).toContain('chicken');
+
+    // The most staples floats to the top of the shelf.
+    const titles = screen
+      .getAllByRole('button', { name: /Pancakes|Chicken Chili/ })
+      .map((button) => button.textContent);
+    expect(titles[0]).toBe('Chicken Chili');
   });
 });

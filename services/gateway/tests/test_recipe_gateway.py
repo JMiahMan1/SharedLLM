@@ -157,3 +157,37 @@ def test_planning_a_meal_passes_an_already_resolved_day_and_recipe(client, monke
     client.post("/api/recipes/plan", json={"text": "plan something", "day": "Fri", "recipe": "Pizza"})
     assert sent[0]["json"]["day"] == "Fri"
     assert sent[0]["json"]["recipe"] == "Pizza"
+
+
+def test_staple_ranking_proxies_the_shelf_scan(client, monkeypatch):
+    sent = _proxy_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "message": "Ranked 2 recipe(s); the best uses 3 staple(s).",
+            "service": "recipe_staples",
+            "detail": {"ranked": [{"title": "Chili", "path": "Recipes/Chili.md", "score": 3, "staples": ["beans"]}], "notes": 2},
+        },
+    )
+    body = client.post("/api/recipes/staples", json={}).json()
+    assert body["detail"]["ranked"][0]["title"] == "Chili"
+    assert sent[0]["url"].endswith("/execute/recipes")
+    assert sent[0]["json"]["action"] == "recipe_staples"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"
+
+
+def test_the_ics_fallback_forwards_the_action(client, monkeypatch):
+    sent = _proxy_fake(
+        monkeypatch,
+        {
+            "status": "SUCCESS",
+            "message": "Ready to publish 2 dinner(s) to a calendar.",
+            "service": "meal_plan",
+            "detail": {"ics": "BEGIN:VCALENDAR\nEND:VCALENDAR", "events": 2},
+        },
+    )
+    body = client.post("/api/recipes/plan/ics", json={}).json()
+    assert body["detail"]["events"] == 2
+    assert sent[0]["url"].endswith("/execute/meal_plan")
+    assert sent[0]["json"]["action"] == "ics"
+    assert sent[0]["json"]["user_context"]["user"] == "dad"

@@ -5340,6 +5340,20 @@ async def proxy_recipe_sources(request: Request):
     )
 
 
+@app.post("/api/recipes/staples")
+async def proxy_recipe_staples(request: Request):
+    """The shelf ranked by how many household staples each recipe uses.
+
+    Reads every recipe note server-side (the listing carries titles only), so
+    the page can float up the dinners that need nothing special. Cached by each
+    note's version, like the duplicate guard.
+    """
+    body = await request.json()
+    return await _proxy_execution_with_identity(
+        request, "/execute/recipes", {"action": "recipe_staples"}, as_user=body.get("as_user")
+    )
+
+
 @app.post("/api/recipes/import")
 async def proxy_recipe_import(request: Request):
     """Paste-a-link recipe import: read a page's schema.org recipe."""
@@ -5367,6 +5381,20 @@ async def proxy_recipe_plan(request: Request):
         "recipe": body.get("recipe"),
     }
     return await _proxy_execution_with_identity(request, "/execute/meal_plan", payload, as_user=body.get("as_user"))
+
+
+@app.post("/api/recipes/plan/ics")
+async def proxy_recipe_plan_ics(request: Request):
+    """The week's dinners as an iCalendar feed (the Skylight no-credentials fallback).
+
+    Reads ``Recipes/Meal plan.md`` and hands back an ICS the household's own
+    calendar can subscribe to; nothing is written and no Skylight account is
+    needed.
+    """
+    body = await request.json()
+    return await _proxy_execution_with_identity(
+        request, "/execute/meal_plan", {"action": "ics"}, as_user=body.get("as_user")
+    )
 
 
 _RECIPE_PHOTO_MAX_BYTES = 8 * 1024 * 1024

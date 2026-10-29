@@ -3598,6 +3598,16 @@ export interface FoodLabelDraft {
   per_100g: boolean;
 }
 
+/** One shelf recipe's staple overlap (services/execution/handlers/recipe_import.py). */
+export interface RecipeStapleRank {
+  title: string;
+  path: string;
+  /** How many household staples the recipe's body mentions. */
+  score: number;
+  /** The staple labels it mentions, in the household list's own order. */
+  staples: string[];
+}
+
 /** A recipe read from a photo or handwriting (services/common/recipe_ocr.py): a draft only. */
 export interface RecipePhotoDraft {
   /** The raw OCR transcription, shown beside the draft. */

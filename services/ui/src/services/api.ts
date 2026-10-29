@@ -170,6 +170,7 @@ import type {
   HealthCheersDay,
   FoodLabelDraft,
   RecipePhotoDraft,
+  RecipeStapleRank,
   RecipeEstimate,
   HealthFastingState,
   HealthCycleSummary,
@@ -2822,6 +2823,30 @@ export const api = {
     const resp = await apiClient.post('/api/recipes/sources', { as_user }, { timeout: 60_000 });
     const sources = (resp.data?.detail?.sources ?? []) as unknown[];
     return sources.filter((source): source is string => typeof source === 'string');
+  },
+
+  /**
+   * The shelf ranked by how many household staples each recipe uses (Phase 6).
+   * Reads every recipe note server-side; each read is cached by its version.
+   */
+  async recipeStaples(as_user?: 'admin'): Promise<RecipeStapleRank[]> {
+    const resp = await apiClient.post('/api/recipes/staples', { as_user }, { timeout: 60_000 });
+    const ranked = (resp.data?.detail?.ranked ?? []) as unknown[];
+    return ranked.filter(
+      (row): row is RecipeStapleRank =>
+        Boolean(row) && typeof (row as RecipeStapleRank).title === 'string',
+    );
+  },
+
+  /**
+   * The week's dinners as an iCalendar feed (the Skylight no-credentials
+   * fallback). Nothing is written: the caller offers the ICS as a download or
+   * a calendar subscription.
+   */
+  async mealPlanIcs(as_user?: 'admin'): Promise<{ ics: string; events: number }> {
+    const resp = await apiClient.post('/api/recipes/plan/ics', { as_user }, { timeout: 30_000 });
+    const detail = (resp.data?.detail ?? {}) as { ics?: unknown; events?: unknown };
+    return { ics: String(detail.ics ?? ''), events: Number(detail.events ?? 0) };
   },
 
   /**

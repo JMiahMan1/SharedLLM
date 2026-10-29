@@ -27,6 +27,7 @@ vi.mock('../services/api', async (importOriginal) => {
       sendSkylightRecipe: vi.fn(),
       pushSkylightWeek: vi.fn(),
       mirrorSkylightList: vi.fn(),
+      mealPlanIcs: vi.fn(),
     },
   };
 });
@@ -45,6 +46,7 @@ const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 const getSkylightMeals = vi.mocked(api.getSkylightMeals);
 const pushSkylightWeek = vi.mocked(api.pushSkylightWeek);
 const mirrorSkylightList = vi.mocked(api.mirrorSkylightList);
+const mealPlanIcs = vi.mocked(api.mealPlanIcs);
 
 function listResponse(titles: string[]) {
   return {
@@ -98,6 +100,17 @@ describe('Recipes week plan', () => {
     getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: true, categories: [] } as never);
     pushSkylightWeek.mockResolvedValue({ status: 'SUCCESS', planned: [], failed: [] } as never);
     mirrorSkylightList.mockResolvedValue({ status: 'SUCCESS', added: 0, removed: 0 } as never);
+    // jsdom has no object-URL support; the .ics download just needs a URL string.
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 'blob:meal-plan'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    });
   });
 
   it('picks a day, marks it cooked, and saves the plan', async () => {
@@ -352,5 +365,39 @@ describe('Recipes week plan', () => {
     fireEvent.click(screen.getByTestId('plan-send-skylight'));
 
     expect(pushSkylightWeek).not.toHaveBeenCalled();
+  });
+
+  it('publishes the week as a calendar file when Skylight is not connected', async () => {
+    getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: false, categories: [] } as never);
+    mealPlanIcs.mockResolvedValue({
+      ics: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
+      events: 1,
+    } as never);
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByTestId('plan-ics'));
+
+    await waitFor(() => expect(mealPlanIcs).toHaveBeenCalledWith(undefined));
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it('will not publish an empty week', async () => {
+    readNote.mockImplementation(
+      (async (title: string) =>
+        title === 'Meal plan'
+          ? { status: 'SUCCESS' as const, message: '#meal-plan\n\n', service: 'note_read' }
+          : RECIPE_RESPONSE) as never,
+    );
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByTestId('plan-ics'));
+
+    expect(mealPlanIcs).not.toHaveBeenCalled();
   });
 });
