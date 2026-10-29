@@ -271,4 +271,35 @@ describe('Wander page', () => {
     expect(screen.queryByRole('button', { name: /edit vehicle & fuel/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^share$/i })).not.toBeInTheDocument();
   });
+
+  it('merges people in the same place into one card only when asked', async () => {
+    // A crowded screen is the complaint: two people at the same place should be
+    // collapsible into one card, and the individual cards come back on a tap.
+    const user = userEvent.setup();
+    server.use(
+      http.get('/api/geo/people', () =>
+        HttpResponse.json({
+          features: [
+            { properties: { entity_id: 'person.michele', friendly_name: 'Michele', state: 'school', in_zones: ['zone.school'] } },
+            { properties: { entity_id: 'person.leo', friendly_name: 'Leo', state: 'school', in_zones: ['zone.school'] } },
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<Wander />);
+
+    // Two separate cards until the merge is asked for.
+    await waitFor(() => expect(screen.getAllByTitle('Show on the live map')).toHaveLength(2));
+    expect(screen.queryByTestId('merged-zone.school')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('merge-nearby'));
+    const merged = await screen.findByTestId('merged-zone.school');
+    expect(merged).toHaveTextContent('2 people');
+    expect(screen.queryAllByTitle('Show on the live map')).toHaveLength(0);
+
+    // Tapping the merged card brings the individual cards back.
+    await user.click(merged);
+    await waitFor(() => expect(screen.getAllByTitle('Show on the live map')).toHaveLength(2));
+    expect(screen.queryByTestId('merged-zone.school')).not.toBeInTheDocument();
+  });
 });

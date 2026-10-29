@@ -132,3 +132,41 @@ export function buildFamilyCards(
   }
   return cards;
 }
+
+/** People who are in the same place, so the page can merge their cards. */
+export interface MemberGroup {
+  /** Stable identity of the place, or a per-person key when they cannot merge. */
+  key: string;
+  /** The place name to show on a merged card ("school", "Grandma's"). */
+  label: string;
+  members: FamilyMemberStatus[];
+}
+
+// "Away"/"Unknown" is not a shared place: two people both away are not together.
+const NOT_A_PLACE = new Set(['away', 'unknown', '']);
+
+/**
+ * Group the family by the place they are in.
+ *
+ * People sharing a named zone (or the same named state) collapse into one
+ * group; anyone who is not in a named place gets a group of their own, so the
+ * page keeps showing them as an individual card.
+ */
+export function groupByPlace(members: FamilyMemberStatus[]): MemberGroup[] {
+  const groups: MemberGroup[] = [];
+  const byKey = new Map<string, MemberGroup>();
+  for (const member of members) {
+    const zoneId = member.inZones?.find((zone) => zone.startsWith('zone.'));
+    const label = zoneId ? zoneId.replace(/^zone\./, '').replace(/_/g, ' ') : member.zone;
+    const named = Boolean(zoneId) || !NOT_A_PLACE.has((member.zone ?? '').trim().toLowerCase());
+    const key = named ? (zoneId ?? `place:${label.toLowerCase()}`) : `solo:${member.id}`;
+    let group = named ? byKey.get(key) : undefined;
+    if (!group) {
+      group = { key, label, members: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.members.push(member);
+  }
+  return groups;
+}

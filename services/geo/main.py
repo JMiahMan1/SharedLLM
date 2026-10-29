@@ -52,8 +52,10 @@ from services.geo import (
     map_regions,
     metric_history,
     place_reminders,
+    places,
     safety,
     step_history,
+    visits,
     workout_import,
 )
 from services.geo.auto_workouts import detect_auto_workouts
@@ -351,8 +353,10 @@ async def get_android_auto(
 
 
 @app.get("/zones")
-async def get_zones():
-    """HA zones (geofences) as a GeoJSON FeatureCollection."""
+async def get_zones(viewer: str | None = Query(None)):
+    """The family's places as a GeoJSON FeatureCollection: the Home Assistant
+    zones plus the places saved from Wander (a shared family list and each
+    person's own, filtered to ``viewer`` when given)."""
     states = await _ha_get_states()
     features = []
     for s in _filter_entities(states, "zone"):
@@ -360,8 +364,28 @@ async def get_zones():
         if f:
             features.append(f)
     # Which places are marked important, and who hears about them.
-    settings = await safety.place_settings(await get_redis())
-    return {"type": "FeatureCollection", "features": safety.annotate_zone_features(features, settings)}
+    r = await get_redis()
+    settings = await safety.place_settings(r)
+    features = safety.annotate_zone_features(features, settings)
+    for place in await places.list_all(r) if r else []:
+        if viewer and not places.can_see(place, viewer):
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [place["lon"], place["lat"]]},
+            "properties": {
+                "entity_id": places.entity_id(place["id"]),
+                "state": "saved",
+                "friendly_name": place["name"],
+                "radius": place["radius"],
+                "custom": True,
+                "owner": place["owner"],
+                "scope": place["scope"],
+                "important": bool(place.get("important")),
+                "notify": list(place.get("notify") or []),
+            },
+        })
+    return {"type": "FeatureCollection", "features": features}
 
 
 @app.put("/place-settings/{zone_id}")
@@ -446,6 +470,122 @@ async def delete_place_reminder(
     if not await place_reminders.remove(r, _place_reminder_user(user), reminder_id):
         raise HTTPException(status_code=404, detail="No such place reminder (it may have gone off already)")
     return {"removed": reminder_id}
+
+
+@app.get("/places")
+async def get_places(
+    viewer: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Saved places the viewer may see: the family's shared ones plus their own."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    who = _place_reminder_user(viewer)
+    return {"places": [places.to_answer(p) for p in await places.list_for(r, who)]}
+
+
+@app.post("/places")
+async def post_place(
+    owner: str,
+    body: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Add a place from Wander: shared with the family, or private to the owner."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    try:
+        place = places.validate(body)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    try:
+        entry = await places.add(r, _place_reminder_user(owner), place)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    return {"place": places.to_answer(entry)}
+
+
+@app.put("/places/{place_id}")
+async def put_place(
+    place_id: str,
+    body: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Edit a saved place. The gateway decides who is allowed to."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    if not await places.get(r, place_id):
+        raise HTTPException(status_code=404, detail="No such place")
+    try:
+        changes = places.validate(body, partial=True)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    merged = await places.update(r, place_id, changes)
+    if not merged:
+        raise HTTPException(status_code=404, detail="No such place")
+    return {"place": places.to_answer(merged)}
+
+
+@app.delete("/places/{place_id}")
+async def delete_place(
+    place_id: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Forget a saved place."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    if not await places.remove(r, place_id):
+        raise HTTPException(status_code=404, detail="No such place")
+    return {"removed": place_id}
+
+
+@app.get("/visit-suggestions")
+async def get_visit_suggestions(
+    user: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Spots this person has stayed at long enough, twice or more, to be worth saving."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    who = _place_reminder_user(user)
+    named = []
+    for spot in await visits.suggestions(r, who):
+        named.append({**spot, "place": await _resolve_place_name_cached(spot["lat"], spot["lon"])})
+    return {"suggestions": named}
+
+
+@app.post("/visit-suggestions/dismiss")
+async def dismiss_visit_suggestion(
+    user: str,
+    body: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+):
+    """Stop suggesting this spot (the person said no)."""
+    if not _verify_internal_secret(x_internal_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    lat, lon = body.get("lat"), body.get("lon")
+    if not isinstance(lat, (int, float)) or isinstance(lat, bool) or not isinstance(lon, (int, float)) or isinstance(lon, bool):
+        raise HTTPException(status_code=422, detail="lat and lon are required")
+    if not await visits.dismiss(r, _place_reminder_user(user), float(lat), float(lon)):
+        raise HTTPException(status_code=404, detail="No such place suggestion")
+    return {"dismissed": True}
 
 
 @app.get("/people/{entity_id:path}/history")
@@ -583,10 +723,23 @@ LEGACY_PRESENCE_ALERTS_KEY = "geo:presence_alerts"
 _zone_cache: dict = {"at": 0.0, "zones": []}
 
 
+async def _saved_places() -> list[dict]:
+    """Saved Wander places in the same shape as a Home Assistant zone, so the
+    presence code treats them identically (a saved place is a point + radius)."""
+    try:
+        r = await get_redis()
+        if not r:
+            return []
+        return [places.to_zone(p) for p in await places.list_all(r)]
+    except Exception as e:
+        warn_periodically(log, "geo.saved_places", "[Geo] Saved places unavailable: %s", e)
+        return []
+
+
 async def _zones_cached() -> list[dict]:
     if time.time() - _zone_cache["at"] > 300:
         try:
-            _zone_cache["zones"] = await _zones()
+            _zone_cache["zones"] = await _zones() + await _saved_places()
             _zone_cache["at"] = time.time()
         except Exception as e:
             # Zones refresh on a timer; a Home Assistant outage should be
@@ -694,6 +847,19 @@ async def _guardian_children_cached() -> dict[str, dict]:
     return _guardian_children_cache.get("children", {})
 
 
+async def _place_alert(r, entity_id: str) -> dict:
+    """Who to tell when someone arrives at or leaves this place.
+
+    Saved Wander places carry their own important/notify; Home Assistant zones
+    use the family-wide place settings the admin sets in Wander.
+    """
+    place_id = places.place_id_from_entity(entity_id)
+    if place_id:
+        saved = await places.get(r, place_id)
+        return places.alert_for(saved) if saved else {}
+    return (await safety.place_settings(r)).get(entity_id, {})
+
+
 async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     dedupe = f"geo:presence_notified:{person}:{zone['entity_id']}:{kind}"
     if not await r.set(dedupe, "1", ex=PRESENCE_REPEAT_S, nx=True):
@@ -737,7 +903,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
 
     # An important place (a school) is a family_safety notice for the people
     # chosen for it; everyone else gets the ordinary arrival or departure.
-    place = (await safety.place_settings(r)).get(zone["entity_id"], {})
+    place = await _place_alert(r, zone["entity_id"])
     chosen = set(place.get("notify") or []) if place.get("important") else set()
     for viewer in await _tracked_users(r):
         if viewer == person or viewer in notified_parents or not await _viewer_may_see(viewer, person):
@@ -2478,13 +2644,35 @@ async def _notice_sweeper() -> None:
         r = await get_redis()
         if not r:
             continue
-        for job in (_migrate_presence_switches, _sweep_long_stops, _sweep_weekly_summaries):
+        for job in (_migrate_presence_switches, _sweep_long_stops, _sweep_visit_stays, _sweep_weekly_summaries):
             try:
                 await job(r)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 log.warning(f"[Geo] {job.__name__} failed: {e}")
+
+
+async def _sweep_visit_stays(r, now: float | None = None) -> int:
+    """Remember long stays somewhere that is not a saved place, so Wander can
+    offer to save one once it happens a few times.
+
+    A stay counts once it has lasted ``visits.MIN_STAY_S``; ``note_stay`` keys
+    on the stop's start time, so repeated sweeps of one stay never double count.
+    """
+    now = now or time.time()
+    zones = await _zones_cached()
+    recorded = 0
+    for person, stop in (await safety.stops(r)).items():
+        since = float(stop.get("since") or 0)
+        if not since or now - since < visits.MIN_STAY_S:
+            continue
+        lat, lon = float(stop["lat"]), float(stop["lon"])
+        if _zone_at(zones, lat, lon):
+            continue
+        if await visits.note_stay(r, person, lat, lon, now - since, since, now):
+            recorded += 1
+    return recorded
 
 
 async def _sweep_long_stops(r, now: float | None = None) -> int:
