@@ -6776,6 +6776,83 @@ async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
     return await _proxy_json_response(resp)
 
 
+@app.get("/api/integrations/skylight/meals")
+async def proxy_get_skylight_meals(request: Request):
+    """Whether Skylight is connected, plus the meal planner's categories."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with shared_http_client() as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/meals", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
+    return await _proxy_json_response(resp)
+
+
+@app.get("/api/integrations/skylight/meals/week")
+async def proxy_get_skylight_meal_week(
+    request: Request,
+    date_min: str | None = None,
+    date_max: str | None = None,
+):
+    """The frame's meal sittings for a date window."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", ""), "date_min": date_min or "", "date_max": date_max or ""}
+    async with shared_http_client() as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/meals/week", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
+    return await _proxy_json_response(resp)
+
+
+@app.post("/api/integrations/skylight/meals/recipe")
+async def proxy_send_skylight_recipe(request: Request):
+    """Send one recipe to the Skylight Recipe Box (idempotent per recipe)."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+
+    body = await request.json() if await request.body() else {}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/meals/recipe", json=body, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=60.0))
+    return await _proxy_json_response(resp)
+
+
+@app.post("/api/integrations/skylight/meals/plan")
+async def proxy_push_skylight_week(request: Request):
+    """Push the week's plan to Skylight as dinner sittings."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+
+    body = await request.json() if await request.body() else {}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/meals/plan", json=body, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=120.0))
+    return await _proxy_json_response(resp)
+
+
+@app.post("/api/integrations/skylight/meals/grocery")
+async def proxy_push_skylight_grocery(request: Request):
+    """Mirror a shopping list onto the frame's default grocery list."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("skylight_enabled", True):
+        return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
+
+    body = await request.json() if await request.body() else {}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": creds.get("user", "")}
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/meals/grocery", json=body, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=60.0))
+    return await _proxy_json_response(resp)
+
+
 @app.post("/api/communication/announcements")
 async def proxy_send_announcement(request: Request):
     body = await request.json()

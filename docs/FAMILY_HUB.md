@@ -309,6 +309,16 @@ planned dinner logs into Health with a portion picker; Health → Today shows a 
 tonight** card with the week plan's dinner, its nutrition and what was actually logged for
 dinner today (planned vs. eaten), all hidden when nothing is planned or in kid mode.
 
+When the household's **Skylight** account is connected, the Recipes page can send to it:
+**Send to Skylight** on a recipe card or in the editor files it into the Skylight Recipe Box
+under Dinner (sending the same recipe again updates it rather than duplicating), **Push week**
+on the week plan writes each planned dinner as a dated Skylight dinner sitting, and **Send to
+Skylight list** mirrors the shopping list onto the frame's grocery list (additive, so a tick
+made on the display survives). The account is one shared household credential with a
+per-person on/off switch, and when it is not connected the page says so and the buttons never
+report a fake success. The Skylight Meals API is unofficial and may change; the connector is
+fail-safe and never blocks the local flows.
+
 ## Voice signatures (shipped)
 
 Each person enrolls under Identity -> Vocal Signature by reading three short

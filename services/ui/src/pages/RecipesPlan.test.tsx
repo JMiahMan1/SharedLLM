@@ -23,6 +23,10 @@ vi.mock('../services/api', async (importOriginal) => {
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
       addFood: vi.fn(),
+      getSkylightMeals: vi.fn(),
+      sendSkylightRecipe: vi.fn(),
+      pushSkylightWeek: vi.fn(),
+      mirrorSkylightList: vi.fn(),
     },
   };
 });
@@ -38,6 +42,9 @@ const readNote = vi.mocked(api.readNote);
 const writeNote = vi.mocked(api.writeNote);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
+const getSkylightMeals = vi.mocked(api.getSkylightMeals);
+const pushSkylightWeek = vi.mocked(api.pushSkylightWeek);
+const mirrorSkylightList = vi.mocked(api.mirrorSkylightList);
 
 function listResponse(titles: string[]) {
   return {
@@ -88,6 +95,9 @@ describe('Recipes week plan', () => {
       detail: { conversations: [{ token: 'room-1', display_name: 'Family' }] },
     } as never);
     sendTalkMessage.mockResolvedValue({ status: 'SUCCESS', message: '', service: 'talk_send' } as never);
+    getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: true, categories: [] } as never);
+    pushSkylightWeek.mockResolvedValue({ status: 'SUCCESS', planned: [], failed: [] } as never);
+    mirrorSkylightList.mockResolvedValue({ status: 'SUCCESS', added: 0, removed: 0 } as never);
   });
 
   it('picks a day, marks it cooked, and saves the plan', async () => {
@@ -282,5 +292,65 @@ describe('Recipes week plan', () => {
     fireEvent.click(await screen.findByTestId('recipe-log-health'));
     // The test recipe has no nutrition: the sheet says so instead of guessing.
     expect(await screen.findByTestId('log-recipe-manual')).toHaveTextContent('no per-serving nutrition');
+  });
+
+  it('pushes the week to Skylight, one dated sitting per planned dinner', async () => {
+    readNote.mockImplementation(
+      (async (title: string) => {
+        if (title === 'Meal plan') return PLAN_RESPONSE;
+        if (title === 'Chicken Chili') {
+          return { status: 'SUCCESS' as const, message: '# Chicken Chili\n\n- [ ] 1 tsp cumin', service: 'note_read' };
+        }
+        return RECIPE_RESPONSE;
+      }) as never,
+    );
+    pushSkylightWeek.mockResolvedValue({ status: 'SUCCESS', planned: [{ date: '2026-10-26', title: 'Chicken Chili' }], failed: [] } as never);
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByTestId('plan-send-skylight'));
+
+    await waitFor(() => expect(pushSkylightWeek).toHaveBeenCalled());
+    const sent = pushSkylightWeek.mock.calls[0][0];
+    expect(sent.days).toHaveLength(1);
+    expect(sent.days[0].title).toBe('Chicken Chili');
+    expect(sent.days[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(sent.days[0].body).toContain('cumin');
+  });
+
+  it('mirrors the shopping list onto the Skylight grocery list', async () => {
+    readNote.mockImplementation(
+      (async (title: string) => {
+        if (title === 'Meal plan') return PLAN_RESPONSE;
+        if (title === 'Shopping list') {
+          return { status: 'SUCCESS' as const, message: '#shopping-list\n\n- [ ] 2 cups flour\n- [x] salt', service: 'note_read' };
+        }
+        return RECIPE_RESPONSE;
+      }) as never,
+    );
+    mirrorSkylightList.mockResolvedValue({ status: 'SUCCESS', message: 'Added 2 item(s)', added: 2, removed: 0 } as never);
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByTestId('list-send-skylight'));
+
+    await waitFor(() => expect(mirrorSkylightList).toHaveBeenCalled());
+    expect(mirrorSkylightList).toHaveBeenCalledWith({ items: ['2 cups flour', 'salt'] });
+  });
+
+  it('does not push the week when Skylight is not connected', async () => {
+    getSkylightMeals.mockResolvedValue({ status: 'SUCCESS', configured: false, categories: [] } as never);
+    renderRecipes();
+    await screen.findByText('Pancakes');
+    fireEvent.click(await screen.findByRole('button', { name: /week plan/i }));
+    await screen.findByTestId('meal-plan');
+
+    fireEvent.click(screen.getByTestId('plan-send-skylight'));
+
+    expect(pushSkylightWeek).not.toHaveBeenCalled();
   });
 });

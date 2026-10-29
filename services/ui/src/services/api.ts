@@ -3751,6 +3751,62 @@ export const api = {
     return resp.data;
   },
 
+  /**
+   * Skylight Meals: whether the household account is connected (the cheap
+   * credentials probe, no sign-in) and the planner's meal categories. A
+   * `configured: false` answer is the Recipes page's "not connected" state.
+   */
+  async getSkylightMeals(): Promise<{
+    status: string;
+    configured?: boolean;
+    categories?: Array<{ id: string; label: string; color?: string | null }>;
+    message?: string;
+  }> {
+    const resp = await apiClient.get('/api/integrations/skylight/meals', { timeout: 30_000 });
+    return resp.data;
+  },
+
+  /** Send one recipe to the Skylight Recipe Box (re-sending updates it). */
+  async sendSkylightRecipe(body: {
+    title: string;
+    body?: string;
+    description?: string;
+    meal_category_id?: string;
+    add_to_grocery_list?: boolean;
+  }): Promise<{
+    status: string;
+    message?: string;
+    recipe_id?: string | null;
+    category_id?: string;
+    grocery_list?: boolean;
+  }> {
+    const resp = await apiClient.post('/api/integrations/skylight/meals/recipe', body, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /** Push the week's planned dinners to Skylight as dinner sittings. */
+  async pushSkylightWeek(body: {
+    days: Array<{ date: string; title: string; body?: string }>;
+    add_to_grocery_list?: boolean;
+  }): Promise<{
+    status: string;
+    message?: string;
+    planned?: Array<{ date: string; title: string; recipe_id?: string | null; sitting_id?: string | null }>;
+    failed?: Array<{ date?: string | null; title?: string | null; reason?: string }>;
+  }> {
+    const resp = await apiClient.post('/api/integrations/skylight/meals/plan', body, { timeout: 120_000 });
+    return resp.data;
+  },
+
+  /** Mirror the shopping list onto the frame's default Skylight grocery list. */
+  async mirrorSkylightList(body: {
+    items: string[];
+    replace?: boolean;
+  }): Promise<{ status: string; message?: string; added?: number; removed?: number }> {
+    const resp = await apiClient.post('/api/integrations/skylight/meals/grocery', body, { timeout: 60_000 });
+    return resp.data;
+  },
+
   async getDeviceStates(domains?: string[]): Promise<DeviceEntry[]> {
     const resp = await apiClient.post('/execute/entity/search', {
       query: '',
