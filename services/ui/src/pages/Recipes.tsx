@@ -1118,7 +1118,7 @@ export default function Recipes() {
                                 key={reading}
                                 type="button"
                                 onClick={() => setPhotoFixes((prev) => ({ ...prev, [phrase]: reading }))}
-                                className="glass-button shrink-0 px-2 py-1 text-[11px]"
+                                className="glass-button min-w-0 max-w-full truncate px-2 py-1 text-[11px]"
                                 title={`Use "${reading}"`}
                               >
                                 {reading}
@@ -1128,7 +1128,8 @@ export default function Recipes() {
                               type="button"
                               onClick={() => applyPhotoFix(phrase)}
                               aria-label={`Accept correction for ${phrase}`}
-                              className="glass-button shrink-0 px-2 py-1 text-[11px]"
+                              disabled={!(photoFixes[phrase] ?? '').trim()}
+                              className="glass-button shrink-0 px-2 py-1 text-[11px] disabled:opacity-50"
                             >
                               Accept
                             </button>
@@ -1287,7 +1288,7 @@ export default function Recipes() {
             <button
               type="button"
               onClick={() => void downloadWeekIcs()}
-              disabled={icsBusy}
+              disabled={icsBusy || !PLAN_DAYS.some((day) => plan[day].title)}
               data-testid="plan-ics"
               className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
             >
