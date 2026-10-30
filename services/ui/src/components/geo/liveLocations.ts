@@ -117,14 +117,21 @@ export interface MemberCluster {
   members: LiveFamilyMember[];
 }
 
-/** The place a point is standing in, smallest containing place first. */
+/** The place a point is standing in, smallest containing place first.
+ *
+ * `marginMeters` gives slack around a place's own radius: indoor fixes scatter
+ * by a hundred metres or more, and Home Assistant zones are often drawn tight,
+ * so a fix just outside home is still "at home" for grouping purposes.
+ */
 export function placeKeyFor(
   point: { lat: number; lon: number },
-  places: { id?: string; name: string; lat: number; lon: number; radius: number }[]
+  places: { id?: string; name: string; lat: number; lon: number; radius: number }[],
+  marginMeters = 0
 ): string | null {
   let best: { key: string; radius: number } | null = null;
   for (const place of places) {
-    if (distanceMeters(point.lat, point.lon, place.lat, place.lon) > place.radius) continue;
+    if (distanceMeters(point.lat, point.lon, place.lat, place.lon) > place.radius + marginMeters)
+      continue;
     const key = place.id ?? place.name;
     if (!best || place.radius < best.radius) best = { key, radius: place.radius };
   }

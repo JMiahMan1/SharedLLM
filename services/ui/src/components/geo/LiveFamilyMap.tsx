@@ -26,6 +26,14 @@ const DEFAULT_ZOOM = 4;
  */
 const NEARBY_CLUSTER_M = 150;
 
+/**
+ * Slack around a place's own radius when deciding who is "at" it. Home
+ * Assistant zones are often drawn tight (100 m), while an indoor fix can sit a
+ * couple of hundred metres off, which would otherwise leave two people at home
+ * on separate pins.
+ */
+const PLACE_SLACK_M = 250;
+
 export interface MapPlace {
   id: string;
   name: string;
@@ -82,7 +90,7 @@ export default function LiveFamilyMap({
     const keys = new Map<string, string>();
     if (zones.length) {
       for (const member of members) {
-        const key = placeKeyFor(member, zones);
+        const key = placeKeyFor(member, zones, PLACE_SLACK_M);
         if (key) keys.set(member.userId, key);
       }
     }
@@ -122,7 +130,7 @@ export default function LiveFamilyMap({
   const avatarResults = useQueries({
     queries: avatarTargets.map((target) => ({
       queryKey: ['avatar-image', target.username, target.version],
-      queryFn: () => api.getAvatarImage(target.username),
+      queryFn: () => api.getAvatarImage(target.username, target.version),
       staleTime: Infinity,
       retry: false,
     })),

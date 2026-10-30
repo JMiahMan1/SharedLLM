@@ -49,7 +49,7 @@ describe('profile pictures', () => {
     expect(presetAvatar.querySelector('svg')).not.toBeNull();
     expect(screen.getByRole('img', { name: 'Sam Summers' })).toHaveTextContent('SS');
     expect(await screen.findByTestId('user-avatar-photo')).toHaveAttribute('src', 'blob:photo');
-    expect(apiMock.getAvatarImage).toHaveBeenCalledWith('ben');
+    expect(apiMock.getAvatarImage).toHaveBeenCalledWith('ben', 'upload:123');
   });
 
   it('saves a chosen character', async () => {

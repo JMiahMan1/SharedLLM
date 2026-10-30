@@ -882,8 +882,14 @@ export const api = {
   },
 
   /** A family member's uploaded picture, fetched with the user's credentials. */
-  async getAvatarImage(username: string): Promise<Blob> {
-    const resp = await apiClient.get(`/api/users/${encodeURIComponent(username)}/avatar/image`, { responseType: 'blob' });
+  async getAvatarImage(username: string, version?: string | null): Promise<Blob> {
+    // The version rides in the URL. The picture route sets a day-long browser
+    // cache and its URL carries no version, so without this a new photo would
+    // keep being served from the browser's cache long after it changed.
+    const resp = await apiClient.get(`/api/users/${encodeURIComponent(username)}/avatar/image`, {
+      params: version ? { v: version } : undefined,
+      responseType: 'blob',
+    });
     return resp.data;
   },
 

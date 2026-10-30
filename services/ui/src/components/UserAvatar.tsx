@@ -25,7 +25,7 @@ export default function UserAvatar({ username, avatar, name, size = 40, classNam
   const uploaded = avatar?.startsWith('upload:') ? avatar : null;
   const { data: blob } = useQuery({
     queryKey: ['avatar-image', username, uploaded],
-    queryFn: () => api.getAvatarImage(username),
+    queryFn: () => api.getAvatarImage(username, uploaded),
     enabled: Boolean(uploaded),
     staleTime: Infinity,
     retry: false,
