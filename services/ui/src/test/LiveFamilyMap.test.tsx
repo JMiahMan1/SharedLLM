@@ -11,6 +11,7 @@ import {
   classifyLocation,
   clusterMembers,
   distanceMeters,
+  placeKeyFor,
 } from '../components/geo/liveLocations';
 
 function renderMap() {
@@ -99,6 +100,24 @@ describe('clustering nearby members', () => {
       { userId: 'b', lat: 33.5, lon: -112.1, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
     ];
     expect(clusterMembers(members)).toHaveLength(2);
+  });
+
+  it('brings people in the same place together however far the fixes scatter', () => {
+    const home = { id: 'zone.home', name: 'Home', lat: 33.45, lon: -112.08, radius: 10000 };
+    // Same as the "separate" pair above: ~7 km apart, so distance alone would
+    // never merge them - but both are inside home.
+    const members = [
+      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 33.5, lon: -112.1, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+    ];
+    expect(clusterMembers(members, 60, (m) => placeKeyFor(m, [home]))).toHaveLength(1);
+  });
+
+  it('names the smallest place a point is standing in', () => {
+    const town = { id: 'zone.town', name: 'Town', lat: 33.45, lon: -112.08, radius: 5000 };
+    const school = { id: 'zone.school', name: 'School', lat: 33.4484, lon: -112.074, radius: 100 };
+    expect(placeKeyFor({ lat: 33.4484, lon: -112.074 }, [town, school])).toBe('zone.school');
+    expect(placeKeyFor({ lat: 34.0, lon: -112.0 }, [town, school])).toBeNull();
   });
 
   it('ignores staleness when distance is what matters', () => {

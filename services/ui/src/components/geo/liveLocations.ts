@@ -117,21 +117,45 @@ export interface MemberCluster {
   members: LiveFamilyMember[];
 }
 
+/** The place a point is standing in, smallest containing place first. */
+export function placeKeyFor(
+  point: { lat: number; lon: number },
+  places: { id?: string; name: string; lat: number; lon: number; radius: number }[]
+): string | null {
+  let best: { key: string; radius: number } | null = null;
+  for (const place of places) {
+    if (distanceMeters(point.lat, point.lon, place.lat, place.lon) > place.radius) continue;
+    const key = place.id ?? place.name;
+    if (!best || place.radius < best.radius) best = { key, radius: place.radius };
+  }
+  return best?.key ?? null;
+}
+
 /**
  * Group members standing together.
  *
  * One phone can post under more than one key (the app posts per-user and has a
  * legacy fallback), which showed up as duplicate pins stacked on the same spot.
  * Anything within `radiusMeters` collapses into one marker.
+ *
+ * Indoor fixes scatter by a hundred metres or more, so being *in the same
+ * place* is what really means "together": when `placeKey` says two members are
+ * in the same zone (home, school, ...) they merge however far apart the fixes
+ * are, which is what a family looking at the map expects.
  */
 export function clusterMembers(
   members: LiveFamilyMember[],
-  radiusMeters = 60
+  radiusMeters = 60,
+  placeKey?: (member: LiveFamilyMember) => string | null
 ): MemberCluster[] {
+  const keyOf = (member: LiveFamilyMember) => (placeKey ? placeKey(member) : null);
   const clusters: MemberCluster[] = [];
   for (const member of members) {
-    const hit = clusters.find((c) =>
-      c.members.some((m) => distanceMeters(m.lat, m.lon, member.lat, member.lon) <= radiusMeters)
+    const key = keyOf(member);
+    const hit = clusters.find(
+      (c) =>
+        (key != null && c.members.some((m) => keyOf(m) === key)) ||
+        c.members.some((m) => distanceMeters(m.lat, m.lon, member.lat, member.lon) <= radiusMeters)
     );
     if (hit) {
       hit.members.push(member);

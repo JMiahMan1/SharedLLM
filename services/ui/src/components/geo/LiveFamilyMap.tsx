@@ -12,11 +12,19 @@ import {
   ageLabel,
   buildLiveMembers,
   clusterMembers,
+  placeKeyFor,
 } from './liveLocations';
 
 /** Continental-US view used until there is a home zone or a member to centre on. */
 const DEFAULT_CENTER: L.LatLngExpression = [39.5, -98.35];
 const DEFAULT_ZOOM = 4;
+
+/**
+ * How close two fixes must be to count as together when they are not in the
+ * same named place. Indoor GPS scatters by a hundred metres or more, so this is
+ * roomier than the 60 m `clusterMembers` defaults to.
+ */
+const NEARBY_CLUSTER_M = 150;
 
 export interface MapPlace {
   id: string;
@@ -67,6 +75,19 @@ export default function LiveFamilyMap({
     ...userLocationsQuery,
     select: (raw) => buildLiveMembers(raw, Date.now(), maxAgeMs),
   });
+
+  // Which place each member is standing in, so two people at home share one pin
+  // however far their indoor fixes scatter.
+  const placeKeys = useMemo(() => {
+    const keys = new Map<string, string>();
+    if (zones.length) {
+      for (const member of members) {
+        const key = placeKeyFor(member, zones);
+        if (key) keys.set(member.userId, key);
+      }
+    }
+    return keys;
+  }, [members, zones]);
 
   // Wander already has the directory; the fallback keeps the map self-contained
   // for any other caller. Same query key, so this never fetches twice.
@@ -175,7 +196,7 @@ export default function LiveFamilyMap({
     }
 
     const points: L.LatLngExpression[] = [];
-    for (const cluster of clusterMembers(members)) {
+    for (const cluster of clusterMembers(members, NEARBY_CLUSTER_M, (m) => placeKeys.get(m.userId) ?? null)) {
       const member = cluster.lead;
       const style = FRESHNESS_STYLE[member.freshness];
       const latlng: L.LatLngExpression = [member.lat, member.lon];
@@ -271,7 +292,7 @@ export default function LiveFamilyMap({
       layer.clearLayers();
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
     };
-  }, [members, zones, personByUser, avatarTargets, avatarDataKey]);
+  }, [members, zones, personByUser, avatarTargets, avatarDataKey, placeKeys]);
 
   // "Show on map" from a family card.
   useEffect(() => {
