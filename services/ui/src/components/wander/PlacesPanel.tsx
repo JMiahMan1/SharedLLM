@@ -436,6 +436,9 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                         name: spot.place,
                         lat: spot.lat.toFixed(5),
                         lon: spot.lon.toFixed(5),
+                        // A spot you keep going back to is the sort of place you
+                        // want alerts from, so start with Important on.
+                        important: true,
                       })
                     }
                     className="glass-button min-h-9 px-3 text-xs text-emerald-200"
