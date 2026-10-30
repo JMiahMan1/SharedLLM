@@ -15,6 +15,7 @@ import NotificationPreferencesPanel from '../components/settings/NotificationPre
 import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
+import WatchPanel from '../components/settings/WatchPanel';
 import Toggle from '../components/ui/Toggle';
 import { getAutoDropIn, setAutoDropIn } from '../lib/callSettings';
 import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
@@ -113,6 +114,11 @@ const Settings = () => {
         <SensorsSection />
         <AppUpdatesSection />
         <AppCleanupPanel />
+      </section>
+
+      <section className="space-y-4" aria-labelledby="settings-watch">
+        <h2 id="settings-watch" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Jarvis Watch</h2>
+        <WatchPanel />
       </section>
 
       <div className="glass-panel rounded-2xl p-4 space-y-1">
