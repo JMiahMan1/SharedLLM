@@ -87,6 +87,18 @@ describe('PlacesPanel', () => {
     expect(screen.getByTestId('places-panel')).toHaveTextContent(/you can add your own places/i);
   });
 
+  it('offers to save a place someone keeps visiting, ready to alert', async () => {
+    getVisitSuggestions.mockResolvedValue([
+      { lat: 33.4, lon: -111.9, count: 3, total_s: 5400, last_since: 1, last_ts: 2, place: 'Corner Cafe' },
+    ]);
+    renderPanel(<PlacesPanel places={[]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
+    await userEvent.click(await screen.findByRole('button', { name: /add as a place/i }));
+    expect(screen.getByLabelText('Place name')).toHaveValue('Corner Cafe');
+    // A spot you keep going back to starts as an important place, so the alert
+    // picker is already open.
+    expect(screen.getByTestId('place-form')).toHaveTextContent(/alerts go to everyone/i);
+  });
+
   it('shows nothing with no places', () => {
     const { container } = renderPanel(<PlacesPanel places={[]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
     expect(container).toBeEmptyDOMElement();
