@@ -105,3 +105,33 @@ def test_a_fix_identity_refuses_is_a_4xx_so_the_phone_drops_it(monkeypatch):
 def test_identity_down_is_still_a_5xx_so_the_phone_keeps_the_fix(monkeypatch):
     _posting(monkeypatch, 503)
     assert TestClient(app).post("/api/users/leo/location", json={"latitude": 1, "longitude": 2}).status_code == 502
+
+
+def test_a_driving_event_goes_to_geo_as_the_signed_in_person(monkeypatch):
+    posted = []
+
+    async def acting(request):
+        return {"user": "zachary", "is_admin": False}
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, **kw):
+            posted.append((url, json))
+            return _Post(200)
+
+    async def to_execution(request, path, payload, as_user=None):
+        return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _Client())
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", to_execution)
+    body = {"feature": "driving", "event": "hard_brake", "detail": {"at": 1, "from_mph": 40, "to_mph": 20}, "as_user": "someone_else"}
+    assert TestClient(app).post("/api/activity", json=body).status_code == 200
+    url, sent = posted[0]
+    assert url.endswith("/driving-events")
+    assert sent == {"user": "zachary", "event": "hard_brake", "detail": {"at": 1, "from_mph": 40, "to_mph": 20}}

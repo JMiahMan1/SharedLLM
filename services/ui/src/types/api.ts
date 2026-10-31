@@ -2524,6 +2524,8 @@ export interface UserLiveLocation {
   battery?: number | null;
   timestamp?: number;
   updated_at?: number;
+  /** What the phone's activity recognition says: driving, cycling, walking, still, unknown. */
+  activity?: string | null;
 }
 
 /** A place saved from Wander - a point + radius, shared with the family or private to its owner. */
@@ -3813,4 +3815,34 @@ export interface PersonDay {
   points: Array<{ t: number; lat: number; lon: number; spd?: number }>;
   stops: DayStop[];
   timeline: DayTimelineEntry[];
+}
+
+/** Driving events counted for a trip or a stretch of days (geo driving.py). */
+export interface DrivingEventCounts {
+  hard_brake: number;
+  rapid_accel: number;
+  high_speed: number;
+  phone_use: number;
+  phone_use_min: number;
+}
+
+/** The driver report: drives over the last days and the phone's driving events. */
+export interface DriverReport {
+  user: string;
+  days: number;
+  trips: number;
+  miles: number;
+  drive_minutes: number;
+  top_speed_mph: number;
+  events: DrivingEventCounts;
+  per_trip: Array<{
+    id: string;
+    start_time: number;
+    end_time: number;
+    distance_miles?: number;
+    top_speed_mph?: number;
+    start_location?: TripLocation | null;
+    end_location?: TripLocation | null;
+    events: DrivingEventCounts;
+  }>;
 }

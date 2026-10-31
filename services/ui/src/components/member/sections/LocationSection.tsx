@@ -9,6 +9,7 @@ import { geoZonesQueryKey, zonePlaces } from '../../../lib/wanderQueries';
 import { localDay } from '../../../lib/healthHub';
 import GeofenceAlertsCard from '../../guardian/GeofenceAlertsCard';
 import DayHistoryCard from '../DayHistoryCard';
+import DriverReportCard from '../DriverReportCard';
 import type { Trip, TripLocation } from '../../../types/api';
 
 const placeName = (l: TripLocation | undefined) => l?.zone || l?.name || l?.address || 'somewhere';
@@ -80,6 +81,7 @@ export default function LocationSection({ username, name }: { username: string; 
       </div>
       <FindPhoneCard username={username} name={name} />
       <DayHistoryCard username={username} name={name} />
+      <DriverReportCard username={username} name={name} />
       <TripsCard username={username} name={name} />
       <PlacesCard />
       <GeofenceAlertsCard username={username} name={name} />

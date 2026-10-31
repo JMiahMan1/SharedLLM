@@ -5508,7 +5508,50 @@ async def post_activity(request: Request):
         "duration_s": body.get("duration_s"),
         "detail": body.get("detail") or {},
     }
+    if payload["feature"] == "driving":
+        # A driving event from the phone (hard braking, over 80 mph, ...):
+        # geo keeps it for the driver report, as the signed-in person.
+        await _forward_driving_event(request, payload)
     return await _proxy_execution_with_identity(request, "/execute/activity", payload, as_user=body.get("as_user"))
+
+
+async def _forward_driving_event(request: Request, payload: dict) -> None:
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{GEO_SVC}/driving-events",
+                json={"user": ident["user"], "event": payload["event"], "detail": payload["detail"]},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status == 422:
+                raise HTTPException(status_code=422, detail="Not a driving event")
+            if resp.status != 200:
+                # The phone keeps it and tries again (its outbox retries a 5xx).
+                raise HTTPException(status_code=503, detail="Could not record the driving event")
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=503, detail="Could not record the driving event") from e
+
+
+@app.get("/api/geo/people/{user}/driving")
+async def get_geo_driver_report(request: Request, user: str, days: int = 7):
+    """The driver report (Wander and the member page); geo checks consent."""
+    target, viewer, is_admin = await _read_target(request, user)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", target or ""):
+        raise HTTPException(status_code=422, detail="A username is required")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/people/{target}/driving",
+            params={"days": max(1, min(int(days), 90)), "viewer": viewer, "is_admin": is_admin},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "No driver report")
 
 
 @app.post("/api/usage")
