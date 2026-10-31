@@ -36,6 +36,11 @@ final class CommsCollector {
     static final String KEY_SMS = "last_sms_ts";
     static final String KEY_CALLS_ID = "last_calls_id";
     static final String KEY_SMS_ID = "last_sms_id";
+    static final String KEY_MMS = "last_mms_ts";
+    static final String KEY_MMS_ID = "last_mms_id";
+    /** MMS address types: who sent it, and who it went to. */
+    static final int MMS_FROM = 137;
+    static final int MMS_TO = 151;
     /** The most rows one run sends per kind; the rest follow on the next run. */
     static final int RUN_LIMIT = 200;
     /** How far back the very first run looks. */
@@ -59,7 +64,10 @@ final class CommsCollector {
         if (key != null && !key.isEmpty()) {
             try {
                 if (hasPerm(app, Manifest.permission.READ_CALL_LOG)) calls = sendCalls(app);
-                if (hasPerm(app, Manifest.permission.READ_SMS)) sms = sendSms(app);
+                if (hasPerm(app, Manifest.permission.READ_SMS)) {
+                    sms = sendSms(app);
+                    sms += sendMms(app);
+                }
             } catch (Exception e) {
                 // Offline or a server error: the cursor stays on the first
                 // row not taken, and the next run starts there.
@@ -144,6 +152,94 @@ final class CommsCollector {
             }
         }
         return sent;
+    }
+
+    /**
+     * Picture and group messages (MMS), which Android keeps apart from plain
+     * texts: only content://sms was read, so a group chat or a photo with a
+     * caption never reached the family. Each goes up as a text, with its
+     * words (every text part joined) and who it was from or to; a group
+     * names everyone in it. MMS times are in seconds, so the cursor is too.
+     */
+    private static int sendMms(Context app) throws Exception {
+        SharedPreferences prefs = prefs(app);
+        long lastAt = prefs.getLong(KEY_MMS, 0L);
+        if (lastAt == 0L) lastAt = startFrom(0L) / 1000L;
+        long lastId = prefs.getLong(KEY_MMS_ID, 0L);
+        String[] projection = {"_id", "date", "msg_box"};
+        int sent = 0;
+        try (Cursor c = app.getContentResolver().query(
+                Uri.parse("content://mms"), projection, after("date", "_id"),
+                afterArgs(lastAt, lastId), "date ASC, _id ASC")) {
+            while (c != null && c.moveToNext() && sent < RUN_LIMIT) {
+                long id = c.getLong(c.getColumnIndexOrThrow("_id"));
+                long at = c.getLong(c.getColumnIndexOrThrow("date"));
+                String direction = smsDirection(c.getInt(c.getColumnIndexOrThrow("msg_box")));
+                String text = mmsText(app, id);
+                java.util.List<String> people = mmsPeople(app, id, "out".equals(direction) ? MMS_TO : MMS_FROM);
+                java.util.List<String> names = new java.util.ArrayList<>();
+                for (String number : people) {
+                    String name = contactName(app, number);
+                    names.add(name.isEmpty() ? number : name);
+                }
+                JSONObject detail = new JSONObject()
+                    .put("number", people.isEmpty() ? "" : people.get(0))
+                    .put("body", text)
+                    .put("direction", direction).put("at", at * 1000L).put("source", "phone").put("mms", true);
+                if (people.size() > 1) detail.put("group", new org.json.JSONArray(names));
+                JSONObject body = new JSONObject()
+                    .put("feature", "sms").put("event", "message")
+                    .put("item", groupLabel(names))
+                    .put("detail", detail);
+                postOrSkip(app, body);
+                prefs.edit().putLong(KEY_MMS, at).putLong(KEY_MMS_ID, id).apply();
+                sent++;
+            }
+        }
+        return sent;
+    }
+
+    /** The words of an MMS: every text/plain part, in order. A photo alone has none. */
+    private static String mmsText(Context app, long id) {
+        StringBuilder out = new StringBuilder();
+        try (Cursor c = app.getContentResolver().query(Uri.parse("content://mms/part"),
+                new String[] {"_id", "ct", "text"}, "mid = ?", new String[] {String.valueOf(id)}, "_id ASC")) {
+            while (c != null && c.moveToNext()) {
+                if (!"text/plain".equals(c.getString(c.getColumnIndexOrThrow("ct")))) continue;
+                String part = c.getString(c.getColumnIndexOrThrow("text"));
+                if (part == null || part.isEmpty()) continue;
+                if (out.length() > 0) out.append('\n');
+                out.append(part);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "mms text unreadable: " + e.getMessage());
+        }
+        return out.toString();
+    }
+
+    /** The numbers of one address type (sender or recipients) of an MMS. */
+    private static java.util.List<String> mmsPeople(Context app, long id, int type) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try (Cursor c = app.getContentResolver().query(Uri.parse("content://mms/" + id + "/addr"),
+                new String[] {"address", "type"}, null, null, null)) {
+            while (c != null && c.moveToNext()) {
+                if (c.getInt(c.getColumnIndexOrThrow("type")) != type) continue;
+                String number = orEmpty(c.getString(c.getColumnIndexOrThrow("address")));
+                if (!number.isEmpty() && !"insert-address-token".equals(number) && !out.contains(number)) out.add(number);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "mms addresses unreadable: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** "Mom", or "Mom, Leo and 2 others" for a group. */
+    static String groupLabel(java.util.List<String> names) {
+        if (names.isEmpty()) return "";
+        if (names.size() == 1) return names.get(0);
+        if (names.size() == 2) return names.get(0) + " and " + names.get(1);
+        int others = names.size() - 2;
+        return names.get(0) + ", " + names.get(1) + " and " + others + (others == 1 ? " other" : " others");
     }
 
     /**

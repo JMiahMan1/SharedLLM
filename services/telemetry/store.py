@@ -30,9 +30,12 @@ LOCK_PREFIX = "tel:lock:"
 # What each person does inside Jarvis (music played, games finished, pages
 # opened, verses read). Capped so a busy month cannot grow without bound, but
 # high enough that in-app page views cannot push a child's calls, messages
-# and sites out of the week the recap reads (500 did, within a week).
+# and sites out of the week the recap reads (500 did, within a week). Texts
+# are logged one per message now, picture and group messages included, and a
+# teen sends hundreds a day: 5000 held about two weeks of them. About 0.5 KB
+# an event with its message text, so ~10 MB per person at most.
 ACTIVITY_PREFIX = "tel:activity:"
-ACTIVITY_MAX = 5000
+ACTIVITY_MAX = 20000
 
 # Screen time per day and when the day started and stopped (the phone's
 # UsageStatsManager reports it; the profile and the parents' views read it).

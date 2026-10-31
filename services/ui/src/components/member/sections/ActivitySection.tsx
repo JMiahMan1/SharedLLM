@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, BookOpen, ChevronLeft, ChevronRight, Gamepad2, Globe, ListOrdered, MessageSquare, Music, Phone, Smartphone } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import MemberCard from '../MemberCard';
-import { ACTIVITY_KINDS, ACTIVITY_LIMIT, activityQuery, kindOf, kindTotals } from '../../../lib/memberPage';
+import { ACTIVITY_KINDS, ACTIVITY_LIMIT, activityQuery, commsLine, kindOf, kindTotals } from '../../../lib/memberPage';
 import { formatDayLabel, localDay, shiftDay } from '../../../lib/healthHub';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -20,6 +20,8 @@ function TimelineCard({ username, name }: { username: string; name: string }) {
   const today = localDay();
   const [day, setDay] = useState(today);
   const [kinds, setKinds] = useState<string[]>([]);
+  /** Messages opened to their full text, by event. */
+  const [expanded, setExpanded] = useState<string[]>([]);
   const events = (data?.events || []).filter((e) => {
     const at = new Date(e.at);
     return !Number.isNaN(at.getTime()) && localDay(at) === day && (kinds.length === 0 || kinds.includes(kindOf(e.feature)));
@@ -54,7 +56,10 @@ function TimelineCard({ username, name }: { username: string; name: string }) {
         <ol className="relative space-y-0 border-l border-white/10 pl-4" data-testid="member-timeline-list">
           {events.map((e, i) => {
             const Icon = ICONS[e.feature] || Activity;
-            const body = e.feature === 'sms' && typeof e.detail?.body === 'string' ? e.detail.body : null;
+            const comms = commsLine(e);
+            const key = `${e.at}-${i}`;
+            const body = comms?.text ?? null;
+            const open = expanded.includes(key);
             return (
               <li key={`${e.at}-${i}`} className="relative py-1.5 text-xs">
                 <span className="absolute -left-[1.4rem] top-2 flex h-4 w-4 items-center justify-center rounded-full bg-slate-800 ring-1 ring-white/10">
@@ -62,12 +67,25 @@ function TimelineCard({ username, name }: { username: string; name: string }) {
                 </span>
                 <span className="flex items-baseline gap-2">
                   <span className="shrink-0 text-[10px] text-slate-500">{new Date(e.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-                  <span className="min-w-0 truncate text-slate-200">
-                    {e.item || e.feature}
-                    {e.action && e.action !== 'view' ? <span className="text-slate-500"> · {e.action}</span> : null}
+                  <span className="min-w-0 break-words text-slate-200" data-testid={comms ? 'member-comms-line' : undefined}>
+                    {comms ? comms.title : e.item || e.feature}
+                    {comms?.length ? <span className="text-slate-400"> · {comms.length}</span> : null}
+                    {comms?.number ? <span className="text-slate-500"> · {comms.number}</span> : null}
+                    {!comms && e.action && e.action !== 'view' ? <span className="text-slate-500"> · {e.action}</span> : null}
                   </span>
                 </span>
-                {body && <span className="block pl-12 text-slate-400 line-clamp-2">{body}</span>}
+                {body && (
+                  // The whole message: two lines until tapped, then all of it.
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((list) => (open ? list.filter((k) => k !== key) : [...list, key]))}
+                    aria-expanded={open}
+                    className={`block w-full whitespace-pre-wrap break-words pl-12 text-left text-slate-400 ${open ? '' : 'line-clamp-2'}`}
+                    data-testid="member-sms-body"
+                  >
+                    {body}
+                  </button>
+                )}
               </li>
             );
           })}
