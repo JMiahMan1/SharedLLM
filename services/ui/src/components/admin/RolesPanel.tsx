@@ -127,7 +127,7 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
                   </span>
                 )}
               </span>
-              {role.description && <span className="mt-1 block text-xs text-slate-400">{role.description}</span>}
+              {role.description && <span className="mt-1 block break-words text-xs text-slate-400">{role.description}</span>}
               <span className="mt-2 block text-[11px] text-slate-500">
                 {role.permissions.length ? role.permissions.map(describe).join(' · ') : 'Nothing beyond assigned devices'}
               </span>

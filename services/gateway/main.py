@@ -5461,6 +5461,7 @@ async def post_usage(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    device = str(body.get("device_key") or "").strip()
     payload = {
         "user": user,
         "day": body.get("day"),
@@ -5470,6 +5471,10 @@ async def post_usage(request: Request):
         "sessions": body.get("sessions"),
         "apps": body.get("apps") if isinstance(body.get("apps"), list) else [],
         "source": body.get("source") or "phone",
+        # Which of the person's devices this is, so a phone and a tablet add up
+        # instead of overwriting each other. Anything that is not a device key
+        # is dropped rather than refused, so the day is still recorded.
+        "device": device if re.fullmatch(r"[A-Za-z0-9_-]{16,128}", device) else "",
     }
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -15290,6 +15295,28 @@ def _media_is_book_person(raw: Any) -> bool:
     return str(item.get("artist_type") or "").strip().lower() in _MEDIA_BOOK_PERSON_TYPES
 
 
+def _media_ma_item_image(item: dict) -> str:
+    """An item's cover, wherever Music Assistant put it.
+
+    Library tracks and albums come with ``image: null`` and their covers in
+    ``metadata.images`` (checked live 2026-10-30); a track's cover may only be
+    its album's. Reading the top-level ``image`` alone left every library
+    track and album without art.
+    """
+    album = item.get("album") if isinstance(item.get("album"), dict) else {}
+    for source in (item, album):
+        if not isinstance(source, dict):
+            continue
+        image = _media_ma_image(source.get("image"))
+        if image:
+            return image
+        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+        image = _media_ma_image(metadata.get("images"))
+        if image:
+            return image
+    return ""
+
+
 def _media_ma_item(raw: Any) -> dict:
     """Normalize a Music Assistant item mapping (or full item) to MediaItem kwargs.
 
@@ -15318,7 +15345,7 @@ def _media_ma_item(raw: Any) -> dict:
         album = album.get("name") or ""
     elif not isinstance(album, str):
         album = ""
-    image = _media_ma_image(item.get("image"))
+    image = _media_ma_item_image(item)
     duration = item.get("duration")
     try:
         duration = float(duration) if duration is not None else None

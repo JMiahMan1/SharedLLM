@@ -27,11 +27,11 @@ export const NOTE_COLORS: Array<{ id: NoteColor; label: string; swatch: string }
 
 export const NOTE_COLOR_BG: Record<NoteColor, string> = {
   default: 'rgba(148, 163, 184, 0.06)',
-  rose: 'rgba(251, 113, 133, 0.10)',
-  amber: 'rgba(251, 191, 36, 0.10)',
-  emerald: 'rgba(52, 211, 153, 0.10)',
-  sky: 'rgba(56, 189, 248, 0.10)',
-  violet: 'rgba(167, 139, 250, 0.10)',
+  rose: 'rgba(251, 113, 133, 0.22)',
+  amber: 'rgba(251, 191, 36, 0.22)',
+  emerald: 'rgba(52, 211, 153, 0.22)',
+  sky: 'rgba(56, 189, 248, 0.22)',
+  violet: 'rgba(167, 139, 250, 0.22)',
 };
 
 export function noteKey(title: string, path?: string): string {

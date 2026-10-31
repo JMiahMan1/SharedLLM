@@ -144,7 +144,7 @@ export default function RavenOpsPanel() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SettingCard icon={<PowerOff size={12} />} title="Health watch" hint="Pause or resume the background log scan.">
           <button
             onClick={() => updateConfigMutation.mutate({ raven_suspended: !current.raven_suspended })}
@@ -202,7 +202,7 @@ export default function RavenOpsPanel() {
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
           <Volume2 size={12} /> Spoken replies (local text-to-speech)
         </p>
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <div>
             <span className="text-[10px] text-slate-500 uppercase font-black mb-1 block">Engine</span>
             <div className="min-h-11 flex items-center text-sm text-white font-mono bg-black/20 px-3 rounded-lg border border-white/5 truncate">

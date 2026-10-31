@@ -43,3 +43,24 @@ export function extractMaImage(img: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * An MA item's cover wherever Music Assistant put it: its own `image`, its
+ * `metadata.images`, then its album's. Library tracks and albums come with
+ * `image: null` and the cover in `metadata.images`, and a track's cover may
+ * only be its album's, so reading `image` alone shows a placeholder.
+ */
+export function maItemImage(item: unknown): string | null {
+  if (!item || typeof item !== 'object') return null;
+  const record = item as Record<string, unknown>;
+  const album = record.album && typeof record.album === 'object' ? (record.album as Record<string, unknown>) : null;
+  for (const source of [record, album]) {
+    if (!source) continue;
+    const own = extractMaImage(source.image);
+    if (own) return own;
+    const metadata = source.metadata && typeof source.metadata === 'object' ? (source.metadata as Record<string, unknown>) : null;
+    const listed = extractMaImage(metadata?.images);
+    if (listed) return listed;
+  }
+  return null;
+}

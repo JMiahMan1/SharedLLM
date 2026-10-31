@@ -4335,10 +4335,14 @@ def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
     A minor's raw data is open to the parents and no one else: an admin, the
     father, and the linked mother (any mother when none is linked). The minor
     sees their suggestions, not the stream behind them, and siblings never see
-    each other's. An adult's raw data is their own.
+    each other's. The father and the mother share theirs with each other;
+    any other adult's raw data is their own.
     """
     if viewer is None or subject is None:
         return False
+    parents = {"father", "mother"}
+    if viewer.family_role in parents and subject.family_role in parents and viewer.username != subject.username:
+        return True
     if (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES:
         if viewer.username == subject.username:
             return False
@@ -4589,8 +4593,9 @@ def _clean_screen_rules(body: dict) -> dict:
             raise HTTPException(status_code=422, detail="geofence_alerts must be an object")
         clean_ga: dict = {}
         for zid, cfg in ga.items():
-            if not isinstance(zid, str) or not re.fullmatch(r"zone\.[a-z0-9_]+", zid.strip()):
-                raise HTTPException(status_code=422, detail="geofence_alerts keys must be zone entity ids (e.g. zone.home)")
+            # A Home Assistant zone or a Wander saved place (geo's ``place.<id>``).
+            if not isinstance(zid, str) or not re.fullmatch(r"zone\.[a-z0-9_]+|place\.[0-9a-f]{32}", zid.strip()):
+                raise HTTPException(status_code=422, detail="geofence_alerts keys must be zone or place ids (e.g. zone.home)")
             if not isinstance(cfg, dict):
                 raise HTTPException(status_code=422, detail="geofence_alerts values must be objects")
             clean_ga[zid.strip()] = {
@@ -4662,9 +4667,11 @@ def _parents_of(session: Session, subject: User) -> list[str]:
 
 @app.get("/api/screen-time/{username}/rules")
 def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A member's rules: theirs to read, their parents' to read and change."""
+    """A member's rules: theirs to read, their parents' to read and change,
+    and readable (not changeable) by the other parent for the father and the
+    mother, whose collected data they share."""
     subject = _screen_subject(session, username)
-    if caller.username != subject.username and not _may_manage_screen_time(caller, subject):
+    if caller.username != subject.username and not may_view_raw_data(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
     return {
         "username": subject.username,
@@ -6994,7 +7001,17 @@ def register_device(
     elif not body.form_factor and device.kind == "phone" and infer_mobile_kind(None, body.model or device.model) == "tablet":
         device.kind = "tablet"
 
-    device.owner_username = caller.username
+    # A child's phone or tablet stays the child's when a parent signs in on
+    # it (to set it up, or to unlock it): taking it over would move its
+    # usage, guard and tamper reports to the parent and stand the guard down.
+    # Handing a device on for good is the admin's reassignment.
+    current = (
+        session.exec(select(User).where(User.username == device.owner_username)).first()
+        if device.owner_username and device.owner_username != caller.username
+        else None
+    )
+    if not (current is not None and (current.family_role or "other") in roles.MINOR_FAMILY_ROLES and may_view_raw_data(caller, current)):
+        device.owner_username = caller.username
     device.model = body.model or device.model
     device.manufacturer = body.manufacturer or device.manufacturer
     device.os_version = body.os_version or device.os_version

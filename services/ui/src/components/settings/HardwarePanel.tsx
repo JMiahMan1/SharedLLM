@@ -106,10 +106,10 @@ const HardwarePanel: React.FC = () => {
           <div key={device.name} className="glass-card p-4 bg-white/5 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <Cpu size={16} className={testing === device.name ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+                <Cpu size={16} className={`shrink-0 ${testing === device.name ? 'text-emerald-400 animate-pulse' : 'text-slate-500'}`} />
                 <span className="font-bold text-sm text-white truncate">{device.name}</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                  className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
                     device.ha_entity_id
                       ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
                       : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'

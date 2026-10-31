@@ -71,7 +71,7 @@ const LLMSettings: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-2xl font-black text-white flex items-center gap-3 tracking-tighter uppercase">
             <Brain className="text-purple-400" size={28} />

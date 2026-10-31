@@ -64,7 +64,7 @@ export default function ProfileHeader({ child }: { child: FamilyRecord }) {
         </div>
       </div>
 
-      <dl className="grid gap-2 text-xs sm:grid-cols-2">
+      <dl className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
           <dt className="text-[10px] uppercase tracking-wider text-slate-500">Now</dt>
           <dd className="text-slate-200" data-testid="member-now">

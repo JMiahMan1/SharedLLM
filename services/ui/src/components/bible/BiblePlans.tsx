@@ -317,7 +317,7 @@ function Catalogue({
       {categories.map((category) => (
         <div key={category} className="space-y-2">
           <h3 className="px-1 text-xs font-semibold uppercase tracking-wider text-slate-500">{category}</h3>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {plans
               .filter((p) => p.category === category)
               .map((p) => (

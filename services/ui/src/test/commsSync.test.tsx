@@ -8,6 +8,7 @@ const commsMock = vi.hoisted(() => ({
   requestAccess: vi.fn(),
   getNewCalls: vi.fn(),
   getNewSms: vi.fn(),
+  syncNow: undefined as undefined | ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('../plugins/comms', () => ({ default: commsMock }));
@@ -22,6 +23,23 @@ describe('CommsSync', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('lets an APK with the native collector send them itself', async () => {
+    // A fresh module: which path it takes is remembered per app start.
+    vi.resetModules();
+    commsMock.syncNow = vi.fn().mockResolvedValue({ ok: true, calls: 2, sms: 1 });
+    commsMock.hasAccess.mockResolvedValue({ calls: true, sms: true });
+    const { default: Fresh } = await import('../components/layout/CommsSync');
+
+    render(<Fresh />);
+
+    await vi.waitFor(() => expect(commsMock.syncNow).toHaveBeenCalled());
+    expect(commsMock.getNewCalls).not.toHaveBeenCalled();
+    expect(commsMock.getNewSms).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    commsMock.syncNow = undefined;
+    vi.resetModules();
   });
 
   it('reports a new call once', async () => {

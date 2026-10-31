@@ -2092,7 +2092,14 @@ const NoteEditor = forwardRef<
             : 'Kept on this device until you save';
 
   return (
-    <div className="space-y-3">
+    // The open note wears its colour, as its card does. Picking one used to
+    // move only the ring on a swatch, so on a phone (where the card palette
+    // is hidden) the choice looked like it did nothing.
+    <div
+      data-testid="note-editor"
+      className="space-y-3 rounded-2xl p-3 transition-colors"
+      style={{ background: NOTE_COLOR_BG[draft.color] ?? NOTE_COLOR_BG.default }}
+    >
       {initial.restoredAt && !conflict && (
         <p className="text-[11px] text-amber-200" role="note">
           Showing unsaved changes this device kept {new Date(initial.restoredAt).toLocaleString()}.{' '}

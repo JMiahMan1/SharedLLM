@@ -45,7 +45,7 @@ const SystemStoragePanel = () => {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="glass-card p-4">
           <p className="text-[10px] uppercase tracking-widest text-slate-500">Artifacts used</p>
           <p className="text-xl font-black text-white mt-1">{formatBytes(usage.data.used) || '0 B'}</p>

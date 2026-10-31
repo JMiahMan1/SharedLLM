@@ -598,3 +598,23 @@ def test_internal_device_registered(client: TestClient, session: Session):
     client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345"))
     assert client.get("/api/internal/device-registered/phone-abc12345").json() == {"registered": True, "owner": "michele"}
     assert client.get("/api/internal/device-registered/never-seen-key-01").json()["registered"] is False
+
+
+def test_a_parent_signing_in_on_a_childs_tablet_does_not_take_it_over(client: TestClient, session: Session):
+    for name, role in (("jeremiah", "father"), ("kid", "child"), ("kate", "adult_child")):
+        user = session.exec(select(User).where(User.username == name)).first() or _make_user(session, name)
+        user.family_role = role
+        session.add(user)
+    session.commit()
+    login(session, "kid").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet"))
+
+    # The father signs in on it to set it up: it stays the child's.
+    assert login(session, "jeremiah").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet")).status_code == 200
+    session.expire_all()
+    assert session.exec(select(Device).where(Device.device_key == "kid-tablet-00000001")).first().owner_username == "kid"
+
+    # Anyone who is not the child's parent still takes over a self-registered device, as before.
+    login(session, "kate").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet"))
+    session.expire_all()
+    assert session.exec(select(Device).where(Device.device_key == "kid-tablet-00000001")).first().owner_username == "kate"
+    app.dependency_overrides = {}

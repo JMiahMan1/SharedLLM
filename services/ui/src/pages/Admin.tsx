@@ -746,7 +746,7 @@ const Admin = () => {
       {/* Tab Content */}
       {activeTab === 'users' && (
         <div className="space-y-8">
-          <div className="grid gap-6 xl:gap-8 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="grid grid-cols-1 gap-6 xl:gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
             <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden">
               <div className="mb-6 flex items-center justify-between">
                 <div>
@@ -1012,7 +1012,7 @@ const Admin = () => {
               <HelpTooltip docName="ENTITY_PROTECTION.md" sectionTitle="## The rule" label="Device Assignments" />
             </div>
 
-            <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
+            <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
               <EntitySearchDropdown
                 value={deviceId}
                 onChange={setDeviceId}
@@ -1108,7 +1108,7 @@ const Admin = () => {
                   <Plus size={20} className="text-emerald-400" />
                   Create Media Group
                 </h3>
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_2fr_auto]">
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
                   <input
                     type="text"
                     value={newGroupName}
@@ -1192,7 +1192,7 @@ const Admin = () => {
                   <Plus size={20} className="text-yellow-400" />
                   Create Light Cluster
                 </h3>
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_2fr_auto]">
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
                   <input
                     type="text"
                     value={newGroupName}
@@ -1326,7 +1326,7 @@ const Admin = () => {
                   <Play size={20} className="text-cyan-400" />
                   Execute Pattern
                 </h3>
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[1fr_1fr_auto]">
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                   <select
                     value={executePatternName}
                     onChange={(e) => setExecutePatternName(e.target.value)}
@@ -1443,7 +1443,7 @@ const Admin = () => {
                   <Phone size={20} className="text-violet-400" />
                   Start Intercom Session
                 </h3>
-                <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-[1fr_160px_auto]">
+                <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-[minmax(0,1fr)_160px_auto]">
                   <input
                     type="text"
                     value={intercomSessionTarget}
@@ -1719,13 +1719,13 @@ const Admin = () => {
                     className="glass-input w-full"
                   />
                   {setting.description && (
-                    <p className="mt-2 text-xs text-slate-500">{setting.description}</p>
+                    <p className="mt-2 break-words text-xs text-slate-500">{setting.description}</p>
                   )}
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-6 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <input
                 type="text"
                 value={newSettingKey}
@@ -2072,7 +2072,7 @@ const Admin = () => {
         title={editingUser ? `Edit @${editingUser.username}` : 'Create User'}
       >
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-xs font-black uppercase tracking-widest text-slate-500">Username</span>
               <input
@@ -2149,7 +2149,7 @@ const Admin = () => {
                   {removing ? (
                     <p className="text-xs text-rose-200">This login will be removed when you save.</p>
                   ) : (
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       {integration.fields.map((field) => (
                         <label key={field.key} className="space-y-1.5">
                           <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{field.label}</span>

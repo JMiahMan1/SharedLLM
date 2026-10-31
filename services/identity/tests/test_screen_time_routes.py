@@ -308,3 +308,14 @@ def test_a_parent_sets_mdm_device_policies(family):
     assert family("mom").put("/api/screen-time/kid/rules", json={"ca_certs": [{"alias": ""}]}).status_code == 422
     assert family("mom").put("/api/screen-time/kid/rules", json={"vpn_lockdown": "yes"}).status_code == 422
 
+
+
+def test_geofence_alerts_take_a_wander_saved_place(family):
+    # Wander's saved places are geo's place.<32 hex>; one in the list used to
+    # make the whole safety-settings save fail with 422.
+    place = "place." + "0123456789abcdef" * 2
+    alerts = {"zone.school": {"arrive": True, "depart": False}, place: {"arrive": False, "depart": True}}
+    assert family("mom").put("/api/screen-time/kid/rules", json={"geofence_alerts": alerts}).status_code == 200
+    children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
+    assert children["kid"]["geofence_alerts"][place] == {"arrive": False, "depart": True}
+    assert family("mom").put("/api/screen-time/kid/rules", json={"geofence_alerts": {"place.short": {}}}).status_code == 422

@@ -35,9 +35,19 @@ export interface CommsNewSms {
   messages: CommsSms[];
 }
 
+/** What one native pass sent (`syncNow`, APK with CommsCollector). */
+export interface CommsSyncResult {
+  ok: boolean;
+  calls: number;
+  sms: number;
+}
+
 export interface CommsPluginInterface {
   hasAccess(): Promise<CommsAccess>;
   requestAccess(): Promise<CommsAccess>;
+  /** Send new calls and texts natively (the background worker's own pass). */
+  syncNow(): Promise<CommsSyncResult>;
+  /** Older APKs only: read new rows for the WebView to post itself. */
   getNewCalls(): Promise<CommsNewCalls>;
   getNewSms(): Promise<CommsNewSms>;
 }
@@ -45,6 +55,7 @@ export interface CommsPluginInterface {
 const webFallback: CommsPluginInterface = {
   hasAccess: async () => ({ calls: false, sms: false }),
   requestAccess: async () => ({ calls: false, sms: false }),
+  syncNow: async () => ({ ok: true, calls: 0, sms: 0 }),
   getNewCalls: async () => ({ calls: [] }),
   getNewSms: async () => ({ messages: [] }),
 };

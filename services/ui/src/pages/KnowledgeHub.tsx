@@ -399,7 +399,7 @@ const KnowledgeHub = () => {
                 {ragResults.answer}
               </div>
             )}
-            <ul className="grid gap-3 md:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {ragResults.files.map((f, i) => (
                 <li key={`${f.path}-${i}`} className="glass-card min-w-0 p-4">
                   <div className="flex min-w-0 items-center gap-2">
@@ -627,15 +627,16 @@ const KnowledgeHub = () => {
            </div>
         </div>
 
-        {/* Size and status get their own columns from sm up; on a phone they
-            sit under the name so the table never needs to scroll sideways. */}
+        {/* Size and status get their own columns from lg up; on a phone, or a
+            tablet beside the sidebar, they sit under the name so the table
+            never needs to scroll sideways. */}
         <div className="pb-4">
           <table className="w-full table-fixed text-left border-collapse">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5">
                 <th className="px-4 sm:px-6 py-4">Name</th>
-                <th className="hidden sm:table-cell w-24 px-6 py-4">Size</th>
-                <th className="hidden sm:table-cell w-32 px-6 py-4">Status</th>
+                <th className="hidden lg:table-cell w-24 px-6 py-4">Size</th>
+                <th className="hidden lg:table-cell w-32 px-6 py-4">Status</th>
                 <th className="w-28 sm:w-40 px-4 sm:px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -644,8 +645,8 @@ const KnowledgeHub = () => {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="px-4 sm:px-6 py-4"><div className="h-4 w-3/4 bg-white/5 rounded" /></td>
-                    <td className="hidden sm:table-cell px-6 py-4"><div className="h-4 w-12 bg-white/5 rounded" /></td>
-                    <td className="hidden sm:table-cell px-6 py-4"><div className="h-4 w-20 bg-white/5 rounded" /></td>
+                    <td className="hidden lg:table-cell px-6 py-4"><div className="h-4 w-12 bg-white/5 rounded" /></td>
+                    <td className="hidden lg:table-cell px-6 py-4"><div className="h-4 w-20 bg-white/5 rounded" /></td>
                     <td className="px-4 sm:px-6 py-4"><div className="h-4 w-16 ml-auto bg-white/5 rounded" /></td>
                   </tr>
                 ))
@@ -680,7 +681,7 @@ const KnowledgeHub = () => {
                           >
                             {file.name}
                           </button>
-                          <p className="sm:hidden text-[10px] text-slate-500">
+                          <p className="lg:hidden text-[10px] text-slate-500">
                             {file.is_dir ? 'Folder' : formatSize(file.size)}
                             {' · '}
                             <span className={file.indexed ? 'text-emerald-400' : ''}>{file.indexed ? 'Indexed' : 'Not indexed'}</span>
@@ -688,10 +689,10 @@ const KnowledgeHub = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="hidden sm:table-cell px-6 py-4 text-xs text-slate-500 font-mono">
+                    <td className="hidden lg:table-cell px-6 py-4 text-xs text-slate-500 font-mono">
                       {file.is_dir ? '--' : formatSize(file.size)}
                     </td>
-                    <td className="hidden sm:table-cell px-6 py-4">
+                    <td className="hidden lg:table-cell px-6 py-4">
                       {file.indexed ? (
                         <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                           <CheckCircle2 size={12} />

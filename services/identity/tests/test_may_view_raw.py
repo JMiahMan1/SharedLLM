@@ -1,4 +1,5 @@
-"""The collected-data visibility rule: a minor's raw data is the parents'."""
+"""The collected-data visibility rule: a minor's raw data is the parents',
+and the father and the mother share theirs with each other."""
 import pytest
 
 from services.identity.main import may_view_raw_data, may_view_technical_data
@@ -32,7 +33,9 @@ GROWN = _u("grown", "adult_child")
         (GROWN, KID, False),
         (DAD, GROWN, False),  # an adult's data is their own
         (GROWN, GROWN, True),
-        (MOM, DAD, False),
+        (MOM, DAD, True),  # the parents share with each other
+        (DAD, MOM, True),
+        (MOM, GROWN, False),
         (DAD, DAD, True),
         (None, KID, False),
         (DAD, None, False),
@@ -52,6 +55,8 @@ def test_who_may_see_collected_data(viewer, subject, allowed):
         (SIB, KID, False),
         (KID, KID, True),  # their own phone's details are their own
         (DAD, GROWN, False),  # an adult's devices are not the father's
+        (DAD, MOM, True),  # the father sees the mother's devices too
+        (MOM, DAD, False),  # the mother sees his data, not its technical side
         (GROWN, GROWN, True),
         (None, KID, False),
     ],

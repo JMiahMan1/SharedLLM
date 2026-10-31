@@ -156,7 +156,7 @@ export default function DnsManagementPanel() {
             {editingRecord ? 'Edit Record' : 'Add New Record'}
           </h4>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label htmlFor="dns-domain" className="block text-xs text-slate-400 mb-1">Domain</label>
               <input id="dns-domain"
@@ -286,14 +286,14 @@ export default function DnsManagementPanel() {
         ) : (
           <div className="space-y-2">
             {records.map((record) => (
-              <div key={record.id} className="glass-card p-4 border border-white/10 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <span className="px-2 py-1 text-xs font-bold text-blue-300 bg-blue-600/20 rounded">
+              <div key={record.id} className="glass-card p-4 border border-white/10 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                  <span className="shrink-0 px-2 py-1 text-xs font-bold text-blue-300 bg-blue-600/20 rounded">
                     {record.record_type}
                   </span>
-                  <div>
-                    <p className="text-sm font-mono text-white">{record.domain}</p>
-                    <p className="text-xs text-slate-400">
+                  <div className="min-w-0">
+                    <p className="text-sm font-mono text-white break-all">{record.domain}</p>
+                    <p className="text-xs text-slate-400 break-all">
                       {record.record_type === 'A'
                         ? record.values.join(', ')
                         : `→ ${record.values[0]}`}
@@ -301,7 +301,7 @@ export default function DnsManagementPanel() {
                     </p>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex shrink-0 gap-2">
                   <button
                     onClick={() => handleEdit(record)}
                     className="glass-button px-2 py-1 text-slate-400 hover:text-white"
@@ -375,7 +375,7 @@ function DnsFailoverSettings({ settings }: { settings: GlobalSetting[] }) {
         </label>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <label htmlFor="dns-health-ports" className="block text-xs text-slate-400 mb-1">Health Ports (comma-separated)</label>
           <input id="dns-health-ports"

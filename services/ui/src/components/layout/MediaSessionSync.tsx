@@ -6,6 +6,10 @@ import MediaSession from '../../plugins/mediaSession';
 const MEDIA_SESSION_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 let mediaSessionSyncInFlight = false;
+// Whether the APK reports plays itself, asked once per app start: null until
+// asked. Its notification listener runs while Jarvis is closed too, so the
+// WebView then stays out of it and nothing is reported twice.
+let nativeMedia: boolean | null = null;
 // Keys we have already reported, so a song playing for an hour does not
 // land on the feed fifty times. A key leaves the set when it stops, so the
 // next time it plays it is reported again.
@@ -19,6 +23,14 @@ async function syncMediaSessions(): Promise<void> {
   if (mediaSessionSyncInFlight) return;
   mediaSessionSyncInFlight = true;
   try {
+    if (nativeMedia === null) {
+      // An older APK rejects the call (or has no such method at all).
+      nativeMedia = await Promise.resolve()
+        .then(() => MediaSession.nativeReports())
+        .then((r) => Boolean(r?.media))
+        .catch(() => false);
+    }
+    if (nativeMedia) return;
     const access = await MediaSession.hasAccess();
     if (!access?.granted) return;
     const token = storageGetSync('jarvis_api_key');
@@ -71,8 +83,9 @@ async function syncMediaSessions(): Promise<void> {
 
 /**
  * Reports what other apps are playing (YouTube, Spotify, podcasts, browser
- * media) so the family profile sees listening outside Jarvis. Android-only;
- * does nothing where the plugin is missing.
+ * media) so the family profile sees listening outside Jarvis, on an APK that
+ * does not report plays itself. Android-only; does nothing where the plugin
+ * is missing.
  */
 export default function MediaSessionSync() {
   useEffect(() => {

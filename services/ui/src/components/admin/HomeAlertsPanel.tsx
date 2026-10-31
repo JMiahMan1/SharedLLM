@@ -102,7 +102,7 @@ export const HomeAlertsPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
         <HelpTooltip docName="INTEGRATIONS.md" sectionTitle="## Home alerts" label="Home alerts" />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_240px_auto]">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_240px_auto]">
         <EntitySearchDropdown
           value={entityId}
           onChange={setEntityId}

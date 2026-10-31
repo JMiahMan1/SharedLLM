@@ -198,7 +198,7 @@ export default function BibleMemorize({ page }: { page?: string }) {
 
       <section>
         <h2 className="text-sm font-bold text-white mb-2 px-1">Memory sets</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {(data?.sets ?? []).map((s) => {
             const complete = s.added >= s.count;
             return (

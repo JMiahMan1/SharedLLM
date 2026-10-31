@@ -101,7 +101,7 @@ export default function BibleStudyBooks({
       ) : studyBooks.length === 0 ? (
         <p className="text-xs text-slate-500">No study books yet. Import one in Admin › Bible.</p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {studyBooks.map((item) => (
             <li key={item.id}>
               <button

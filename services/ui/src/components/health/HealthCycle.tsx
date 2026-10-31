@@ -426,7 +426,7 @@ export default function HealthCycle() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
           <h4 className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
             <CalendarDays size={13} className="text-rose-300" /> Log a period
@@ -536,7 +536,7 @@ export default function HealthCycle() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
           <h4 className="text-[11px] font-semibold text-slate-300">Cycle settings</h4>
           <p className="mt-1 text-[10px] text-slate-500">

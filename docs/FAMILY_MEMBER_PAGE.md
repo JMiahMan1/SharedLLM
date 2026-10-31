@@ -27,10 +27,12 @@ support.google.com/families, techadvisor.com Qustodio review.
 
 The server decides; the page only hides what the server already refuses.
 
-- **Which members:** identity's `may_view_raw_data` rule, unchanged. A
-  minor's page is open to an admin, the father and the linked mother (any
-  mother when none is linked). An adult's collected data stays their own, so
-  adults do not get a monitored page.
+- **Which members:** identity's `may_view_raw_data` rule. A minor's page is
+  open to an admin, the father and the linked mother (any mother when none is
+  linked). The father and the mother also share their own collected data with
+  each other, so each sees the other's page: read-only (`can_manage` is false,
+  so no pause, bonus, lock or rules), with the technical side for the father
+  only, as for a child. Any other adult's collected data stays their own.
 - **Father / admin:** every section, including **Devices** (technical data).
 - **Mother:** every personal section (time, apps, web, activity, location,
   health, faith, journal, all controls) but **no technical data**: no Devices
@@ -94,6 +96,11 @@ it, and it links on here.
 | Father, admin | yes | yes | 200 |
 | Linked mother (any mother when none is linked) | yes | stripped | 403 |
 | Sibling, other adult | 403 on every data route | | 403 |
+
+| Viewer of a parent | Page | Technical side | Devices endpoint |
+|---|---|---|---|
+| The father, viewing the mother | yes, read-only | yes | 200 |
+| The mother, viewing the father | yes, read-only | stripped | 403 |
 | The child themselves | 403 on raw data (`may_view_raw_data`) | | 403 |
 
 - Identity: `may_view_technical_data(viewer, subject)` next to

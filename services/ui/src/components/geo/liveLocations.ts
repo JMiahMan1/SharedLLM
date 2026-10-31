@@ -138,6 +138,21 @@ export function placeKeyFor(
   return best?.key ?? null;
 }
 
+/** Where a member lands on screen at the current zoom, in pixels. */
+export type ScreenProjection = (member: LiveFamilyMember) => { x: number; y: number };
+
+export interface ClusterOptions {
+  /**
+   * Projects a member onto the map at its current zoom. With it, members whose
+   * pins would overlap on screen merge too: metres alone cannot say that,
+   * because a 34 px avatar covers 10 m at street level and a kilometre at
+   * city level.
+   */
+  project?: ScreenProjection;
+  /** How close two pins may sit on screen before they merge (default 40 px). */
+  pixelRadius?: number;
+}
+
 /**
  * Group members standing together.
  *
@@ -149,27 +164,77 @@ export function placeKeyFor(
  * place* is what really means "together": when `placeKey` says two members are
  * in the same zone (home, school, ...) they merge however far apart the fixes
  * are, which is what a family looking at the map expects.
+ *
+ * Grouping is transitive: if A is next to B and B is next to C, all three share
+ * a pin even when A and C are just out of reach of each other. A single greedy
+ * pass left the third person as a second pin drawn on top of the first.
  */
 export function clusterMembers(
   members: LiveFamilyMember[],
   radiusMeters = 60,
-  placeKey?: (member: LiveFamilyMember) => string | null
+  placeKey?: (member: LiveFamilyMember) => string | null,
+  { project, pixelRadius = 40 }: ClusterOptions = {}
 ): MemberCluster[] {
-  const keyOf = (member: LiveFamilyMember) => (placeKey ? placeKey(member) : null);
+  const keys = members.map((member) => (placeKey ? placeKey(member) : null));
+  const points = project ? members.map(project) : null;
+  const together = (i: number, j: number) => {
+    if (keys[i] != null && keys[i] === keys[j]) return true;
+    const a = members[i];
+    const b = members[j];
+    if (distanceMeters(a.lat, a.lon, b.lat, b.lon) <= radiusMeters) return true;
+    if (!points) return false;
+    return Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y) <= pixelRadius;
+  };
+
+  // Union-find over the "together" pairs; a family is a handful of people, so
+  // checking every pair is cheap.
+  const parent = members.map((_, i) => i);
+  const root = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      if (together(i, j)) parent[root(j)] = root(i);
+    }
+  }
+
+  const byRoot = new Map<number, MemberCluster>();
   const clusters: MemberCluster[] = [];
-  for (const member of members) {
-    const key = keyOf(member);
-    const hit = clusters.find(
-      (c) =>
-        (key != null && c.members.some((m) => keyOf(m) === key)) ||
-        c.members.some((m) => distanceMeters(m.lat, m.lon, member.lat, member.lon) <= radiusMeters)
-    );
+  members.forEach((member, i) => {
+    const r = root(i);
+    const hit = byRoot.get(r);
     if (hit) {
       hit.members.push(member);
       if (member.ageMs < hit.lead.ageMs) hit.lead = member;
     } else {
-      clusters.push({ lead: member, members: [member] });
+      const cluster = { lead: member, members: [member] };
+      byRoot.set(r, cluster);
+      clusters.push(cluster);
     }
-  }
+  });
   return clusters;
+}
+
+/** Stable identity for a cluster, so an expanded group stays open across polls. */
+export function clusterKey(cluster: MemberCluster): string {
+  return [...new Set(cluster.members.map((m) => m.userId))].sort().join('|');
+}
+
+/**
+ * Pixel offsets that fan `count` pins out in a ring around a group's spot, so
+ * a tapped group opens into people you can tell apart. Starts at 12 o'clock;
+ * the ring grows with the count so neighbouring pins never touch.
+ */
+export function spiderOffsets(count: number, pinSize = 34, gap = 10): { x: number; y: number }[] {
+  if (count <= 0) return [];
+  if (count === 1) return [{ x: 0, y: 0 }];
+  const radius = Math.max(pinSize + gap, ((pinSize + gap) * count) / (2 * Math.PI));
+  return Array.from({ length: count }, (_, i) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / count;
+    return { x: Math.round(radius * Math.cos(angle)), y: Math.round(radius * Math.sin(angle)) };
+  });
 }

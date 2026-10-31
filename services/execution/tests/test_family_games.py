@@ -72,8 +72,13 @@ def test_trivia_prompt_includes_the_question():
 def test_memory_starts_with_cards_face_down():
     state = GameRegistry().start_memory("room", pairs=2)
     assert len(state.board) == 4
-    assert len(state.revealed) == 1
+    assert state.revealed == []
     assert "Memory" in memory_prompt(state)
+
+
+def _numbers(*indexes: int) -> list[str]:
+    """Cards are called by the number printed on them (1-based)."""
+    return [str(i + 1) for i in indexes]
 
 
 def test_memory_matching_a_pair_scores_and_keeps_it_up():
@@ -81,7 +86,7 @@ def test_memory_matching_a_pair_scores_and_keeps_it_up():
     first = state.board[0]
     partner = state.board.index(first, 1)
 
-    result = apply_memory_flip(state, "Kiddo", [first, state.board[partner]])
+    result = apply_memory_flip(state, "Kiddo", _numbers(0, partner))
     assert result["matched"] is True
     assert result["stars"] == 1
     assert partner in state.revealed
@@ -97,7 +102,7 @@ def test_memory_miss_flips_the_wrong_cards_back():
     first = state.board[0]
     partner = state.board.index(first, 1)
     other = next(i for i, name in enumerate(state.board) if i not in (0, partner))
-    wrong = [first, state.board[other]]
+    wrong = _numbers(0, other)
 
     result = apply_memory_flip(state, "Kiddo", wrong)
     assert result["matched"] is False
@@ -111,20 +116,28 @@ def test_memory_finishes_when_every_card_is_up():
     # shuffled, so consecutive indices are not consecutive pairs and the game
     # could never complete.
     seen: set[str] = set()
-    pairs = []
-    for name in state.board:
-        if name not in seen:
-            seen.add(name)
-            pairs.append(name)
-    for name in pairs:
-        apply_memory_flip(state, "A", [name, state.board[state.board.index(name, 1)]])
+    for index, name in enumerate(state.board):
+        if name in seen:
+            continue
+        seen.add(name)
+        apply_memory_flip(state, "A", _numbers(index, state.board.index(name, index + 1)))
     assert state.over is True
+
+
+def test_memory_a_single_card_is_a_peek_that_flips_back():
+    state = GameRegistry().start_memory("room", pairs=2)
+    result = apply_memory_flip(state, "A", ["3"])
+    assert result["flipped"] == [state.board[2]]
+    assert state.revealed == []
 
 
 def test_memory_rejects_unknown_cards_and_three_at_a_time():
     state = GameRegistry().start_memory("room", pairs=2)
-    assert "not in the deck" in apply_memory_flip(state, "A", ["unicorn"])["message"]
-    assert "two cards" in apply_memory_flip(state, "A", state.board[:3])["message"]
+    # A word, or a number off the board, is not a card.
+    assert "by number" in apply_memory_flip(state, "A", ["unicorn"])["message"]
+    assert "by number" in apply_memory_flip(state, "A", ["9"])["message"]
+    # Only the first two cards called are flipped.
+    assert len(apply_memory_flip(state, "A", ["1", "2", "3"])["flipped"]) == 2
 
 
 def test_game_card_carries_the_leaderboard():

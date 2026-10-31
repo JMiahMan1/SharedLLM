@@ -83,6 +83,11 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                 <p className="text-[11px] text-slate-400">
                   Scans new photos locally using household AI for safety concerns without uploading private photos.
                 </p>
+                {/* The setting is kept, but no phone sends photos yet: saying
+                    "Active" told the parents something was watching that was not. */}
+                <p className="text-[11px] text-amber-300/90" data-testid="photo-scan-not-yet">
+                  Not scanning yet: the phone app does not send new photos in this version.
+                </p>
               </div>
             </div>
             <button
@@ -96,7 +101,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                   : 'border border-white/10 bg-black/20 text-slate-400'
               }`}
             >
-              {photoScanEnabled ? 'Active' : 'Off'}
+              {photoScanEnabled ? 'On' : 'Off'}
             </button>
           </div>
         </div>

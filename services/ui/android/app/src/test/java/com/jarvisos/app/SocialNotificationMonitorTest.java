@@ -1,8 +1,10 @@
 package com.jarvisos.app;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -50,5 +52,17 @@ public class SocialNotificationMonitorTest {
                 true, "severe", "com.google.android.apps.messaging", false, false, "msg", "Mom", "dinner", recent, 1_000L));
         assertNull(SocialNotificationMonitor.extract(
                 true, "severe", "com.jarvisos.app", false, false, "msg", "Jarvis", "notice", recent, 1_000L));
+    }
+
+    @Test
+    public void onlyMessagesCountAsSocial() {
+        // A known messaging app, a message category, or a conversation-style notification.
+        assertTrue(SocialNotificationMonitor.isSocial("com.snapchat.android", null, false));
+        assertTrue(SocialNotificationMonitor.isSocial("com.example.chat", "msg", false));
+        assertTrue(SocialNotificationMonitor.isSocial("com.example.chat", null, true));
+        // A game's or a shop's notifications are not social updates.
+        assertFalse(SocialNotificationMonitor.isSocial("com.supercell.clashofclans", "promo", false));
+        assertFalse(SocialNotificationMonitor.isSocial("com.amazon.mShop.android.shopping", null, false));
+        assertFalse(SocialNotificationMonitor.isSocial(null, null, false));
     }
 }

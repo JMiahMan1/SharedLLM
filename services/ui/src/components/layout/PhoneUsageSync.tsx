@@ -88,6 +88,8 @@ async function syncPhoneUsage(): Promise<void> {
       },
       body: JSON.stringify({
         day: localDay(),
+        // A person's phone and tablet each report their own day; the server adds them up.
+        device_key: await getDeviceKey(),
         millis: today.millis,
         first_use: today.firstUse,
         last_use: today.lastUse,

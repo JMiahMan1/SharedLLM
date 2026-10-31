@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { averageMinutes, dayBars, hourHeatmap, kindTotals, limitFor, memberState, nextRoutineLine, placeAt } from './memberPage';
+import { averageMinutes, dayBars, hourHeatmap, kindOf, kindTotals, limitFor, memberState, nextRoutineLine, placeAt } from './memberPage';
 import type { ScreenTimeStatus, UsageDay } from '../types/api';
 
 const TODAY = '2026-10-24'; // a Saturday
@@ -64,5 +64,13 @@ describe('the family member page arithmetic', () => {
     const places = [{ id: 'z', name: 'School', lat: 33.4484, lon: -112.074, radius: 200, important: true, notify: [] }];
     expect(placeAt(33.4485, -112.0741, places)).toBe('School');
     expect(placeAt(33.5, -112.0, places)).toBeNull();
+  });
+});
+
+describe('activity kinds', () => {
+  it('files chat and social notifications under Social, not Other', () => {
+    expect(kindOf('social')).toBe('social');
+    expect(kindOf('sms')).toBe('comms');
+    expect(kindOf('something-new')).toBe('other');
   });
 });

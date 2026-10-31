@@ -675,7 +675,7 @@ const Workspaces = () => {
         </div>
       )}
 
-      <div className="grid gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {isLoading ? (
           <div className="glass-panel p-12 flex items-center justify-center">
             <div className="flex flex-col items-center gap-4">
@@ -1049,7 +1049,7 @@ const Workspaces = () => {
         title={editingWs ? `Configure ${editingWs.display_name}` : 'Register New Workspace'}
       >
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Workspace ID</span>
               <input 
@@ -1161,7 +1161,7 @@ const Workspaces = () => {
           </label>
 
           {form.sync_mode !== 'nextcloud' && (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Remote</span>
               <input 
@@ -1340,7 +1340,7 @@ const Workspaces = () => {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GitHub</p>
                         <p className="mt-1 text-xs text-slate-400">Content type: application/json</p>

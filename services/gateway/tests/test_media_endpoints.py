@@ -766,3 +766,22 @@ def test_abs_progress_validates_its_body(client):
         ).status_code
         == 422
     )
+
+
+def test_a_library_track_or_album_finds_its_cover_in_metadata_or_its_album():
+    """Library tracks and albums come with ``image: null`` and their covers in
+    ``metadata.images`` (measured live 2026-10-30), so reading ``image`` alone
+    left every selection page without art."""
+    from services.gateway.main import _media_ma_item
+
+    album = {"uri": "a://1", "name": "Album", "image": None,
+             "metadata": {"images": [{"type": "thumb", "path": "album-1", "proxy_id": "alb"}]}}
+    assert _media_ma_item(album)["image"] == "/imageproxy/alb"
+
+    track = {"uri": "t://1", "name": "Song", "image": None, "metadata": {"images": []},
+             "album": {"name": "Album", "image": {"path": "album-2", "proxy_id": "trk-album"}}}
+    assert _media_ma_item(track)["image"] == "/imageproxy/trk-album"
+
+    # Its own image still wins, and an item with none anywhere has none.
+    assert _media_ma_item({**track, "image": {"proxy_id": "own"}})["image"] == "/imageproxy/own"
+    assert _media_ma_item({"uri": "t://2", "name": "Bare"})["image"] == ""

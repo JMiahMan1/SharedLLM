@@ -220,7 +220,7 @@ export default function BibleBooksPanel() {
       {selected ? (
         <div className="rounded-xl border border-sky-400/20 bg-sky-500/5 p-3 space-y-2">
           <p className="text-[11px] text-sky-200 truncate">{selected.path}</p>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}

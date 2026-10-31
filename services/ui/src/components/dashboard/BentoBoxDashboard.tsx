@@ -10,7 +10,9 @@ import { WidgetSkeletonSelector } from '../widgets/skeletons/WidgetSkeletons';
 const SIZE_CLASSES: Record<WidgetSize, { col: string; row: string }> = {
   small:  { col: 'col-span-1',               row: 'row-span-1' }, // ~200px tall
   medium: { col: 'col-span-1',               row: 'row-span-2' }, // ~420px tall
-  wide:   { col: 'col-span-1 md:col-span-2', row: 'row-span-1' }, // ~200px tall, 2 cols wide
+  // lg, not md: at tablet width the sidebar leaves room for one 280px column,
+  // and a two-column span there adds an implicit column off the screen.
+  wide:   { col: 'col-span-1 lg:col-span-2', row: 'row-span-1' }, // ~200px tall, 2 cols wide
   tall:   { col: 'col-span-1',               row: 'row-span-3' }, // ~620px tall
 };
 

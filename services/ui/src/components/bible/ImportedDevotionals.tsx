@@ -105,7 +105,7 @@ export default function ImportedDevotionals({
         <BookOpen size={16} className="text-amber-300" />
         Devotional books
       </h2>
-      <ul className="grid gap-2 sm:grid-cols-2">
+      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {devotionals.map((item) => (
           <li
             key={item.id}
