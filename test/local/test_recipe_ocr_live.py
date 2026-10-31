@@ -9,7 +9,7 @@ so a laptop without the model still passes.
 The endpoint comes from the environment, so the same model the app uses (the
 Alpaca router's OpenAI-compatible API) can be pointed at directly:
 
-    VISION_OCR_URL   - the LLM base URL (falls back to OLLAMA_URL)
+    VISION_OCR_URL   - the LLM base URL (falls back to LLM_URL)
     VISION_OCR_MODEL - the vision model name (default: qwen2.5-vl:7b)
 
 Run them with the model up (``--run-local`` is what un-skips ``local_only``):
@@ -34,7 +34,7 @@ DEFAULT_MODEL = "qwen2.5-vl:7b"
 
 def _endpoint() -> tuple[str | None, str]:
     """The LLM base URL and vision model the app would call, from the environment."""
-    url = os.getenv("VISION_OCR_URL") or os.getenv("OLLAMA_URL")
+    url = os.getenv("VISION_OCR_URL") or os.getenv("LLM_URL")
     model = os.getenv("VISION_OCR_MODEL") or DEFAULT_MODEL
     return (url.rstrip("/") if url else None), model
 
@@ -43,7 +43,7 @@ async def _read(path: Path, task: str) -> dict:
     """Run the configured vision model on ``path``, skipping when it is not there."""
     proxy_url, model = _endpoint()
     if not proxy_url:
-        pytest.skip("no vision endpoint configured (set VISION_OCR_URL or OLLAMA_URL)")
+        pytest.skip("no vision endpoint configured (set VISION_OCR_URL or LLM_URL)")
     try:
         result = await vision_ocr.vision_ocr_screenshot(
             str(path), proxy_url=proxy_url, model=model, task=task

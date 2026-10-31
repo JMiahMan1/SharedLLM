@@ -41,7 +41,7 @@ os.environ.setdefault("BIBLE_IMPORT_DIR", os.path.join(tempfile.gettempdir(), "b
 os.environ.setdefault("BIBLE_API_KEY", "")
 os.environ.setdefault("BIBLE_PROVIDER_CACHE", os.path.join(tempfile.gettempdir(), "bible_provider_cache"))
 os.environ.setdefault("BIBLE_PROVIDER_CALL_BUDGET", "1200")
-os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
+os.environ.setdefault("LLM_URL", "http://localhost:11434")
 os.environ.setdefault("IDENTITY_SVC_URL", "http://localhost:8001")
 # Network-mode service URLs (required by config._net_url)
 # NETWORK_MODE defaults to "bridge" (lowercase), so keys are bridge_* not BRIDGE_*

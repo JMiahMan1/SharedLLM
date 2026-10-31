@@ -327,7 +327,7 @@ def _sync_main_constants(settings: dict[str, str]) -> None:
         "logging_svc_url": "LOGGING_SVC",
         "workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC",
         "control_plane_url": "CONTROL_PLANE_URL",
-        "llm_local_url": "OLLAMA_URL",
+        "llm_local_url": "LLM_URL",
     }
     for key, attr in mappings.items():
         val = settings.get(key)

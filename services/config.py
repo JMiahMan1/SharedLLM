@@ -83,7 +83,7 @@ IDENTITY_SVC_URL = _net_url("IDENTITY", "http://identity:8001")
 
 # --- Runtime config: fetched from Identity service at startup ---
 # These are module-level placeholders; populated by resolve_runtime_config()
-OLLAMA_URL = ""
+LLM_URL = ""
 EXECUTION_SVC_URL = _net_url("EXECUTION", "http://host.docker.internal:8003")
 RAG_SVC_URL = _net_url("RAG", "http://rag:8004")
 STORAGE_SVC_URL = _net_url("STORAGE", "http://storage:8005")
@@ -305,7 +305,7 @@ async def resolve_runtime_config():
     # (e.g. "rag_svc_url") are legacy bridge-mode defaults and must not be used
     # by host-network services.
     settings_map = {
-        "llm_local_url": "OLLAMA_URL",
+        "llm_local_url": "LLM_URL",
         # These are Identity *setting keys*, which are lowercase by convention
         # (host_searxng_url, bridge_searxng_url; see services/identity/seed.py),
         # so NETWORK_MODE is interpolated lowercased here on purpose. Do NOT

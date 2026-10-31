@@ -3,9 +3,9 @@ import time
 
 import httpx
 
-OLLAMA_URL = os.getenv("OLLAMA_URL")
-if not OLLAMA_URL:
-    raise RuntimeError("OLLAMA_URL is not set. Define it in .env (seeded to llm_local_url in the config DB).")
+LLM_URL = os.getenv("LLM_URL")
+if not LLM_URL:
+    raise RuntimeError("LLM_URL is not set. Define it in .env (seeded to llm_local_url in the config DB).")
 
 PROMPT = """
 Write a Python class 'MultiTenantLock' that uses Redis (redis-py) to implement a distributed lock.
@@ -21,7 +21,7 @@ async def run_single_benchmark(model):
         start_t = time.time()
         try:
             resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
+                f"{LLM_URL}/api/generate",
                 json={"model": model, "prompt": PROMPT, "stream": False},
             )
             elapsed = time.time() - start_t

@@ -44,7 +44,7 @@ class TestConfigBootstrap:
         with open(config_path) as f:
             source = f.read()
         runtime_keys = [
-            "OLLAMA_URL", "HA_URL", "HA_TOKEN",
+            "LLM_URL", "HA_URL", "HA_TOKEN",
             "ASSISTANT_MODEL", "CODING_MODEL", "REDIS_URL",
             "DEFAULT_TTS_VOICE", "EMBEDDING_MODEL",
         ]
@@ -97,7 +97,7 @@ class TestRuntimeConfigResolution:
 
         await config.resolve_runtime_config()
 
-        assert config.OLLAMA_URL == "http://ollama:11434"
+        assert config.LLM_URL == "http://ollama:11434"
         assert config.HA_URL == "http://homeassistant:8123"
         assert config.HA_TOKEN == "test-ha-token"
         assert config.ASSISTANT_MODEL == "llama3"
@@ -130,7 +130,7 @@ class TestRuntimeConfigResolution:
         await config.resolve_runtime_config()
 
         # Should retain defaults, not crash
-        assert config.OLLAMA_URL == ""
+        assert config.LLM_URL == ""
 
     @pytest.mark.local_only
     @pytest.mark.asyncio
@@ -145,8 +145,8 @@ class TestRuntimeConfigResolution:
 
         await config.resolve_runtime_config()
 
-        # Should not have made any network calls; OLLAMA_URL stays empty
-        assert config.OLLAMA_URL == ""
+        # Should not have made any network calls; LLM_URL stays empty
+        assert config.LLM_URL == ""
 
 
 class TestConfigSettingsMap:
@@ -159,7 +159,7 @@ class TestConfigSettingsMap:
             source = f.read()
 
         runtime_vars = [
-            "FERNET_KEY", "OLLAMA_URL", "EXECUTION_SVC_URL", "RAG_SVC_URL",
+            "FERNET_KEY", "LLM_URL", "EXECUTION_SVC_URL", "RAG_SVC_URL",
             "STORAGE_SVC_URL", "LOGGING_SVC_URL", "WORKSPACE_RUNTIME_SVC_URL",
             "CONTROL_PLANE_URL", "SEARXNG_URL", "HA_URL", "HA_TOKEN",
             "NEXTCLOUD_URL", "NEXTCLOUD_USER", "NEXTCLOUD_PASS",

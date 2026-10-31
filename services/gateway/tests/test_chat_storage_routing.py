@@ -88,7 +88,7 @@ def get_test_settings():
     if not settings.get("librarian_model"):
         settings["librarian_model"] = os.getenv("LIBRARIAN_MODEL") or settings.get("assistant_model")
     if not settings.get("llm_local_url"):
-        settings["llm_local_url"] = os.getenv("OLLAMA_URL") or "http://localhost:11434"
+        settings["llm_local_url"] = os.getenv("LLM_URL") or "http://localhost:11434"
     if not settings.get("embedding_model"):
         settings["embedding_model"] = os.getenv("EMBEDDING_MODEL") or "nomic-ai/nomic-embed-text-v1.5"
     if not settings.get("active_llm_provider"):

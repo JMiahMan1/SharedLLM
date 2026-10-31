@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ollama_url_raw = os.getenv("OLLAMA_URL")
+ollama_url_raw = os.getenv("LLM_URL")
 # Try local fallback only if explicitly allowed, otherwise stricter
 # User said NO env info hardcoded. So "localhost" is maybe okay but IP isn't.
 _ollama_url = ollama_url_raw or "http://localhost:11434"
@@ -234,7 +234,7 @@ cannot reach Ollama to process requests.
 Solutions:
 1. Verify Ollama is running at: {_ollama_url}
 2. Check network connectivity between RAG server (ai.local) and Ollama (192.168.1.161)
-3. If Ollama moved to a new server, update OLLAMA_URL in .env
+3. If Ollama moved to a new server, update LLM_URL in .env
 4. Test from RAG server directly:
    ssh jeremiah@ai.local
    curl http://192.168.1.161:11434/api/tags

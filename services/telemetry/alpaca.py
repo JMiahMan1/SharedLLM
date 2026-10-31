@@ -33,9 +33,9 @@ def _get_client() -> aiohttp.ClientSession:
 
 def base_url() -> str:
     url = (
-        os.getenv("LLM_LOCAL_URL")
-        or os.getenv("OLLAMA_URL")
-        or "http://ollama:11434"
+        os.getenv("LLM_URL")
+        or os.getenv("LLM_LOCAL_URL")
+        or "http://localhost:11434"
     ).rstrip("/")
     return url
 

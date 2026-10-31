@@ -28,7 +28,7 @@ from services.common.secrets import secret_matches
 from services.config import (
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
-    OLLAMA_URL,
+    LLM_URL,
     TEMP_MEDIA_DIR,
 )
 
@@ -3177,9 +3177,9 @@ async def execute_llm_info(req: LLMInfoRequest):
     try:
         async with get_client() as client:
             if payload:
-                resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload, timeout=aiohttp.ClientTimeout(total=10.0))
+                resp = await client.post(f"{LLM_URL}{endpoint}", json=payload, timeout=aiohttp.ClientTimeout(total=10.0))
             else:
-                resp = await client.get(f"{OLLAMA_URL}{endpoint}", timeout=aiohttp.ClientTimeout(total=10.0))
+                resp = await client.get(f"{LLM_URL}{endpoint}", timeout=aiohttp.ClientTimeout(total=10.0))
 
             if resp.status == 200:
                 data = await resp.json()
