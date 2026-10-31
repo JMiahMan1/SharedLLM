@@ -763,7 +763,8 @@ final class GuardApi {
         }
     }
 
-    private static HttpResult send(Context context, String method, String path, String json) throws Exception {
+    /** Null when the phone has no credentials yet. Also used for the crash SOS ({@link CrashAlert}). */
+    static HttpResult send(Context context, String method, String path, String json) throws Exception {
         SharedPreferences p = prefs(context);
         String token = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
         String server = p.getString(TokenBridgePlugin.KEY_SERVER_URL, null);

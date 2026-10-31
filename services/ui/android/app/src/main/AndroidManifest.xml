@@ -47,6 +47,8 @@
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- The crash countdown ("Did you crash?") may take the screen, like an alarm. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -414,6 +416,12 @@
              services sends them, through the service's own PendingIntent. -->
         <receiver
             android:name=".ActivityTransitionReceiver"
+            android:exported="false" />
+
+        <!-- The crash countdown's "I'm OK" and "Get help", and its alarms
+             (the end of the countdown, retries of the SOS). -->
+        <receiver
+            android:name=".CrashAlertReceiver"
             android:exported="false" />
 
         <!-- Keeps the pedometer ledger current while the app is closed, even

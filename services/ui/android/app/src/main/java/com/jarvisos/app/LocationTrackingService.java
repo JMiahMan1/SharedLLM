@@ -66,7 +66,8 @@ import org.json.JSONObject;
  * for phones without Play services) uploaded whichever fix won, so 80 m
  * network fixes with no speed interleaved with 5 m GPS ones and a phone at 36
  * mph was reported standing still. While driving, {@link DrivingMonitor}
- * notices hard braking, rapid acceleration, high speed and phone use.
+ * notices hard braking, rapid acceleration, high speed and phone use, and
+ * {@link CrashDetector} listens to the accelerometer for a crash.
  */
 public class LocationTrackingService extends Service {
     private static final String TAG = "LocationTracking";
@@ -109,6 +110,32 @@ public class LocationTrackingService extends Service {
     /** Read and changed on the main thread only (fixes and transitions arrive there). */
     private MotionModeSelector motion;
     private final DrivingMonitor drivingMonitor = new DrivingMonitor();
+    /** Main thread only, like {@link #motion}: accelerometer samples are delivered there too. */
+    private final CrashDetector crashDetector = new CrashDetector();
+    private SensorManager sensorManager;
+    private boolean accelRegistered = false;
+    /**
+     * Held while the accelerometer listens. Without it the CPU sleeps between
+     * once-a-second fixes with the screen off, and an impact in between is
+     * never delivered. Bounded, and renewed with each fix while driving.
+     */
+    private PowerManager.WakeLock crashWakeLock;
+    private static final long CRASH_WAKE_MS = 5 * 60 * 1000L;
+
+    private final SensorEventListener accelListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            boolean wasPending = crashDetector.isPending();
+            crashDetector.onAccel(wallTime(event.timestamp),
+                    event.values[0], event.values[1], event.values[2]);
+            if (wasPending != crashDetector.isPending()) syncCrashListening();
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+            // Not used.
+        }
+    };
     /** The running service, for transitions the receiver hands over. */
     private static volatile LocationTrackingService instance;
 
@@ -277,6 +304,9 @@ public class LocationTrackingService extends Service {
         instance = this;
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         motion = loadMotion(this);
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        // A crash countdown or SOS retry the process was killed in the middle of.
+        CrashAlert.resume(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);
@@ -383,6 +413,9 @@ public class LocationTrackingService extends Service {
                 }
             }
             updatesRequested = true;
+            // A service restarted mid-drive listens for a crash straight away.
+            crashDetector.setDriving(motion.mode() == MotionModeSelector.Mode.DRIVING);
+            syncCrashListening();
             // Seed from the freshest cached fix so the family map is not blank
             // for the first interval after the service starts.
             Location cached = locationManager != null ? bestLastKnown() : null;
@@ -398,7 +431,7 @@ public class LocationTrackingService extends Service {
 
     /** One fused request at the current mode's rate, replacing any earlier one. */
     private void requestFused() throws SecurityException {
-        MotionModeSelector.Mode mode = motion.mode();
+        MotionModeSelector.Mode mode = requestMode();
         LocationRequest request = new LocationRequest.Builder(
                 mode.highAccuracy ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY,
                 mode.intervalMs)
@@ -485,13 +518,91 @@ public class LocationTrackingService extends Service {
         if (before == MotionModeSelector.Mode.DRIVING && now != MotionModeSelector.Mode.DRIVING) {
             postDrivingEvents(drivingMonitor.finish());
         }
-        if (fused != null && updatesRequested && requestedMode != now) {
+        crashDetector.setDriving(now == MotionModeSelector.Mode.DRIVING);
+        syncCrashListening();
+    }
+
+    /**
+     * The rate fixes are asked for: the mode's, except that a crash waiting
+     * for its stop to be confirmed keeps driving's once a second. Activity
+     * Recognition can call a crashed car "still" within the minute, and a
+     * fix a minute later is too late to confirm anything.
+     */
+    private MotionModeSelector.Mode requestMode() {
+        return crashDetector.isPending() ? MotionModeSelector.Mode.DRIVING : motion.mode();
+    }
+
+    /**
+     * The accelerometer listens only while driving (or a crash is being
+     * confirmed): at 50 samples a second it costs battery for nothing on foot.
+     * Also re-asks for fixes when the rate they should come at changed.
+     */
+    private void syncCrashListening() {
+        boolean want = updatesRequested && requestMode() == MotionModeSelector.Mode.DRIVING;
+        if (want && !accelRegistered && sensorManager != null) {
+            Sensor accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            if (accel != null) {
+                accelRegistered = sensorManager.registerListener(
+                        accelListener, accel, SensorManager.SENSOR_DELAY_GAME, handler);
+                if (accelRegistered) Log.i(TAG, "crash detection listening");
+            }
+        } else if (!want && accelRegistered) {
+            stopCrashListening();
+        }
+        if (want) holdCrashWakeLock();
+        if (fused != null && updatesRequested && requestedMode != requestMode()) {
             try {
                 requestFused();
             } catch (SecurityException e) {
                 Log.w(TAG, "fused re-request denied", e);
             }
         }
+    }
+
+    private void stopCrashListening() {
+        if (accelRegistered && sensorManager != null) sensorManager.unregisterListener(accelListener);
+        accelRegistered = false;
+        if (crashWakeLock != null && crashWakeLock.isHeld()) {
+            try {
+                crashWakeLock.release();
+            } catch (RuntimeException ignored) {
+                // Already released by timeout.
+            }
+        }
+    }
+
+    private void holdCrashWakeLock() {
+        if (!accelRegistered) return;
+        if (crashWakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+            crashWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:crash");
+            crashWakeLock.setReferenceCounted(false);
+        }
+        // Re-acquiring restarts the timeout: a drive with fixes keeps it, a
+        // service that stops hearing anything lets it lapse.
+        crashWakeLock.acquire(CRASH_WAKE_MS);
+    }
+
+    /**
+     * Sensor time (nanoseconds since boot) as wall-clock milliseconds, so
+     * accelerometer samples and fixes are on one clock. A fix's own time
+     * comes from GPS and can differ from the phone's clock by seconds.
+     */
+    private static long wallTime(long elapsedNanos) {
+        return System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() - elapsedNanos) / 1_000_000L;
+    }
+
+    /** The detector's view of a fix: unwrapped so the rules stay free of Android types. */
+    private void feedCrashDetector(Location location, double speed, double accuracy) {
+        long at = location.getElapsedRealtimeNanos() > 0
+                ? wallTime(location.getElapsedRealtimeNanos()) : location.getTime();
+        boolean wasPending = crashDetector.isPending();
+        crashDetector.setDriving(motion.mode() == MotionModeSelector.Mode.DRIVING);
+        CrashDetector.Result crash = crashDetector.onFix(at, speed, accuracy,
+                location.getLatitude(), location.getLongitude());
+        if (crash != null) CrashAlert.start(this, crash);
+        if (wasPending != crashDetector.isPending() || accelRegistered) syncCrashListening();
     }
 
     private void postDrivingEvents(List<DrivingMonitor.Event> events) {
@@ -542,6 +653,7 @@ public class LocationTrackingService extends Service {
                     location.getLatitude(), location.getLongitude(), screenInteractive()));
         }
         if (changed) onModeChanged(before);
+        feedCrashDetector(location, speed, accuracy);
         if (isBetter(location, lastKnown)) lastKnown = location;
         if (System.currentTimeMillis() - lastUploadAt >= motion.mode().uploadEveryMs && lastKnown != null) {
             upload(lastKnown, false);
@@ -836,6 +948,7 @@ public class LocationTrackingService extends Service {
         removeUpdates();
         removeTransitions();
         postDrivingEvents(drivingMonitor.finish());
+        stopCrashListening();
         releaseWakeLock();
         stopForeground(true);
         stopSelf();
@@ -846,6 +959,7 @@ public class LocationTrackingService extends Service {
         handler.removeCallbacksAndMessages(null);
         releaseWakeLock();
         removeUpdates();
+        stopCrashListening();
         if (instance == this) instance = null;
         super.onDestroy();
     }

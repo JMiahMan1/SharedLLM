@@ -11,6 +11,7 @@ interface LocationTrackingPlugin {
   requestBackgroundLocation(): Promise<{ granted: boolean }>;
   hasActivityAccess(): Promise<{ granted: boolean }>;
   requestActivityAccess(): Promise<{ granted: boolean }>;
+  crashStatus(): Promise<{ pending: boolean; sendsAt: number | null }>;
 }
 
 /**
@@ -183,5 +184,30 @@ export async function requestActivityAccess(): Promise<boolean | null> {
   } catch (err) {
     console.warn('[locationTracking] activity recognition request failed:', err);
     return null;
+  }
+}
+
+export interface CrashStatus {
+  /** A crash alert is counting down or being sent to the family. */
+  pending: boolean;
+  /** When the countdown runs out (ms since the epoch); null once it has, or with none. */
+  sendsAt: number | null;
+}
+
+/**
+ * Whether the phone's crash detection has an alert counting down or being
+ * sent. Not Android, or an APK older than crash detection: nothing pending.
+ */
+export async function getCrashStatus(): Promise<CrashStatus> {
+  const plugin = getLocationTracking();
+  if (!plugin) return { pending: false, sendsAt: null };
+  try {
+    const res = await plugin.crashStatus();
+    return {
+      pending: Boolean(res?.pending),
+      sendsAt: typeof res?.sendsAt === 'number' ? res.sendsAt : null,
+    };
+  } catch {
+    return { pending: false, sendsAt: null };
   }
 }
