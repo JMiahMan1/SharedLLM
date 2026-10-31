@@ -14,9 +14,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Calls and texts while the app is closed: {@link CommsCollector} every 15
  * minutes (WorkManager's shortest period), and whatever {@link ActivityOutbox}
- * still holds. Without call-log and SMS permission, or signed out, a run sends
- * no calls or texts. WorkManager keeps the schedule across reboots and app
- * updates.
+ * and {@link LocationOutbox} still hold. Without call-log and SMS permission,
+ * or signed out, a run sends no calls or texts. WorkManager keeps the schedule
+ * across reboots and app updates.
  */
 public class CommsSyncWorker extends Worker {
     static final String WORK_NAME = "comms_sync";
@@ -48,6 +48,9 @@ public class CommsSyncWorker extends Worker {
         boolean ok = CommsCollector.run(getApplicationContext()).optBoolean("ok", true);
         // Chat notifications and media plays the phone could not send when they happened.
         ok &= ActivityOutbox.flush(getApplicationContext());
+        // Location fixes from a stretch without signal, in case the tracking
+        // service is not running (or not moving) to send them itself.
+        ok &= LocationOutbox.flush(getApplicationContext());
         return ok ? Result.success() : Result.retry();
     }
 }

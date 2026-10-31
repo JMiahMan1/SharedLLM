@@ -25,10 +25,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 /**
@@ -44,6 +40,9 @@ import org.json.JSONObject;
  * Credentials come from TokenBridge's prefs, which the login flow already
  * mirrors natively, so this works with no WebView at all -- including after the
  * OS restarts the service.
+ *
+ * A fix that cannot be sent (no signal, the server restarting) is kept in
+ * {@link LocationOutbox} and sent, oldest first, ahead of the next live fix.
  */
 public class LocationTrackingService extends Service {
     private static final String TAG = "LocationTracking";
@@ -65,7 +64,6 @@ public class LocationTrackingService extends Service {
     private static final long HEARTBEAT_WAKE_MS = 90_000L;
     /** A fix this much newer than the one we hold replaces it regardless. */
     private static final long SIGNIFICANTLY_NEWER_MS = 2 * 60 * 1000L;
-    private static final long UPLOAD_TIMEOUT_MS = 15_000L;
 
     private LocationManager locationManager;
     private PowerManager.WakeLock wakeLock;
@@ -429,26 +427,34 @@ public class LocationTrackingService extends Service {
             Log.w(TAG, "missing credentials; not uploading");
             return;
         }
-        String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
-        String primary = base + "/api/users/" + android.net.Uri.encode(username) + "/location";
-        String fallback = base + "/api/users/location";
+        final String user = username;
+        JSONObject body;
         try {
-            int status = post(primary, token, location);
-            if (status == 404) {
-                // Older gateways expose only the collection route.
-                status = post(fallback, token, location);
-            }
-            if (status >= 200 && status < 300) {
-                Log.i(TAG, "uploaded " + username + " (" + status + ")");
-            } else {
-                Log.w(TAG, "upload failed HTTP " + status);
-            }
+            body = fixBody(location);
         } catch (Exception e) {
-            Log.e(TAG, "upload threw", e);
+            Log.e(TAG, "could not build the upload", e);
+            return;
+        }
+        // Fixes kept from a stretch without signal go first, oldest first: the
+        // server takes the last fix it gets as the current position, and Geo
+        // skips a fix older than its newest when it builds trips.
+        LocationOutbox.Sent sent = LocationOutbox.sendLive(LocationOutbox.store(this), user, body,
+                b -> LocationOutbox.send(serverUrl, token, user, b));
+        switch (sent) {
+            case OK:
+                Log.i(TAG, "uploaded " + user);
+                break;
+            case RETRY:
+                Log.i(TAG, "upload kept for later");
+                break;
+            default:
+                // Refused (a 401/403/404/422): the same fix would be refused again.
+                Log.w(TAG, "upload refused; fix dropped");
+                break;
         }
     }
 
-    private int post(String url, String token, Location location) throws Exception {
+    private JSONObject fixBody(Location location) throws Exception {
         JSONObject body = new JSONObject();
         body.put("latitude", location.getLatitude());
         body.put("longitude", location.getLongitude());
@@ -481,20 +487,7 @@ public class LocationTrackingService extends Service {
         if (userId != null) {
             body.put("username", username);
         }
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setConnectTimeout(10_000);
-        conn.setReadTimeout((int) UPLOAD_TIMEOUT_MS);
-        conn.setDoOutput(true);
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Authorization", "Bearer " + token);
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-        }
-        int status = conn.getResponseCode();
-        conn.disconnect();
-        return status;
+        return body;
     }
 
     /**
