@@ -216,10 +216,13 @@ $COMPOSE exec -T identity curl -s -X POST "http://127.0.0.1:8001/api/admin/seed?
 
 # --- Step 5: Re-ingest HA devices ---
 log "Re-ingesting Home Assistant devices via Gateway..."
-# Execute the POST request INSIDE the gateway container
+# Execute the POST request INSIDE the gateway container. It runs as the
+# household, which the gateway grants only to a caller holding the internal
+# secret; without it this step was refused (401) on every deploy.
 $COMPOSE exec -T gateway curl -s -X POST "http://127.0.0.1:11435/api/discovery/sync" \
      -H "Content-Type: application/json" \
-     -d '{"rag_user": "default"}' \
+     -H "X-Internal-Secret: $INTERNAL_SECRET" \
+     -d '{}' \
      | tee -a "$LOG_FILE"
 
 log "========================================="

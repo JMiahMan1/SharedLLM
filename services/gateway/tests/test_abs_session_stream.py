@@ -573,6 +573,19 @@ class TestMaLibraryUriEndpointRequiresAuth:
         from services.gateway import main
 
         self._resolver(monkeypatch)
+
+        class _Refused:
+            status = 401
+
+        class _Identity:
+            def get(self, *a, **k):
+                async def answer():
+                    return _Refused()
+                return answer()
+
+        # Identity answers an unknown key with 401 (when it cannot be reached
+        # at all the gateway says 503 instead, see test_sd_auth_gate).
+        monkeypatch.setattr(main, "get_http_client", lambda: _Identity())
         resp = TestClient(main.app, headers={"Authorization": "Bearer sk-not-a-real-key"}).post(
             "/api/media/ma-library-uri", json={"abs_item_id": "book-1", "title": "Narnia"}
         )
