@@ -11420,7 +11420,16 @@ async def update_user_location(user_id: str, request: Request):
         )
         if resp.status == 200:
             return await resp.json()
+        _refused_location(resp.status)
     raise HTTPException(status_code=502, detail="Identity service unavailable")
+
+
+def _refused_location(status: int) -> None:
+    """Identity refused the fix itself (422: not a valid fix): say so, so the
+    phone drops it. As a 502 the phone's offline queue would keep it and try
+    the same fix again and again, ahead of every newer one."""
+    if 400 <= status < 500:
+        raise HTTPException(status_code=422 if status == 422 else 400, detail="Identity refused that location fix")
 
 
 @app.post("/api/users/location")
@@ -11448,6 +11457,7 @@ async def update_current_user_location(request: Request):
         )
         if resp.status == 200:
             return await resp.json()
+        _refused_location(resp.status)
     raise HTTPException(status_code=502, detail="Identity service unavailable")
 
 
