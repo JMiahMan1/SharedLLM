@@ -251,3 +251,51 @@ export function placeAt(lat: number, lon: number, places: ZonePlace[]): string |
   }
   return best?.name ?? null;
 }
+
+/** "4 min 12 s" for a call's length. */
+export function callLength(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+const CALL_TITLE: Record<string, (who: string) => string> = {
+  in: (who) => `Call from ${who}`,
+  out: (who) => `Call to ${who}`,
+  missed: (who) => `Missed call from ${who}`,
+  rejected: (who) => `Declined call from ${who}`,
+  voicemail: (who) => `Voicemail from ${who}`,
+  blocked: (who) => `Blocked call from ${who}`,
+};
+
+const TEXT_TITLE: Record<string, (who: string) => string> = {
+  in: (who) => `Text from ${who}`,
+  out: (who) => `Text to ${who}`,
+  outbox: (who) => `Text to ${who} (sending)`,
+  failed: (who) => `Text to ${who} (not sent)`,
+  draft: (who) => `Draft to ${who}`,
+};
+
+/**
+ * A call or a text as the timeline shows it: who, which way, and for a call
+ * how long it lasted; the number when the line names a contact. Null for any
+ * other kind of event.
+ */
+export function commsLine(e: { feature: string; item: string; duration_s?: number | null; detail?: Record<string, unknown> }):
+  { title: string; number: string | null; length: string | null; text: string | null } | null {
+  if (e.feature !== 'calls' && e.feature !== 'sms') return null;
+  const direction = typeof e.detail?.direction === 'string' ? e.detail.direction : '';
+  const number = typeof e.detail?.number === 'string' && e.detail.number ? e.detail.number : null;
+  const who = e.item || number || 'an unknown number';
+  if (e.feature === 'calls') {
+    const title = (CALL_TITLE[direction] ?? ((w: string) => `Call with ${w}`))(who);
+    const answered = direction === 'in' || direction === 'out';
+    const length = answered && typeof e.duration_s === 'number' ? callLength(e.duration_s) : null;
+    return { title, number: number && number !== who ? number : null, length, text: null };
+  }
+  const title = (TEXT_TITLE[direction] ?? ((w: string) => `Text with ${w}`))(who);
+  const text = typeof e.detail?.body === 'string' ? e.detail.body : null;
+  return { title, number: number && number !== who ? number : null, length: null, text };
+}

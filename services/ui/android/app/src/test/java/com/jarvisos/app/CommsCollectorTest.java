@@ -33,4 +33,14 @@ public class CommsCollectorTest {
         assertEquals("out", CommsCollector.smsDirection(2));
         assertEquals("unknown", CommsCollector.smsDirection(0));
     }
+
+    @Test
+    public void aGroupMessageNamesEveryoneInIt() {
+        org.junit.Assert.assertEquals("", CommsCollector.groupLabel(java.util.Arrays.asList()));
+        org.junit.Assert.assertEquals("Mom", CommsCollector.groupLabel(java.util.Arrays.asList("Mom")));
+        org.junit.Assert.assertEquals("Mom and Leo", CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo")));
+        org.junit.Assert.assertEquals("Mom, Leo and 1 other", CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Gracie")));
+        org.junit.Assert.assertEquals("Mom, Leo and 2 others",
+                CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Gracie", "+15555550100")));
+    }
 }

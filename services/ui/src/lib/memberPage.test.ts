@@ -74,3 +74,32 @@ describe('activity kinds', () => {
     expect(kindOf('something-new')).toBe('other');
   });
 });
+
+import { callLength, commsLine } from './memberPage';
+
+describe('calls and texts on the timeline', () => {
+  it('a call says who, which way and how long', () => {
+    expect(commsLine({ feature: 'calls', item: 'Mom', duration_s: 252, detail: { direction: 'out', number: '+15555550101' } }))
+      .toEqual({ title: 'Call to Mom', number: '+15555550101', length: '4 min 12 s', text: null });
+    expect(commsLine({ feature: 'calls', item: 'Mom', duration_s: 0, detail: { direction: 'missed', number: '+15555550101' } })?.title)
+      .toBe('Missed call from Mom');
+    // A missed call has no length to show.
+    expect(commsLine({ feature: 'calls', item: 'Mom', duration_s: 0, detail: { direction: 'missed' } })?.length).toBeNull();
+  });
+
+  it('a text carries its whole message, and the number when the line names a contact', () => {
+    const long = 'See you at 5. '.repeat(40);
+    expect(commsLine({ feature: 'sms', item: 'Leo', detail: { direction: 'in', number: '+15555550102', body: long } }))
+      .toEqual({ title: 'Text from Leo', number: '+15555550102', length: null, text: long });
+    expect(commsLine({ feature: 'sms', item: '+15555550102', detail: { direction: 'out', number: '+15555550102', body: 'ok' } }))
+      .toEqual({ title: 'Text to +15555550102', number: null, length: null, text: 'ok' });
+  });
+
+  it('is nothing for other kinds', () => {
+    expect(commsLine({ feature: 'bible', item: 'John 3' })).toBeNull();
+  });
+
+  it('formats call lengths', () => {
+    expect([callLength(42), callLength(120), callLength(3725)]).toEqual(['42 s', '2 min', '1 h 2 min']);
+  });
+});
