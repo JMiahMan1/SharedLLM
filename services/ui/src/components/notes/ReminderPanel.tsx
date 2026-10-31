@@ -240,7 +240,9 @@ export default function ReminderPanel({
           value={value}
           min={localInputValue(now)}
           onChange={(e) => setValue(e.target.value)}
-          className="glass-input min-h-9 px-2 py-1 text-base sm:text-xs"
+          // Its own row on a phone: a date-and-time field will not shrink below
+          // its contents, which ran off the screen with larger text.
+          className="glass-input min-h-9 w-full min-w-0 max-w-full px-2 py-1 text-base sm:w-auto sm:text-xs"
         />
         <button
           type="button"

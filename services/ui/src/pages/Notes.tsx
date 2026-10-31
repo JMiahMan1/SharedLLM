@@ -2181,7 +2181,7 @@ const NoteEditor = forwardRef<
             <CheckSquare size={13} /> Checklist item
           </button>
         )}
-        <label className="text-xs text-slate-400 flex items-center gap-2">
+        <label className="text-xs text-slate-400 flex min-w-0 items-center gap-2">
           Folder
           <input
             value={draft.folder}
@@ -2191,7 +2191,7 @@ const NoteEditor = forwardRef<
             className="glass-input min-h-11 px-2 py-1 text-base sm:text-xs w-32"
           />
         </label>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <input
             value={labelDraft}
             onChange={(e) => setLabelDraft(e.target.value)}
@@ -2227,7 +2227,7 @@ const NoteEditor = forwardRef<
         >
           <Pin size={13} /> {draft.pinned ? 'Pinned' : 'Pin'}
         </button>
-        <div className="flex items-center">
+        <div className="flex min-w-0 flex-wrap items-center">
           {NOTE_COLORS.map((c) => (
             <button
               key={c.id}
@@ -2275,8 +2275,10 @@ const NoteEditor = forwardRef<
           }}
         />
       )}
+      {/* Every row here wraps: on a narrow phone, or with Android's larger
+          text, the buttons and the save status used to run off the right edge. */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             className="glass-button min-h-11 px-4 py-2 text-sm"
@@ -2294,11 +2296,11 @@ const NoteEditor = forwardRef<
           >
             <X size={13} /> Close
           </button>
-          <span className="text-[11px] text-slate-500" aria-live="polite" data-testid="note-save-status">
+          <span className="min-w-0 break-words text-[11px] text-slate-500" aria-live="polite" data-testid="note-save-status">
             {status}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {initial.path && (
             <button
               type="button"
