@@ -114,6 +114,46 @@ async def test_a_vague_fix_at_the_edge_is_not_a_departure(world):
 
 
 @pytest.mark.asyncio
+async def test_a_zone_drawn_tighter_than_a_phone_can_resolve_does_not_flap(world):
+    """A 40 m zone.home and an indoor fix 200 m out flapped "left Home" all day.
+
+    The drawn radius is floored for the presence decision only, so an uncertain
+    fix near a tight zone is not a departure; a genuinely distant one still is.
+    """
+    r = R()
+    t = time.time()
+    geo._zone_cache.update({"at": time.time(), "zones": [{**HOME, "radius": 40.0}, WORK]})
+    try:
+        await geo._presence_transition(r, "jeremiah", 33.1667, -111.5646, t)          # home
+        # 195 m out, and the phone admits 76 m of uncertainty: not a departure.
+        await geo._presence_transition(r, "jeremiah", 33.168455, -111.5646, t + 60, acc=76.0)
+        assert world == []
+        # A kilometre away, though, is a real departure.
+        await geo._presence_transition(r, "jeremiah", 33.1757, -111.5646, t + 120, acc=10.0)
+        assert ("michele", "Jeremiah left Home", "") in world
+    finally:
+        geo._zone_cache.update({"at": time.time(), "zones": [HOME, WORK]})
+
+
+@pytest.mark.asyncio
+async def test_a_tight_home_zone_does_not_flap_on_a_bad_fix(world):
+    """``zone.home`` here is drawn 40 m across while an indoor fix can sit 200 m
+    out, which flapped "left Home" / "arrived at Home" all day. A zone tighter
+    than a phone can resolve is widened for the presence decision, so the same
+    phone reads as home while a real trip away still counts."""
+    r = R()
+    t = time.time()
+    geo._zone_cache.update({"at": time.time(), "zones": [{**HOME, "radius": 40.0}, WORK]})
+    await geo._presence_transition(r, "michele", 33.1667, -111.5646, t)              # home
+    # 195 m out with 76 m of uncertainty: still home, the zone is only 40 m wide
+    await geo._presence_transition(r, "michele", 33.168452, -111.5646, t + 30, acc=76.0)
+    assert world == []
+    # 500 m out is a real departure, however tight the zone was drawn
+    await geo._presence_transition(r, "michele", 33.171191, -111.5646, t + 60, acc=76.0)
+    assert ("jeremiah", "Michele left Home", "") in world
+
+
+@pytest.mark.asyncio
 async def test_the_old_switch_moves_to_the_family_presence_preference_once(monkeypatch):
     """Geo's own presence switch is gone: whoever had it off gets
     family_presence=false in identity, and the old entry is dropped only once
