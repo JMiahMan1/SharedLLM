@@ -9,6 +9,8 @@ interface LocationTrackingPlugin {
   requestBatteryUnrestricted(): Promise<{ unrestricted: boolean }>;
   backgroundLocation(): Promise<{ granted: boolean; foreground: boolean }>;
   requestBackgroundLocation(): Promise<{ granted: boolean }>;
+  hasActivityAccess(): Promise<{ granted: boolean }>;
+  requestActivityAccess(): Promise<{ granted: boolean }>;
 }
 
 /**
@@ -148,5 +150,38 @@ export async function requestBackgroundLocation(): Promise<void> {
     await plugin.requestBackgroundLocation();
   } catch (err) {
     console.warn('[locationTracking] background location request failed:', err);
+  }
+}
+
+/**
+ * Whether Activity Recognition is allowed, which lets the service tell driving
+ * (a fix every second) from sitting still (no GPS). `null` when it cannot say:
+ * not Android, or an APK older than the check. Without it the service still
+ * finds drives, by speed alone.
+ */
+export async function hasActivityAccess(): Promise<boolean | null> {
+  const plugin = getLocationTracking();
+  if (!plugin) return null;
+  try {
+    const res = await plugin.hasActivityAccess();
+    return Boolean(res?.granted);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Shows Android's own "Physical activity" prompt and resolves with the answer.
+ * `null` when it cannot ask: not Android, or an APK older than the request.
+ */
+export async function requestActivityAccess(): Promise<boolean | null> {
+  const plugin = getLocationTracking();
+  if (!plugin) return null;
+  try {
+    const res = await plugin.requestActivityAccess();
+    return Boolean(res?.granted);
+  } catch (err) {
+    console.warn('[locationTracking] activity recognition request failed:', err);
+    return null;
   }
 }

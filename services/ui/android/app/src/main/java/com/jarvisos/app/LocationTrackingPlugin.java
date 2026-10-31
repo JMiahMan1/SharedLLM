@@ -9,10 +9,13 @@ import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 /**
  * Starts and stops {@link LocationTrackingService}.
@@ -21,7 +24,12 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * the process. It still owns the decision to track (user preference, consent,
  * permission state), so it calls in here when that decision is made.
  */
-@CapacitorPlugin(name = "LocationTracking")
+@CapacitorPlugin(
+    name = "LocationTracking",
+    permissions = {
+        @Permission(alias = "activity", strings = { Manifest.permission.ACTIVITY_RECOGNITION })
+    }
+)
 public class LocationTrackingPlugin extends Plugin {
 
     private static final int NOTIFICATION_ID = 0x10A1;
@@ -155,6 +163,53 @@ public class LocationTrackingPlugin extends Plugin {
         }
         JSObject ret = new JSObject();
         ret.put("granted", false);
+        call.resolve(ret);
+    }
+
+    /**
+     * Whether Activity Recognition may run, which tells the tracking service
+     * when someone is driving (a fix every second) or sitting still (no GPS).
+     * Without it the service goes by speed alone. Not a runtime permission
+     * before Android 10.
+     */
+    @PluginMethod
+    public void hasActivityAccess(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", LocationTrackingService.hasActivityRecognition(getContext()));
+        call.resolve(ret);
+    }
+
+    /** Ask for Activity Recognition (Android's own dialog); resolves once it is answered. */
+    @PluginMethod
+    public void requestActivityAccess(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || getPermissionState("activity") == PermissionState.GRANTED) {
+            activityAccessResult(call);
+            return;
+        }
+        requestPermissionForAlias("activity", call, "activityAccessResult");
+    }
+
+    @PermissionCallback
+    private void activityAccessResult(PluginCall call) {
+        boolean granted = LocationTrackingService.hasActivityRecognition(getContext());
+        if (granted && LocationTrackingService.isEnabled(getContext())) {
+            // The running service registers for transitions now rather than at
+            // its next heartbeat. The app is in front, so starting it is allowed.
+            try {
+                Intent intent = new Intent(getContext(), LocationTrackingService.class)
+                        .setAction(LocationTrackingService.ACTION_ACTIVITY_ACCESS);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getContext().startForegroundService(intent);
+                } else {
+                    getContext().startService(intent);
+                }
+            } catch (Exception ignored) {
+                // The heartbeat registers within five minutes anyway.
+            }
+        }
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
         call.resolve(ret);
     }
 

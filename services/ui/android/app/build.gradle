@@ -102,6 +102,9 @@ dependencies {
     // same Guava another plugin already ships at runtime, so the APK is unchanged.
     implementation "com.google.guava:guava:31.1-android"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+    // Fused location and Activity Recognition for LocationTrackingService. The
+    // same version the Geolocation plugin already ships, so the APK gains no copy.
+    implementation "com.google.android.gms:play-services-location:21.3.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is stubs only; the push stream parsing tests need the real one.
