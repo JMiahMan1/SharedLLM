@@ -29,9 +29,17 @@ In order:
 
 1. **Static mappings**: the `dns_mappings` global setting in Identity
    (edited in the UI's DNS panel through the gateway's `/api/dns` routes, or
-   `/api/admin/dns`), refreshed every `DNS_REFRESH_INTERVAL` (30 s). A host
-   may list several IPs. If `IDENTITY_SVC_URL` or `INTERNAL_SECRET` is unset,
-   only the `DNS_MAPPINGS` env var (JSON) is used.
+   `/api/admin/dns`), refreshed every `DNS_REFRESH_INTERVAL` (30 s). The
+   database is the only source: `DNS_MAPPINGS` in `.env` is copied into it
+   once by Identity's seed, and only while the setting is empty (`{}`); this
+   service never reads it. Names match in any case. Per record:
+   - **A**: one or more IPv4 addresses (see failover below). A value that is
+     not an IPv4 address is skipped and logged, not fatal.
+   - **CNAME**: an alias; answered with whatever its target resolves to
+     (another mapping, a container, or upstream), under the asked name.
+     Chains stop after 8 hops.
+   - A record switched off (`is_active: false`) is not answered.
+   - The record's own `ttl` is used (health-checked answers stay short).
 2. **`*.docker`, container names and container hostnames**: live from the
    Docker socket.
 3. **`host.docker.internal`**: the bridge gateway, `172.26.0.1`.
@@ -56,8 +64,15 @@ default true), only the IPs that answer are returned:
   lookup only waits on a probe the first time an address is seen.
 - These answers carry the health interval as their TTL (at least 5 s), so a
   client follows a switch within one interval instead of holding a dead IP.
-- If no candidate answers, the **last address that did** is returned, not the
-  whole pool.
+- If no candidate answers, the **last address that did** is returned (if it
+  is still listed), not the whole pool.
+- Every answering address is returned, in the listed order, so a service on
+  several machines gets all of them; a machine that moves networks is
+  followed within one health interval.
+- Probes count a host as up when **any** health port answers. Keep
+  `dns_health_ports` to the service's own ports (for the alpaca box:
+  `11434,5000,8082`): a stale address reassigned by DHCP to a printer or TV
+  with port 80 open would otherwise be handed out.
 
 Example: `<desktop-host>.local` (the Ollama / audio box) lists several
 addresses; the answer is whichever is up.
@@ -66,7 +81,7 @@ addresses; the answer is whichever is up.
 
 | Setting | Where | Default |
 |---|---|---|
-| `dns_mappings` | Identity global setting (JSON: host → IP or list) | `{}` |
+| `dns_mappings` | Identity global setting (JSON: host → record, IP or list); seeded from `DNS_MAPPINGS` only when empty | `{}` |
 | `dns_failover_enabled`, `dns_health_ports`, `dns_health_path` | Identity global settings | on, see below, none |
 | `UPSTREAM_DNS` | compose / `.env` | `1.1.1.1` |
 | `DNS_HEALTH_PORTS`, `DNS_HEALTH_PATH` | env (the Identity settings above override them) | `11434,80,443,8080,8000,9000`, none |

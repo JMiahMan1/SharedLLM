@@ -169,6 +169,10 @@ def _parse_env_users() -> dict:
     return users
 
 
+def _is_empty_setting(value: str | None) -> bool:
+    return not (value or "").strip() or (value or "").strip() in ("{}", "[]")
+
+
 def seed_from_env(session: Session, force: bool = False) -> int:
     """
     Seed the database from environment variables.
@@ -347,10 +351,13 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {shown}")
-            elif not existing.value:
+            elif _is_empty_setting(existing.value):
+                # The database is the authority: .env only fills a value that
+                # is empty. "{}" and "[]" are empty too: dns_mappings starts as
+                # "{}", so DNS_MAPPINGS never reached a new database.
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {shown}")
+                log.info(f"[seed] Backfilled {global_key} from {env_key}: {shown}")
 
     # Per-user mailbox credentials
     # MAIL_USER / MAIL_USER_PASS belong to one person, not the whole system, so

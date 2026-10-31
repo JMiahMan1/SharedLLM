@@ -226,10 +226,62 @@ class DockerWatcher:
         self._running = False
 
 
+#: How many CNAME hops a static mapping may take before the lookup gives up.
+MAX_ALIAS_HOPS = 8
+
+
+def _is_ipv4(value: str) -> bool:
+    parts = value.split('.')
+    return len(parts) == 4 and all(p.isdigit() and int(p) <= 255 for p in parts)
+
+
+def normalize_mapping(entry) -> dict | None:
+    """One ``dns_mappings`` entry as ``{"type", "values", "ttl"}``; None to skip it.
+
+    The UI stores a dict (``record_type``, ``values``, ``ttl``, ``is_active``);
+    older entries may be a bare IP or a list. A record
+    switched off in the UI is skipped, and a CNAME keeps its target hostname
+    instead of being read as an address.
+    """
+    ttl = 300
+    rtype = 'A'
+    if isinstance(entry, dict):
+        if entry.get('is_active', True) is False:
+            return None
+        rtype = 'CNAME' if str(entry.get('record_type') or 'A').upper() == 'CNAME' else 'A'
+        try:
+            ttl = max(1, int(entry.get('ttl') or 300))
+        except (TypeError, ValueError):
+            ttl = 300
+        raw = entry.get('values')
+        if not isinstance(raw, list) or not any(str(v).strip() for v in raw):
+            raw = entry.get('ip')
+    else:
+        raw = entry
+    if isinstance(raw, str):
+        raw = [raw]
+    values = [str(v).strip().rstrip('.') for v in (raw if isinstance(raw, list) else []) if str(v).strip()]
+    if not values:
+        return None
+    return {'type': rtype, 'values': values, 'ttl': ttl}
+
+
+def normalize_mappings(mappings) -> dict[str, dict]:
+    """A whole ``dns_mappings`` object, keyed by lower-case hostname."""
+    out = {}
+    for host, entry in (mappings or {}).items():
+        if not isinstance(host, str) or host.startswith('__'):
+            continue
+        normalized = normalize_mapping(entry)
+        if normalized:
+            out[host.strip().rstrip('.').lower()] = normalized
+    return out
+
+
 class DNSResolver:
     """DNS query resolver"""
 
-    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8', static_mappings: dict[str, str] | None = None):
+    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8', static_mappings: dict | None = None):
         self.registry = registry
         self.upstream_dns = upstream_dns
         self.upstream_client = _DNSClient(upstream_dns)
@@ -241,17 +293,40 @@ class DNSResolver:
         self._refreshing: set[str] = set()
         self._last_reachable: dict[str, list[str]] = {}  # name -> last answer with a live IP
 
+    @property
+    def static_mappings(self) -> dict[str, dict]:
+        return self._static_mappings
+
+    @static_mappings.setter
+    def static_mappings(self, mappings) -> None:
+        # Normalized on the way in, whatever shape the source used.
+        self._static_mappings = normalize_mappings(mappings)
+
     async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
         logger.debug(f"Resolver called for: {query.question_name}")
-        name = query.question_name.rstrip('.')
+        return await self._lookup(query.question_name.rstrip('.'), query.question_type, 0)
 
+    async def _lookup(self, name: str, qtype: int, hops: int) -> list | None:
         try:
-            # Check static mappings first (for external LAN hosts, e.g. a local Ollama server)
-            if name in self.static_mappings:
-                entry = self.static_mappings[name]
-                ips = entry if isinstance(entry, list) else [entry]
-                ttl = 300
+            # Static mappings first (external LAN hosts, e.g. the Ollama / alpaca box)
+            entry = self.static_mappings.get(name.lower())
+            if entry and entry['type'] == 'CNAME':
+                # An alias made in the UI: answer with whatever its target
+                # resolves to (the server flattens it under the asked name).
+                if hops >= MAX_ALIAS_HOPS:
+                    logger.warning(f"DNS alias loop or chain too long at {name}")
+                    return None
+                records = await self._lookup(entry['values'][0], qtype, hops + 1)
+                return [{**r, 'ttl': min(r['ttl'], entry['ttl'])} for r in records] if records else records
+            if entry:
+                ips = [v for v in entry['values'] if _is_ipv4(v)]
+                if len(ips) < len(entry['values']):
+                    logger.warning(f"DNS mapping {name} has values that are not IPv4 addresses: "
+                                   f"{[v for v in entry['values'] if not _is_ipv4(v)]}")
+                if not ips:
+                    return None
+                ttl = entry['ttl']
                 if self.health_aware and len(ips) > 1:
                     # Only return IPs that are currently reachable; the answer
                     # flips automatically when the available device changes.
@@ -260,15 +335,19 @@ class DNSResolver:
                     # name timed out (seen for jeremiah-home-desktop.local).
                     up = await asyncio.gather(*(self._is_reachable(ip) for ip in ips))
                     reachable = [ip for ip, ok in zip(ips, up, strict=False) if ok]
+                    key = name.lower()
                     if reachable:
-                        self._last_reachable[name] = reachable
+                        self._last_reachable[key] = reachable
                     # None answering: the last address that did, not the whole
                     # pool -- handing out dead candidates is what sent callers
-                    # to hosts that refuse the connection.
-                    ips = reachable or self._last_reachable.get(name) or ips[:1]
+                    # to hosts that refuse the connection. Only while that
+                    # address is still listed: one removed from the mapping
+                    # is never handed out again.
+                    last = [ip for ip in self._last_reachable.get(key, []) if ip in ips]
+                    ips = reachable or last or ips[:1]
                     # Short-lived so a client's cache follows a switch within
                     # one health interval instead of holding a dead IP 5 min.
-                    ttl = max(5, int(DNS_HEALTH_TTL))
+                    ttl = min(ttl, max(5, int(DNS_HEALTH_TTL)))
                 records = [self._make_a_record(name, ip, ttl) for ip in ips if ip]
                 logger.debug(f"Found static mapping: {name} -> {ips}")
                 return records
@@ -302,7 +381,7 @@ class DNSResolver:
 
             # Forward to upstream DNS
             logger.debug(f"Forwarding {name} to upstream DNS {self.upstream_dns}")
-            records = await self.upstream_client.resolve(name, query.question_type)
+            records = await self.upstream_client.resolve(name, qtype)
             if records:
                 logger.debug(f"Upstream DNS returned {len(records)} records for {name}")
                 for record in records:
@@ -773,42 +852,12 @@ async def main():
     registry = ContainerRegistry()
     resolver = DNSResolver(registry, upstream_dns)
 
-    # Parse static DNS mappings from DNS_MAPPINGS env var (fallback)
-    mappings_str = os.environ.get('DNS_MAPPINGS', '')
-    flat_mappings = {}
-    if mappings_str:
-        try:
-            mappings = json.loads(mappings_str)
-            for hostname, ip in mappings.items():
-                if isinstance(ip, list):
-                    for ip_addr in ip:
-                        flat_mappings[hostname] = ip_addr
-                else:
-                    flat_mappings[hostname] = ip
-            logger.info(f"Loaded {len(flat_mappings)} static DNS mappings from DNS_MAPPINGS env var")
-        except json.JSONDecodeError as e:
-            logger.warning(f"Invalid DNS_MAPPINGS JSON: {e}")
-
-    resolver.static_mappings = flat_mappings
+    # Static mappings come only from Identity (the ``dns_mappings`` setting,
+    # seeded once from DNS_MAPPINGS in .env): this service never reads them
+    # from its own environment, so an address removed in the UI cannot come
+    # back from a stale .env while Identity is unreachable.
 
     # Fetch DNS records from Identity service and update periodically
-    def _normalize_dns_entry(entry) -> list[str]:
-        """Flatten a dns_mappings entry (str | list | dict) into a clean IP list."""
-        if isinstance(entry, str):
-            return [entry.strip()] if entry.strip() else []
-        if isinstance(entry, list):
-            return [str(v).strip() for v in entry if str(v).strip()]
-        if isinstance(entry, dict):
-            vals = entry.get("values")
-            if isinstance(vals, list):
-                return [str(v).strip() for v in vals if str(v).strip()]
-            ip = entry.get("ip")
-            if isinstance(ip, str):
-                return [ip.strip()] if ip.strip() else []
-            if isinstance(ip, list):
-                return [str(v).strip() for v in ip if str(v).strip()]
-        return []
-
     async def refresh_dns_mappings():
         """Fetch DNS mappings + failover settings from Identity and update resolver.
 
@@ -820,7 +869,7 @@ async def main():
         internal_secret = os.environ.get('INTERNAL_SECRET')
 
         if not identity_url or not internal_secret:
-            logger.warning("IDENTITY_SVC_URL or INTERNAL_SECRET not set, using env var mappings only")
+            logger.warning("IDENTITY_SVC_URL or INTERNAL_SECRET not set: no static DNS mappings")
             return
 
         while True:
@@ -838,17 +887,9 @@ async def main():
                             mappings = json.loads(raw) if isinstance(raw, str) else raw
                         except (json.JSONDecodeError, TypeError):
                             mappings = {}
-                        new_mappings = {}
-                        for host, entry in (mappings or {}).items():
-                            if not isinstance(host, str) or host.startswith("__"):
-                                continue
-                            values = _normalize_dns_entry(entry)
-                            if values:
-                                new_mappings[host] = values
-                                if len(values) > 1:
-                                    logger.debug(f"DNS mapping with multiple values: {host} -> {values}")
-                        resolver.static_mappings = new_mappings
-                        logger.info(f"Updated {len(new_mappings)} DNS mappings from Identity service")
+                        if isinstance(mappings, dict):
+                            resolver.static_mappings = mappings
+                        logger.info(f"Updated {len(resolver.static_mappings)} DNS mappings from Identity service")
 
                     # Failover config (health-aware DNS)
                     resp = await http_session.get(
@@ -862,8 +903,8 @@ async def main():
                         ).lower() in ("1", "true", "yes", "on")
                         if ports := settings.get("dns_health_ports"):
                             resolver.health_ports = [p.strip() for p in ports.split(",") if p.strip()]
-                        if path := settings.get("dns_health_path", "").strip():
-                            resolver.health_path = path
+                        # Taken as stored, so clearing it in the UI goes back to port probes.
+                        resolver.health_path = str(settings.get("dns_health_path") or "").strip()
             except Exception as e:
                 logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
 
