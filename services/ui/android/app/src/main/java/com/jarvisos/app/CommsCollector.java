@@ -67,6 +67,9 @@ final class CommsCollector {
                 if (hasPerm(app, Manifest.permission.READ_SMS)) {
                     sms = sendSms(app);
                     sms += sendMms(app);
+                    // After the store is read, so a text that is there is not
+                    // also posted from its notification.
+                    sms += ChatMessageLog.flush(app);
                 }
             } catch (Exception e) {
                 // Offline or a server error: the cursor stays on the first

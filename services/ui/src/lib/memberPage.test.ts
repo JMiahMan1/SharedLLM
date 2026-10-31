@@ -95,6 +95,12 @@ describe('calls and texts on the timeline', () => {
       .toEqual({ title: 'Text to +15555550102', number: null, length: null, text: 'ok' });
   });
 
+  it('marks chat and picture or group messages', () => {
+    expect(commsLine({ feature: 'sms', item: 'Leo', detail: { direction: 'in', body: 'omw', rcs: true } })?.title).toBe('Text from Leo (chat)');
+    expect(commsLine({ feature: 'sms', item: 'Mom and Leo', detail: { direction: 'out', body: 'ok', mms: true } })?.title)
+      .toBe('Text to Mom and Leo (picture or group)');
+  });
+
   it('is nothing for other kinds', () => {
     expect(commsLine({ feature: 'bible', item: 'John 3' })).toBeNull();
   });
