@@ -17,3 +17,15 @@ describe('motionLabel', () => {
     expect(motionLabel({ ...base, speedKnown: false, activity: 'still' })).toBe('Stationary');
   });
 });
+
+import { buildFamilyCards } from './familyCards';
+
+describe('a paused person', () => {
+  it('has a card that says paused, with no position', () => {
+    const cards = buildFamilyCards([], { grown: { latitude: NaN, longitude: NaN, paused: true } as never }, [], Date.now());
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ name: 'Grown', zone: 'Location paused', paused: true });
+    expect(cards[0].lat).toBeUndefined();
+    expect(motionLabel(cards[0])).toBe('Paused');
+  });
+});

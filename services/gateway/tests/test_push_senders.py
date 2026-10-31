@@ -656,3 +656,30 @@ def test_check_in_without_a_position_sends_nothing(safety_client, sent):
     client, _ = safety_client
     assert client.post("/api/family/check-in", json={}).status_code == 422
     assert sent == []
+
+
+def test_a_detected_crash_is_the_most_urgent_notice_with_where_and_how_fast(safety_client, sent):
+    import time
+
+    client, _ = safety_client
+    body = {"auto": True, "speed_before_mph": 41.6, "peak_g": 5.2,
+            "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000}}
+    assert client.post("/api/family/crash", json=body).json()["sent"] == 2
+    notice = sent[0]
+    assert notice["priority"] == 5 and notice["category"] == "family_safety"
+    assert notice["title"] == "Possible crash: Leo"
+    assert notice["body"].startswith("Leo's phone detected a possible crash at about 42 mph and they did not answer for a minute.")
+    assert "33.50000, -112.10000" in notice["body"]
+    # One alert per crash: a retry (its answer was lost) is told it went out.
+    again = client.post("/api/family/crash", json=body)
+    assert again.status_code == 200 and again.json()["already_sent"] is True
+    assert len(sent) == 2
+
+
+def test_get_help_after_a_crash_says_they_asked(safety_client, sent):
+    import time
+
+    client, _ = safety_client
+    body = {"auto": False, "speed_before_mph": 30, "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000}}
+    client.post("/api/family/crash", json=body)
+    assert sent[0]["body"].startswith("Leo asked for help after a possible crash at about 30 mph.")

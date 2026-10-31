@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core';
 import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, PhoneIncoming, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
+import LocationPausePanel from '../components/settings/LocationPausePanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import AppCleanupPanel from '../components/settings/AppCleanupPanel';
@@ -122,6 +123,7 @@ const Settings = () => {
       <section className="space-y-4" aria-labelledby="settings-device">
         <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>
         <SensorsSection />
+        <LocationPausePanel />
         <PhoneReportsPanel />
         <AppUpdatesSection />
         <AppCleanupPanel />
@@ -522,9 +524,13 @@ const FamilyDropInSection = () => {
 const SensorsSection = () => {
   const { sensors, enableSensor, disableSensor, openSensorSettings } = useLocation();
   const { trigger } = useHaptics();
+  const { user } = useAuth();
+  // Children and teens keep location on: a parent's rule, not a setting.
+  const locationLocked = Boolean(user?.is_minor);
 
   const handleSensorToggle = async (id: 'location' | 'steps', next: boolean) => {
     trigger('light');
+    if (id === 'location' && !next && locationLocked) return;
     if (next) {
       const ok = await enableSensor(id);
       if (ok) toast.success(id === 'steps' ? 'Step counter enabled' : 'Location tracking enabled');
@@ -573,12 +579,18 @@ const SensorsSection = () => {
                 <div className="min-w-0">
                   <p className="text-white text-sm font-medium">{row.label}</p>
                   <p className="text-xs text-slate-400">{s.enabled ? row.onDesc : row.offDesc}</p>
+                  {row.id === 'location' && locationLocked && s.enabled && (
+                    <p className="text-[11px] text-slate-500" data-testid="location-locked">
+                      A parent keeps location on for children and teens.
+                    </p>
+                  )}
                 </div>
               </div>
               <Toggle
                 checked={s.enabled}
                 onChange={(next) => void handleSensorToggle(row.id, next)}
                 ariaLabel={row.label}
+                disabled={row.id === 'location' && locationLocked && s.enabled}
               />
             </div>
             {s.message && (

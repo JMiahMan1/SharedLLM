@@ -158,8 +158,13 @@ const LocationPanel = () => {
     return () => window.clearTimeout(id);
   }, [refreshData]);
 
+  // A child's or teen's location stays on (household rule): they cannot
+  // switch it off here, or pause it.
+  const locked = Boolean(user?.is_minor);
+
   const handleToggleTracking = () => {
     trigger('light');
+    if (isTracking && locked) return;
     if (isTracking) {
       stopTracking();
     } else {
@@ -451,6 +456,7 @@ const LocationPanel = () => {
             checked={isTracking}
             onChange={() => handleToggleTracking()}
             ariaLabel="Toggle location tracking"
+            disabled={locked && isTracking}
           />
         </div>
 

@@ -5441,6 +5441,80 @@ def internal_may_view_raw(
     return {"allowed": may_view_raw_data(who, whose), "technical": may_view_technical_data(who, whose)}
 
 
+#: GlobalSetting key holding an adult's pause of location sharing.
+LOCATION_PAUSE_PREFIX = "location_pause:"
+#: How long a pause may be asked for; "until I turn it back on" has no end.
+LOCATION_PAUSE_MAX_MIN = 7 * 24 * 60
+
+
+def _location_paused(session: Session, username: str, now: float | None = None) -> dict | None:
+    """The person's current pause ({"until": epoch or None}), or None when
+    sharing is on. A pause that ran out is simply over."""
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == f"{LOCATION_PAUSE_PREFIX}{username.lower()}")).first()
+    if row is None:
+        return None
+    try:
+        pause = json.loads(row.value or "{}")
+    except (TypeError, ValueError):
+        return None
+    until = pause.get("until")
+    if until is not None and float(until) <= (now or time.time()):
+        return None
+    return {"until": until}
+
+
+@app.get("/api/users/me/location-pause")
+def get_location_pause(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Whether the caller has paused location sharing, and until when."""
+    return {
+        "paused": _location_paused(session, user.username) is not None,
+        "until": (_location_paused(session, user.username) or {}).get("until"),
+        "allowed": (user.family_role or "other") not in roles.MINOR_FAMILY_ROLES,
+    }
+
+
+@app.put("/api/users/me/location-pause")
+def set_location_pause(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Pause location sharing: ``{"minutes": n}`` for a while, or
+    ``{"minutes": null}`` until turned back on. While paused nobody sees the
+    position (admins included) and no arrival alerts go out about it.
+
+    Children and teens cannot pause: a minor's location stays with the
+    parents (household rule)."""
+    if (user.family_role or "other") in roles.MINOR_FAMILY_ROLES:
+        raise HTTPException(status_code=403, detail="Children and teens cannot pause location sharing")
+    minutes = (body or {}).get("minutes")
+    until = None
+    if minutes is not None:
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="minutes must be a number or null") from None
+        if not 1 <= minutes <= LOCATION_PAUSE_MAX_MIN:
+            raise HTTPException(status_code=422, detail=f"minutes must be between 1 and {LOCATION_PAUSE_MAX_MIN}")
+        until = time.time() + minutes * 60
+    key = f"{LOCATION_PAUSE_PREFIX}{user.username.lower()}"
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    value = json.dumps({"until": until, "since": time.time()})
+    if row:
+        row.value = value
+    else:
+        row = GlobalSetting(key=key, value=value, description=f"Location sharing paused by {user.username}")
+    session.add(row)
+    session.commit()
+    return {"paused": True, "until": until}
+
+
+@app.delete("/api/users/me/location-pause")
+def clear_location_pause(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Turn location sharing back on."""
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == f"{LOCATION_PAUSE_PREFIX}{user.username.lower()}")).first()
+    if row:
+        session.delete(row)
+        session.commit()
+    return {"paused": False, "until": None}
+
+
 @app.get("/api/internal/activity-sharing")
 def internal_activity_sharing(
     session: Session = Depends(get_session),
@@ -5448,12 +5522,18 @@ def internal_activity_sharing(
 ):
     """Internal: every stored activity-sharing preference (for the geo feed).
 
-    A user with no row has never opted in and is simply absent.
+    A user with no row has never opted in and is simply absent. A person who
+    paused location sharing is marked ``paused`` (geo hides them from
+    everyone else, admins included, while it lasts).
     """
     rows = session.exec(select(UserActivitySharing)).all()
+    now = time.time()
     return {
         "status": "SUCCESS",
-        "users": [{"username": r.username, **_activity_sharing_data(r)} for r in rows],
+        "users": [
+            {"username": r.username, **_activity_sharing_data(r), "paused": _location_paused(session, r.username, now) is not None}
+            for r in rows
+        ],
     }
 
 
@@ -6941,6 +7021,12 @@ def get_all_user_locations(
         for setting in settings:
             user_id = setting.key.replace("user_location:", "")
             if viewer and not is_admin and not _location_visible_to(session, viewer_user, user_id.lower(), grants):
+                continue
+            # Paused: the family sees that, not where (admins too; a service
+            # with no viewer still gets the position, e.g. for SOS).
+            pause = _location_paused(session, user_id) if viewer and viewer.strip().lower() != user_id.lower() else None
+            if pause is not None:
+                locations[user_id] = {"paused": True, "paused_until": pause.get("until")}
                 continue
             locations[user_id] = json.loads(setting.value)
     return locations

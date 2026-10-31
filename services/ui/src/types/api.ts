@@ -2527,6 +2527,9 @@ export interface UserLiveLocation {
   updated_at?: number;
   /** What the phone's activity recognition says: driving, cycling, walking, still, unknown. */
   activity?: string | null;
+  /** The person paused location sharing: no position, just that (and until when, epoch s). */
+  paused?: boolean;
+  paused_until?: number | null;
 }
 
 /** A place saved from Wander - a point + radius, shared with the family or private to its owner. */

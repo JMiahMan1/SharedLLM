@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import Settings from '../pages/Settings';
 import { renderWithProviders } from './render';
+import { server } from './setup';
+import { http, HttpResponse } from 'msw';
 
 const enableSensor = vi.fn(async () => true);
 const disableSensor = vi.fn(async () => undefined);
@@ -73,5 +75,13 @@ describe('Settings sensors section', () => {
     expect(stepsSwitch).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(stepsSwitch);
     await waitFor(() => expect(enableSensor).toHaveBeenCalledWith('steps'));
+  });
+
+  it("keeps a child's location on: the switch is locked and says why", async () => {
+    server.use(http.get('/api/users/me', () => HttpResponse.json({ id: 9, username: 'noah', is_minor: true, family_role: 'child', is_admin: false })));
+    renderWithProviders(<Settings />);
+    expect(await screen.findByTestId('location-locked')).toHaveTextContent('A parent keeps location on for children and teens.');
+    expect(screen.getByRole('switch', { name: 'Location tracking' })).toBeDisabled();
+    expect(disableSensor).not.toHaveBeenCalled();
   });
 });
