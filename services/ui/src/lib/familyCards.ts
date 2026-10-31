@@ -17,6 +17,9 @@ export interface FamilyMemberStatus {
   inZones?: string[];
   /** Where the position came from: the Jarvis app, or a Home Assistant person. */
   source: 'app' | 'home_assistant';
+  /** The position itself, for Navigate and a drive time (absent when only HA's zone is known). */
+  lat?: number;
+  lon?: number;
 }
 
 export interface Place {
@@ -113,6 +116,8 @@ export function buildFamilyCards(
       accuracy: typeof loc.accuracy === 'number' ? loc.accuracy : null,
       lastUpdated: new Date(stamp * 1000).toISOString(),
       source: 'app',
+      lat: latitude,
+      lon: longitude,
     };
     if (typeof loc.battery === 'number') update.battery = loc.battery;
 
