@@ -17,6 +17,13 @@ export interface FamilyMemberStatus {
   inZones?: string[];
   /** Where the position came from: the Jarvis app, or a Home Assistant person. */
   source: 'app' | 'home_assistant';
+  /**
+   * What the phone says the person is doing (driving, walking, still...), and
+   * whether its fix carried a speed at all: a network fix has none, and
+   * showing it as 0 mph said "Stationary" in the middle of a drive.
+   */
+  activity?: string | null;
+  speedKnown?: boolean;
   /** The position itself, for Navigate and a drive time (absent when only HA's zone is known). */
   lat?: number;
   lon?: number;
@@ -107,7 +114,8 @@ export function buildFamilyCards(
     if (existing && haTime >= stamp) continue; // HA is as fresh or fresher
 
     const inZones = placesAt(latitude, longitude, places);
-    const speed = typeof loc.speed === 'number' ? loc.speed : 0;
+    const speedKnown = typeof loc.speed === 'number';
+    const speed = speedKnown ? (loc.speed as number) : 0;
     const update: Partial<FamilyMemberStatus> = {
       zone: inZones[0] ?? 'Away',
       inZones,
@@ -118,6 +126,8 @@ export function buildFamilyCards(
       source: 'app',
       lat: latitude,
       lon: longitude,
+      speedKnown,
+      activity: loc.activity ?? null,
     };
     if (typeof loc.battery === 'number') update.battery = loc.battery;
 
@@ -174,4 +184,19 @@ export function groupByPlace(members: FamilyMemberStatus[]): MemberGroup[] {
     group.members.push(member);
   }
   return groups;
+}
+
+const ACTIVITY_LABEL: Record<string, string> = { driving: 'Driving', cycling: 'Cycling', walking: 'Walking', still: 'Stationary' };
+
+/**
+ * The card's motion line: a measured speed while moving; otherwise what the
+ * phone says it is doing; "Stationary" only when that is actually known;
+ * nothing when it is not (a network fix carries no speed).
+ */
+export function motionLabel(member: Pick<FamilyMemberStatus, 'isMoving' | 'speedMph' | 'activity' | 'speedKnown' | 'source'>): string | null {
+  if (member.isMoving) return `${member.speedMph} mph`;
+  const said = member.activity ? ACTIVITY_LABEL[member.activity] : undefined;
+  if (said) return said;
+  if (member.speedKnown === false) return null;
+  return 'Stationary';
 }

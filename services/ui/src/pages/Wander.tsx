@@ -47,7 +47,7 @@ import {
   userLocationsQuery,
   routeQueryKey,
 } from '../lib/wanderQueries';
-import { buildFamilyCards, groupByPlace, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
+import { buildFamilyCards, groupByPlace, motionLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
@@ -808,12 +808,12 @@ const Wander = () => {
 
         <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 text-slate-400">
           <div className="flex items-center gap-1.5">
-            <Gauge size={13} className={member.isMoving ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
-            <span>
+            <Gauge size={13} className={member.isMoving || member.activity === 'driving' ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+            <span data-testid="member-motion">
               {member.isMoving ? (
                 <span className="text-emerald-400 font-semibold">{member.speedMph} mph (In Motion)</span>
               ) : (
-                'Stationary'
+                motionLabel(member) ?? 'Speed not known'
               )}
             </span>
           </div>

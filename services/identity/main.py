@@ -6606,6 +6606,10 @@ def update_intercom_config(config_data: dict, x_internal_secret: str = Header(..
 
 # Presence & Location
 
+#: What a phone's activity recognition may report with a fix.
+PHONE_ACTIVITIES = ("driving", "cycling", "walking", "still", "unknown")
+
+
 class LocationUpdate(BaseModel):
     """GPS location update from mobile app."""
     latitude: float
@@ -6618,6 +6622,9 @@ class LocationUpdate(BaseModel):
     charging: bool | None = None
     timestamp: float | None = None
     daily_steps: int | None = None
+    #: What the phone says the person is doing (its activity recognition):
+    #: driving, cycling, walking, still or unknown. Newer app builds only.
+    activity: str | None = None
 
 
 async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
@@ -6748,6 +6755,8 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
         }
         if location.daily_steps is not None:
             payload["daily_steps"] = location.daily_steps
+        if location.activity:
+            payload["activity"] = location.activity
         async with get_client_insecure() as client, client.post(
             f"{geo_url}/people/{clean_user}/record",
             headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
@@ -6799,6 +6808,9 @@ async def update_user_location(
         "battery": location.battery,
         "timestamp": location.timestamp or time.time(),
         "updated_at": time.time(),
+        # Shown on the family cards: "Driving" when the phone knows, rather
+        # than a speed a network fix cannot give.
+        "activity": location.activity if location.activity in PHONE_ACTIVITIES else None,
     }
     low_battery = None
     with Session(engine) as session:

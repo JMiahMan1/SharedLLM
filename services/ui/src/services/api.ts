@@ -117,6 +117,7 @@ import type {
   NetworkScanResponse,
   Trip,
   PersonDay,
+  DriverReport,
   TripUpdatePayload,
   TripsResponse,
   TripRouteResponse,
@@ -1665,6 +1666,12 @@ export const api = {
   },
 
   // Family Circle & Vehicle Trips
+  /** The driver report over the last ``days`` (their sharing consent applies). */
+  async getDriverReport(username: string, days = 7): Promise<DriverReport> {
+    const resp = await apiClient.get(`/api/geo/people/${encodeURIComponent(username)}/driving`, { params: { days } });
+    return resp.data;
+  },
+
   /** One person's day: path, stops and trips (their sharing consent applies). */
   async getPersonDay(username: string, day: string): Promise<PersonDay> {
     const resp = await apiClient.get(`/api/geo/people/${encodeURIComponent(username)}/day`, { params: { day } });

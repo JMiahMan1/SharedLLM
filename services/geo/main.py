@@ -47,6 +47,7 @@ from services.config import (
 from services.geo import (
     achievements,
     day_history,
+    driving,
     event_feed,
     health_notices,
     map_match,
@@ -621,6 +622,47 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     return {"entity_id": entity_id, "points": points}
 
 
+@app.post("/driving-events")
+async def post_driving_event(body: dict):
+    """One driving event from a person's phone (the gateway names the person)."""
+    user = str(body.get("user") or "").split(".")[-1].strip().lower()
+    entry = driving.clean_event(body.get("event"), body.get("detail"))
+    if not user or entry is None:
+        raise HTTPException(status_code=422, detail="Not a driving event")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Store unavailable")
+    await driving.add(r, user, entry)
+    return {"status": "SUCCESS"}
+
+
+@app.get("/people/{user}/driving")
+async def get_driver_report(
+    user: str,
+    days: int = Query(7, ge=1, le=90),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """The driver report: drives, miles, top speed and the phone's driving
+    events (hard braking, rapid acceleration, over 80 mph, phone in use) over
+    the last ``days``. Same consent as the person's location."""
+    clean = await _require_may_view(viewer, user, is_admin)
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Store unavailable")
+    end = time.time()
+    start = end - days * 86400
+    trips = []
+    for tid in await r.zrangebyscore(f"geo:trips:user:{clean}", start, end):
+        raw = await r.get(f"geo:trip:{tid}")
+        if raw:
+            with contextlib.suppress(ValueError):
+                trip = json.loads(raw)
+                if not _is_phantom_trip(trip):
+                    trips.append(trip)
+    return {"user": clean, **driving.report(trips, await driving.between(r, clean, start, end), days)}
+
+
 #: How many stops a day's history names by street address (each can be a
 #: geocoder call); the rest are named by saved place only.
 DAY_STOPS_NAMED = 12
@@ -739,6 +781,7 @@ async def record_point(
     bearing: float | None = None,
     battery: int | None = None,
     timestamp: float | None = None,
+    activity: str | None = None,
 ):
     r = await get_redis()
     if not r:
@@ -758,6 +801,7 @@ async def record_point(
         "spd": speed if speed is not None else 0.0,
         "brg": bearing if bearing is not None else 0.0,
         "bat": battery,
+        **({"act": activity} if activity else {}),
     }
     encoded = json.dumps(point)
     for k in {f"geo:history:{entity_id.lower()}", f"geo:history:{clean_id}"}:
@@ -768,7 +812,7 @@ async def record_point(
             log.warning(f"[Geo] Failed to record point to Redis ({k}): {e}")
 
     try:
-        await process_trip_point(clean_id, lat, lon, speed, ts, accuracy)
+        await process_trip_point(clean_id, lat, lon, speed, ts, accuracy, activity)
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
@@ -1405,6 +1449,8 @@ class LocationUpdate(BaseModel):
     bearing: float | None = None
     timestamp: float | None = None
     daily_steps: int | None = None  # hardware pedometer cumulative count (TYPE_STEP_COUNTER)
+    #: The phone's activity recognition: driving, cycling, walking, still, unknown.
+    activity: str | None = None
 
 
 @app.post("/people/{entity_id:path}/see")
@@ -1439,6 +1485,7 @@ async def post_see(
         bearing=update.bearing,
         battery=update.battery,
         timestamp=update.timestamp,
+        activity=update.activity,
     )
 
     dev_id = entity_id.split(".")[-1]
@@ -1493,6 +1540,7 @@ async def post_record(
         bearing=update.bearing,
         battery=update.battery,
         timestamp=update.timestamp,
+        activity=update.activity,
     )
     return {"status": "ok", "entity_id": entity_id}
 
@@ -2880,8 +2928,14 @@ async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: floa
         return None
 
 
+#: A phone that says it is driving starts a trip from this speed, not 10 mph:
+#: its activity recognition (motion sensors) already ruled out a parked
+#: phone's drifting fixes, which is what the higher bar is for.
+DRIVING_TRIP_START_MPH = 5.0
+
+
 async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float,
-                             accuracy: float | None = None):
+                             accuracy: float | None = None, activity: str | None = None):
     """Detect and record trips when speeds over 10 MPH are reached.
 
     ``speed_mps`` None means the fix had no speed (a network fix); one is then
@@ -2894,7 +2948,9 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     clean_user = user_id.split(".")[-1].lower()
     ts = timestamp or time.time()
     spd_mps = speed_mps if (speed_mps is not None and speed_mps >= 0) else 0.0
-    if spd_mps == 0.0:
+    # A phone that knows it is standing still is not driving, whatever its
+    # network fixes drift by.
+    if spd_mps == 0.0 and activity != "still":
         derived = await _estimate_speed_from_history(r, clean_user, lat, lon, ts, accuracy)
         if derived is not None:
             spd_mps = derived
@@ -2930,8 +2986,9 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
         except Exception as e:
             log.warning(f"[Geo] Error finalizing stale active trip: {e}")
 
-    # 1. Start or advance a trip when speed >= 10 MPH
-    if spd_mph >= 10.0:
+    # 1. Start or advance a trip when speed >= 10 MPH (5 when the phone says
+    #    it is driving)
+    if spd_mph >= (DRIVING_TRIP_START_MPH if activity == "driving" else 10.0):
         if not active_raw:
             veh = await get_user_default_vehicle(clean_user)
             start_details = await _resolve_place_details_cached(lat, lon)

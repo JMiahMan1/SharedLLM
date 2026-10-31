@@ -1088,3 +1088,23 @@ def test_speed_from_positions_ignores_fixes_too_close_or_too_vague():
     # Real driving: 900 m in 30 s on GPS is about 65 mph.
     mph = geo.derived_speed(gps, at(900), -111.9, 30.0, 5) * 2.23694
     assert math.isclose(mph, 65.0, abs_tol=2.0)
+
+
+@pytest.mark.asyncio
+async def test_a_phone_that_says_it_is_still_does_not_start_a_trip(fake_redis):
+    """Its network fixes drift a couple of hundred metres; its motion sensors
+    know better."""
+    now = time.time()
+    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=20, timestamp=now, activity="still")
+    await geo.record_point(entity_id="jeremiah", lat=33.1700, lon=-111.5646, accuracy=20, timestamp=now + 30, activity="still")
+    assert await fake_redis.get("geo:active_trip:jeremiah") is None
+
+
+@pytest.mark.asyncio
+async def test_a_phone_that_says_it_is_driving_starts_a_trip_from_5_mph(fake_redis):
+    now = time.time()
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=3.0, timestamp=now)
+    assert await fake_redis.get("geo:active_trip:jeremiah") is None  # 6.7 mph, no word from the phone
+    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=3.0, timestamp=now + 5,
+                                 activity="driving")
+    assert await fake_redis.get("geo:active_trip:jeremiah") is not None
