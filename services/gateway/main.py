@@ -11330,12 +11330,18 @@ async def get_user_presence(user_id: str, request: Request):
 # PATCH /api/users/{user_id} route, which answers 405 for GET.
 @app.get("/api/users/location/all")
 async def get_all_user_locations(request: Request):
-    """Last known GPS position for every user who has location sharing on."""
-    if not await _user_id_from_request(request):
+    """Last known GPS position of everyone the caller may see.
+
+    Identity filters by the caller's sharing grants and family role; before,
+    every signed-in user got every member's position.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users/location/all",
+            params={"viewer": ident["user"], "is_admin": str(bool(ident.get("is_admin"))).lower()},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -11662,10 +11668,16 @@ async def get_geo_android_auto(request: Request, user_id: str | None = None):
 
 @app.get("/api/geo/zones")
 async def get_geo_zones(request: Request):
-    await _require_identity_from_request(request)
+    """The family's places: Home Assistant zones, the shared saved places, and
+    the caller's own private ones (someone else's private place stays theirs;
+    without the viewer geo returned every one of them)."""
+    ident = await _acting_identity(request)
+    if ident is None:
+        await _require_identity_from_request(request)  # a service: every place
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/zones",
+            params={"viewer": ident["user"]} if ident else None,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )

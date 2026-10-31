@@ -1057,3 +1057,9 @@ async def test_a_parked_phone_that_goes_quiet_still_ends_its_trip(fake_redis, mo
     assert await fake_redis.zcard("geo:trips:user:michele") == 1
     # a drive still moving is left alone
     assert await fake_redis.get("geo:active_trip:jeremiah") is not None
+
+
+def test_trip_share_takes_the_apps_field_name_and_the_old_one():
+    """The app sent rider_ids, geo wanted shared_with: every share was a 422."""
+    assert geo.TripSharePayload.model_validate({"shared_with": ["michele"]}).shared_with == ["michele"]
+    assert geo.TripSharePayload.model_validate({"rider_ids": ["michele"]}).shared_with == ["michele"]
