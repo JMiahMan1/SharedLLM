@@ -1063,3 +1063,28 @@ def test_trip_share_takes_the_apps_field_name_and_the_old_one():
     """The app sent rider_ids, geo wanted shared_with: every share was a 422."""
     assert geo.TripSharePayload.model_validate({"shared_with": ["michele"]}).shared_with == ["michele"]
     assert geo.TripSharePayload.model_validate({"rider_ids": ["michele"]}).shared_with == ["michele"]
+
+
+def test_speed_from_positions_ignores_fixes_too_close_or_too_vague():
+    """Live readings, 2026-10-31: a parked phone's GPS and network fixes read
+    as 68 mph (6 s apart), 160-550 mph (1-3 s apart) and 12 mph (network
+    fixes drifting 200 m over 78 s)."""
+    import math
+
+    def at(m_north):
+        return 33.4 + m_north / 111_320.0
+
+    gps = {"t": 0.0, "lat": 33.4, "lon": -111.9, "acc": 10}
+    # 180 m in 6 s with a 72 m network fix: too close together to tell.
+    assert geo.derived_speed(gps, at(180), -111.9, 6.0, 72) is None
+    # The same 180 m over 12 s is mostly the fixes' uncertainty: far below
+    # the 10 mph a trip starts at.
+    assert geo.derived_speed(gps, at(180), -111.9, 12.0, 72) * 2.23694 < 5.0
+    # 2 s apart: not worked out at all.
+    assert geo.derived_speed(gps, at(200), -111.9, 2.0, 20) is None
+    # A parked phone's network fixes 190 m apart over 78 s, each ~80 m off.
+    net = {"t": 0.0, "lat": 33.4, "lon": -111.9, "acc": 80}
+    assert geo.derived_speed(net, at(190), -111.9, 78.0, 80) * 2.23694 < 1.0
+    # Real driving: 900 m in 30 s on GPS is about 65 mph.
+    mph = geo.derived_speed(gps, at(900), -111.9, 30.0, 5) * 2.23694
+    assert math.isclose(mph, 65.0, abs_tol=2.0)

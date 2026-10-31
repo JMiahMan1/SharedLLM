@@ -768,7 +768,7 @@ async def record_point(
             log.warning(f"[Geo] Failed to record point to Redis ({k}): {e}")
 
     try:
-        await process_trip_point(clean_id, lat, lon, speed, ts)
+        await process_trip_point(clean_id, lat, lon, speed, ts, accuracy)
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
@@ -2837,8 +2837,36 @@ async def get_map_regions(
     return {"needed": await map_regions.needed(await get_redis())}
 
 
-async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: float, ts: float) -> float | None:
-    """Derive m/s from the previous breadcrumb when the GPS fix omits speed.
+#: The shortest gap between two fixes a speed is worked out over: closer
+#: together, a few metres of GPS wobble reads as highway speed.
+MIN_DERIVED_SPEED_GAP_S = 10.0
+
+
+def derived_speed(prev: dict, lat: float, lon: float, ts: float, accuracy: float | None) -> float | None:
+    """m/s between two fixes, counting only the movement beyond both fixes'
+    uncertainty; None when it cannot be told.
+
+    The phone mixes GPS fixes (a few metres) with network fixes (50-100 m off),
+    and a network fix carries no speed. Dividing the raw distance by the gap
+    read 68 mph for two fixes 6 s apart while parked, 160-550 mph a second or
+    two apart, and 12 mph for a parked phone's network fixes drifting 200 m:
+    each could start a phantom trip or set a top speed nobody drove."""
+    dt = ts - float(prev.get("t", 0))
+    # Queued breadcrumbs are flushed with identical timestamps; dividing a
+    # position jump by ~0 s produced 400+ mph readings (and bogus trips).
+    if dt < MIN_DERIVED_SPEED_GAP_S or dt > 120:
+        return None
+    dist_m = _haversine_distance(float(prev.get("lat", lat)), float(prev.get("lon", lon)), lat, lon)
+    # A stated accuracy is one standard deviation: a network fix is often
+    # further off than it says, so twice it before anything counts as moving.
+    # That can under-read a drive on network fixes alone; it never invents one.
+    slack = 2.0 * (float(prev.get("acc") or 0) + float(accuracy or 0))
+    return max(0.0, dist_m - slack) / dt
+
+
+async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: float, ts: float,
+                                       accuracy: float | None = None) -> float | None:
+    """Derive m/s from the previous breadcrumb when the fix carries no speed.
 
     record_point() writes the current fix to history *before* calling
     process_trip_point(), so index 0 of a descending zrange is this fix and
@@ -2847,20 +2875,18 @@ async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: floa
         pts = await r.zrevrange(f"geo:history:{clean_user}", 0, 1)
         if len(pts) < 2:
             return None
-        prev = json.loads(pts[1])
-        dt = ts - float(prev.get("t", 0))
-        # Queued breadcrumbs are flushed with identical timestamps; dividing a
-        # position jump by ~0 s produced 400+ mph readings (and bogus trips).
-        if dt < 1.0 or dt > 120:
-            return None
-        dist_m = _haversine_distance(prev.get("lat", lat), prev.get("lon", lon), lat, lon)
-        return dist_m / dt
+        return derived_speed(json.loads(pts[1]), lat, lon, ts, accuracy)
     except Exception:
         return None
 
 
-async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float):
-    """Detect and record trips when speeds over 10 MPH are reached."""
+async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float,
+                             accuracy: float | None = None):
+    """Detect and record trips when speeds over 10 MPH are reached.
+
+    ``speed_mps`` None means the fix had no speed (a network fix); one is then
+    worked out from the previous fix where that can be trusted. A reported 0
+    from an older app means the same thing."""
     r = await get_redis()
     if not r:
         return
@@ -2869,7 +2895,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     ts = timestamp or time.time()
     spd_mps = speed_mps if (speed_mps is not None and speed_mps >= 0) else 0.0
     if spd_mps == 0.0:
-        derived = await _estimate_speed_from_history(r, clean_user, lat, lon, ts)
+        derived = await _estimate_speed_from_history(r, clean_user, lat, lon, ts, accuracy)
         if derived is not None:
             spd_mps = derived
     spd_mph = spd_mps * 2.23694
