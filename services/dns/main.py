@@ -42,6 +42,7 @@ DNS_HEALTH_PORTS = [int(p) for p in os.environ.get("DNS_HEALTH_PORTS", "11434,80
 DNS_HEALTH_TIMEOUT = float(os.environ.get("DNS_HEALTH_TIMEOUT", "1.0"))
 DNS_HEALTH_TTL = float(os.environ.get("DNS_HEALTH_TTL", "15.0"))
 DNS_REFRESH_INTERVAL = float(os.environ.get("DNS_REFRESH_INTERVAL", "30.0"))
+DNS_FIRST_LOAD_RETRY = 2.0
 
 # How long to wait for an upstream resolver before giving up.
 #
@@ -872,6 +873,7 @@ async def main():
             logger.warning("IDENTITY_SVC_URL or INTERNAL_SECRET not set: no static DNS mappings")
             return
 
+        loaded = False
         while True:
             try:
                 async with get_client() as http_session:
@@ -889,6 +891,7 @@ async def main():
                             mappings = {}
                         if isinstance(mappings, dict):
                             resolver.static_mappings = mappings
+                            loaded = True
                         logger.info(f"Updated {len(resolver.static_mappings)} DNS mappings from Identity service")
 
                     # Failover config (health-aware DNS)
@@ -908,7 +911,10 @@ async def main():
             except Exception as e:
                 logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
 
-            await asyncio.sleep(DNS_REFRESH_INTERVAL)  # Refresh interval (env-configurable)
+            # Until the first load, retry quickly: DNS and Identity restart
+            # together on a deploy, and the mapped hosts (the alpaca box) do
+            # not resolve until it lands (seen: 30 s without them).
+            await asyncio.sleep(DNS_REFRESH_INTERVAL if loaded else DNS_FIRST_LOAD_RETRY)
 
     # Start refresh task if Identity service URL is configured
     if os.environ.get('IDENTITY_SVC_URL'):
