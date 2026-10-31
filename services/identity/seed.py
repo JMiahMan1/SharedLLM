@@ -301,22 +301,22 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 setting.description = ds.get("description")
             session.add(setting)
 
-    # Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS)
-    env_ollama_url = os.getenv("OLLAMA_URL")
-    if not env_ollama_url:
+    # Seed LLM_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS)
+    env_llm_url = os.getenv("LLM_URL")
+    if not env_llm_url:
         env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         if os.path.exists(env_path):
             env_vals = dotenv_values(env_path)
-            env_ollama_url = env_vals.get("OLLAMA_URL", "")
-    if env_ollama_url:
+            env_llm_url = env_vals.get("LLM_URL", "")
+    if env_llm_url:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
         if not existing:
-            session.add(GlobalSetting(key="llm_local_url", value=env_ollama_url, description="Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API). Seeded from .env OLLAMA_URL on first startup."))
-            log.info(f"[seed] Seeded OLLAMA_URL from .env: {env_ollama_url}")
+            session.add(GlobalSetting(key="llm_local_url", value=env_llm_url, description="Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API). Seeded from .env LLM_URL on first startup."))
+            log.info(f"[seed] Seeded LLM_URL from .env: {env_llm_url}")
         elif not existing.value:
-            existing.value = env_ollama_url
+            existing.value = env_llm_url
             session.add(existing)
-            log.info(f"[seed] Backfilled empty llm_local_url from .env: {env_ollama_url}")
+            log.info(f"[seed] Backfilled empty llm_local_url from .env: {env_llm_url}")
 
     # Seed additional .env vars into GlobalSettings
     env_to_global = {

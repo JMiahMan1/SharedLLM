@@ -7,7 +7,7 @@ import time
 
 import httpx
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+LLM_URL = os.getenv("LLM_URL", "http://localhost:11434")
 
 PROMPT = """
 Write a Python class 'MultiTenantLock' that uses Redis to implement a distributed lock.
@@ -23,7 +23,7 @@ async def unload_model(model):
         print(f"Unloading model: {model}...")
         with contextlib.suppress(Exception):
             # Sending keep_alive: 0 to force immediate eviction
-            await client.post(f"{OLLAMA_URL}/api/generate", json={"model": model, "keep_alive": 0})
+            await client.post(f"{LLM_URL}/api/generate", json={"model": model, "keep_alive": 0})
 
 def validate_code(code: str):
     try:
@@ -71,7 +71,7 @@ async def run_validation_benchmark():
             start_t = time.time()
             try:
                 resp = await client.post(
-                    f"{OLLAMA_URL}/api/generate",
+                    f"{LLM_URL}/api/generate",
                     json={"model": model, "prompt": PROMPT, "stream": False},
                 )
                 elapsed = time.time() - start_t

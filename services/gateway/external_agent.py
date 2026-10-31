@@ -33,7 +33,7 @@ from services.gateway.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     INTERNAL_SECRET,
-    OLLAMA_URL,
+    LLM_URL,
     RAG_SVC,
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
@@ -229,7 +229,7 @@ async def run_external_agent(
     Returns {"content", "thinking", "tool_trace", "iterations", "model"}.
     ``tool_trace`` entries: {iteration, name, arguments, status, summary}.
     """
-    base = (ollama_url or OLLAMA_URL or "").rstrip("/")
+    base = (ollama_url or LLM_URL or "").rstrip("/")
     if not base:
         return {
             "content": "[ExternalAgent] Ollama URL not configured (llm_local_url).",

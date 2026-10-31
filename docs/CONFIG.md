@@ -39,7 +39,7 @@ Names: `IDENTITY`, `EXECUTION`, `RAG`, `STORAGE`, `LOGGING`,
 
 | Setting key | Variable | What |
 |---|---|---|
-| `llm_local_url` | `OLLAMA_URL` | Local inference server |
+| `llm_local_url` | `LLM_URL` | Local inference server |
 | `{mode}_execution_svc_url`, `{mode}_rag_svc_url`, `{mode}_storage_svc_url`, `{mode}_logging_svc_url`, `{mode}_workspace_runtime_svc_url`, `{mode}_bible_svc_url`, `{mode}_searxng_url` | `*_SVC_URL`, `SEARXNG_URL` | Network-scoped URLs |
 | `geo_svc_url`, `control_plane_url` | `GEO_SVC_URL`, `CONTROL_PLANE_URL` | |
 | `ha_url`, `ha_token` | `HA_URL`, `HA_TOKEN` | Home Assistant |

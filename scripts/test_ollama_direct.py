@@ -15,7 +15,7 @@ def get_config_url():
     if os.path.exists(".env"):
         with open(".env") as f:
             content = f.read()
-            match = re.search(r"OLLAMA_URL=(.+)", content)
+            match = re.search(r"LLM_URL=(.+)", content)
             if match:
                 ollama_url = match.group(1).strip()
 

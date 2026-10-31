@@ -161,7 +161,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=host
       - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
       # Telemetry keeps a fixed bridge address (it publishes no host port);
@@ -233,7 +233,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -320,7 +320,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -369,7 +369,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -413,7 +413,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -461,7 +461,7 @@ services:
       - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL}
       - GATEWAY_INTERNAL_URL=${BRIDGE_GATEWAY_SVC_URL}
       - AUTOMATION_SVC_URL=${BRIDGE_AUTOMATION_SVC_URL}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=America/Phoenix
     volumes:
@@ -502,7 +502,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -548,7 +548,7 @@ services:
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -770,7 +770,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
@@ -867,7 +867,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
-      - OLLAMA_URL=${OLLAMA_URL}
+      - LLM_URL=${LLM_URL}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
