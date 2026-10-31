@@ -10,6 +10,7 @@ import LocationPanel from '../components/location/LocationPanel';
 import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import AppCleanupPanel from '../components/settings/AppCleanupPanel';
+import MapStylePanel from '../components/settings/MapStylePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PushAppsPanel from '../components/settings/PushAppsPanel';
@@ -99,6 +100,7 @@ const Settings = () => {
       <section className="space-y-4" aria-labelledby="settings-appearance">
         <h2 id="settings-appearance" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Appearance</h2>
         <SiteThemePanel />
+        <MapStylePanel />
         <MobileMenuPanel />
       </section>
 
