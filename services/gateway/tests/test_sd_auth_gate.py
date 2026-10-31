@@ -12,6 +12,8 @@ checked against Identity's strict endpoint, and uncertainty denies.
 (header handling, ordering, fail-closed) rather than the HTTP call itself.
 The strict endpoint is tested in services/identity.
 """
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -95,8 +97,11 @@ def test_identity_being_unreachable_fails_closed(monkeypatch):
             raise RuntimeError("identity unreachable")
 
     monkeypatch.setattr(main, "get_http_client", lambda: _Boom())
+    monkeypatch.setattr(main, "STRICT_IDENTITY_RETRY_S", 0)
     resp = _client(**{"Authorization": "Bearer some-key"}).get(GATED_ROUTE)
-    assert resp.status_code == 401
+    # Refused, but as "try again" (503): a 401 signs the app out, and Identity
+    # being down for a restart says nothing about the key.
+    assert resp.status_code == 503
 
 
 def test_identity_answering_500_fails_closed(monkeypatch):
@@ -108,8 +113,9 @@ def test_identity_answering_500_fails_closed(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(main, "get_http_client", lambda: _Client())
+    monkeypatch.setattr(main, "STRICT_IDENTITY_RETRY_S", 0)
     resp = _client(**{"Authorization": "Bearer some-key"}).get(GATED_ROUTE)
-    assert resp.status_code == 401
+    assert resp.status_code == 503
 
 
 @pytest.mark.parametrize(
@@ -122,3 +128,30 @@ def test_identity_answering_500_fails_closed(monkeypatch):
 def test_every_gated_get_route_rejects_a_junk_key(rejected_key, route):
     resp = _client(**{"Authorization": "Bearer totally-bogus-key"}).get(route)
     assert resp.status_code == 401
+
+
+def test_a_restarting_identity_is_waited_for(monkeypatch):
+    """Identity down for a moment (a deploy restarts it): the check tries again
+    and the request goes through once it answers, instead of failing."""
+    calls = []
+
+    class _Ok:
+        status = 200
+
+        async def json(self):
+            return {"user": "michele", "is_admin": False}
+
+    class _Client:
+        def get(self, *a, **k):
+            calls.append(1)
+            if len(calls) < 3:
+                raise RuntimeError("identity restarting")
+
+            async def answer():
+                return _Ok()
+            return answer()
+
+    monkeypatch.setattr(main, "get_http_client", lambda: _Client())
+    monkeypatch.setattr(main, "STRICT_IDENTITY_RETRY_S", 0)
+    ident = asyncio.run(main._resolve_strict_identity("some-key"))
+    assert ident and ident["user"] == "michele" and len(calls) == 3

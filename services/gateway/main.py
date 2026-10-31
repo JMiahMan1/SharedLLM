@@ -2395,6 +2395,12 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
 
+#: How often a key check is tried while Identity does not answer, and the
+#: pause between tries: together a few seconds, about one Identity restart.
+STRICT_IDENTITY_ATTEMPTS = 4
+STRICT_IDENTITY_RETRY_S = 1.5
+
+
 async def _resolve_strict_identity(api_key: str) -> dict | None:
     """Resolve an API key to its real owner, with NO default-user fallback.
 
@@ -2410,23 +2416,36 @@ async def _resolve_strict_identity(api_key: str) -> dict | None:
     not return a credential payload. Keeping it means a future resolver change
     cannot silently turn an authentication gate back into a fallback.
 
-    Returns ``None`` when the key is not a real user's key, or when Identity
-    cannot be reached. Callers must deny in that case rather than assume an
-    identity -- defaulting to the admin is exactly the bug this replaces.
+    Returns ``None`` when the key is not a real user's key. When Identity
+    cannot be reached (after a few tries) it raises 503: the request is still
+    denied, never waved through as some default identity, but the client is
+    told to retry rather than that its key is bad.
     """
     key = (api_key or "").strip()
     if not key:
         return None
-    try:
-        resp = await get_http_client().get(
-            f"{IDENTITY_SVC}/api/internal/validate-api-key",
-            # A header, not a query parameter: URLs land in access logs.
-            headers={"X-Internal-Secret": INTERNAL_SECRET, "X-Api-Key": key},
-            timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-    except Exception as exc:
-        log.warning(f"[identity] strict key lookup failed (identity unreachable): {exc}")
-        return None
+    resp = None
+    for attempt in range(STRICT_IDENTITY_ATTEMPTS):
+        try:
+            resp = await get_http_client().get(
+                f"{IDENTITY_SVC}/api/internal/validate-api-key",
+                # A header, not a query parameter: URLs land in access logs.
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "X-Api-Key": key},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+        except Exception as exc:
+            log.warning(f"[identity] strict key lookup failed (identity unreachable): {exc}")
+            resp = None
+        if resp is not None and resp.status < 500:
+            break
+        if attempt + 1 < STRICT_IDENTITY_ATTEMPTS:
+            await asyncio.sleep(STRICT_IDENTITY_RETRY_S)
+    if resp is None or resp.status >= 500:
+        # Identity is restarting or down: the key cannot be checked either
+        # way. Still refused, but as "try again", not "signed out": a 401
+        # makes the app delete its key and go to the login screen, and a
+        # deploy that restarted Identity was doing that to the family.
+        raise HTTPException(status_code=503, detail="Sign-in check unavailable; try again shortly")
     if resp.status != 200:
         return None
     try:
@@ -2828,11 +2847,18 @@ async def get_entities(request: Request):
 
 
 # --- Middleware & Security ---
-def _response_log_level(status_code: object) -> str:
-    """ERROR for a 5xx, WARNING for a 4xx, INFO otherwise."""
+def _response_log_level(status_code: object, path: str = "") -> str:
+    """ERROR for a 5xx, WARNING for a 4xx, INFO otherwise.
+
+    Except a 404 outside ``/api/`` and ``/execute/``: nothing in the app asks
+    for those (scanners probing ``/``, ``/.env``, ``/wp-login.php`` do), so
+    the refusal is right and is not a problem for the dashboard.
+    """
     code = status_code if isinstance(status_code, int) else 0
     if code >= 500:
         return "ERROR"
+    if code == 404 and not path.startswith(("/api/", "/execute/")):
+        return "INFO"
     if code >= 400:
         return "WARNING"
     return "INFO"
@@ -2925,6 +2951,16 @@ async def secure_logging_middleware(request: Request, call_next):
                 status_code=400,
                 content={"status": "ERROR", "message": "The request body must be JSON"},
             )
+        if isinstance(e, (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError)):
+            # A service behind the gateway is restarting (every deploy does
+            # this): the caller should retry, and it is not a gateway fault.
+            log.warning("Upstream unreachable: %s %s: %s", request.method, request.url.path, e)
+            _run_in_background(emit_log("WARNING", f"RESPONSE {request.method} {request.url.path} -> 503 (service restarting)", {}))
+            return JSONResponse(
+                status_code=503,
+                content={"status": "ERROR", "message": "A service is restarting; try again shortly"},
+                headers={"Retry-After": "5"},
+            )
         error_id = uuid.uuid4().hex[:12]
         log.error(
             "[error_id=%s] Middleware error: %s: %s",
@@ -2949,7 +2985,7 @@ async def secure_logging_middleware(request: Request, call_next):
     # Failures carry their level so the dashboard's "Recent problems" panel
     # (``/api/admin/logs?level=warning,error``) can find them among the
     # request lines; everything used to be INFO.
-    level = _response_log_level(status_code)
+    level = _response_log_level(status_code, request.url.path)
     if level != "INFO" or not _is_routine_poll(request.url.path):
         _run_in_background(emit_log(level, f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
@@ -5704,6 +5740,14 @@ async def family_member_devices(request: Request, user: str):
     the family member page's Devices section. Identity refuses anyone but
     the father and an admin with 403, the mother included."""
     status, body = await _identity_as_caller(request, "GET", f"/api/family/devices/{user}")
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.delete("/api/family/member/{user}/devices/tamper")
+async def clear_family_member_tamper(request: Request, user: str):
+    """Clear a child's tamper reports from the Devices section (the father and
+    an admin; Identity checks)."""
+    status, body = await _identity_as_caller(request, "DELETE", f"/api/family/devices/{user}/tamper")
     return JSONResponse(status_code=status, content=body)
 
 
@@ -9530,8 +9574,11 @@ async def check_service_updates(request: Request):
         if updates_available > 0:
             services = [s.get("service", "unknown").replace("sharedllm_", "") for s in data.get("services", []) if s.get("has_update")]
             services_str = ", ".join(services)
+            # A notice, not a problem: CI builds a new image on every push and
+            # a deploy restarts only the services it names, so this lists
+            # several almost always (it was 60 of the dashboard's problems).
             await emit_log(
-                level="WARNING",
+                level="INFO",
                 message=f"Docker image updates available: {services_str}",
                 context={"updates": services}
             )
