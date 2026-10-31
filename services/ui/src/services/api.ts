@@ -1787,7 +1787,7 @@ export const api = {
   },
 
   async shareTrip(tripId: string, riderIds: string[]): Promise<Trip> {
-    const resp = await apiClient.patch(`/api/geo/trips/${encodeURIComponent(tripId)}/share`, { rider_ids: riderIds });
+    const resp = await apiClient.patch(`/api/geo/trips/${encodeURIComponent(tripId)}/share`, { shared_with: riderIds });
     return resp.data;
   },
 

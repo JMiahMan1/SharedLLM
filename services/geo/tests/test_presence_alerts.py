@@ -281,3 +281,20 @@ async def test_child_geofence_arrival_and_departure_alerts(world, monkeypatch):
     assert by_user["jeremiah"]["title"] == "Noah left Work"
     assert "Home in about 22 min by road" in by_user["jeremiah"]["body"]
 
+
+
+@pytest.mark.asyncio
+async def test_a_parent_who_does_not_share_location_still_hears(world, monkeypatch):
+    """Recipients were only people with a breadcrumb history; a parent whose
+    phone does not run tracking never heard about anyone."""
+
+    async def family(**_kw):
+        return ["dana", "jeremiah", "kate", "michele"]
+
+    monkeypatch.setattr(geo.notify, "family", family)
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.25, -111.70, t)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    assert ("dana", "Michele arrived at Home", "") in world
+    assert not any(user == "kate" for user, *_ in world)  # still not in the circle

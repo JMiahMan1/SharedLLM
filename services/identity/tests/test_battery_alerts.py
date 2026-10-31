@@ -1,16 +1,17 @@
 """Low phone battery: the family hears once per discharge, again only after
 the phone has been charged, and at most once a day per phone owner."""
 import asyncio
+import json
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, StaticPool, create_engine
+from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 from services.common import notify
 from services.identity import battery_alerts
 from services.identity import main as identity_main
-from services.identity.models import User
+from services.identity.models import User, UserActivitySharing
 
 HEADERS = {"X-Internal-Secret": "test-secret"}
 
@@ -25,6 +26,8 @@ def family(monkeypatch):
         session.add(User(username="leo", display_name="Leo"))
         session.add(User(username="michele", display_name="Michele"))
         session.add(User(username="jeremiah", display_name="Jeremiah"))
+        # Leo shares with the family circle (everyone in the live family does).
+        session.add(UserActivitySharing(username="leo", data=json.dumps({"enabled": True, "audience": "circle"})))
         session.commit()
     sent = []
 
@@ -144,3 +147,16 @@ def test_a_phone_low_but_charging_is_not_news(family):
 ])
 def test_step(previous, reading, charging, expected):
     assert battery_alerts.step(previous, reading, charging) == expected
+
+
+def test_only_people_who_may_see_the_phone_hear_about_it(family, monkeypatch):
+    """Someone who shares their location with no one: the family is not told
+    their phone is dying, any more than it is shown where it is."""
+    report, sent = family
+    with Session(identity_main.engine) as session:
+        row = session.exec(select(UserActivitySharing).where(UserActivitySharing.username == "leo")).one()
+        row.data = json.dumps({"enabled": False, "audience": "circle"})
+        session.add(row)
+        session.commit()
+    report(14)
+    assert sent == []

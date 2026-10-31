@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from services.common import notify
 from services.common.http import get_client, get_client_insecure
@@ -931,7 +931,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     # chosen for it; everyone else gets the ordinary arrival or departure.
     place = await _place_alert(r, zone["entity_id"])
     chosen = set(place.get("notify") or []) if place.get("important") else set()
-    for viewer in await _tracked_users(r):
+    for viewer in await _alert_recipients(r):
         if viewer == person or viewer in notified_parents or not await _viewer_may_see(viewer, person):
             continue
         if place.get("important") and (not chosen or viewer in chosen):
@@ -1857,6 +1857,16 @@ async def compute_eta(clean: str, to: str = "home") -> dict:
     }
 
 
+async def _alert_recipients(r) -> list[str]:
+    """Who may hear about someone's movements (each still checked against
+    ``_viewer_may_see``): the whole family, so a parent whose own phone does
+    not share location still gets their child's arrivals; plus anyone with a
+    breadcrumb history the family list missed. This used to be the tracked
+    users alone, and even a person named on a place's notify list was
+    skipped if they did not run tracking themselves."""
+    return sorted(set(await notify.family()) | set(await _tracked_users(r)))
+
+
 async def _tracked_users(r) -> list[str]:
     """Usernames with a breadcrumb history (entity-id copies left out)."""
     users = set()
@@ -2061,8 +2071,13 @@ class TripUpdatePayload(BaseModel):
 
 
 class TripSharePayload(BaseModel):
-    """Manually assign riders who shared a trip (family members who rode along)."""
-    shared_with: list[str]  # list of user names or person entity ids
+    """Manually assign riders who shared a trip (family members who rode along).
+
+    The app sent ``rider_ids`` while this expected ``shared_with``, so every
+    save from the Share dialog failed with a 422; both names are taken, so an
+    app bundle from before the fix works too.
+    """
+    shared_with: list[str] = Field(validation_alias=AliasChoices("shared_with", "rider_ids"))  # user names or person entity ids
 
 
 async def get_user_default_vehicle(user_id: str) -> dict:
@@ -2724,7 +2739,7 @@ async def _sweep_long_stops(r, now: float | None = None) -> int:
         title = f"{person.title()} has been stopped for {hours:.0f} h"
         body = f"At {place}, which is not a saved place."
         url = f"/wander?person={person}"
-        for viewer in await _tracked_users(r):
+        for viewer in await _alert_recipients(r):
             if viewer == person or not await _viewer_may_see(viewer, person):
                 continue
             await _send_notice(notify.notice(

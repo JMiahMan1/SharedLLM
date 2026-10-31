@@ -6788,7 +6788,16 @@ async def update_user_location(
             previous, location.battery, location.charging)
         if announce:
             owner = session.exec(select(User).where(User.username == person)).first()
-            family = [u.username for u in session.exec(select(User)).all() if not u.is_system_default]
+            # Only people who may see this person on the map hear that their
+            # phone is dying (the same rule as the location feed).
+            grants = {
+                row.username.lower(): _activity_sharing_data(row)
+                for row in session.exec(select(UserActivitySharing)).all()
+            }
+            family = [
+                u.username for u in session.exec(select(User)).all()
+                if not u.is_system_default and _location_visible_to(session, u, person.lower(), grants)
+            ]
             low_battery = (person, (owner.display_name if owner else "") or person.title(), family)
         if existing:
             existing.value = json.dumps(location_data)
@@ -6834,15 +6843,60 @@ def get_user_location(
     raise HTTPException(status_code=404, detail="Location not found")
 
 
+def _location_visible_to(session: Session, viewer: User | None, target: str, grants: dict[str, dict]) -> bool:
+    """Whether ``viewer`` may see ``target``'s last position on the family map.
+
+    Their own; anyone who shares with them (the activity-sharing grant geo's
+    feed already honours: the whole circle, or a list naming them); and what
+    the raw-data rule opens (parents see their children, the father and the
+    mother see each other). A location row that belongs to no account
+    (``default``, a legacy fallback key) proves no one's consent and is left
+    out.
+    """
+    if viewer is None:
+        return False
+    if target == viewer.username:
+        return True
+    subject = session.exec(select(User).where(User.username == target)).first()
+    if subject is None:
+        return False
+    grant = grants.get(target)
+    if grant and grant["enabled"] and (
+        grant["audience"] == "circle" or viewer.username in {u.lower() for u in grant["user_ids"]}
+    ):
+        return True
+    return may_view_raw_data(viewer, subject)
+
+
 @app.get("/api/users/location/all")
-def get_all_user_locations(x_internal_secret: str = Header(...)):
-    """Get GPS locations for all users."""
+def get_all_user_locations(
+    x_internal_secret: str = Header(...),
+    viewer: str | None = Query(None),
+    is_admin: bool = Query(False),
+):
+    """Last GPS position per user.
+
+    Services (no ``viewer``) get everyone. The app passes the signed-in user,
+    and only the people they may see come back: this feed used to hand every
+    member's position to everyone, bypassing the sharing consent that geo's
+    people feed applies.
+    """
     _require_internal_secret(x_internal_secret)
     locations = {}
     with Session(engine) as session:
         settings = session.exec(select(GlobalSetting).where(text("globalsetting.key LIKE 'user_location:%'"))).all()
+        viewer_user = None
+        grants: dict[str, dict] = {}
+        if viewer and not is_admin:
+            viewer_user = session.exec(select(User).where(User.username == viewer.strip().lower())).first()
+            grants = {
+                row.username.lower(): _activity_sharing_data(row)
+                for row in session.exec(select(UserActivitySharing)).all()
+            }
         for setting in settings:
             user_id = setting.key.replace("user_location:", "")
+            if viewer and not is_admin and not _location_visible_to(session, viewer_user, user_id.lower(), grants):
+                continue
             locations[user_id] = json.loads(setting.value)
     return locations
 
