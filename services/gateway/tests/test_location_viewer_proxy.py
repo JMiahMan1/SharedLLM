@@ -68,3 +68,40 @@ def test_a_days_history_refuses_a_path_in_the_name(monkeypatch):
     sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
     assert TestClient(app).get("/api/geo/people/leo/day", params={"day": "../../x"}).status_code == 422
     assert sent == []
+
+
+class _Post:
+    def __init__(self, status):
+        self.status = status
+
+    async def json(self):
+        return {}
+
+
+def _posting(monkeypatch, status):
+    async def acting(request):
+        return {"user": "leo", "is_admin": False}
+    monkeypatch.setattr(gateway_main, "_acting_identity", acting)
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **kw):
+            return _Post(status)
+
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: _Client())
+
+
+def test_a_fix_identity_refuses_is_a_4xx_so_the_phone_drops_it(monkeypatch):
+    _posting(monkeypatch, 422)
+    assert TestClient(app).post("/api/users/leo/location", json={"latitude": "x"}).status_code == 422
+    assert TestClient(app).post("/api/users/location", json={"latitude": "x"}).status_code == 422
+
+
+def test_identity_down_is_still_a_5xx_so_the_phone_keeps_the_fix(monkeypatch):
+    _posting(monkeypatch, 503)
+    assert TestClient(app).post("/api/users/leo/location", json={"latitude": 1, "longitude": 2}).status_code == 502

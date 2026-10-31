@@ -6809,6 +6809,14 @@ async def update_user_location(
             previous = json.loads(existing.value) if existing else None
         except (TypeError, ValueError):
             previous = None
+        # A fix older than the one held (the phone sending what it kept while
+        # it had no signal) is history, not where they are now: geo files it
+        # as a breadcrumb, and the current position, the battery alert and
+        # Home Assistant stay with the newer fix.
+        held = float((previous or {}).get("timestamp") or 0)
+        if location.timestamp and held and location.timestamp < held:
+            background.add_task(_forward_location_to_geo, user_id, location)
+            return {"status": "SUCCESS", "message": "Older fix added to the history"}
         announce, location_data[battery_alerts.SENT_FIELD] = battery_alerts.step(
             previous, location.battery, location.charging)
         if announce:

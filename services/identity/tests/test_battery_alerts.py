@@ -160,3 +160,25 @@ def test_only_people_who_may_see_the_phone_hear_about_it(family, monkeypatch):
         session.commit()
     report(14)
     assert sent == []
+
+
+def test_a_late_fix_from_the_phones_backlog_does_not_move_the_current_position(family, monkeypatch):
+    """The phone sends fixes it kept while offline oldest first; one older than
+    the fix held is history (geo), not where the person is now."""
+    report, sent = family
+    forwarded = []
+
+    async def to_geo(user_id, location):
+        forwarded.append(location.timestamp)
+
+    monkeypatch.setattr(identity_main, "_forward_location_to_geo", to_geo)
+    client = TestClient(identity_main.app)
+    new = {"latitude": 33.5, "longitude": -111.9, "battery": 80, "timestamp": 2_000_000.0}
+    old = {"latitude": 33.1, "longitude": -111.5, "battery": 9, "timestamp": 1_000_000.0}
+    assert client.post("/api/users/leo/location", headers=HEADERS, json=new).status_code == 200
+    resp = client.post("/api/users/leo/location", headers=HEADERS, json=old)
+    assert resp.json()["message"] == "Older fix added to the history"
+    held = client.get("/api/users/leo/location", headers=HEADERS).json()
+    assert (held["latitude"], held["battery"]) == (33.5, 80)
+    assert forwarded == [2_000_000.0, 1_000_000.0]  # both still reach the history
+    assert sent == []  # the old 9% reading is not a low-battery alert
