@@ -717,6 +717,19 @@ async def record_point(
 
 ZONE_EXIT_MARGIN_M = 50.0
 PRESENCE_REPEAT_S = 600
+#: A zone drawn tighter than a phone can resolve is not a usable geofence.
+#: ``zone.home`` in this household is only 40 m across while an indoor fix can
+#: sit 200 m out, which flapped "left Home" / "arrived at Home" all day.
+PRESENCE_MIN_RADIUS_M = 150.0
+#: Only a zone drawn tighter than this is widened to PRESENCE_MIN_RADIUS_M. A
+#: zone someone deliberately drew roomy (100 m or more) is left alone, so this
+#: never turns a real boundary into a vague one.
+TIGHT_ZONE_RADIUS_M = 75.0
+#: Zones drawn tighter than this are widened to PRESENCE_MIN_RADIUS_M for the
+#: presence decision. A zone someone drew deliberately roomy keeps its size; a
+#: 40 m one is smaller than a fix's own error, so every stray fix would read as
+#: a departure.
+TIGHT_ZONE_RADIUS_M = 75.0
 #: The old per-person switch (hash viewer -> "off"), now the family_presence
 #: preference in identity; ``_migrate_presence_switches`` moves it over.
 LEGACY_PRESENCE_ALERTS_KEY = "geo:presence_alerts"
@@ -776,13 +789,26 @@ async def _presence_transition(r, user: str, lat: float, lon: float, ts: float, 
         return []  # a late fix
     current = state.get("zone") if state else None
     margin = max(ZONE_EXIT_MARGIN_M, float(acc or 0.0))
-    still = _zone_at(zones, lat, lon, margin, only=current) if current else None
-    inside = still or _zone_at(zones, lat, lon)
+    # A zone drawn tighter than a phone can resolve is not a usable geofence:
+    # ``zone.home`` here is 40 m across while an indoor fix can sit 200 m out,
+    # which flapped "left Home" / "arrived at Home" all day. Floor the radius
+    # for the presence decision only; the drawn circle stays as it is.
+    usable = [
+        {
+            **z,
+            "radius": PRESENCE_MIN_RADIUS_M
+            if float(z["radius"]) < TIGHT_ZONE_RADIUS_M
+            else float(z["radius"]),
+        }
+        for z in zones
+    ]
+    still = _zone_at(usable, lat, lon, margin, only=current) if current else None
+    inside = still or _zone_at(usable, lat, lon)
     new = inside["entity_id"] if inside else None
     await r.set(key, json.dumps({"zone": new, "t": ts}))
     if state is None or new == current:
         return []  # first sighting, or no change
-    by_id = {z["entity_id"]: z for z in zones}
+    by_id = {z["entity_id"]: z for z in usable}
     events = []
     if current and current in by_id:
         events.append({"kind": "departed", "zone": by_id[current]})

@@ -95,6 +95,9 @@ export function avatarClusterMarkerHtml({
     })
     .join('');
   const safeLabel = escapeHtml(label);
-  return `<span role="group" aria-label="${safeLabel}" title="${safeLabel}" data-testid="map-avatar-cluster" data-avatar-count="${people.length}" style="display:inline-flex;align-items:center;height:${height}px;width:${width}px">${avatars}</span>`;
+  // A count badge, because a few overlapping avatars read as separate pins on a
+  // map at a glance - the number makes "these are together" unmistakable.
+  const badge = `<span style="position:absolute;right:-6px;bottom:-6px;z-index:${people.length + 1};min-width:19px;height:19px;padding:0 5px;border-radius:9999px;background:#111827;border:1px solid rgba(255,255,255,.4);color:#fff;font:700 11px/17px ui-sans-serif,system-ui,-apple-system,sans-serif;text-align:center;box-sizing:border-box">${people.length}</span>`;
+  return `<span role="group" aria-label="${safeLabel}" title="${safeLabel}" data-testid="map-avatar-cluster" data-avatar-count="${people.length}" style="display:inline-flex;align-items:center;position:relative;height:${height}px;width:${width}px">${avatars}${badge}</span>`;
 }
 

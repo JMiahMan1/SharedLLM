@@ -26,6 +26,12 @@ const DEFAULT_ZOOM = 4;
  */
 const NEARBY_CLUSTER_M = 150;
 
+/** Roomier fallback used only when no places are known at all (the zones call
+ * failed or Home Assistant is unreachable): without a place to group by, the
+ * distance rule is all that is left, and a family in one house should still
+ * share a pin rather than sit on separate ones. */
+const NO_PLACE_CLUSTER_M = 300;
+
 /**
  * Slack around a place's own radius when deciding who is "at" it. Home
  * Assistant zones are often drawn tight (100 m), while an indoor fix can sit a
@@ -204,7 +210,11 @@ export default function LiveFamilyMap({
     }
 
     const points: L.LatLngExpression[] = [];
-    for (const cluster of clusterMembers(members, NEARBY_CLUSTER_M, (m) => placeKeys.get(m.userId) ?? null)) {
+    for (const cluster of clusterMembers(
+      members,
+      zones.length ? NEARBY_CLUSTER_M : NO_PLACE_CLUSTER_M,
+      (m) => placeKeys.get(m.userId) ?? null
+    )) {
       const member = cluster.lead;
       const style = FRESHNESS_STYLE[member.freshness];
       const latlng: L.LatLngExpression = [member.lat, member.lon];

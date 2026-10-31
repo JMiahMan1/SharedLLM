@@ -560,13 +560,35 @@ def trivia_prompt(state: GameState, hint: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _memory_board_line(state: GameState) -> str:
+    """The board as the room sees it: the word where a card is face up, its
+    number where it is still hidden. Without this a player cannot know which
+    card to turn, which is what made the game unplayable in chat."""
+    return "  ".join(
+        f"{i + 1}:{word}" if i in state.revealed else f"{i + 1}:?"
+        for i, word in enumerate(state.board)
+    )
+
+
+def memory_board_lines(state: GameState) -> list[str]:
+    """The board as the room sees it: a face-down card shows its number, a
+    card that is up shows its word. Without the numbers there is no way to say
+    which card to flip - which is the whole game."""
+    cells = [
+        f"{i + 1}. {word}" if i in state.revealed else f"{i + 1}. ?"
+        for i, word in enumerate(state.board)
+    ]
+    return ["   ".join(cells[i : i + 4]) for i in range(0, len(cells), 4)]
+
+
 def memory_prompt(state: GameState) -> str:
     face_down = len(state.board) - len(state.revealed)
     return "\n".join(
         [
             "🃏 Memory: find the pairs",
             f"{len(state.board)} cards, {face_down} still face down.",
-            "Say two words to flip them, e.g. 'spaceship moonwalk'.",
+            _memory_board_line(state),
+            "Say two card numbers to flip them, e.g. '3 5'.",
         ]
     )
 
@@ -653,25 +675,55 @@ def apply_trivia_answer(state: GameState, who: str, answer: str, star_value: int
     }
 
 
+def _memory_pick(state: GameState, token: str) -> int | None:
+    """The card a token names. Players type the number printed on the card
+    ("3", "card 3"), so a token with no card number in it is ignored."""
+    digits = re.sub(r"[^0-9]", "", str(token or ""))
+    if not digits:
+        return None
+    index = int(digits) - 1
+    return index if 0 <= index < len(state.board) else None
+
+
 def apply_memory_flip(state: GameState, who: str, words: list[str]) -> dict[str, Any]:
-    """Flip the named cards. A pair is kept face up, a miss flips back."""
+    """Flip two numbered cards. A pair is kept face up, a miss flips back."""
     player = state.player(who)
-    wanted = [normalize(w) for w in words]
-    indexes = [i for i, word in enumerate(state.board) if normalize(word) in wanted]
-    if not indexes:
-        return {"flipped": [], "matched": False, "stars": player.stars, "message": "Those cards are not in the deck."}
-    if len(indexes) > 2:
-        return {"flipped": [], "matched": False, "stars": player.stars, "message": "Flip two cards at a time."}
+    picks: list[int] = []
+    for token in words:
+        index = _memory_pick(state, token)
+        if index is not None and index not in picks:
+            picks.append(index)
+        if len(picks) == 2:
+            break
+    if not picks:
+        return {
+            "flipped": [],
+            "matched": False,
+            "stars": player.stars,
+            "message": f'Call two cards by number, 1 to {len(state.board)} - e.g. "2 7".',
+        }
+    if len(picks) == 1:
+        index = picks[0]
+        if index not in state.revealed:
+            state.revealed.append(index)
+        return {
+            "flipped": [state.board[index]],
+            "matched": False,
+            "stars": player.stars,
+            "message": f"Card {index + 1} is {state.board[index]}. Now pick its partner.",
+        }
 
-    for i in indexes:
-        if i not in state.revealed:
-            state.revealed.append(i)
-
-    flipped_words = [state.board[i] for i in indexes]
-    if len(indexes) == 1:
-        return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": f"{flipped_words[0]}. Now pick its partner."}
-
-    if state.board[indexes[0]] == state.board[indexes[1]]:
+    first, second = picks
+    if first in state.revealed or second in state.revealed:
+        return {
+            "flipped": [],
+            "matched": False,
+            "stars": player.stars,
+            "message": "One of those is already face up. Pick two cards that are face down.",
+        }
+    state.revealed.extend((first, second))
+    flipped_words = [state.board[first], state.board[second]]
+    if state.board[first] == state.board[second]:
         player.stars += 1
         state.round += 1
         if len(state.revealed) == len(state.board):
@@ -684,11 +736,14 @@ def apply_memory_flip(state: GameState, who: str, words: list[str]) -> dict[str,
             "message": f"Pair found! {flipped_words[0]} and {flipped_words[1]}.",
         }
 
-    # Miss: hide the two wrong cards again, but keep the one that was already up.
-    for i in indexes:
-        if i not in state.revealed[: len(state.revealed) - 2]:
-            state.revealed.remove(i)
-    return {"flipped": flipped_words, "matched": False, "stars": player.stars, "message": "Not a pair, those flip back."}
+    # Miss: hide the two wrong cards again.
+    state.revealed = [i for i in state.revealed if i not in picks]
+    return {
+        "flipped": flipped_words,
+        "matched": False,
+        "stars": player.stars,
+        "message": f"Not a pair: {flipped_words[0]} and {flipped_words[1]} flip back.",
+    }
 
 
 def game_card(state: GameState, headline: str, detail: str | None = None) -> dict[str, Any]:
