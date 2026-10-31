@@ -11859,6 +11859,26 @@ async def update_geo_trip(trip_id: str, request: Request):
     await _raise_scoped_failure(resp, "Failed to update trip")
 
 
+@app.get("/api/geo/people/{user}/day")
+async def get_geo_person_day(request: Request, user: str, day: str):
+    """One person's day: path, stops and trips (Wander's location history).
+    Geo checks the caller may see that person, as for their live location."""
+    target, viewer, is_admin = await _read_target(request, user)
+    # Both go into geo's URL: a username and a date, nothing else.
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", target or "") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(status_code=422, detail="A username and a day (YYYY-MM-DD) are required")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/people/{target}/day",
+            params={"day": day, "viewer": viewer, "is_admin": is_admin},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=20.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    await _raise_scoped_failure(resp, "Could not read that day")
+
+
 @app.get("/api/geo/trips/{trip_id}/route")
 async def get_geo_trip_route(request: Request, trip_id: str):
     # The owner's sharing consent applies, as for their location: geo checks

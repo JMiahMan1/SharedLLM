@@ -53,3 +53,18 @@ def test_places_are_read_as_the_viewer(monkeypatch):
     assert TestClient(app).get("/api/geo/zones").status_code == 200
     url, params = sent[0]
     assert url.endswith("/zones") and params == {"viewer": "gracie"}
+
+
+def test_a_days_history_is_read_as_the_viewer(monkeypatch):
+    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    resp = TestClient(app).get("/api/geo/people/leo/day", params={"day": "2026-10-31"})
+    assert resp.status_code == 200
+    url, params = sent[0]
+    assert url.endswith("/people/leo/day")
+    assert params == {"day": "2026-10-31", "viewer": "michele", "is_admin": ""}
+
+
+def test_a_days_history_refuses_a_path_in_the_name(monkeypatch):
+    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    assert TestClient(app).get("/api/geo/people/leo/day", params={"day": "../../x"}).status_code == 422
+    assert sent == []

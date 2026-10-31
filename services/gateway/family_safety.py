@@ -152,6 +152,30 @@ async def on_my_way(request: Request):
     return {"status": "SUCCESS", "sent": sent, "eta_s": (eta or {}).get("duration_s")}
 
 
+#: A position the phone took this recently is used as is for an SOS or a
+#: check-in; older, the stored last fix is no worse.
+FRESH_POSITION_S = 5 * 60
+CHECK_IN_COOLDOWN_S = 2 * 60
+
+
+def fresh_position(body: Any, now: float) -> dict | None:
+    """The position the phone sent with the request, in the stored location's
+    shape, when it is real and fresh; None otherwise."""
+    pos = body.get("position") if isinstance(body, dict) else None
+    if not isinstance(pos, dict):
+        return None
+    try:
+        lat, lon = float(pos["lat"]), float(pos["lon"])
+        at = float(pos.get("at") or now * 1000) / 1000
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+        return None
+    if now - at > FRESH_POSITION_S or at - now > 60:
+        return None
+    return {"latitude": lat, "longitude": lon, "timestamp": at, "accuracy": pos.get("accuracy")}
+
+
 @router.post("/api/family/sos")
 async def sos(request: Request):
     user = await _caller(request)
@@ -163,7 +187,9 @@ async def sos(request: Request):
         raise HTTPException(status_code=422, detail="An SOS must be confirmed")
     cooldown = await _start_cooldown("sos", user, SOS_COOLDOWN_S, "Your SOS went out less than a minute ago.")
     now = time.time()
-    location = await _get_json(f"{IDENTITY_SVC}/api/users/{user}/location")
+    # Where the phone is right now when it could tell (it asks for a fix as
+    # the SOS is sent); the last stored fix only when it could not.
+    location = fresh_position(body, now) or await _get_json(f"{IDENTITY_SVC}/api/users/{user}/location")
     title, text, link = sos_text(user.title(), location, now)
     url = f"/wander?person={user}"
     actions = [notify.view_action(url, "Map")]
@@ -181,6 +207,43 @@ async def sos(request: Request):
         await _end_cooldown(cooldown)
 
     return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
+
+
+def check_in_text(name: str, place: str | None) -> tuple[str, str]:
+    if place:
+        return f"{name} checked in", f"{name} is at {place}."
+    return f"{name} checked in", f"{name} shared where they are."
+
+
+@router.post("/api/family/check-in")
+async def check_in(request: Request):
+    """"I'm here": tell the family where you are now, with the place named.
+    Needs the phone's own fresh position: a check-in is about now."""
+    user = await _caller(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    now = time.time()
+    position = fresh_position(body, now)
+    if position is None:
+        raise HTTPException(status_code=422, detail="Your phone could not tell where you are, so nothing was sent")
+    cooldown = await _start_cooldown("check_in", user, CHECK_IN_COOLDOWN_S, "You checked in a moment ago.")
+    lat, lon = position["latitude"], position["longitude"]
+    named = await _get_json(f"{GEO_SVC}/place-name", lat=lat, lon=lon) or {}
+    title, text = check_in_text(user.title(), named.get("name"))
+    url = f"/wander?person={user}"
+    link = f"https://www.openstreetmap.org/?mlat={lat:.5f}&mlon={lon:.5f}#map=17/{lat:.5f}/{lon:.5f}"
+    sent = await notify.send_many(
+        [u for u in await notify.family() if u != user],
+        lambda viewer: notify.notice(
+            viewer, "family_presence", title, text, url=url, priority=3, tag=f"check_in:{user}",
+            data={"person": user, "lat": lat, "lon": lon, "place": named.get("name")},
+            actions=[notify.view_action(url, "Map"), notify.view_action(link, "Directions")]),
+    )
+    if not sent:
+        await _end_cooldown(cooldown)
+    return {"status": "SUCCESS", "sent": sent, "place": named.get("name")}
 
 
 @router.post("/api/phone/find")

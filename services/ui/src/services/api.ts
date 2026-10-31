@@ -3,6 +3,7 @@ import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from 
 import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
+import type { FreshPosition } from '../lib/freshPosition';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type { ActiveCall, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
@@ -115,6 +116,7 @@ import type {
   NetworkScanRequest,
   NetworkScanResponse,
   Trip,
+  PersonDay,
   TripUpdatePayload,
   TripsResponse,
   TripRouteResponse,
@@ -1663,6 +1665,12 @@ export const api = {
   },
 
   // Family Circle & Vehicle Trips
+  /** One person's day: path, stops and trips (their sharing consent applies). */
+  async getPersonDay(username: string, day: string): Promise<PersonDay> {
+    const resp = await apiClient.get(`/api/geo/people/${encodeURIComponent(username)}/day`, { params: { day } });
+    return resp.data;
+  },
+
   async getTrips(userId?: string): Promise<TripsResponse> {
     const resolved = resolveUserId(userId);
     // The whole history in one request (Wander lists it by day/week/month/
@@ -1760,8 +1768,14 @@ export const api = {
   },
 
   /** An urgent notice to everyone else in the family with your last position. */
-  async sendSos(): Promise<{ status: string; sent: number; family: number; located: boolean }> {
-    const resp = await apiClient.post('/api/family/sos', { confirm: true });
+  async sendSos(position?: FreshPosition | null): Promise<{ status: string; sent: number; family: number; located: boolean }> {
+    const resp = await apiClient.post('/api/family/sos', { confirm: true, ...(position ? { position } : {}) });
+    return resp.data;
+  },
+
+  /** "I'm here": tell the family where you are now (needs the phone's own position). */
+  async checkIn(position: FreshPosition): Promise<{ status: string; sent: number; place: string | null }> {
+    const resp = await apiClient.post('/api/family/check-in', { position });
     return resp.data;
   },
 

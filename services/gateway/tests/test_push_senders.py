@@ -617,3 +617,42 @@ def test_an_improved_drawing_notifies_the_person_who_asked(monkeypatch):
     resp = TestClient(main.app).post("/api/images/edit", json={"prompt": "better", "image": "data:image/png;base64,AA=="})
     assert resp.json()["status"] == "SUCCESS"
     assert told == ["leo"]
+
+
+def test_sos_uses_the_position_the_phone_just_took(safety_client, sent):
+    import time
+
+    client, answers = safety_client
+    answers["/location"] = {"latitude": 1.0, "longitude": 1.0, "timestamp": time.time() - 3 * 3600}  # stale
+    now_ms = time.time() * 1000
+    body = client.post("/api/family/sos", json={"confirm": True, "position": {"lat": 33.5, "lon": -112.1, "at": now_ms}}).json()
+    assert body["located"] is True
+    assert "Last seen just now at 33.50000, -112.10000" in sent[0]["body"]
+
+
+def test_a_stale_or_bad_position_is_ignored():
+    now = 10_000.0
+    assert family_safety.fresh_position({"position": {"lat": 33.5, "lon": -112.1, "at": (now - 60) * 1000}}, now)["latitude"] == 33.5
+    assert family_safety.fresh_position({"position": {"lat": 33.5, "lon": -112.1, "at": (now - 3600) * 1000}}, now) is None
+    assert family_safety.fresh_position({"position": {"lat": 0, "lon": 0}}, now) is None
+    assert family_safety.fresh_position({"position": {"lat": 120, "lon": 0}}, now) is None
+    assert family_safety.fresh_position({}, now) is None
+
+
+def test_check_in_names_the_place_and_tells_everyone_else(safety_client, sent):
+    import time
+
+    client, answers = safety_client
+    answers["/place-name"] = {"name": "Lincoln Elementary", "zone": "place.abc"}
+    body = client.post("/api/family/check-in", json={"position": {"lat": 33.3, "lon": -111.6, "at": time.time() * 1000}}).json()
+    assert body == {"status": "SUCCESS", "sent": 2, "place": "Lincoln Elementary"}
+    assert {n["user"] for n in sent} == {"jeremiah", "michele"}
+    assert sent[0]["title"] == "Leo checked in" and sent[0]["body"] == "Leo is at Lincoln Elementary."
+    # Again straight away: the family is not told twice.
+    assert client.post("/api/family/check-in", json={"position": {"lat": 33.3, "lon": -111.6, "at": time.time() * 1000}}).status_code == 429
+
+
+def test_check_in_without_a_position_sends_nothing(safety_client, sent):
+    client, _ = safety_client
+    assert client.post("/api/family/check-in", json={}).status_code == 422
+    assert sent == []

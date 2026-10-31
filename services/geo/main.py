@@ -21,7 +21,7 @@ import re
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -46,6 +46,7 @@ from services.config import (
 )
 from services.geo import (
     achievements,
+    day_history,
     event_feed,
     health_notices,
     map_match,
@@ -618,6 +619,69 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
         if len(points) >= samples:
             break
     return {"entity_id": entity_id, "points": points}
+
+
+#: How many stops a day's history names by street address (each can be a
+#: geocoder call); the rest are named by saved place only.
+DAY_STOPS_NAMED = 12
+
+
+@app.get("/people/{user}/day")
+async def get_person_day(
+    user: str,
+    day: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """One person's day (local time): the path they took, where they stayed and
+    for how long, and their trips, in order (Wander's location history; the
+    breadcrumbs are kept 30 days). Same consent as their live location."""
+    clean = await _require_may_view(viewer, user, is_admin)
+    try:
+        which = date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from None
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Location history unavailable")
+    start, end = day_history.day_bounds(which, APP_TIMEZONE)
+    points = []
+    for raw in await r.zrangebyscore(f"geo:history:{clean}", start, end):
+        with contextlib.suppress(ValueError, TypeError):
+            p = json.loads(raw)
+            points.append({"t": float(p["t"]), "lat": float(p["lat"]), "lon": float(p["lon"]), "spd": p.get("spd") or 0})
+    points.sort(key=lambda p: p["t"])
+
+    zones = await _zones_cached()
+    day_stops = day_history.stops(points)
+    for index, stop in enumerate(day_stops):
+        zone = _zone_at(zones, stop["lat"], stop["lon"], margin=100.0)
+        if zone:
+            stop["place"] = zone["name"]
+            stop["zone"] = zone["entity_id"]
+        elif index < DAY_STOPS_NAMED:
+            try:
+                stop["place"] = await _resolve_place_name_cached(stop["lat"], stop["lon"])
+            except Exception:
+                stop["place"] = None
+
+    trips = []
+    for tid in await r.zrangebyscore(f"geo:trips:user:{clean}", start, end):
+        raw = await r.get(f"geo:trip:{tid}")
+        if raw:
+            with contextlib.suppress(ValueError):
+                trip = json.loads(raw)
+                if not _is_phantom_trip(trip):
+                    trips.append({k: trip.get(k) for k in (
+                        "id", "start_time", "end_time", "distance_miles", "duration_seconds",
+                        "top_speed_mph", "start_location", "end_location", "activity_type")})
+    return {
+        "user": clean,
+        "day": day,
+        "points": day_history.thin(points),
+        "stops": day_stops,
+        "timeline": day_history.timeline(day_stops, trips),
+    }
 
 
 def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -3459,6 +3523,20 @@ async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -
             return stored, "stored"
         return resolved, "coords"
     return resolved, "osm"
+
+
+@app.get("/place-name")
+async def get_place_name(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)):
+    """What to call a spot in one line: the family place it is in (Home
+    Assistant zone or saved place), else its street address. For a check-in."""
+    zone = _zone_at(await _zones_cached(), lat, lon, margin=50.0)
+    if zone:
+        return {"name": zone["name"], "zone": zone["entity_id"]}
+    try:
+        name = await _resolve_place_name_cached(lat, lon)
+    except Exception:
+        name = None
+    return {"name": name or None, "zone": None}
 
 
 @app.get("/locations/suggestions")

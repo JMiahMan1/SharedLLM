@@ -14,12 +14,18 @@ vi.mock('../../services/api', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    api: { ...(actual.api as Record<string, unknown>), sendOnMyWay: vi.fn(), sendSos: vi.fn() },
+    api: { ...(actual.api as Record<string, unknown>), sendOnMyWay: vi.fn(), sendSos: vi.fn(), checkIn: vi.fn() },
   };
 });
 
+vi.mock('../../lib/freshPosition', () => ({ freshPosition: vi.fn() }));
+import { freshPosition } from '../../lib/freshPosition';
+const position = vi.mocked(freshPosition);
+const HERE = { lat: 33.3, lon: -111.6, accuracy: 8, at: 1_793_000_000_000 };
+
 const sendOnMyWay = vi.mocked(api.sendOnMyWay);
 const sendSos = vi.mocked(api.sendSos);
+const checkIn = vi.mocked(api.checkIn);
 
 describe('SafetyButtons', () => {
   beforeEach(() => vi.resetAllMocks());
@@ -66,5 +72,31 @@ describe('SafetyButtons', () => {
     for (const name of [/on my way/i, /^sos$/i]) {
       expect(screen.getByRole('button', { name }).className).toMatch(/min-h-11/);
     }
+  });
+
+  it('sends the SOS with where the phone is right now', async () => {
+    position.mockResolvedValue(HERE);
+    sendSos.mockResolvedValue({ status: 'SUCCESS', sent: 2, family: 2, located: true });
+    render(<SafetyButtons />);
+    await userEvent.click(screen.getByRole('button', { name: /^sos$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /send sos/i }));
+    await waitFor(() => expect(sendSos).toHaveBeenCalledWith(HERE));
+  });
+
+  it('checks in with the place named', async () => {
+    position.mockResolvedValue(HERE);
+    checkIn.mockResolvedValue({ status: 'SUCCESS', sent: 2, place: 'Lincoln Elementary' });
+    render(<SafetyButtons />);
+    await userEvent.click(screen.getByRole('button', { name: /check in/i }));
+    await waitFor(() => expect(checkIn).toHaveBeenCalledWith(HERE));
+    expect(toast.success).toHaveBeenCalledWith('Checked in at Lincoln Elementary');
+  });
+
+  it('does not check in when the phone cannot tell where it is', async () => {
+    position.mockResolvedValue(null);
+    render(<SafetyButtons />);
+    await userEvent.click(screen.getByRole('button', { name: /check in/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(checkIn).not.toHaveBeenCalled();
   });
 });

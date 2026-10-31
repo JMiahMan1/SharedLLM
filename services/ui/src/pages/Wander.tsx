@@ -7,6 +7,8 @@ import { api } from '../services/api';
 import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, TripLocationSuggestion, RoutePoint, TripsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
+import SafetyButtons from '../components/family/SafetyButtons';
+import MemberDirections from '../components/wander/MemberDirections';
 import UserAvatar from '../components/UserAvatar';
 import { findFamilyMember, useFamilyDirectory, type FamilyMember } from '../components/chat/familyDirectory';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
@@ -821,6 +823,9 @@ const Wander = () => {
             </span>
           )}
         </div>
+        {member.lat != null && member.lon != null && member.name.toLowerCase() !== currentUsername && (
+          <MemberDirections me={currentUsername} name={member.name} lat={member.lat} lon={member.lon} />
+        )}
       </div>
     );
   };
@@ -934,7 +939,8 @@ const Wander = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <SafetyButtons />
           <button
             onClick={refreshAll}
             disabled={isRefreshing}

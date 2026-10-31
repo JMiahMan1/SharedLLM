@@ -3789,3 +3789,28 @@ export interface HealthStreaks {
     needs?: string;
   }>;
 }
+
+/** One place someone stayed during a day (geo day_history). */
+export interface DayStop {
+  lat: number;
+  lon: number;
+  since: number;
+  until: number;
+  fixes: number;
+  /** A saved place's name, else a street address; null when it could not be named. */
+  place?: string | null;
+  zone?: string;
+}
+
+export type DayTimelineEntry =
+  | ({ kind: 'stop'; at: number } & DayStop)
+  | ({ kind: 'trip'; at: number } & Pick<Trip, 'id' | 'start_time' | 'end_time' | 'distance_miles' | 'duration_seconds' | 'start_location' | 'end_location' | 'activity_type'> & { top_speed_mph?: number });
+
+/** One person's day on the map: their path, where they stayed, and their trips. */
+export interface PersonDay {
+  user: string;
+  day: string;
+  points: Array<{ t: number; lat: number; lon: number; spd?: number }>;
+  stops: DayStop[];
+  timeline: DayTimelineEntry[];
+}
