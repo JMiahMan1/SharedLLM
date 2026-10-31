@@ -34,6 +34,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Activity Recognition's own permission before Android 10, granted at install. -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+        android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Install approvals: the screen guard lists the apps on a child's phone to
          hold a newly installed one until a parent says yes. Sideloaded, never
@@ -404,6 +408,13 @@
             android:exported="false"
             android:foregroundServiceType="location"
             android:stopWithTask="false" />
+
+        <!-- Activity Recognition transitions (driving, cycling, walking, still)
+             that set how often the tracking service asks for a fix. Only Play
+             services sends them, through the service's own PendingIntent. -->
+        <receiver
+            android:name=".ActivityTransitionReceiver"
+            android:exported="false" />
 
         <!-- Keeps the pedometer ledger current while the app is closed, even
              when location sharing is off. It posts to /api/geo/steps and owns

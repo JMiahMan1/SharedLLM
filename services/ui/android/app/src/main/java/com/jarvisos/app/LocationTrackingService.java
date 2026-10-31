@@ -25,6 +25,21 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.location.ActivityRecognition;
+import com.google.android.gms.location.ActivityRecognitionClient;
+import com.google.android.gms.location.ActivityTransition;
+import com.google.android.gms.location.ActivityTransitionRequest;
+import com.google.android.gms.location.DetectedActivity;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+import java.util.ArrayList;
+import java.util.List;
 import org.json.JSONObject;
 
 /**
@@ -43,14 +58,22 @@ import org.json.JSONObject;
  *
  * A fix that cannot be sent (no signal, the server restarting) is kept in
  * {@link LocationOutbox} and sent, oldest first, ahead of the next live fix.
+ *
+ * Fixes come from Google Play services' fused provider when the phone has it,
+ * at a rate set by what the person is doing ({@link MotionModeSelector}): once
+ * a second while driving, every 15 s on foot or a bike, Wi-Fi and cell once a
+ * minute while still. Asking GPS and network separately (the fallback below,
+ * for phones without Play services) uploaded whichever fix won, so 80 m
+ * network fixes with no speed interleaved with 5 m GPS ones and a phone at 36
+ * mph was reported standing still. While driving, {@link DrivingMonitor}
+ * notices hard braking, rapid acceleration, high speed and phone use.
  */
 public class LocationTrackingService extends Service {
     private static final String TAG = "LocationTracking";
     private static final int NOTIFICATION_ID = 0x10A1;
+    /** The LocationManager fallback's rate, unchanged from before the fused provider. */
     private static final long MIN_TIME_MS = 30_000L;
     private static final float MIN_DISTANCE_M = 5f;
-    /** At most one upload this often while fixes keep arriving (moving). */
-    private static final long UPLOAD_MIN_MS = 30_000L;
     /**
      * Ask for a fresh fix this often even when nothing moved. Without it a
      * stationary device produces no LocationManager callback at all, so the
@@ -77,6 +100,25 @@ public class LocationTrackingService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean updatesRequested = false;
 
+    /** Null without Google Play services: the LocationManager code below is used instead. */
+    private FusedLocationProviderClient fused;
+    /** The mode the current fused request was made for, so a change re-requests. */
+    private MotionModeSelector.Mode requestedMode;
+    private ActivityRecognitionClient activityClient;
+    private boolean transitionsRegistered = false;
+    /** Read and changed on the main thread only (fixes and transitions arrive there). */
+    private MotionModeSelector motion;
+    private final DrivingMonitor drivingMonitor = new DrivingMonitor();
+    /** The running service, for transitions the receiver hands over. */
+    private static volatile LocationTrackingService instance;
+
+    private final LocationCallback fusedCallback = new LocationCallback() {
+        @Override
+        public void onLocationResult(LocationResult result) {
+            for (Location location : result.getLocations()) consider(location);
+        }
+    };
+
     private final LocationListener listener = new LocationListener() {
         @Override
         public void onLocationChanged(Location location) {
@@ -102,6 +144,10 @@ public class LocationTrackingService extends Service {
     private static final String PREFS = "jarvis_location";
     private static final String KEY_ENABLED = "tracking_enabled";
     private static final String KEY_STEPS = "steps_enabled";
+    /** The current mode and its last moving fix, so a restarted service resumes a drive. */
+    private static final String KEY_MODE = "motion_mode";
+    private static final String KEY_MOVING_AT = "motion_moving_at";
+    static final String ACTION_ACTIVITY_ACCESS = "activity_access";
     /** A step reading is attached to a fix only while both are this fresh. */
     private static final long STEPS_FRESH_MS = 10 * 60 * 1000L;
 
@@ -159,10 +205,82 @@ public class LocationTrackingService extends Service {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
+    /**
+     * Activity Recognition may run: a runtime permission from Android 10, and
+     * before that Play services' own install-time one (in the manifest).
+     */
+    static boolean hasActivityRecognition(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true;
+        return context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    static boolean hasPlayServices(Context context) {
+        try {
+            return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
+                    == ConnectionResult.SUCCESS;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static MotionModeSelector loadMotion(Context context) {
+        android.content.SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return new MotionModeSelector(MotionModeSelector.Mode.parse(p.getString(KEY_MODE, null)),
+                p.getLong(KEY_MOVING_AT, 0L));
+    }
+
+    private static void saveMotion(Context context, MotionModeSelector motion) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_MODE, motion.mode().name())
+                .putLong(KEY_MOVING_AT, motion.lastMovingAt())
+                .apply();
+    }
+
+    /** Activity Recognition's activity type as a mode, or null for one not asked for. */
+    static MotionModeSelector.Mode modeFor(int activityType) {
+        switch (activityType) {
+            case DetectedActivity.IN_VEHICLE:
+                return MotionModeSelector.Mode.DRIVING;
+            case DetectedActivity.ON_BICYCLE:
+                return MotionModeSelector.Mode.CYCLING;
+            case DetectedActivity.WALKING:
+            case DetectedActivity.RUNNING:
+                return MotionModeSelector.Mode.WALKING;
+            case DetectedActivity.STILL:
+                return MotionModeSelector.Mode.STILL;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * A transition from {@link ActivityTransitionReceiver}. The running service
+     * takes it on its own thread; with none running it is only remembered, and
+     * a service started later begins in that mode.
+     */
+    static void onActivityTransition(Context context, int activityType, boolean enter) {
+        final MotionModeSelector.Mode mode = modeFor(activityType);
+        if (mode == null) return;
+        final LocationTrackingService running = instance;
+        if (running != null) {
+            running.handler.post(() -> running.applyTransition(mode, enter));
+            return;
+        }
+        MotionModeSelector motion = loadMotion(context);
+        if (motion.onTransition(mode, enter, System.currentTimeMillis())) saveMotion(context, motion);
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        motion = loadMotion(this);
+        if (hasPlayServices(this)) {
+            fused = LocationServices.getFusedLocationProviderClient(this);
+            activityClient = ActivityRecognition.getClient(this);
+        }
         // Mirrored natively at login, so the service authenticates with no WebView.
         android.content.SharedPreferences p = TokenBridgePlugin.prefs(this);
         username = p.getString(TokenBridgePlugin.KEY_USERNAME, null);
@@ -181,6 +299,13 @@ public class LocationTrackingService extends Service {
                 onHeartbeat();
                 return START_STICKY;
             }
+            if (ACTION_ACTIVITY_ACCESS.equals(intent.getAction()) && updatesRequested) {
+                // Activity Recognition was just allowed in the app. A service
+                // that was not running starts in full below instead.
+                startForegroundCompat();
+                registerTransitions();
+                return START_STICKY;
+            }
             if (intent.getStringExtra("username") != null) {
                 persistIdentity(intent.getStringExtra("username"), intent.getStringExtra("userId"));
             }
@@ -190,6 +315,7 @@ public class LocationTrackingService extends Service {
         acquireWakeLock();
         readSteps();
         requestUpdates();
+        registerTransitions();
         scheduleHeartbeat();
         // Sticky: if Android reclaims us, come back on our own.
         return START_STICKY;
@@ -236,26 +362,30 @@ public class LocationTrackingService extends Service {
     }
 
     private void requestUpdates() {
-        if (locationManager == null) return;
+        if (fused == null && locationManager == null) return;
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "fine location not granted; cannot track");
             return;
         }
         try {
-            locationManager.removeUpdates(listener);
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, listener);
-            }
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, listener);
+            if (fused != null) {
+                requestFused();
+            } else {
+                locationManager.removeUpdates(listener);
+                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    locationManager.requestLocationUpdates(
+                            LocationManager.GPS_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, listener);
+                }
+                if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    locationManager.requestLocationUpdates(
+                            LocationManager.NETWORK_PROVIDER, MIN_TIME_MS, MIN_DISTANCE_M, listener);
+                }
             }
             updatesRequested = true;
             // Seed from the freshest cached fix so the family map is not blank
             // for the first interval after the service starts.
-            Location cached = bestLastKnown();
+            Location cached = locationManager != null ? bestLastKnown() : null;
             if (cached != null) {
                 lastKnown = cached;
                 upload(cached, true);  // sent with its own (possibly old) fix time
@@ -264,6 +394,120 @@ public class LocationTrackingService extends Service {
         } catch (SecurityException e) {
             Log.e(TAG, "requestLocationUpdates denied", e);
         }
+    }
+
+    /** One fused request at the current mode's rate, replacing any earlier one. */
+    private void requestFused() throws SecurityException {
+        MotionModeSelector.Mode mode = motion.mode();
+        LocationRequest request = new LocationRequest.Builder(
+                mode.highAccuracy ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                mode.intervalMs)
+                .setMinUpdateDistanceMeters(mode.minDistanceM)
+                .build();
+        fused.removeLocationUpdates(fusedCallback);
+        fused.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper());
+        requestedMode = mode;
+        Log.i(TAG, "fused updates: " + mode.activity + " every " + mode.intervalMs + " ms");
+    }
+
+    /**
+     * Ask Play services for enter and exit of driving, cycling, walking,
+     * running and still. Without the permission (or Play services) the mode
+     * comes from speed alone, so a mode only Activity Recognition could have
+     * set is dropped: still asks for no GPS and so could never be left.
+     */
+    private void registerTransitions() {
+        if (activityClient == null || !hasActivityRecognition(this)) {
+            transitionsRegistered = false;
+            MotionModeSelector.Mode before = motion.mode();
+            if (motion.dropActivityRecognition()) onModeChanged(before);
+            return;
+        }
+        if (transitionsRegistered) return;
+        List<ActivityTransition> transitions = new ArrayList<>();
+        for (int type : new int[]{DetectedActivity.IN_VEHICLE, DetectedActivity.ON_BICYCLE,
+                DetectedActivity.WALKING, DetectedActivity.RUNNING, DetectedActivity.STILL}) {
+            for (int transition : new int[]{ActivityTransition.ACTIVITY_TRANSITION_ENTER,
+                    ActivityTransition.ACTIVITY_TRANSITION_EXIT}) {
+                transitions.add(new ActivityTransition.Builder()
+                        .setActivityType(type).setActivityTransition(transition).build());
+            }
+        }
+        try {
+            activityClient.requestActivityTransitionUpdates(
+                            new ActivityTransitionRequest(transitions), transitionIntent())
+                    .addOnSuccessListener(v -> {
+                        transitionsRegistered = true;
+                        Log.i(TAG, "activity transitions registered");
+                    })
+                    .addOnFailureListener(e -> {
+                        transitionsRegistered = false;
+                        Log.w(TAG, "activity transitions refused", e);
+                        MotionModeSelector.Mode before = motion.mode();
+                        if (motion.dropActivityRecognition()) onModeChanged(before);
+                    });
+        } catch (SecurityException e) {
+            Log.w(TAG, "activity recognition denied", e);
+        }
+    }
+
+    /** Mutable: Play services writes the transition result into it. */
+    private PendingIntent transitionIntent() {
+        Intent i = new Intent(this, ActivityTransitionReceiver.class);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0);
+        return PendingIntent.getBroadcast(this, 2, i, flags);
+    }
+
+    private void removeTransitions() {
+        if (activityClient == null) return;
+        try {
+            activityClient.removeActivityTransitionUpdates(transitionIntent());
+        } catch (RuntimeException ignored) {
+            // Not registered, or the permission was taken back: nothing to remove.
+        }
+        transitionsRegistered = false;
+    }
+
+    private void applyTransition(MotionModeSelector.Mode mode, boolean enter) {
+        MotionModeSelector.Mode before = motion.mode();
+        if (motion.onTransition(mode, enter, System.currentTimeMillis())) onModeChanged(before);
+    }
+
+    /**
+     * The mode changed: remember it, close a drive that ended, and ask for
+     * fixes at the new rate.
+     */
+    private void onModeChanged(MotionModeSelector.Mode before) {
+        MotionModeSelector.Mode now = motion.mode();
+        Log.i(TAG, "mode " + before.activity + " -> " + now.activity);
+        saveMotion(this, motion);
+        if (before == MotionModeSelector.Mode.DRIVING && now != MotionModeSelector.Mode.DRIVING) {
+            postDrivingEvents(drivingMonitor.finish());
+        }
+        if (fused != null && updatesRequested && requestedMode != now) {
+            try {
+                requestFused();
+            } catch (SecurityException e) {
+                Log.w(TAG, "fused re-request denied", e);
+            }
+        }
+    }
+
+    private void postDrivingEvents(List<DrivingMonitor.Event> events) {
+        for (DrivingMonitor.Event event : events) {
+            try {
+                ActivityOutbox.add(this, event.toBody());
+                Log.i(TAG, "driving event " + event.type);
+            } catch (Exception e) {
+                Log.w(TAG, "driving event not kept", e);
+            }
+        }
+    }
+
+    private boolean screenInteractive() {
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isInteractive();
     }
 
     private Location bestLastKnown() {
@@ -289,8 +533,17 @@ public class LocationTrackingService extends Service {
      * and a precise GPS fix seconds later was dropped by the throttle.
      */
     private void consider(Location location) {
+        double speed = location.hasSpeed() ? location.getSpeed() : Double.NaN;
+        double accuracy = location.hasAccuracy() ? location.getAccuracy() : Double.NaN;
+        MotionModeSelector.Mode before = motion.mode();
+        boolean changed = motion.onFix(location.getTime(), speed, accuracy);
+        if (motion.mode() == MotionModeSelector.Mode.DRIVING) {
+            postDrivingEvents(drivingMonitor.onFix(location.getTime(), speed, accuracy,
+                    location.getLatitude(), location.getLongitude(), screenInteractive()));
+        }
+        if (changed) onModeChanged(before);
         if (isBetter(location, lastKnown)) lastKnown = location;
-        if (System.currentTimeMillis() - lastUploadAt >= UPLOAD_MIN_MS && lastKnown != null) {
+        if (System.currentTimeMillis() - lastUploadAt >= motion.mode().uploadEveryMs && lastKnown != null) {
             upload(lastKnown, false);
         }
     }
@@ -357,21 +610,33 @@ public class LocationTrackingService extends Service {
         // The alarm may have restarted the process: listen again if so.
         readSteps();
         if (!updatesRequested) requestUpdates();
+        // A drive whose last fix came minutes ago (parked indoors, no fix at
+        // all) ends here, and the permission may have been granted or taken back.
+        MotionModeSelector.Mode before = motion.mode();
+        if (motion.tick(System.currentTimeMillis())) onModeChanged(before);
+        registerTransitions();
         if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
         scheduleHeartbeat();
     }
 
-    /** One fresh fix from each enabled provider, for the heartbeat. */
+    /** One fresh fix (fused, or from each enabled provider), for the heartbeat. */
     @SuppressWarnings("deprecation")
     private void requestFreshFix() {
-        if (locationManager == null) return;
+        if (fused == null && locationManager == null) return;
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) return;
         try {
-            for (String provider : new String[]{
-                    LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                if (locationManager.isProviderEnabled(provider)) {
-                    locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
+            if (fused != null) {
+                fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                        .addOnSuccessListener(l -> {
+                            if (l != null) consider(l);
+                        });
+            } else {
+                for (String provider : new String[]{
+                        LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    if (locationManager.isProviderEnabled(provider)) {
+                        locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
+                    }
                 }
             }
         } catch (SecurityException e) {
@@ -398,16 +663,17 @@ public class LocationTrackingService extends Service {
             Log.w(TAG, "no username persisted; not uploading");
             return;
         }
-        if (!force && now - lastUploadAt < UPLOAD_MIN_MS) {
+        if (!force && now - lastUploadAt < motion.mode().uploadEveryMs) {
             return;
         }
         if (uploading) {
             return;
         }
         uploading = true;
+        final String activity = motion.mode().activity;
         Thread worker = new Thread(() -> {
             try {
-                doUpload(location);
+                doUpload(location, activity);
                 lastUploadAt = System.currentTimeMillis();
                 lastUploadedFixTime = location.getTime();
             } finally {
@@ -417,7 +683,7 @@ public class LocationTrackingService extends Service {
         worker.start();
     }
 
-    private void doUpload(Location location) {
+    private void doUpload(Location location, String activity) {
         android.content.SharedPreferences p = TokenBridgePlugin.prefs(this);
         String token = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
         String serverUrl = p.getString(TokenBridgePlugin.KEY_SERVER_URL, null);
@@ -430,7 +696,7 @@ public class LocationTrackingService extends Service {
         final String user = username;
         JSONObject body;
         try {
-            body = fixBody(location);
+            body = fixBody(location, activity);
         } catch (Exception e) {
             Log.e(TAG, "could not build the upload", e);
             return;
@@ -454,16 +720,12 @@ public class LocationTrackingService extends Service {
         }
     }
 
-    private JSONObject fixBody(Location location) throws Exception {
-        JSONObject body = new JSONObject();
-        body.put("latitude", location.getLatitude());
-        body.put("longitude", location.getLongitude());
-        body.put("accuracy", location.hasAccuracy() ? location.getAccuracy() : 0);
-        body.put("speed", location.hasSpeed() ? location.getSpeed() : 0);
-        // When the fix was taken, not when it is sent: a cached last-known fix
-        // (hours old, possibly) used to be reported as current.
-        body.put("timestamp", (location.getTime() > 0 ? location.getTime() : System.currentTimeMillis()) / 1000.0);
-        if (location.hasBearing()) body.put("bearing", location.getBearing());
+    private JSONObject fixBody(Location location, String activity) throws Exception {
+        JSONObject body = fixFields(location.getLatitude(), location.getLongitude(),
+                location.hasAccuracy() ? location.getAccuracy() : Double.NaN,
+                location.hasSpeed() ? location.getSpeed() : Double.NaN,
+                location.hasBearing() ? location.getBearing() : Double.NaN,
+                location.getTime(), System.currentTimeMillis(), activity);
         // The family cards show it; without it each upload from here blanked
         // the battery the app had reported.
         int battery = batteryPercent();
@@ -487,6 +749,30 @@ public class LocationTrackingService extends Service {
         if (userId != null) {
             body.put("username", username);
         }
+        return body;
+    }
+
+    /**
+     * The fix itself, apart from battery, steps and identity. NaN means the
+     * fix does not have that value.
+     *
+     * Speed is sent only when the fix has one. A network fix has none, and it
+     * used to be sent as 0, so a phone doing 36 mph was shown as stationary;
+     * the server works one out from the fixes when it is missing.
+     */
+    static JSONObject fixFields(double lat, double lon, double accuracyM, double speedMps, double bearing,
+                                long fixTimeMs, long nowMs, String activity) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("latitude", lat);
+        body.put("longitude", lon);
+        body.put("accuracy", Double.isNaN(accuracyM) ? 0 : accuracyM);
+        if (!Double.isNaN(speedMps)) body.put("speed", speedMps);
+        // When the fix was taken, not when it is sent: a cached last-known fix
+        // (hours old, possibly) used to be reported as current.
+        body.put("timestamp", (fixTimeMs > 0 ? fixTimeMs : nowMs) / 1000.0);
+        if (!Double.isNaN(bearing)) body.put("bearing", bearing);
+        // driving, cycling, walking, still or unknown: what the phone was doing.
+        if (activity != null) body.put("activity", activity);
         return body;
     }
 
@@ -547,13 +833,9 @@ public class LocationTrackingService extends Service {
         handler.removeCallbacksAndMessages(null);
         cancelHeartbeat();
         updatesRequested = false;
-        if (locationManager != null) {
-            try {
-                locationManager.removeUpdates(listener);
-            } catch (SecurityException ignored) {
-                // Nothing to remove.
-            }
-        }
+        removeUpdates();
+        removeTransitions();
+        postDrivingEvents(drivingMonitor.finish());
         releaseWakeLock();
         stopForeground(true);
         stopSelf();
@@ -563,6 +845,14 @@ public class LocationTrackingService extends Service {
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         releaseWakeLock();
+        removeUpdates();
+        if (instance == this) instance = null;
+        super.onDestroy();
+    }
+
+    private void removeUpdates() {
+        if (fused != null) fused.removeLocationUpdates(fusedCallback);
+        requestedMode = null;
         if (locationManager != null) {
             try {
                 locationManager.removeUpdates(listener);
@@ -570,7 +860,6 @@ public class LocationTrackingService extends Service {
                 // Nothing to remove.
             }
         }
-        super.onDestroy();
     }
 
     @Override
