@@ -109,7 +109,24 @@ export function avatarClusterMarkerHtml({
 
 // --- Saved places: a round pin, with everyone there in a pill above it ------
 
-export type PlaceKind = 'home' | 'school' | 'work' | 'church' | 'place';
+export type PlaceKind =
+  | 'home' | 'school' | 'work' | 'church' | 'store' | 'gym' | 'park' | 'friends' | 'food' | 'hospital' | 'place';
+
+/** Every icon a place can be given, in the order the picker lists them (geo keeps the same list). */
+export const PLACE_KINDS: { kind: PlaceKind; label: string }[] = [
+  { kind: 'home', label: 'Home' },
+  { kind: 'school', label: 'School' },
+  { kind: 'work', label: 'Work' },
+  { kind: 'church', label: 'Church' },
+  { kind: 'store', label: 'Store' },
+  { kind: 'gym', label: 'Gym or sports' },
+  { kind: 'park', label: 'Park' },
+  { kind: 'friends', label: 'Friends or family' },
+  { kind: 'food', label: 'Restaurant' },
+  { kind: 'hospital', label: 'Doctor or hospital' },
+  { kind: 'place', label: 'Pin' },
+];
+const KIND_NAMES = new Set<string>(PLACE_KINDS.map((k) => k.kind));
 
 /** Line icons (24-unit viewBox) drawn white inside the place pin. */
 const PLACE_ICON_PATHS: Record<PlaceKind, string> = {
@@ -117,6 +134,12 @@ const PLACE_ICON_PATHS: Record<PlaceKind, string> = {
   school: '<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
   work: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   church: '<path d="M12 2v6M9 5h6"/><path d="M5 22V12l7-4 7 4v10z"/><path d="M10 22v-4h4v4"/>',
+  store: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  gym: '<path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/>',
+  park: '<path d="M12 22v-6"/><path d="M12 2 5 14h14z"/>',
+  friends: '<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 12 6 5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>',
+  food: '<path d="M3 2v7a3 3 0 0 0 6 0V2M6 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6h5zm0 0v7"/>',
+  hospital: '<path d="M12 6v12M6 12h12"/><rect x="3" y="3" width="18" height="18" rx="4"/>',
   place: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
 };
 
@@ -125,11 +148,19 @@ const PLACE_ICON_PATHS: Record<PlaceKind, string> = {
  * (``mdi:school``), else its id or name ("zone.home", "Lincoln Elementary").
  */
 export function placeKind(place: { id?: string; name: string; icon?: string | null }): PlaceKind {
+  // An icon chosen in Jarvis by the place's owner or an admin.
+  if (place.icon && KIND_NAMES.has(place.icon)) return place.icon as PlaceKind;
   const text = `${place.icon ?? ''} ${place.id ?? ''} ${place.name}`.toLowerCase();
   if (/\bhome\b|house/.test(text)) return 'home';
   if (/school|academy|college|university|elementary|preschool|campus/.test(text)) return 'school';
   if (/work|office|briefcase/.test(text)) return 'work';
   if (/church|chapel|cross/.test(text)) return 'church';
+  if (/store|shop|cart|costco|target|walmart|mall/.test(text)) return 'store';
+  if (/gym|dumbbell|sport|gymnastic|soccer|stadium/.test(text)) return 'gym';
+  if (/park|tree|pine/.test(text)) return 'park';
+  if (/grandma|grandpa|friend|heart|account-group/.test(text)) return 'friends';
+  if (/restaurant|food|silverware|cafe|coffee/.test(text)) return 'food';
+  if (/hospital|doctor|clinic|medical|dentist/.test(text)) return 'hospital';
   return 'place';
 }
 

@@ -139,7 +139,7 @@ async def test_place_settings_are_stored_and_shown_on_the_zones():
     r = R()
     await safety.save_place_setting(r, "zone.school", True, ["Leo", "michele", " "])
     settings = await safety.place_settings(r)
-    assert settings == {"zone.school": {"important": True, "notify": ["leo", "michele"]}}
+    assert settings == {"zone.school": {"important": True, "notify": ["leo", "michele"], "icon": ""}}
     features = [{"properties": {"entity_id": "zone.school"}}, {"properties": {"entity_id": "zone.home"}}]
     safety.annotate_zone_features(features, settings)
     assert features[0]["properties"]["important"] is True
@@ -205,3 +205,18 @@ async def test_the_weekly_summary_goes_out_on_sunday_evening_once(sent):
 def test_weekly_text_without_a_last_week():
     assert health_notices.weekly_text(5000, 0, 1) == ("Your week in steps", "5,000 steps this week, 5,000 a day.")
     assert health_notices.weekly_text(900, 1000, 3)[1].endswith("Down 10% on last week (1,000).")
+
+
+@pytest.mark.asyncio
+async def test_an_icon_chosen_for_a_zone_is_kept_and_shown():
+    r = R()
+    await safety.save_place_setting(r, "zone.school", False, [], "school")
+    # Marking it important later, without naming an icon, keeps the icon.
+    await safety.save_place_setting(r, "zone.school", True, ["leo"])
+    settings = await safety.place_settings(r)
+    assert settings["zone.school"]["icon"] == "school"
+    features = [{"properties": {"entity_id": "zone.school", "icon": "mdi:bus"}}]
+    assert safety.annotate_zone_features(features, settings)[0]["properties"]["icon"] == "school"
+    await safety.save_place_setting(r, "zone.school", True, ["leo"], "")
+    features = [{"properties": {"entity_id": "zone.school", "icon": "mdi:bus"}}]
+    assert safety.annotate_zone_features(features, await safety.place_settings(r))[0]["properties"]["icon"] == "mdi:bus"

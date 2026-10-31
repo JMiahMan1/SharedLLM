@@ -5323,6 +5323,31 @@ def family_member_devices(username: str, session: Session = Depends(get_session)
     }
 
 
+@app.delete("/api/family/devices/{username}/tamper")
+def clear_family_member_tamper(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Clear a child's tamper reports off the Devices section once a parent has
+    read them (they piled up and filled the screen). Only those who may see
+    them, the father and an admin. The rows are kept, marked cleared with who
+    and when, so a later question about what happened still has an answer."""
+    child = _screen_subject(session, username)
+    if caller.username == child.username or not may_view_technical_data(caller, child):
+        raise HTTPException(status_code=403, detail="Only the father or an admin can clear tamper reports")
+    rows = session.exec(
+        select(DeviceEvent).where(DeviceEvent.username == child.username, DeviceEvent.event == "guard_tamper")
+    ).all()
+    stamp = datetime.now(UTC).isoformat()
+    for row in rows:
+        try:
+            extra = json.loads(row.extra or "{}")
+        except (TypeError, ValueError):
+            extra = {}
+        row.event = "guard_tamper_cleared"
+        row.extra = json.dumps({**extra, "cleared_by": caller.username, "cleared_at": stamp})
+        session.add(row)
+    session.commit()
+    return {"status": "SUCCESS", "cleared": len(rows)}
+
+
 def _journal_out(row: GuardianNote) -> dict:
     return {"id": row.id, "author": row.author, "child": row.child, "text": row.text, "shared": row.shared, "created_at": row.created_at}
 

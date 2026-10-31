@@ -61,14 +61,20 @@ async def place_settings(r) -> dict[str, dict]:
             out[_decode(key)] = {
                 "important": bool(entry.get("important")),
                 "notify": [str(u).lower() for u in entry.get("notify") or [] if str(u).strip()],
+                "icon": str(entry.get("icon") or ""),
             }
     return out
 
 
-async def save_place_setting(r, zone_id: str, important: bool, notify: list[str] | None) -> dict:
+async def save_place_setting(r, zone_id: str, important: bool, notify: list[str] | None,
+                             icon: str | None = None) -> dict:
+    """``icon`` None keeps the zone's icon as it was; "" goes back to automatic."""
+    if icon is None:
+        icon = (await place_settings(r)).get(zone_id, {}).get("icon", "")
     entry = {
         "important": bool(important),
         "notify": sorted({str(u).strip().lower() for u in notify or [] if str(u).strip()}),
+        "icon": icon,
     }
     await r.hset(PLACE_SETTINGS_KEY, zone_id, json.dumps(entry))
     return entry
@@ -81,6 +87,9 @@ def annotate_zone_features(features: list[dict], settings: dict[str, dict]) -> l
         entry = settings.get(props.get("entity_id") or "", {})
         props["important"] = bool(entry.get("important"))
         props["notify"] = list(entry.get("notify") or [])
+        # An icon chosen in Jarvis wins over the one drawn in Home Assistant.
+        if entry.get("icon"):
+            props["icon"] = entry["icon"]
     return features
 
 

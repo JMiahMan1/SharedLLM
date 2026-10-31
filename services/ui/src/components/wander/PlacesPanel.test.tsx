@@ -13,6 +13,7 @@ vi.mock('../../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       setPlaceSettings: vi.fn(),
+      updateSavedPlace: vi.fn(),
       getSavedPlaces: vi.fn(),
       getVisitSuggestions: vi.fn(),
     },
@@ -22,6 +23,7 @@ vi.mock('../../services/api', async (importOriginal) => {
 const setPlaceSettings = vi.mocked(api.setPlaceSettings);
 const getSavedPlaces = vi.mocked(api.getSavedPlaces);
 const getVisitSuggestions = vi.mocked(api.getVisitSuggestions);
+const updateSavedPlace = vi.mocked(api.updateSavedPlace);
 const members = [
   { username: 'michele', name: 'Michele' },
   { username: 'leo', name: 'Leo' },
@@ -102,5 +104,34 @@ describe('PlacesPanel', () => {
   it('shows nothing with no places', () => {
     const { container } = renderPanel(<PlacesPanel places={[]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('an admin picks the icon a Home Assistant place shows on the map', async () => {
+    renderPanel(<PlacesPanel places={[school]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /map icon for school/i }), 'gym');
+    await waitFor(() =>
+      expect(setPlaceSettings).toHaveBeenCalledWith('zone.school', { important: false, notify: [], icon: 'gym' }),
+    );
+  });
+
+  it('only shows the icon to someone who cannot change a Home Assistant place', () => {
+    renderPanel(<PlacesPanel places={[school]} members={members} canEdit={false} onSaved={vi.fn()} currentUser="leo" isAdmin={false} />);
+    expect(screen.queryByRole('combobox', { name: /map icon for school/i })).not.toBeInTheDocument();
+  });
+
+  it("the owner of a saved place changes its icon, and someone else's has no edit button", async () => {
+    const mine = { id: 'a'.repeat(32), entity_id: `place.${'a'.repeat(32)}`, name: 'Gymnastics', lat: 33.4, lon: -111.9, radius: 150,
+      scope: 'family' as const, owner: 'leo', important: false, notify: [] };
+    const theirs = { ...mine, id: 'b'.repeat(32), entity_id: `place.${'b'.repeat(32)}`, name: 'Office', owner: 'michele' };
+    getSavedPlaces.mockResolvedValue([mine, theirs]);
+    updateSavedPlace.mockResolvedValue({ ...mine, icon: 'gym' });
+    const onSaved = vi.fn();
+    renderPanel(<PlacesPanel places={[]} members={members} canEdit={false} onSaved={onSaved} currentUser="leo" isAdmin={false} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit Gymnastics' }));
+    expect(screen.queryByRole('button', { name: 'Edit Office' })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /map icon for gymnastics/i }), 'gym');
+    await userEvent.click(screen.getByRole('button', { name: 'Save place' }));
+    await waitFor(() => expect(updateSavedPlace).toHaveBeenCalledWith(mine.id, expect.objectContaining({ icon: 'gym' })));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
 });

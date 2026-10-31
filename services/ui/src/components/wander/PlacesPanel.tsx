@@ -7,12 +7,15 @@ import { errorText } from '../../lib/errorText';
 import { confirmDialog } from '../ui/confirmDialog';
 import Toggle from '../ui/Toggle';
 import type { SavedPlace, SavedPlaceInput, VisitSuggestion } from '../../types/api';
+import { PLACE_KINDS, placeKind, placePinHtml } from '../../lib/avatarMarker';
 
 export interface PlaceSetting {
   id: string;
   name: string;
   important: boolean;
   notify: string[];
+  /** The map icon chosen for it; absent or "" means automatic. */
+  icon?: string;
 }
 
 export interface PlaceMember {
@@ -43,6 +46,8 @@ interface Draft {
   scope: 'family' | 'user';
   important: boolean;
   notify: string[];
+  /** "" is automatic (from the name). */
+  icon: string;
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -53,7 +58,40 @@ const EMPTY_DRAFT: Draft = {
   scope: 'user',
   important: false,
   notify: [],
+  icon: '',
 };
+
+/**
+ * The icon a place's pin wears on the family map: automatic (worked out from
+ * its name) or one picked from the list, with the pin it gives shown beside.
+ */
+function IconPicker({ name, value, disabled, onChange }: { name: string; value: string; disabled?: boolean; onChange: (icon: string) => void }) {
+  const kind = placeKind({ name, icon: value });
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-xs text-slate-400">
+      <span
+        aria-hidden
+        className="shrink-0 scale-75"
+        // Static SVG from avatarMarker; the name in it is escaped there.
+        dangerouslySetInnerHTML={{ __html: placePinHtml({ name, kind }) }}
+      />
+      <select
+        aria-label={`Map icon for ${name || 'this place'}`}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="glass-input min-h-9 min-w-0 max-w-full px-2 text-xs"
+      >
+        <option value="">Automatic</option>
+        {PLACE_KINDS.map((k) => (
+          <option key={k.kind} value={k.kind}>
+            {k.label}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
 
 /** A saved place's owner may edit it; admins may edit any. */
 function mayEdit(place: SavedPlace, currentUser: string, isAdmin: boolean): boolean {
@@ -86,10 +124,10 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
 
   const refreshSaved = () => void queryClient.invalidateQueries({ queryKey: ['saved-places'] });
 
-  const saveZone = async (place: PlaceSetting, important: boolean, notify: string[]) => {
+  const saveZone = async (place: PlaceSetting, important: boolean, notify: string[], icon?: string) => {
     setSaving(place.id);
     try {
-      await api.setPlaceSettings(place.id, { important, notify });
+      await api.setPlaceSettings(place.id, { important, notify, ...(icon !== undefined ? { icon } : {}) });
       onSaved();
     } catch (err) {
       toast.error(errorText(err, `Could not save ${place.name}`));
@@ -112,6 +150,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
       toast.success(payload.id ? `Saved ${place.name}` : `Added ${place.name}`);
       setDraft(null);
       refreshSaved();
+      onSaved(); // the map's places, so a new icon shows at once
     },
     onError: (err) => toast.error(errorText(err, 'Could not save the place')),
   });
@@ -159,6 +198,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
       scope: draft.scope,
       important: draft.important,
       notify: draft.important ? draft.notify : [],
+      icon: draft.icon,
     };
     savePlace.mutate({ id: draft.id, body });
   };
@@ -217,7 +257,13 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                   <span className="truncate">{place.name}</span>
                 </span>
                 {canEdit ? (
-                  <span className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-400">
+                    <IconPicker
+                      name={place.name}
+                      value={place.icon && PLACE_KINDS.some((k) => k.kind === place.icon) ? place.icon : ''}
+                      disabled={saving === place.id}
+                      onChange={(icon) => void saveZone(place, place.important, place.notify, icon)}
+                    />
                     Important
                     <Toggle
                       checked={place.important}
@@ -289,6 +335,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                             scope: place.scope,
                             important: place.important,
                             notify: place.notify,
+                            icon: place.icon ?? '',
                           })
                         }
                         className="glass-button flex h-9 w-9 items-center justify-center p-0 text-slate-300"
@@ -393,6 +440,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
               </span>
             </div>
             {draft.important && members.length > 0 && notifyPicker(true, draft.notify, false, toggleDraftMember)}
+            <IconPicker name={draft.name} value={draft.icon} onChange={(icon) => setDraft({ ...draft, icon })} />
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"

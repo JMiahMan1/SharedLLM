@@ -1107,6 +1107,12 @@ export const api = {
     return resp.data;
   },
 
+  /** Clear a child's tamper reports off the Devices section (father or admin). */
+  async clearMemberTamper(username: string): Promise<{ cleared: number }> {
+    const resp = await apiClient.delete(`/api/family/member/${encodeURIComponent(username)}/devices/tamper`);
+    return resp.data;
+  },
+
   // --- Device management (MDM, HANDOVER.md Phase 12) -----------------------
 
   /** Every family device in one list: the father's and admins' only. */
@@ -1705,7 +1711,10 @@ export const api = {
   },
 
   /** Mark a place (an HA zone) important and choose who hears about it; an empty list means everyone. */
-  async setPlaceSettings(zoneId: string, settings: { important: boolean; notify: string[] }): Promise<{ zone: string; important: boolean; notify: string[] }> {
+  async setPlaceSettings(
+    zoneId: string,
+    settings: { important: boolean; notify: string[]; icon?: string },
+  ): Promise<{ zone: string; important: boolean; notify: string[]; icon?: string }> {
     const resp = await apiClient.put(`/api/geo/places/${encodeURIComponent(zoneId)}`, settings);
     return resp.data;
   },

@@ -477,6 +477,10 @@ export interface MemberGuardState {
   /** Installed apps that get around the web filter (closed while it is on). */
   bypassApps?: string[];
   usageAccess?: boolean;
+  /** Notification access (media sessions, chat and social notifications). */
+  notificationAccess?: boolean;
+  callLogAccess?: boolean;
+  smsAccess?: boolean;
   healthConnect?: string;
   reportedAt?: string;
 }
@@ -2534,6 +2538,8 @@ export interface SavedPlace {
   owner: string;
   important: boolean;
   notify: string[];
+  /** The map pin's icon (lib/avatarMarker PLACE_KINDS); absent means automatic. */
+  icon?: string;
   created_at?: number;
 }
 
@@ -2546,6 +2552,8 @@ export interface SavedPlaceInput {
   scope?: 'family' | 'user';
   important?: boolean;
   notify?: string[];
+  /** "" for automatic (from the name). */
+  icon?: string;
 }
 
 /** A spot someone keeps spending a long time at, worth offering to save as a place. */

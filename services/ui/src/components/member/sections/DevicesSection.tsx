@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { BatteryMedium, Check, Cpu, KeyRound, Lightbulb, Mic, Monitor, ShieldAlert, Smartphone, Speaker, Tablet, Watch, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -6,8 +7,11 @@ import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
 import { relativeTime } from '../../../lib/wanderTrips';
 import { deviceKindLabel, deviceNoun, isEsphomeDevice } from '../../../lib/deviceKind';
-import type { MemberDevice, MemberGuardState } from '../../../types/api';
+import type { MemberDevice, MemberDevices, MemberGuardState } from '../../../types/api';
 import { tamperText } from '../../../lib/guardTamper';
+import { confirmDialog } from '../../ui/confirmDialog';
+import { errorText } from '../../../lib/errorText';
+import toast from 'react-hot-toast';
 
 const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
@@ -26,6 +30,9 @@ const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'webFilterAllowed', label: 'Web filter VPN allowed' },
   { key: 'webFilterActive', label: 'Web filter running' },
   { key: 'usageAccess', label: 'Usage access' },
+  { key: 'notificationAccess', label: 'Notification access (media, chat apps)' },
+  { key: 'callLogAccess', label: 'Call log' },
+  { key: 'smsAccess', label: 'Text messages' },
 ];
 
 function State({ on }: { on: boolean | undefined }) {
@@ -137,6 +144,72 @@ function DeviceCard({ device }: { device: MemberDevice }) {
   );
 }
 
+/** Reports shown before "Show all": the log used to fill the screen. */
+const TAMPER_SHOWN = 5;
+
+function TamperCard({ username, name, tamper }: { username: string; name: string; tamper: MemberDevices['tamper'] }) {
+  const queryClient = useQueryClient();
+  const [all, setAll] = useState(false);
+  const clear = useMutation({
+    mutationFn: () => api.clearMemberTamper(username),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['member-devices', username] });
+      toast.success('Tamper reports cleared');
+    },
+    onError: (err) => toast.error(errorText(err, 'Could not clear the reports')),
+  });
+  const askClear = async () => {
+    const ok = await confirmDialog({
+      title: 'Clear tamper reports?',
+      body: `This clears ${tamper.length} report${tamper.length === 1 ? '' : 's'} from ${name}'s page. New reports still show up and still notify you.`,
+      confirmLabel: 'Clear',
+    });
+    if (ok) clear.mutate();
+  };
+  const shown = all ? tamper : tamper.slice(0, TAMPER_SHOWN);
+  return (
+    <MemberCard
+      title="Tamper reports"
+      icon={ShieldAlert}
+      tone="text-red-300"
+      testId="member-tamper"
+      aside={
+        tamper.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => void askClear()}
+            disabled={clear.isPending}
+            className="glass-button min-h-11 rounded-xl px-3 text-xs font-semibold text-slate-200 disabled:opacity-50"
+            data-testid="member-tamper-clear"
+          >
+            Clear
+          </button>
+        ) : null
+      }
+      empty={tamper.length === 0 ? 'No protection changes reported.' : null}
+    >
+      <ul className="space-y-1.5 text-xs">
+        {shown.map((t, i) => (
+          <li key={`${t.at}-${i}`} className="flex justify-between gap-2">
+            <span className="min-w-0 break-words text-slate-200">{tamperText(t.extra)}</span>
+            <span className="shrink-0 text-[10px] text-slate-500">{relativeTime(t.at)}</span>
+          </li>
+        ))}
+      </ul>
+      {tamper.length > TAMPER_SHOWN && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          className="min-h-11 text-xs font-medium text-[var(--site-accent-text)]"
+          data-testid="member-tamper-more"
+        >
+          {all ? 'Show fewer' : `Show all ${tamper.length}`}
+        </button>
+      )}
+    </MemberCard>
+  );
+}
+
 /**
  * Every device of the child with its technical side (the father's and an
  * admin's only; the server refuses anyone else, the mother included).
@@ -163,22 +236,7 @@ export default function DevicesSection({ username, name }: { username: string; n
       {data.devices.map((d) => (
         <DeviceCard key={d.device_key} device={d} />
       ))}
-      <MemberCard
-        title="Tamper reports"
-        icon={ShieldAlert}
-        tone="text-red-300"
-        testId="member-tamper"
-        empty={data.tamper.length === 0 ? 'No protection changes reported.' : null}
-      >
-        <ul className="space-y-1.5 text-xs">
-          {data.tamper.map((t, i) => (
-            <li key={`${t.at}-${i}`} className="flex justify-between gap-2">
-              <span className="min-w-0 break-words text-slate-200">{tamperText(t.extra)}</span>
-              <span className="shrink-0 text-[10px] text-slate-500">{relativeTime(t.at)}</span>
-            </li>
-          ))}
-        </ul>
-      </MemberCard>
+      <TamperCard username={username} name={name} tamper={data.tamper} />
       <MemberCard title="Offline unlock codes" icon={KeyRound} tone="text-amber-300" testId="member-offline-codes" empty={parents.length === 0 ? 'No parents linked.' : null}>
         <ul className="space-y-1.5 text-xs">
           {parents.map(([parent, set]) => (

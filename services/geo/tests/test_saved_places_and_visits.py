@@ -296,3 +296,16 @@ async def test_the_sweep_remembers_a_long_stay_somewhere_unsaved(monkeypatch):
         assert await geo._sweep_visit_stays(r, now) == 0
     finally:
         geo._zone_cache.update({"at": 0.0, "zones": []})
+
+
+# --- the icon on the map ---------------------------------------------------
+
+
+def test_a_place_takes_one_of_the_map_icons_or_automatic():
+    assert places.validate({"icon": "school"}, partial=True) == {"icon": "school"}
+    assert places.validate({"icon": " Gym "}, partial=True) == {"icon": "gym"}
+    assert places.validate({"icon": ""}, partial=True) == {"icon": ""}
+    with pytest.raises(ValueError):
+        places.validate({"icon": "rocket"}, partial=True)
+    # An edit that does not mention the icon leaves it alone.
+    assert "icon" not in places.validate({"name": "Gym"}, partial=True)
