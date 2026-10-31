@@ -5,13 +5,18 @@ import type { IWidgetProps } from '../../types/widget';
 import { householdSeries, type EnergySummary as Summary } from '../../lib/energySeries';
 import { api } from '../../services/api';
 import { WidgetCard } from './WidgetCard';
+import { useAuth } from '../../context/AuthContext';
 
 const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
+  // Energy readings are the admin's (the gateway refuses anyone else with 403);
+  // asking anyway put a failed request in the logs on every dashboard load.
+  const isAdmin = useAuth().role === 'admin';
   const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(isAdmin);
+  const [error, setError] = React.useState<string | null>(isAdmin ? null : 'Energy insights are available to the household admin.');
 
   React.useEffect(() => {
+    if (!isAdmin) return undefined;
     const fetchEnergyData = async () => {
       try {
         setError(null);
@@ -47,7 +52,7 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
     fetchEnergyData();
     const interval = setInterval(fetchEnergyData, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAdmin]);
 
   const data = useMemo(() => householdSeries(summaries), [summaries]);
 

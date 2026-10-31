@@ -28,7 +28,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from services.common import concern_monitor, concern_review, guardian_recap
-from services.telemetry import llm, notices, store
+from services.telemetry import app_updates, llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
 
@@ -328,4 +328,12 @@ async def recap_loop(redis_factory, session_factory, deliver: Deliver) -> None:
             raise
         except Exception as exc:
             log.error("weekly recap tick failed: %s", exc)
+        try:
+            # The same tick tells people whose phones missed an app update.
+            session = session_factory()
+            await app_updates.remind_missed_updates(rc, session, deliver, await children(session))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("missed-update reminder tick failed: %s", exc)
         await asyncio.sleep(RECAP_TICK_SECONDS)

@@ -188,6 +188,9 @@ async def mission_needs_approval(mission: dict) -> bool:
 # -------------------------------------------------------------- app updates
 
 ANNOUNCED_APK_KEY = "app_updates:announced"
+#: The newest published APK ({version_code, version_name, notes, published_at});
+#: telemetry's missed-update reminder reads it.
+LATEST_APK_KEY = "app_updates:latest_apk"
 
 
 def _human_notes(notes: str | None) -> bool:
@@ -196,24 +199,35 @@ def _human_notes(notes: str | None) -> bool:
     return bool(notes) and notes != "Jarvis OS update" and not notes.startswith("Android build ")
 
 
-async def app_update_published(version_code: int, version_name: str | None, notes: str, r=None) -> int:
-    """Tell everyone once about a new APK; returns how many were told."""
+async def app_update_published(version_code: int, version_name: str | None, notes: str, r=None) -> bool:
+    """Record a newly published APK; nobody is told yet.
+
+    Every push under ``services/ui`` builds and publishes an APK, so telling
+    the whole family at once sent several "is available" notices a day, to
+    people whose phones were already up to date. Telemetry's missed-update
+    reminder (``services/telemetry/app_updates.py``) reads what is recorded
+    here and tells only the people with a phone or tablet still behind, once
+    the build has been out a few hours, at most once a day. Returns whether
+    this build was new.
+    """
     try:
         async with _redis(r) as conn:
             if not await conn.sadd(ANNOUNCED_APK_KEY, str(version_code)):
-                return 0  # this build was already announced
+                return False  # this build was already recorded
+            current = await conn.get(LATEST_APK_KEY)
+            try:
+                current_code = int(json.loads(current or "{}").get("version_code") or 0)
+            except (TypeError, ValueError):
+                current_code = 0
+            if version_code <= current_code:
+                return False
+            await conn.set(LATEST_APK_KEY, json.dumps({
+                "version_code": version_code,
+                "version_name": version_name or "",
+                "notes": _summary(notes) if _human_notes(notes) else "",
+                "published_at": time.time(),
+            }))
+            return True
     except Exception as e:  # the build is published either way
         log.warning(f"[app-updates] could not record build {version_code}: {type(e).__name__}: {e}")
-        return 0
-    # The version name only changes on a release bump, so every build in
-    # between shares it. The build number is what tells two of them apart and
-    # what Settings shows ("Install build 308").
-    label = f"{version_name} (build {version_code})" if version_name else f"build {version_code}"
-    body = _summary(notes) if _human_notes(notes) else "Open Settings to install it."
-    return await notify.send_many(
-        await notify.family(),
-        lambda user: notify.notice(
-            user, "app_updates", f"Jarvis app {label} is available", body, url="/settings",
-            tag="app_update", once=f"apk:{version_code}", actions=[notify.view_action("/settings", "Update")],
-            audience="parents"),
-    )
+        return False

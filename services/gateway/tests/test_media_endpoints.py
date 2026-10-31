@@ -417,7 +417,7 @@ def test_abs_book_cover_and_duration_survive_normalization(client, upstream, ma)
     body = client.get("/api/media/home").json()
 
     book = body["recent"][0]
-    assert book["image"] == "/covers/b1.jpg"
+    assert book["image"] == "/api/items/b1/cover"  # ABS serves the cover by item id
     assert book["duration"] == 3600
 
 
@@ -442,7 +442,7 @@ def test_abs_search_book_cover_uses_the_cover_field(client, upstream, ma):
 
     body = client.get("/api/media/search", params={"q": "Blue Train"}).json()
 
-    assert body["audiobooks"][0]["image"] == "/covers/b1.jpg"
+    assert body["audiobooks"][0]["image"] == "/api/items/b1/cover"
 
 
 def test_a_music_assistant_cover_uses_the_proxy_id_the_image_proxy_can_fetch(client, ma):
@@ -785,3 +785,19 @@ def test_a_library_track_or_album_finds_its_cover_in_metadata_or_its_album():
     # Its own image still wins, and an item with none anywhere has none.
     assert _media_ma_item({**track, "image": {"proxy_id": "own"}})["image"] == "/imageproxy/own"
     assert _media_ma_item({"uri": "t://2", "name": "Bare"})["image"] == ""
+
+
+def test_an_audiobookshelf_cover_is_its_cover_url_not_its_path_on_disk():
+    """Execution passes on ABS's ``coverPath`` (a file path on the ABS server);
+    the image proxy fetched that from Home Assistant and every audiobook and
+    podcast cover was a 404 (live, 2026-10-30)."""
+    from services.gateway.main import _media_abs_book_item, _media_abs_cover
+
+    book = {"id": "4d1a0d03-c263-4179-b35a-5060ac55c453", "title": "Exodus",
+            "cover_path": "/audiobooks/Exodus [B005FXZQYM]/cover.jpg"}
+    assert _media_abs_book_item(book)["image"] == "/api/items/4d1a0d03-c263-4179-b35a-5060ac55c453/cover"
+    assert _media_abs_cover("p1", "/metadata/items/p1/cover.jpg") == "/api/items/p1/cover"
+    # Already a URL: kept. No cover at all: none (no placeholder fetch).
+    assert _media_abs_cover("p1", "/api/items/p1/cover?width=400") == "/api/items/p1/cover?width=400"
+    assert _media_abs_cover("p1", "https://example.org/c.jpg") == "https://example.org/c.jpg"
+    assert _media_abs_cover("p1", None) == ""
