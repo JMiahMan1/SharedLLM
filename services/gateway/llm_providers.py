@@ -397,6 +397,20 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         self.provider_name = provider_name
         self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
 
+    @staticmethod
+    def _unwrap_envelope(data: Any) -> Any:
+        """Unwrap a {"data": {...}} completion envelope.
+
+        ClinePass returns non-streaming completions nested one level deep
+        ({"data": {"choices": [...]}}) instead of the flat OpenAI shape, while
+        its streaming SSE is flat. Unwrap the envelope so both parse alike.
+        """
+        if isinstance(data, dict) and "choices" not in data:
+            inner = data.get("data")
+            if isinstance(inner, dict) and "choices" in inner:
+                return inner
+        return data
+
     async def generate(
         self,
         model: str,
@@ -431,7 +445,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     raw_text = await resp.text()
                     raise RuntimeError(f"{self.provider_name} HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
-                data = await resp.json()
+                data = self._unwrap_envelope(await resp.json())
                 msg = data.get("choices", [{}])[0].get("message", {})
                 content = msg.get("content", "") or ""
                 reasoning = msg.get("reasoning_content", "") or ""
@@ -448,16 +462,27 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     await response.read()
                     raise RuntimeError(f"{self.provider_name} stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
+                # SSE frames arrive as arbitrary byte chunks, so one read can carry
+                # several "data: ..." lines (or a partial one). Buffer and split on
+                # newlines; treating each read as a single line dropped every event
+                # after the first, which broke ClinePass streaming.
+                buffer = ""
+                done = False
                 async for chunk in response.content.iter_any():
-                    line = chunk.decode("utf-8")
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
+                    if done:
+                        break
+                    buffer += chunk.decode("utf-8", errors="ignore")
+                    while "\n" in buffer:
+                        raw_line, buffer = buffer.split("\n", 1)
+                        line = raw_line.strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].strip()
                         if data_str == "[DONE]":
+                            done = True
                             break
                         try:
-                            chunk_json = json.loads(data_str)
+                            chunk_json = self._unwrap_envelope(json.loads(data_str))
                             delta = chunk_json.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content") or ""
                             reasoning = delta.get("reasoning_content") or ""
