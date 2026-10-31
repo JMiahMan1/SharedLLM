@@ -366,10 +366,35 @@ class OllamaProvider(BaseLLMProvider):
         return full_content.strip()
 
 
-class OpenRouterProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1/chat/completions", timeout: float | aiohttp.ClientTimeout = 120.0):
+# Default chat-completions endpoints for every supported cloud provider.
+# A custom llm_cloud_url overrides these, but selecting a provider from this
+# table means switching providers "just works" without editing the URL.
+CLOUD_PROVIDER_DEFAULT_URLS: dict[str, str] = {
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "cline_pass": "https://api.cline.bot/api/v1/chat/completions",
+}
+
+
+class OpenAICompatibleProvider(BaseLLMProvider):
+    """Generic OpenAI-compatible chat-completions client.
+
+    Backs OpenRouter, OpenAI, ClinePass and any other endpoint that speaks
+    the /v1/chat/completions contract. Provider-specific headers (e.g. the
+    OpenRouter HTTP-Referer attribution) are only added when provider_name
+    matches.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://openrouter.ai/api/v1/chat/completions",
+        provider_name: str = "openrouter",
+        timeout: float | aiohttp.ClientTimeout = 120.0,
+    ):
         self.api_key = api_key
         self.base_url = base_url
+        self.provider_name = provider_name
         self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
 
     async def generate(
@@ -383,8 +408,10 @@ class OpenRouterProvider(BaseLLMProvider):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/jmiahman1/sharedllm",
         }
+        # OpenRouter asks for attribution headers; other providers ignore them.
+        if self.provider_name == "openrouter":
+            headers["HTTP-Referer"] = "https://github.com/jmiahman1/sharedllm"
         payload = {
             "model": model,
             "messages": messages,
@@ -397,12 +424,12 @@ class OpenRouterProvider(BaseLLMProvider):
 
         full_content = ""
         async with shared_http_client() as client:
-            log.info(f"[OpenRouterProvider] Calling {self.base_url} for model {model}")
+            log.info(f"[{self.provider_name}] Calling {self.base_url} for model {model}")
             if not chunk_callback:
                 resp = await client.post(self.base_url, json=payload, headers=headers, timeout=self.timeout)
                 if resp.status >= 400:
                     raw_text = await resp.text()
-                    raise RuntimeError(f"OpenRouter HTTP {resp.status}: {raw_text}")
+                    raise RuntimeError(f"{self.provider_name} HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
                 data = await resp.json()
                 msg = data.get("choices", [{}])[0].get("message", {})
@@ -419,7 +446,7 @@ class OpenRouterProvider(BaseLLMProvider):
             async with client.post(self.base_url, json=payload, headers=headers, timeout=self.timeout) as response:
                 if response.status >= 400:
                     await response.read()
-                    raise RuntimeError(f"OpenRouter stream HTTP {response.status}: {response.text}")
+                    raise RuntimeError(f"{self.provider_name} stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
                 async for chunk in response.content.iter_any():
                     line = chunk.decode("utf-8")
@@ -447,7 +474,7 @@ class OpenRouterProvider(BaseLLMProvider):
             # If the model never emitted content (thinking-only response), fall back
             # to the accumulated reasoning so the AgentLoop can still extract a JSON action.
             if not full_content.strip() and full_reasoning.strip():
-                log.warning("[OpenRouterProvider] No content chunks received; falling back to reasoning_content")
+                log.warning(f"[{self.provider_name}] No content chunks received; falling back to reasoning_content")
                 return full_reasoning
             return full_content
 
@@ -460,10 +487,19 @@ async def get_provider(settings: dict[str, Any]) -> BaseLLMProvider:
         timeout = float(timeout_raw)
     except (ValueError, TypeError):
         timeout = 600.0
-    if active_provider == "openrouter":
-        return OpenRouterProvider(
+    if active_provider in CLOUD_PROVIDER_DEFAULT_URLS:
+        # Honour a custom URL the operator typed, but fall back to the
+        # provider's canonical endpoint when the field still holds another
+        # provider's default (so switching providers just works).
+        configured_url = settings.get("llm_cloud_url", "")
+        if configured_url and configured_url not in CLOUD_PROVIDER_DEFAULT_URLS.values():
+            base_url = configured_url
+        else:
+            base_url = CLOUD_PROVIDER_DEFAULT_URLS[active_provider]
+        return OpenAICompatibleProvider(
             api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
+            base_url=base_url,
+            provider_name=active_provider,
             timeout=timeout,
         )
     else:
@@ -474,4 +510,9 @@ async def get_provider(settings: dict[str, Any]) -> BaseLLMProvider:
             base_url=local_url,
             timeout=timeout,
         )
+
+
+# Backwards-compatible alias: the cloud client began life as the OpenRouter
+# provider and existing callers/tests import it under that name.
+OpenRouterProvider = OpenAICompatibleProvider
 

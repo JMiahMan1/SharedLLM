@@ -514,7 +514,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "artifact_local_quota_bytes", "value": "5368709120", "description": "Default local storage quota per user for generated artifacts, in bytes. Per-user overrides are stored by the storage service."},
 
     # --- LLM CONFIGURATION (UI MANAGED) ---
-    {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai)"},
+    {"key": "active_llm_provider", "value": "ollama", "description": "Active LLM Compute Engine (ollama, openrouter, openai, cline_pass)"},
     {"key": "llm_local_url", "value": "", "description": "Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API). Seeded from .env OLLAMA_URL on first startup."},
     {"key": "llm_local_max_ctx", "value": "16384", "description": "Maximum token context allowed for local inference (raise on larger VRAM; no code ceiling)"},
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},

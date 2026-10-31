@@ -30,9 +30,12 @@ GATEWAY_CONFIG_SCHEMA = {
     "workspace_runtime_svc_url": (OPTIONAL, "Workspace runtime URL", "Workspace operations broken"),
     "control_plane_url": (OPTIONAL, "Control plane URL", "Container management broken"),
 
-    # Cloud provider (only needed if active_llm_provider=openrouter)
-    "llm_cloud_api_key": (OPTIONAL, "Cloud LLM API key", "OpenRouter provider broken"),
+    # Cloud provider (only needed if active_llm_provider is a cloud provider)
+    "llm_cloud_api_key": (OPTIONAL, "Cloud LLM API key", "Cloud provider broken"),
 }
+
+# Providers that route through the shared cloud slot (llm_cloud_url + key).
+CLOUD_PROVIDERS = ("openrouter", "openai", "cline_pass")
 
 
 class ConfigValidationResult:
@@ -68,14 +71,15 @@ def validate_config(settings: dict[str, str]) -> ConfigValidationResult:
     """Validate configuration against the gateway schema."""
     result = ConfigValidationResult()
     active_provider = settings.get("active_llm_provider", "ollama")
+    is_cloud = active_provider in CLOUD_PROVIDERS
 
     for key, (priority, _description, impact) in GATEWAY_CONFIG_SCHEMA.items():
         # Skip cloud keys if not using cloud provider
-        if key.startswith("llm_cloud_") and active_provider != "openrouter":
+        if key.startswith("llm_cloud_") and not is_cloud:
             continue
 
         # Skip local/ollama keys if using cloud provider
-        if key == "llm_local_url" and active_provider == "openrouter":
+        if key == "llm_local_url" and is_cloud:
             continue
 
         value = settings.get(key, "")
@@ -93,9 +97,9 @@ def validate_config(settings: dict[str, str]) -> ConfigValidationResult:
             result.ok.append(key)
 
     # Cross-validation: if active_llm_provider is missing/invalid
-    if active_provider not in ("ollama", "openrouter"):
+    if active_provider not in ("ollama", *CLOUD_PROVIDERS):
         result.critical_failures.append(
-            f"active_llm_provider='{active_provider}': must be 'ollama' or 'openrouter'"
+            f"active_llm_provider='{active_provider}': must be 'ollama' or one of {', '.join(CLOUD_PROVIDERS)}"
         )
         log.critical(f"[ConfigValidation] CRITICAL: Invalid active_llm_provider='{active_provider}'")
 
