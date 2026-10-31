@@ -142,6 +142,13 @@ final class CrashDetector {
 
     private long lastReportedAt = Long.MIN_VALUE / 2;
 
+    // The last trusted fix, for a crash whose own fixes never come (below).
+    private double lastLat = Double.NaN;
+    private double lastLon = Double.NaN;
+    private double lastAccuracy = Double.NaN;
+    /** Whether any trusted fix has come since the impact. */
+    private boolean fixSinceImpact;
+
     /** Whether the phone is in driving mode; outside it no new impact is taken. */
     void setDriving(boolean driving) {
         this.driving = driving;
@@ -157,15 +164,24 @@ final class CrashDetector {
         return impactAt >= 0;
     }
 
-    /** One accelerometer sample. Never confirms a crash itself: only a fix can. */
-    void onAccel(long timeMs, double x, double y, double z) {
+    /**
+     * One accelerometer sample. It confirms a crash only in one case: a hard
+     * impact (a single {@link #SPIKE_MPS2} spike) after which no trusted fix
+     * came at all for {@link #STOP_WITHIN_MS}. A crash can take the GPS with
+     * it (the phone thrown, the antenna blocked), and that is the crash most
+     * worth reporting; the countdown still lets the person say they are fine.
+     * It is reported at the last position known before the impact.
+     */
+    Result onAccel(long timeMs, double x, double y, double z) {
+        Result lost = gpsLost(timeMs);
+        if (lost != null) return lost;
         expire(timeMs);
         double beyond = Math.sqrt(x * x + y * y + z * z) - GRAVITY;
         if (impactAt >= 0) {
             // Later jolts of the same crash (a second hit, the car settling)
             // only raise the peak.
             if (beyond > peakMps2) peakMps2 = beyond;
-            return;
+            return null;
         }
         boolean strong = beyond >= SUSTAINED_MPS2;
         if (!strong) {
@@ -177,13 +193,27 @@ final class CrashDetector {
             }
         }
         boolean impact = beyond >= SPIKE_MPS2 || (strong && strongRun.size() >= SUSTAIN_SAMPLES);
-        if (!impact || !armed(timeMs)) return;
+        if (!impact || !armed(timeMs)) return null;
         impactAt = timeMs;
         peakMps2 = beyond;
         speedBefore = topRecentSpeed(timeMs);
         stopAt = -1L;
         holdFixes = 0;
+        fixSinceImpact = false;
         strongRun.clear();
+        return null;
+    }
+
+    /** The no-fix case described at {@link #onAccel}; null otherwise. */
+    private Result gpsLost(long nowMs) {
+        if (impactAt < 0 || fixSinceImpact || peakMps2 < SPIKE_MPS2) return null;
+        if (nowMs - impactAt <= STOP_WITHIN_MS || Double.isNaN(lastLat)) return null;
+        Result r = new Result(round1(peakMps2 / GRAVITY), DrivingMonitor.mph(speedBefore), impactAt,
+                lastLat, lastLon, lastAccuracy, nowMs);
+        lastReportedAt = impactAt;
+        clearCandidate();
+        recentSpeeds.clear();
+        return r;
     }
 
     /**
@@ -195,6 +225,10 @@ final class CrashDetector {
         expire(timeMs);
         boolean trusted = !Double.isNaN(speedMps) && !Double.isNaN(accuracyM) && accuracyM <= MAX_ACCURACY_M;
         if (!trusted) return null;
+        lastLat = lat;
+        lastLon = lon;
+        lastAccuracy = accuracyM;
+        if (impactAt >= 0 && timeMs >= impactAt) fixSinceImpact = true;
         if (impactAt < 0) {
             if (driving) {
                 recentSpeeds.addLast(new double[]{timeMs, speedMps});
