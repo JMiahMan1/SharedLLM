@@ -314,4 +314,37 @@ public class CrashDetectorTest {
         accel(12_000 + CrashDetector.HOLD_MS + CrashDetector.HOLD_GRACE_MS + 1, 0);
         assertFalse(detector.isPending());
     }
+
+    // A crash that takes the GPS with it.
+
+    @Test
+    public void aHardImpactWithNoFixAfterItIsStillACrash() {
+        drive(10_000);
+        accel(10_500, 45);  // about 4.6 g, and then the GPS goes quiet
+        assertNull(detector.onAccel(T0 + 25_000, 0, 0, G));
+        CrashDetector.Result r = detector.onAccel(T0 + 31_000, 0, 0, G);
+        assertNotNull(r);
+        assertEquals(4.6, r.peakG, 1e-9);
+        assertEquals(T0 + 10_500, r.detectedAtMs);
+        assertEquals(LAT, r.lat, 1e-9);  // the last place known before the impact
+        assertFalse(detector.isPending());
+    }
+
+    @Test
+    public void aSoftImpactWithNoFixAfterItIsNot() {
+        drive(10_000);
+        for (long t = 10_500; t <= 10_560; t += 20) accel(t, 27);  // ~2.7 g held: a jolt, not a 4 g hit
+        assertTrue(detector.isPending());
+        assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
+        assertFalse(detector.isPending());
+    }
+
+    @Test
+    public void aHardImpactWithTheCarDrivingOnIsNot() {
+        drive(10_000);
+        accel(10_500, 45);  // a pothole, or the phone dropped
+        assertNull(fix(12_000, 20));
+        assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
+        assertFalse(detector.isPending());
+    }
 }

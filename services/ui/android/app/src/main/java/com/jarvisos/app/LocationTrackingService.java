@@ -126,8 +126,9 @@ public class LocationTrackingService extends Service {
         @Override
         public void onSensorChanged(SensorEvent event) {
             boolean wasPending = crashDetector.isPending();
-            crashDetector.onAccel(wallTime(event.timestamp),
+            CrashDetector.Result crash = crashDetector.onAccel(wallTime(event.timestamp),
                     event.values[0], event.values[1], event.values[2]);
+            if (crash != null) CrashAlert.start(LocationTrackingService.this, crash);
             if (wasPending != crashDetector.isPending()) syncCrashListening();
         }
 
