@@ -63,6 +63,27 @@ describe('MiniPlayer', () => {
     expect(value.previous).toHaveBeenCalled();
   });
 
+  it('can be closed while nothing is playing, and comes back when playback starts', async () => {
+    const paused = player({ isPlaying: false });
+    const view = renderAt('/bible', paused);
+    await userEvent.click(screen.getByRole('button', { name: 'Close player' }));
+    expect(screen.queryByTestId('mini-player')).toBeNull();
+
+    view.rerender(
+      <MemoryRouter initialEntries={['/bible']}>
+        <MediaPlayerContext.Provider value={player({ isPlaying: true })}>
+          <MiniPlayer />
+        </MediaPlayerContext.Provider>
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId('mini-player')).toBeTruthy();
+  });
+
+  it('cannot be closed while audio is playing', () => {
+    renderAt('/bible', player({ isPlaying: true }));
+    expect(screen.queryByRole('button', { name: 'Close player' })).toBeNull();
+  });
+
   it('stays out of the way on the Media page', () => {
     renderAt('/media', player());
     expect(screen.queryByTestId('mini-player')).toBeNull();
