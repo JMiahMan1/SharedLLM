@@ -103,11 +103,13 @@ One household account, set up by an admin on the system default user. Everyone
 else can only turn Skylight chores and rewards on or off for themselves; the
 fields are read-only for them.
 
-## OpenRouter
+## Cloud Providers (OpenRouter / ClinePass)
 
-OpenRouter is configured once for the whole household, not per user: pick the
-cloud provider and its API key under Settings > LLM (the `llm_cloud_url` and
-`llm_cloud_api_key` global settings). There is no per-user OpenRouter tile.
+A cloud provider is configured once for the whole household, not per user: pick
+the provider and its API key under Settings > LLM (the `llm_cloud_url` and
+`llm_cloud_api_key` global settings). OpenRouter and ClinePass share this one
+cloud slot; choosing a provider fills in its canonical endpoint automatically,
+so you only need to paste the API key. There is no per-user cloud tile.
 
 ## External Client Setup
 

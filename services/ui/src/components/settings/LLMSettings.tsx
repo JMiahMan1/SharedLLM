@@ -59,6 +59,9 @@ const LLMSettings: React.FC = () => {
 
   const rawProvider = getSetting('active_llm_provider') || 'ollama';
   const activeProvider = rawProvider === 'llama_server' ? 'ollama' : rawProvider;
+  // Providers that use the shared cloud slot (llm_cloud_url + llm_cloud_api_key).
+  const CLOUD_PROVIDERS = ['openrouter', 'cline_pass'];
+  const isCloudProvider = CLOUD_PROVIDERS.includes(activeProvider);
 
   if (isLoading) {
     return (
@@ -103,7 +106,8 @@ const LLMSettings: React.FC = () => {
             <div className="space-y-3">
               {[
                 { id: 'ollama', label: 'Local (Ollama / llama.cpp)', icon: Cpu, desc: 'Privacy-first, low latency local inference. Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.' },
-                { id: 'openrouter', label: 'Cloud (OpenRouter)', icon: Cloud, desc: 'High-power inference via cloud providers.' }
+                { id: 'openrouter', label: 'Cloud (OpenRouter)', icon: Cloud, desc: 'High-power inference via cloud providers.' },
+                { id: 'cline_pass', label: 'Cloud (ClinePass)', icon: Cloud, desc: 'Inference through ClinePass. Uses the Cloud API URL and Key below (defaults to the ClinePass endpoint).' }
               ].map(provider => (
                 <button
                   key={provider.id}
@@ -256,7 +260,7 @@ const LLMSettings: React.FC = () => {
             </div>
 
             {/* Cloud Models */}
-            <div className={`glass-panel p-6 border-white/5 transition-opacity ${activeProvider !== 'openrouter' ? 'opacity-50' : 'opacity-100'}`}>
+            <div className={`glass-panel p-6 border-white/5 transition-opacity ${!isCloudProvider ? 'opacity-50' : 'opacity-100'}`}>
               <div className="flex items-center gap-3 mb-6">
                 <Cloud size={20} className="text-sky-400" />
                 <h4 className="text-xs font-black uppercase tracking-widest text-white">Cloud Model Mapping</h4>
@@ -275,9 +279,9 @@ const LLMSettings: React.FC = () => {
                     <input 
                       id={`llm-cloud-${role.key}`}
                       type="text" 
-                      value={activeProvider === 'openrouter' ? getSetting(role.key) : ''} 
+                      value={isCloudProvider ? getSetting(role.key) : ''} 
                       onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
-                      disabled={activeProvider !== 'openrouter'}
+                      disabled={!isCloudProvider}
                       className="glass-input w-full text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       placeholder={role.placeholder}
                     />
