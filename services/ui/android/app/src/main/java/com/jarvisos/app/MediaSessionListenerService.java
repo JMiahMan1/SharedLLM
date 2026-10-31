@@ -133,6 +133,40 @@ public class MediaSessionListenerService extends NotificationListenerService {
         }
     }
 
+    /**
+     * A messaging app's notification: held so a chat message (RCS), which no
+     * other app can read from the message store, is still logged as a
+     * received text (ChatMessageLog). Only with the same permission plain
+     * texts need, and never the person's own replies.
+     */
+    private void noteChatMessage(StatusBarNotification sbn, Notification n, Bundle extras) {
+        if (checkSelfPermission(android.Manifest.permission.READ_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        if (sbn.isOngoing() || (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
+        String sender = null;
+        String text = null;
+        android.os.Parcelable[] messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+        if (messages != null && messages.length > 0 && messages[messages.length - 1] instanceof Bundle) {
+            Bundle last = (Bundle) messages[messages.length - 1];
+            CharSequence t = last.getCharSequence("text");
+            CharSequence s = last.getCharSequence("sender");
+            if (s == null && last.get("sender_person") instanceof android.app.Person) {
+                s = ((android.app.Person) last.get("sender_person")).getName();
+            }
+            // No sender in a conversation is the phone's own reply.
+            if (s == null || s.length() == 0) return;
+            sender = s.toString();
+            text = t == null ? null : t.toString();
+        } else {
+            CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
+            CharSequence body = extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+            if (body == null || body.length() == 0) body = extras.getCharSequence(Notification.EXTRA_TEXT);
+            sender = title == null ? "" : title.toString();
+            text = body == null ? null : body.toString();
+        }
+        long at = sbn.getPostTime() > 0 ? sbn.getPostTime() : System.currentTimeMillis();
+        ChatMessageLog.add(this, sender, text, at);
+    }
+
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null) return;
@@ -142,6 +176,10 @@ public class MediaSessionListenerService extends NotificationListenerService {
         if (extras == null) return;
 
         String pkg = sbn.getPackageName();
+        if (ChatMessageLog.MESSAGING_APPS.contains(pkg)) {
+            noteChatMessage(sbn, n, extras);
+            return;  // texts are logged from the message store, not as "social"
+        }
         boolean conversation = extras.containsKey(Notification.EXTRA_MESSAGES)
                 || "android.app.Notification$MessagingStyle".equals(extras.getString(Notification.EXTRA_TEMPLATE));
         if (!SocialNotificationMonitor.isSocial(pkg, n.category, conversation)) return;

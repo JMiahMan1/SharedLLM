@@ -44,6 +44,11 @@ public class CommsSyncWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
+        // Whether this is a child's phone (and its rules): the guard service
+        // fetched it only while the screen guard was on, so a teen's phone with
+        // the guard off never learned it was protected, and nothing that
+        // depends on that (message notifications, app approvals) ran.
+        GuardApi.refreshStatus(getApplicationContext());
         // A stopped run kept its place; retrying soon beats waiting a period.
         boolean ok = CommsCollector.run(getApplicationContext()).optBoolean("ok", true);
         // Chat notifications and media plays the phone could not send when they happened.

@@ -295,7 +295,9 @@ export function commsLine(e: { feature: string; item: string; duration_s?: numbe
     const length = answered && typeof e.duration_s === 'number' ? callLength(e.duration_s) : null;
     return { title, number: number && number !== who ? number : null, length, text: null };
   }
-  const title = (TEXT_TITLE[direction] ?? ((w: string) => `Text with ${w}`))(who);
+  // A chat (RCS) message is known from its notification only.
+  const kind = e.detail?.rcs ? ' (chat)' : e.detail?.mms ? ' (picture or group)' : '';
+  const title = (TEXT_TITLE[direction] ?? ((w: string) => `Text with ${w}`))(who) + kind;
   const text = typeof e.detail?.body === 'string' ? e.detail.body : null;
   return { title, number: number && number !== who ? number : null, length: null, text };
 }
