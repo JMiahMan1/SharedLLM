@@ -24,6 +24,8 @@ export interface FamilyMemberStatus {
    */
   activity?: string | null;
   speedKnown?: boolean;
+  /** The person paused location sharing. */
+  paused?: boolean;
   /** The position itself, for Navigate and a drive time (absent when only HA's zone is known). */
   lat?: number;
   lon?: number;
@@ -103,6 +105,22 @@ export function buildFamilyCards(
 
   for (const [userId, loc] of Object.entries(appLocations ?? {})) {
     const user = userId.toLowerCase();
+    if (loc.paused) {
+      // Paused by the person: say so on their card, never where they were.
+      if (!cards.some((c) => tokensById.get(c.id)?.has(user) || c.id === `user.${user}`)) {
+        cards.push({
+          id: `user.${user}`,
+          name: titleCase(user),
+          zone: 'Location paused',
+          isMoving: false,
+          speedMph: 0,
+          battery: null,
+          source: 'app',
+          paused: true,
+        });
+      }
+      continue;
+    }
     const { latitude, longitude } = loc;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
     if (latitude === 0 && longitude === 0) continue;
@@ -193,7 +211,8 @@ const ACTIVITY_LABEL: Record<string, string> = { driving: 'Driving', cycling: 'C
  * phone says it is doing; "Stationary" only when that is actually known;
  * nothing when it is not (a network fix carries no speed).
  */
-export function motionLabel(member: Pick<FamilyMemberStatus, 'isMoving' | 'speedMph' | 'activity' | 'speedKnown' | 'source'>): string | null {
+export function motionLabel(member: Pick<FamilyMemberStatus, 'isMoving' | 'speedMph' | 'activity' | 'speedKnown' | 'source' | 'paused'>): string | null {
+  if (member.paused) return 'Paused';
   if (member.isMoving) return `${member.speedMph} mph`;
   const said = member.activity ? ACTIVITY_LABEL[member.activity] : undefined;
   if (said) return said;

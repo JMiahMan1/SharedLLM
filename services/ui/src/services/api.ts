@@ -952,6 +952,23 @@ export const api = {
     return resp.data;
   },
 
+  /** Whether the caller has paused location sharing (adults only may). */
+  async getLocationPause(): Promise<{ paused: boolean; until: number | null; allowed: boolean }> {
+    const resp = await apiClient.get('/api/users/me/location-pause');
+    return resp.data;
+  },
+
+  /** Pause location sharing for ``minutes``, or until turned back on (null). */
+  async setLocationPause(minutes: number | null): Promise<{ paused: boolean; until: number | null }> {
+    const resp = await apiClient.put('/api/users/me/location-pause', { minutes });
+    return resp.data;
+  },
+
+  async clearLocationPause(): Promise<{ paused: boolean }> {
+    const resp = await apiClient.delete('/api/users/me/location-pause');
+    return resp.data;
+  },
+
   async getActivitySharing(): Promise<{
     enabled: boolean;
     audience: 'circle' | 'users';

@@ -209,6 +209,70 @@ async def sos(request: Request):
     return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
 
 
+CRASH_COOLDOWN_S = 2 * 60
+
+
+def crash_text(name: str, auto: bool, speed_mph: float | None, location: dict | None, now: float) -> tuple[str, str, str | None]:
+    """(title, body, map link) for a crash alert from the phone."""
+    _, where, link = sos_text(name, location, now)
+    where = where.replace(f"{name} needs help. ", "")
+    how = f" at about {round(speed_mph)} mph" if speed_mph and speed_mph > 0 else ""
+    if auto:
+        body = f"{name}'s phone detected a possible crash{how} and they did not answer for a minute. {where}"
+    else:
+        body = f"{name} asked for help after a possible crash{how}. {where}"
+    return f"Possible crash: {name}", body, link
+
+
+@router.post("/api/family/crash")
+async def crash(request: Request):
+    """A crash the phone detected (an impact while driving, then the car
+    stopped): sent after a minute nobody cancelled, or at once when the person
+    tapped Get help. The most urgent notice there is, to everyone else, with
+    where the phone was."""
+    user = await _caller(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object")
+    try:
+        cooldown = await _start_cooldown("crash", user, CRASH_COOLDOWN_S, "This crash alert already went out.")
+    except HTTPException as e:
+        if e.status_code != 429:
+            raise
+        # The phone retries until it hears back; a retry of an alert that
+        # already went out (its answer was lost) is a success, not "try
+        # again", or the person would be told their family was not reached.
+        return {"status": "SUCCESS", "already_sent": True}
+    now = time.time()
+    location = fresh_position(body, now) or await _get_json(f"{IDENTITY_SVC}/api/users/{user}/location")
+    try:
+        speed = float(body.get("speed_before_mph")) if body.get("speed_before_mph") is not None else None
+    except (TypeError, ValueError):
+        speed = None
+    auto = body.get("auto") is not False
+    title, text, link = crash_text(user.title(), auto, speed, location, now)
+    url = f"/wander?person={user}"
+    actions = [notify.view_action(url, "Map")]
+    if link:
+        actions.append(notify.view_action(link, "Directions"))
+    family = [u for u in await notify.family() if u != user]
+    sent = await notify.send_many(
+        family,
+        lambda viewer: notify.notice(
+            viewer, "family_safety", title, text, url=url, priority=5, tag=f"crash:{user}",
+            once=f"crash:{user}:{int(now)}", data={"person": user, "crash": True, "auto": auto, "map": link},
+            actions=actions),
+    )
+    log.warning(f"[family-safety] crash alert for {user} (auto={auto}): {sent} of {len(family)} notices accepted")
+    if not sent:
+        await _end_cooldown(cooldown)
+        raise HTTPException(status_code=503, detail="No one could be told; the phone will try again")
+    return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
+
+
 def check_in_text(name: str, place: str | None) -> tuple[str, str]:
     if place:
         return f"{name} checked in", f"{name} is at {place}."

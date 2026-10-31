@@ -263,10 +263,20 @@ async def get_people(
             if clean_viewer in allowed:
                 visible.add(name)
 
+    # Adults who paused location sharing are hidden from everyone else,
+    # admins included.
+    paused = {
+        str(e.get("username", "")).strip().lower()
+        for e in (await _fetch_activity_sharing()).get("users", [])
+        if e.get("paused")
+    } - {clean_viewer}
+
     states = await _ha_get_states()
     features = []
     for s in _filter_entities(states, "person") + _filter_entities(states, "device_tracker"):
         if visible is not None and not _entity_belongs_to(s.get("entity_id") or "", visible):
+            continue
+        if paused and _entity_belongs_to(s.get("entity_id") or "", paused):
             continue
         f = _entity_to_feature(s["entity_id"], s)
         if f:
@@ -5416,6 +5426,14 @@ async def _fetch_activity_sharing() -> dict:
     return {"users": []}
 
 
+async def _is_paused(target: str) -> bool:
+    """Whether ``target`` has paused location sharing (Identity's feed says)."""
+    for entry in (await _fetch_activity_sharing()).get("users", []):
+        if str(entry.get("username", "")).strip().lower() == target:
+            return bool(entry.get("paused"))
+    return False
+
+
 async def _viewer_may_see(viewer: str, target: str, sharing: dict | None = None) -> bool:
     """True when `viewer` is allowed to read `target`'s activity.
 
@@ -5432,7 +5450,7 @@ async def _viewer_may_see(viewer: str, target: str, sharing: dict | None = None)
     for entry in sharing.get("users", []):
         if str(entry.get("username", "")).strip().lower() != target:
             continue
-        if not entry.get("enabled"):
+        if not entry.get("enabled") or entry.get("paused"):
             return False
         if entry.get("audience") == "circle":
             return True
@@ -5486,6 +5504,10 @@ async def _require_may_view(
     clean_target = (target or "").split(".")[-1].strip().lower()
     clean_viewer = (viewer or "").split(".")[-1].strip().lower()
     if _is_privileged_viewer(viewer, is_admin):
+        # An adult who paused location sharing is hidden from admins too
+        # (a service with no viewer still reads it, e.g. for an SOS).
+        if clean_viewer and clean_viewer != clean_target and await _is_paused(clean_target):
+            raise HTTPException(status_code=404, detail="location sharing is paused")
         return clean_target
     if not clean_target:
         raise HTTPException(status_code=400, detail="user_id is required")
