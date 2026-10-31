@@ -669,10 +669,16 @@ class UDPServer(asyncio.DatagramProtocol):
         # Question section
         question = self._encode_name(query.question_name) + struct.pack('!HH', query.question_type, 1)
 
-        # Answer section
+        # Answer section. Every A record is answered under the name that was
+        # asked (CNAME flattening). Upstream answers a CDN-hosted name with a
+        # CNAME and then A records owned by the CNAME's target; only the A
+        # records are encoded here, so they used to go out under the target's
+        # name with nothing linking it to the question, and glibc threw the
+        # answer away: auth.docker.io never resolved inside a container, so
+        # the control plane's update check failed every run (2026-10-30).
         answers = b''
+        name_bytes = self._encode_name(query.question_name)
         for record in records:
-            name_bytes = self._encode_name(record['name'])
             if record['rtype'] == 1 and len(record['rdata']) == 4:  # A record
                 answers += name_bytes + struct.pack('!HHIH', record['rtype'], record['rclass'], record['ttl'], 4) + record['rdata']
 

@@ -88,3 +88,17 @@ def test_the_answer_count_matches_the_records_actually_encoded():
     server, _ = _server()
     reply = server._build_response(dns.DNSQuery(1, "x.test", 1), [a, aaaa])
     assert _header(reply)[2] == 1
+
+
+def test_a_cname_answer_is_given_under_the_name_that_was_asked():
+    """Upstream answers auth.docker.io with A records owned by its CNAME's
+    target; sent under that name with no CNAME, glibc discarded them and the
+    name never resolved inside a container."""
+    a = {"name": "auth.docker.io.cdn.cloudflare.net", "rtype": 1, "rclass": 1, "ttl": 60, "rdata": bytes([104, 18, 43, 178])}
+    server, _ = _server()
+    reply = server._build_response(dns.DNSQuery(1, "auth.docker.io", 1), [a])
+    question = server._encode_name("auth.docker.io")
+    # Question, then the answer's owner name: both the asked name.
+    assert reply.count(question) == 2
+    assert server._encode_name("auth.docker.io.cdn.cloudflare.net") not in reply
+    assert reply.endswith(bytes([104, 18, 43, 178]))

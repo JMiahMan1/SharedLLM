@@ -112,7 +112,15 @@ notify_deploy_result() {
     commit=$(sed -n 's/^Server now at commit: //p' "$REMOTE_LOG" 2>/dev/null | tail -1)
     [ -n "$commit" ] || commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     commit="$commit $(git log -1 --format=%s "$commit" 2>/dev/null || true)"
-    if [ "$status" -eq 0 ]; then
+    if [ -n "$DEPLOY_INTERRUPTED" ]; then
+        # Stopped by hand (or the machine went to sleep): say so. The EXIT
+        # trap used to see status 0 here and send "Deploy finished" for a
+        # deploy that never happened.
+        title="Deploy stopped"
+        body="Stopped while ${DEPLOY_STEP} (${commit% }); nothing after that step ran."
+        priority=2
+        status=130
+    elif [ "$status" -eq 0 ]; then
         title="Deploy finished"
         body="${commit% } on ${BRANCH:-unknown}. Services: ${SERVICES}"
         priority=2
@@ -131,6 +139,8 @@ notify_deploy_result() {
     exit "$status"
 }
 trap notify_deploy_result EXIT
+DEPLOY_INTERRUPTED=""
+trap 'DEPLOY_INTERRUPTED=1; exit 130' INT TERM HUP
 
 # Sync non-git files to remote to ensure config match
 for NON_GIT_FILE in "prompts/"; do
