@@ -32,6 +32,8 @@ public class BootReceiver extends BroadcastReceiver {
         WidgetUpdater.requestAll(app);
         WidgetAlarm.schedule(app);
         try {
+            // A reboot clears alarms: put back a crash countdown or SOS retries.
+            CrashAlert.resume(app);
             LocationTrackingService.resumeIfEnabled(app);
             StepSyncService.resumeIfEnabled(app);
             PushService.start(app);

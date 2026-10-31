@@ -213,6 +213,19 @@ public class LocationTrackingPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Whether a crash alert is counting down or being sent, and when the
+     * countdown runs out (null once it has), so the app can show it.
+     */
+    @PluginMethod
+    public void crashStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("pending", CrashAlert.isPending(getContext()));
+        Long sendsAt = CrashAlert.countdownEndsAt(getContext());
+        ret.put("sendsAt", sendsAt == null ? org.json.JSONObject.NULL : sendsAt);
+        call.resolve(ret);
+    }
+
     private boolean isUnrestricted() {
         PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
         return pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
