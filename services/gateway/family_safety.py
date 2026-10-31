@@ -232,7 +232,11 @@ def place_payload(body: Any, family: list[str]) -> dict[str, Any]:
     unknown = sorted(set(names) - set(family))
     if unknown:
         raise HTTPException(status_code=422, detail=f"Not in the family: {', '.join(unknown)}")
-    return {"important": important, "notify": list(dict.fromkeys(names))}
+    out = {"important": important, "notify": list(dict.fromkeys(names))}
+    if "icon" in body:
+        # Checked against geo's list of icons there (422 for anything else).
+        out["icon"] = body["icon"] if isinstance(body["icon"], str) else ""
+    return out
 
 
 @router.put("/api/geo/places/{zone_id}")
@@ -323,7 +327,7 @@ def saved_place_payload(body: Any, family: list[str]) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="The body must be an object")
     out: dict[str, Any] = {}
-    for key in ("name", "lat", "lon", "radius", "scope"):
+    for key in ("name", "lat", "lon", "radius", "scope", "icon"):
         if key in body:
             out[key] = body[key]
     if "important" in body:

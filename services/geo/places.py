@@ -30,6 +30,18 @@ MAX_RADIUS_M = 5000.0
 SCOPES = ("family", "user")
 
 _PLACE_ID = re.compile(r"^[0-9a-f]{32}$")
+#: The icons a place's pin can wear on the family map (the UI draws them);
+#: "" means automatic, worked out from the place's name.
+PLACE_ICONS = ("home", "school", "work", "church", "store", "gym", "park", "friends", "food", "hospital", "place")
+
+
+def clean_icon(value: Any) -> str:
+    """A place icon from a request: one of PLACE_ICONS, or "" for automatic.
+    Raises ValueError for anything else."""
+    icon = "" if value is None else str(value).strip().lower()
+    if icon and icon not in PLACE_ICONS:
+        raise ValueError(f"icon must be one of: {', '.join(PLACE_ICONS)}")
+    return icon
 
 
 def _decode(value: Any) -> str:
@@ -95,6 +107,8 @@ def validate(body: Any, *, partial: bool = False) -> dict[str, Any]:
         out["scope"] = scope
     if "important" in body or not partial:
         out["important"] = bool(body.get("important"))
+    if "icon" in body:
+        out["icon"] = clean_icon(body.get("icon"))
     if "notify" in body or not partial:
         notify = body.get("notify")
         if notify is None:

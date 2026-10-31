@@ -13,6 +13,7 @@ import AppCleanupPanel from '../components/settings/AppCleanupPanel';
 import MapStylePanel from '../components/settings/MapStylePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
+import PhoneReportsPanel from '../components/settings/PhoneReportsPanel';
 import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
@@ -115,6 +116,7 @@ const Settings = () => {
       <section className="space-y-4" aria-labelledby="settings-device">
         <h2 id="settings-device" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">This device</h2>
         <SensorsSection />
+        <PhoneReportsPanel />
         <AppUpdatesSection />
         <AppCleanupPanel />
       </section>

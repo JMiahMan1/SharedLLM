@@ -8,23 +8,7 @@ import Guard, { type GuardStatus } from '../../plugins/guard';
 import PhoneUsage from '../../plugins/phoneUsage';
 import MediaSession from '../../plugins/mediaSession';
 import Comms from '../../plugins/comms';
-
-/** What the parents' reports need from this phone, besides the guard itself. */
-interface ReportingAccess {
-  usage: boolean;
-  notifications: boolean;
-  calls: boolean;
-  sms: boolean;
-}
-
-async function readReportingAccess(): Promise<ReportingAccess> {
-  const [usage, media, comms] = await Promise.all([
-    PhoneUsage.hasAccess().catch(() => ({ granted: false })),
-    MediaSession.hasAccess().catch(() => ({ granted: false })),
-    Comms.hasAccess().catch(() => ({ calls: false, sms: false })),
-  ]);
-  return { usage: Boolean(usage?.granted), notifications: Boolean(media?.granted), calls: Boolean(comms?.calls), sms: Boolean(comms?.sms) };
-}
+import { readReportingAccess, type ReportingAccess } from '../../lib/reportingAccess';
 
 /**
  * Setting up Jarvis's protection on a child's Android phone: device admin (no

@@ -151,3 +151,28 @@ def test_the_father_and_the_mother_see_each_other(family):
     assert act("mom").get("/api/family/devices/dad").status_code == 403
     # Another grown member's stay their own.
     assert act("dad").get("/api/screen-time/grown/rules").status_code == 403
+
+
+def test_the_father_clears_the_tamper_log_and_the_rows_are_kept(family):
+    act, engine = family
+    for event in ("guard_disabled", "uninstall_attempt", "dns_changed"):
+        act("dad").post("/api/internal/guard/tamper/kid", json={"event": event})
+    assert len(act("dad").get("/api/family/devices/kid").json()["tamper"]) == 3
+
+    assert act("dad").delete("/api/family/devices/kid/tamper").json() == {"status": "SUCCESS", "cleared": 3}
+    assert act("dad").get("/api/family/devices/kid").json()["tamper"] == []
+    with Session(engine) as s:
+        kept = s.exec(select(DeviceEvent).where(DeviceEvent.event == "guard_tamper_cleared")).all()
+    assert len(kept) == 3 and all('"cleared_by": "dad"' in row.extra for row in kept)
+
+    # A new report after clearing shows on its own.
+    act("dad").post("/api/internal/guard/tamper/kid", json={"event": "guard_disabled"})
+    assert len(act("dad").get("/api/family/devices/kid").json()["tamper"]) == 1
+
+
+@pytest.mark.parametrize("viewer", ["mom", "kid", "sib"])
+def test_only_those_who_see_the_log_may_clear_it(family, viewer):
+    act, _ = family
+    act("dad").post("/api/internal/guard/tamper/kid", json={"event": "guard_disabled"})
+    assert act(viewer).delete("/api/family/devices/kid/tamper").status_code == 403
+    assert len(act("dad").get("/api/family/devices/kid").json()["tamper"]) == 1

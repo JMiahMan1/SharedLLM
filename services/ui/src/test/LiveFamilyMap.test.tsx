@@ -524,6 +524,9 @@ describe('placeKind', () => {
     expect(placeKind({ name: 'Lincoln Elementary' })).toBe('school');
     expect(placeKind({ name: 'Dad', icon: 'mdi:briefcase' })).toBe('work');
     expect(placeKind({ name: 'Grace Church' })).toBe('church');
-    expect(placeKind({ name: 'Costco' })).toBe('place');
+    expect(placeKind({ name: 'Costco' })).toBe('store');
+    expect(placeKind({ name: 'Somewhere' })).toBe('place');
+    // One chosen in Jarvis wins over the name.
+    expect(placeKind({ id: 'zone.home', name: 'Home', icon: 'friends' })).toBe('friends');
   });
 });

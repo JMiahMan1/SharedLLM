@@ -5,6 +5,7 @@ import { storageGetSync } from '../../lib/storage';
 import { getDeviceKey } from '../../lib/deviceRegistration';
 import PhoneUsage from '../../plugins/phoneUsage';
 import Guard from '../../plugins/guard';
+import { readReportingAccess } from '../../lib/reportingAccess';
 
 const USAGE_SYNC_INTERVAL_MS = 5 * 60 * 1000; // the day moves slowly; five minutes is plenty
 
@@ -54,8 +55,16 @@ let lastGuardReport = '';
  */
 async function syncGuardState(serverUrl: string, token: string, usageAccess: boolean): Promise<void> {
   if (Capacitor.getPlatform() !== 'android') return;
-  const guard = await Guard.status();
-  const state = { ...guard, usageAccess };
+  const [guard, access] = await Promise.all([Guard.status(), readReportingAccess()]);
+  // Calls, texts and notifications too: without them those reports are empty
+  // and nobody could tell why (no phone had ever sent a call or a text).
+  const state = {
+    ...guard,
+    usageAccess,
+    notificationAccess: access.notifications,
+    callLogAccess: access.calls,
+    smsAccess: access.sms,
+  };
   const report = JSON.stringify(state);
   if (report === lastGuardReport) return;
   const resp = await fetch(`${serverUrl}/api/user-panel/devices/${encodeURIComponent(await getDeviceKey())}/capabilities`, {

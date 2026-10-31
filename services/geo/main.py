@@ -383,6 +383,7 @@ async def get_zones(viewer: str | None = Query(None)):
                 "scope": place["scope"],
                 "important": bool(place.get("important")),
                 "notify": list(place.get("notify") or []),
+                **({"icon": place["icon"]} if place.get("icon") else {}),
             },
         })
     return {"type": "FeatureCollection", "features": features}
@@ -399,7 +400,11 @@ async def put_place_settings(zone_id: str, body: dict):
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
     notify_list = body.get("notify") if isinstance(body.get("notify"), list) else []
-    entry = await safety.save_place_setting(r, zone_id, bool(body.get("important")), notify_list)
+    try:
+        icon = places.clean_icon(body["icon"]) if "icon" in body else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    entry = await safety.save_place_setting(r, zone_id, bool(body.get("important")), notify_list, icon)
     return {"zone": zone_id, **entry}
 
 
