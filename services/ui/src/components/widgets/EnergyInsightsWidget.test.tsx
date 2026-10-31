@@ -14,6 +14,9 @@ vi.mock('../../services/api', async (importOriginal) => ({
 
 import { api } from '../../services/api';
 
+const auth = vi.hoisted(() => ({ role: 'admin' as 'admin' | 'user' }));
+vi.mock('../../context/AuthContext', () => ({ useAuth: () => auth }));
+
 const apiMock = api as unknown as {
   getTelemetryEnrollments: ReturnType<typeof vi.fn>;
   getTelemetrySummary: ReturnType<typeof vi.fn>;
@@ -66,6 +69,8 @@ function renderWidget() {
 
 describe('EnergyInsightsWidget', () => {
   beforeEach(() => {
+    auth.role = 'admin';
+    apiMock.getTelemetryEnrollments.mockClear();
     apiMock.getTelemetryEnrollments.mockResolvedValue([
       enrolment('sensor.rosebud_123_1min'),
       enrolment('sensor.ac_unit_1min'),
@@ -73,6 +78,13 @@ describe('EnergyInsightsWidget', () => {
     apiMock.getTelemetrySummary.mockImplementation(async (entityId: string) =>
       summary(entityId === 'sensor.rosebud_123_1min' ? 2.8517875717626 : 2.85),
     );
+  });
+
+  it('does not ask for the admin-only readings for anyone else', async () => {
+    auth.role = 'user';
+    renderWidget();
+    expect(await screen.findByText(/available to the household admin/)).toBeInTheDocument();
+    expect(apiMock.getTelemetryEnrollments).not.toHaveBeenCalled();
   });
 
   it('shows each device’s draw as a whole number of watts', async () => {

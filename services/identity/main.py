@@ -2462,14 +2462,28 @@ def internal_router(session: Session = Depends(get_session), _: None = Depends(r
 @app.get("/api/internal/owned-devices/{username}")
 def internal_owned_devices(username: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
     """Internal: the phones and tablets assigned to a person (the sleep estimate
-    joins their overnight use)."""
+    joins their overnight use), and for each one the app build it runs and
+    when it was last seen (telemetry's missed-update reminder reads those)."""
     rows = session.exec(
         select(Device).where(
             Device.owner_username == username.strip().lower(),
             Device.kind.in_(MOBILE_DEVICE_KINDS),
         )
     ).all()
-    return {"devices": [row.device_key for row in rows]}
+    return {
+        "devices": [row.device_key for row in rows],
+        "details": [
+            {
+                "device_key": row.device_key,
+                "kind": row.kind,
+                "label": row.label or row.model or row.kind,
+                "app_build": row.app_build,
+                "last_seen_at": row.last_seen_at,
+                "revoked": bool(row.revoked),
+            }
+            for row in rows
+        ],
+    }
 
 
 @app.get("/api/internal/device-registered/{device_key}")

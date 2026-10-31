@@ -2861,6 +2861,19 @@ def _is_routine_poll(path: str) -> bool:
     return path.startswith("/api/users/") and path.endswith("/location")
 
 
+def _json_error_from_request_body(exc: BaseException) -> bool:
+    """Whether a JSON error came from reading the incoming request's own body
+    (Starlette's ``Request.json``), rather than from parsing an upstream
+    service's answer, which is the gateway's problem and stays a 500."""
+    tb = exc.__traceback__
+    while tb is not None:
+        filename = tb.tb_frame.f_code.co_filename.replace("\\", "/")
+        if filename.endswith("starlette/requests.py") and tb.tb_frame.f_code.co_name == "json":
+            return True
+        tb = tb.tb_next
+    return False
+
+
 @app.middleware("http")
 async def secure_logging_middleware(request: Request, call_next):
     """Logs incoming requests while redacting sensitive security headers."""
@@ -2903,6 +2916,15 @@ async def secure_logging_middleware(request: Request, call_next):
             headers={"X-Error-Id": error_id},
         )
     except Exception as e:
+        if isinstance(e, json.JSONDecodeError) and _json_error_from_request_body(e):
+            # The caller sent no body, or one that is not JSON, to a route that
+            # reads JSON: the request's fault, so 400, not a 500 and a traceback
+            # (curl with no body produced exactly that, 2026-10-30).
+            log.warning("Request body is not JSON: %s %s", request.method, request.url.path)
+            return JSONResponse(
+                status_code=400,
+                content={"status": "ERROR", "message": "The request body must be JSON"},
+            )
         error_id = uuid.uuid4().hex[:12]
         log.error(
             "[error_id=%s] Middleware error: %s: %s",
@@ -15461,6 +15483,23 @@ async def _media_exec_audiobookshelf(creds: Any, params: dict, *, timeout: float
     return detail
 
 
+def _media_abs_cover(item_id: Any, raw: Any) -> str:
+    """The cover URL for an Audiobookshelf item.
+
+    Execution passes on ABS's ``coverPath``, which is the file's path on the
+    ABS server's disk (``/audiobooks/Exodus [B005FXZQYM]/cover.jpg``,
+    ``/metadata/items/<id>/cover.jpg``), not a URL. The image proxy could not
+    tell it was ABS's, fetched it from Home Assistant and every audiobook and
+    podcast cover came back 404 (live, 2026-10-30). ABS serves an item's cover
+    at ``/api/items/<id>/cover``, which the proxy routes to ABS.
+    """
+    value = str(raw or "").strip()
+    if value.startswith("/api/items/") or urlparse(value).scheme in ("http", "https"):
+        return value
+    item = str(item_id or "").strip()
+    return f"/api/items/{item}/cover" if item and value else ""
+
+
 def _media_abs_book_item(book: dict) -> dict:
     """Normalize an ABS last-played/list book to MediaItem kwargs.
 
@@ -15473,7 +15512,7 @@ def _media_abs_book_item(book: dict) -> dict:
         "media_type": "audiobook",
         "artist": book.get("author") or "",
         "album": book.get("series") or "",
-        "image": book.get("cover_path") or book.get("cover") or "",
+        "image": _media_abs_cover(book.get("id"), book.get("cover_path") or book.get("cover")),
         "duration": book.get("duration"),
         "favorite": None,
     }
@@ -15583,7 +15622,7 @@ async def search_media(request: Request, q: str = "", types: str = "", limit: in
                     "name": podcast.get("title") or "",
                     "media_type": "podcast",
                     "artist": podcast.get("author") or "",
-                    "image": podcast.get("cover") or "",
+                    "image": _media_abs_cover(podcast.get("id"), podcast.get("cover")),
                 }
             )
         for author in abs_detail.get("authors") or []:

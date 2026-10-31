@@ -52,6 +52,10 @@ class _Redis:
         self.s[key] = (value, ex)
         return True
 
+    async def get(self, key):
+        found = self.s.get(key)
+        return found[0] if isinstance(found, tuple) else None
+
     async def ttl(self, key):
         return self.s[key][1] if key in self.s else -2
 
@@ -161,19 +165,25 @@ async def test_find_phone_is_urgent_and_asks_the_phone_to_ring(sent):
 # -------------------------------------------------------------- app updates
 
 
-async def test_a_new_apk_is_announced_to_everyone_once_per_build(sent):
+async def test_a_new_apk_is_recorded_not_announced_to_everyone(sent):
+    """Every UI push publishes an APK; telling the whole family each time sent
+    several notices a day to phones already up to date. The build is recorded
+    for telemetry's missed-update reminder instead."""
     r = _Redis()
-    assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) == 3
-    assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) == 0
-    assert {n["user"] for n in sent} == {"jeremiah", "leo", "michele"}
-    assert sent[0]["category"] == "app_updates" and sent[0]["title"] == "Jarvis app 2.4.1 (build 412) is available"
-    assert sent[0]["body"] == "Faster maps" and sent[0]["data"]["url"] == "/settings"
-    assert sent[0]["audience"] == "parents"  # an update notice never goes to a child
+    assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) is True
+    assert await notices.app_update_published(412, "2.4.1", "Faster maps", r) is False
+    assert sent == []
+    latest = json.loads(await r.get(notices.LATEST_APK_KEY))
+    assert latest["version_code"] == 412 and latest["version_name"] == "2.4.1" and latest["notes"] == "Faster maps"
 
 
-async def test_ci_placeholder_notes_are_not_shown_as_the_update_body(sent):
-    await notices.app_update_published(413, "2.4.1", "Android build 31ccc366", _Redis())
-    assert sent[0]["body"] == "Open Settings to install it."
+async def test_an_older_build_published_late_does_not_replace_the_newest(sent):
+    r = _Redis()
+    await notices.app_update_published(413, "2.4.1", "Android build 31ccc366", r)
+    assert await notices.app_update_published(410, "2.4.0", "Old", r) is False
+    latest = json.loads(await r.get(notices.LATEST_APK_KEY))
+    assert latest["version_code"] == 413
+    assert latest["notes"] == ""  # CI's placeholder is not shown as the update's notes
 
 
 # -------------------------------------------------------------------- raven
