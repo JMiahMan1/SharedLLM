@@ -178,3 +178,140 @@ def test_config_validator_rejects_unknown_provider():
         "llm_local_url": "http://localhost:11434",
     })
     assert any("active_llm_provider" in f for f in result.critical_failures)
+
+
+def test_unwrap_envelope_handles_cline_pass_shape():
+    enveloped = {"data": {"choices": [{"message": {"content": "PONG"}}]}, "success": True}
+    assert OpenAICompatibleProvider._unwrap_envelope(enveloped) == {
+        "choices": [{"message": {"content": "PONG"}}]
+    }
+
+
+def test_unwrap_envelope_passes_through_flat_and_other_shapes():
+    flat = {"choices": [{"message": {"content": "x"}}]}
+    assert OpenAICompatibleProvider._unwrap_envelope(flat) is flat
+    # A "data" key that is not a completion envelope (e.g. a models list) is left alone.
+    models = {"data": [{"id": "a"}]}
+    assert OpenAICompatibleProvider._unwrap_envelope(models) is models
+
+
+@pytest.mark.asyncio
+async def test_generate_unwraps_cline_pass_envelope():
+    # ClinePass nests the non-streaming completion under "data"; generate() must
+    # still return the visible content instead of an empty string.
+    class _EnvelopedResponse(_FakeResponse):
+        async def json(self):
+            return {"data": {"choices": [{"message": {"content": "PONG"}}]}, "success": True}
+
+    from contextlib import asynccontextmanager
+
+    client = MagicMock()
+
+    async def _post(url, json=None, headers=None, timeout=None):
+        return _EnvelopedResponse()
+
+    client.post = _post
+
+    @asynccontextmanager
+    async def _fake_shared_client():
+        yield client
+
+    provider = OpenAICompatibleProvider(
+        api_key="sk_54",
+        base_url=CLOUD_PROVIDER_DEFAULT_URLS["cline_pass"],
+        provider_name="cline_pass",
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("services.gateway.main.shared_http_client", _fake_shared_client)
+        result = await provider.generate(
+            model="deepseek/deepseek-v4.1-flash-1017",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+    assert result == "PONG"
+
+
+class _StreamCM:
+    def __init__(self, response):
+        self._response = response
+
+    async def __aenter__(self):
+        return self._response
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _StreamResponse:
+    status = 200
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    def raise_for_status(self):
+        return None
+
+    async def read(self):
+        return b""
+
+    class _Content:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        async def iter_any(self):
+            for c in self._chunks:
+                yield c
+
+    @property
+    def content(self):
+        return _StreamResponse._Content(self._chunks)
+
+
+async def _stream_generate(chunks) -> tuple[str, list[str]]:
+    from contextlib import asynccontextmanager
+
+    client = MagicMock()
+    client.post = lambda *a, **k: _StreamCM(_StreamResponse(chunks))
+
+    @asynccontextmanager
+    async def _fake_shared_client():
+        yield client
+
+    provider = OpenAICompatibleProvider(api_key="k", provider_name="cline_pass")
+    seen: list[str] = []
+
+    async def cb(t):
+        seen.append(t)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("services.gateway.main.shared_http_client", _fake_shared_client)
+        result = await provider.generate(
+            model="m", messages=[{"role": "user", "content": "hi"}], chunk_callback=cb
+        )
+    return result, seen
+
+
+@pytest.mark.asyncio
+async def test_stream_parses_multiple_events_per_read():
+    # Several SSE frames arriving in one network read must all be parsed; the
+    # old parser treated each read as a single line and dropped every event
+    # after the first.
+    read = (
+        b'data: {"choices":[{"delta":{"content":"PO"}}]}\n'
+        b'data: {"choices":[{"delta":{"content":"NG"}}]}\n'
+        b"data: [DONE]\n"
+    )
+    result, seen = await _stream_generate([read])
+    assert result == "PONG"
+    assert "".join(seen) == "PONG"
+
+
+@pytest.mark.asyncio
+async def test_stream_parses_event_split_across_reads():
+    # A single event split across two reads must still be reassembled.
+    result, seen = await _stream_generate([
+        b'data: {"choices":[{"delta":{"content":"PO',
+        b'NG"}}]}\n',
+        b"data: [DONE]\n",
+    ])
+    assert result == "PONG"
+    assert "".join(seen) == "PONG"
