@@ -103,7 +103,7 @@ export default function Family() {
       {tab === 'games' && (
         <div className="space-y-4" data-testid="family-games">
           <ArcadeGames />
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {BIBLE_GAMES.map(({ icon: Icon, name, detail, to }) => (
               <Link
                 key={name}

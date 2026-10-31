@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Notes from '../pages/Notes';
-import { EMPTY_NOTES_INDEX, readNotesSnapshot, writeNotesSnapshot } from '../lib/notesMeta';
+import { EMPTY_NOTES_INDEX, NOTE_COLOR_BG, readNotesSnapshot, writeNotesSnapshot } from '../lib/notesMeta';
 import { renderWithProviders } from './render';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -25,7 +25,7 @@ import toast, { Toaster } from 'react-hot-toast';
 
 const lastIndex = (path: string) => {
   const meta = notesMetaWrites.at(-1)?.meta as
-    | { notes?: Record<string, { previousPath?: string }> }
+    | { notes?: Record<string, { previousPath?: string; color?: string }> }
     | undefined;
   return meta?.notes?.[path];
 };
@@ -75,6 +75,24 @@ describe('Notes (Keep-style)', () => {
 
     await waitFor(() => expect(notesWriteCalls.length).toBe(1));
     expect(notesWriteCalls[0]).toMatchObject({ title: 'Trip ideas', path: 'Notes/Trip ideas.md', category: 'Notes' });
+  });
+
+  it('a colour picked in the open note tints it at once and is kept for its card', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByText('Trip ideas'));
+    const editor = await screen.findByTestId('note-editor');
+    expect(editor).toHaveStyle({ background: NOTE_COLOR_BG.default });
+
+    await user.click(within(editor).getByRole('button', { name: 'Colour Rose' }));
+    expect(editor).toHaveStyle({ background: NOTE_COLOR_BG.rose });
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(lastIndex('Notes/Trip ideas.md')).toMatchObject({ color: 'rose' }));
+    await waitFor(() => expect(screen.queryByTestId('note-editor')).not.toBeInTheDocument());
+    const card = screen.getAllByTestId('note-card').find((el) => within(el).queryByText('Trip ideas'));
+    expect(card).toHaveStyle({ background: NOTE_COLOR_BG.rose });
   });
 
   it('renaming a note writes it under the new name and removes the old file', async () => {

@@ -854,7 +854,7 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
       {/* Add event */}
       <div className="mt-6 rounded-2xl border p-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
         <p className="mb-3 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--os-ink-faint)' }}>Add Event</p>
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <input ref={addTitleRef} type="text" value={summary} onChange={(e) => setSummary(e.target.value)} aria-label="Event title" className="min-h-11 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="Event title" />
           <input type="text" value={startInput} onChange={(e) => setStartInput(e.target.value)} aria-label="Event time" className="min-h-11 rounded-xl border px-3 py-2 text-base outline-none sm:text-sm" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="When (e.g. tomorrow at 2pm)" />
           <div className="flex gap-2">

@@ -136,3 +136,18 @@ def test_a_weekly_schedule_is_checked_and_kept(family):
     assert ok.status_code == 200 and ok.json()["rules"]["day_limits"] == {"mon": 60, "sat": 180}
     assert act("dad").put("/api/screen-time/kid/rules", json={"day_limits": {"funday": 60}}).status_code == 422
     assert act("dad").put("/api/screen-time/kid/rules", json={"day_limits": {"mon": 2000}}).status_code == 422
+
+
+def test_the_father_and_the_mother_see_each_other(family):
+    act, _ = family
+    # The father reads the mother's rules and devices; neither may change the other's.
+    rules = act("dad").get("/api/screen-time/mom/rules").json()
+    assert rules["can_manage"] is False and rules["technical"] is True
+    assert act("dad").get("/api/family/devices/mom").status_code == 200
+    assert act("dad").put("/api/screen-time/mom/rules", json={"daily_limit_min": 60}).status_code == 403
+    # The mother reads the father's rules, without the technical side.
+    rules = act("mom").get("/api/screen-time/dad/rules").json()
+    assert rules["can_manage"] is False and rules["technical"] is False
+    assert act("mom").get("/api/family/devices/dad").status_code == 403
+    # Another grown member's stay their own.
+    assert act("dad").get("/api/screen-time/grown/rules").status_code == 403

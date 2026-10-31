@@ -64,6 +64,11 @@ registerPlugin(CommsPlugin.class);
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
         PushService.start(this);
+        // Screen time keeps reporting while the app is closed (a no-op until
+        // usage access is on and someone is signed in).
+        UsageSyncWorker.schedule(this);
+        // Calls and texts the same way (a no-op without their permissions).
+        CommsSyncWorker.schedule(this);
     }
 
     @Override

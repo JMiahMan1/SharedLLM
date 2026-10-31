@@ -278,7 +278,7 @@ async def record_activity(rc, session, event: dict[str, Any], deliver: Deliver) 
 async def build_recap(rc, username: str, day: date) -> dict[str, Any]:
     start, end = guardian_recap.week_bounds(day)
     usage = await store.get_usage(rc, username, 21)
-    events = await store.list_activity(rc, username, 500)
+    events = await store.list_activity(rc, username, store.ACTIVITY_MAX)
     concerns = await store.list_concerns(rc, username)
     return guardian_recap.build(usage, events, concerns, start, end, household_now().tzinfo.key)
 
@@ -290,10 +290,17 @@ async def send_weekly_recaps(rc, session, deliver: Deliver, now: datetime) -> in
     sent = 0
     week = guardian_recap.week_bounds(now.date())[0].isoformat()
     for child in (await children(session)).values():
-        if not await rc.set(f"tel:recap_sent:{child['username']}:{week}", "1", nx=True, ex=8 * 86400):
+        sent_key = f"tel:recap_sent:{child['username']}:{week}"
+        if not await rc.set(sent_key, "1", nx=True, ex=8 * 86400):
             continue
-        recap = await build_recap(rc, child["username"], now.date())
-        await store.save_recap(rc, child["username"], week, recap)
+        try:
+            recap = await build_recap(rc, child["username"], now.date())
+            await store.save_recap(rc, child["username"], week, recap)
+        except Exception as exc:
+            # Not sent: let the next sweep this evening try again.
+            await rc.delete(sent_key)
+            log.warning("recap for %s failed: %s", child["username"], exc)
+            continue
         line = guardian_recap.summary_line(child.get("display_name") or child["username"], recap)
         for parent in child.get("parents") or []:
             try:

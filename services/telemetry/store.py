@@ -28,14 +28,20 @@ QUEUE = "tel:queue"
 LOCK_PREFIX = "tel:lock:"
 
 # What each person does inside Jarvis (music played, games finished, pages
-# opened, verses read). Capped so a busy month cannot grow without bound.
+# opened, verses read). Capped so a busy month cannot grow without bound, but
+# high enough that in-app page views cannot push a child's calls, messages
+# and sites out of the week the recap reads (500 did, within a week).
 ACTIVITY_PREFIX = "tel:activity:"
-ACTIVITY_MAX = 500
+ACTIVITY_MAX = 5000
 
 # Screen time per day and when the day started and stopped (the phone's
 # UsageStatsManager reports it; the profile and the parents' views read it).
 USAGE_PREFIX = "tel:usage:"
 USAGE_MAX_DAYS = 90
+# The same, one reading per device (field ``<day>|<device key>``): a person's
+# day above is the sum of their devices' days.
+USAGE_DEVICE_PREFIX = "tel:usagedev:"
+USAGE_UNKNOWN_DEVICE = "_unknown"
 
 # Content-monitoring hits per child (newest last), and the weekly recaps the
 # parents receive, kept by week start.
@@ -222,56 +228,53 @@ async def list_activity(rc, user: str, limit: int = 50) -> list[dict[str, Any]]:
     return events
 
 
-async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
-    """Merge one day of device usage into the person's history.
+def _usage_num(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-    The phone re-reports as the day goes on, so the stored day is the union of
-    what has been seen: the longest screen time, the earliest first use, the
-    latest last use, the most sessions.
+
+def _usage_load(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _merge_reading(merged: dict[str, Any], entry: dict[str, Any], day: str) -> dict[str, Any]:
+    """One device's day, merged with its new report.
+
+    A device re-reports as the day goes on, so its stored day is the union of
+    what it has said: the longest screen time, the earliest first use, the
+    latest last use, the most sessions, and the longest reading per app.
     """
-    key = f"{USAGE_PREFIX}{user}"
-    day = str(entry.get("day") or "").strip()
-    raw = await rc.hget(key, day)
-    merged: dict[str, Any] = {}
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError):
-            parsed = {}
-        if isinstance(parsed, dict):
-            merged = parsed
-
-    def _num(value: Any) -> float | None:
-        if value is None or isinstance(value, bool):
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    millis = _num(entry.get("millis")) or 0.0
-    first = _num(entry.get("first_use"))
-    last = _num(entry.get("last_use"))
-    sessions = _num(entry.get("sessions")) or 0.0
+    millis = _usage_num(entry.get("millis")) or 0.0
+    first = _usage_num(entry.get("first_use"))
+    last = _usage_num(entry.get("last_use"))
+    sessions = _usage_num(entry.get("sessions")) or 0.0
 
     merged["day"] = day
-    merged["millis"] = int(max(_num(merged.get("millis")) or 0.0, millis))
-    prev_first = _num(merged.get("first_use"))
+    merged["millis"] = int(max(_usage_num(merged.get("millis")) or 0.0, millis))
+    prev_first = _usage_num(merged.get("first_use"))
     if first is not None and (prev_first is None or first < prev_first):
         merged["first_use"] = int(first)
     elif "first_use" not in merged:
         merged["first_use"] = None
-    prev_last = _num(merged.get("last_use"))
+    prev_last = _usage_num(merged.get("last_use"))
     if last is not None and (prev_last is None or last > prev_last):
         merged["last_use"] = int(last)
     elif "last_use" not in merged:
         merged["last_use"] = None
-    merged["sessions"] = int(max(_num(merged.get("sessions")) or 0.0, sessions))
+    merged["sessions"] = int(max(_usage_num(merged.get("sessions")) or 0.0, sessions))
     merged["source"] = str(entry.get("source") or merged.get("source") or "phone")
     merged["updated_at"] = str(entry.get("at") or utcnow_iso())
 
-    # Per-app foreground time for the day, merged by package: keep the longest
-    # reading seen for each app so a re-report never shrinks a row.
     incoming_apps = entry.get("apps")
     if isinstance(incoming_apps, list):
         by_pkg: dict[str, dict[str, Any]] = {}
@@ -302,14 +305,76 @@ async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
                 if alast_i is not None and (prev_last_app is None or alast_i > prev_last_app):
                     prev["last_use"] = alast_i
         merged["apps"] = sorted(by_pkg.values(), key=lambda a: int(a.get("millis") or 0), reverse=True)
+    return merged
 
-    await rc.hset(key, day, json.dumps(merged))
+
+def _combine_devices(day: str, readings: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """A person's day across every device they used: screen time, sessions
+    and per-app time add up, the day starts at the earliest first use and ends
+    at the latest last use. A report that did not name its device (an app
+    from before devices were told apart) only counts when no device did, since
+    it is most likely one of them counted again."""
+    named = {d: r for d, r in readings.items() if d != USAGE_UNKNOWN_DEVICE}
+    readings = named or readings
+    firsts = [int(v) for r in readings.values() if (v := _usage_num(r.get("first_use"))) is not None]
+    lasts = [int(v) for r in readings.values() if (v := _usage_num(r.get("last_use"))) is not None]
+    by_pkg: dict[str, dict[str, Any]] = {}
+    for reading in readings.values():
+        for app in reading.get("apps") or []:
+            if not isinstance(app, dict) or not app.get("package"):
+                continue
+            row = by_pkg.setdefault(str(app["package"]), {"package": str(app["package"]), "millis": 0, "last_use": None})
+            row["millis"] += int(app.get("millis") or 0)
+            alast = _usage_num(app.get("last_use"))
+            if alast is not None and (row["last_use"] is None or alast > row["last_use"]):
+                row["last_use"] = int(alast)
+    newest = max(readings.values(), key=lambda r: str(r.get("updated_at") or ""), default={})
+    return {
+        "day": day,
+        "millis": sum(int(_usage_num(r.get("millis")) or 0) for r in readings.values()),
+        "first_use": min(firsts) if firsts else None,
+        "last_use": max(lasts) if lasts else None,
+        "sessions": sum(int(_usage_num(r.get("sessions")) or 0) for r in readings.values()),
+        "source": str(newest.get("source") or "phone"),
+        "updated_at": str(newest.get("updated_at") or utcnow_iso()),
+        "devices": len(readings),
+        "apps": sorted(by_pkg.values(), key=lambda a: int(a.get("millis") or 0), reverse=True),
+    }
+
+
+async def merge_usage(rc, user: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Merge one device's day of usage into the person's history.
+
+    Each device keeps its own reading (``USAGE_DEVICE_PREFIX``), so a phone and
+    a tablet no longer overwrite each other; the person's day
+    (``USAGE_PREFIX``, what every reader uses) is rebuilt from all of them.
+    """
+    day = str(entry.get("day") or "").strip()
+    device = str(entry.get("device") or "").strip() or USAGE_UNKNOWN_DEVICE
+    dev_key = f"{USAGE_DEVICE_PREFIX}{user}"
+    field = f"{day}|{device}"
+    reading = _merge_reading(_usage_load(await rc.hget(dev_key, field)), entry, day)
+    await rc.hset(dev_key, field, json.dumps(reading))
+
+    all_readings = await rc.hgetall(dev_key)
+    readings = {
+        f.split("|", 1)[1]: _usage_load(v)
+        for f, v in all_readings.items()
+        if f.startswith(f"{day}|")
+    }
+    combined = _combine_devices(day, readings)
+    key = f"{USAGE_PREFIX}{user}"
+    await rc.hset(key, day, json.dumps(combined))
 
     if await rc.hlen(key) > USAGE_MAX_DAYS:
         stale = sorted((await rc.hgetall(key)).keys())
         for old_day in stale[: len(stale) - USAGE_MAX_DAYS]:
             await rc.hdel(key, old_day)
-    return merged
+    kept = set((await rc.hgetall(key)).keys())
+    for f in all_readings:
+        if f.split("|", 1)[0] not in kept:
+            await rc.hdel(dev_key, f)
+    return combined
 
 
 def _intervals(raw: Any) -> list[list[int]]:

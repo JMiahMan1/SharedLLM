@@ -117,7 +117,7 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
         everyone else&apos;s device lists, so an unpermitted user never sees them at all.
       </p>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_220px_auto]">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
         <EntitySearchDropdown
           value={entityId}
           onChange={setEntityId}

@@ -44,6 +44,47 @@ public final class SocialNotificationMonitor {
     static final Set<String> IGNORED_CATEGORIES = new HashSet<>(Arrays.asList(
             "transport", "service", "sys", "progress", "status", "alarm", "Stopwatch"));
 
+    /**
+     * Messaging and social apps whose notifications are messages even when the
+     * app does not label them so. Anything else counts only when Android says
+     * it is a message ({@link #isSocial}).
+     */
+    static final Set<String> SOCIAL_PACKAGES = new HashSet<>(Arrays.asList(
+            "com.snapchat.android",
+            "com.instagram.android",
+            "com.instagram.barcelona",
+            "com.discord",
+            "com.whatsapp",
+            "com.facebook.orca",
+            "com.facebook.katana",
+            "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.trill",
+            "org.telegram.messenger",
+            "org.thoughtcrime.securesms",
+            "kik.android",
+            "com.groupme.android",
+            "com.reddit.frontpage",
+            "com.twitter.android",
+            "com.roblox.client",
+            "com.google.android.apps.dynamite",
+            "com.microsoft.teams"));
+
+    /** Notification categories Android uses for a message from a person. */
+    static final Set<String> SOCIAL_CATEGORIES = new HashSet<>(Arrays.asList("msg", "social"));
+
+    /**
+     * Whether a notification is a message or social update at all: from a
+     * known messaging or social app, in a message/social category, or drawn
+     * as a conversation (MessagingStyle). Every other app's notifications
+     * (games, shopping, video, news) used to be recorded as "social", which
+     * filled the feed and the recap with noise.
+     */
+    public static boolean isSocial(String pkg, String category, boolean conversation) {
+        if (pkg != null && SOCIAL_PACKAGES.contains(pkg)) return true;
+        if (category != null && SOCIAL_CATEGORIES.contains(category)) return true;
+        return conversation;
+    }
+
     public static final class Record {
         public final String pkg;
         public final String sender;

@@ -1113,7 +1113,7 @@ function InstallFields({
   const unknown = typed !== '' && knownCodes.length > 0 && !knownCodes.includes(typed);
   return (
     <>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <Field
             label="Translation code"

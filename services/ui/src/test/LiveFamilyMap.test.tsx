@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from './setup';
@@ -9,9 +9,11 @@ import {
   ageLabel,
   buildLiveMembers,
   classifyLocation,
+  clusterKey,
   clusterMembers,
   distanceMeters,
   placeKeyFor,
+  spiderOffsets,
 } from '../components/geo/liveLocations';
 
 function renderMap() {
@@ -118,6 +120,49 @@ describe('clustering nearby members', () => {
     const school = { id: 'zone.school', name: 'School', lat: 33.4484, lon: -112.074, radius: 100 };
     expect(placeKeyFor({ lat: 33.4484, lon: -112.074 }, [town, school])).toBe('zone.school');
     expect(placeKeyFor({ lat: 34.0, lon: -112.0 }, [town, school])).toBeNull();
+  });
+
+  it('groups pins that would overlap on screen, with no place and beyond the metre radius', () => {
+    // ~400 m apart and no saved place covers them: metres alone keep them apart.
+    const members = [
+      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 33.4520, lon: -112.074, accuracy: 10, ageMs: 5_000, freshness: 'live' as const },
+    ];
+    expect(clusterMembers(members, 150)).toHaveLength(2);
+    // Zoomed out, ~10 m to the pixel: 40 px apart, so the avatars would overlap.
+    const zoomedOut = (m: { lat: number; lon: number }) => ({ x: m.lon * 1e4, y: -m.lat * 1e4 });
+    const out = clusterMembers(members, 150, undefined, { project: zoomedOut, pixelRadius: 40 });
+    expect(out).toHaveLength(1);
+    expect(out[0].lead.userId).toBe('b');
+    // Zoomed in, the same pair is hundreds of pixels apart and splits again.
+    const zoomedIn = (m: { lat: number; lon: number }) => ({ x: m.lon * 1e5, y: -m.lat * 1e5 });
+    expect(clusterMembers(members, 150, undefined, { project: zoomedIn, pixelRadius: 40 })).toHaveLength(2);
+  });
+
+  it('chains neighbours into one group instead of stacking a second pin on the first', () => {
+    // a-b and b-c are each ~110 m apart; a-c is ~220 m. A greedy pass that saw
+    // a, then c, then b left c on its own pin right next to the group.
+    const members = [
+      { userId: 'a', lat: 33.0, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'c', lat: 33.002, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 33.001, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+    ];
+    const clusters = clusterMembers(members, 150);
+    expect(clusters).toHaveLength(1);
+    expect(clusterKey(clusters[0])).toBe('a|b|c');
+  });
+
+  it('fans a group out into pins that do not touch', () => {
+    for (const count of [2, 3, 5, 8]) {
+      const offsets = spiderOffsets(count);
+      expect(offsets).toHaveLength(count);
+      for (let i = 0; i < count; i++) {
+        for (let j = i + 1; j < count; j++) {
+          const gap = Math.hypot(offsets[i].x - offsets[j].x, offsets[i].y - offsets[j].y);
+          expect(gap).toBeGreaterThanOrEqual(34);
+        }
+      }
+    }
   });
 
   it('ignores staleness when distance is what matters', () => {
@@ -309,4 +354,42 @@ describe('LiveFamilyMap', () => {
     expect(screen.getByTestId('live-map-count').textContent).toContain('2 sharing location');
   });
 
+  it('opens a group into separate pins on tap, and folds it back on zoom', async () => {
+    server.use(
+      http.get('/api/users/location/all', () => HttpResponse.json({
+        jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
+        michele: { latitude: 33.44842, longitude: -112.07401, accuracy: 12, updated_at: nowSec - 30 },
+      })),
+      http.get('/api/users/family-directory', () => HttpResponse.json([
+        { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
+        { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: '' },
+      ])),
+    );
+    renderMap();
+    const cluster = await waitFor(() => {
+      const found = document.querySelector('[data-testid="map-avatar-cluster"]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    // No saved place covers this spot: the pair still shares one pin.
+    expect(document.querySelectorAll('.leaflet-marker-icon')).toHaveLength(1);
+
+    fireEvent.click(cluster.closest('.leaflet-marker-icon') as HTMLElement);
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="map-avatar-cluster"]')).toBeNull();
+      expect(document.querySelectorAll('[data-testid="map-avatar-marker"]')).toHaveLength(2);
+    });
+    const pins = [...document.querySelectorAll('.leaflet-marker-icon')] as HTMLElement[];
+    expect(pins).toHaveLength(2);
+    // Fanned out: the two pins no longer sit on the same spot.
+    const at = (pin: HTMLElement) => `${pin.style.left},${pin.style.top},${pin.style.transform}`;
+    expect(at(pins[0])).not.toBe(at(pins[1]));
+
+    act(() => {
+      fireEvent.click(document.querySelector('.leaflet-control-zoom-out') as HTMLElement);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="map-avatar-cluster"]')).not.toBeNull();
+    });
+  });
 });

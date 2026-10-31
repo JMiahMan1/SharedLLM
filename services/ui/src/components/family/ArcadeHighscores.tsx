@@ -26,7 +26,7 @@ export default function ArcadeHighscores() {
         <h2 className="text-sm font-semibold text-slate-200">High scores by game</h2>
         <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">Top 3</span>
       </div>
-      <div className="mt-3 grid max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+      <div className="mt-3 grid grid-cols-1 max-h-96 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
         {games.map((game) => (
           <div
             key={game.slug}

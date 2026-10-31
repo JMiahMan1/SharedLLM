@@ -96,6 +96,12 @@ body {
     color: var(--site-text);
   }
 
+  /* A <select> is as wide as its longest option, and those are often people's
+     full names or Home Assistant entity names: never wider than its box. */
+  select {
+    max-width: 100%;
+  }
+
   /* Smooth scrolling for all scroll containers */
   * {
     scroll-behavior: smooth;

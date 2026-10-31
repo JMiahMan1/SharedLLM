@@ -186,7 +186,7 @@ export default function ArcadeGames() {
     return (
       <div className="glass-panel p-4 rounded-2xl border border-white/5 animate-pulse" data-testid="arcade-loading">
         <div className="h-4 w-40 rounded bg-white/10" />
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="h-24 rounded-xl bg-white/5" />
           <div className="h-24 rounded-xl bg-white/5" />
         </div>
@@ -256,7 +256,7 @@ export default function ArcadeGames() {
           {data.featured.length > 0 && (
             <div>
               <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Featured</h3>
-              <div className="grid gap-3 sm:grid-cols-2" data-testid="arcade-featured">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="arcade-featured">
                 {data.featured.map((game) => (
                   <GameCard
                     key={`featured-${game.slug}`}
@@ -271,7 +271,7 @@ export default function ArcadeGames() {
           {data.games.length > data.featured.length && (
             <div>
               <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">All games</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {data.games.map((game) => (
                   <GameCard
                     key={game.slug}

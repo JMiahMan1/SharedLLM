@@ -10,6 +10,9 @@ const smsSeen = new Set<number>();
 
 let commsSyncInFlight = false;
 
+/** Whether this APK sends calls and texts itself (CommsCollector); false once an older one says no. */
+let nativeSync = true;
+
 /** One pass: pull new calls and SMS, post each as an activity event. */
 async function syncComms(): Promise<void> {
   if (commsSyncInFlight) return;
@@ -17,6 +20,18 @@ async function syncComms(): Promise<void> {
   try {
     const access = await Comms.hasAccess();
     if (!access?.calls && !access?.sms) return;
+    if (nativeSync) {
+      // The APK reads oldest first and moves its place only after the server
+      // took each one, the same pass its background worker runs while Jarvis
+      // is closed, so nothing is sent twice or lost on a failed upload.
+      try {
+        await Comms.syncNow();
+        return;
+      } catch {
+        // An APK from before syncNow: read the rows here, as it always did.
+        nativeSync = false;
+      }
+    }
     const token = storageGetSync('jarvis_api_key');
     if (!token) return;
     const serverUrl = storageGetSync('jarvis_server_url') || window.location.origin;
@@ -85,7 +100,8 @@ async function syncComms(): Promise<void> {
 }
 
 /**
- * Pulls new calls and SMS from the device and posts them to the activity feed.
+ * Sends new calls and SMS to the activity feed while Jarvis is open (the APK's
+ * background worker covers the rest of the time).
  */
 export default function CommsSync() {
   useEffect(() => {

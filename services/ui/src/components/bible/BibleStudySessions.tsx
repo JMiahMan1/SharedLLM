@@ -238,7 +238,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
       {sessions.isLoading ? (
         <p className="text-xs text-slate-500">Loading studies…</p>
       ) : (sessions.data?.sessions ?? []).length === 0 ? null : (
-        <ul className="grid gap-2 sm:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {(sessions.data?.sessions ?? []).map((session) => (
             <li
               key={session.id}

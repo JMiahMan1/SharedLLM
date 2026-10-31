@@ -36,6 +36,8 @@ final class GuardApi {
     static final String KEY_INSTALL_BASELINE = "guard_install_baseline";
     /** Tamper reports not yet taken by the server (JSON list of {event, detail}). */
     static final String KEY_TAMPER_PENDING = "guard_tamper_pending";
+    private static final String KEY_ATTEMPT_REPORTED_PREFIX = "attempt_reported_";
+    static final long ATTEMPT_REPORT_GAP_MS = 10L * 60 * 1000;
     static final String KEY_BYPASS_REPORTED = "guard_bypass_reported";
     static final String KEY_FILTER_PROMPT_AT = "guard_filter_prompt_at";
     static final String KEY_GUARD_BOOT = "guard_boot_count";
@@ -585,22 +587,22 @@ final class GuardApi {
 
     /** Post a social/chat notification from a watched minor's phone onto the activity feed. */
     static void reportSocialNotification(Context context, String pkg, String label, String sender, String text) {
-        new Thread(() -> {
-            try {
-                JSONObject body = new JSONObject();
-                body.put("feature", "social");
-                body.put("item", label == null || label.isEmpty() ? pkg : label);
-                body.put("event", "notification");
-                JSONObject detail = new JSONObject();
-                detail.put("package", pkg);
-                if (sender != null && !sender.isEmpty()) detail.put("sender", sender);
-                detail.put("body", text);
-                body.put("detail", detail);
-                send(context, "POST", "/api/activity", body.toString());
-            } catch (Exception ignored) {
-                // Best effort: notification monitoring never blocks the phone.
-            }
-        }).start();
+        try {
+            JSONObject body = new JSONObject();
+            body.put("feature", "social");
+            body.put("item", label == null || label.isEmpty() ? pkg : label);
+            body.put("event", "notification");
+            JSONObject detail = new JSONObject();
+            detail.put("package", pkg);
+            if (sender != null && !sender.isEmpty()) detail.put("sender", sender);
+            detail.put("body", text);
+            body.put("detail", detail);
+            // Kept on the phone until the server takes it (it used to be lost
+            // whenever the phone was offline).
+            ActivityOutbox.add(context, body);
+        } catch (Exception ignored) {
+            // Notification monitoring never blocks the phone.
+        }
     }
 
     /** Report a photo or video thumbnail to be scanned for safety concerns. */
@@ -632,10 +634,23 @@ final class GuardApi {
      */
     @android.annotation.SuppressLint("ApplySharedPref") // the report must be on disk before the guard may stop
     static void reportTamper(Context context, String event, String detail) {
+        // An attempt (opening the screens that uninstall Jarvis or change
+        // Private DNS) is covered every time, but the parents hear of it at
+        // most once per ATTEMPT_REPORT_GAP_MS: one child poking at Settings
+        // sent them 29 notices in two hours.
+        if (event.endsWith("_attempt")) {
+            long now = System.currentTimeMillis();
+            String at = KEY_ATTEMPT_REPORTED_PREFIX + event;
+            if (now - prefs(context).getLong(at, 0L) < ATTEMPT_REPORT_GAP_MS) return;
+            prefs(context).edit().putLong(at, now).apply();
+        }
         JSONObject item;
         try {
             item = new JSONObject().put("event", event);
             if (detail != null && !detail.isEmpty()) item.put("detail", detail);
+            // Which of the child's devices it was, for the father's Devices section.
+            String deviceKey = TokenBridgePlugin.prefs(context).getString(TokenBridgePlugin.KEY_DEVICE_KEY, "");
+            if (deviceKey != null && !deviceKey.isEmpty()) item.put("device_key", deviceKey);
         } catch (Exception e) {
             return; // A report we cannot build is not kept; the guard itself keeps working.
         }

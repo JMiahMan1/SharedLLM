@@ -44,6 +44,8 @@ describe('PhoneUsageSync', () => {
     expect(body.sessions).toBe(3);
     expect(body.source).toBe('phone');
     expect(body.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Names this device, so a phone and a tablet add up on the server.
+    expect(body.device_key).toMatch(/^[0-9a-f]{16,}$/);
   });
 
   it('stays quiet without the usage permission', async () => {

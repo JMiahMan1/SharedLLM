@@ -21,7 +21,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { GripVertical, ListMusic, Loader2, Music, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
-import { extractMaImage } from '../../../lib/maImage';
+import { extractMaImage, maItemImage } from '../../../lib/maImage';
 import { proxiedImage } from '../../../lib/mediaImage';
 import { useMediaToken } from '../../../lib/mediaToken';
 import { formatDuration } from '../format';
@@ -102,7 +102,7 @@ function toEntry(raw: unknown): QueueEntry | null {
     name,
     artist: artists,
     duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
-    image: extractMaImage(item.image) ?? extractMaImage(media?.image) ?? null,
+    image: extractMaImage(item.image) ?? maItemImage(media) ?? null,
     available: item.available !== false,
   };
 }

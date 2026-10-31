@@ -9,7 +9,7 @@ import { api } from '../services/api';
 import { localDay } from '../lib/healthHub';
 import type { GuardianRecap, ScreenTimeStatus } from '../types/api';
 
-const auth = vi.hoisted(() => ({ user: { username: 'dad', is_minor: false } as { username: string; is_minor: boolean } }));
+const auth = vi.hoisted(() => ({ user: { username: 'dad', is_minor: false } as { username: string; is_minor: boolean; family_role?: string } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../components/geo/LiveFamilyMap', () => ({ default: () => <div data-testid="map" /> }));
 vi.mock('../components/bible/ShareToChatSheet', () => ({
@@ -127,6 +127,23 @@ describe('The family member page (a parent)', () => {
     expect(concern).toHaveTextContent('Bullying · High');
     expect(concern).toHaveTextContent('In a text message: “nobody likes you”');
     expect(await within(concern).findByText(/Has anyone said anything/)).toBeInTheDocument();
+  });
+
+  it('lists the other parent for the father, without the controls a child has', async () => {
+    auth.user = { username: 'dad', is_minor: false, family_role: 'father' };
+    vi.mocked(api.getFamily).mockResolvedValue([
+      { username: 'dad', display_name: 'Dad', is_minor: false, family_role: 'father' } as never,
+      { username: 'mom', display_name: 'Mom', is_minor: false, family_role: 'mother' } as never,
+      { username: 'kate', display_name: 'Kate', is_minor: false, family_role: 'adult_child' } as never,
+      { username: 'sam', display_name: 'Sam', is_minor: true, family_role: 'child' } as never,
+    ]);
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue({ ...status(true), can_manage: false });
+    wrap(<FamilyMember />, '/family/member/mom');
+    expect(await screen.findByTestId('member-strip-mom')).toBeInTheDocument();
+    expect(screen.getByTestId('member-strip-sam')).toBeInTheDocument();
+    expect(screen.queryByTestId('member-strip-kate')).toBeNull(); // another grown member's stays their own
+    expect(screen.getByTestId('where')).toHaveTextContent('/family/member/mom');
+    expect(screen.queryByTestId('member-pause')).toBeNull();
   });
 
   it("answers only this child's requests, inline", async () => {

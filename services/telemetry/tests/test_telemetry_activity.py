@@ -99,3 +99,19 @@ def test_use_summarizes_in_app_features_without_the_raw_stream(client, rc):
 def test_use_needs_the_internal_secret(client):
     assert client.get("/api/telemetry/use/kiddo").status_code == 401
 
+
+
+def test_a_call_keeps_the_time_it_happened_not_the_upload_time(client, rc):
+    from datetime import UTC, datetime, timedelta
+
+    happened = datetime.now(UTC) - timedelta(hours=5)
+    body = {"user": "kiddo", "feature": "calls", "item": "Grandma",
+            "detail": {"direction": "in", "at": int(happened.timestamp() * 1000)}}
+    event = client.post("/api/telemetry/activity", headers=HEADERS, json=body).json()["event"]
+    assert abs(datetime.fromisoformat(event["at"]) - happened) < timedelta(seconds=1)
+
+    # A time in the future, or far in the past, is not believed.
+    for bad in (int((datetime.now(UTC) + timedelta(days=1)).timestamp() * 1000), 1, True, "yesterday"):
+        event = client.post("/api/telemetry/activity", headers=HEADERS,
+                            json={**body, "detail": {"at": bad}}).json()["event"]
+        assert abs(datetime.fromisoformat(event["at"]) - datetime.now(UTC)) < timedelta(minutes=1)

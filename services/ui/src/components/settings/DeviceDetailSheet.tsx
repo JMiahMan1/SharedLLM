@@ -309,7 +309,7 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
                 {name}
               </span>
             </p>
-            <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wide" data-testid="device-detail-kind">
+            <p className="text-[11px] text-slate-500 mt-0.5 uppercase tracking-wide break-all" data-testid="device-detail-kind">
               {deviceKindLabel(device.kind)}
               {device.owner_username ? ` · ${device.owner_username}` : ''}
             </p>

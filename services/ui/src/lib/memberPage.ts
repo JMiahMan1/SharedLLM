@@ -218,6 +218,7 @@ export const ACTIVITY_KINDS: Array<{ id: string; label: string; features: string
   { id: 'bible', label: 'Bible', features: ['bible'] },
   { id: 'games', label: 'Games', features: ['game', 'trivia'] },
   { id: 'comms', label: 'Calls & texts', features: ['sms', 'calls'] },
+  { id: 'social', label: 'Social', features: ['social'] },
   { id: 'web', label: 'Web', features: ['web'] },
   { id: 'apps', label: 'App', features: ['page'] },
 ];

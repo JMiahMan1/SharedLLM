@@ -238,9 +238,9 @@ const AnnouncementsPanel = () => {
         <p className="mt-2 text-sm text-slate-400">Timers, alarms, household reminders, and spoken announcements around the house.</p>
       </header>
 
-      <div className="grid gap-6 xl:gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-2">
         <section className="glass-panel p-4 sm:p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Clock3 size={20} className="shrink-0 text-orange-300" />
               <div className="min-w-0">

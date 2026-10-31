@@ -483,7 +483,7 @@ const Dashboard = () => {
                     {searchResults.answer}
                   </div>
                 )}
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {(searchResults.files || []).map((file, index) => (
                     <div key={`${file.path}-${index}`} className="glass-card flex items-center gap-3 p-4">
                       <FileText size={15} className="text-blue-400 shrink-0" />
@@ -557,7 +557,7 @@ const Dashboard = () => {
       )}
 
       {/* Logs + Workspaces + Settings + Raven */}
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         {isAdmin && (
         <SectionErrorBoundary label="Recent Problems">
           <section className="glass-panel p-6">

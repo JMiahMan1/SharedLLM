@@ -1,18 +1,27 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/api';
 import { userLocationsQuery } from '../../lib/wanderQueries';
-import { avatarClusterMarkerHtml, avatarClusterMarkerLayout, avatarMarkerHtml, escapeHtml } from '../../lib/avatarMarker';
+import {
+  avatarClusterMarkerHtml,
+  avatarClusterMarkerLayout,
+  avatarMarkerHtml,
+  escapeHtml,
+  type AvatarMarkerOptions,
+} from '../../lib/avatarMarker';
 import { findFamilyMember, useFamilyDirectory, type FamilyLookup } from '../chat/familyDirectory';
 import {
   FRESHNESS_STYLE,
   STALE_MAX_AGE_MS,
   ageLabel,
   buildLiveMembers,
+  clusterKey,
   clusterMembers,
   placeKeyFor,
+  spiderOffsets,
+  type LiveFamilyMember,
 } from './liveLocations';
 
 /** Continental-US view used until there is a home zone or a member to centre on. */
@@ -39,6 +48,14 @@ const NO_PLACE_CLUSTER_M = 300;
  * on separate pins.
  */
 const PLACE_SLACK_M = 250;
+
+/**
+ * Pins closer than this on screen merge into one group, whatever the distance
+ * in metres. An avatar is 34 px across, so anything nearer overlaps; this is
+ * what keeps a zoomed-out map from piling a family into an unreadable stack,
+ * and it re-groups every time the zoom changes.
+ */
+const OVERLAP_CLUSTER_PX = 40;
 
 export interface MapPlace {
   id: string;
@@ -80,6 +97,10 @@ export default function LiveFamilyMap({
   const layerRef = useRef<L.LayerGroup | null>(null);
   /** Only auto-fit once: 30 s polls must not yank the view away from the user. */
   const hasFitMembersRef = useRef(false);
+  /** Grouping depends on how far apart pins sit on screen, so it tracks zoom. */
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  /** The group fanned out into individual pins after a tap, by `clusterKey`. */
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // The one shared location query (see wanderQueries); freshness is worked out
   // in `select`, against the time the data arrived, so render stays pure.
@@ -160,6 +181,13 @@ export default function LiveFamilyMap({
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
+    // Zooming changes who overlaps whom, so re-group and fold any open group
+    // back up; tapping the map itself closes an open group too.
+    map.on('zoomend', () => {
+      setZoom(map.getZoom());
+      setExpandedKey(null);
+    });
+    map.on('click', () => setExpandedKey(null));
 
     // Android WebViews can settle the container size after the map mounts;
     // without this the canvas stays blank/garbled until a manual resize.
@@ -209,72 +237,9 @@ export default function LiveFamilyMap({
         .addTo(layer);
     }
 
-    const points: L.LatLngExpression[] = [];
-    for (const cluster of clusterMembers(
-      members,
-      zones.length ? NEARBY_CLUSTER_M : NO_PLACE_CLUSTER_M,
-      (m) => placeKeys.get(m.userId) ?? null
-    )) {
-      const member = cluster.lead;
-      const style = FRESHNESS_STYLE[member.freshness];
-      const latlng: L.LatLngExpression = [member.lat, member.lon];
-      points.push(latlng);
-
-      if (member.accuracy && member.accuracy > 0 && member.freshness !== 'stale') {
-        L.circle(latlng, {
-          radius: member.accuracy,
-          color: style.color,
-          weight: 1,
-          fillColor: style.color,
-          fillOpacity: 0.12,
-        }).addTo(layer);
-      }
-
-      const uniqueMembers = [...new Map(cluster.members.map((m) => [m.userId, m])).values()];
-      const people = uniqueMembers.map((m) => {
-        const person = personByUser.get(m.userId);
-        const label = person?.display_name || m.userId;
-        const avatar = person?.avatar ?? null;
-        const imageUrl = person && avatar?.startsWith('upload:')
-          ? avatarUrls.get(`${person.username}:${avatar}`) ?? null
-          : null;
-        const size = m.freshness === 'stale' ? 30 : 34;
-        return {
-          label,
-          avatar: avatar ?? undefined,
-          imageUrl: imageUrl ?? undefined,
-          ringColor: FRESHNESS_STYLE[m.freshness].color,
-          size,
-          opacity: m.freshness === 'stale' ? 0.7 : 1,
-        };
-      });
-      const isCluster = people.length > 1;
-      const layout = isCluster
-        ? avatarClusterMarkerLayout(people)
-        : { width: people[0]?.size ?? 34, height: people[0]?.size ?? 34 };
-      const title = people.map((person) => person.label).join(', ');
-      const icon = L.divIcon({
-        className: '',
-        html: isCluster ? avatarClusterMarkerHtml({ people }) : avatarMarkerHtml(people[0]!),
-        iconSize: [layout.width, layout.height],
-        iconAnchor: [layout.width / 2, layout.height / 2],
-        popupAnchor: [0, -layout.height / 2],
-      });
-
-      const popup = uniqueMembers
-        .map((m) => {
-          const person = personByUser.get(m.userId);
-          const label = person?.display_name || m.userId;
-          const age = ageLabel(m.ageMs);
-          const ageText = m.freshness === 'stale' ? `last seen ${age}` : age;
-          return `<strong>${escapeHtml(label)}</strong><br/>${ageText}` + (m.accuracy ? `<br/>±${Math.round(m.accuracy)} m` : '');
-        })
-        .join('<hr style="border-color:rgba(255,255,255,.12);margin:6px 0" />');
-      L.marker(latlng, { icon, keyboard: true, title, alt: title, riseOnHover: true })
-        .bindPopup(popup)
-        .addTo(layer);
-    }
-
+    // Fit first, so the grouping below is worked out at the zoom the family
+    // will actually see.
+    const points: L.LatLngTuple[] = members.map((m) => [m.lat, m.lon]);
     if (!hasFitMembersRef.current && points.length > 0) {
       hasFitMembersRef.current = true;
       if (points.length === 1) {
@@ -287,10 +252,7 @@ export default function LiveFamilyMap({
           const bounds = L.latLngBounds(points);
           const center = bounds.getCenter();
           const spreadMeters =
-            points.reduce((acc, p) => {
-              const ll = L.latLng(p as L.LatLngTuple);
-              return acc + ll.distanceTo(center);
-            }, 0) / points.length;
+            points.reduce((acc, p) => acc + L.latLng(p).distanceTo(center), 0) / points.length;
           if (spreadMeters < 50) {
             map.setView(center, 16);
           } else {
@@ -298,7 +260,7 @@ export default function LiveFamilyMap({
           }
         } catch {
           // Never let a bad bounds calculation leave the map blank
-          map.setView(points[0] as L.LatLngTuple, 15);
+          map.setView(points[0], 15);
         }
       }
     } else if (!hasFitMembersRef.current && zones.length > 0) {
@@ -306,11 +268,113 @@ export default function LiveFamilyMap({
       map.setView([zones[0].lat, zones[0].lon], 13);
     }
 
+    const pinFor = (m: LiveFamilyMember): AvatarMarkerOptions => {
+      const person = personByUser.get(m.userId);
+      const label = person?.display_name || m.userId;
+      const avatar = person?.avatar ?? null;
+      const imageUrl = person && avatar?.startsWith('upload:')
+        ? avatarUrls.get(`${person.username}:${avatar}`) ?? null
+        : null;
+      return {
+        label,
+        avatar: avatar ?? undefined,
+        imageUrl: imageUrl ?? undefined,
+        ringColor: FRESHNESS_STYLE[m.freshness].color,
+        size: m.freshness === 'stale' ? 30 : 34,
+        opacity: m.freshness === 'stale' ? 0.7 : 1,
+      };
+    };
+    const popupFor = (m: LiveFamilyMember) => {
+      const age = ageLabel(m.ageMs);
+      const ageText = m.freshness === 'stale' ? `last seen ${age}` : age;
+      return `<strong>${escapeHtml(pinFor(m).label)}</strong><br/>${ageText}` + (m.accuracy ? `<br/>±${Math.round(m.accuracy)} m` : '');
+    };
+    const singleIcon = (pin: AvatarMarkerOptions) => {
+      const size = pin.size ?? 34;
+      return L.divIcon({
+        className: '',
+        html: avatarMarkerHtml(pin),
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+        popupAnchor: [0, -size / 2],
+      });
+    };
+
+    // Grouped by place, by distance, and by whether the pins would overlap on
+    // screen at this zoom - so people at the same spot share one pin even when
+    // no saved place covers it.
+    const viewZoom = map.getZoom();
+    const clusters = clusterMembers(
+      members,
+      zones.length ? NEARBY_CLUSTER_M : NO_PLACE_CLUSTER_M,
+      (m) => placeKeys.get(m.userId) ?? null,
+      { project: (m) => map.project([m.lat, m.lon], viewZoom), pixelRadius: OVERLAP_CLUSTER_PX }
+    );
+    for (const cluster of clusters) {
+      const member = cluster.lead;
+      const style = FRESHNESS_STYLE[member.freshness];
+      const latlng: L.LatLngTuple = [member.lat, member.lon];
+
+      if (member.accuracy && member.accuracy > 0 && member.freshness !== 'stale') {
+        L.circle(latlng, {
+          radius: member.accuracy,
+          color: style.color,
+          weight: 1,
+          fillColor: style.color,
+          fillOpacity: 0.12,
+        }).addTo(layer);
+      }
+
+      const uniqueMembers = [...new Map(cluster.members.map((m) => [m.userId, m])).values()];
+      const people = uniqueMembers.map(pinFor);
+      const title = people.map((person) => person.label).join(', ');
+
+      if (people.length === 1) {
+        L.marker(latlng, { icon: singleIcon(people[0]), keyboard: true, title, alt: title, riseOnHover: true })
+          .bindPopup(popupFor(uniqueMembers[0]))
+          .addTo(layer);
+        continue;
+      }
+
+      const key = clusterKey(cluster);
+      if (key === expandedKey) {
+        // Fan the group out around its spot, each pin tied back to where that
+        // person's own fix is, so everyone can be read and tapped on their own.
+        const origin = map.project(latlng, viewZoom);
+        spiderOffsets(uniqueMembers.length).forEach((offset, index) => {
+          const m = uniqueMembers[index];
+          const spot = map.unproject(origin.add([offset.x, offset.y]), viewZoom);
+          L.polyline([[m.lat, m.lon], spot], {
+            color: FRESHNESS_STYLE[m.freshness].color,
+            weight: 1.5,
+            opacity: 0.8,
+            interactive: false,
+          }).addTo(layer);
+          L.marker(spot, { icon: singleIcon(people[index]), keyboard: true, title: people[index].label, alt: people[index].label, riseOnHover: true, zIndexOffset: 1000 })
+            .bindPopup(popupFor(m))
+            .addTo(layer);
+        });
+        continue;
+      }
+
+      // One stacked pin with a count; tapping it fans the group out.
+      const layout = avatarClusterMarkerLayout(people);
+      const icon = L.divIcon({
+        className: '',
+        html: avatarClusterMarkerHtml({ people }),
+        iconSize: [layout.width, layout.height],
+        iconAnchor: [layout.width / 2, layout.height / 2],
+      });
+      L.marker(latlng, { icon, keyboard: true, title: `${title} - tap to see each person`, alt: title, riseOnHover: true })
+        .on('click', () => setExpandedKey(key))
+        .addTo(layer);
+    }
+
     return () => {
       layer.clearLayers();
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
     };
-  }, [members, zones, personByUser, avatarTargets, avatarDataKey, placeKeys]);
+  }, [members, zones, personByUser, avatarTargets, avatarDataKey, placeKeys, zoom, expandedKey]);
 
   // "Show on map" from a family card.
   useEffect(() => {

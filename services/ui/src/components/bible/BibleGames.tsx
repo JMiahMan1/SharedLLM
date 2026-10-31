@@ -195,7 +195,7 @@ function GameLobby({
         <AttemptReview attemptId={reviewing.id} mine={reviewing.mine} page={page} onClose={() => setReviewing(null)} />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {others.map((m) => (
           <ModeCard key={m.mode} info={m} loading={loading === m.mode} disabled={loading !== null} onStart={() => onStart(m.mode)} />
         ))}
@@ -347,7 +347,7 @@ function GameRound({
         {question.reference && <p className="mt-2 text-sm text-[var(--page-muted)]">{question.reference}</p>}
       </section>
 
-      <div className="grid gap-2.5 sm:grid-cols-2" role="group" aria-label="Answers">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2" role="group" aria-label="Answers">
         {question.options.map((option) => (
           <button
             key={option}

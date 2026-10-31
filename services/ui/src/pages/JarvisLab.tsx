@@ -173,7 +173,7 @@ const AdvancedOverviewPane = () => {
   const services = Object.entries(health?.services || {});
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr]">
+    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <section className="glass-panel p-4 sm:p-6">
         <div className="mb-6 flex items-center gap-3">
           <CheckCircle2 size={20} className="text-emerald-300" />

@@ -44,6 +44,18 @@ public class MediaSessionPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Whether this APK reports what other apps play by itself
+     * ({@link MediaSessionListenerService}); the WebView then stops doing it,
+     * so nothing is reported twice. An older APK has no such method.
+     */
+    @PluginMethod
+    public void nativeReports(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("media", true);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void getActive(PluginCall call) {
         JSArray sessions = new JSArray();
@@ -87,7 +99,7 @@ public class MediaSessionPlugin extends Plugin {
         }
     }
 
-    private JSObject readSession(MediaController controller) {
+    static JSObject readSession(MediaController controller) {
         if (controller == null) {
             return null;
         }

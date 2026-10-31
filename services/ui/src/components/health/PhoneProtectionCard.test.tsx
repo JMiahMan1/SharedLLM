@@ -3,6 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PhoneProtectionCard from './PhoneProtectionCard';
 import Guard from '../../plugins/guard';
+import PhoneUsage from '../../plugins/phoneUsage';
+import MediaSession from '../../plugins/mediaSession';
+import Comms from '../../plugins/comms';
 import { api } from '../../services/api';
 
 const platform = vi.hoisted(() => ({ name: 'android' }));
@@ -12,6 +15,9 @@ vi.mock('@capacitor/core', async (importOriginal) => {
 });
 vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'kid' } }) }));
 vi.mock('../../plugins/guard', () => ({ default: { status: vi.fn(), enableAdmin: vi.fn(), openGuardSettings: vi.fn(), openAppInfo: vi.fn() } }));
+vi.mock('../../plugins/phoneUsage', () => ({ default: { hasAccess: vi.fn(), openSettings: vi.fn() } }));
+vi.mock('../../plugins/mediaSession', () => ({ default: { hasAccess: vi.fn(), openSettings: vi.fn() } }));
+vi.mock('../../plugins/comms', () => ({ default: { hasAccess: vi.fn(), requestAccess: vi.fn() } }));
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return { ...actual, api: { ...(actual.api as Record<string, unknown>), getScreenTimeStatus: vi.fn() } };
@@ -29,6 +35,26 @@ describe('PhoneProtectionCard', () => {
     vi.clearAllMocks();
     platform.name = 'android';
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue({ protected: true } as never);
+    vi.mocked(PhoneUsage.hasAccess).mockResolvedValue({ granted: true });
+    vi.mocked(MediaSession.hasAccess).mockResolvedValue({ granted: true });
+    vi.mocked(Comms.hasAccess).mockResolvedValue({ calls: true, sms: true });
+    vi.mocked(Comms.requestAccess).mockResolvedValue({ calls: true, sms: true });
+  });
+
+  it('asks for what the reports need when the phone has not allowed it', async () => {
+    vi.mocked(Guard.status).mockResolvedValue({ adminActive: true, deviceOwner: false, guardEnabled: true });
+    vi.mocked(PhoneUsage.hasAccess).mockResolvedValue({ granted: false });
+    vi.mocked(MediaSession.hasAccess).mockResolvedValue({ granted: false });
+    vi.mocked(Comms.hasAccess).mockResolvedValue({ calls: false, sms: false });
+    renderCard();
+    const usage = await screen.findByTestId('phone-protection-usage');
+    expect(screen.queryByTestId('phone-protection-on')).toBeNull();
+    fireEvent.click(usage.querySelector('button')!);
+    expect(PhoneUsage.openSettings).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('phone-protection-notifications').querySelector('button')!);
+    expect(MediaSession.openSettings).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(Comms.requestAccess).toHaveBeenCalled();
   });
 
   it('walks a parent through the two switches', async () => {

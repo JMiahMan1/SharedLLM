@@ -22,6 +22,8 @@ export interface MediaSessionPluginInterface {
   hasAccess(): Promise<MediaSessionAccess>;
   openSettings(): Promise<void>;
   getActive(): Promise<{ sessions: MediaSessionItem[] }>;
+  /** An APK whose notification listener reports plays itself (older APKs reject this). */
+  nativeReports(): Promise<{ media: boolean }>;
 }
 
 /* On the web (and old APKs without the plugin) there is simply nothing to
@@ -30,6 +32,7 @@ const webFallback: MediaSessionPluginInterface = {
   hasAccess: async () => ({ granted: false }),
   openSettings: async () => undefined,
   getActive: async () => ({ sessions: [] }),
+  nativeReports: async () => ({ media: false }),
 };
 
 const MediaSession = registerPlugin<MediaSessionPluginInterface>('MediaSession', {

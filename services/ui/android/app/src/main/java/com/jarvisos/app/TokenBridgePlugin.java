@@ -128,6 +128,8 @@ public class TokenBridgePlugin extends Plugin {
         LocationTrackingService.setEnabled(context, false);
         StepSyncService.setEnabled(context, false);
         StepSyncService.setStepsEnabled(context, false);
+        UsageSyncWorker.cancel(context);
+        CommsSyncWorker.cancel(context);
         Intent stopLocation = new Intent(context, LocationTrackingService.class);
         stopLocation.setAction("stop");
         Intent stopSteps = new Intent(context, StepSyncService.class);

@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -50,6 +50,23 @@ log = logging.getLogger("telemetry")
 
 _http: aiohttp.ClientSession | None = None
 
+
+def _happened_at(detail: dict) -> str | None:
+    """When a phone says the thing happened (``detail.at``, epoch ms: a call,
+    a text), as UTC ISO-8601. A call collected hours later used to be stamped
+    with its upload time, which put it on the wrong day in the recap. Only a
+    time within the last 60 days and not in the future is believed."""
+    raw = detail.get("at")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    now = datetime.now(UTC)
+    try:
+        when = datetime.fromtimestamp(raw / 1000, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+    if when > now + timedelta(minutes=5) or when < now - timedelta(days=60):
+        return None
+    return when.isoformat()
 
 def _client() -> aiohttp.ClientSession:
     global _http
@@ -420,14 +437,15 @@ def create_app():
         feature = str(body.get("feature") or "").strip()
         if not user or not feature:
             raise HTTPException(status_code=422, detail="user and feature required")
+        detail = body.get("detail") if isinstance(body.get("detail"), dict) else {}
         event = {
             "user": user,
             "feature": feature,
             "item": str(body.get("item") or "").strip(),
             "action": str(body.get("action") or "view").strip(),
             "duration_s": body.get("duration_s"),
-            "at": str(body.get("at") or "").strip() or utcnow_iso(),
-            "detail": body.get("detail") if isinstance(body.get("detail"), dict) else {},
+            "at": str(body.get("at") or "").strip() or _happened_at(detail) or utcnow_iso(),
+            "detail": detail,
         }
         rc = _redis()
         # A child's events are scanned for concerns as they land (never fails the record).
@@ -513,7 +531,8 @@ def create_app():
 
     @application.post("/api/telemetry/usage")
     async def record_usage(body: dict = Body(...), _: bool = Depends(require_internal)):
-        """One phone's day of screen time and when the day started and stopped."""
+        """One device's day of screen time and when the day started and stopped
+        (the person's day adds up all of their devices)."""
         user = str(body.get("user") or "").strip()
         day = str(body.get("day") or "").strip()
         if not user or not day:
@@ -533,6 +552,7 @@ def create_app():
             "sessions": sessions,
             "apps": body.get("apps") if isinstance(body.get("apps"), list) else [],
             "source": (str(body.get("source") or "phone").strip() or "phone"),
+            "device": str(body.get("device") or "").strip()[:128],
             "at": utcnow_iso(),
         }
         rc = _redis()

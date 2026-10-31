@@ -200,14 +200,14 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
 
       {step.at !== 'closed' && (
         <div className="p-4 sm:p-6 border-b border-white/5 space-y-4" aria-label="Add a device">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-white">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="min-w-0 break-words font-bold text-white">
               {step.at === 'find' && 'Add a device'}
               {step.at === 'code' && `Pair ${step.name}`}
               {step.at === 'adopt' && `Link ${step.name}`}
               {step.at === 'done' && 'Added'}
             </h4>
-            <button onClick={close} aria-label="Close" className={`p-2 rounded-xl text-slate-400 hover:text-white ${touch}`}>
+            <button onClick={close} aria-label="Close" className={`shrink-0 p-2 rounded-xl text-slate-400 hover:text-white ${touch}`}>
               <X size={18} />
             </button>
           </div>

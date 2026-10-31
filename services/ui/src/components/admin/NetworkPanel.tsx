@@ -271,7 +271,7 @@ const RouterLoginForm: FC<{ status: NetworkStatus; onSaved: (s: NetworkStatus) =
       <p className="text-xs text-slate-400">
         Use a read-only router account (scripts/router_setup.sh creates one). The password is stored encrypted and never shown again.
       </p>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <input className="glass-input min-h-11 px-3 text-sm" aria-label="Router address" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://192.168.2.1" />
         <input className="glass-input min-h-11 px-3 text-sm" aria-label="Router username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
         <input

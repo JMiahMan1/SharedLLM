@@ -95,7 +95,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 text-xs">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
             {recap.top_apps.length > 0 && (
               <div>
                 <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Top apps</p>

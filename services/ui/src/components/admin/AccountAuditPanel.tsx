@@ -27,12 +27,12 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
             Who changed which account, login or permission, and when. Values are never recorded.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 max-w-full items-center gap-2">
           <select
             value={target}
             onChange={(event) => setTarget(event.target.value)}
             aria-label="Filter by account"
-            className="glass-input min-h-11 text-sm"
+            className="glass-input min-h-11 min-w-0 text-sm"
           >
             <option value="">All accounts</option>
             {users.map((u) => (
@@ -41,7 +41,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
               </option>
             ))}
           </select>
-          <button type="button" className="glass-button min-h-11 min-w-11 p-2.5" aria-label="Refresh activity" onClick={() => void refetch()}>
+          <button type="button" className="glass-button min-h-11 min-w-11 shrink-0 p-2.5" aria-label="Refresh activity" onClick={() => void refetch()}>
             <RefreshCcw size={14} className={isFetching ? 'animate-spin' : ''} />
           </button>
         </div>

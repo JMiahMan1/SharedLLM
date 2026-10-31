@@ -1036,9 +1036,9 @@ point.
       under `docs/ROLES.md`) and to no one else; a minor does not browse their own raw feed,
       and siblings never see each other. The member's own view is the *output*, not the
       collection: their suggestions, recommendations and their own lanes are theirs to see
-      and act on, never the stream behind them. A father-mother shared parents' page stays
-      mutual and revocable for accountability; an adult child's data is their own to share
-      or hold.
+      and act on, never the stream behind them. The father and the mother see each other's
+      collected data (mutual, read-only: neither manages the other's rules); an adult
+      child's data is their own to share or hold.
 - [x] **Prayer and guidance.** The parent view pairs the week's real activity with Scripture:
       prayer prompts grounded in what actually happened, conversation starters from the
       devotional library, and a talk journal. Jarvis drafts gentle notes a parent reviews

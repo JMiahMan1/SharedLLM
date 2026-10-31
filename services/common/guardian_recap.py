@@ -25,14 +25,24 @@ def week_bounds(day: date) -> tuple[date, date]:
     return start, start + timedelta(days=6)
 
 
-def _in_week(at: str | None, start: date, end: date) -> bool:
+def _local_day(at: str | None, tz: ZoneInfo) -> date | None:
+    """The household day an event happened on. Events are stamped in UTC, so
+    the date part of the stamp is the wrong day for anything late in the
+    evening west of Greenwich (and Sunday evening fell into the next week)."""
     if not at:
-        return False
+        return None
     try:
-        when = datetime.fromisoformat(str(at).replace("Z", "+00:00")).date()
+        when = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
     except ValueError:
-        return False
-    return start <= when <= end
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=ZoneInfo("UTC"))
+    return when.astimezone(tz).date()
+
+
+def _in_week(at: str | None, start: date, end: date, tz: ZoneInfo) -> bool:
+    day = _local_day(at, tz)
+    return day is not None and start <= day <= end
 
 
 def _minutes(ms: Any) -> int:
@@ -81,7 +91,7 @@ def build(
             if isinstance(app, dict) and app.get("package"):
                 apps[str(app["package"])] += _minutes(app.get("millis"))
 
-    week_events = [e for e in events if _in_week(e.get("at"), start, end)]
+    week_events = [e for e in events if _in_week(e.get("at"), start, end, tz)]
     media = Counter(e.get("item") for e in week_events if e.get("feature") in MEDIA_FEATURES and e.get("item"))
     visits: Counter[str] = Counter()
     blocked: Counter[str] = Counter()
@@ -94,12 +104,12 @@ def build(
     calls = [e for e in week_events if e.get("feature") == "calls"]
     texts = [e for e in week_events if e.get("feature") == "sms"]
     social = [e for e in week_events if e.get("feature") == "social"]
-    bible_days = {str(e.get("at"))[:10] for e in week_events if e.get("feature") == "bible"}
+    bible_days = {_local_day(e.get("at"), tz) for e in week_events if e.get("feature") == "bible"}
 
     # A hit the local model dismissed in context stays on record, out of the recap.
     week_concerns = [
         c for c in concerns
-        if _in_week(c.get("at"), start, end) and (c.get("review") or {}).get("verdict") != "dismissed"
+        if _in_week(c.get("at"), start, end, tz) and (c.get("review") or {}).get("verdict") != "dismissed"
     ]
     by_category: dict[str, dict[str, Any]] = {}
     for c in week_concerns:

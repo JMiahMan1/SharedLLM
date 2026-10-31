@@ -36,7 +36,9 @@ const SECTION_VIEW: Record<SectionId, (p: { username: string; name: string }) =>
  * shows only when the server says this viewer may see it.
  */
 export default function FamilyMember() {
-  const me = useAuth().user?.username || '';
+  const { user } = useAuth();
+  const me = user?.username || '';
+  const myRole = user?.family_role;
   const { username } = useParams();
   const [params, setParams] = useSearchParams();
   const { data: family = [], isLoading, error } = useQuery({
@@ -45,7 +47,12 @@ export default function FamilyMember() {
     retry: false,
     staleTime: 10 * 60 * 1000,
   });
-  const children = useMemo(() => family.filter((m) => m.is_minor && m.username !== me), [family, me]);
+  // The children, and for the father and the mother each other too: they share
+  // their collected data (identity's visibility rule says so as well).
+  const children = useMemo(() => {
+    const isParent = (role?: string | null) => role === 'father' || role === 'mother';
+    return family.filter((m) => m.username !== me && (m.is_minor || (isParent(myRole) && isParent(m.family_role))));
+  }, [family, me, myRole]);
   const child = children.find((c) => c.username === username);
   const { data: status } = useQuery({ ...statusQuery(child?.username || ''), enabled: Boolean(child) });
   const sections = MEMBER_SECTIONS.filter((s) => !s.technical || status?.technical);

@@ -56,7 +56,7 @@ function Header({ description, child }: { description: string; child?: FamilyRec
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold text-white sm:text-2xl">Family guardian</h1>
-          <p className="mt-0.5 text-xs text-slate-400">{description}</p>
+          <p className="mt-0.5 break-words text-xs text-slate-400">{description}</p>
         </div>
         {child && (
           <Link

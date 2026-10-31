@@ -195,7 +195,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
           <Icon className="w-6 h-6 md:w-8 md:h-8" />
         </div>
         <div className="flex-1 md:flex-none min-w-0">
-          <h3 className="font-bold text-white">{name}</h3>
+          <h3 className="font-bold text-white break-words">{name}</h3>
           <p className="text-[10px] text-slate-500 mt-1 truncate md:max-w-[150px] font-mono" data-testid={`integration-status-${name}`}>
             {statusLine}
           </p>
@@ -231,7 +231,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             </div>
           )}
 
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 gap-4">
             {Object.entries(configKeys).map(([label, key]) => {
               const isSecret = isSecretKey(key);
               const isReadOnly = name === 'Skylight' && !userData?.is_system_default;
@@ -812,7 +812,7 @@ const Identity = () => {
                  <NewApiKey />
               </div>
               
-              <div className="p-0">
+              <div className="p-0 overflow-x-auto">
                  <table className="w-full text-left text-xs">
                     <thead className="bg-white/5 text-slate-500 font-black uppercase text-[9px] tracking-widest">
                        <tr>

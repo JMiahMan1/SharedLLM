@@ -17,6 +17,7 @@ import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import WatchPanel from '../components/settings/WatchPanel';
 import Toggle from '../components/ui/Toggle';
+import UserAvatar from '../components/UserAvatar';
 import { getAutoDropIn, setAutoDropIn } from '../lib/callSettings';
 import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
 import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
@@ -172,9 +173,14 @@ const Settings = () => {
           onClick={() => { trigger('light'); navigate('/identity'); }}
           className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
         >
-          <div className="flex items-center gap-3">
-            <User size={18} className="text-slate-400" />
-            <div className="text-left">
+          <div className="flex min-w-0 items-center gap-3">
+            {/* The person's own picture, so a new one shows here as soon as it is saved. */}
+            {user ? (
+              <UserAvatar username={user.username} avatar={user.avatar} name={user.full_name || user.username} size={32} />
+            ) : (
+              <User size={18} className="text-slate-400" />
+            )}
+            <div className="min-w-0 text-left">
               <p className="text-white text-sm font-medium">Accounts & Integrations</p>
               <p className="text-xs text-slate-400">Profile, Nextcloud / Skylight / GitHub / CalDAV, voice, devices, API keys</p>
             </div>
@@ -730,12 +736,12 @@ const AppUpdatesSection = () => {
 
   return (
     <div className="glass-panel rounded-2xl p-4 space-y-3">
-      <div className="flex items-center justify-between px-3 pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 pt-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
           <Smartphone size={16} className="text-purple-400" />
           App &amp; OTA Updates
         </h2>
-        <span className="text-[10px] text-slate-500 font-mono">
+        <span className="min-w-0 break-all text-[10px] text-slate-500 font-mono">
           {updateInfo.version ? `v${updateInfo.version} ` : ''}({updateInfo.gitSha})
         </span>
       </div>
@@ -753,7 +759,7 @@ const AppUpdatesSection = () => {
               Web UI updates install silently; background checks run on launch and every 6 hours
             </p>
             {updateInfo.remoteSha && updateInfo.remoteSha !== 'unknown' && (
-              <p className="text-[10px] text-slate-500 font-mono mt-1">
+              <p className="text-[10px] text-slate-500 font-mono mt-1 break-all">
                 Server: {updateInfo.remoteVersion ? `${updateInfo.remoteVersion} ` : ''}({updateInfo.remoteSha})
                 {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
               </p>

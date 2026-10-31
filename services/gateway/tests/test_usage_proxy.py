@@ -100,6 +100,17 @@ def test_usage_forwards_the_authenticated_user(client, monkeypatch):
     assert body["source"] == "phone"
 
 
+def test_usage_names_the_device_so_devices_add_up(client, monkeypatch):
+    cap = _patch_telemetry(monkeypatch, payload={"status": "SUCCESS"})
+
+    client.post("/api/usage", json={"day": "2026-10-23", "millis": 1000, "device_key": "ab12" * 8})
+    client.post("/api/usage", json={"day": "2026-10-23", "millis": 1000, "device_key": "not a key!"})
+
+    assert cap["calls"][0]["json"]["device"] == "ab12" * 8
+    # A malformed key is dropped, but the day is still recorded.
+    assert cap["calls"][1]["json"]["device"] == ""
+
+
 def test_usage_history_forwards_days(client, monkeypatch):
     cap = _patch_telemetry(monkeypatch, payload={"status": "SUCCESS", "days": []})
 

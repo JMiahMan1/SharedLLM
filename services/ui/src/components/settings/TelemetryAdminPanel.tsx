@@ -194,7 +194,7 @@ const TelemetryAdminPanel = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="glass-card p-3 text-center">
             <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Total Devices</p>
             <p className="text-lg font-bold text-white mt-1">{stats.totalDevices}</p>
@@ -229,8 +229,8 @@ const TelemetryAdminPanel = () => {
       </section>
 
       {/* Enrollment Form */}
-      <section className="glass-panel p-6">
-        <div className="mb-6 flex items-center justify-between">
+      <section className="glass-panel p-4 sm:p-6">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-3 text-xl font-bold text-white">
               <Plus size={20} className="text-emerald-400" />
@@ -256,7 +256,7 @@ const TelemetryAdminPanel = () => {
           </button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr] lg:grid-cols-[2fr_1fr_1fr_auto]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
           <div className="md:col-span-2">
             <EntitySearchDropdown
               value={telemetryEntityId}
@@ -369,7 +369,7 @@ const TelemetryAdminPanel = () => {
                 className="glass-card p-4 space-y-3"
               >
                 {/* Header */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-white truncate">{enrollment.entity_id}</h4>
@@ -377,7 +377,7 @@ const TelemetryAdminPanel = () => {
                         {enrollment.entity_id.split('.')[0]}
                       </span>
                     </div>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-slate-400">
                       <span className="flex items-center gap-1">
                         <Power size={11} className={enrollment.power_tracking ? 'text-amber-400' : 'text-slate-600'} />
                         Power: {enrollment.power_tracking ? 'On' : 'Off'}

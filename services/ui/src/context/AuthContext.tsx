@@ -30,6 +30,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
 
+  // Follow the ['me'] cache. The avatar picker and the Identity page write a
+  // changed profile there; this copy was set only at sign-in, so everything
+  // reading useAuth().user (the Settings page among them) kept the old
+  // picture until the app was restarted. Only the same person's profile is
+  // taken, so a late answer can never swap who is signed in.
+  useEffect(() => queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== 'updated' || event.query.queryKey.length !== 1 || event.query.queryKey[0] !== 'me') return;
+    const next = event.query.state.data as UserProfile | undefined;
+    if (!next?.username) return;
+    setUser((prev) => (prev && prev.username === next.username && prev !== next ? next : prev));
+  }), [queryClient]);
+
   useEffect(() => {
     const hardTimeout = setTimeout(() => {
       setInitError('Initialization timed out. Please restart the app.');

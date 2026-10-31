@@ -62,7 +62,7 @@ export default function ArcadeScoreboard() {
       <p className="mt-1 text-xs text-slate-400">
         Scores live in the arcade under each member's initials. Play a game and submit the score; the board updates here.
       </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {data.players.map((player, index) => (
           <PlayerRow key={player.username} player={player} rank={index + 1} />
         ))}

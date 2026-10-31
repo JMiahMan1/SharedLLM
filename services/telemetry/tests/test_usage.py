@@ -122,3 +122,36 @@ def test_per_app_foreground_time_merges_by_package(client, rc):
 
 def test_needs_the_internal_secret(client, rc):
     assert client.post("/api/telemetry/usage", json=_usage()).status_code == 401
+
+
+def test_a_phone_and_a_tablet_add_up_rather_than_overwrite(client, rc):
+    phone, tablet = "a" * 32, "b" * 32
+    client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(
+        device=phone, millis=3_600_000, first=1_700_000_000_000, last=1_700_004_000_000, sessions=4,
+        apps=[{"package": "com.youtube", "millis": 1_000_000, "last_use": 1_700_003_000_000}]))
+    client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(
+        device=tablet, millis=1_800_000, first=1_699_990_000_000, last=1_700_002_000_000, sessions=2,
+        apps=[{"package": "com.youtube", "millis": 500_000, "last_use": 1_700_002_000_000},
+              {"package": "com.minecraft", "millis": 900_000, "last_use": 1_700_001_000_000}]))
+    # The phone re-reports later in the day; only its own reading grows.
+    client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(device=phone, millis=4_000_000, sessions=5))
+
+    day = client.get("/api/telemetry/usage/kiddo", headers=HEADERS).json()["days"][0]
+    assert day["millis"] == 4_000_000 + 1_800_000
+    assert day["sessions"] == 5 + 2
+    assert day["first_use"] == 1_699_990_000_000
+    assert day["last_use"] == 1_700_004_000_000
+    assert day["devices"] == 2
+    by_pkg = {a["package"]: a["millis"] for a in day["apps"]}
+    assert by_pkg == {"com.youtube": 1_500_000, "com.minecraft": 900_000}
+
+
+def test_an_unnamed_report_is_dropped_once_a_device_names_itself(client, rc):
+    # An app from before devices were told apart reported without a key; the
+    # same phone then reports with its key. Counting both would double the day.
+    client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(millis=3_000_000))
+    client.post("/api/telemetry/usage", headers=HEADERS, json=_usage(device="c" * 32, millis=3_100_000))
+
+    day = client.get("/api/telemetry/usage/kiddo", headers=HEADERS).json()["days"][0]
+    assert day["millis"] == 3_100_000
+    assert day["devices"] == 1

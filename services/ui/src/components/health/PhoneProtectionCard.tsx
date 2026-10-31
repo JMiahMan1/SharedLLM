@@ -5,19 +5,43 @@ import { ShieldCheck, ShieldAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import Guard, { type GuardStatus } from '../../plugins/guard';
+import PhoneUsage from '../../plugins/phoneUsage';
+import MediaSession from '../../plugins/mediaSession';
+import Comms from '../../plugins/comms';
+
+/** What the parents' reports need from this phone, besides the guard itself. */
+interface ReportingAccess {
+  usage: boolean;
+  notifications: boolean;
+  calls: boolean;
+  sms: boolean;
+}
+
+async function readReportingAccess(): Promise<ReportingAccess> {
+  const [usage, media, comms] = await Promise.all([
+    PhoneUsage.hasAccess().catch(() => ({ granted: false })),
+    MediaSession.hasAccess().catch(() => ({ granted: false })),
+    Comms.hasAccess().catch(() => ({ calls: false, sms: false })),
+  ]);
+  return { usage: Boolean(usage?.granted), notifications: Boolean(media?.granted), calls: Boolean(comms?.calls), sms: Boolean(comms?.sms) };
+}
 
 /**
  * Setting up Jarvis's protection on a child's Android phone: device admin (no
  * plain uninstall) and the screen guard (removing or switching off Jarvis
  * needs a parent's login; screen-time rules are enforced). Android only lets
  * the person holding the phone switch these on, so this walks a parent through
- * it on the child's phone, and shows plainly when both are on.
+ * it on the child's phone, and shows plainly when both are on. The same goes
+ * for what the parents' reports read (usage access for screen time and apps,
+ * notification access for media and chat apps, call and message logs):
+ * without them the phone reports nothing and nothing says why.
  */
 export default function PhoneProtectionCard() {
   const { user } = useAuth();
   const me = user?.username || '';
   const android = Capacitor.getPlatform() === 'android';
   const [guard, setGuard] = useState<GuardStatus | null>(null);
+  const [access, setAccess] = useState<ReportingAccess | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ['screen-time', me],
@@ -29,7 +53,10 @@ export default function PhoneProtectionCard() {
   useEffect(() => {
     if (!android) return undefined;
     let alive = true;
-    const read = () => void Guard.status().then((s) => alive && setGuard(s)).catch(() => undefined);
+    const read = () => {
+      void Guard.status().then((s) => alive && setGuard(s)).catch(() => undefined);
+      void readReportingAccess().then((a) => alive && setAccess(a));
+    };
     read();
     // Coming back from Settings: read it again.
     document.addEventListener('visibilitychange', read);
@@ -42,7 +69,9 @@ export default function PhoneProtectionCard() {
   if (!android || !status?.protected || !guard) return null;
   const filterWanted = Boolean(status.rules?.web_filter?.enabled);
   const filterReady = !filterWanted || Boolean(guard.webFilterAllowed);
-  const allOn = guard.adminActive && guard.guardEnabled && filterReady;
+  const reportingOn = Boolean(access && access.usage && access.notifications && access.calls && access.sms);
+  const allOn = guard.adminActive && guard.guardEnabled && filterReady && reportingOn;
+  const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
 
   return (
     <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="phone-protection-card">
@@ -86,6 +115,44 @@ export default function PhoneProtectionCard() {
                     , tap ⋮, then <b>Allow restricted settings</b>, and try again.
                   </span>
                 </>
+              )}
+            </li>
+            <li data-testid="phone-protection-usage">
+              Usage access{' '}
+              {access?.usage ? (
+                <span className="text-emerald-300">is on.</span>
+              ) : (
+                <>
+                  <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void PhoneUsage.openSettings()}>
+                    Turn on
+                  </button>
+                  <span className="block mt-1 text-slate-400">
+                    Choose <b>Jarvis</b> and allow usage access. Screen time, app limits and the apps a parent sees all come from it.
+                  </span>
+                </>
+              )}
+            </li>
+            <li data-testid="phone-protection-notifications">
+              Notification access{' '}
+              {access?.notifications ? (
+                <span className="text-emerald-300">is on.</span>
+              ) : (
+                <>
+                  <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void MediaSession.openSettings()}>
+                    Turn on
+                  </button>
+                  <span className="block mt-1 text-slate-400">Choose <b>Jarvis</b>. Music, videos and chat apps are reported with it.</span>
+                </>
+              )}
+            </li>
+            <li data-testid="phone-protection-comms">
+              Calls and messages{' '}
+              {access?.calls && access?.sms ? (
+                <span className="text-emerald-300">are allowed.</span>
+              ) : (
+                <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={askComms}>
+                  Allow
+                </button>
               )}
             </li>
             {filterWanted && (

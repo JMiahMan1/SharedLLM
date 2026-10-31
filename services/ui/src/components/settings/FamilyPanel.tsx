@@ -143,7 +143,7 @@ export default function FamilyPanel() {
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="space-y-1 text-xs text-slate-400">
                   <span>Family role</span>
                   <select

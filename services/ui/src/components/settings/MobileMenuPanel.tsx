@@ -122,7 +122,7 @@ export default function MobileMenuPanel() {
             <div className="min-w-0 flex-1">
               <p className="text-white text-sm font-medium truncate">{page.label}</p>
               {page.mobileLabel && page.mobileLabel !== page.label && (
-                <p className="text-[11px] text-slate-500">Shown as “{page.mobileLabel}”</p>
+                <p className="text-[11px] text-slate-500 truncate">Shown as “{page.mobileLabel}”</p>
               )}
             </div>
             <button

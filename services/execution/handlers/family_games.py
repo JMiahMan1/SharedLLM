@@ -525,7 +525,10 @@ class GameRegistry:
             kind="memory",
             token=token,
             board=board,
-            revealed=[0],
+            # Every card starts face down. A first card shown face up could
+            # never be matched (a flip takes two face-down cards), so the game
+            # could not finish.
+            revealed=[],
         )
         self._games[token] = state
         return state
@@ -703,14 +706,15 @@ def apply_memory_flip(state: GameState, who: str, words: list[str]) -> dict[str,
             "message": f'Call two cards by number, 1 to {len(state.board)} - e.g. "2 7".',
         }
     if len(picks) == 1:
+        # A peek, not a turn: the card is named and flips back. Keeping it face
+        # up left it out of every later pair, so its partner could never be
+        # matched and the game could not finish.
         index = picks[0]
-        if index not in state.revealed:
-            state.revealed.append(index)
         return {
             "flipped": [state.board[index]],
             "matched": False,
             "stars": player.stars,
-            "message": f"Card {index + 1} is {state.board[index]}. Now pick its partner.",
+            "message": f'Card {index + 1} is {state.board[index]}. Call two cards to flip a pair - e.g. "{index + 1} 4".',
         }
 
     first, second = picks

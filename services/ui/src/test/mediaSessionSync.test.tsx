@@ -7,6 +7,7 @@ const mediaSessionMock = vi.hoisted(() => ({
   hasAccess: vi.fn(),
   openSettings: vi.fn(),
   getActive: vi.fn(),
+  nativeReports: undefined as undefined | ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('../plugins/mediaSession', () => ({ default: mediaSessionMock }));
@@ -21,6 +22,23 @@ describe('MediaSessionSync', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('leaves it to an APK whose notification listener reports plays itself', async () => {
+    vi.resetModules();
+    mediaSessionMock.nativeReports = vi.fn().mockResolvedValue({ media: true });
+    mediaSessionMock.hasAccess.mockResolvedValue({ granted: true });
+    mediaSessionMock.getActive.mockResolvedValue({ sessions: [{ app: 'com.spotify.music', title: 'Song', artist: '', album: '', playing: true, durationMs: 1, positionMs: 0 }] });
+    const { default: Fresh } = await import('../components/layout/MediaSessionSync');
+
+    render(<Fresh />);
+
+    await vi.waitFor(() => expect(mediaSessionMock.nativeReports).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mediaSessionMock.getActive).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    mediaSessionMock.nativeReports = undefined;
+    vi.resetModules();
   });
 
   it('reports a playing external session once', async () => {

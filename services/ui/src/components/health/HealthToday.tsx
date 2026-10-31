@@ -166,7 +166,7 @@ export default function HealthToday({ onNavigate }: Props) {
     return (
       <div className="space-y-3" aria-hidden>
         <div className="h-40 skeleton rounded-2xl" />
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="h-36 skeleton rounded-2xl" />
           <div className="h-36 skeleton rounded-2xl" />
         </div>
