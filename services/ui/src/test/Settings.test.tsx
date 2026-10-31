@@ -4,6 +4,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Capacitor } from '@capacitor/core';
 import Settings from '../pages/Settings';
 import { renderWithProviders } from './render';
+import { server } from './setup';
+import { http, HttpResponse } from 'msw';
 import { setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
 
 afterEach(() => {
@@ -76,5 +78,19 @@ describe('Settings page', () => {
     await user.click(screen.getByRole('button', { name: /save pin/i }));
 
     await waitFor(async () => expect(await verifyAdminPin('5678')).toBe(true));
+  });
+});
+
+describe('Settings profile header', () => {
+  it("shows the person's own picture and name, not a letter on a gradient", async () => {
+    server.use(
+      http.get('/api/users/me', () =>
+        HttpResponse.json({ id: 7, username: 'leo', full_name: 'Leo Summers', avatar: 'preset:jonahs-whale', is_admin: false }),
+      ),
+    );
+    renderWithProviders(<Settings />);
+    await waitFor(() => expect(screen.getByTestId('settings-profile-name')).toHaveTextContent('Leo Summers'));
+    const header = screen.getByTestId('settings-profile-name').closest('.glass-panel') as HTMLElement;
+    expect(header.querySelector('[data-testid="user-avatar-preset"]')).not.toBeNull();
   });
 });

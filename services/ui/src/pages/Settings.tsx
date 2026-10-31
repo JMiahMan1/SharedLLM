@@ -62,11 +62,17 @@ const Settings = () => {
 
       <div className="glass-panel rounded-2xl p-4">
         <div className="flex items-center gap-4 p-3 rounded-xl bg-white/5">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold shrink-0">
-            {user?.username?.[0].toUpperCase() || 'G'}
-          </div>
+          {/* The person's own picture (the Account row below shows the same):
+              this was a letter on a gradient, never their avatar. */}
+          {user ? (
+            <UserAvatar username={user.username} avatar={user.avatar} name={user.full_name || user.username} size={48} className="shrink-0" />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-slate-400 shrink-0">
+              <User size={20} />
+            </div>
+          )}
           <div className="min-w-0">
-            <p className="text-white font-medium">{user?.username || 'Guest'}</p>
+            <p className="truncate text-white font-medium" data-testid="settings-profile-name">{user?.full_name || user?.username || 'Guest'}</p>
             <p className="text-xs text-slate-400">{user?.is_admin ? 'Admin' : 'Family Member'}</p>
           </div>
         </div>
