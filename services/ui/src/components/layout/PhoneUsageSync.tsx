@@ -64,6 +64,7 @@ async function syncGuardState(serverUrl: string, token: string, usageAccess: boo
     notificationAccess: access.notifications,
     callLogAccess: access.calls,
     smsAccess: access.sms,
+    ...(access.activity === null ? {} : { activityAccess: access.activity }),
   };
   const report = JSON.stringify(state);
   if (report === lastGuardReport) return;

@@ -481,6 +481,7 @@ export interface MemberGuardState {
   notificationAccess?: boolean;
   callLogAccess?: boolean;
   smsAccess?: boolean;
+  activityAccess?: boolean;
   healthConnect?: string;
   reportedAt?: string;
 }

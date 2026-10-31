@@ -5,6 +5,7 @@ import PhoneUsage from '../../plugins/phoneUsage';
 import MediaSession from '../../plugins/mediaSession';
 import Comms from '../../plugins/comms';
 import { readReportingAccess, type ReportingAccess } from '../../lib/reportingAccess';
+import { requestActivityAccess } from '../../lib/locationTracking';
 
 /**
  * What this phone lets Jarvis read for the family's reports (screen time,
@@ -31,11 +32,16 @@ export default function PhoneReportsPanel() {
 
   if (!android || !access) return null;
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
+  const askActivity = () => void requestActivityAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
   const rows: { key: keyof ReportingAccess; label: string; what: string; allow: () => void }[] = [
     { key: 'usage', label: 'Usage access', what: 'Screen time and app use', allow: () => void PhoneUsage.openSettings() },
     { key: 'notifications', label: 'Notification access', what: 'Media playing, chat and social apps', allow: () => void MediaSession.openSettings() },
     { key: 'calls', label: 'Call log', what: 'Calls made and received', allow: askComms },
     { key: 'sms', label: 'Text messages', what: 'Texts sent and received', allow: askComms },
+    // An app build without it reports null: no row rather than a dead button.
+    ...(access.activity === null
+      ? []
+      : [{ key: 'activity' as const, label: 'Physical activity', what: 'Knowing when you are driving, for trips and driving reports', allow: askActivity }]),
   ];
 
   return (
