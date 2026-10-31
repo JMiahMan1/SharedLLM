@@ -10,11 +10,18 @@ const comms = vi.hoisted(() => ({ hasAccess: vi.fn(), requestAccess: vi.fn() }))
 vi.mock('../../plugins/comms', () => ({ default: comms }));
 vi.mock('../../plugins/phoneUsage', () => ({ default: { hasAccess: vi.fn().mockResolvedValue({ granted: true }), openSettings: vi.fn() } }));
 vi.mock('../../plugins/mediaSession', () => ({ default: { hasAccess: vi.fn().mockResolvedValue({ granted: false }), openSettings: vi.fn() } }));
+const activity = vi.hoisted(() => ({ hasActivityAccess: vi.fn(), requestActivityAccess: vi.fn() }));
+vi.mock('../../lib/locationTracking', () => activity);
 
 import PhoneReportsPanel from './PhoneReportsPanel';
 
 describe('PhoneReportsPanel', () => {
   beforeEach(() => {
+    activity.hasActivityAccess.mockResolvedValue(false);
+    activity.requestActivityAccess.mockImplementation(async () => {
+      activity.hasActivityAccess.mockResolvedValue(true);
+      return true;
+    });
     comms.hasAccess.mockResolvedValue({ calls: false, sms: false });
     comms.requestAccess.mockImplementation(async () => {
       comms.hasAccess.mockResolvedValue({ calls: true, sms: true });
@@ -30,5 +37,20 @@ describe('PhoneReportsPanel', () => {
     expect(comms.requestAccess).toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId('phone-report-calls')).toHaveTextContent('Allowed'));
     expect(screen.getByTestId('phone-report-sms')).toHaveTextContent('Allowed');
+  });
+
+  it('asks for physical activity, which tells it when you are driving', async () => {
+    render(<PhoneReportsPanel />);
+    const row = await screen.findByTestId('phone-report-activity');
+    await userEvent.click(row.querySelector('button')!);
+    expect(activity.requestActivityAccess).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('phone-report-activity')).toHaveTextContent('Allowed'));
+  });
+
+  it('has no physical activity row on an app build that cannot ask', async () => {
+    activity.hasActivityAccess.mockResolvedValue(null);
+    render(<PhoneReportsPanel />);
+    await screen.findByTestId('phone-report-usage');
+    expect(screen.queryByTestId('phone-report-activity')).toBeNull();
   });
 });

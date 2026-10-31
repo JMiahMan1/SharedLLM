@@ -33,6 +33,7 @@ const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'notificationAccess', label: 'Notification access (media, chat apps)' },
   { key: 'callLogAccess', label: 'Call log' },
   { key: 'smsAccess', label: 'Text messages' },
+  { key: 'activityAccess', label: 'Physical activity (driving detection)' },
 ];
 
 function State({ on }: { on: boolean | undefined }) {
