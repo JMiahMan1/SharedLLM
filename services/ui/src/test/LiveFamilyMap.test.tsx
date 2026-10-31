@@ -3,7 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from './setup';
-import LiveFamilyMap from '../components/geo/LiveFamilyMap';
+import LiveFamilyMap, { type MapPlace } from '../components/geo/LiveFamilyMap';
+import { placeKind } from '../lib/avatarMarker';
+import { isNight, resolveMapScheme, setMapStyle, sunTimes } from '../lib/mapStyle';
 import {
   STALE_MAX_AGE_MS,
   ageLabel,
@@ -16,13 +18,13 @@ import {
   spiderOffsets,
 } from '../components/geo/liveLocations';
 
-function renderMap() {
+function renderMap(zones: MapPlace[] = []) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <LiveFamilyMap />
+      <LiveFamilyMap zones={zones} />
     </QueryClientProvider>
   );
 }
@@ -366,16 +368,17 @@ describe('LiveFamilyMap', () => {
       ])),
     );
     renderMap();
-    const cluster = await waitFor(() => {
-      const found = document.querySelector('[data-testid="map-avatar-cluster"]');
-      expect(found).not.toBeNull();
-      return found as HTMLElement;
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="map-avatar-cluster"]')).not.toBeNull();
     });
     // No saved place covers this spot: the pair still shares one pin.
     expect(document.querySelectorAll('.leaflet-marker-icon')).toHaveLength(1);
 
-    fireEvent.click(cluster.closest('.leaflet-marker-icon') as HTMLElement);
+    // The map's first fit can still be zooming, and a zoom folds an open
+    // group back up; tap again until the fit has settled.
     await waitFor(() => {
+      const group = document.querySelector('[data-testid="map-avatar-cluster"]');
+      if (group) fireEvent.click(group.closest('.leaflet-marker-icon') as HTMLElement);
       expect(document.querySelector('[data-testid="map-avatar-cluster"]')).toBeNull();
       expect(document.querySelectorAll('[data-testid="map-avatar-marker"]')).toHaveLength(2);
     });
@@ -391,5 +394,136 @@ describe('LiveFamilyMap', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-testid="map-avatar-cluster"]')).not.toBeNull();
     });
+  });
+
+  describe('saved places', () => {
+    const HOME: MapPlace = { id: 'zone.home', name: 'Home', lat: 33.4484, lon: -112.074, radius: 100 };
+    const SCHOOL: MapPlace = { id: 'place.abc', name: 'Lincoln Elementary', lat: 33.47, lon: -112.05, radius: 150 };
+
+    it('draws each place as a round pin with an icon for what it is', async () => {
+      server.use(http.get('/api/users/location/all', () => HttpResponse.json({})));
+      renderMap([HOME, SCHOOL]);
+      await waitFor(() => expect(document.querySelectorAll('[data-testid="map-place-pin"]')).toHaveLength(2));
+      const kinds = [...document.querySelectorAll('[data-testid="map-place-pin"]')].map((pin) => pin.getAttribute('data-place-kind'));
+      expect(kinds.sort()).toEqual(['home', 'school']);
+    });
+
+    it('puts everyone at a place side by side in one pill above its pin', async () => {
+      server.use(
+        http.get('/api/users/location/all', () => HttpResponse.json({
+          // Indoor fixes scattered around the house, and one person elsewhere.
+          jeremiah: { latitude: 33.4486, longitude: -112.0742, accuracy: 15, updated_at: nowSec - 20 },
+          michele: { latitude: 33.4479, longitude: -112.0736, accuracy: 60, updated_at: nowSec - 30 },
+          kaleb: { latitude: 33.6, longitude: -111.9, accuracy: 20, updated_at: nowSec - 40 },
+        })),
+        http.get('/api/users/family-directory', () => HttpResponse.json([
+          { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
+          { username: 'michele', display_name: 'Michele Parker', nextcloud_user: 'michele', avatar: '' },
+          { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: 'kaleb', avatar: '' },
+        ])),
+      );
+      renderMap([HOME]);
+      const pill = await waitFor(() => {
+        const found = document.querySelector('[data-testid="map-place-group"]');
+        expect(found).not.toBeNull();
+        return found as HTMLElement;
+      });
+      expect(pill.getAttribute('data-avatar-count')).toBe('2');
+      expect(pill.getAttribute('aria-label')).toBe('Jeremiah, Michele Parker at Home');
+      // Each person is their own tile: picture, or initials ("MP").
+      const tiles = [...pill.querySelectorAll('[data-testid="map-avatar-marker"]')];
+      expect(tiles).toHaveLength(2);
+      expect(tiles.map((t) => t.textContent)).toContain('MP');
+      // Anchored above the pin, not on top of it.
+      const marker = pill.closest('.leaflet-marker-icon') as HTMLElement;
+      expect(parseFloat(marker.style.marginTop)).toBeLessThan(-parseFloat(marker.style.height));
+      // Kaleb is not at a place: his own pin, not in the pill.
+      expect(document.querySelectorAll('.leaflet-marker-icon [data-testid="map-avatar-marker"]')).toHaveLength(3);
+
+      // Tap until the map's first fit has settled (see the group test above).
+      await waitFor(() => {
+        const content = document.querySelector('.leaflet-popup-content')?.textContent ?? '';
+        if (!content) fireEvent.click(document.querySelector('[data-testid="map-place-group"]')!.closest('.leaflet-marker-icon') as HTMLElement);
+        expect(content).toContain('Michele Parker');
+      });
+      expect(document.querySelector('.leaflet-popup-content')?.textContent).toContain('Home');
+    });
+
+    it('folds a crowd beyond five into +N', async () => {
+      const crowd = Object.fromEntries(
+        ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7'].map((u) => [u, { latitude: 33.4484, longitude: -112.074, updated_at: nowSec - 10 }]),
+      );
+      server.use(http.get('/api/users/location/all', () => HttpResponse.json(crowd)));
+      renderMap([HOME]);
+      const pill = await waitFor(() => {
+        const found = document.querySelector('[data-testid="map-place-group"]');
+        expect(found).not.toBeNull();
+        return found as HTMLElement;
+      });
+      expect(pill.querySelectorAll('[data-testid="map-avatar-marker"]')).toHaveLength(5);
+      expect(pill.textContent).toContain('+2');
+    });
+  });
+
+  it('turns the map dark when Settings says dark, and back for light', async () => {
+    setMapStyle('light');
+    try {
+      renderMap();
+      const map = await waitFor(() => {
+        const found = document.querySelector('.leaflet-container') as HTMLElement | null;
+        expect(found).not.toBeNull();
+        return found as HTMLElement;
+      });
+      expect(map.classList.contains('jarvis-map-dark')).toBe(false);
+      act(() => setMapStyle('dark'));
+      expect(map.classList.contains('jarvis-map-dark')).toBe(true);
+      act(() => setMapStyle('light'));
+      expect(map.classList.contains('jarvis-map-dark')).toBe(false);
+      // Always the standard tiles; dark is a filter, not a keyed tile service.
+      expect((document.querySelector('.leaflet-tile') as HTMLImageElement | null)?.src ?? 'tile.openstreetmap.org').toContain('tile.openstreetmap.org');
+    } finally {
+      setMapStyle('auto');
+    }
+  });
+});
+
+describe('map style', () => {
+  // Phoenix, 2026-06-21: sunrise ~05:20, sunset ~19:42 local (UTC-7).
+  const PHX = { lat: 33.45, lon: -112.07 };
+  const at = (iso: string) => Date.parse(iso);
+
+  it('works out sunrise and sunset to within a few minutes', () => {
+    const sun = sunTimes(at('2026-06-21T19:00:00Z'), PHX.lat, PHX.lon)!;
+    expect(Math.abs(sun.sunrise - at('2026-06-21T12:20:00Z'))).toBeLessThan(5 * 60_000);
+    expect(Math.abs(sun.sunset - at('2026-06-22T02:42:00Z'))).toBeLessThan(5 * 60_000);
+  });
+
+  it('auto is light by day and dark after sunset', () => {
+    expect(resolveMapScheme('auto', at('2026-06-21T20:00:00Z'), PHX)).toBe('light'); // 1 pm
+    expect(resolveMapScheme('auto', at('2026-06-22T03:30:00Z'), PHX)).toBe('dark'); // 8:30 pm
+    expect(resolveMapScheme('auto', at('2026-06-21T11:00:00Z'), PHX)).toBe('dark'); // 4 am
+  });
+
+  it('a fixed choice wins over the clock', () => {
+    expect(resolveMapScheme('dark', at('2026-06-21T20:00:00Z'), PHX)).toBe('dark');
+    expect(resolveMapScheme('light', at('2026-06-22T03:30:00Z'), PHX)).toBe('light');
+  });
+
+  it('falls back to 7 pm - 6 am without a position', () => {
+    const local = (h: number) => new Date(2026, 5, 21, h, 0).getTime();
+    expect(isNight(local(20))).toBe(true);
+    expect(isNight(local(5))).toBe(true);
+    expect(isNight(local(12))).toBe(false);
+  });
+});
+
+describe('placeKind', () => {
+  it('reads what a place is from its zone icon, id or name', () => {
+    expect(placeKind({ id: 'zone.home', name: 'Home' })).toBe('home');
+    expect(placeKind({ name: 'Grandma', icon: 'mdi:home-heart' })).toBe('home');
+    expect(placeKind({ name: 'Lincoln Elementary' })).toBe('school');
+    expect(placeKind({ name: 'Dad', icon: 'mdi:briefcase' })).toBe('work');
+    expect(placeKind({ name: 'Grace Church' })).toBe('church');
+    expect(placeKind({ name: 'Costco' })).toBe('place');
   });
 });

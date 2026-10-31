@@ -84,6 +84,13 @@ describe('MiniPlayer', () => {
     expect(screen.queryByRole('button', { name: 'Close player' })).toBeNull();
   });
 
+  it('drops the previous-track button while paused to keep room for the title', () => {
+    renderAt('/bible', player({ isPlaying: false }));
+    expect(screen.queryByRole('button', { name: 'Previous track' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next track' })).toBeTruthy();
+  });
+
   it('stays out of the way on the Media page', () => {
     renderAt('/media', player());
     expect(screen.queryByTestId('mini-player')).toBeNull();

@@ -109,14 +109,17 @@ export default function MiniPlayer({ onOpen }: { onOpen?: () => void }) {
             </>
           ) : (
             <>
-              <button
-                type="button"
-                aria-label="Previous track"
-                onClick={() => void player.previous()}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
-              >
-                <SkipBack size={17} />
-              </button>
+              {/* Paused, the close button takes its place, so the title keeps its room on a phone. */}
+              {playing ? (
+                <button
+                  type="button"
+                  aria-label="Previous track"
+                  onClick={() => void player.previous()}
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white"
+                >
+                  <SkipBack size={17} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 aria-label={player.isPlaying ? 'Pause' : 'Play'}

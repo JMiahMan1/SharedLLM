@@ -4,11 +4,17 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/api';
 import { userLocationsQuery } from '../../lib/wanderQueries';
+import { getMapStyle, resolveMapScheme, subscribeMapStyle } from '../../lib/mapStyle';
 import {
+  PLACE_PIN_SIZE,
   avatarClusterMarkerHtml,
   avatarClusterMarkerLayout,
   avatarMarkerHtml,
   escapeHtml,
+  placeGroupHtml,
+  placeGroupLayout,
+  placeKind,
+  placePinHtml,
   type AvatarMarkerOptions,
 } from '../../lib/avatarMarker';
 import { findFamilyMember, useFamilyDirectory, type FamilyLookup } from '../chat/familyDirectory';
@@ -63,6 +69,29 @@ export interface MapPlace {
   lat: number;
   lon: number;
   radius: number;
+  /** Home Assistant's zone icon ("mdi:school"), which picks the pin's icon. */
+  icon?: string;
+}
+
+/** Space between a place's pin and the pill of people above it. */
+const PLACE_GROUP_LIFT_PX = 8;
+
+/**
+ * The standard map, drawn dark by a filter on the tile layer (index.css,
+ * `.jarvis-map-dark`) rather than a second tile service: the free dark tile
+ * sets now want an API key. Light or dark follows lib/mapStyle: dark only at
+ * night by this device's clock, unless Settings says always light or dark.
+ */
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = '&copy; OpenStreetMap contributors';
+const DARK_CLASS = 'jarvis-map-dark';
+
+/** How often "auto" re-checks whether the sun has set. */
+const SCHEME_CHECK_MS = 60_000;
+
+function currentScheme(map: L.Map): 'light' | 'dark' {
+  const centre = map.getCenter();
+  return resolveMapScheme(getMapStyle(), Date.now(), { lat: centre.lat, lon: centre.lng });
 }
 
 interface LiveFamilyMapProps {
@@ -101,6 +130,9 @@ export default function LiveFamilyMap({
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   /** The group fanned out into individual pins after a tap, by `clusterKey`. */
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  /** The marker whose popup is open, so a redraw (every poll) reopens it. */
+  const openPopupRef = useRef<string | null>(null);
+  const redrawingRef = useRef(false);
 
   // The one shared location query (see wanderQueries); freshness is worked out
   // in `select`, against the time the data arrived, so render stays pure.
@@ -179,7 +211,15 @@ export default function LiveFamilyMap({
     // A map with no view never draws tiles. Start at a real view so the map
     // is usable (and visibly a map) even when nobody has a fresh fix yet.
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(map);
+    // Dark at sunset, light at sunrise, or as the setting says.
+    const followScheme = () => {
+      container.classList.toggle(DARK_CLASS, currentScheme(map) === 'dark');
+    };
+    followScheme();
+    const schemeTimer = window.setInterval(followScheme, SCHEME_CHECK_MS);
+    const stopSchemeWatch = subscribeMapStyle(followScheme);
+    map.on('moveend', followScheme);
     layerRef.current = L.layerGroup().addTo(map);
     // Zooming changes who overlaps whom, so re-group and fold any open group
     // back up; tapping the map itself closes an open group too.
@@ -202,6 +242,8 @@ export default function LiveFamilyMap({
     return () => {
       cancelAnimationFrame(raf);
       observer?.disconnect();
+      window.clearInterval(schemeTimer);
+      stopSchemeWatch();
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
@@ -213,7 +255,24 @@ export default function LiveFamilyMap({
     const map = mapRef.current;
     const layer = layerRef.current;
     if (!map || !layer) return;
+    redrawingRef.current = true;
     layer.clearLayers();
+    redrawingRef.current = false;
+    // Every popup marker goes through here: it keeps track of which one is
+    // open, and reopens it after the redraw that removed it.
+    const withPopup = (marker: L.Marker, key: string, html: string) => {
+      marker
+        .bindPopup(html)
+        .on('popupopen', () => {
+          openPopupRef.current = key;
+        })
+        .on('popupclose', () => {
+          if (!redrawingRef.current) openPopupRef.current = null;
+        })
+        .addTo(layer);
+      if (openPopupRef.current === key) marker.openPopup();
+      return marker;
+    };
 
     // One object URL per uploaded picture for this render of the markers; the
     // blobs themselves come from the query cache UserAvatar already uses.
@@ -223,17 +282,31 @@ export default function LiveFamilyMap({
       if (blob) avatarUrls.set(target.key, URL.createObjectURL(blob));
     });
 
-    // Places (HA zones) first so member pins always sit on top.
+    // Places first so member pins always sit on top: a faint outline of the
+    // place's area and a round pin at its centre.
+    const placeById = new Map(zones.map((place) => [place.id ?? place.name, place]));
     for (const place of zones) {
       L.circle([place.lat, place.lon], {
         radius: place.radius,
-        color: '#818CF8',
+        color: '#22d3ee',
         weight: 1,
         dashArray: '4 4',
-        fillColor: '#818CF8',
-        fillOpacity: 0.06,
+        fillColor: '#22d3ee',
+        fillOpacity: 0.05,
+        interactive: false,
+      }).addTo(layer);
+      L.marker([place.lat, place.lon], {
+        icon: L.divIcon({
+          className: '',
+          html: placePinHtml({ name: place.name, kind: placeKind(place) }),
+          iconSize: [PLACE_PIN_SIZE, PLACE_PIN_SIZE],
+          iconAnchor: [PLACE_PIN_SIZE / 2, PLACE_PIN_SIZE / 2],
+        }),
+        keyboard: true,
+        title: place.name,
+        alt: place.name,
       })
-        .bindTooltip(place.name, { permanent: false, direction: 'top' })
+        .bindTooltip(place.name, { permanent: false, direction: 'bottom', offset: [0, PLACE_PIN_SIZE / 2] })
         .addTo(layer);
     }
 
@@ -300,14 +373,54 @@ export default function LiveFamilyMap({
       });
     };
 
-    // Grouped by place, by distance, and by whether the pins would overlap on
-    // screen at this zoom - so people at the same spot share one pin even when
-    // no saved place covers it.
+    // Everyone at a saved place sits in one pill above that place's pin,
+    // whatever their own fixes say (an indoor fix scatters; the place is where
+    // they are). The pill lists each of them on tap.
+    const atPlace = new Map<string, LiveFamilyMember[]>();
+    const elsewhere: LiveFamilyMember[] = [];
+    for (const member of members) {
+      const key = placeKeys.get(member.userId);
+      if (key && placeById.has(key)) atPlace.set(key, [...(atPlace.get(key) ?? []), member]);
+      else elsewhere.push(member);
+    }
+    for (const [key, group] of atPlace) {
+      const place = placeById.get(key)!;
+      const unique = [...new Map(group.map((m) => [m.userId, m])).values()];
+      const people = unique.map(pinFor);
+      const layout = placeGroupLayout(people.length);
+      const names = people.map((person) => person.label).join(', ');
+      const list = unique
+        .map((m, index) => {
+          const age = ageLabel(m.ageMs);
+          return `<strong>${escapeHtml(people[index].label)}</strong> · ${m.freshness === 'stale' ? `last seen ${age}` : age}`;
+        })
+        .join('<br/>');
+      const groupMarker = L.marker([place.lat, place.lon], {
+        icon: L.divIcon({
+          className: '',
+          html: placeGroupHtml({ people, place: place.name }),
+          iconSize: [layout.width, layout.height],
+          // Bottom-centre of the pill just above the top of the place's pin.
+          iconAnchor: [layout.width / 2, layout.height + PLACE_PIN_SIZE / 2 + PLACE_GROUP_LIFT_PX],
+          popupAnchor: [0, -(layout.height + PLACE_PIN_SIZE / 2 + PLACE_GROUP_LIFT_PX)],
+        }),
+        keyboard: true,
+        title: `${names} at ${place.name}`,
+        alt: `${names} at ${place.name}`,
+        riseOnHover: true,
+        zIndexOffset: 500,
+      });
+      withPopup(groupMarker, `place:${key}`, `<strong>${escapeHtml(place.name)}</strong><br/>${list}`);
+    }
+
+    // Everyone else: grouped by distance and by whether the pins would overlap
+    // on screen at this zoom, so people at the same spot share one pin even
+    // when no saved place covers it.
     const viewZoom = map.getZoom();
     const clusters = clusterMembers(
-      members,
+      elsewhere,
       zones.length ? NEARBY_CLUSTER_M : NO_PLACE_CLUSTER_M,
-      (m) => placeKeys.get(m.userId) ?? null,
+      undefined,
       { project: (m) => map.project([m.lat, m.lon], viewZoom), pixelRadius: OVERLAP_CLUSTER_PX }
     );
     for (const cluster of clusters) {
@@ -330,9 +443,11 @@ export default function LiveFamilyMap({
       const title = people.map((person) => person.label).join(', ');
 
       if (people.length === 1) {
-        L.marker(latlng, { icon: singleIcon(people[0]), keyboard: true, title, alt: title, riseOnHover: true })
-          .bindPopup(popupFor(uniqueMembers[0]))
-          .addTo(layer);
+        withPopup(
+          L.marker(latlng, { icon: singleIcon(people[0]), keyboard: true, title, alt: title, riseOnHover: true }),
+          `user:${uniqueMembers[0].userId}`,
+          popupFor(uniqueMembers[0]),
+        );
         continue;
       }
 
@@ -350,9 +465,11 @@ export default function LiveFamilyMap({
             opacity: 0.8,
             interactive: false,
           }).addTo(layer);
-          L.marker(spot, { icon: singleIcon(people[index]), keyboard: true, title: people[index].label, alt: people[index].label, riseOnHover: true, zIndexOffset: 1000 })
-            .bindPopup(popupFor(m))
-            .addTo(layer);
+          withPopup(
+            L.marker(spot, { icon: singleIcon(people[index]), keyboard: true, title: people[index].label, alt: people[index].label, riseOnHover: true, zIndexOffset: 1000 }),
+            `user:${m.userId}`,
+            popupFor(m),
+          );
         });
         continue;
       }
@@ -371,7 +488,9 @@ export default function LiveFamilyMap({
     }
 
     return () => {
+      redrawingRef.current = true;
       layer.clearLayers();
+      redrawingRef.current = false;
       for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
     };
   }, [members, zones, personByUser, avatarTargets, avatarDataKey, placeKeys, zoom, expandedKey]);

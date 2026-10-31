@@ -50,6 +50,8 @@ export interface ZonePlace {
   radius: number;
   important: boolean;
   notify: string[];
+  /** Home Assistant's zone icon ("mdi:school"), when it has one. */
+  icon?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function zonePlaces(data: unknown): ZonePlace[] {
         radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
         important: props.important === true,
         notify: Array.isArray(props.notify) ? props.notify.map(String) : [],
+        ...(typeof props.icon === 'string' && props.icon ? { icon: props.icon } : {}),
       };
     })
     .filter((z): z is ZonePlace => z !== null);

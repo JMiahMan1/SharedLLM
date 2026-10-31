@@ -547,3 +547,13 @@ input[type="range"] {
   opacity: 0.5;
 }
 
+
+/* Live family map at night (LiveFamilyMap, lib/mapStyle): the standard map
+   tiles turned dark, roads light on a near-black ground, so pins stay the
+   brightest thing on it. */
+.jarvis-map-dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
+}
+.jarvis-map-dark.leaflet-container {
+  background: #1a1d24;
+}
