@@ -65,13 +65,13 @@ def test_who_may_see_the_technical_side(viewer, subject, allowed):
     assert may_view_technical_data(viewer, subject) is allowed
 
 
-# Calls, texts and message notifications: the parents only, no admin carve-out.
+# Calls, texts and message notifications: the parents (every admin is one).
 
 @pytest.mark.parametrize("viewer, subject, expected", [
     (DAD, KID, True),
     (MOM, KID, True),
     (OTHER_MOM, KID, False),   # a mother not linked to this child
-    (ADMIN, KID, False),       # an admin who is not a parent
+    (ADMIN, KID, True),        # every admin is a parent
     (KID, KID, False),         # a child does not see their own logs
     (SIB, KID, False),
     (GROWN, GROWN, True),      # a grown member's are their own
