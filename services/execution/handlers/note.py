@@ -93,6 +93,26 @@ def _etag(resp: dict) -> str | None:
     return str(value) if value else None
 
 
+#: Top-level folders a note may name as its own: Notes, and Recipes (the
+#: Recipes page's shelf, with its own page).
+_TOP_LEVEL_DIRS = ("Notes", "Recipes")
+
+
+def _category_dir(category: str | None) -> str:
+    """The folder a note of ``category`` is written to.
+
+    A category is a folder inside Notes ("Work" -> "Notes/Work"), the way the
+    Notes page and Nextcloud Notes read them. A category written as its own
+    top-level folder ("General", "Bible") was saved but listed nowhere.
+    """
+    clean = (category or "").strip().strip("/")
+    if not clean:
+        return "Notes"
+    if any(clean == top or clean.startswith(top + "/") for top in _TOP_LEVEL_DIRS):
+        return clean
+    return f"Notes/{clean}"
+
+
 def _with_header(title: str | None, category: str | None, content: str | None) -> str:
     return f"# {title}\nCategory: {category}\n\n{note_body(content)}"
 
@@ -847,12 +867,13 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
 
     try:
         if action == "create":
-            await provider.ensure_directory(req.category or "Notes")
+            category = _category_dir(req.category)
+            await provider.ensure_directory(category)
             file_title = provider.sanitize_filename(req.title or "untitled", "note")
             filename = f"{file_title}.md"
-            url = provider.file_url(f"{req.category or 'Notes'}/{filename}")
+            url = provider.file_url(f"{category}/{filename}")
             _forget_preview(url)
-            content = _with_header(req.title, req.category, req.content)
+            content = _with_header(req.title, category, req.content)
             resp = await http_request("PUT", url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 201, 204]:
                 # The path comes back so a caller that wants to point at this
@@ -862,7 +883,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                     status="SUCCESS",
                     message=f"Note '{req.title}' created.",
                     service="note_create",
-                    detail={"path": f"{req.category or 'Notes'}/{filename}"},
+                    detail={"path": f"{category}/{filename}"},
                 )
 
         elif action == "read":
@@ -899,7 +920,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             # Full replace: this is what the editor's Save uses. "append" is a
             # deliberate quick-capture action and must never back a save, or
             # every save duplicates the body into a checklist line.
-            category = req.category or "Notes"
+            category = _category_dir(req.category)
             await provider.ensure_directory(category)
             if req.path:
                 url = provider.file_url(req.path.lstrip("/"))

@@ -10,10 +10,9 @@ from urllib.parse import unquote
 
 import pytest
 
-from services.execution.nextcloud_client import safe_filename
-
 from services.execution.handlers import meal_plan
 from services.execution.handlers import note as note_handler
+from services.execution.nextcloud_client import safe_filename
 from services.execution.schemas import MealPlanRequest
 
 PLAN = "Recipes/Meal plan.md"

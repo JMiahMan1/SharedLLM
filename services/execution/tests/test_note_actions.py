@@ -2,9 +2,8 @@
 
 import pytest
 
-from services.execution.nextcloud_client import safe_filename
-
 from services.execution.handlers import note as note_handler
+from services.execution.nextcloud_client import safe_filename
 
 
 class FakeProvider:
@@ -145,7 +144,7 @@ async def test_create_reports_where_the_note_was_written(provider, monkeypatch):
 
     assert result.status == "SUCCESS"
     assert result.detail is not None
-    assert result.detail["path"] == "Bible/John-3-16.md"
+    assert result.detail["path"] == "Notes/Bible/John-3-16.md"
 
 
 async def test_write_reports_where_the_note_was_written(provider, monkeypatch):
@@ -160,7 +159,7 @@ async def test_write_reports_where_the_note_was_written(provider, monkeypatch):
         request("write", title="John 3:16", category="Bible", content="text")
     )
     assert result.detail is not None
-    assert result.detail["path"] == "Bible/John-3-16.md"
+    assert result.detail["path"] == "Notes/Bible/John-3-16.md"
 
 
 async def test_write_to_an_explicit_path_reports_that_path(provider, monkeypatch):
@@ -1035,3 +1034,18 @@ async def test_a_note_made_without_a_folder_goes_where_notes_are_listed(provider
 
     assert result.detail["path"] == "Notes/Groceries.md"
     assert note_handler.DEFAULT_NOTES_DIRS == ["Notes"]
+
+
+@pytest.mark.parametrize(("category", "folder"), [
+    (None, "Notes"),
+    ("", "Notes"),
+    ("General", "Notes/General"),  # chat's old default, once a folder nothing listed
+    ("Bible", "Notes/Bible"),
+    ("Work/Plans", "Notes/Work/Plans"),
+    ("Notes", "Notes"),
+    ("Notes/Work", "Notes/Work"),  # the Notes page's own categories
+    ("/Notes/Work/", "Notes/Work"),
+    ("Recipes", "Recipes"),  # the Recipes page's shelf
+])
+def test_every_category_is_a_folder_the_notes_page_lists(category, folder):
+    assert note_handler._category_dir(category) == folder
