@@ -5653,7 +5653,7 @@ async def _parents_only_telemetry(request: Request, subject: str, path: str, par
         resp = await client.get(f"{TELEMETRY_SVC}{path}", params=params or {}, headers={"X-Internal-Secret": INTERNAL_SECRET})
         if access.get("comms") or resp.status != 200:
             return await _member_json(resp, technical)
-        # Not a parent (an admin, say): everything but the calls and messages.
+        # Not allowed the calls and messages: everything but them.
         data = without_comms(await resp.json(content_type=None))
         return JSONResponse(status_code=resp.status, content=data if technical else strip_technical(data))
 
@@ -5793,7 +5793,7 @@ async def guardian_talk(request: Request):
 async def guardian_comms(request: Request, user: str, days: int = 7):
     """Calls, texts and message notifications over the last ``days``: the
     parents' Calls & messages tab. Only a parent (identity's ``comms`` answer;
-    an admin who is not a parent is refused)."""
+    every admin counts as one)."""
     access = await _raw_access(request, user)
     if not access.get("comms"):
         raise HTTPException(status_code=403, detail="Only a parent can see calls and messages")
@@ -6178,6 +6178,9 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         "can_manage": bool(body.get("can_manage")),
         # Whether this viewer sees the technical side (the page's Devices section).
         "technical": bool(body.get("technical", True)),
+        # Whether this viewer sees calls, texts and message notifications (the
+        # parents; the Calls & messages tab and Overview's card show for them).
+        "comms": bool(body.get("comms")),
         "protected": bool(body.get("protected")),
         # The parents' answers on new apps ({pkg: pending|approved|denied}) and
         # app permissions ({"pkg|group": ...}); the phone's guard enforces them.

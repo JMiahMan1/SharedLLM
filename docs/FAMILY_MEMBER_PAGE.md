@@ -39,13 +39,13 @@ The server decides; the page only hides what the server already refuses.
   section, and the server strips technical fields everywhere else (device
   ids, package names, app versions, IP/network, permission and service
   states, sync timestamps, tokens).
-- **Calls, texts and message notifications** are the parents' only, tighter
-  than the rest: a child's are their father's and (linked) mother's, the
-  father's and the mother's are each other's, a grown member's are their own.
-  An admin who is not a parent sees none of them: the activity feed, recap,
-  concerns and guidance come without them (`comms_hidden`), and the **Calls &
-  messages** tab is not offered (`may_view_comms`; identity's status says
-  `comms`).
+- **Calls, texts and message notifications** are the parents' only, by the
+  same rule as the rest of the raw data: a child's are an admin's (every admin
+  is a parent), their father's and (linked) mother's; the father's and the
+  mother's are each other's; a grown member's are their own. Anyone else gets
+  the feed, recap, concerns and guidance without them (`comms_hidden`), and
+  the **Calls & messages** tab is not offered (`may_view_comms`; identity's
+  status says `comms`).
 
 ## Layout
 

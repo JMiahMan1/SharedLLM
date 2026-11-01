@@ -4370,18 +4370,12 @@ def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
 
 def may_view_comms(viewer: User | None, subject: User | None) -> bool:
     """Whether ``viewer`` may see ``subject``'s calls, texts and message
-    notifications: the most private part of the raw data, so the parents only.
-
-    The raw-data rule (:func:`may_view_raw_data`) with its admin carve-out
-    taken off: a minor's are their father's and mother's (the linked mother),
-    the father's and the mother's are each other's, and a grown member's are
-    their own. An admin who is not a parent sees none of them.
+    notifications: the parents', which is the raw-data rule
+    (:func:`may_view_raw_data`): a minor's are an admin's (every admin is a
+    parent), the father's and the linked mother's; the father's and the
+    mother's are each other's; a grown member's are their own.
     """
-    if viewer is None or subject is None:
-        return False
-    if viewer.username == subject.username:
-        return (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES
-    return viewer.family_role in ("father", "mother") and may_view_raw_data(viewer, subject)
+    return may_view_raw_data(viewer, subject)
 
 
 def may_view_technical_data(viewer: User | None, subject: User | None) -> bool:

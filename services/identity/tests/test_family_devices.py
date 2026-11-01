@@ -92,11 +92,11 @@ def test_the_rules_say_who_sees_the_technical_side(family):
         "technical": False,
         "comms": True,  # the mother sees a child's calls and messages
     }
-    # An admin who is not a parent sees the child's data, not their calls and messages.
+    # Every admin is a parent: the child's calls and messages too.
     assert act("dad").get("/api/internal/may-view-raw", params={"viewer": "boss", "subject": "kid"}).json() == {
         "allowed": True,
         "technical": True,
-        "comms": False,
+        "comms": True,
     }
 
 

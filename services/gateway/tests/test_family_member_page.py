@@ -171,6 +171,18 @@ def test_the_status_drops_guard_and_approval_states_for_the_mother(identity):
     assert (full["technical"], mine["technical"]) == (True, False)  # the page hides Devices for her
 
 
+def test_the_status_says_who_sees_calls_and_messages(identity):
+    """Both parents (the mother too, without the technical side) are told they
+    see calls and messages; the page shows its Calls & messages tab on it."""
+    client, answers, _ = identity
+    answers["/api/screen-time/kid/rules"] = (200, {"rules": {}, "technical": True, "comms": True})
+    assert client.get("/api/screen-time/kid/status").json()["comms"] is True
+    answers["/api/screen-time/kid/rules"] = (200, {"rules": {}, "technical": False, "comms": True})
+    assert client.get("/api/screen-time/kid/status").json()["comms"] is True
+    answers["/api/screen-time/kid/rules"] = (200, {"rules": {}, "technical": True, "comms": False})
+    assert client.get("/api/screen-time/kid/status").json()["comms"] is False
+
+
 def test_stripping_reaches_every_depth_and_keeps_personal_fields():
     body = {"a": [{"device_key": "x", "name": "Pixel", "nested": {"ip": "1.2.3.4", "steps": 10}}], "token": "t"}
     assert strip_technical(body) == {"a": [{"name": "Pixel", "nested": {"steps": 10}}]}

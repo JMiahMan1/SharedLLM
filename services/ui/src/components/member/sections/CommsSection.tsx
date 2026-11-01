@@ -42,8 +42,7 @@ function topContacts(events: ActivityEvent[]): { who: string; calls: number; tex
 
 /**
  * Calls, texts and app message notifications for one person, for their
- * parents only (the server refuses anyone else, an admin who is not a parent
- * included): the totals, who they talk with most, and every call and message
+ * parents only (every admin is one; the server refuses anyone else): the totals, who they talk with most, and every call and message
  * with its full text, searchable.
  */
 export default function CommsSection({ username, name }: { username: string; name: string }) {
