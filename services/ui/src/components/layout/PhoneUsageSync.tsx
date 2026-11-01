@@ -5,7 +5,7 @@ import { storageGetSync } from '../../lib/storage';
 import { getDeviceKey } from '../../lib/deviceRegistration';
 import PhoneUsage from '../../plugins/phoneUsage';
 import Guard from '../../plugins/guard';
-import { readReportingAccess } from '../../lib/reportingAccess';
+import { CHECK_MS, readReportingAccess, within } from '../../lib/reportingAccess';
 
 const USAGE_SYNC_INTERVAL_MS = 5 * 60 * 1000; // the day moves slowly; five minutes is plenty
 
@@ -55,7 +55,16 @@ let lastGuardReport = '';
  */
 async function syncGuardState(serverUrl: string, token: string, usageAccess: boolean): Promise<void> {
   if (Capacitor.getPlatform() !== 'android') return;
-  const [guard, access] = await Promise.all([Guard.status(), readReportingAccess()]);
+  // A guard check that fails or never answers is reported as such, so the
+  // permissions below still reach the parents.
+  const [guard, access] = await Promise.all([
+    within<Record<string, unknown>>(
+      Guard.status().then((g) => ({ ...g })),
+      CHECK_MS,
+      { guardStatusUnavailable: true },
+    ),
+    readReportingAccess(),
+  ]);
   // Calls, texts and notifications too: without them those reports are empty
   // and nobody could tell why (no phone had ever sent a call or a text).
   const state = {
@@ -81,7 +90,7 @@ async function syncPhoneUsage(): Promise<void> {
   if (usageSyncInFlight) return;
   usageSyncInFlight = true;
   try {
-    const access = await PhoneUsage.hasAccess();
+    const access = await within(PhoneUsage.hasAccess(), CHECK_MS, { granted: false });
     const token = storageGetSync('jarvis_api_key');
     if (!token) return;
     const serverUrl = storageGetSync('jarvis_server_url') || window.location.origin;

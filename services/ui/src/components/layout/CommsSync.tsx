@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import { storageGetSync } from '../../lib/storage';
 import Comms from '../../plugins/comms';
+import { CHECK_MS, within } from '../../lib/reportingAccess';
 
 const COMMS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -18,7 +19,7 @@ async function syncComms(): Promise<void> {
   if (commsSyncInFlight) return;
   commsSyncInFlight = true;
   try {
-    const access = await Comms.hasAccess();
+    const access = await within(Comms.hasAccess(), CHECK_MS, { calls: false, sms: false });
     if (!access?.calls && !access?.sms) return;
     if (nativeSync) {
       // The APK reads oldest first and moves its place only after the server
