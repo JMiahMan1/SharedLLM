@@ -4,9 +4,8 @@ import base64
 
 import pytest
 
-from services.execution.nextcloud_client import safe_filename
-
 from services.execution.handlers import note as note_handler
+from services.execution.nextcloud_client import safe_filename
 
 FILEID_REPLY = (
     '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
