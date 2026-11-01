@@ -86,3 +86,15 @@ def test_the_spoken_recap():
     assert text.startswith("Emma has averaged 2 h 0 min a day on the phone.")
     assert "Most used: Youtube." in text and "bullying (high)" in text
     assert spoken("Emma", build([], [], [], START, END)) == "Nothing has been reported from Emma's phone yet this week."
+
+
+def test_a_tablet_is_called_a_tablet():
+    from services.common.guardian_recap import spoken
+
+    usage = [_usage("2026-10-19", 120, [("com.google.android.youtube", 70)])]
+    r = build(usage, [], [], START, END)
+    assert summary_line("Noah", r, "tablet") == "Noah's week: about 2 h 0 min a day on the tablet, most in Youtube."
+    assert spoken("Noah", r, "tablet").startswith("Noah has averaged 2 h 0 min a day on the tablet.")
+    empty = build([], [], [], START, END)
+    assert summary_line("Noah", empty, "tablet") == "Nothing was reported from Noah's tablet this week."
+    assert spoken("Noah", empty, "device") == "Nothing has been reported from Noah's device yet this week."

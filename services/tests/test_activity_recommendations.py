@@ -17,7 +17,7 @@ def _day(day, last_hour, hours_on=2):
 def test_late_nights_suggest_a_wind_down_in_the_household_time():
     rec = recommend_activity([_day(20, 23), _day(21, 22), _day(22, 20)], TZ)
     assert rec["theme"] == "late nights" and rec["kind"] == "activity"
-    assert rec["matched_on"] == "late nights on the phone this week"  # no numbers repeated back
+    assert rec["matched_on"] == "late nights on screens this week"  # no numbers repeated back
 
 
 def test_after_midnight_is_still_a_late_night():

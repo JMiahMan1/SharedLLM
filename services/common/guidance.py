@@ -83,21 +83,21 @@ PROMPTS: dict[str, dict[str, str]] = {
         "ref": "Psalm 4:8",
         "verse": "I will both lay me down in peace, and sleep: for thou, LORD, only makest me dwell in safety.",
         "prayer": "Pray for rest for {name}, and for whatever keeps them up at night.",
-        "starter": "You've been up late a few nights. Is something on your mind, or is it just hard to put the phone down?",
+        "starter": "You've been up late a few nights. Is something on your mind, or is it just hard to put the {device} down?",
     },
     "screen_up": {
-        "title": "More time on the phone",
+        "title": "More time on the {device}",
         "ref": "Ephesians 5:15-16",
         "verse": "See then that ye walk circumspectly, not as fools, but as wise, redeeming the time.",
         "prayer": "Pray for {name} to find joy away from the screen, and for a plan you make together.",
-        "starter": "What's been the best thing on your phone this week? Want to do something together this weekend?",
+        "starter": "What's been the best thing on your {device} this week? Want to do something together this weekend?",
     },
     "blocked": {
         "title": "Sites that were blocked",
         "ref": "Proverbs 4:23",
         "verse": "Keep thy heart with all diligence; for out of it are the issues of life.",
         "prayer": "Pray for {name}'s curiosity to lead somewhere good.",
-        "starter": "Some sites got blocked on your phone this week. Was there something you were looking for?",
+        "starter": "Some sites got blocked on your {device} this week. Was there something you were looking for?",
     },
     "bible": {
         "title": "Reading the Word",
@@ -134,18 +134,19 @@ def signals(recap: dict[str, Any]) -> list[str]:
     return [s for s in ORDER if s in found]
 
 
-def guidance(recap: dict[str, Any], name: str, limit: int = 4) -> list[dict[str, str]]:
-    """Up to ``limit`` prompts for the week; a quiet week gets a blessing."""
+def guidance(recap: dict[str, Any], name: str, limit: int = 4, device: str = "phone") -> list[dict[str, str]]:
+    """Up to ``limit`` prompts for the week; a quiet week gets a blessing.
+    ``device`` is what the child carries ("tablet"; services/common/device_noun.py)."""
     chosen = signals(recap)[:limit] or ["quiet"]
     out = []
     for key in chosen:
         p = PROMPTS[key]
         out.append({
             "signal": key,
-            "title": p["title"],
+            "title": p["title"].format(device=device),
             "ref": p["ref"],
             "verse": p["verse"],
             "prayer": p["prayer"].format(name=name),
-            "starter": p["starter"],
+            "starter": p["starter"].format(device=device),
         })
     return out

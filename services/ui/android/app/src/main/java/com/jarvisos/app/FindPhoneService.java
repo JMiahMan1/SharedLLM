@@ -215,8 +215,8 @@ public class FindPhoneService extends Service {
 
     private Notification buildNotification() {
         PendingIntent stop = stopIntent();
-        String title = (customTitle != null && !customTitle.isEmpty()) ? customTitle : "Find my phone";
-        String body = (customBody != null && !customBody.isEmpty()) ? customBody : "Your phone is ringing.";
+        String title = (customTitle != null && !customTitle.isEmpty()) ? customTitle : "Find my " + DeviceNoun.of(this);
+        String body = (customBody != null && !customBody.isEmpty()) ? customBody : "Your " + DeviceNoun.of(this) + " is ringing.";
         String category = (customTitle != null && !customTitle.isEmpty()) ? "timers" : "family_safety";
         return new NotificationCompat.Builder(
                 this, PushCategories.channelId(category, 5))

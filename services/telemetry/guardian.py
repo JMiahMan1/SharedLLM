@@ -27,7 +27,7 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from services.common import concern_monitor, concern_review, guardian_recap
+from services.common import concern_monitor, concern_review, device_noun, guardian_recap
 from services.telemetry import app_updates, llm, notices, store
 
 log = logging.getLogger("telemetry.guardian")
@@ -64,6 +64,11 @@ async def children(session) -> dict[str, dict[str, Any]]:
     return by_name
 
 
+def _device(child: dict[str, Any]) -> str:
+    """What the child carries, from identity's ``device_kinds`` ("tablet")."""
+    return device_noun.noun(child.get("device_kinds"))
+
+
 def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any], day: str) -> dict[str, Any]:
     name = child.get("display_name") or child["username"]
     priority = 5 if concern["category"] in concern_monitor.ALWAYS_ON else 4 if concern["level"] == "severe" else 3
@@ -76,7 +81,7 @@ def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any],
         "category": "family_safety",
         "kind": "concern",
         "priority": priority,
-        "title": f"{concern['label']} on {name}'s phone",
+        "title": f"{concern['label']} on {name}'s {_device(child)}",
         "body": body,
         "tag": f"concern:{child['username']}:{concern['category']}",
         "once": f"concern:{child['username']}:{concern['category']}:{day}",
@@ -94,8 +99,8 @@ def _blocked_site_notice(parent: str, child: dict[str, Any], domain: str, count:
         "category": "family_safety",
         "kind": "blocked_site",
         "priority": 3,
-        "title": f"Blocked site on {name}'s phone",
-        "body": f"{name}'s phone tried to open {domain} ({count} blocked attempts today).",
+        "title": f"Blocked site on {name}'s {_device(child)}",
+        "body": f"{name}'s {_device(child)} tried to open {domain} ({count} blocked attempts today).",
         "tag": f"blocked_site:{child['username']}:{domain}",
         "once": f"blocked_site:{child['username']}:{domain}:{day}",
         "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "domain": domain, "count": count},
@@ -304,7 +309,7 @@ async def send_weekly_recaps(rc, session, deliver: Deliver, now: datetime) -> in
             await rc.delete(sent_key)
             log.warning("recap for %s failed: %s", child["username"], exc)
             continue
-        line = guardian_recap.summary_line(child.get("display_name") or child["username"], recap)
+        line = guardian_recap.summary_line(child.get("display_name") or child["username"], recap, _device(child))
         for parent in child.get("parents") or []:
             try:
                 await deliver({

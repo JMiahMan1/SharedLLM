@@ -520,7 +520,7 @@ export default function HealthToday({ onNavigate }: Props) {
                 <Footprints size={13} className="text-emerald-300" />
                 Steps
               </h3>
-              <span className="text-[10px] text-slate-500">from your phone</span>
+              <span className="text-[10px] text-slate-500">from your device</span>
             </div>
             {stepsQuery.isError ? (
               // "No reading yet" is a claim about the phone. A failed fetch is
@@ -543,7 +543,7 @@ export default function HealthToday({ onNavigate }: Props) {
                   {steps.hasData ? steps.today.toLocaleString() : 'No reading yet'}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {steps.hasData ? `of ${steps.goal.toLocaleString()} goal` : 'Open the app on your phone to sync'}
+                  {steps.hasData ? `of ${steps.goal.toLocaleString()} goal` : 'Open the app on your phone or tablet to sync'}
                 </p>
               </>
             )}

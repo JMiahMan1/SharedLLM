@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
 import Modal from '../ui/Modal';
 import { freshPosition } from '../../lib/freshPosition';
+import { useThisDeviceNoun } from '../../hooks/useDeviceNoun';
 
 /**
  * "On my way", "I'm here" and SOS, on the family hub and Wander.
@@ -24,6 +25,7 @@ function isTooSoon(err: unknown): boolean {
 }
 
 export default function SafetyButtons({ fill = false }: { fill?: boolean }) {
+  const device = useThisDeviceNoun();
   const [busy, setBusy] = useState<'way' | 'sos' | 'here' | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -46,7 +48,7 @@ export default function SafetyButtons({ fill = false }: { fill?: boolean }) {
     try {
       const position = await freshPosition();
       if (!position) {
-        toast.error('Your phone could not tell where you are. Check that location is on.');
+        toast.error(`Your ${device} could not tell where you are. Check that location is on.`);
         return;
       }
       const res = await api.checkIn(position);

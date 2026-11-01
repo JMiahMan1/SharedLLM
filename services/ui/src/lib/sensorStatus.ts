@@ -81,7 +81,7 @@ export function sensorStatus(sensor: string, state: SensorStatusInput): SensorSt
     return {
       health: 'unavailable',
       title: `${label.title} is not available on this device`,
-      detail: state.message ?? 'This phone does not expose that sensor, so nothing is being recorded.',
+      detail: state.message ?? 'This device does not expose that sensor, so nothing is being recorded.',
       canEnable: false,
       needsOsSettings: false,
     };

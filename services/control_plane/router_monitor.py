@@ -447,7 +447,7 @@ def internet_notices(state: dict[str, Any], internet: bool, now: float) -> list[
     s["down_since"] = now - (INTERNET_DOWN_AFTER - 1) * CHECK_SECONDS
     return [_notice(
         "The internet is down",
-        "Jarvis can't reach the internet from home. Phones away from home won't reach Jarvis until "
+        "Jarvis can't reach the internet from home. Phones and tablets away from home won't reach Jarvis until "
         "it's back; this notice may arrive late for the same reason.",
         "admin:network:internet", priority=4)]
 

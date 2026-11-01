@@ -12,7 +12,8 @@ from services.telemetry.config import INTERNAL_SECRET as EXPECTED_SECRET
 from services.telemetry.main import app
 
 HEADERS = {"X-Internal-Secret": EXPECTED_SECRET}
-KIDS = {"kid": {"username": "kid", "display_name": "Emma", "parents": ["dad", "mom"], "monitoring": "severe"}}
+KIDS = {"kid": {"username": "kid", "display_name": "Emma", "parents": ["dad", "mom"], "monitoring": "severe",
+                "device_kinds": ["phone"]}}
 
 
 @pytest.fixture
@@ -92,6 +93,20 @@ def test_sunday_evening_sends_each_recap_once(wired):
     assert asyncio.run(guardian.send_weekly_recaps(fake, None, deliver, sunday_evening)) == 0
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert sent[0]["title"] == "Emma's week" and sent[0]["kind"] == "recap"
+    assert sent[0]["body"] == "Nothing was reported from Emma's phone this week."
+
+
+def test_a_tablet_is_called_a_tablet(wired, monkeypatch):
+    client, _fake, sent = wired
+    monkeypatch.setitem(KIDS, "kid", {**KIDS["kid"], "display_name": "Noah", "device_kinds": ["tablet"]})
+    client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
+    assert sent[0]["title"] == "Self-harm or suicide on Noah's tablet"
+    blocked = guardian._blocked_site_notice("dad", KIDS["kid"], "bad.example", 5, "2026-10-21")
+    assert blocked["title"] == "Blocked site on Noah's tablet"
+    assert blocked["body"].startswith("Noah's tablet tried to open bad.example")
+    # Nothing known about the child's devices: neither word is guessed.
+    unknown = guardian._blocked_site_notice("dad", {"username": "kid", "display_name": "Noah"}, "x.com", 5, "d")
+    assert unknown["title"] == "Blocked site on Noah's device"
 
 
 def _with_model(monkeypatch, answer):

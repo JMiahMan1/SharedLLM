@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link2, Link2Off, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import HealthConnect, { type HealthConnectResult, type HealthConnectStatus } from '../../plugins/healthConnect';
+import { useThisDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const LABELS: Record<string, string> = {
   sleep: 'sleep',
@@ -16,9 +17,9 @@ const LABELS: Record<string, string> = {
 
 const ERRORS: Record<string, string> = {
   not_connected: 'Not connected.',
-  unavailable: 'Health Connect is not available on this phone.',
+  unavailable: 'Health Connect is not available on this device.',
   signed_out: 'Sign in to sync.',
-  different_account: 'Connected by another account on this phone, so nothing is sent for you.',
+  different_account: 'Connected by another account on this device, so nothing is sent for you.',
   no_permission: 'Health Connect has no data access for Jarvis. Connect again to choose what to share.',
   waiting_for_app: 'Waiting for the app to be opened (background reading is off).',
   read_failed: 'Health Connect could not be read.',
@@ -54,6 +55,7 @@ function summary(result: HealthConnectResult | null): string | null {
  * already counts them.
  */
 export default function HealthConnectCard() {
+  const device = useThisDeviceNoun();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const android = Capacitor.getPlatform() === 'android';
@@ -116,8 +118,8 @@ export default function HealthConnectCard() {
         <div className="space-y-2 text-xs text-slate-300">
           <p data-testid="health-connect-unavailable">
             {status.availability === 'update_required'
-              ? 'Health Connect needs to be installed or updated on this phone first.'
-              : 'Health Connect is not available on this phone (it needs Android 9 or later).'}
+              ? `Health Connect needs to be installed or updated on this ${device} first.`
+              : `Health Connect is not available on this ${device} (it needs Android 9 or later).`}
           </p>
           {status.availability === 'update_required' && (
             <button type="button" className="glass-button px-3 py-1.5 min-h-11" onClick={() => void HealthConnect.openHealthConnect()}>
@@ -136,7 +138,7 @@ export default function HealthConnectCard() {
             <p className="text-slate-400">
               {status.backgroundAvailable
                 ? 'Background reading is off, so it syncs when you open Jarvis. Allow it in Health Connect to sync hourly.'
-                : 'This phone’s Health Connect only allows reading while Jarvis is open, so it syncs when you open the app.'}
+                : `This ${device}’s Health Connect only allows reading while Jarvis is open, so it syncs when you open the app.`}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -171,7 +173,7 @@ export default function HealthConnectCard() {
         <div className="space-y-2 text-xs text-slate-300">
           <p>
             Bring in sleep, resting heart rate, HRV, weight and walks, runs and rides from a watch, scale or other app
-            through Health Connect. Steps are not imported - this phone already counts them.
+            through Health Connect. Steps are not imported - this {device} already counts them.
           </p>
           <button
             type="button"

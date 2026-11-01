@@ -59,7 +59,7 @@ final class PushCategories {
         new Category("family_presence", "Arrivals and departures",
             "When family arrive at or leave a saved place.", NORMAL, GROUP_FAMILY, R.drawable.mi_place),
         new Category("family_safety", "Family safety",
-            "Low phone battery, school arrivals, long stops somewhere unknown and On my way.",
+            "Low battery, school arrivals, long stops somewhere unknown and On my way.",
             POP_UP, GROUP_FAMILY, R.drawable.mi_shield),
         new Category("health", "Health and fitness",
             "Step goals reached and your weekly summary.", QUIET, GROUP_FAMILY, R.drawable.mi_favorite),

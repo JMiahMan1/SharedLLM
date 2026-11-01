@@ -8,6 +8,7 @@ import UsageTiles from '../../health/UsageTiles';
 import { usageQuery } from '../../../lib/memberPage';
 import { formatMinutes, localDay, shiftDay } from '../../../lib/healthHub';
 import { stepsQueryKey } from '../../../lib/healthQueries';
+import { useMemberDeviceNoun } from '../../../hooks/useDeviceNoun';
 
 const NIGHTS = 14;
 const short = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric' });
@@ -84,17 +85,18 @@ function StepsCard({ username, name }: { username: string; name: string }) {
 
 /** Today's phone habits: when use began and ended, how much, how often. */
 function HabitsCard({ username }: { username: string }) {
+  const device = useMemberDeviceNoun(username);
   const { data, isLoading, isError } = useQuery(usageQuery(username));
   const today = data?.days.find((d) => d.day === localDay());
   return (
     <MemberCard
-      title="Phone habits today"
+      title={`${device === 'device' ? 'Screen' : device[0].toUpperCase() + device.slice(1)} habits today`}
       icon={Smartphone}
       testId="member-habits"
       wide
       isLoading={isLoading}
-      error={isError ? 'Phone use could not be loaded.' : null}
-      empty={!today ? 'No phone use reported today.' : null}
+      error={isError ? 'Screen use could not be loaded.' : null}
+      empty={!today ? `No ${device} use reported today.` : null}
     >
       {today && <UsageTiles day={today} />}
     </MemberCard>

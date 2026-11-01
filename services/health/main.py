@@ -1864,7 +1864,7 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
         # A minor's digital wellbeing is the parents'; it is not theirs to open.
         raise HTTPException(
             status_code=422,
-            detail="Phone use sharing is for adults; a child's belongs to their parents.",
+            detail="Screen time sharing is for adults; a child's belongs to their parents.",
         )
 
     row = session.exec(

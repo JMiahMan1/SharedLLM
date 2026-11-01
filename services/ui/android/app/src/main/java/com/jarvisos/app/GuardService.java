@@ -510,7 +510,7 @@ public class GuardService extends AccessibilityService {
     private void checkWarning() {
         if (!GuardApi.isProtected(this) || GuardApi.isLocked(this) || GuardApi.isUnlocked(this)) return;
         LockWarning.Warning w = LockWarning.due(System.currentTimeMillis(),
-                GuardApi.nextLockAt(this), GuardApi.nextLockReason(this));
+                GuardApi.nextLockAt(this), GuardApi.nextLockReason(this), DeviceNoun.of(this));
         if (w == null && !lastApp.isEmpty()) {
             w = LockWarning.appDue(lastApp, UnifiedPushDistributor.label(this, lastApp),
                     GuardApi.appMinutesLeft(this).get(lastApp), GuardApi.statusDay(this));

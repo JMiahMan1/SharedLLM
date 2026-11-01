@@ -110,7 +110,7 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
         status = 200
 
         async def json(self, content_type=None):
-            return {"parents": ["dad", "mom"], "display_name": "Zachary"}
+            return {"parents": ["dad", "mom"], "display_name": "Zachary", "device": "tablet"}
 
     class _Client:
         async def post(self, url, **kw):
@@ -128,7 +128,9 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
     assert calls[-1]["url"].endswith("/api/internal/guard/tamper/kid")
     assert calls[-1]["json"] == {"event": "admin_disabled", "device_key": "k" * 16}
     assert [n["user"] for n in sent] == ["dad", "mom"]
-    assert "Zachary's phone turned off Jarvis's device protection" in sent[0]["body"]
+    # Identity names the reporting device's kind: a tablet is never "phone".
+    assert sent[0]["title"] == "Tablet protection changed"
+    assert "Zachary's tablet turned off Jarvis's device protection" in sent[0]["body"]
     assert client.post("/api/guard/tamper", json={"event": "nonsense"}).status_code == 422
     assert client.post("/api/guard/tamper", json={"event": "offline_unlock"}).status_code == 200
     assert "unlocked with a parent's offline code" in sent[-1]["body"]
@@ -235,7 +237,7 @@ def test_a_self_pause_reads_as_you_and_a_parents_pause_as_a_parent(wired, monkey
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _who)
 
     # A grown member pausing their own phone.
-    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {"paused": True}})
+    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {"paused": True}, "device": "phone"})
     assert client.post("/api/screen-time/grown/pause", json={}).status_code == 200
     assert sent[-1]["title"] == "Phone paused"
     assert sent[-1]["body"] == "You paused your phone for now."
@@ -243,15 +245,15 @@ def test_a_self_pause_reads_as_you_and_a_parents_pause_as_a_parent(wired, monkey
     # A parent pausing a child's phone.
     sent.clear()
     actor["user"] = "dad"
-    answers[("POST", "/screen-time/kid/pause")] = (200, {"username": "kid", "rules": {"paused": True}})
+    answers[("POST", "/screen-time/kid/pause")] = (200, {"username": "kid", "rules": {"paused": True}, "device": "tablet"})
     assert client.post("/api/screen-time/kid/pause", json={}).status_code == 200
-    assert sent[-1]["title"] == "Phone paused"
-    assert sent[-1]["body"] == "A parent paused your phone for now."
+    assert sent[-1]["title"] == "Tablet paused"  # identity names what the child carries
+    assert sent[-1]["body"] == "A parent paused your tablet for now."
 
     # Resuming reads the same either way.
     sent.clear()
     actor["user"] = "grown"
-    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {}})
+    answers[("POST", "/screen-time/grown/pause")] = (200, {"username": "grown", "rules": {}, "device": "phone"})
     assert client.post("/api/screen-time/grown/pause", json={"resume": True}).status_code == 200
     assert sent[-1]["body"] == "Your phone is back on."
 

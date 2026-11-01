@@ -414,6 +414,8 @@ export interface ScreenTimeStatus {
   comms?: boolean;
   /** A minor's phone: Jarvis must stay installed and guarded (withheld from the mother). */
   protected?: boolean;
+  /** The kinds of their phones and tablets ("phone", "tablet"), to word the page by. */
+  device_kinds?: string[];
   limit_min: number | null;
   used_min: number;
   bonus_min: number;

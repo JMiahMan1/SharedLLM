@@ -45,7 +45,7 @@ public final class FilterBypass {
         m.put("com.opera.mini.native", "Opera Mini: pages load through Opera's servers");
         m.put("com.cloudmosa.puffinFree", "Puffin: pages load on its own servers");
         m.put("com.cloudmosa.puffin", "Puffin: pages load on its own servers");
-        m.put("app.intra", "Intra: encrypted DNS for the whole phone");
+        m.put("app.intra", "Intra: encrypted DNS for the whole device");
         KNOWN = Collections.unmodifiableMap(m);
     }
 

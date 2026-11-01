@@ -246,9 +246,9 @@ export function syncStatus(
 export function syncAdvice(status: SyncStatus): string | null {
   switch (status.freshness) {
     case 'never':
-      return 'No sync yet. Open the app on your phone';
+      return 'No sync yet. Open the app on your phone or tablet';
     case 'stale':
-      return `Not updated since ${status.label}. Open the app on your phone`;
+      return `Not updated since ${status.label}. Open the app on your phone or tablet`;
     case 'aging':
       return null;
     default:

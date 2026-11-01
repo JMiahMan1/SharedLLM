@@ -176,7 +176,7 @@ def test_a_parent_asking_about_their_childs_week_gets_the_recap(monkeypatch):
         async def get(self, url, **kw):
             if url.endswith("/guardian/children"):
                 return _Resp({"children": [
-                    {"username": "emma", "display_name": "Emma", "parents": ["dad", "mom"]},
+                    {"username": "emma", "display_name": "Emma", "parents": ["dad", "mom"], "device_kinds": ["tablet"]},
                     {"username": "neighbour", "display_name": "Zoe", "parents": ["other"]},
                 ]})
             return _Resp({"recap": {"has_data": False}})
@@ -187,7 +187,7 @@ def test_a_parent_asking_about_their_childs_week_gets_the_recap(monkeypatch):
 
     monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
     answer = asyncio.run(gateway_main._child_week_answer("How was Emma's week?", "dad"))
-    assert answer == "Nothing has been reported from Emma's phone yet this week."
+    assert answer == "Nothing has been reported from Emma's tablet yet this week."  # what she carries
     assert asyncio.run(gateway_main._child_week_answer("How was Zoe's week?", "dad")) is None  # not his child
     assert asyncio.run(gateway_main._child_week_answer("turn on the lights", "dad")) is None
 

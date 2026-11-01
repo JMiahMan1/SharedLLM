@@ -151,8 +151,8 @@ export const STATE_LABELS: Record<MemberState, string> = {
   paused: 'Paused',
   bedtime: 'Bedtime',
   locked: 'Locked',
-  in_use: 'On the phone',
-  idle: 'Not on the phone',
+  in_use: 'In use now',
+  idle: 'Not in use',
   offline: 'No report today',
 };
 

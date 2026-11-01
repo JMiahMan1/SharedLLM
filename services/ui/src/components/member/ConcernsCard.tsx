@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
 import type { ConcernLevel } from '../../types/api';
+import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const LEVEL: Record<ConcernLevel, { word: string; icon: typeof AlertTriangle; style: string }> = {
   severe: { word: 'Severe', icon: AlertOctagon, style: 'border-red-400/40 bg-red-400/10 text-red-200' },
@@ -34,6 +35,7 @@ function whereText(feature?: string, action?: string): string {
  * say so rather than disappearing.
  */
 export default function ConcernsCard({ username, name, limit = 5 }: { username: string; name: string; limit?: number }) {
+  const device = useMemberDeviceNoun(username);
   const concerns = useQuery({ queryKey: ['guardian-concerns', username], queryFn: () => api.getGuardianConcerns(username, 50), retry: false });
   const guidance = useQuery({ queryKey: ['guardian-guidance', username], queryFn: () => api.getGuardianGuidance(username), retry: false });
   const starters = new Map((guidance.data?.prompts || []).map((p) => [p.signal, p.starter]));
@@ -47,7 +49,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
       testId="member-concerns"
       isLoading={concerns.isLoading}
       error={concerns.isError ? 'Concerns could not be loaded.' : null}
-      empty={list.length === 0 ? `Nothing of concern found on ${name}'s phone.` : null}
+      empty={list.length === 0 ? `Nothing of concern found on ${name}'s ${device}.` : null}
       aside={concerns.data && concerns.data.concerns.length > limit ? `${limit} of ${concerns.data.concerns.length}` : undefined}
     >
       <ul className="space-y-2">

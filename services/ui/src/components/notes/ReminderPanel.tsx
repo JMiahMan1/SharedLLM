@@ -136,7 +136,7 @@ function PlaceReminderSection({
         </p>
       )}
       <p className="text-[11px] text-slate-500">
-        Goes off on your next arrival or departure, from the location your phone shares with the family (Location set
+        Goes off on your next arrival or departure, from the location your phone or tablet shares with the family (Location set
         to “Allow all the time”). Only you get it.
       </p>
     </div>

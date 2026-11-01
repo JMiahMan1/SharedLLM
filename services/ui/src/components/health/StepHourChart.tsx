@@ -34,7 +34,7 @@ export default function StepHourChart({ hours, currentHour, className = '' }: Pr
   if (!hours?.length) {
     return (
       <p data-testid="hour-chart-missing" className="text-xs text-slate-400 leading-relaxed">
-        No hourly detail yet. Your phone starts recording steps by the hour once it
+        No hourly detail yet. Your phone or tablet starts recording steps by the hour once it
         has the current app build. Until then only the daily total is available.
       </p>
     );

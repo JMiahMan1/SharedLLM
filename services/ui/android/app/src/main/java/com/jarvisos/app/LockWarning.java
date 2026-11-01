@@ -27,14 +27,14 @@ public final class LockWarning {
     private LockWarning() {}
 
     /** A warning when the next lock is a minute away or less (and not yet here), else null. */
-    public static Warning due(long nowMs, long nextLockAtMs, String reason) {
+    public static Warning due(long nowMs, long nextLockAtMs, String reason, String device) {
         if (nextLockAtMs <= 0 || reason == null || reason.isEmpty()) return null;
         long left = nextLockAtMs - nowMs;
         if (left <= 0 || left > WARN_MS) return null;
         // The limit's lock time moves a little with each status (it is "now + minutes left"),
         // so its key is the ten-minute slot it falls in.
         long slot = "limit".equals(reason) ? nextLockAtMs / 600_000L : nextLockAtMs / 60_000L;
-        return new Warning(reason + ":" + slot, text(reason));
+        return new Warning(reason + ":" + slot, text(reason, device));
     }
 
     /** One app is down to its last minute (the server counts whole minutes). */
@@ -52,7 +52,7 @@ public final class LockWarning {
         return nextLockAtMs > 0 && nowMs >= nextLockAtMs && ("bedtime".equals(reason) || "school".equals(reason));
     }
 
-    static String text(String reason) {
+    static String text(String reason, String device) {
         switch (reason) {
             case "bedtime":
                 return "Bedtime in one minute. Time to finish up.";
@@ -61,7 +61,7 @@ public final class LockWarning {
             case "limit":
                 return "One minute of screen time left today.";
             default:
-                return "Your phone locks in one minute.";
+                return "Your " + device + " locks in one minute.";
         }
     }
 }

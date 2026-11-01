@@ -8,6 +8,7 @@ import MemberCard from '../MemberCard';
 import { commsLine } from '../../../lib/memberPage';
 import { formatDayLabel, localDay } from '../../../lib/healthHub';
 import type { ActivityEvent } from '../../../types/api';
+import { useMemberDeviceNoun } from '../../../hooks/useDeviceNoun';
 
 type Kind = 'all' | 'calls' | 'sms' | 'social';
 
@@ -46,6 +47,7 @@ function topContacts(events: ActivityEvent[]): { who: string; calls: number; tex
  * with its full text, searchable.
  */
 export default function CommsSection({ username, name }: { username: string; name: string }) {
+  const device = useMemberDeviceNoun(username);
   const [days, setDays] = useState(7);
   const [kind, setKind] = useState<Kind>('all');
   const [search, setSearch] = useState('');
@@ -154,7 +156,7 @@ export default function CommsSection({ username, name }: { username: string; nam
         icon={Phone}
         testId="member-comms"
         wide
-        empty={events.length === 0 ? `No calls or messages from ${name}'s phone ${days === 1 ? 'today' : `in the last ${days} days`}. They show up once the phone allows calls and texts (Settings > Phone reports) and runs a recent app.` : null}
+        empty={events.length === 0 ? `No calls or messages from ${name}'s ${device} ${days === 1 ? 'today' : `in the last ${days} days`}. They show up once the ${device} allows calls and texts (Settings > Phone reports) and runs a recent app.` : null}
       >
         <div className="flex flex-wrap items-center gap-2">
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1" role="group" aria-label="Show">

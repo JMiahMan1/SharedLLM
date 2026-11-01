@@ -25,3 +25,11 @@ def test_every_prompt_is_complete():
     for key, p in PROMPTS.items():
         assert all(p.get(field) for field in ("title", "ref", "verse", "prayer", "starter")), key
         assert "{name}" in p["prayer"], key
+
+
+def test_a_tablet_is_called_a_tablet():
+    recap = {"screen": {"late_nights": 3, "change_pct": 40}, "web": {"blocked": [{"domain": "x.com", "count": 2}]}}
+    prompts = guidance(recap, "Noah", device="tablet")
+    assert prompts[1]["title"] == "More time on the tablet"
+    assert all("phone" not in p["title"] + p["starter"] for p in prompts)
+    assert "tablet" in prompts[0]["starter"] and "tablet" in prompts[2]["starter"]

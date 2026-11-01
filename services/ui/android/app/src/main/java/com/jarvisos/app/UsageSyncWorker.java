@@ -158,7 +158,7 @@ public class UsageSyncWorker extends Worker {
         Intent settings = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent tap = PendingIntent.getActivity(app, REMINDER_ID, settings,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String body = "Jarvis needs usage access on this phone for screen time and app limits. "
+        String body = "Jarvis needs usage access on this " + DeviceNoun.of(app) + " for screen time and app limits. "
             + "Tap, choose Jarvis, and allow it.";
         nm.notify(REMINDER_ID, new NotificationCompat.Builder(app, PushCategories.channelId("family_safety", 3))
             .setSmallIcon(PushCategories.icon("family_safety", 3))

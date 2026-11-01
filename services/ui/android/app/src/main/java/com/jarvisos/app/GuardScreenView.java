@@ -433,7 +433,7 @@ final class GuardScreenView {
             case "school":
                 return "It's school time";
             case "paused":
-                return "A parent paused this phone";
+                return "A parent paused this " + DeviceNoun.of(context);
             default:
                 return "That's today's screen time";
         }

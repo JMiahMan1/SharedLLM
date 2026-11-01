@@ -183,3 +183,43 @@ def test_only_those_who_see_the_log_may_clear_it(family, viewer):
     act("dad").post("/api/internal/guard/tamper/kid", json={"event": "guard_disabled"})
     assert act(viewer).delete("/api/family/devices/kid/tamper").status_code == 403
     assert len(act("dad").get("/api/family/devices/kid").json()["tamper"]) == 1
+
+
+def _give(engine, owner, key, kind):
+    with Session(engine) as s:
+        s.add(Device(device_key=key, owner_username=owner, kind=kind))
+        s.commit()
+
+
+def test_the_rules_name_the_members_device_kinds(family):
+    """The page words its text from these: a tablet is never called a phone."""
+    act, engine = family
+    assert act("dad").get("/api/screen-time/kid/rules").json()["device_kinds"] == ["phone"]  # the revoked one is left out
+    _give(engine, "kid", "kid-tablet-000000004", "tablet")
+    _give(engine, "kid", "kid-watch-0000000005", "watch")
+    assert act("dad").get("/api/screen-time/kid/rules").json()["device_kinds"] == ["phone", "tablet"]
+    assert act("grown").get("/api/screen-time/grown/rules").json()["device_kinds"] == []
+
+
+def test_the_guardian_list_and_notices_say_tablet_for_a_tablet(family):
+    act, engine = family
+    with Session(engine) as s:
+        sib = s.exec(select(Device).where(Device.device_key == "sib-phone-0000000003")).one()
+        sib.kind = "tablet"
+        s.add(sib)
+        s.commit()
+    children = {c["username"]: c for c in act("dad").get("/api/internal/guardian/children").json()["children"]}
+    assert children["sib"]["device_kinds"] == ["tablet"] and children["kid"]["device_kinds"] == ["phone"]
+    assert act("dad").get("/api/internal/guard/parents/sib").json()["device"] == "tablet"
+    told = act("dad").post("/api/internal/guard/tamper/sib", json={"event": "guard_disabled"}).json()
+    assert told["device"] == "tablet"
+    # The device that sent the report decides when it is registered.
+    _give(engine, "sib", "sib-phone-0000000006", "phone")
+    assert act("dad").get("/api/internal/guard/parents/sib").json()["device"] == "phone or tablet"
+    told = act("dad").post("/api/internal/guard/tamper/sib",
+                           json={"event": "guard_disabled", "device_key": "sib-phone-0000000006"}).json()
+    assert told["device"] == "phone"
+    paused = act("dad").post("/api/screen-time/sib/pause", json={}).json()
+    assert paused["device"] == "phone or tablet"
+    refused = act("kid").post("/api/screen-time/sib/pause", json={})
+    assert refused.status_code == 403 and refused.json()["detail"] == "Only a parent can pause a minor's phone or tablet"

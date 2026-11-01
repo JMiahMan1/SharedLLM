@@ -8,6 +8,7 @@ import type { PermissionGroup, ScreenRules } from '../../types/api';
 import { PERMISSION_WORDS } from '../../lib/guardRequests';
 import { guardRequestsQuery, usageQuery } from '../../lib/memberPage';
 import { localDay, shiftDay } from '../../lib/healthHub';
+import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 /**
  * A parent's app control for one child (Phase 11 step 5): switch an app off,
@@ -22,6 +23,7 @@ import { localDay, shiftDay } from '../../lib/healthHub';
  * approves it for that app. The requests themselves land on the parents' page.
  */
 export default function AppControls({ username, name, rules }: { username: string; name: string; rules: ScreenRules }) {
+  const device = useMemberDeviceNoun(username);
   const queryClient = useQueryClient();
   const { data: usage } = useQuery(usageQuery(username));
   const { data: pending } = useQuery(guardRequestsQuery(false));
@@ -96,10 +98,10 @@ export default function AppControls({ username, name, rules }: { username: strin
     <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="app-controls">
       <div className="flex items-center gap-2">
         <AppWindow size={14} className="text-sky-300" />
-        <h3 className="text-sm font-semibold text-white">Apps on {name}'s phone</h3>
+        <h3 className="text-sm font-semibold text-white">Apps on {name}'s {device}</h3>
       </div>
       {apps.length === 0 ? (
-        <p className="text-[11px] text-slate-400">No app use reported yet. Apps show up here once {name}'s phone shares its usage.</p>
+        <p className="text-[11px] text-slate-400">No app use reported yet. Apps show up here once {name}'s {device} shares its usage.</p>
       ) : (
         <ul className="space-y-1.5">
           {apps.map(([pkg, millis]) => {

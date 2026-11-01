@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { appName, duration } from '../../lib/phoneUsageFormat';
 import { formatDayLabel } from '../../lib/healthHub';
 import type { ConcernLevel } from '../../types/api';
+import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const LEVEL_STYLE: Record<ConcernLevel, string> = {
   severe: 'border-red-400/40 bg-red-400/10 text-red-200',
@@ -16,6 +17,7 @@ const LEVEL_STYLE: Record<ConcernLevel, string> = {
  * what the phone and Jarvis reported; anything not reported is left out.
  */
 export default function RecapCard({ username, name }: { username: string; name: string }) {
+  const device = useMemberDeviceNoun(username);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['guardian-recap', username],
     queryFn: () => api.getGuardianRecap(username),
@@ -38,7 +40,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
         <p className="text-xs text-amber-300">The week could not be loaded.</p>
       ) : !recap.has_data ? (
         <p className="text-xs text-slate-400" data-testid="guardian-recap-empty">
-          Nothing reported from {name}'s phone yet this week.
+          Nothing reported from {name}'s {device} yet this week.
         </p>
       ) : (
         <>
@@ -70,7 +72,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
             {recap.screen && (
               <div className="rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
-                <p className="text-[10px] uppercase tracking-wider text-slate-500">Phone a day</p>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Screen time a day</p>
                 <p className="font-semibold text-slate-100" data-testid="guardian-screen">{duration(recap.screen.daily_avg_min * 60000)}</p>
                 {recap.screen.change_pct !== null && (
                   <p className="text-[10px] text-slate-400">{recap.screen.change_pct >= 0 ? '+' : ''}{recap.screen.change_pct}% vs last week</p>
@@ -81,7 +83,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
               <div className="rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">Late nights</p>
                 <p className="font-semibold text-slate-100">{recap.screen.late_nights}</p>
-                <p className="text-[10px] text-slate-400">phone after 10 pm</p>
+                <p className="text-[10px] text-slate-400">{device} after 10 pm</p>
               </div>
             )}
             <div className="rounded-xl border border-white/5 bg-white/[0.03] p-2.5">

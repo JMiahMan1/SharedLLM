@@ -81,3 +81,28 @@ export function esphomeTargetName(device: DevicePlatformLike): string {
   if (label) return label;
   return (device.device_key ?? '').trim();
 }
+
+/** What to call a person's own device(s) in a sentence. */
+export type HandheldNoun = 'phone' | 'tablet' | 'phone or tablet' | 'device';
+
+/**
+ * The word for someone's phones and tablets, from the kinds registered to
+ * them: "tablet" for a child with only a tablet, "phone or tablet" for
+ * someone with both, and "device" when nothing is known (never "phone" by
+ * default, which would call a tablet a phone).
+ */
+export function handheldNoun(kinds: readonly (string | null | undefined)[] | null | undefined): HandheldNoun {
+  const set = new Set((kinds ?? []).map((k) => (k ?? '').trim().toLowerCase()));
+  const phone = set.has('phone');
+  const tablet = set.has('tablet');
+  if (phone && tablet) return 'phone or tablet';
+  if (phone) return 'phone';
+  if (tablet) return 'tablet';
+  return 'device';
+}
+
+/** The word for the device the app runs on: its form factor, or "device" in a browser. */
+export function thisDeviceNoun(formFactor: string | null | undefined): 'phone' | 'tablet' | 'device' {
+  const key = (formFactor ?? '').trim().toLowerCase();
+  return key === 'phone' || key === 'tablet' ? key : 'device';
+}

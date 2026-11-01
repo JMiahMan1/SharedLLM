@@ -517,7 +517,7 @@ class TestCompanionClaim:
         assert client.post(REGISTER, json=_phone_payload(form_factor="tablet")).status_code == 200
         resp = client.post(CLAIM, json=_claim(device_key="phone-abc12345"))
         assert resp.status_code == 409
-        assert "phone or tablet" in resp.json()["detail"]
+        assert resp.json()["detail"] == "This device key belongs to a tablet"  # its real kind
 
     @pytest.mark.parametrize("kind", ["phone", "tablet"])
     def test_a_mobile_kind_is_not_claimable(self, client: TestClient, kind: str):

@@ -91,7 +91,7 @@ public class HealthConnectPlugin extends Plugin {
             return;
         }
         if (!HealthConnectReader.available(getContext())) {
-            call.reject("Health Connect is not available on this phone");
+            call.reject("Health Connect is not available on this " + DeviceNoun.of(getContext()));
             return;
         }
         IO.execute(() -> {

@@ -76,7 +76,7 @@ public class GuardPlugin extends Plugin {
         Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                 .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin())
                 .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        "Keeps Jarvis on this phone. Removing it will need a parent.")
+                        "Keeps Jarvis on this " + DeviceNoun.of(getContext()) + ". Removing it will need a parent.")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getActivity().startActivity(intent);
         call.resolve();

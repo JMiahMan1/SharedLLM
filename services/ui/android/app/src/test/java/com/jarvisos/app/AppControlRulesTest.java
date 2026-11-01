@@ -97,19 +97,19 @@ public class AppControlRulesTest {
     @Test
     public void theWarningComesInTheLastMinuteOnceAndNotBefore() {
         long bedtime = 1_000_000_000L;
-        assertNull(LockWarning.due(bedtime - 61_000, bedtime, "bedtime"));
-        LockWarning.Warning w = LockWarning.due(bedtime - 59_000, bedtime, "bedtime");
+        assertNull(LockWarning.due(bedtime - 61_000, bedtime, "bedtime", "phone"));
+        LockWarning.Warning w = LockWarning.due(bedtime - 59_000, bedtime, "bedtime", "phone");
         assertNotNull(w);
         assertTrue(w.text.startsWith("Bedtime in one minute"));
-        assertEquals(w.key, LockWarning.due(bedtime - 10_000, bedtime, "bedtime").key);
-        assertNull(LockWarning.due(bedtime + 1, bedtime, "bedtime"));
-        assertNull(LockWarning.due(bedtime - 30_000, 0, "bedtime"));
+        assertEquals(w.key, LockWarning.due(bedtime - 10_000, bedtime, "bedtime", "phone").key);
+        assertNull(LockWarning.due(bedtime + 1, bedtime, "bedtime", "phone"));
+        assertNull(LockWarning.due(bedtime - 30_000, 0, "bedtime", "phone"));
     }
 
     @Test
     public void theLimitsKeyHoldsStillAsItsTimeDrifts() {
         long at = 600_000L * 1000 + 300_000;
-        assertEquals(LockWarning.due(at - 30_000, at, "limit").key, LockWarning.due(at - 20_000, at + 20_000, "limit").key);
+        assertEquals(LockWarning.due(at - 30_000, at, "limit", "phone").key, LockWarning.due(at - 20_000, at + 20_000, "limit", "phone").key);
     }
 
     @Test

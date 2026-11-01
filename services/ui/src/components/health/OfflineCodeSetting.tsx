@@ -35,8 +35,8 @@ export default function OfflineCodeSetting() {
       </div>
       <p className="text-[11px] text-slate-400">
         {data.set
-          ? 'Set. It works on your children’s phones when they have no connection; a phone picks up a new code the next time you sign in on it while online.'
-          : 'For when a child’s phone has no connection: 6 to 12 digits, yours only. Sign in once on each child’s phone while online so it learns the code.'}
+          ? 'Set. It works on your children’s phones and tablets when they have no connection; each picks up a new code the next time you sign in on it while online.'
+          : 'For when a child’s phone or tablet has no connection: 6 to 12 digits, yours only. Sign in once on each child’s device while online so it learns the code.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
