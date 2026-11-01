@@ -5364,7 +5364,10 @@ async def proxy_create_note(request: Request):
         "action": "create",
         "title": body.get("title"),
         "content": body.get("content"),
-        "category": body.get("category", "General"),
+        # The folder the note is written to. Notes lists only "Notes", so a
+        # note saved without one (the dashboard's Quick Notes) went to a
+        # "General" folder nothing ever showed.
+        "category": body.get("category") or "Notes",
         "storage": body.get("storage", "nextcloud"),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
