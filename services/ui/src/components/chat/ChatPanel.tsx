@@ -300,7 +300,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   }, [onScreenToken]);
 
   const openConversation = useMutation({
-    mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),
+    // As yourself: "send as" belongs to the conversation on screen, and an
+    // Admin-to-them chat opened with it never appeared in your own list.
+    mutationFn: (user: string) => api.openTalkConversation({ target_user: user }),
     onSuccess: (data) => {
       const token = (data.detail as { conversation?: TalkConversation } | undefined)?.conversation?.token;
       if (token) select(token);

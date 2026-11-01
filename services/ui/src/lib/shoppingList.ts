@@ -11,6 +11,8 @@ import { withShareNote } from './verseShare';
 
 export const SHOPPING_TITLE = 'Shopping list';
 export const SHOPPING_PATH = 'Recipes/Shopping list.md';
+/** Where saves once went by mistake (see shoppingListStore). */
+export const LEGACY_SHOPPING_PATH = 'Recipes/Shopping-list.md';
 
 const CHECKBOX = /^-\s*\[([ xX])\]\s*(.+?)\s*$/;
 const PLAIN = /^-\s+(?!\[)(.+?)\s*$/;

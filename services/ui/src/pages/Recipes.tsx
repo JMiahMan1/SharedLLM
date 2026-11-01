@@ -16,7 +16,8 @@ import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import LogRecipeSheet from '../components/health/LogRecipeSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
-import { SHOPPING_PATH, SHOPPING_TITLE, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
+import { LEGACY_SHOPPING_PATH, SHOPPING_PATH, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
+import { readShoppingList, saveShoppingList } from '../lib/shoppingListStore';
 import { PHOTO_LABEL, buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
 import { mirrorItems, plannedPushDays } from '../lib/skylightMeals';
@@ -24,6 +25,8 @@ import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib
 import { confirmDialog } from '../components/ui/confirmDialog';
 import {
   emptyPlan,
+  LEGACY_PLAN_PATH,
+  PLAN_PATH,
   planLevel,
   pickSurprise,
   planDayOf,
@@ -63,9 +66,12 @@ interface LogRequest {
   planDay?: PlanDay;
 }
 
+/** The week plan and shopping list live in Recipes/ too; they are not recipes. */
+const NOT_RECIPES = new Set([PLAN_PATH, LEGACY_PLAN_PATH, SHOPPING_PATH, LEGACY_SHOPPING_PATH]);
+
 function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
   const detail = response?.detail as { notes?: RecipeSummary[] } | undefined;
-  return detail?.notes ?? [];
+  return (detail?.notes ?? []).filter((note) => !NOT_RECIPES.has((note.path ?? '').replace(/^\/+/, '')));
 }
 
 /**
@@ -343,12 +349,11 @@ export default function Recipes() {
   const shareList = async () => {
     setSharingList(true);
     try {
-      const res = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
-      if (res.status !== 'SUCCESS' || !res.message) {
+      const { text: listBody } = await readShoppingList(asUser);
+      if (!listBody) {
         toast.error('Build the shopping list first');
         return;
       }
-      const listBody = res.message;
       setShare({
         reference: 'Shopping list',
         text: shoppingShareText(listBody),
@@ -502,15 +507,8 @@ export default function Recipes() {
         const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
         if (res.status === 'SUCCESS') ingredients.push(...ingredientLines(noteBody(res.message ?? '')));
       }
-      const existing = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
-      const existed = existing.status === 'SUCCESS';
-      const saved = await saveNote({
-        title: SHOPPING_TITLE,
-        content: buildShoppingList(existed ? existing.message ?? '' : '', ingredients),
-        category: RECIPES_DIR,
-        previous: existed ? { title: SHOPPING_TITLE, category: RECIPES_DIR, path: SHOPPING_PATH } : undefined,
-        asUser,
-      });
+      const existing = await readShoppingList(asUser);
+      const saved = await saveShoppingList(buildShoppingList(existing.text ?? '', ingredients), existing.exists, asUser);
       if (saved.response.status === 'SUCCESS') {
         toast.success('Shopping list ready');
         queryClient.invalidateQueries({ queryKey: ['recipes'] });
@@ -604,12 +602,12 @@ export default function Recipes() {
     if (skylightUnavailable()) return;
     setSkylightBusy('list');
     try {
-      const res = await api.readNote(SHOPPING_TITLE, STORAGE, SHOPPING_PATH, asUser);
-      if (res.status !== 'SUCCESS' || !res.message) {
+      const { text } = await readShoppingList(asUser);
+      if (!text) {
         toast.error('Build the shopping list first');
         return;
       }
-      const items = mirrorItems(res.message);
+      const items = mirrorItems(text);
       if (items.length === 0) {
         toast.error('The shopping list is empty');
         return;

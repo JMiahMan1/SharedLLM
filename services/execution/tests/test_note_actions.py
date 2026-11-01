@@ -2,6 +2,8 @@
 
 import pytest
 
+from services.execution.nextcloud_client import safe_filename
+
 from services.execution.handlers import note as note_handler
 
 
@@ -22,7 +24,9 @@ class FakeProvider:
         return f"http://nextcloud.test/{path}"
 
     def sanitize_filename(self, value, fallback):
-        return (value or fallback).replace(" ", "_")
+        # The real rule: a fake that named files differently hid a save
+        # written to "Meal-plan.md" while every read asked for "Meal plan.md".
+        return safe_filename(value or "", fallback)
 
     #: OCS calls (method, endpoint, params, data) and the answer a test sets.
     ocs_calls: list
@@ -141,7 +145,7 @@ async def test_create_reports_where_the_note_was_written(provider, monkeypatch):
 
     assert result.status == "SUCCESS"
     assert result.detail is not None
-    assert result.detail["path"] == "Bible/John_3:16.md"
+    assert result.detail["path"] == "Bible/John-3-16.md"
 
 
 async def test_write_reports_where_the_note_was_written(provider, monkeypatch):
@@ -156,7 +160,7 @@ async def test_write_reports_where_the_note_was_written(provider, monkeypatch):
         request("write", title="John 3:16", category="Bible", content="text")
     )
     assert result.detail is not None
-    assert result.detail["path"] == "Bible/John_3:16.md"
+    assert result.detail["path"] == "Bible/John-3-16.md"
 
 
 async def test_write_to_an_explicit_path_reports_that_path(provider, monkeypatch):
@@ -1016,3 +1020,18 @@ async def test_a_refused_share_reports_nextcloud_s_reason(provider):
     result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele"))
     assert result.status == "FAILURE"
     assert result.message == "Sharing is disabled for this user"
+
+
+async def test_a_note_made_without_a_folder_goes_where_notes_are_listed(provider, monkeypatch):
+    """Chat's note tool sends no category; "General" was written and never listed."""
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, **kwargs):
+        return {"status_code": 201, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(request("create", title="Groceries", content="milk"))
+
+    assert result.detail["path"] == "Notes/Groceries.md"
+    assert note_handler.DEFAULT_NOTES_DIRS == ["Notes"]

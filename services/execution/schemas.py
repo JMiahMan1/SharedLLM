@@ -409,7 +409,9 @@ class NoteRequest(BaseRequest):
     ]
     title: str | None = None
     content: str | None = None
-    category: str | None = "General"
+    # The folder a new note goes in. Only "Notes" (and its subfolders) is
+    # listed, so a note made in chat without one was lost in "General".
+    category: str | None = "Notes"
     item: str | None = None # For check_off
     storage: Literal["nextcloud", "local"] | None = "nextcloud"
     directories: list[str] | None = None # Custom Nextcloud directories to scan (recursive)

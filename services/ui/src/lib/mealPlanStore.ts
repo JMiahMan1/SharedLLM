@@ -6,7 +6,7 @@
  */
 import { api } from '../services/api';
 import { saveNote } from './noteSave';
-import { PLAN_PATH, PLAN_TITLE, buildMealPlan, emptyPlan, parseMealPlan, type PlanDay, type WeeklyPlan } from './mealPlan';
+import { LEGACY_PLAN_PATH, PLAN_PATH, PLAN_TITLE, buildMealPlan, emptyPlan, parseMealPlan, type PlanDay, type WeeklyPlan } from './mealPlan';
 
 const STORAGE = 'nextcloud';
 const RECIPES_DIR = 'Recipes';
@@ -17,22 +17,39 @@ export interface StoredPlan {
   exists: boolean;
 }
 
-/** The saved plan. A note that is not there yet is an empty plan; a failed read throws. */
+/**
+ * The saved plan. A note that is not there yet is an empty plan; a failed read throws.
+ *
+ * Saves once went to `Recipes/Meal-plan.md` (the file name the server makes
+ * from the title) while every read asked for `Recipes/Meal plan.md`, so such
+ * a plan is read from there until the next save moves it.
+ */
 export async function readMealPlan(asUser?: 'admin'): Promise<StoredPlan> {
   const res = await api.readNote(PLAN_TITLE, STORAGE, PLAN_PATH, asUser);
   if (res.status === 'SUCCESS') return { plan: parseMealPlan(res.message ?? ''), exists: true };
+  const old = await api.readNote(PLAN_TITLE, STORAGE, LEGACY_PLAN_PATH, asUser);
+  if (old.status === 'SUCCESS') return { plan: parseMealPlan(old.message ?? ''), exists: false };
   return { plan: emptyPlan(), exists: false };
 }
 
-/** Write the plan note; returns the save's response for the caller's message. */
+/**
+ * Write the plan note; returns the save's response for the caller's message.
+ *
+ * Always to `PLAN_PATH` itself: without a path the server names the file
+ * from the title (`Meal-plan.md`), which no read ever looks for.
+ */
 export async function saveMealPlan(plan: WeeklyPlan, exists: boolean, asUser?: 'admin') {
-  return saveNote({
+  const saved = await saveNote({
     title: PLAN_TITLE,
     content: buildMealPlan(plan),
     category: RECIPES_DIR,
-    previous: exists ? { title: PLAN_TITLE, category: RECIPES_DIR, path: PLAN_PATH } : undefined,
+    previous: { title: PLAN_TITLE, category: RECIPES_DIR, path: PLAN_PATH },
     asUser,
   });
+  if (!exists && saved.response.status === 'SUCCESS') {
+    await api.deleteNote(PLAN_TITLE, STORAGE, LEGACY_PLAN_PATH, asUser).catch(() => undefined);
+  }
+  return saved;
 }
 
 /**

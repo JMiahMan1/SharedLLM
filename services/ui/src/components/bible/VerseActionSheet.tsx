@@ -142,7 +142,9 @@ export default function VerseActionSheet({
     run('Saved to Notes', async () => {
       const saved = await api.createNote({
         title: verse.reference,
-        category: 'Bible',
+        // A folder inside Notes, where the Notes page lists it; a top-level
+        // "Bible" folder was saved but never shown.
+        category: 'Notes/Bible',
         content: `${verse.reference}\n\n${verse.text}`,
       });
       await api.recordBibleEvent('note_created', verse.reference);
