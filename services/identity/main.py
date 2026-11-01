@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.common import device_noun
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import PERMISSION_GROUPS, WEB_FILTER_CATEGORIES
 from services.common.secrets import secret_matches
@@ -4689,6 +4690,29 @@ def _parents_of(session: Session, subject: User) -> list[str]:
     return [u.username for u in session.exec(select(User)).all() if _may_manage_screen_time(u, subject)]
 
 
+def _device_kinds(session: Session, username: str) -> list[str]:
+    """The kinds of a member's phones and tablets that are not revoked, sorted
+    (["tablet"], ["phone", "tablet"], or [] for none), so text names them right."""
+    rows = session.exec(
+        select(Device.kind).where(
+            Device.owner_username == username.strip().lower(),
+            Device.kind.in_(MOBILE_DEVICE_KINDS),
+            Device.revoked == False,  # noqa: E712
+        )
+    ).all()
+    return device_noun.mobile_kinds(rows)
+
+
+def _device_word(session: Session, username: str, device_key: str = "") -> str:
+    """What to call the member's device: the one that sent the event when it
+    is known, else from every phone and tablet they have ("device" for none)."""
+    if device_key:
+        row = session.exec(select(Device).where(Device.device_key == device_key)).first()
+        if row is not None and row.kind in MOBILE_DEVICE_KINDS:
+            return row.kind
+    return device_noun.noun(_device_kinds(session, username))
+
+
 @app.get("/api/screen-time/{username}/rules")
 def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A member's rules: theirs to read, their parents' to read and change,
@@ -4714,6 +4738,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
         # The parents' answers on new apps and permissions, for the phone's guard.
         "approvals": _guard_approvals(session, subject.username),
+        # What the member carries, so the page says "tablet" for a tablet.
+        "device_kinds": _device_kinds(session, subject.username),
     }
 
 
@@ -4738,7 +4764,9 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
     ``{"resume": true}`` to lift it."""
     subject = _screen_subject(session, username)
     if not _may_edit_screen_time(caller, subject):
-        raise HTTPException(status_code=403, detail="Only a parent can pause a minor's phone")
+        raise HTTPException(
+            status_code=403, detail=f"Only a parent can pause a minor's {_device_word(session, subject.username)}"
+        )
     rules = _screen_rules(session, subject.username)
     rules.pop("paused", None)
     rules.pop("paused_until", None)
@@ -4754,7 +4782,8 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
             rules["paused"] = True
     _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
-    return {"username": subject.username, "rules": rules}
+    # "device" names it in the gateway's paused notice ("Tablet paused").
+    return {"username": subject.username, "rules": rules, "device": _device_word(session, subject.username)}
 
 
 def _request_read(r: ScreenTimeRequest) -> dict:
@@ -5202,7 +5231,10 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
         {"parent": row.username, "salt": row.salt, "iterations": row.iterations, "hash": row.hash}
         for row in session.exec(select(GuardOfflineCode).where(GuardOfflineCode.username.in_(parents))).all()
     ] if parents else []
-    return {"ok": True, "parent": parent.username, "until": until.isoformat(), "notify": parents, "offline_codes": offline}
+    return {
+        "ok": True, "parent": parent.username, "until": until.isoformat(), "notify": parents, "offline_codes": offline,
+        "device": _device_word(session, caller.username, str((body or {}).get("device_key") or "")),
+    }
 
 
 OFFLINE_CODE_ITERATIONS = 120_000
@@ -5257,8 +5289,12 @@ def internal_guard_parents(username: str, session: Session = Depends(get_session
     """Internal: who to tell when a child's phone protection changes."""
     subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
     if subject is None:
-        return {"parents": [], "display_name": username}
-    return {"parents": _parents_of(session, subject), "display_name": subject.display_name or subject.username}
+        return {"parents": [], "display_name": username, "device": "device"}
+    return {
+        "parents": _parents_of(session, subject),
+        "display_name": subject.display_name or subject.username,
+        "device": _device_word(session, subject.username),
+    }
 
 
 #: Tamper reports kept on a child's record for the father's Devices section.
@@ -5297,7 +5333,12 @@ def internal_guard_tamper(username: str, body: dict, session: Session = Depends(
     ))
     session.commit()
     parents = _parents_of(session, subject)
-    return {"username": subject.username, "parents": parents, "notify": parents, "display_name": subject.display_name or subject.username}
+    return {
+        "username": subject.username, "parents": parents, "notify": parents,
+        "display_name": subject.display_name or subject.username,
+        # The reporting device's kind when it is registered: "Noah's tablet ...".
+        "device": _device_word(session, subject.username, str((body or {}).get("device_key") or "")),
+    }
 
 
 @app.get("/api/family/devices/{username}")
@@ -5421,6 +5462,7 @@ def internal_guardian_children(session: Session = Depends(get_session), _: None 
             "monitoring": rules.get("monitoring") or "severe",
             "photo_scan": rules.get("photo_scan", True),
             "geofence_alerts": rules.get("geofence_alerts") or {},
+            "device_kinds": _device_kinds(session, child.username),
         })
     return {"children": out}
 
@@ -6940,7 +6982,8 @@ async def update_user_location(
                 u.username for u in session.exec(select(User)).all()
                 if not u.is_system_default and _location_visible_to(session, u, person.lower(), grants)
             ]
-            low_battery = (person, (owner.display_name if owner else "") or person.title(), family)
+            low_battery = (person, (owner.display_name if owner else "") or person.title(), family,
+                           _device_word(session, person))
         if existing:
             existing.value = json.dumps(location_data)
         else:
@@ -6954,8 +6997,8 @@ async def update_user_location(
     # No coordinates in the log: it is kept and read far more widely than the map.
     log.info(f"[location] Updated location for {user_id} (±{int(location.accuracy or 0)} m)")
     if low_battery:
-        name, display, family = low_battery
-        background.add_task(battery_alerts.announce, name, display, location.battery, family)
+        name, display, family, device = low_battery
+        background.add_task(battery_alerts.announce, name, display, location.battery, family, device=device)
 
     # Location forwarding to HA and Geo can be slow or subject to external timeouts;
     # run them in background tasks so location uploads never hold up the mobile client
@@ -7436,7 +7479,7 @@ def claim_device(
     device = session.exec(select(Device).where(Device.device_key == key)).first()
     if device is not None:
         if device.kind in MOBILE_DEVICE_KINDS:
-            raise HTTPException(status_code=409, detail="This device key belongs to a phone or tablet")
+            raise HTTPException(status_code=409, detail=f"This device key belongs to a {device.kind}")
         if device.owner_username and device.owner_username != owner_name and not body.verified:
             raise HTTPException(
                 status_code=409,

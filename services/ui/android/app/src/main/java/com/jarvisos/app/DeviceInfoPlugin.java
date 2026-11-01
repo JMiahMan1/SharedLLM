@@ -33,7 +33,7 @@ public class DeviceInfoPlugin extends Plugin {
         if (widthDp <= 0) {
             ret.put("formFactor", JSONObject.NULL);
         } else {
-            ret.put("formFactor", widthDp >= 600 ? "tablet" : "phone");
+            ret.put("formFactor", DeviceNoun.forWidth(widthDp));
         }
         call.resolve(ret);
     }

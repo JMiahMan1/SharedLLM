@@ -14,17 +14,17 @@ function person(overrides: Partial<HealthFamilyPerson> = {}): HealthFamilyPerson
 describe('SharedWithYouCard digital scope', () => {
   it('shows the shared screen time for the day', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: true, screen_time_min: 60, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('1h on the phone today');
+    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('1h of screen time today');
   });
 
   it('says when the phone reported nothing, never a zero', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: true, screen_time_min: null, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('No phone use reported today');
+    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('No screen use reported today');
   });
 
   it('says when the number could not be read', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: false, screen_time_min: null, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('Phone use not available right now');
+    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('Screen use not available right now');
   });
 });
 

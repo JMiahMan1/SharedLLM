@@ -43,7 +43,7 @@ export default function DigitalWellbeingCard() {
     <section className="glass-panel rounded-2xl p-4 sm:p-5" data-testid="digital-wellbeing-card">
       <div className="flex items-center gap-2 min-w-0">
         <Smartphone size={16} className="text-sky-300 shrink-0" />
-        <h3 className="text-sm font-semibold text-white truncate">Phone use</h3>
+        <h3 className="text-sm font-semibold text-white truncate">Screen use</h3>
       </div>
 
       {isLoading ? (
@@ -52,10 +52,10 @@ export default function DigitalWellbeingCard() {
           <div className="h-3 w-full skeleton rounded" />
         </div>
       ) : error ? (
-        <p className="mt-3 text-xs text-amber-300/90" data-testid="digital-wellbeing-error">Phone use could not load.</p>
+        <p className="mt-3 text-xs text-amber-300/90" data-testid="digital-wellbeing-error">Screen use could not load.</p>
       ) : !today ? (
         <div className="mt-3 space-y-2" data-testid="digital-wellbeing-empty">
-          <p className="text-xs text-slate-400">No phone use reported today. The Android app reports it once Usage Access is on.</p>
+          <p className="text-xs text-slate-400">No screen use reported today. The Android app reports it once Usage Access is on.</p>
           {canOpenSettings && (
             <button type="button" onClick={() => void PhoneUsage.openSettings()} className="glass-button px-3 py-1.5 text-xs min-h-11">
               Turn on Usage Access

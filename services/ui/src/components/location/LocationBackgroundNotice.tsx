@@ -6,6 +6,7 @@ import {
   requestBackgroundLocation,
   requestBatteryUnrestricted,
 } from '../../lib/locationTracking';
+import { useThisDeviceNoun } from '../../hooks/useDeviceNoun';
 
 type Check = { background: boolean | null; battery: boolean | null };
 
@@ -23,6 +24,7 @@ type Check = { background: boolean | null; battery: boolean | null };
  * set, or when the app cannot tell (web, or an older APK).
  */
 export default function LocationBackgroundNotice() {
+  const device = useThisDeviceNoun();
   const [check, setCheck] = useState<Check>({ background: null, battery: null });
 
   const refresh = useCallback(() => {
@@ -54,7 +56,7 @@ export default function LocationBackgroundNotice() {
     return (
       <Notice
         icon={<BatteryWarning size={16} className="text-amber-400 shrink-0 mt-0.5" />}
-        text="Battery optimisation pauses location sharing while your phone sleeps, so your family may see where you were hours ago."
+        text={`Battery optimisation pauses location sharing while your ${device} sleeps, so your family may see where you were hours ago.`}
         action="Allow in background"
         onAction={requestBatteryUnrestricted}
       />

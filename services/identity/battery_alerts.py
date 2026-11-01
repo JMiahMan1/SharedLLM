@@ -1,6 +1,6 @@
 """Low device battery: the family hears once per discharge.
 
-Every location upload carries the phone's battery percentage (and, from newer
+Every location upload carries the phone's (or tablet's) battery percentage (and, from newer
 app builds, whether it is charging). The first reading below LOW_BATTERY_PCT
 that is not charging sends one ``family_safety`` notice to the rest of the
 family. Only a charging phone, or a reading of at least LOW_BATTERY_PCT +
@@ -46,11 +46,14 @@ def step(previous: dict | None, battery: float | None, charging: bool | None) ->
 
 
 async def announce(person: str, display_name: str, battery: float, family: list[str],
-                   today: date | None = None) -> int:
-    """Tell everyone in ``family`` but ``person``; how many notices went out."""
+                   today: date | None = None, device: str = "device") -> int:
+    """Tell everyone in ``family`` but ``person``; how many notices went out.
+
+    ``device`` is what they carry ("phone", "tablet"; services/common/device_noun.py).
+    """
     url = f"/wander?person={person}"
     once = f"battery:{person}:{(today or date.today()).isoformat()}"
-    title = f"{display_name}'s phone is at {int(battery)}%"
+    title = f"{display_name}'s {device} is at {int(battery)}%"
     body = "It is not charging, so it may switch off soon."
     return await notify.send_many(
         [u for u in family if u != person],

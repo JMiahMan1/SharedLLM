@@ -378,6 +378,8 @@ def safety_client(sent, monkeypatch):
     monkeypatch.setattr(notices, "_redis", shared_redis)
     monkeypatch.setattr(family_safety, "get_client", lambda: Client())
     answers["who"] = who
+    # Everyone carries a phone unless a test says otherwise (identity's owned-devices).
+    answers["/owned-devices/"] = {"details": [{"kind": "phone"}, {"kind": "tablet", "revoked": True}]}
     return TestClient(main.app), answers
 
 
@@ -458,6 +460,28 @@ def test_a_parent_can_ring_a_childs_phone(safety_client, sent, monkeypatch):
         "status": "SUCCESS", "message": "The phone is ringing."}
     assert len(sent) == 1 and sent[0]["user"] == "kiddo"
     assert sent[0]["kind"] == "find_phone" and sent[0]["priority"] == 5
+
+
+def test_a_tablet_is_rung_as_a_tablet(safety_client, sent, monkeypatch):
+    _allow_raw(monkeypatch)
+    client, answers = safety_client
+    answers["/owned-devices/"] = {"details": [{"kind": "tablet"}]}
+    assert client.post("/api/guardian/find-phone/kiddo").json() == {
+        "status": "SUCCESS", "message": "The tablet is ringing."}
+    assert sent[0]["title"] == "Find my tablet" and sent[0]["body"] == "Your tablet is ringing."
+    assert client.post("/api/guardian/find-phone/kiddo").json()["detail"].startswith("That tablet is already ringing.")
+    # Nothing known about the member's devices: neither word is guessed.
+    answers.pop("/owned-devices/")
+    assert client.post("/api/phone/find").json()["message"] == "Your device is ringing."
+
+
+def test_crash_and_check_in_name_the_device(safety_client, sent):
+    client, answers = safety_client
+    answers["/owned-devices/"] = {"details": [{"kind": "tablet"}]}
+    assert client.post("/api/family/check-in", json={}).json()["detail"] == (
+        "Your tablet could not tell where you are, so nothing was sent")
+    _, body, _ = family_safety.crash_text("Noah", True, None, None, 0.0, "tablet")
+    assert body.startswith("Noah's tablet detected a possible crash")
 
 
 def test_ringing_is_refused_when_the_visibility_rule_says_no(safety_client, sent, monkeypatch):

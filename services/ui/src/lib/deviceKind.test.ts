@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviceKindLabel } from './deviceKind';
+import { deviceKindLabel, handheldNoun, thisDeviceNoun } from './deviceKind';
 
 describe('deviceKindLabel', () => {
   it.each([
@@ -24,5 +24,26 @@ describe('deviceKindLabel', () => {
   it('tolerates case and stray whitespace from the server', () => {
     expect(deviceKindLabel(' Tablet ')).toBe('Tablet');
     expect(deviceKindLabel('PHONE')).toBe('Phone');
+  });
+});
+
+describe('handheldNoun', () => {
+  it.each([
+    [['phone'], 'phone'],
+    [['tablet'], 'tablet'],
+    [['tablet', 'phone'], 'phone or tablet'],
+    [['watch'], 'device'],
+    [[], 'device'],
+    [undefined, 'device'],
+  ] as const)('%j is a %s', (kinds, noun) => {
+    expect(handheldNoun(kinds as readonly string[] | undefined)).toBe(noun);
+  });
+});
+
+describe('thisDeviceNoun', () => {
+  it('uses the form factor, and "device" when there is none', () => {
+    expect(thisDeviceNoun('tablet')).toBe('tablet');
+    expect(thisDeviceNoun('phone')).toBe('phone');
+    expect(thisDeviceNoun(null)).toBe('device');
   });
 });

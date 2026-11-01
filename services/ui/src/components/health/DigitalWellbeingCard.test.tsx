@@ -65,7 +65,7 @@ describe('DigitalWellbeingCard', () => {
   it('says plainly when nothing was reported today', async () => {
     vi.mocked(api.getUsage).mockResolvedValue({ status: 'SUCCESS', days: [] });
     renderCard();
-    expect(await screen.findByTestId('digital-wellbeing-empty')).toHaveTextContent('No phone use reported today');
+    expect(await screen.findByTestId('digital-wellbeing-empty')).toHaveTextContent('No screen use reported today');
   });
 });
 

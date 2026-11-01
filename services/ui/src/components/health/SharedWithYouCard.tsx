@@ -108,10 +108,10 @@ export default function SharedWithYouCard({
                   <Smartphone size={12} className="shrink-0 text-sky-300" aria-hidden />
                   <span className="min-w-0 break-words">
                     {!digital.available
-                      ? 'Phone use not available right now'
+                      ? 'Screen use not available right now'
                       : digital.screen_time_min === null
-                        ? 'No phone use reported today'
-                        : `${formatMinutes(digital.screen_time_min)} on the phone today`}
+                        ? 'No screen use reported today'
+                        : `${formatMinutes(digital.screen_time_min)} of screen time today`}
                   </span>
                 </p>
               )}

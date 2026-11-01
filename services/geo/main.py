@@ -30,7 +30,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import AliasChoices, BaseModel, Field
 
-from services.common import notify
+from services.common import device_noun, notify
 from services.common.http import get_client, get_client_insecure
 from services.common.logging_utils import warn_periodically
 from services.common.secrets import secret_matches
@@ -1820,7 +1820,11 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         speech += f" Last {w_label.lower()}: {w_dist} miles."
 
     if cur_bat is not None:
-        speech += f" Phone battery is at {cur_bat}%."
+        # "Tablet battery" for a member who has only tablets; just "Battery"
+        # when they have both or identity cannot say.
+        device = device_noun.noun(await device_noun.kinds(clean_id))
+        label = f"{device.capitalize()} battery" if device in device_noun.MOBILE_KINDS else "Battery"
+        speech += f" {label} is at {cur_bat}%."
 
     return {
         "status": "ok",
@@ -5329,7 +5333,7 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
         lines.append(
             "This family member has no pedometer or workout data recorded yet. In 2-3 sentences, "
             "acknowledge that activity tracking hasn't started and encourage them to open the app "
-            "on their phone to begin syncing steps and recording their first workout. Do NOT invent "
+            "on their phone or tablet to begin syncing steps and recording their first workout. Do NOT invent "
             "any statistics, because no data exists yet."
         )
     return "\n".join(lines)

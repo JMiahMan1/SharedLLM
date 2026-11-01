@@ -4,6 +4,7 @@ import { Globe } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import type { ScreenRules, WebFilterCategory, WebFilterRules } from '../../types/api';
+import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const CATEGORIES: Array<{ id: WebFilterCategory; label: string }> = [
   { id: 'social', label: 'Social media' },
@@ -27,6 +28,7 @@ const lines = (text: string) =>
   text.split(/[\s,]+/).map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
 
 export default function WebFilterControls({ username, name, rules }: { username: string; name: string; rules: ScreenRules }) {
+  const device = useMemberDeviceNoun(username);
   const queryClient = useQueryClient();
   const wf: WebFilterRules = rules.web_filter || {};
   const [block, setBlock] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function WebFilterControls({ username, name, rules }: { username:
     <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="web-filter-controls">
       <div className="flex items-center gap-2">
         <Globe size={14} className="text-sky-300" />
-        <h3 className="text-sm font-semibold text-white">Websites on {name}'s phone</h3>
+        <h3 className="text-sm font-semibold text-white">Websites on {name}'s {device}</h3>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {toggle('enabled', 'Web filter')}
@@ -149,7 +151,7 @@ export default function WebFilterControls({ username, name, rules }: { username:
         </div>
       )}
       <p className="text-[10px] text-slate-500">
-        Filters by site name on the phone (Wi-Fi and mobile data). A browser set to its own secure DNS can get around it; the
+        Filters by site name on the {device} (Wi-Fi and mobile data). A browser set to its own secure DNS can get around it; the
         guard keeps the filter from being switched off.
       </p>
       {failure && <p className="text-xs text-amber-300">{failure}</p>}

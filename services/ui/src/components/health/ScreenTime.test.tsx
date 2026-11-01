@@ -58,7 +58,7 @@ describe('ScreenTimeCard (the member)', () => {
   it('explains a lock and when it lifts', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ locked: true, reason: 'bedtime', until: '2026-10-22T07:00:00-07:00' }));
     wrap(<ScreenTimeCard />);
-    expect(await screen.findByTestId('screen-time-locked')).toHaveTextContent(/^Bedtime\. The phone is back on at/);
+    expect(await screen.findByTestId('screen-time-locked')).toHaveTextContent(/^Bedtime\. Back on at/);
   });
 
   it('says so once a request is waiting', async () => {

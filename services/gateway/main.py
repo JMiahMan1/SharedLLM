@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
 from services.common import active_minutes as _active_minutes
+from services.common import device_noun as _device_noun
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
 from services.common import notify as _notify
@@ -1569,7 +1570,9 @@ async def _child_week_answer(query: str, user_id: str) -> str | None:
         return None
     if recap is None:
         return None
-    return _recap.spoken(child.get("display_name") or child["username"], recap)
+    return _recap.spoken(
+        child.get("display_name") or child["username"], recap, _device_noun.noun(child.get("device_kinds"))
+    )
 
 
 async def _health_coach_answer(query: str, user_id: str) -> str | None:
@@ -5717,14 +5720,15 @@ async def guardian_guidance(request: Request, user: str):
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         who = await client.get(f"{IDENTITY_SVC}/api/internal/guard/parents/{user}", headers=headers)
-        name = ((await who.json(content_type=None)) or {}).get("display_name") if who.status == 200 else None
+        info = ((await who.json(content_type=None)) or {}) if who.status == 200 else {}
+        name, device = info.get("display_name"), info.get("device") or "device"
         resp = await client.get(f"{TELEMETRY_SVC}/api/telemetry/recap/{user}", headers=headers)
         recap = ((await resp.json(content_type=None)) or {}).get("recap") if resp.status == 200 else None
     if recap is None:
         raise HTTPException(status_code=502, detail="The week could not be read")
     if not access.get("comms"):
         recap = without_comms({"recap": recap})["recap"]
-    return {"status": "SUCCESS", "week": recap.get("week"), "prompts": _guidance(recap, name or user)}
+    return {"status": "SUCCESS", "week": recap.get("week"), "prompts": _guidance(recap, name or user, device=device)}
 
 
 @app.get("/api/guardian/journal/{user}")
@@ -6182,6 +6186,9 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # parents; the Calls & messages tab and Overview's card show for them).
         "comms": bool(body.get("comms")),
         "protected": bool(body.get("protected")),
+        # What the member carries (["tablet"], ["phone", "tablet"]), so the
+        # page names it right; not technical.
+        "device_kinds": list(body.get("device_kinds") or []),
         # The parents' answers on new apps ({pkg: pending|approved|denied}) and
         # app permissions ({"pkg|group": ...}); the phone's guard enforces them.
         "app_approvals": (body.get("approvals") or {}).get("apps") or {},
@@ -6264,10 +6271,11 @@ async def guard_parent_unlock(request: Request):
     if status == 200:
         creds = await _resolve_identity_from_request(request)
         child = str((creds or {}).get("user") or "")
+        device = (body or {}).get("device") or "device"
         await _screen_time_notice(
             body.get("notify") or [],
-            "Phone protection unlocked",
-            f"{body.get('parent')} unlocked Jarvis's protection on {child}'s phone for 10 minutes.",
+            f"{device.capitalize()} protection unlocked",
+            f"{body.get('parent')} unlocked Jarvis's protection on {child}'s {device} for 10 minutes.",
             "/fitness",
         )
     return JSONResponse(status_code=status, content={k: v for k, v in (body or {}).items() if k != "notify"})
@@ -6342,10 +6350,12 @@ async def guard_tamper(request: Request):
         )
         info = await resp.json(content_type=None) if resp.status == 200 else {}
     name = (info or {}).get("display_name") or child
+    # The kind of the device that reported it, when identity knows it.
+    device = (info or {}).get("device") or "device"
     await _screen_time_notice(
         (info or {}).get("parents") or [],
-        "Phone protection changed",
-        f"{name}'s phone {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
+        f"{device.capitalize()} protection changed",
+        f"{name}'s {device} {_TAMPER_EVENTS[event]}" + (f": {detail}." if detail else "."),
         f"/family/member/{child}",
     )
     answer: dict = {"status": "SUCCESS"}
@@ -6544,10 +6554,13 @@ async def screen_time_pause(request: Request, username: str):
         actor = str((creds or {}).get("user") or "").strip().lower()
         subject = str((body or {}).get("username") or username).strip().lower()
         mine = bool(actor) and actor == subject
+        # "tablet" for a member who has only tablets (identity says which).
+        device = (body or {}).get("device") or "device"
         if paused:
-            title, text = "Phone paused", "You paused your phone for now." if mine else "A parent paused your phone for now."
+            title = f"{device.capitalize()} paused"
+            text = f"You paused your {device} for now." if mine else f"A parent paused your {device} for now."
         else:
-            title, text = "Phone unpaused", "Your phone is back on."
+            title, text = f"{device.capitalize()} unpaused", f"Your {device} is back on."
         await _screen_time_notice([username], title, text, "/fitness")
         # The Devices page's lock/unlock is this pause; keep it in the MDM audit
         # log (Phase 12) so "who locked a device, and when" has one answer. A

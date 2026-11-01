@@ -76,7 +76,7 @@ function Header({ description, child }: { description: string; child?: FamilyRec
 function GuardianSelf() {
   return (
     <div className={PAGE} data-testid="guardian-page">
-      <Header description="Your phone, your time, and asking a parent." />
+      <Header description="Your screen time, and asking a parent." />
       <div className={GRID}>
         <ScreenTimeCard />
         <AskForSiteCard />

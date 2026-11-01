@@ -328,7 +328,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
           </li>
         )}
         {!isLoading && !devicesError && devices.length === 0 && (
-          <li className="p-4 sm:p-6 text-sm text-slate-500">No devices yet. Signing in on your phone adds it here.</li>
+          <li className="p-4 sm:p-6 text-sm text-slate-500">No devices yet. Signing in on your phone or tablet adds it here.</li>
         )}
         {devices.map((d: CompanionDevice) => {
           const Icon = KIND_ICON[d.kind] ?? Cpu;

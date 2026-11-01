@@ -1088,7 +1088,7 @@ async def mdm_wipe_device(request: Request, device_key: str):
     if not body.get("confirm"):
         raise HTTPException(
             status_code=422,
-            detail="A remote wipe erases everything on the phone and cannot be undone; send confirm=true to proceed.",
+            detail="A remote wipe erases everything on the device and cannot be undone; send confirm=true to proceed.",
         )
     key = device_key.strip()
     if key.lower().startswith("esphome:"):

@@ -11,7 +11,7 @@ from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 from services.common import notify
 from services.identity import battery_alerts
 from services.identity import main as identity_main
-from services.identity.models import User, UserActivitySharing
+from services.identity.models import Device, User, UserActivitySharing
 
 HEADERS = {"X-Internal-Secret": "test-secret"}
 
@@ -28,6 +28,7 @@ def family(monkeypatch):
         session.add(User(username="jeremiah", display_name="Jeremiah"))
         # Leo shares with the family circle (everyone in the live family does).
         session.add(UserActivitySharing(username="leo", data=json.dumps({"enabled": True, "audience": "circle"})))
+        session.add(Device(device_key="leo-phone-0000001", kind="phone", owner_username="leo"))
         session.commit()
     sent = []
 
@@ -62,6 +63,28 @@ def test_dropping_below_15_tells_the_rest_of_the_family_once(family):
     assert notice["title"] == "Leo's phone is at 14%"
     assert notice["tag"] == "battery:leo" and notice["data"]["url"] == "/wander?person=leo"
     assert notice["once"] == f"battery:leo:{date.today().isoformat()}"
+
+
+def test_a_tablet_is_called_a_tablet(family):
+    report, sent = family
+    with Session(identity_main.engine) as session:
+        phone = session.exec(select(Device)).one()
+        phone.kind = "tablet"
+        session.add(phone)
+        session.commit()
+    report(14)
+    assert sent[0]["title"] == "Leo's tablet is at 14%"
+
+
+def test_a_revoked_device_does_not_name_it(family):
+    report, sent = family
+    with Session(identity_main.engine) as session:
+        phone = session.exec(select(Device)).one()
+        phone.revoked = True
+        session.add(phone)
+        session.commit()
+    report(14)
+    assert sent[0]["title"] == "Leo's device is at 14%"
 
 
 def test_charging_arms_it_again_for_the_next_discharge(family):

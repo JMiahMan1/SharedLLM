@@ -13,6 +13,7 @@ import { formatMinutes, localDay } from '../../../lib/healthHub';
 import { lockedLine } from '../../../lib/screenTimeText';
 import { geoZonesQueryKey, zonePlaces } from '../../../lib/wanderQueries';
 import { useFamilyDirectory } from '../../chat/familyDirectory';
+import { useMemberDeviceNoun } from '../../../hooks/useDeviceNoun';
 
 const minutes = (m: number) => duration(m * 60000);
 
@@ -144,6 +145,7 @@ export function LastNightCard({ username, name }: { username: string; name: stri
  * first thing they see rather than something to look for.
  */
 function CommsGlanceCard({ username, name }: { username: string; name: string }) {
+  const device = useMemberDeviceNoun(username);
   const { data: status } = useQuery(statusQuery(username));
   const allowed = Boolean(status?.comms);
   const { data, isLoading } = useQuery({
@@ -169,7 +171,7 @@ function CommsGlanceCard({ username, name }: { username: string; name: string })
       <p className="text-xs text-slate-300">
         {calls || texts || apps
           ? `${calls} call${calls === 1 ? '' : 's'}, ${texts} text${texts === 1 ? '' : 's'}, ${apps} app message${apps === 1 ? '' : 's'}.`
-          : `No calls or messages from ${name}'s phone today yet.`}
+          : `No calls or messages from ${name}'s ${device} today yet.`}
       </p>
     </MemberCard>
   );

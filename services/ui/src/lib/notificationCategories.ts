@@ -20,7 +20,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   {
     id: 'family_safety',
     label: 'Family safety',
-    description: 'Low phone battery, school arrivals, long stops somewhere unknown, and On my way.',
+    description: 'Low battery, school arrivals, long stops somewhere unknown, and On my way.',
     note: 'SOS alerts always come through, even with this off.',
   },
   { id: 'health', label: 'Health and fitness', description: 'Step goals reached and your weekly summary.' },

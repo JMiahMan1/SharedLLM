@@ -59,12 +59,18 @@ function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; v
 
 function StatsGrid({ stats }: { stats: WatchStats }) {
   const BatteryIcon = stats.charging ? BatteryCharging : Battery;
+  const percent = stats.battery < 0 ? '--' : `${Math.round(stats.battery)}%`;
+  const volts = stats.volts > 0 ? ` · ${stats.volts.toFixed(2)} V` : '';
+  // The firmware reports -1 for `left_h` until the discharge curve has enough
+  // samples, so an unknown estimate reads as a dash rather than "0.0 h".
+  const remaining = stats.left_h >= 0 ? `${stats.left_h.toFixed(1)} h` : '--';
   return (
     <div className="grid grid-cols-2 gap-2" data-testid="watch-stats">
-      <Stat icon={BatteryIcon} label="Battery" value={stats.charging ? `Charging · ${Math.round(stats.battery)}%` : `${Math.round(stats.battery)}%`} />
+      <Stat icon={BatteryIcon} label="Battery" value={stats.charging ? `Charging · ${percent}${volts}` : `${percent}${volts}`} />
       <Stat icon={Footprints} label="Steps" value={`${stats.steps.toLocaleString()} / ${stats.goal.toLocaleString()}`} />
       <Stat icon={Gauge} label="Power mode" value={titleCase(stats.mode)} />
       <Stat icon={Clock} label="Uptime" value={formatUptime(stats.uptime)} />
+      <Stat icon={BatteryIcon} label="Battery time left" value={remaining} />
     </div>
   );
 }
@@ -109,7 +115,7 @@ const WatchPanel: React.FC = () => {
   const onTestNotification = async () => {
     setBusy('notify');
     try {
-      await sendNotification('Jarvis', 'Test notification from your phone.');
+      await sendNotification('Jarvis', 'Test notification from Jarvis.');
       toast.success('Notification sent');
     } finally {
       setBusy(null);
@@ -134,7 +140,7 @@ const WatchPanel: React.FC = () => {
 
       {!supported && (
         <p className="p-4 sm:p-6 text-sm text-slate-400">
-          Bluetooth is not available here. Open Jarvis on the phone to talk to the watch directly.
+          Bluetooth is not available here. Open the Jarvis app on your phone to talk to the watch directly.
         </p>
       )}
 

@@ -24,7 +24,7 @@ from typing import Any
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 
-from services.common import notify
+from services.common import device_noun, notify
 from services.common.http import get_client
 from services.gateway import notices
 from services.gateway.config import GEO_SVC, IDENTITY_SVC, INTERNAL_SECRET
@@ -57,6 +57,11 @@ async def _get_json(url: str, **params) -> Any:
     except Exception as e:
         log.warning(f"[family-safety] {url}: {type(e).__name__}: {e}")
         return None
+
+
+async def _device(user: str) -> str:
+    """What ``user`` carries: "phone", "tablet", "phone or tablet" or "device"."""
+    return await device_noun.noun_for(user, client=get_client(), identity=IDENTITY_SVC, secret=INTERNAL_SECRET)
 
 
 def _ago(seconds: float) -> str:
@@ -212,13 +217,14 @@ async def sos(request: Request):
 CRASH_COOLDOWN_S = 2 * 60
 
 
-def crash_text(name: str, auto: bool, speed_mph: float | None, location: dict | None, now: float) -> tuple[str, str, str | None]:
-    """(title, body, map link) for a crash alert from the phone."""
+def crash_text(name: str, auto: bool, speed_mph: float | None, location: dict | None, now: float,
+               device: str = "phone") -> tuple[str, str, str | None]:
+    """(title, body, map link) for a crash alert from the phone (``device``: what they carry)."""
     _, where, link = sos_text(name, location, now)
     where = where.replace(f"{name} needs help. ", "")
     how = f" at about {round(speed_mph)} mph" if speed_mph and speed_mph > 0 else ""
     if auto:
-        body = f"{name}'s phone detected a possible crash{how} and they did not answer for a minute. {where}"
+        body = f"{name}'s {device} detected a possible crash{how} and they did not answer for a minute. {where}"
     else:
         body = f"{name} asked for help after a possible crash{how}. {where}"
     return f"Possible crash: {name}", body, link
@@ -253,7 +259,8 @@ async def crash(request: Request):
     except (TypeError, ValueError):
         speed = None
     auto = body.get("auto") is not False
-    title, text, link = crash_text(user.title(), auto, speed, location, now)
+    device = await _device(user)
+    title, text, link = crash_text(user.title(), auto, speed, location, now, device)
     url = f"/wander?person={user}"
     actions = [notify.view_action(url, "Map")]
     if link:
@@ -269,7 +276,7 @@ async def crash(request: Request):
     log.warning(f"[family-safety] crash alert for {user} (auto={auto}): {sent} of {len(family)} notices accepted")
     if not sent:
         await _end_cooldown(cooldown)
-        raise HTTPException(status_code=503, detail="No one could be told; the phone will try again")
+        raise HTTPException(status_code=503, detail=f"No one could be told; the {device} will try again")
     return {"status": "SUCCESS", "sent": sent, "family": len(family), "located": link is not None}
 
 
@@ -291,7 +298,9 @@ async def check_in(request: Request):
     now = time.time()
     position = fresh_position(body, now)
     if position is None:
-        raise HTTPException(status_code=422, detail="Your phone could not tell where you are, so nothing was sent")
+        raise HTTPException(
+            status_code=422, detail=f"Your {await _device(user)} could not tell where you are, so nothing was sent"
+        )
     cooldown = await _start_cooldown("check_in", user, CHECK_IN_COOLDOWN_S, "You checked in a moment ago.")
     lat, lon = position["latitude"], position["longitude"]
     named = await _get_json(f"{GEO_SVC}/place-name", lat=lat, lon=lon) or {}
@@ -314,9 +323,10 @@ async def check_in(request: Request):
 async def find_phone(request: Request):
     """Ring the caller's phone. The watch's Find my phone button calls this."""
     user = await _caller(request)
-    if not await notices.find_phone(user):
-        raise HTTPException(status_code=502, detail="Could not reach your phone")
-    return {"status": "SUCCESS", "message": "Your phone is ringing."}
+    device = await _device(user)
+    if not await notices.find_phone(user, device):
+        raise HTTPException(status_code=502, detail=f"Could not reach your {device}")
+    return {"status": "SUCCESS", "message": f"Your {device} is ringing."}
 
 
 @router.post("/api/guardian/find-phone/{user}")
@@ -334,13 +344,14 @@ async def ring_member_phone(request: Request, user: str):
     if not subject:
         raise HTTPException(status_code=422, detail="A member is required")
     await _raw_data_access(request, subject)  # 401/403 unless the caller may see this member
+    device = await _device(subject)
     cooldown = await _start_cooldown(
-        "find_phone", subject, FIND_PHONE_COOLDOWN_S, "That phone is already ringing."
+        "find_phone", subject, FIND_PHONE_COOLDOWN_S, f"That {device} is already ringing."
     )
-    if not await notices.find_phone(subject):
+    if not await notices.find_phone(subject, device):
         await _end_cooldown(cooldown)
-        raise HTTPException(status_code=502, detail="Could not reach that phone")
-    return {"status": "SUCCESS", "message": "The phone is ringing."}
+        raise HTTPException(status_code=502, detail=f"Could not reach that {device}")
+    return {"status": "SUCCESS", "message": f"The {device} is ringing."}
 
 
 def place_payload(body: Any, family: list[str]) -> dict[str, Any]:

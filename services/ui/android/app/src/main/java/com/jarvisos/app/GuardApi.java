@@ -275,7 +275,7 @@ final class GuardApi {
             if (label != null && !label.isEmpty()) body.put("label", label);
             if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
             HttpResult r = send(context, "POST", "/api/guard/requests", body.toString());
-            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) return null;
             String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
             return detail.isEmpty() ? "That did not work." : detail;
@@ -298,7 +298,7 @@ final class GuardApi {
             body.put("day", day);
             if (note != null && !note.trim().isEmpty()) body.put("note", note.trim());
             HttpResult r = send(context, "POST", "/api/screen-time/requests", body.toString());
-            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) return null;
             String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
             return detail.isEmpty() ? "That did not work." : detail;
@@ -317,7 +317,7 @@ final class GuardApi {
             JSONObject body = new JSONObject();
             body.put("text", text == null ? "" : text.trim());
             HttpResult r = send(context, "POST", "/api/guard/message", body.toString());
-            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) return null;
             String detail = new JSONObject(r.body.isEmpty() ? "{}" : r.body).optString("detail", "");
             return detail.isEmpty() ? "That did not work." : detail;
@@ -394,7 +394,7 @@ final class GuardApi {
             body.put("username", username);
             body.put("password", password);
             HttpResult r = send(context, "POST", "/api/guard/parent-unlock", body.toString());
-            if (r == null) return "No connection to Jarvis. Try again when the phone is online.";
+            if (r == null) return "No connection to Jarvis. Try again when the " + DeviceNoun.of(context) + " is online.";
             if (r.status == 200) {
                 long until = epochMs(new JSONObject(r.body).optString("until", ""));
                 long ms = until == 0L ? System.currentTimeMillis() + 10 * 60_000L : until;
@@ -438,7 +438,7 @@ final class GuardApi {
             codes = new JSONArray();
         }
         if (codes.length() == 0) {
-            return "No offline code is set up on this phone yet. A parent signs in here once while online to set it up.";
+            return "No offline code is set up on this " + DeviceNoun.of(context) + " yet. A parent signs in here once while online to set it up.";
         }
         for (int i = 0; i < codes.length(); i++) {
             JSONObject c = codes.optJSONObject(i);

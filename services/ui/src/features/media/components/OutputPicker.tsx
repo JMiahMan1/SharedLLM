@@ -70,7 +70,7 @@ export function OutputPicker() {
       <Modal isOpen={open} onClose={() => setOpen(false)} title="Playing on" size="md">
         <p className={`mb-2 text-xs ${muted}`}>{online} speaker{online === 1 ? '' : 's'} online</p>
         <ul className="space-y-1" aria-label="Outputs">
-          {option('', 'This device', player.isPlaying ? 'Playing now' : 'This phone or browser', true, <Headphones size={18} aria-hidden />)}
+          {option('', 'This device', player.isPlaying ? 'Playing now' : 'Right here, on this device', true, <Headphones size={18} aria-hidden />)}
           {devices.map((d) => option(
             d.id,
             d.name,

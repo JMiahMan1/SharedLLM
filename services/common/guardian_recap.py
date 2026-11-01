@@ -154,15 +154,16 @@ def build(
     }
 
 
-def summary_line(name: str, recap: dict[str, Any]) -> str:
-    """One line for the parents' notification."""
+def summary_line(name: str, recap: dict[str, Any], device: str = "phone") -> str:
+    """One line for the parents' notification; ``device`` is what the child
+    carries ("tablet"; services/common/device_noun.py)."""
     if not recap.get("has_data"):
-        return f"Nothing was reported from {name}'s phone this week."
+        return f"Nothing was reported from {name}'s {device} this week."
     parts = []
     screen = recap.get("screen")
     if screen:
         hours, minutes = divmod(screen["daily_avg_min"], 60)
-        parts.append(f"about {hours} h {minutes} min a day on the phone" if hours else f"about {minutes} min a day on the phone")
+        parts.append(f"about {hours} h {minutes} min a day on the {device}" if hours else f"about {minutes} min a day on the {device}")
     if recap.get("top_apps"):
         parts.append(f"most in {recap['top_apps'][0]['package'].rsplit('.', 1)[-1].title()}")
     severe = [c for c in recap.get("concerns") or [] if c.get("level") in ("severe", "high")]
@@ -184,21 +185,21 @@ def asked_about(query: str, children: list[dict[str, Any]]) -> dict[str, Any] | 
     return None
 
 
-def spoken(name: str, recap: dict[str, Any]) -> str:
+def spoken(name: str, recap: dict[str, Any], device: str = "phone") -> str:
     """The recap as a few plain sentences for a chat answer."""
     if not recap.get("has_data"):
-        return f"Nothing has been reported from {name}'s phone yet this week."
+        return f"Nothing has been reported from {name}'s {device} yet this week."
     out: list[str] = []
     screen = recap.get("screen")
     if screen:
         hours, minutes = divmod(screen["daily_avg_min"], 60)
         avg = f"{hours} h {minutes} min" if hours else f"{minutes} min"
-        line = f"{name} has averaged {avg} a day on the phone"
+        line = f"{name} has averaged {avg} a day on the {device}"
         if screen.get("change_pct") is not None:
             line += f" ({'up' if screen['change_pct'] >= 0 else 'down'} {abs(screen['change_pct'])}% from last week)"
         out.append(line + ".")
         if screen.get("late_nights"):
-            out.append(f"The phone was in use after 10 pm on {screen['late_nights']} night{'s' if screen['late_nights'] != 1 else ''}.")
+            out.append(f"The {device} was in use after 10 pm on {screen['late_nights']} night{'s' if screen['late_nights'] != 1 else ''}.")
     if recap.get("top_apps"):
         apps = ", ".join(a["package"].rsplit(".", 1)[-1].title() for a in recap["top_apps"][:3])
         out.append(f"Most used: {apps}.")

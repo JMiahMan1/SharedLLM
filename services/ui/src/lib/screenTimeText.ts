@@ -12,7 +12,7 @@ export function lockedLine(status: ScreenTimeStatus): string {
     case 'paused':
       return until ? `Paused by a parent until ${until}.` : 'Paused by a parent for now.';
     case 'bedtime':
-      return `Bedtime. The phone is back on at ${until}.`;
+      return `Bedtime. Back on at ${until}.`;
     case 'school':
       return `School time until ${until}.`;
     case 'limit':

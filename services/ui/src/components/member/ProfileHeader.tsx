@@ -13,6 +13,7 @@ import { appName } from '../../lib/phoneUsageFormat';
 import { lockedLine } from '../../lib/screenTimeText';
 import { localDay } from '../../lib/healthHub';
 import type { FamilyRecord } from '../../types/api';
+import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const ROLE_WORDS: Record<string, string> = { child: 'Child', teen: 'Teen' };
 const LOCK_FOR = [30, 60, 120];
@@ -23,6 +24,7 @@ const BONUS = [15, 30, 60];
  * where, and the urgent actions one tap away (pause, bonus time, lock, talk).
  */
 export default function ProfileHeader({ child }: { child: FamilyRecord }) {
+  const device = useMemberDeviceNoun(child.username);
   const username = child.username;
   const name = child.display_name || username;
   const queryClient = useQueryClient();
@@ -75,15 +77,15 @@ export default function ProfileHeader({ child }: { child: FamilyRecord }) {
                 : state === 'in_use' && lastApp
                   ? `Using ${appName(lastApp.package)}`
                   : today?.last_use
-                    ? `Last on the phone ${relativeTime(today.last_use)}`
-                    : 'No phone use reported today.'}
+                    ? `Last on the ${device} ${relativeTime(today.last_use)}`
+                    : `No ${device} use reported today.`}
           </dd>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
           <dt className="text-[10px] uppercase tracking-wider text-slate-500">Where</dt>
           <dd className="flex items-center gap-1 text-slate-200" data-testid="member-where">
             <MapPin size={12} className="shrink-0 text-slate-400" />
-            {where ? `${place || 'Away from family places'} · ${seen ? relativeTime(seen) : 'time unknown'}` : 'Location is not shared from their phone.'}
+            {where ? `${place || 'Away from family places'} · ${seen ? relativeTime(seen) : 'time unknown'}` : `Location is not shared from their ${device}.`}
           </dd>
         </div>
       </dl>
@@ -111,7 +113,7 @@ export default function ProfileHeader({ child }: { child: FamilyRecord }) {
             </Link>
           </div>
           {open && (
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={open === 'bonus' ? 'Add time today' : 'Lock the phone for'}>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={open === 'bonus' ? 'Add time today' : `Lock the ${device} for`}>
               <span className="text-[11px] text-slate-400">{open === 'bonus' ? 'Add today:' : 'Lock for:'}</span>
               {(open === 'bonus' ? BONUS : LOCK_FOR).map((m) => (
                 <button

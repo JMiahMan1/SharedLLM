@@ -116,7 +116,7 @@ export const SensorStatusBanner = () => {
       if (ok) toast.success(`${id === 'location' ? 'Location sharing' : 'Step tracking'} is on`);
       // enableSensor already toasts the specific failure; do not double-report.
     } catch {
-      toast.error('Could not turn that on. Check your phone permissions');
+      toast.error('Could not turn that on. Check the app permissions in Android settings');
     } finally {
       setBusy(null);
     }
