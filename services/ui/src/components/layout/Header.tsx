@@ -152,7 +152,7 @@ const Header = () => {
       {/* On a phone this used to be `md:flex hidden`, so the only way to reach
           the pages that are not pinned to the bottom bar was to scroll the More
           sheet. The phone header renders it too now, just smaller. */}
-      <div className="flex-1 max-w-2xl relative group flex" ref={navRef}>
+      <div className="flex-1 min-w-0 max-w-2xl relative group flex mr-3 md:mr-6" ref={navRef}>
         <div className="absolute inset-y-0 left-3 md:left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
           <Search size={20} />
         </div>
@@ -228,7 +228,11 @@ const Header = () => {
                 <h4 className="text-sm font-bold text-white">Notifications</h4>
                 {visible.length > 0 && (
                   <button
-                    onClick={() => clearNotifications(visible[0]?.created_at)}
+                    onClick={() => {
+                      clearNotifications(visible[0]?.created_at);
+                      // Nothing left to read: the panel closes with them.
+                      setShowNotifications(false);
+                    }}
                     className="min-h-11 px-2 -mr-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
                   >
                     Clear all

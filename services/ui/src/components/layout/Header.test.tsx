@@ -139,10 +139,14 @@ describe('Header notifications bell', () => {
     expect(titles).toEqual(['Michele arrived at Home', 'Michele left Home']);
   });
 
-  it('Clear all empties the list on this device and stays cleared', async () => {
+  it('Clear all empties the list on this device, closes the panel and stays cleared', async () => {
     const first = renderHeader();
-    fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
+    const bell = await screen.findByRole('button', { name: /notifications, 2 new/i });
+    fireEvent.click(bell);
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    expect(screen.queryByRole('button', { name: 'Clear all' })).toBeNull();
+    expect(screen.getByRole('button', { name: /^notifications$/i }).getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: /^notifications$/i }));
     expect(screen.getByText("You're all caught up")).toBeTruthy();
     expect(screen.queryByText('Michele left Home')).toBeNull();
 
