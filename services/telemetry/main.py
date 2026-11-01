@@ -48,6 +48,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("telemetry")
 
+#: Most calls and messages the Calls & messages tab gets in one read.
+COMMS_MAX = 3000
+
 _http: aiohttp.ClientSession | None = None
 
 
@@ -508,6 +511,33 @@ def create_app():
                 "label": concern["label"],
             }
         return {"status": "SUCCESS", "concern": False}
+
+    @application.get("/api/telemetry/comms/{user}")
+    async def get_comms(
+        user: str, days: int = Query(default=7, ge=1, le=60), _: bool = Depends(require_internal)
+    ):
+        """One person's calls, texts and message notifications over the last
+        ``days``, newest first (the parents' Calls & messages tab). The whole
+        log is read: a busy texter fills a day with more than the activity
+        feed's 200."""
+        rc = _redis()
+        since = datetime.now(UTC) - timedelta(days=days)
+        out = []
+        for e in await store.list_activity(rc, user, store.ACTIVITY_MAX):  # newest first
+            if e.get("feature") not in ("calls", "sms", "social"):
+                continue
+            try:
+                when = datetime.fromisoformat(str(e.get("at")))
+            except ValueError:
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=UTC)
+            if when < since:
+                continue
+            out.append(e)
+            if len(out) >= COMMS_MAX:
+                break
+        return {"status": "SUCCESS", "days": days, "events": out}
 
     @application.get("/api/telemetry/activity/{user}")
     async def get_activity(

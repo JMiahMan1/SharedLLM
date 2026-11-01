@@ -115,3 +115,20 @@ def test_a_call_keeps_the_time_it_happened_not_the_upload_time(client, rc):
         event = client.post("/api/telemetry/activity", headers=HEADERS,
                             json={**body, "detail": {"at": bad}}).json()["event"]
         assert abs(datetime.fromisoformat(event["at"]) - datetime.now(UTC)) < timedelta(minutes=1)
+
+
+def test_comms_returns_a_weeks_calls_and_messages_newest_first(client, rc):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    def post(feature, days_ago, item):
+        at = int((now - timedelta(days=days_ago)).timestamp() * 1000)
+        assert client.post("/api/telemetry/activity", json={"user": "kid", "feature": feature, "item": item, "detail": {"at": at}},
+                           headers=HEADERS).status_code == 200
+    post("sms", 2, "Leo")
+    post("bible", 1, "John 3")
+    post("calls", 1, "Mom")
+    post("sms", 20, "old")       # outside the week
+    post("social", 0, "Snapchat")
+    body = client.get("/api/telemetry/comms/kid", params={"days": 7}, headers=HEADERS).json()
+    assert [e["item"] for e in body["events"]] == ["Snapchat", "Mom", "Leo"]

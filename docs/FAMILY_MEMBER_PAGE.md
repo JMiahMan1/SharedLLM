@@ -39,6 +39,13 @@ The server decides; the page only hides what the server already refuses.
   section, and the server strips technical fields everywhere else (device
   ids, package names, app versions, IP/network, permission and service
   states, sync timestamps, tokens).
+- **Calls, texts and message notifications** are the parents' only, tighter
+  than the rest: a child's are their father's and (linked) mother's, the
+  father's and the mother's are each other's, a grown member's are their own.
+  An admin who is not a parent sees none of them: the activity feed, recap,
+  concerns and guidance come without them (`comms_hidden`), and the **Calls &
+  messages** tab is not offered (`may_view_comms`; identity's status says
+  `comms`).
 
 ## Layout
 
@@ -130,6 +137,7 @@ it, and it links on here.
 | Overview | today ring vs limit with time left, bonus and the next routine; open requests (more time, apps, permissions, sites) answered inline; 7-day bars with limit line, average and over-limit days; concerns (severity word and icon, context, what to say from the week's guidance); top apps today; mini-map; last night's sleep | status, usage, `/api/screen-time/requests`, `/api/guard/requests`, `/api/guardian/concerns` and `/guidance`, `/api/health/family` |
 | Time | weekly schedule (a row per day: own limit or the everyday/weekend one it falls back to, school day), bedtime and school routines; 14-day hour × day heatmap; answered time requests; the viewer's offline unlock code | rules (`day_limits` is new), `/api/guardian/activity`, requests, `/api/guard/offline-code` |
 | Apps & web | open app/permission/site requests; each app with today's and the week's time and state (allowed, limited, blocked, awaiting approval), install approvals and permission gating; web filter, lists; recent websites (visited, blocked); answered requests | status rules, usage, guard requests, activity (`web`) |
+| Calls & messages (parents only), right after Overview | totals for today / 7 / 30 days (calls, missed, talk time, texts sent and received, app messages), who they are most in touch with, every call and message by day with its whole text, filter by calls / texts / app messages, search; a "today" card with a link on Overview | `/api/guardian/comms/{u}?days=` (the whole log for the window, up to 3000) |
 | Activity | timeline one day at a time, filter by media, Bible, games, calls & texts, web, app; totals over 7/15/30 days | `/api/guardian/activity` (last 200 events, said when the record is shorter than the window) |
 | Location | map centred on the child, today's trips as departures and arrivals, family places | locations, `/api/geo/trips?user_id=`, zones |
 | Health | sleep for 14 nights (bars, average), steps for 14 days (bars, goal, average), today's phone habits | `/api/health/family?day=` (sharing rules), `/api/geo/steps?user_id=` (activity sharing), usage |

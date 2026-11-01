@@ -4368,6 +4368,22 @@ def may_view_raw_data(viewer: User | None, subject: User | None) -> bool:
     return viewer.username == subject.username
 
 
+def may_view_comms(viewer: User | None, subject: User | None) -> bool:
+    """Whether ``viewer`` may see ``subject``'s calls, texts and message
+    notifications: the most private part of the raw data, so the parents only.
+
+    The raw-data rule (:func:`may_view_raw_data`) with its admin carve-out
+    taken off: a minor's are their father's and mother's (the linked mother),
+    the father's and the mother's are each other's, and a grown member's are
+    their own. An admin who is not a parent sees none of them.
+    """
+    if viewer is None or subject is None:
+        return False
+    if viewer.username == subject.username:
+        return (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES
+    return viewer.family_role in ("father", "mother") and may_view_raw_data(viewer, subject)
+
+
 def may_view_technical_data(viewer: User | None, subject: User | None) -> bool:
     """Whether ``viewer`` may also see the technical side of ``subject``'s data
     (devices, app versions, guard and permission states, sync times; the
@@ -4696,6 +4712,9 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         # Whether the caller sees the technical side (the gateway strips it
         # for the mother; docs/FAMILY_MEMBER_PAGE.md).
         "technical": may_view_technical_data(caller, subject),
+        # Whether the caller may see calls, texts and message notifications
+        # (the parents only; the Calls & messages tab shows for them).
+        "comms": may_view_comms(caller, subject),
         # A minor's phone keeps Jarvis protected (no uninstall, no switching
         # the guard off) whether or not any time rules are set.
         "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
@@ -5438,7 +5457,11 @@ def internal_may_view_raw(
         return session.exec(select(User).where(User.username == username.strip().lower())).first()
 
     who, whose = find(viewer), find(subject)
-    return {"allowed": may_view_raw_data(who, whose), "technical": may_view_technical_data(who, whose)}
+    return {
+        "allowed": may_view_raw_data(who, whose),
+        "technical": may_view_technical_data(who, whose),
+        "comms": may_view_comms(who, whose),
+    }
 
 
 #: GlobalSetting key holding an adult's pause of location sharing.

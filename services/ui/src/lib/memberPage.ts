@@ -10,17 +10,20 @@ import type { ZonePlace } from './wanderQueries';
 import { distanceMeters } from '../components/geo/liveLocations';
 import type { ActivityEvent, ScreenRules, ScreenTimeStatus, UsageDay, Weekday } from '../types/api';
 
-export type SectionId = 'overview' | 'time' | 'apps' | 'activity' | 'location' | 'health' | 'faith' | 'devices';
+export type SectionId = 'overview' | 'comms' | 'time' | 'apps' | 'activity' | 'location' | 'health' | 'faith' | 'devices';
 
 export interface MemberSection {
   id: SectionId;
   label: string;
   /** Technical data: shown only when the server says the viewer may see it. */
   technical?: boolean;
+  /** Calls and messages: shown only to a parent (the server's ``comms``). */
+  comms?: boolean;
 }
 
 export const MEMBER_SECTIONS: MemberSection[] = [
   { id: 'overview', label: 'Overview' },
+  { id: 'comms', label: 'Calls & messages', comms: true },
   { id: 'time', label: 'Time' },
   { id: 'apps', label: 'Apps & web' },
   { id: 'activity', label: 'Activity' },
@@ -285,6 +288,12 @@ const TEXT_TITLE: Record<string, (who: string) => string> = {
  */
 export function commsLine(e: { feature: string; item: string; duration_s?: number | null; detail?: Record<string, unknown> }):
   { title: string; number: string | null; length: string | null; text: string | null } | null {
+  if (e.feature === 'social') {
+    // A message notification from an app (Snapchat, Instagram...): who, on which app, and what it said.
+    const sender = typeof e.detail?.sender === 'string' && e.detail.sender ? e.detail.sender : null;
+    const text = typeof e.detail?.body === 'string' ? e.detail.body : null;
+    return { title: sender ? `${sender} on ${e.item || 'an app'}` : `Message on ${e.item || 'an app'}`, number: null, length: null, text };
+  }
   if (e.feature !== 'calls' && e.feature !== 'sms') return null;
   const direction = typeof e.detail?.direction === 'string' ? e.detail.direction : '';
   const number = typeof e.detail?.number === 'string' && e.detail.number ? e.detail.number : null;

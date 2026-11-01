@@ -10,6 +10,7 @@ import OverviewSection from '../components/member/sections/OverviewSection';
 import TimeSection from '../components/member/sections/TimeSection';
 import AppsWebSection from '../components/member/sections/AppsWebSection';
 import ActivitySection from '../components/member/sections/ActivitySection';
+import CommsSection from '../components/member/sections/CommsSection';
 import LocationSection from '../components/member/sections/LocationSection';
 import HealthSection from '../components/member/sections/HealthSection';
 import FaithSection from '../components/member/sections/FaithSection';
@@ -18,6 +19,7 @@ import { MEMBER_SECTIONS, memberPath, statusQuery, type SectionId } from '../lib
 
 const SECTION_VIEW: Record<SectionId, (p: { username: string; name: string }) => ReactElement> = {
   overview: OverviewSection,
+  comms: CommsSection,
   time: TimeSection,
   apps: AppsWebSection,
   activity: ActivitySection,
@@ -55,7 +57,7 @@ export default function FamilyMember() {
   }, [family, me, myRole]);
   const child = children.find((c) => c.username === username);
   const { data: status } = useQuery({ ...statusQuery(child?.username || ''), enabled: Boolean(child) });
-  const sections = MEMBER_SECTIONS.filter((s) => !s.technical || status?.technical);
+  const sections = MEMBER_SECTIONS.filter((s) => (!s.technical || status?.technical) && (!s.comms || status?.comms));
   const asked = params.get('section') as SectionId | null;
   const section = sections.find((s) => s.id === asked)?.id || 'overview';
   const View = SECTION_VIEW[section];

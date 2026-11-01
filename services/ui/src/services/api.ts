@@ -1236,6 +1236,12 @@ export const api = {
     return resp.data;
   },
 
+  /** Calls, texts and message notifications over the last ``days`` (parents only). */
+  async getGuardianComms(username: string, days = 7): Promise<{ days: number; events: ActivityEvent[] }> {
+    const resp = await apiClient.get(`/api/guardian/comms/${encodeURIComponent(username)}`, { params: { days } });
+    return resp.data;
+  },
+
   async getGuardianActivity(username: string, limit = 100): Promise<{ events: ActivityEvent[] }> {
     const resp = await apiClient.get(`/api/guardian/activity/${encodeURIComponent(username)}`, { params: { limit } });
     return resp.data;

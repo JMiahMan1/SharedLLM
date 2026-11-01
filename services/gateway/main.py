@@ -5588,6 +5588,37 @@ async def _raw_data_access(request: Request, subject: str) -> bool:
     visibility rule: a minor's is the parents', an adult's is their own);
     refused with 401/403 otherwise. Returns whether they also see its
     technical side (only an admin and the father do; member_page.py)."""
+    return bool((await _raw_access(request, subject)).get("technical"))
+
+
+#: Collected data that is a person's private communication: calls, texts and
+#: message notifications. Only parents see it (identity's ``comms`` answer).
+COMMS_FEATURES = frozenset({"calls", "sms", "social"})
+
+
+def without_comms(data: Any) -> Any:
+    """An activity feed, concerns list or recap with the calls, texts and
+    message notifications taken out, for a viewer who is not a parent."""
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    if isinstance(out.get("events"), list):
+        out["events"] = [e for e in out["events"] if not (isinstance(e, dict) and e.get("feature") in COMMS_FEATURES)]
+    if isinstance(out.get("concerns"), list):
+        out["concerns"] = [c for c in out["concerns"] if not (isinstance(c, dict) and c.get("feature") in COMMS_FEATURES)]
+    if isinstance(out.get("recap"), dict):
+        recap = dict(out["recap"])
+        recap.pop("comms", None)
+        if isinstance(recap.get("concerns"), list):
+            recap["concerns"] = [c for c in recap["concerns"] if not (isinstance(c, dict) and c.get("feature") in COMMS_FEATURES)]
+        out["recap"] = recap
+    out["comms_hidden"] = True
+    return out
+
+
+async def _raw_access(request: Request, subject: str) -> dict:
+    """Identity's answer for the caller and ``subject``: ``allowed`` (raw
+    data at all, else 401/403 here), ``technical`` and ``comms``."""
     creds = await _resolve_identity_from_request(request)
     viewer = str((creds or {}).get("user") or "").strip()
     if not viewer:
@@ -5601,7 +5632,7 @@ async def _raw_data_access(request: Request, subject: str) -> bool:
         answer = (await rule.json(content_type=None) or {}) if rule.status == 200 else {}
     if not answer.get("allowed"):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
-    return bool(answer.get("technical"))
+    return answer
 
 
 async def _member_json(resp, technical: bool) -> JSONResponse:
@@ -5616,10 +5647,15 @@ async def _parents_only_telemetry(request: Request, subject: str, path: str, par
     """A child's collected data from telemetry, for the people identity's
     visibility rule allows (a minor's parents; an adult themselves), without
     the technical side unless the viewer is an admin or the father."""
-    technical = await _raw_data_access(request, subject)
+    access = await _raw_access(request, subject)
+    technical = bool(access.get("technical"))
     async with borrow_http_client() as client:
         resp = await client.get(f"{TELEMETRY_SVC}{path}", params=params or {}, headers={"X-Internal-Secret": INTERNAL_SECRET})
-        return await _member_json(resp, technical)
+        if access.get("comms") or resp.status != 200:
+            return await _member_json(resp, technical)
+        # Not a parent (an admin, say): everything but the calls and messages.
+        data = without_comms(await resp.json(content_type=None))
+        return JSONResponse(status_code=resp.status, content=data if technical else strip_technical(data))
 
 
 @app.get("/api/usage/{user}")
@@ -5677,7 +5713,7 @@ async def guardian_guidance(request: Request, user: str):
     """Prayer prompts, a verse and a conversation starter for each thing that
     happened in the child's week (``services/common/guidance.py``). Parents
     only; nothing is sent to the child."""
-    await _raw_data_access(request, user)
+    access = await _raw_access(request, user)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         who = await client.get(f"{IDENTITY_SVC}/api/internal/guard/parents/{user}", headers=headers)
@@ -5686,6 +5722,8 @@ async def guardian_guidance(request: Request, user: str):
         recap = ((await resp.json(content_type=None)) or {}).get("recap") if resp.status == 200 else None
     if recap is None:
         raise HTTPException(status_code=502, detail="The week could not be read")
+    if not access.get("comms"):
+        recap = without_comms({"recap": recap})["recap"]
     return {"status": "SUCCESS", "week": recap.get("week"), "prompts": _guidance(recap, name or user)}
 
 
@@ -5749,6 +5787,25 @@ async def guardian_talk(request: Request):
         except Exception as exc:
             log.warning("[guardian] talk request to %s failed: %s", parent, exc)
     return {"status": "SUCCESS", "told": wanted}
+
+
+@app.get("/api/guardian/comms/{user}")
+async def guardian_comms(request: Request, user: str, days: int = 7):
+    """Calls, texts and message notifications over the last ``days``: the
+    parents' Calls & messages tab. Only a parent (identity's ``comms`` answer;
+    an admin who is not a parent is refused)."""
+    access = await _raw_access(request, user)
+    if not access.get("comms"):
+        raise HTTPException(status_code=403, detail="Only a parent can see calls and messages")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", user):
+        raise HTTPException(status_code=422, detail="A username is required")
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/comms/{user}",
+            params={"days": max(1, min(int(days), 60))},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        return await _proxy_json_response(resp)
 
 
 @app.get("/api/guardian/activity/{user}")
