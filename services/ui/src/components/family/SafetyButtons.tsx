@@ -23,7 +23,7 @@ function isTooSoon(err: unknown): boolean {
   return (err as { response?: { status?: number } })?.response?.status === 429;
 }
 
-export default function SafetyButtons() {
+export default function SafetyButtons({ fill = false }: { fill?: boolean }) {
   const [busy, setBusy] = useState<'way' | 'sos' | 'here' | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -81,22 +81,26 @@ export default function SafetyButtons() {
   };
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="family-safety">
+    // ``fill``: on a phone the three share one full-width row, evenly (Wander).
+    <div
+      className={fill ? 'grid w-full min-w-0 grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center' : 'flex min-w-0 flex-wrap items-center gap-2'}
+      data-testid="family-safety"
+    >
       <button
         type="button"
         onClick={onMyWay}
         disabled={busy !== null}
-        className="flex min-h-11 items-center gap-1.5 rounded-full border border-white/10 bg-slate-900/80 px-3 text-[13px] font-medium text-slate-200 hover:border-purple-400/40 disabled:opacity-50"
+        className="flex min-h-11 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border border-white/10 bg-slate-900/80 px-2 text-[13px] sm:gap-1.5 sm:px-3 font-medium text-slate-200 hover:border-purple-400/40 disabled:opacity-50"
       >
-        {busy === 'way' ? <Loader2 size={14} className="animate-spin" /> : <Navigation size={14} />} On my way
+        {busy === 'way' ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <Navigation size={14} className="shrink-0" />} On my way
       </button>
       <button
         type="button"
         onClick={checkIn}
         disabled={busy !== null}
-        className="flex min-h-11 items-center gap-1.5 rounded-full border border-white/10 bg-slate-900/80 px-3 text-[13px] font-medium text-slate-200 hover:border-purple-400/40 disabled:opacity-50"
+        className="flex min-h-11 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border border-white/10 bg-slate-900/80 px-2 text-[13px] sm:gap-1.5 sm:px-3 font-medium text-slate-200 hover:border-purple-400/40 disabled:opacity-50"
       >
-        {busy === 'here' ? <Loader2 size={14} className="animate-spin" /> : <MapPinCheck size={14} />} Check in
+        {busy === 'here' ? <Loader2 size={14} className="shrink-0 animate-spin" /> : <MapPinCheck size={14} className="shrink-0" />} Check in
       </button>
       <button
         type="button"
@@ -104,7 +108,7 @@ export default function SafetyButtons() {
         disabled={busy !== null}
         className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full bg-rose-600 px-3 text-[13px] font-bold text-white hover:bg-rose-500 disabled:opacity-50"
       >
-        <Siren size={14} /> SOS
+        <Siren size={14} className="shrink-0" /> SOS
       </button>
       <Modal isOpen={confirming} onClose={() => busy === null && setConfirming(false)} title="Send an SOS?" size="sm">
         <p className="text-sm text-slate-300">

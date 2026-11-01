@@ -917,35 +917,40 @@ const Wander = () => {
 
       {!showAllTrips && (<>
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-white/10 shadow-xl">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
-              <Compass size={26} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-indigo-300 bg-clip-text text-transparent">
-                  Wander
-                </h1>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Cherith Telemetry
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-400">
-                Family presence, places, and trips. Inspired by Elijah&apos;s journey in the wilderness (1 Kings 17:3-6). Steps and workouts live on Health.
-              </p>
-            </div>
+      {/* On a phone: the title with Refresh at its right, the line under it,
+          then On my way / Check in / SOS as one even row. From sm up the
+          buttons sit at the right of the title. */}
+      <div className="flex flex-col gap-4 glass-panel p-4 sm:p-6 rounded-2xl border border-white/10 shadow-xl sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="shrink-0 p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+            <Compass size={24} />
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <SafetyButtons />
+          <div className="min-w-0 flex-1 space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-indigo-300 bg-clip-text text-transparent">
+              Wander
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Family presence, places, and trips. Inspired by Elijah&apos;s journey in the wilderness (1 Kings 17:3-6). Steps and workouts live on Health.
+            </p>
+          </div>
           <button
             onClick={refreshAll}
             disabled={isRefreshing}
-            className="glass-button flex items-center gap-2 px-3 min-h-11 text-xs font-semibold text-slate-300 hover:text-white rounded-xl"
-            title="Refresh Trips & Telemetry"
+            aria-label="Refresh"
+            title="Refresh trips and locations"
+            className="glass-button sm:hidden shrink-0 flex min-h-11 min-w-11 items-center justify-center rounded-xl text-slate-300 hover:text-white"
+          >
+            <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-purple-400' : ''} />
+          </button>
+        </div>
+
+        <div className="flex min-w-0 items-center gap-2">
+          <SafetyButtons fill />
+          <button
+            onClick={refreshAll}
+            disabled={isRefreshing}
+            title="Refresh trips and locations"
+            className="glass-button hidden sm:flex items-center gap-2 px-3 min-h-11 text-xs font-semibold text-slate-300 hover:text-white rounded-xl"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-purple-400' : ''} />
             <span>Refresh</span>
