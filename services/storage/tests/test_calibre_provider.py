@@ -402,3 +402,16 @@ def test_build_provider_keeps_one_provider_per_login_and_library():
     assert build_provider(ProviderConfig(kind="calibre", settings={"library_path": "/Books/Other"})) is not first
     other_login = ProviderConfig(kind="calibre", settings={"library_path": "/Books/Text", "username": "kiddo"})
     assert build_provider(other_login) is not first
+
+
+def test_the_book_files_are_every_format_at_its_real_path():
+    """The family Library shelf lists real files from metadata.db, no folder walk."""
+    provider = _provider({"/Books/Text/metadata.db": _make_db([
+        (1, "Both", "A/Both (1)", "", None, [1], [], [("PDF", "Both - A", 7), ("EPUB", "Both - A", 10)]),
+    ])})
+    files = asyncio.run(provider.list_book_files())
+    assert [(f.path, f.name, f.size) for f in files] == [
+        ("/Books/Text/A/Both (1)/Both - A.epub", "Both - A.epub", 10),
+        ("/Books/Text/A/Both (1)/Both - A.pdf", "Both - A.pdf", 7),
+    ]
+    assert provider.client.requested == ["/Books/Text/metadata.db"]
