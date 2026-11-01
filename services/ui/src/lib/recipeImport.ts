@@ -2,6 +2,19 @@
 // returns its schema.org recipe; this module guesses the shelf labels and
 // renders the note body (the notes service adds the title/category header).
 
+/** Per-serving nutrition as the source stated it; a missing name was not stated. */
+export interface StatedNutrition {
+  calories?: number;
+  fat_g?: number;
+  sat_fat_g?: number;
+  cholesterol_mg?: number;
+  sodium_mg?: number;
+  carbs_g?: number;
+  fiber_g?: number;
+  sugar_g?: number;
+  protein_g?: number;
+}
+
 export interface ImportedRecipe {
   title: string;
   description: string;
@@ -18,6 +31,8 @@ export interface ImportedRecipe {
   notes?: string;
   /** Where the draft came from; a photo import adds its own label. */
   source_kind?: 'link' | 'search' | 'photo';
+  /** Per serving: the Food.com submitter's figures, or a page's published ones. */
+  nutrition?: StatedNutrition | null;
 }
 
 /** One card from recipe search: the offline index or TheMealDB. */
@@ -36,6 +51,9 @@ export interface RecipeSearchItem {
   prep_minutes?: number | null;
   cook_minutes?: number | null;
   source_url: string;
+  /** Per serving, as stated (offline index only). */
+  calories?: number | null;
+  protein_g?: number | null;
 }
 
 /** Shelf labels for an imported recipe: level first, then the quick ones. */
@@ -73,6 +91,35 @@ export function guessLabels(recipe: ImportedRecipe): string[] {
 /** The label a photo or handwriting import carries. */
 export const PHOTO_LABEL = '#photo-import';
 
+/** Written in this order, the way scripts/import_recipes.py writes them. */
+const NUTRITION_PARTS: [keyof StatedNutrition, string][] = [
+  ['calories', 'kcal'],
+  ['fat_g', 'g fat'],
+  ['sat_fat_g', 'g sat fat'],
+  ['cholesterol_mg', 'mg cholesterol'],
+  ['sodium_mg', 'mg sodium'],
+  ['carbs_g', 'g carbs'],
+  ['fiber_g', 'g fiber'],
+  ['sugar_g', 'g sugar'],
+  ['protein_g', 'g protein'],
+];
+
+const round1 = (value: number) => Math.round(value * 10) / 10;
+
+/**
+ * The `## Nutrition` line for a recipe, in the format `parseRecipeNutrition`
+ * reads (so it can be logged to Health), or null when nothing was stated.
+ */
+export function nutritionLine(recipe: Pick<ImportedRecipe, 'nutrition' | 'site'>): string | null {
+  const stated = recipe.nutrition ?? {};
+  const parts = NUTRITION_PARTS.filter(([key]) => typeof stated[key] === 'number').map(
+    ([key, label]) => `${round1(stated[key] as number)} ${label}`,
+  );
+  if (parts.length === 0) return null;
+  const who = recipe.site === 'food.com' ? 'the submitter - foodcom' : 'the recipe page - link';
+  return `*Per serving, as stated by ${who}:* ${parts.join(' · ')}`;
+}
+
 /** The note body for an imported recipe (title/category come from the save). */
 export function buildRecipeNote(recipe: ImportedRecipe, extraLabels: string[] = []): string {
   const yieldText = recipe.yield
@@ -105,6 +152,8 @@ export function buildRecipeNote(recipe: ImportedRecipe, extraLabels: string[] = 
     '## Steps',
     ...recipe.instructions.map((step, index) => `${index + 1}. ${step}`),
   );
+  const nutrition = nutritionLine(recipe);
+  if (nutrition) lines.push('', '## Nutrition', nutrition);
   if (recipe.notes) lines.push('', '## Notes', recipe.notes);
   return lines.join('\n');
 }

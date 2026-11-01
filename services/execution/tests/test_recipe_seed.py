@@ -22,6 +22,11 @@ SPINE_HEADERS = [
     "AggregatedRating",
     "ReviewCount",
     "RecipeServings",
+    "Calories",
+    "FatContent",
+    "CarbohydrateContent",
+    "ProteinContent",
+    "SodiumContent",
 ]
 
 
@@ -42,6 +47,11 @@ def _spine_row(rid, name, author, servings, parts, steps, quantities, **override
         "AggregatedRating": "4.5",
         "ReviewCount": "4",
         "RecipeServings": str(servings),
+        "Calories": "180.5",
+        "FatContent": "2.1",
+        "CarbohydrateContent": "38",
+        "ProteinContent": "3.4",
+        "SodiumContent": "NA",
     }
     row.update(overrides)
     return row
@@ -258,3 +268,36 @@ def test_get_seed_reads_the_env_override(tmp_path, monkeypatch):
     assert first is second
     assert first.present is True
     assert first.search("blueberry")[0]["id"] == 100
+
+
+def test_search_and_fetch_carry_the_stated_nutrition(tmp_path):
+    _, out = _build(tmp_path)
+    seed = RecipeSeed(str(out))
+    hit = seed.search("blueberry")[0]
+    assert (hit["calories"], hit["protein_g"]) == (180.5, 3.4)
+    nutrition = seed.fetch(100)["nutrition"]
+    # Only what the submitter stated: "NA" sodium is left out, not zero.
+    assert nutrition == {"calories": 180.5, "fat_g": 2.1, "carbs_g": 38.0, "protein_g": 3.4}
+
+
+def test_nutrition_is_added_to_a_seed_built_without_it(tmp_path):
+    """The live seed predates the columns; they are added by recipe id."""
+    import sqlite3
+
+    from scripts.build_recipe_seed import add_nutrition
+
+    _, out = _build(tmp_path)
+    conn = sqlite3.connect(out)
+    for column in recipe_seed.NUTRITION:
+        conn.execute(f"ALTER TABLE recipes DROP COLUMN {column}")
+    conn.commit()
+    conn.close()
+    old = RecipeSeed(str(out))
+    assert old.search("blueberry")[0]["calories"] is None
+    assert old.fetch(100)["nutrition"] is None
+    assert old.fetch(100)["ingredients"][0] == "4 cups blueberries, fresh or frozen"
+
+    assert add_nutrition(str(out), str(tmp_path / "recipes.csv"), log=lambda *_: None) == 3 - 1
+    fresh = RecipeSeed(str(out))
+    assert fresh.fetch(100)["nutrition"]["calories"] == 180.5
+    assert fresh.fetch(100)["ingredients"][0] == "4 cups blueberries, fresh or frozen"
