@@ -1,14 +1,14 @@
 """Ask about a passage, with the passage and its study notes in front of the model.
 
-The reader asks a question about what is on the screen, so the answer is
-grounded in that text rather than in whatever the model remembers about the
-Bible. Two things are put in the prompt: the verses themselves and the study
-notes already stored for them. Nothing else is fetched, so an answer can always
-be traced back to something the reader can see.
+The reader asks a question about what is on the screen. The prompt carries the
+verses, the rest of their chapter and the study notes stored for them, and the
+model starts there and then brings in what a study Bible would: related
+passages, setting, word meanings and how the passage has been understood.
+Answering only from the verses and notes gave thin answers to most real
+questions ("why", "what did this mean to them", "how does this fit").
 
-A question that the passage does not answer is a real answer, and the prompt
-says so plainly. Guessing is worse than saying "this passage does not say",
-because the reader cannot tell the two apart afterwards.
+Quotes stay honest: only the text given is quoted; other passages are named by
+reference (and become chips that open the real text), never quoted from memory.
 
 This module deliberately holds no scripture and no model name: the text arrives
 from the corpus, and the model is named by the gateway's own alias so the
@@ -37,14 +37,27 @@ MAX_QUESTION_CHARACTERS = 2_000
 MAX_VERSES = 150
 MAX_NOTES = 40
 MAX_NOTE_CHARACTERS = 1_200
+#: Verses of the surrounding chapter sent for context, nearest first.
+MAX_CONTEXT_VERSES = 80
 
 SYSTEM_PROMPT = (
-    "You are a careful Bible study helper for a family. Answer the question "
-    "from the passage and study notes given to you, and say so plainly when "
-    "they do not answer it. Do not invent verse text, references or quotes. "
-    "Answer at the length the question needs: a sentence or two for a simple "
-    "question, or a short paragraph or list when the question asks for "
-    "explanation. Write for someone reading the chapter right now."
+    "You are a knowledgeable, careful Bible study helper for a family. Start "
+    "from the passage, the rest of its chapter and the study notes given to "
+    "you, then bring in what a good study Bible or teacher would: related "
+    "Scripture from the whole Bible (the New Testament rests on the Old: show "
+    "the quotations, promises and patterns it draws on), the historical and "
+    "cultural setting, what the original words mean, and how the church has "
+    "historically understood it. Hold to traditional, historic Christian "
+    "teaching. Use the related Scripture, family library and web results you "
+    "are given where they bear on the question, and say where a point comes "
+    "from (a passage, a book by its title and author, a site). Make clear what "
+    "the passage itself says and what is background. Quote only the text "
+    "given to you; name any other passage by its reference instead of quoting "
+    "it from memory. Do not invent verse text, references, quotes or sources. "
+    "Where Christians "
+    "disagree or something is uncertain, say so and give the main views. "
+    "Answer at the length the question needs. Write for someone reading the "
+    "chapter right now."
 )
 
 
@@ -57,11 +70,12 @@ DEPTHS = {
     ),
     "teen": (
         "The reader is a teenager. Be direct and concrete, connect it to everyday "
-        "life where the passage does, and keep it brief."
+        "life where the passage does, and keep it focused: a few short paragraphs at most."
     ),
     "adult": (
-        "The reader is an adult. Explain the point in one or two short paragraphs "
-        "when the question asks for explanation; do not pad a simple question."
+        "The reader is an adult. When the question asks for explanation, give a "
+        "full answer: the point, the context that bears on it and the related "
+        "passages, in a few paragraphs or a short list. Do not pad a simple question."
     ),
 }
 
@@ -142,12 +156,36 @@ def _note_lines(notes: list[dict]) -> list[str]:
     return lines
 
 
+def _source_lines(sources: dict) -> list[str]:
+    """Related Scripture, library passages and web results, each labelled by where it came from."""
+    lines: list[str] = []
+    related = [r for r in sources.get("related") or [] if r.get("verses")]
+    if related:
+        lines += ["", "Related Scripture from elsewhere in the Bible (this translation's text):"]
+        for group in related:
+            lines += [f"{group['reference']}:", *_verse_lines(group["verses"])]
+    library = sources.get("library") or []
+    if library:
+        lines += ["", "From the family library (use only what bears on the question; name the book and author):"]
+        for item in library:
+            where = item["title"] + (f" by {item['author']}" if item.get("author") else "")
+            where += f", {item['chapter']}" if item.get("chapter") else ""
+            lines.append(f"- {where}: {item['text']}")
+    web = sources.get("web") or []
+    if web:
+        lines += ["", "From a web search on how Christians understand it (snippets; name the site when used):"]
+        lines += [f"- {w['title']} ({w['url']}): {w['snippet']}" for w in web]
+    return lines
+
+
 def build_prompt(
     *,
     reference: str,
     verses: list[dict],
     notes: list[dict],
     question: str,
+    context: list[dict] | None = None,
+    sources: dict | None = None,
 ) -> str:
     """Assemble the question with the passage and its notes in front of it.
 
@@ -176,14 +214,21 @@ def build_prompt(
     note_lines = _note_lines(notes[:MAX_NOTES])
 
     parts = [f"Passage: {reference}", "", "Scripture:", *body]
+    around = _verse_lines((context or [])[:MAX_CONTEXT_VERSES])
+    if around:
+        parts += ["", "The rest of the chapter, for context:", *around]
     if note_lines:
         parts += ["", "Study notes for this passage:", *note_lines]
+    parts += _source_lines(sources or {})
     parts += [
         "",
         "Question:",
         cleaned,
         "",
-        "Answer from the passage above. If it does not answer the question, say so.",
+        f"Answer the question about {reference}. Start from the passage, then use "
+        "the chapter, the notes, the related Scripture and sources above and your "
+        "wider knowledge of Scripture and its background, holding to historic "
+        "Christian teaching. Say plainly where something is uncertain.",
     ]
     return "\n".join(parts)
 

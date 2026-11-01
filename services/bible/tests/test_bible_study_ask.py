@@ -14,7 +14,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from services.bible import study_ask
+from services.bible import study_ask, study_sources
 
 pytestmark = pytest.mark.unit
 
@@ -46,9 +46,36 @@ def test_the_prompt_carries_the_passage_and_its_notes():
     assert "Study notes for this passage:" in prompt
     assert "John 3:16 (commentary): The word translated 'world' is kosmos" in prompt
     assert "Question:\nWhat does 'world' mean here?" in prompt
-    # The closing instruction is what makes "it does not say" an acceptable
-    # answer instead of a failure the model tries to paper over.
-    assert "If it does not answer the question, say so." in prompt
+    # The answer starts from the passage and may go beyond it, saying where
+    # something is uncertain rather than papering over it.
+    assert "Start from the passage" in prompt
+    assert "wider knowledge of Scripture" in prompt
+    assert "Say plainly where something is uncertain." in prompt
+
+
+def test_the_rest_of_the_chapter_is_given_for_context_after_the_passage():
+    prompt = study_ask.build_prompt(
+        reference="John 3:16",
+        verses=[VERSE],
+        notes=[],
+        question="Who is speaking?",
+        context=[{"reference": "John 3:15", "text": "That whosoever believeth"}],
+    )
+    assert "The rest of the chapter, for context:\nJohn 3:15 That whosoever believeth" in prompt
+    assert prompt.index("Scripture:") < prompt.index("The rest of the chapter") < prompt.index("Question:")
+
+
+def test_no_context_heading_without_context():
+    prompt = study_ask.build_prompt(reference="John 3:16", verses=[VERSE], notes=[], question="Why?")
+    assert "The rest of the chapter" not in prompt
+
+
+def test_the_helper_may_go_beyond_the_passage_but_never_quotes_from_memory():
+    system = study_ask.system_prompt("adult")
+    assert "related Scripture from the whole Bible" in system and "historical and cultural setting" in system
+    assert "traditional, historic Christian teaching" in system
+    assert "Quote only the text given to you" in system
+    assert "Do not invent verse text, references, quotes or sources" in system
 
 
 def test_a_question_is_separated_from_the_scripture_it_is_about():
@@ -237,7 +264,7 @@ async def test_the_question_goes_to_the_gateway_with_thinking_turned_off(monkeyp
     assert body["think"] is False
     assert body["enable_thinking"] is False
     assert body["messages"][0]["role"] == "system"
-    assert "say so plainly" in body["messages"][0]["content"]
+    assert "Quote only the text given to you" in body["messages"][0]["content"]
     assert body["messages"][1]["content"].startswith("Passage: John 3:16")
     assert headers == {"X-Internal-Secret": "s3cret"}
 
@@ -330,6 +357,12 @@ async def test_no_failure_becomes_an_answer(monkeypatch, failure):
 def _patch_gateway(monkeypatch, answer: str = "It is about love."):
     session = _Session(_answer(answer))
     monkeypatch.setattr(study_ask.aiohttp, "ClientSession", lambda **kwargs: session)
+
+    async def no_sources(**_kwargs):
+        return {"related": [], "library": [], "web": []}
+
+    # The extra sources have their own tests below; here only the answer call is seen.
+    monkeypatch.setattr(study_sources, "gather", no_sources)
     return session
 
 
@@ -444,7 +477,7 @@ def test_the_depth_changes_the_words_not_the_rules():
     assert "child" in child and "Do not invent verse text" in child
     assert "three or four sentences" in child
     assert "adult" in adult and "Do not invent verse text" in adult
-    assert "one or two short paragraphs" in adult
+    assert "a few paragraphs or a short list" in adult
     assert "three or four sentences" not in adult
     with pytest.raises(study_ask.StudyAskError):
         study_ask.system_prompt("toddler")
@@ -579,3 +612,73 @@ def test_the_stream_route_reports_a_failure_as_an_event(loaded_client: TestClien
 def test_a_bad_stream_request_is_a_plain_400(loaded_client: TestClient):
     resp = loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "  "})
     assert resp.status_code == 400
+
+
+# the sources beyond the passage
+
+def test_related_scripture_and_sources_are_labelled_in_the_prompt():
+    prompt = study_ask.build_prompt(
+        reference="Matthew 1:23",
+        verses=[{"reference": "Matthew 1:23", "text": "Behold, a virgin shall be with child"}],
+        notes=[],
+        question="What prophecy is this?",
+        sources={
+            "related": [{"reference": "Isaiah 7:14", "verses": [{"reference": "Isaiah 7:14", "text": "Therefore the Lord himself shall give you a sign"}]}],
+            "library": [{"title": "The Faithful Promiser", "author": "John R. Macduff", "chapter": "I.", "text": "The promise kept."}],
+            "web": [{"title": "Matthew 1:23 Commentaries", "url": "https://biblehub.com/x", "snippet": "Isaiah foretold it."}],
+        },
+    )
+    assert "Related Scripture from elsewhere in the Bible (this translation's text):\nIsaiah 7:14:\nIsaiah 7:14 Therefore the Lord" in prompt
+    assert "- The Faithful Promiser by John R. Macduff, I.: The promise kept." in prompt
+    assert "- Matthew 1:23 Commentaries (https://biblehub.com/x): Isaiah foretold it." in prompt
+    assert prompt.index("Related Scripture") < prompt.index("Question:")
+
+
+def test_related_scripture_is_real_text_once_each_and_never_repeats_the_passage(monkeypatch):
+    calls = []
+
+    def fetch(_session, _version, spans):
+        calls.append(spans)
+        span = spans[0]
+        if span.book == "Isa":
+            return [{"osis": "Isa", "chapter": 7, "verse": 14, "reference": "Isaiah 7:14", "text": "a sign"}]
+        if span.book == "Matt":
+            return [{"osis": "Matt", "chapter": 1, "verse": 23, "reference": "Matthew 1:23", "text": "asked"}]
+        raise study_sources.ReferenceError("not in this version")
+
+    monkeypatch.setattr(study_sources.corpus, "fetch_passage", fetch)
+    related = study_sources._related(
+        None, "KJV", ["Isaiah 7:14", "Isaiah 7:14", "Matthew 1:23", "Hezekiah 9:9", "Tobit 1:1"],
+        {("Matt", 1, 23)},
+    )
+    assert [r["reference"] for r in related] == ["Isaiah 7:14"]
+
+
+def test_a_whole_chapter_reference_gives_only_its_opening_verses():
+    span = study_sources.parse_reference("Psalm 22")[0]
+    short = study_sources._short(span)
+    assert (short.verse_start, short.verse_end) == (1, study_sources.MAX_VERSES_PER_REF)
+
+
+async def test_sources_that_fail_are_left_out_and_cited_references_are_looked_up(monkeypatch):
+    async def suggest(*_a):
+        return ["Isaiah 7:14"]
+
+    async def nothing(*_a):
+        return []
+
+    async def web(*_a):
+        return [{"title": "t", "url": "u", "snippet": "Compare Micah 5:2."}]
+
+    looked_up = []
+    monkeypatch.setattr(study_sources, "_suggest", suggest)
+    monkeypatch.setattr(study_sources, "_library", nothing)
+    monkeypatch.setattr(study_sources, "_web", web)
+    monkeypatch.setattr(study_sources, "_related", lambda _s, _v, refs, _shown: looked_up.extend(refs) or [])
+    out = await study_sources.gather(
+        session=None, version="KJV", reference="Matthew 2:6", question="Which prophet?",
+        verses=[], notes=[{"body": "See Isaiah 9:6."}], context=[], user="jeremiah",
+        gateway_url="g", rag_url="r", execution_url="e", internal_secret="s",
+    )
+    assert out["library"] == [] and out["web"][0]["snippet"] == "Compare Micah 5:2."
+    assert looked_up == ["Isaiah 7:14", "Isaiah 9:6", "Micah 5:2"]
