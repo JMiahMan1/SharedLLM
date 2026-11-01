@@ -54,6 +54,7 @@ from services.bible import (
     reminders,
     study,
     study_ask,
+    study_sources,
     verse_context,
     votd,
 )
@@ -89,6 +90,7 @@ from services.config import (
     GEO_SVC_URL,
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
+    RAG_SVC_URL,
     TELEMETRY_SVC_URL,
 )
 from services.shared.info_endpoint import info_router
@@ -484,11 +486,79 @@ def _study_context(session: Session, payload: StudyAskPayload) -> dict:
             notes.append(record.as_dict())
 
     reference = format_reference(spans)
+    context = _chapter_context(session, resolved, spans, verses)
     try:
-        prompt = study_ask.build_prompt(reference=reference, verses=verses, notes=notes, question=payload.question)
+        prompt = study_ask.build_prompt(
+            reference=reference, verses=verses, notes=notes, question=payload.question, context=context
+        )
     except study_ask.StudyAskError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"reference": reference, "version": resolved, "edition": chosen, "verses": verses, "notes": notes, "prompt": prompt}
+    return {"reference": reference, "version": resolved, "edition": chosen, "verses": verses, "notes": notes,
+            "context": context, "question": payload.question, "prompt": prompt, "sources": {}}
+
+
+async def _with_sources(session: Session, ctx: dict, username: str) -> dict:
+    """The study context with related Scripture, library and web sources added to its prompt.
+
+    Best effort: a source that fails is left out, and the prompt without any of
+    them (already checked by ``_study_context``) still stands.
+    """
+    sources = await study_sources.gather(
+        session=session,
+        version=ctx["version"],
+        reference=ctx["reference"],
+        question=ctx["question"],
+        verses=ctx["verses"],
+        notes=ctx["notes"],
+        context=ctx["context"],
+        user=username,
+        gateway_url=GATEWAY_INTERNAL_URL,
+        rag_url=RAG_SVC_URL,
+        execution_url=EXECUTION_SVC_URL,
+        internal_secret=INTERNAL_SECRET,
+    )
+    prompt = study_ask.build_prompt(
+        reference=ctx["reference"], verses=ctx["verses"], notes=ctx["notes"], question=ctx["question"],
+        context=ctx["context"], sources=sources,
+    )
+    return {**ctx, "prompt": prompt, "sources": sources}
+
+
+def _source_counts(sources: dict) -> dict:
+    return {
+        "related_used": len(sources.get("related") or []),
+        "library_used": len(sources.get("library") or []),
+        "web_used": len(sources.get("web") or []),
+    }
+
+
+def _chapter_context(session: Session, version: str, spans, verses: list[dict]) -> list[dict]:
+    """The rest of the passage's chapters, nearest verses first, in reading order.
+
+    A verse read alone loses what comes before and after it; the answer is
+    better for seeing the chapter, and it is still text the reader can open.
+    """
+    asked = {(v.get("osis"), v.get("chapter"), v.get("verse")) for v in verses}
+    rows: list[dict] = []
+    for span in spans:
+        for chapter in range(span.chapter_start, span.resolved_chapter_end + 1):
+            try:
+                rows.extend(corpus.fetch_chapter(session, version, span.book, chapter))
+            except ReferenceError:
+                continue
+    around = [r for r in rows if (r.get("osis"), r.get("chapter"), r.get("verse")) not in asked]
+    if len(around) <= study_ask.MAX_CONTEXT_VERSES:
+        return around
+
+    def distance(row: dict) -> int:
+        return min(
+            abs(int(row["verse"]) - int(v["verse"])) + 1000 * abs(int(row["chapter"]) - int(v["chapter"]))
+            for v in verses
+        )
+
+    keep = sorted(around, key=distance)[: study_ask.MAX_CONTEXT_VERSES]
+    kept = {id(r) for r in keep}
+    return [r for r in around if id(r) in kept]
 
 
 @app.post("/study/ask/stream")
@@ -504,7 +574,7 @@ async def study_ask_stream_route(
     chips) or ``error`` (the reason, never a partial answer passed off as whole).
     Mistakes in the request are still plain 400s before anything streams.
     """
-    ctx = _study_context(session, payload)
+    ctx = await _with_sources(session, _study_context(session, payload), username)
     _record_event(session, username, "assistant_ask", ref=ctx["reference"])
     edition_name = _edition_name(session, ctx["edition"], ctx["version"])
 
@@ -518,6 +588,7 @@ async def study_ask_stream_route(
             "depth": payload.depth,
             "verses_used": len(ctx["verses"]),
             "notes_used": len(ctx["notes"]),
+            **_source_counts(ctx["sources"]),
         }
         yield json.dumps(head) + "\n"
         parts: list[str] = []
@@ -548,19 +619,16 @@ async def study_ask_route(
 ):
     """Ask about the passage on screen, with that passage in front of the model.
 
-    The reader's own question plus the verses they are reading plus whatever
-    study notes are stored for those verses. Nothing else is fetched, so the
-    answer can be checked against what is on the screen, and the same passage
-    and study Bible choices they made for the notes apply here.
-
-    A question the passage does not answer comes back as an answer saying so:
-    the prompt asks for that rather than a guess, because a reader cannot tell
-    a confident invention from the text afterwards.
+    The reader's own question plus the verses they are reading, the rest of
+    their chapter and whatever study notes are stored for those verses (the
+    same passage and study Bible choices they made for the notes apply here).
+    The model starts there and adds related passages, setting and how the
+    passage has been understood, quoting only the text it was given.
 
     The reading event is recorded (``assistant_ask``) but never the question or
     the answer, because reading events are metadata only.
     """
-    ctx = _study_context(session, payload)
+    ctx = await _with_sources(session, _study_context(session, payload), username)
     reference, resolved, chosen, verses, notes, prompt = (
         ctx["reference"], ctx["version"], ctx["edition"], ctx["verses"], ctx["notes"], ctx["prompt"]
     )
@@ -589,6 +657,7 @@ async def study_ask_route(
         "references": study_ask.find_references(answer),
         "verses_used": len(verses),
         "notes_used": len(notes),
+        **_source_counts(ctx["sources"]),
     }
 
 

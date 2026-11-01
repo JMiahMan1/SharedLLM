@@ -25,6 +25,8 @@ interface Turn {
   failed: boolean;
   verses: number;
   notes: number;
+  /** Related passages, library passages and web results it was also given. */
+  extra?: string;
   references: string[];
   /** The answer is still being written. */
   streaming?: boolean;
@@ -57,6 +59,16 @@ const STARTERS = [
 ];
 
 const TOUCH = 'min-h-11 pointer-coarse:min-h-11';
+
+/** "3 related passages, 2 library passages, 5 web results", leaving out what was not used. */
+function extraSources(event: { related_used?: number; library_used?: number; web_used?: number }): string {
+  const part = (n: number | undefined, one: string, many: string) => (n ? `${n} ${n === 1 ? one : many}` : '');
+  return [
+    part(event.related_used, 'related passage', 'related passages'),
+    part(event.library_used, 'library passage', 'library passages'),
+    part(event.web_used, 'web result', 'web results'),
+  ].filter(Boolean).join(', ');
+}
 
 export default function JarvisStudyThread({
   passage,
@@ -98,7 +110,7 @@ export default function JarvisStudyThread({
     abortRef.current = controller;
     try {
       await api.streamBibleStudy(passage, wanted, { version, edition, crossVersion, depth }, (event) => {
-        if (event.type === 'start') updateLast({ verses: event.verses_used, notes: event.notes_used });
+        if (event.type === 'start') updateLast({ verses: event.verses_used, notes: event.notes_used, extra: extraSources(event) });
         else if (event.type === 'text') {
           written += event.text;
           updateLast({ text: written });
@@ -159,7 +171,7 @@ export default function JarvisStudyThread({
               </span>
             </p>
             <p className="text-[11px] text-slate-500 mt-1 uppercase tracking-wide">
-              Answered from this passage and its study notes
+              From this passage, the whole Bible, study notes, the library and the web
             </p>
           </div>
           <button
@@ -175,8 +187,9 @@ export default function JarvisStudyThread({
         {turns.length === 0 && (
           <div className="mb-3">
             <p className="text-xs text-slate-400 mb-2">
-              Ask anything about the verses on the screen. If they do not answer
-              it, Jarvis will say so rather than guess.
+              Ask anything about the verses on the screen. Jarvis starts from them,
+              brings in the rest of Scripture, study notes, the family library and
+              the web, and says when something is uncertain.
             </p>
             <div className="flex flex-wrap gap-1.5" data-testid="bible-ask-starters">
               {STARTERS.map((starter) => (
@@ -226,6 +239,7 @@ export default function JarvisStudyThread({
                     <BookOpenCheck size={12} />
                     Read {turn.verses} verse{turn.verses === 1 ? '' : 's'} and{' '}
                     {turn.notes} note{turn.notes === 1 ? '' : 's'}
+                    {turn.extra ? `, ${turn.extra}` : ''}
                   </p>
                 )}
               </li>

@@ -3150,7 +3150,7 @@ export type BibleStudyDepth = 'child' | 'teen' | 'adult';
 
 /** One line of a streamed study answer. */
 export type BibleStudyStreamEvent =
-  | { type: 'start'; reference: string; version: string; edition: string; edition_name: string; depth: BibleStudyDepth; verses_used: number; notes_used: number }
+  | { type: 'start'; reference: string; version: string; edition: string; edition_name: string; depth: BibleStudyDepth; verses_used: number; notes_used: number; related_used?: number; library_used?: number; web_used?: number }
   | { type: 'text'; text: string }
   | { type: 'done'; answer: string; references: string[] }
   | { type: 'error'; detail: string; status?: number };
