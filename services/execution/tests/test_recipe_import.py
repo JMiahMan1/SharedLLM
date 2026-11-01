@@ -532,3 +532,22 @@ async def test_recipe_staples_reports_a_listing_failure(monkeypatch):
     result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
     assert result.status == "FAILURE"
     assert "Could not read the recipe shelf" in result.message
+
+
+def test_reads_the_stated_nutrition_and_leaves_out_what_is_not_a_number():
+    recipe = recipe_import.parse_recipe(
+        {
+            "name": "Soup",
+            "nutrition": {
+                "@type": "NutritionInformation",
+                "calories": "350 calories",
+                "proteinContent": "25 g",
+                "fatContent": "12.5g",
+                "carbohydrateContent": "about thirty",
+                "sodiumContent": "640 mg",
+            },
+        },
+        "https://example.com/soup",
+    )
+    assert recipe["nutrition"] == {"calories": 350.0, "protein_g": 25.0, "fat_g": 12.5, "sodium_mg": 640.0}
+    assert recipe_import.parse_recipe({"name": "Soup"}, "https://example.com/soup")["nutrition"] is None

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PHOTO_LABEL, buildRecipeNote, guessLabels, type ImportedRecipe } from '../lib/recipeImport';
+import { parseRecipeNutrition } from '../lib/recipeNutrition';
 
 const RECIPE: ImportedRecipe = {
   title: 'Best Lemonade',
@@ -73,5 +74,31 @@ describe('recipeImport', () => {
     expect(note).toContain('Tags: #level-1 #30-minutes #5-ingredients #photo-import');
     expect(note).toContain('Source: photo import');
     expect(note).toContain('## Notes\nBest with butter.');
+  });
+});
+
+describe('the stated nutrition goes into the note, where Health reads it', () => {
+  it('writes the Food.com per-serving line and it parses back', () => {
+    const note = buildRecipeNote({
+      ...RECIPE,
+      site: 'food.com',
+      nutrition: { calories: 350.24, fat_g: 12, sat_fat_g: 3, sodium_mg: 640, carbs_g: 41, protein_g: 25 },
+    });
+    expect(note).toContain('## Nutrition');
+    expect(note).toContain('*Per serving, as stated by the submitter - foodcom:* 350.2 kcal · 12 g fat · 3 g sat fat');
+    const parsed = parseRecipeNutrition(note);
+    expect(parsed).toEqual({
+      status: 'ok',
+      perServing: { calories: 350.2, protein_g: 25, carbs_g: 41, fat_g: 12, fiber_g: null, sugar_g: null, sodium_mg: 640, source: 'foodcom' },
+    });
+  });
+
+  it('names a linked page as the source', () => {
+    const note = buildRecipeNote({ ...RECIPE, nutrition: { calories: 200, protein_g: 10, carbs_g: 20, fat_g: 5 } });
+    expect(parseRecipeNutrition(note)).toMatchObject({ status: 'ok', perServing: { source: 'link' } });
+  });
+
+  it('writes no section when nothing was stated', () => {
+    expect(buildRecipeNote({ ...RECIPE, nutrition: null })).not.toContain('## Nutrition');
   });
 });

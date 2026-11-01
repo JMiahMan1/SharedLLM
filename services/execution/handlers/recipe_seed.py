@@ -22,6 +22,12 @@ DEFAULT_SEED_PATH = "/data/recipes/recipe-seed.db"
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _SEED_CACHE: dict[str, RecipeSeed] = {}
 
+#: Per-serving nutrition columns (schema 2); an older seed has none of them.
+NUTRITION = (
+    "calories", "fat_g", "sat_fat_g", "cholesterol_mg", "sodium_mg",
+    "carbs_g", "fiber_g", "sugar_g", "protein_g",
+)
+
 
 def seed_path() -> str:
     """Where the seed lives: ``RECIPE_SEED_PATH`` or the server data dir."""
@@ -45,6 +51,7 @@ class RecipeSeed:
         self.path = path
         self._conn: sqlite3.Connection | None = None
         self._absent = False
+        self._has_nutrition = False
 
     @property
     def present(self) -> bool:
@@ -60,6 +67,8 @@ class RecipeSeed:
                 f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
             )
             self._conn.execute("SELECT id FROM recipes LIMIT 1").fetchone()
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(recipes)")}
+            self._has_nutrition = all(name in columns for name in NUTRITION)
             return True
         except sqlite3.Error as exc:
             self._mark_absent(str(exc))
@@ -81,11 +90,12 @@ class RecipeSeed:
         if not tokens:
             return []
         match = " AND ".join(f"{token}*" for token in tokens)
+        per_serving = "r.calories, r.protein_g" if self._has_nutrition else "NULL, NULL"
         try:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT r.id, r.name, r.category, r.total_minutes, r.servings,
-                       r.rating, r.image, r.source_url
+                       r.rating, r.image, r.source_url, {per_serving}
                 FROM recipe_fts f
                 JOIN recipes r ON r.id = f.rowid
                 WHERE recipe_fts MATCH ?
@@ -109,6 +119,9 @@ class RecipeSeed:
                 "source_url": row[7],
                 "site": "food.com",
                 "source": "foodcom",
+                # Per serving, as the submitter stated it; None when not stated.
+                "calories": row[8],
+                "protein_g": row[9],
             }
             for row in rows
         ]
@@ -118,10 +131,11 @@ class RecipeSeed:
         if not self.present:
             return None
         try:
+            extra = "".join(f", {name}" for name in NUTRITION) if self._has_nutrition else ""
             row = self._conn.execute(
                 "SELECT id, name, category, ingredients, instructions, "
                 "prep_minutes, cook_minutes, total_minutes, servings, image, "
-                "source_url FROM recipes WHERE id = ?",
+                f"source_url{extra} FROM recipes WHERE id = ?",
                 (recipe_id,),
             ).fetchone()
         except sqlite3.Error as exc:
@@ -141,4 +155,11 @@ class RecipeSeed:
             "image": row[9] or None,
             "source_url": row[10],
             "site": "food.com",
+            "nutrition": _nutrition(row[11:]) if self._has_nutrition else None,
         }
+
+
+def _nutrition(values) -> dict | None:
+    """Per-serving nutrition by name; None when the submitter stated none."""
+    found = {name: value for name, value in zip(NUTRITION, values, strict=False) if value is not None}
+    return found or None

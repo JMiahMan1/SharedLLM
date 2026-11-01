@@ -194,6 +194,37 @@ def _yield_text(value: Any) -> str:
     return _text(value)
 
 
+#: schema.org NutritionInformation -> the app's per-serving names.
+_NUTRITION_FIELDS = (
+    ("calories", "calories"),
+    ("fatContent", "fat_g"),
+    ("saturatedFatContent", "sat_fat_g"),
+    ("cholesterolContent", "cholesterol_mg"),
+    ("sodiumContent", "sodium_mg"),
+    ("carbohydrateContent", "carbs_g"),
+    ("fiberContent", "fiber_g"),
+    ("sugarContent", "sugar_g"),
+    ("proteinContent", "protein_g"),
+)
+_LEADING_NUMBER = re.compile(r"^\s*(\d+(?:\.\d+)?)")
+
+
+def _nutrition(value: Any) -> dict | None:
+    """The page's stated nutrition ("350 calories", "12 g"); None when it states none.
+
+    schema.org means it per serving. A value that does not start with a number
+    is left out rather than guessed.
+    """
+    if not isinstance(value, dict):
+        return None
+    found = {}
+    for field, name in _NUTRITION_FIELDS:
+        match = _LEADING_NUMBER.match(_text(value.get(field)))
+        if match:
+            found[name] = float(match.group(1))
+    return found or None
+
+
 def parse_recipe(recipe: dict, source_url: str) -> dict:
     """Normalize a schema.org Recipe node into the shape the app saves."""
     ingredients = [
@@ -211,6 +242,7 @@ def parse_recipe(recipe: dict, source_url: str) -> dict:
         "image": _image(recipe.get("image")),
         "source_url": source_url,
         "site": urlparse(source_url).netloc,
+        "nutrition": _nutrition(recipe.get("nutrition")),
     }
 
 

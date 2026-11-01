@@ -61,7 +61,7 @@ LICENSE = (
     "ingredient units via the Karo8870 parsed mirror "
     "(https://huggingface.co/datasets/Karo8870/food.com-parsed-dataset)"
 )
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"  # 2: per-serving nutrition
 
 _REPO_ROOT = _SCRIPTS_DIR.parent
 DEFAULT_PARSED_CSV = str(_REPO_ROOT / ".tmp" / "foodcom" / "parsed_recipes.csv")
@@ -82,13 +82,35 @@ CREATE TABLE recipes (
     rating REAL,
     reviews INTEGER,
     image TEXT,
-    source_url TEXT NOT NULL
+    source_url TEXT NOT NULL,
+    calories REAL,
+    fat_g REAL,
+    sat_fat_g REAL,
+    cholesterol_mg REAL,
+    sodium_mg REAL,
+    carbs_g REAL,
+    fiber_g REAL,
+    sugar_g REAL,
+    protein_g REAL
 );
 CREATE VIRTUAL TABLE recipe_fts USING fts5(name, keywords, ingredients, category);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 _NA_WORDS = {"", "na", "nan", "none", "null"}
+
+#: Per-serving nutrition as the submitter stated it: seed column <- CSV column.
+NUTRITION_COLUMNS = (
+    ("calories", "Calories"),
+    ("fat_g", "FatContent"),
+    ("sat_fat_g", "SaturatedFatContent"),
+    ("cholesterol_mg", "CholesterolContent"),
+    ("sodium_mg", "SodiumContent"),
+    ("carbs_g", "CarbohydrateContent"),
+    ("fiber_g", "FiberContent"),
+    ("sugar_g", "SugarContent"),
+    ("protein_g", "ProteinContent"),
+)
 
 
 def _cell(row: dict[str, Any], key: str) -> str:
@@ -179,6 +201,15 @@ def load_parsed_index(
     return by_key, by_title
 
 
+def _nutrition(row: dict[str, Any]) -> dict[str, float | None]:
+    """The row's per-serving nutrition; a value that is not a number is None."""
+    out: dict[str, float | None] = {}
+    for column, source in NUTRITION_COLUMNS:
+        value = _float_or_none(_clean(row.get(source)))
+        out[column] = value if value is not None and value >= 0 else None
+    return out
+
+
 def _spine_recipe(
     row: dict[str, Any],
     by_key: dict[str, str],
@@ -244,12 +275,13 @@ def _spine_recipe(
         "reviews": _int_or_none(_cell(row, "ReviewCount")) or 0,
         "image": image,
         "source_url": f"https://www.food.com/recipe/{slugify(name)}-{rid}",
+        **_nutrition(row),
     }
     return record, from_mirror
 
 
 _INSERT_RECIPE = (
-    "INSERT INTO recipes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "INSERT INTO recipes VALUES (" + ",".join("?" * (14 + len(NUTRITION_COLUMNS))) + ")"
 )
 _INSERT_FTS = (
     "INSERT INTO recipe_fts(rowid, name, keywords, ingredients, category) "
@@ -363,6 +395,40 @@ def build_seed(
     return stats
 
 
+def add_nutrition(seed_path: str, spine_csv: str, log=print) -> int:
+    """Add the nutrition columns to a seed built before they existed.
+
+    Matched by recipe id, so the seed's ingredient lines (joined from the
+    mirror, which may no longer be at hand) stay as they are. ``spine_csv``
+    needs only ``RecipeId`` and the nutrition columns. Returns rows filled.
+    """
+    conn = sqlite3.connect(seed_path)
+    have = {row[1] for row in conn.execute("PRAGMA table_info(recipes)")}
+    for column, _ in NUTRITION_COLUMNS:
+        if column not in have:
+            conn.execute(f"ALTER TABLE recipes ADD COLUMN {column} REAL")
+    sets = ", ".join(f"{column} = ?" for column, _ in NUTRITION_COLUMNS)
+    filled = 0
+    with open(spine_csv, newline="", encoding="utf-8") as fh:
+        batch: list[tuple[Any, ...]] = []
+        for row in csv.DictReader(fh):
+            rid = _cell(row, "RecipeId")
+            if not rid.isdigit():
+                continue
+            values = _nutrition(row)
+            batch.append((*(values[column] for column, _ in NUTRITION_COLUMNS), int(rid)))
+            if len(batch) >= 5000:
+                filled += conn.executemany(f"UPDATE recipes SET {sets} WHERE id = ?", batch).rowcount
+                batch.clear()
+        if batch:
+            filled += conn.executemany(f"UPDATE recipes SET {sets} WHERE id = ?", batch).rowcount
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
+    conn.commit()
+    conn.close()
+    log(f"[recipe-seed] nutrition added to {filled:,} recipes in {seed_path}")
+    return filled
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spine-csv", default=DEFAULT_RECIPES_CSV, help="irkaal recipes.csv")
@@ -375,7 +441,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default=DEFAULT_OUT, help="where the seed is written")
     parser.add_argument("--expect", type=int, default=None, help="assert the kept count")
     parser.add_argument("--count-only", action="store_true", help="count without writing")
+    parser.add_argument(
+        "--add-nutrition-to",
+        metavar="SEED",
+        help="add the nutrition columns to an existing seed instead of building one",
+    )
     args = parser.parse_args(argv)
+
+    if args.add_nutrition_to:
+        return 0 if add_nutrition(args.add_nutrition_to, args.spine_csv) else 1
 
     if not os.path.exists(args.spine_csv):
         raise SystemExit(

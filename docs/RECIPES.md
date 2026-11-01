@@ -233,6 +233,19 @@ account is connected, everything above still works.
 
 ## Phase 8 - search and import (paste-a-link + TheMealDB shipped)
 
+- [x] Nutrition in search (2026-11-01): the offline index carries each recipe's
+      per-serving figures as the submitter stated them (seed schema 2: `calories`,
+      `fat_g`, `sat_fat_g`, `cholesterol_mg`, `sodium_mg`, `carbs_g`, `fiber_g`,
+      `sugar_g`, `protein_g`). Search cards show kcal and protein; a pick saves a
+      `## Nutrition` line in the importer's format, so it logs to Health as it is.
+      Pasted links keep a page's schema.org `nutrition` the same way. A seed built
+      before schema 2 gets the columns, matched by recipe id, with
+      `scripts/build_recipe_seed.py --spine-csv recipes.csv --add-nutrition-to <seed>`
+      (the CSV needs only `RecipeId` and the nutrition columns).
+- [x] The Recipes page's "Add a recipe" panel: search first, then a link, a photo or
+      handwriting, or "Write it yourself" (the editor). A pick can be logged to Health
+      from its preview without saving it.
+
 - [x] Search sources: the offline index over the CC0 Food.com corpus first (SQLite FTS
       over name, keywords and ingredients - instant, no network; built by
       `scripts/build_recipe_seed.py` into `data/recipes/recipe-seed.db`), TheMealDB's free

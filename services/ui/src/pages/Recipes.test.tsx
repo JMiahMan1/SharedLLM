@@ -299,7 +299,7 @@ describe('Recipes', () => {
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
     fireEvent.change(screen.getByLabelText('Recipe link'), {
       target: { value: 'https://example.com/recipes/lemonade' },
     });
@@ -343,7 +343,7 @@ describe('Recipes', () => {
 
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
     fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'gateau' } });
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
@@ -393,7 +393,7 @@ describe('Recipes', () => {
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
     fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'gateau' } });
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
@@ -427,6 +427,8 @@ describe('Recipes', () => {
             servings: 4,
             source_url: 'https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
             site: 'food.com',
+            calories: 170.9,
+            protein_g: 3.2,
           },
           {
             id: '52772',
@@ -462,6 +464,7 @@ describe('Recipes', () => {
           image: null,
           source_url: 'https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
           site: 'food.com',
+          nutrition: { calories: 170.9, fat_g: 2.5, carbs_g: 37.1, protein_g: 3.2 },
         },
       },
     } as never);
@@ -469,11 +472,12 @@ describe('Recipes', () => {
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
     fireEvent.change(screen.getByLabelText('Search recipes'), { target: { value: 'berry' } });
     fireEvent.click(screen.getByRole('button', { name: /^search$/i }));
 
     const card = await screen.findByText('Low-Fat Berry Blue Frozen Dessert');
+    expect(screen.getAllByTestId('meal-result-nutrition')[0].textContent).toBe('171 kcal · 3 g protein · per serving');
     fireEvent.click(card);
 
     await waitFor(() => expect(fetchRecipe).toHaveBeenCalledWith(38));
@@ -487,6 +491,8 @@ describe('Recipes', () => {
       'Source: https://www.food.com/recipe/low-fat-berry-blue-frozen-dessert-38',
     );
     expect(body.content).toContain('4 cups blueberries, fresh or frozen');
+    // The stated nutrition is kept, so the recipe can be logged to Health.
+    expect(body.content).toContain('## Nutrition\n*Per serving, as stated by the submitter - foodcom:* 170.9 kcal · 2.5 g fat · 37.1 g carbs · 3.2 g protein');
   });
 
   it("shows an open recipe's per-serving nutrition and household estimate", async () => {
@@ -601,7 +607,7 @@ describe('Recipes', () => {
 
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
 
     const file = new File(['bytes'], 'page.jpg', { type: 'image/jpeg' });
     fireEvent.change(screen.getByLabelText('Recipe photo'), { target: { files: [file] } });
@@ -650,7 +656,7 @@ describe('Recipes', () => {
 
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('recipes')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /import a link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add a recipe/i }));
 
     const file = new File(['bytes'], 'card.png', { type: 'image/png' });
     fireEvent.change(screen.getByLabelText('Recipe photo'), { target: { files: [file] } });

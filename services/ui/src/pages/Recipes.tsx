@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Camera, Download, Link2, Loader2, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
+import { BookOpen, CalendarDays, Camera, Download, Link2, Loader2, Pencil, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
@@ -18,7 +18,7 @@ import LogRecipeSheet from '../components/health/LogRecipeSheet';
 import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
 import { LEGACY_SHOPPING_PATH, SHOPPING_PATH, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
 import { readShoppingList, saveShoppingList } from '../lib/shoppingListStore';
-import { PHOTO_LABEL, buildRecipeNote, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
+import { PHOTO_LABEL, buildRecipeNote, nutritionLine, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
 import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
 import { mirrorItems, plannedPushDays } from '../lib/skylightMeals';
 import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib/recipeNutrition';
@@ -917,7 +917,7 @@ export default function Recipes() {
             onClick={() => setImportOpen((open) => !open)}
             className="glass-button min-h-11 px-3 text-xs"
           >
-            <Link2 size={14} /> {importOpen ? 'Close import' : 'Import a link'}
+            <Plus size={14} /> {importOpen ? 'Close' : 'Add a recipe'}
           </button>
           <button
             type="button"
@@ -940,6 +940,86 @@ export default function Recipes() {
       {importOpen && (
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
           <span className="text-sm font-semibold text-slate-200">Add a recipe</span>
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void searchMealDb();
+            }}
+          >
+            <input
+              value={mealQuery}
+              onChange={(event) => setMealQuery(event.target.value)}
+              placeholder="Search 500,000 recipes: chicken chili, banana bread…"
+              aria-label="Search recipes"
+              enterKeyHint="search"
+              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
+            />
+            <button
+              type="submit"
+              disabled={mealSearching}
+              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+            >
+              {mealSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Search
+            </button>
+          </form>
+          <p className="text-[10px] text-slate-500">
+            The Food.com collection, with calories and protein per serving where the cook gave them.
+          </p>
+          {sourcesQuery.isError && (
+            <p className="text-[11px] text-amber-200">
+              Could not check which recipes are already on the shelf, so one may be offered twice.
+            </p>
+          )}
+          {mealResults.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
+              {mealResults.map((result) => {
+                const alreadyImported = importedSources.has(result.source_url);
+                return (
+                  <button
+                    key={result.source_url}
+                    type="button"
+                    onClick={() => void openSearchResult(result)}
+                    disabled={alreadyImported || searchLoadingId === result.source_url}
+                    data-testid={alreadyImported ? 'meal-result-imported' : undefined}
+                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
+                  >
+                    {result.image ? (
+                      <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                    ) : null}
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {[
+                          result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
+                          result.description,
+                          result.total_minutes ? `${result.total_minutes} min` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                      <span className="block truncate text-[10px] text-emerald-300/80" data-testid="meal-result-nutrition">
+                        {[
+                          typeof result.calories === 'number' ? `${Math.round(result.calories)} kcal` : '',
+                          typeof result.protein_g === 'number' ? `${Math.round(result.protein_g)} g protein` : '',
+                          typeof result.calories === 'number' ? 'per serving' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                      {alreadyImported ? (
+                        <span className="block text-[10px] text-emerald-300">Already in Recipes</span>
+                      ) : searchLoadingId === result.source_url ? (
+                        <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or bring your own</div>
           <p className="text-xs text-slate-400">Paste a recipe page - Jarvis reads its published recipe data.</p>
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -987,68 +1067,26 @@ export default function Recipes() {
               Reads a recipe page, card or handwriting with the local vision model.
             </span>
           </div>
-          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or search recipes</div>
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={mealQuery}
-              onChange={(event) => setMealQuery(event.target.value)}
-              placeholder="Search recipes…"
-              aria-label="Search recipes"
-              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
-            />
             <button
               type="button"
-              onClick={() => void searchMealDb()}
-              disabled={mealSearching}
-              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+              onClick={() => {
+                startNew();
+                setImportOpen(false);
+                // The editor is below the shelf; on a phone it is off screen.
+                requestAnimationFrame(() => {
+                  const name = document.getElementById('recipe-name');
+                  name?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  name?.focus();
+                });
+              }}
+              data-testid="recipe-write-own"
+              className="glass-button min-h-11 px-3 text-xs"
             >
-              {mealSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-              Search
+              <Pencil size={14} /> Write it yourself
             </button>
+            <span className="text-[10px] text-slate-500">Type or paste a family recipe into the editor.</span>
           </div>
-          {sourcesQuery.isError && (
-            <p className="text-[11px] text-amber-200">
-              Could not check which recipes are already on the shelf, so one may be offered twice.
-            </p>
-          )}
-          {mealResults.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
-              {mealResults.map((result) => {
-                const alreadyImported = importedSources.has(result.source_url);
-                return (
-                  <button
-                    key={result.source_url}
-                    type="button"
-                    onClick={() => void openSearchResult(result)}
-                    disabled={alreadyImported || searchLoadingId === result.source_url}
-                    data-testid={alreadyImported ? 'meal-result-imported' : undefined}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
-                  >
-                    {result.image ? (
-                      <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
-                    ) : null}
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
-                      <span className="block truncate text-[10px] text-slate-400">
-                        {[
-                          result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
-                          result.description,
-                          result.total_minutes ? `${result.total_minutes} min` : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                      {alreadyImported ? (
-                        <span className="block text-[10px] text-emerald-300">Already in Recipes</span>
-                      ) : searchLoadingId === result.source_url ? (
-                        <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
           {imported && (
             <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="recipe-import-preview">
               <div className="flex items-start gap-3">
@@ -1065,6 +1103,13 @@ export default function Recipes() {
                   </div>
                   {imported.description ? (
                     <div className="text-[11px] text-slate-500">{imported.description}</div>
+                  ) : null}
+                  {nutritionLine(imported) ? (
+                    <div className="text-[11px] text-emerald-300/80" data-testid="imported-nutrition">
+                      {nutritionLine(imported)?.replace(/^\*[^*]*\*\s*/, 'Per serving: ')}
+                    </div>
+                  ) : imported.source_kind !== 'photo' ? (
+                    <div className="text-[11px] text-slate-500">No nutrition was given for this recipe; logging it asks for the numbers.</div>
                   ) : null}
                 </div>
               </div>
@@ -1154,6 +1199,17 @@ export default function Recipes() {
                   {savingImport ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   Save to Recipes
                 </button>
+                {imported.source_kind !== 'photo' && (
+                  <button
+                    type="button"
+                    // Log it without keeping it: the entry has no recipe to link back to.
+                    onClick={() => setLogRequest({ title: imported.title, path: '', body: buildRecipeNote(imported) })}
+                    data-testid="imported-log-health"
+                    className="glass-button min-h-11 px-3 text-xs"
+                  >
+                    <Utensils size={14} /> Log to Health
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1454,6 +1510,7 @@ export default function Recipes() {
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
+            id="recipe-name"
             placeholder="Recipe name"
             aria-label="Recipe name"
             className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
