@@ -58,6 +58,7 @@ module never writes to it.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
@@ -66,6 +67,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -104,6 +106,11 @@ MAX_LIBRARY_BOOK_BYTES = 200 * 1024 * 1024
 LIBRARY_MAX_BOOKS = 500
 #: How long the storage service may take to list or fetch from the shelf.
 LIBRARY_LIST_TIMEOUT = 60.0
+# A good listing is kept this long: the shelf changes when a book is added in
+# Calibre, not between two page loads.
+LIBRARY_CACHE_S = 600.0
+_LIBRARY_CACHE: dict[str, tuple[float, dict]] = {}
+_LIBRARY_LOCK = asyncio.Lock()
 LIBRARY_FETCH_TIMEOUT = 180.0
 
 #: File extensions the Library set shows as books. The Calibre shelf also holds
@@ -563,10 +570,26 @@ async def list_library_books() -> dict:
     if not root:
         return _unconfigured()
     base = normalise_path(root)
-    payload = {"provider": {"kind": "nextcloud", "settings": {}}, "path": base, "recursive": True}
+    # One listing at a time: a page opened twice waits for the first answer
+    # instead of starting a second read of the shelf.
+    async with _LIBRARY_LOCK:
+        cached = _LIBRARY_CACHE.get(base)
+        if cached and time.monotonic() - cached[0] < LIBRARY_CACHE_S:
+            return cached[1]
+        result = await _read_library(base)
+        if not result.get("error"):
+            _LIBRARY_CACHE[base] = (time.monotonic(), result)
+        return result
+
+
+async def _read_library(base: str) -> dict:
+    # The book files come from Calibre's metadata.db (one download). Walking
+    # every author and book folder over WebDAV took minutes on the family's
+    # thousands of books and never finished inside the timeout.
+    payload = {"provider": {"kind": "calibre", "settings": {"library_path": base}}, "path": base}
     try:
         async with get_client().post(
-            f"{STORAGE_SVC}/providers/list",
+            f"{STORAGE_SVC}/providers/calibre/files",
             json=payload,
             headers=_HEADERS,
             timeout=aiohttp.ClientTimeout(total=LIBRARY_LIST_TIMEOUT),

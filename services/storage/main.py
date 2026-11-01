@@ -30,6 +30,7 @@ from services.storage.indexer import (
 from services.storage.models import (
     IndexScanRequest,
     ProviderFetchRequest,
+    ProviderListRequest,
     ProviderMirrorRequest,
     ProviderWriteRequest,
 )
@@ -363,6 +364,22 @@ def pause_indexing():
 def resume_indexing():
     set_indexer_pause(False)
     return {"status": "RESUMED"}
+
+
+@app.post("/providers/calibre/files", dependencies=[Depends(_require_internal_secret)])
+async def list_calibre_files(req: ProviderListRequest):
+    """The book files of a Calibre library, read from its ``metadata.db``."""
+    if req.provider.kind != "calibre":
+        raise HTTPException(status_code=422, detail="A calibre provider is required")
+    try:
+        provider = build_provider(req.provider)
+        entries = await provider.list_book_files()
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        log.warning("Calibre file list failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The Calibre library could not be read") from exc
+    return {"status": "SUCCESS", "entries": [e.model_dump() for e in entries]}
 
 
 @app.post("/providers/list", dependencies=[Depends(_require_internal_secret)])

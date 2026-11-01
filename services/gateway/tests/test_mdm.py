@@ -61,6 +61,7 @@ class _Ctx:
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     """A gateway with identity faked and the shared folders under tmp_path."""
+    mdm._LIBRARY_CACHE.clear()
     state = {"admin": "dad", "caller": "dad", "devices": {}, "internal": {}, "updates": {},
              "notices": [], "library_path": "/Books/Text"}
 
@@ -460,19 +461,19 @@ def test_library_reports_an_unconfigured_shelf_rather_than_an_empty_one(world):
 
 def test_library_lists_books_from_the_shelf_through_storage(world):
     client, state = world
-    state["internal"]["/providers/list"] = (200, {"status": "SUCCESS", "entries": [
+    state["internal"]["/providers/calibre/files"] = (200, {"status": "SUCCESS", "entries": [
         {"path": "/Books/Text/A/Book (1)/Book - A.epub", "name": "Book - A.epub", "is_dir": False, "size": 42},
         {"path": "/Books/Text/metadata.db", "name": "metadata.db", "is_dir": False, "size": 3},
     ]})
     body = client.get("/api/mdm/library/books").json()
     assert body["configured"] is True and body["root"] == "/Books/Text"
     assert [b["name"] for b in body["books"]] == ["Book - A.epub"]
-    assert any("providers/list" in call for call in state["client"].calls)
+    assert any("providers/calibre/files" in call for call in state["client"].calls)
 
 
 def test_library_reports_a_storage_failure_as_its_own_state(world):
     client, state = world
-    state["internal"]["/providers/list"] = (500, {"detail": "boom"})
+    state["internal"]["/providers/calibre/files"] = (500, {"detail": "boom"})
     body = client.get("/api/mdm/library/books").json()
     assert body["configured"] is True and body["books"] == [] and "error" in body
 
@@ -480,7 +481,7 @@ def test_library_reports_a_storage_failure_as_its_own_state(world):
 def test_library_listing_is_bounded_and_says_when_it_was_cut(world, monkeypatch):
     client, state = world
     monkeypatch.setattr(mdm, "LIBRARY_MAX_BOOKS", 1)
-    state["internal"]["/providers/list"] = (200, {"status": "SUCCESS", "entries": [
+    state["internal"]["/providers/calibre/files"] = (200, {"status": "SUCCESS", "entries": [
         {"path": "/Books/Text/A/One (1)/One - A.epub", "name": "One - A.epub", "is_dir": False, "size": 1},
         {"path": "/Books/Text/B/Two (2)/Two - B.pdf", "name": "Two - B.pdf", "is_dir": False, "size": 2},
     ]})
@@ -624,3 +625,23 @@ def test_a_book_content_type_does_not_depend_on_the_host_mime_table():
 
 
 
+
+
+def test_library_listing_is_kept_between_page_loads(world):
+    client, state = world
+    state["internal"]["/providers/calibre/files"] = (200, {"status": "SUCCESS", "entries": [
+        {"path": "/Books/Text/A/Book (1)/Book - A.epub", "name": "Book - A.epub", "is_dir": False, "size": 42},
+    ]})
+    client.get("/api/mdm/library/books")
+    client.get("/api/mdm/library/books")
+    assert sum("providers/calibre/files" in call for call in state["client"].calls) == 1
+
+
+def test_a_failed_library_listing_is_not_kept(world):
+    client, state = world
+    state["internal"]["/providers/calibre/files"] = (500, {"detail": "boom"})
+    assert "error" in client.get("/api/mdm/library/books").json()
+    state["internal"]["/providers/calibre/files"] = (200, {"status": "SUCCESS", "entries": [
+        {"path": "/Books/Text/A/Book (1)/Book - A.epub", "name": "Book - A.epub", "is_dir": False, "size": 42},
+    ]})
+    assert [b["name"] for b in client.get("/api/mdm/library/books").json()["books"]] == ["Book - A.epub"]

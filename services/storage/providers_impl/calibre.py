@@ -92,6 +92,22 @@ class CalibreStorageProvider(StorageProvider):
         entries.sort(key=lambda e: e.path.lower())
         return entries
 
+    async def list_book_files(self) -> list[StorageEntry]:
+        """Every book file in the library, at its real path, from ``metadata.db``.
+
+        One download of the catalogue (skipped when its checksum is unchanged)
+        instead of a WebDAV walk of every author and book folder, which on a
+        library of thousands took minutes.
+        """
+        catalog = await self._load_catalog(refresh=True)
+        entries = [
+            StorageEntry(path=f["path"], name=f["path"].rsplit("/", 1)[-1], is_dir=False, size=f.get("size"))
+            for book in catalog.values()
+            for f in book.get("files", [])
+        ]
+        entries.sort(key=lambda e: e.path.lower())
+        return entries
+
     async def get_sections(self, path: str) -> list[ContentSection] | None:
         book = await self._resolve_book(path)
         if book is None:
@@ -261,6 +277,11 @@ def _query_catalog(conn: sqlite3.Connection, library_path: str) -> dict[int, dic
     for book_id, book in books.items():
         book_formats = formats.get(book_id, {})
         book["formats"] = sorted(book_formats)
+        book["files"] = [
+            {"path": f"{library_path}/{book['path']}/{info['path']}".replace("//", "/"),
+             "size": info.get("uncompressed_size")}
+            for _fmt, info in sorted(book_formats.items())
+        ]
         book["text_format"] = _pick_text_format(book_formats)
         book["text_path"] = _format_remote_path(library_path, book, book_formats)
         book["metadata"] = _book_metadata(book)

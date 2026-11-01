@@ -146,6 +146,8 @@ function FolderCard({ folder, files }: { folder: string; files: MdmSharedFile[] 
   const library = useQuery({
     queryKey: ['mdm-library-books'],
     queryFn: () => api.getMdmLibraryBooks(),
+    // The shelf changes when a book is added, not between page loads.
+    staleTime: 10 * 60_000,
     enabled: isLibrary,
     retry: false,
   });
