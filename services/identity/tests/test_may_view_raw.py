@@ -2,7 +2,7 @@
 and the father and the mother share theirs with each other."""
 import pytest
 
-from services.identity.main import may_view_raw_data, may_view_technical_data
+from services.identity.main import may_view_comms, may_view_raw_data, may_view_technical_data
 from services.identity.models import User
 
 
@@ -63,3 +63,22 @@ def test_who_may_see_collected_data(viewer, subject, allowed):
 )
 def test_who_may_see_the_technical_side(viewer, subject, allowed):
     assert may_view_technical_data(viewer, subject) is allowed
+
+
+# Calls, texts and message notifications: the parents only, no admin carve-out.
+
+@pytest.mark.parametrize("viewer, subject, expected", [
+    (DAD, KID, True),
+    (MOM, KID, True),
+    (OTHER_MOM, KID, False),   # a mother not linked to this child
+    (ADMIN, KID, False),       # an admin who is not a parent
+    (KID, KID, False),         # a child does not see their own logs
+    (SIB, KID, False),
+    (GROWN, GROWN, True),      # a grown member's are their own
+    (DAD, GROWN, False),
+    (MOM, DAD, True),          # the father and the mother share theirs
+    (DAD, MOM, True),
+    (ADMIN, DAD, False),
+])
+def test_only_parents_see_calls_and_messages(viewer, subject, expected):
+    assert may_view_comms(viewer, subject) is expected

@@ -410,6 +410,8 @@ export interface ScreenTimeStatus {
   can_manage: boolean;
   /** Whether the viewer sees the technical side (the father and admins; not the mother). */
   technical?: boolean;
+  /** Whether the viewer may see calls, texts and message notifications (the parents only). */
+  comms?: boolean;
   /** A minor's phone: Jarvis must stay installed and guarded (withheld from the mother). */
   protected?: boolean;
   limit_min: number | null;

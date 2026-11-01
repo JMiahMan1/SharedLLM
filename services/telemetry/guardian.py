@@ -80,6 +80,9 @@ def _concern_notice(parent: str, child: dict[str, Any], concern: dict[str, Any],
         "body": body,
         "tag": f"concern:{child['username']}:{concern['category']}",
         "once": f"concern:{child['username']}:{concern['category']}:{day}",
+        # It quotes what was flagged (a message, often): never to a minor,
+        # whoever is on the parents list.
+        "audience": "parents",
         "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "level": concern["level"]},
     }
 

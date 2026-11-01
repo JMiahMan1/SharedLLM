@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import { AppWindow, BarChart3, Gauge, MapPinned, Moon } from 'lucide-react';
+import { AppWindow, BarChart3, Gauge, MapPinned, MessageSquare, Moon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../../../services/api';
 import MemberCard from '../MemberCard';
 import ConcernsCard from '../ConcernsCard';
 import RequestsCard from '../../guardian/RequestsCard';
 import LiveFamilyMap from '../../geo/LiveFamilyMap';
 import { DailyBars, TimeRing } from '../charts';
-import { averageMinutes, dayBars, nextRoutineLine, statusQuery, usageQuery } from '../../../lib/memberPage';
+import { averageMinutes, dayBars, memberPath, nextRoutineLine, statusQuery, usageQuery } from '../../../lib/memberPage';
 import { appName, duration } from '../../../lib/phoneUsageFormat';
 import { formatMinutes, localDay } from '../../../lib/healthHub';
 import { lockedLine } from '../../../lib/screenTimeText';
@@ -137,10 +138,48 @@ export function LastNightCard({ username, name }: { username: string; name: stri
 }
 
 /** Aura's overview: today, the week, what they want, what to watch for, where they are. */
+/**
+ * Today's calls and messages at a glance, with the way into the Calls &
+ * messages tab: for a parent only (the server's ``comms``), so it is the
+ * first thing they see rather than something to look for.
+ */
+function CommsGlanceCard({ username, name }: { username: string; name: string }) {
+  const { data: status } = useQuery(statusQuery(username));
+  const allowed = Boolean(status?.comms);
+  const { data, isLoading } = useQuery({
+    queryKey: ['member-comms', username, 1],
+    queryFn: () => api.getGuardianComms(username, 1),
+    enabled: allowed,
+    retry: false,
+    staleTime: 60_000,
+  });
+  if (!allowed) return null;
+  const events = data?.events ?? [];
+  const calls = events.filter((e) => e.feature === 'calls').length;
+  const texts = events.filter((e) => e.feature === 'sms').length;
+  const apps = events.filter((e) => e.feature === 'social').length;
+  return (
+    <MemberCard
+      title="Calls & messages today"
+      icon={MessageSquare}
+      testId="member-comms-glance"
+      isLoading={isLoading}
+      aside={<Link to={memberPath(username, 'comms')} className="min-h-11 inline-flex items-center rounded-xl px-2 text-xs font-semibold text-[var(--site-accent-text)]">See all</Link>}
+    >
+      <p className="text-xs text-slate-300">
+        {calls || texts || apps
+          ? `${calls} call${calls === 1 ? '' : 's'}, ${texts} text${texts === 1 ? '' : 's'}, ${apps} app message${apps === 1 ? '' : 's'}.`
+          : `No calls or messages from ${name}'s phone today yet.`}
+      </p>
+    </MemberCard>
+  );
+}
+
 export default function OverviewSection({ username, name }: { username: string; name: string }) {
   return (
     <>
       <TodayCard username={username} />
+      <CommsGlanceCard username={username} name={name} />
       <RequestsCard username={username} name={name} />
       <WeekCard username={username} />
       <ConcernsCard username={username} name={name} />

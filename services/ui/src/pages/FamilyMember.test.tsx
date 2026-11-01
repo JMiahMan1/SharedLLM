@@ -23,6 +23,7 @@ vi.mock('../services/api', async (importOriginal) => {
       ...(actual.api as Record<string, unknown>),
       getFamily: vi.fn(),
       getScreenTimeStatus: vi.fn(),
+      getGuardianComms: vi.fn(),
       getUsage: vi.fn(),
       getAllUserLocations: vi.fn(),
       getGeoZones: vi.fn(),
@@ -195,6 +196,24 @@ describe('The family member page (a parent)', () => {
     expect(screen.queryByTestId('member-tab-devices')).toBeNull();
     expect(screen.getByTestId('member-panel-overview')).toBeInTheDocument(); // a devices link falls back to the overview
     expect(api.getMemberDevices).not.toHaveBeenCalled();
+  });
+
+  it('puts Calls & messages right after Overview for a parent, and nowhere for anyone else', async () => {
+    vi.mocked(api.getGuardianComms).mockResolvedValue({ days: 1, events: [] } as never);
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue({ ...status(true), comms: true });
+    const { unmount } = wrap(<FamilyMember />, '/family/member/sam');
+    const tabs = await screen.findByTestId('member-tabs');
+    await waitFor(() => expect(screen.getByTestId('member-tab-comms')).toBeInTheDocument());
+    const names = [...tabs.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    expect(names.slice(0, 2)).toEqual(['Overview', 'Calls & messages']);
+    expect(await screen.findByTestId('member-comms-glance')).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue({ ...status(true), comms: false });
+    wrap(<FamilyMember />, '/family/member/sam?section=comms');
+    await screen.findByTestId('member-tab-overview');
+    expect(screen.queryByTestId('member-tab-comms')).toBeNull();
+    expect(screen.queryByTestId('member-comms-glance')).toBeNull();
   });
 
   it("shows the week, guidance and journal under Faith & growth", async () => {
