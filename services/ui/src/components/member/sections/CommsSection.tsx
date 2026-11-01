@@ -195,13 +195,13 @@ export default function CommsSection({ username, name }: { username: string; nam
                         <div className="flex items-start gap-2">
                           <Icon size={14} className={`mt-0.5 shrink-0 ${e.detail?.direction === 'missed' ? 'text-rose-300' : 'text-slate-400'}`} />
                           <div className="min-w-0 flex-1">
-                            <p className="flex flex-wrap items-baseline gap-x-2 text-slate-200">
-                              <span className="break-words">{line?.title ?? e.item}</span>
-                              {line?.length && <span className="text-slate-400">{line.length}</span>}
-                              {line?.number && <span className="text-slate-500">{line.number}</span>}
-                              <span className="ml-auto shrink-0 text-[10px] text-slate-500">
-                                {new Date(e.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            <p className="flex items-baseline gap-2 text-slate-200">
+                              <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
+                                <span className="break-words">{line?.title ?? e.item}</span>
+                                {line?.length && <span className="text-slate-400">{line.length}</span>}
+                                {line?.number && <span className="text-slate-500">{line.number}</span>}
                               </span>
+                              <Stamp at={e.at} />
                             </p>
                             {line?.text && (
                               <button
@@ -225,6 +225,22 @@ export default function CommsSection({ username, name }: { username: string; nam
         )}
       </MemberCard>
     </>
+  );
+}
+
+/** When a call or message happened on the phone: the time on the row, the full date on hover. */
+function Stamp({ at }: { at: string }) {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return null;
+  return (
+    <time
+      dateTime={when.toISOString()}
+      title={when.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+      className="shrink-0 text-[11px] tabular-nums text-slate-400"
+      data-testid="member-comms-time"
+    >
+      {when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+    </time>
   );
 }
 

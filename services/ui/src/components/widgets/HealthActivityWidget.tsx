@@ -10,7 +10,7 @@ import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
-import { syncAdvice, syncStatus } from '../../lib/healthMetrics';
+import { milesFromSteps, stepLengthM, syncAdvice, syncStatus } from '../../lib/healthMetrics';
 import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 import ActivityRings, { type RingInput } from '../health/ActivityRings';
 import { heroInsight } from '../../lib/healthRanges';
@@ -101,10 +101,19 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
     ? Math.round(weekValues.reduce((a, b) => a + b, 0) / weekValues.length)
     : null;
   const weekBest = weekValues.length ? Math.max(...weekValues) : null;
-  // Distance estimate from stride length, labelled "est." wherever it is shown.
-  const weekMiles = weekValues.length
-    ? (weekValues.reduce((a, b) => a + b, 0) * 0.7) / 1609.34
-    : null;
+  // Today's distance from today's steps, with a step length from the
+  // person's height (an average adult's when none is on file), labelled
+  // "est.". It used to add up the whole week at a fixed 0.7 m and sit beside
+  // per-day numbers, so it read as several times today's walk.
+  const profileQuery = useQuery({
+    queryKey: ['health-profile'],
+    queryFn: () => api.getHealthProfile(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const stepM = stepLengthM(profileQuery.data?.height_cm, profileQuery.data?.sex);
+  const todayMiles = steps == null ? null : milesFromSteps(steps, stepM);
+  const goalMiles = milesFromSteps(stepsGoal, stepM);
 
   // Publish the resolved theme colors so the native Android home-screen widget
   // can tint itself the same way. Keeps palettes in the pack data (never
@@ -256,9 +265,9 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
             },
             {
               key: 'distance',
-              label: 'Miles (est.)',
-              value: weekMiles == null ? null : weekMiles.toFixed(1),
-              pct: weekMiles == null ? 0 : weekMiles / 10,
+              label: 'Miles today (est.)',
+              value: todayMiles == null ? null : todayMiles.toFixed(1),
+              pct: todayMiles == null ? 0 : todayMiles / Math.max(0.1, goalMiles),
               icon: Footprints,
               ring: cssVars['--ht-accent'],
             },

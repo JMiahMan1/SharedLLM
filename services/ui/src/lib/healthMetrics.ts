@@ -162,6 +162,26 @@ export function workoutTotals(workouts: Workout[] | null | undefined): WorkoutTo
   };
 }
 
+/** An average adult's walking step, used when no height is on file. */
+export const DEFAULT_STEP_LENGTH_M = 0.72;
+
+/**
+ * One walking step, in metres, from the person's height: about 41% of it
+ * (0.413 for women, 0.415 for men). A child's step is far shorter than an
+ * adult's, so a fixed length overstated their miles.
+ */
+export function stepLengthM(heightCm?: number | null, sex?: string | null): number {
+  const h = Number(heightCm);
+  if (!Number.isFinite(h) || h < 50 || h > 250) return DEFAULT_STEP_LENGTH_M;
+  const ratio = sex === 'female' ? 0.413 : sex === 'male' ? 0.415 : 0.414;
+  return (h / 100) * ratio;
+}
+
+/** Miles walked for a step count at a given step length. */
+export function milesFromSteps(steps: number, stepM: number = DEFAULT_STEP_LENGTH_M): number {
+  return (finite(steps, 0) * stepM) / 1609.344;
+}
+
 export function formatMiles(miles: number): string {
   const n = finite(miles, 0);
   return n < 10 ? n.toFixed(1) : Math.round(n).toLocaleString();

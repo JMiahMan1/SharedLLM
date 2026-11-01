@@ -210,7 +210,8 @@ public class MediaSessionListenerService extends NotificationListenerService {
         }
         if (record != null) {
             String label = UnifiedPushDistributor.label(this, record.pkg);
-            GuardApi.reportSocialNotification(this, record.pkg, label, record.sender, record.body);
+            long postedAt = sbn.getPostTime() > 0 ? sbn.getPostTime() : System.currentTimeMillis();
+            GuardApi.reportSocialNotification(this, record.pkg, label, record.sender, record.body, postedAt);
         }
     }
 }
