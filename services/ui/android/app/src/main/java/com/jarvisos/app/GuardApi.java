@@ -586,7 +586,7 @@ final class GuardApi {
     }
 
     /** Post a social/chat notification from a watched minor's phone onto the activity feed. */
-    static void reportSocialNotification(Context context, String pkg, String label, String sender, String text) {
+    static void reportSocialNotification(Context context, String pkg, String label, String sender, String text, long at) {
         try {
             JSONObject body = new JSONObject();
             body.put("feature", "social");
@@ -596,6 +596,9 @@ final class GuardApi {
             detail.put("package", pkg);
             if (sender != null && !sender.isEmpty()) detail.put("sender", sender);
             detail.put("body", text);
+            // When it arrived on the phone (epoch ms), so one held in the outbox
+            // while offline is filed at its own time, not the upload's.
+            if (at > 0) detail.put("at", at);
             body.put("detail", detail);
             // Kept on the phone until the server takes it (it used to be lost
             // whenever the phone was offline).

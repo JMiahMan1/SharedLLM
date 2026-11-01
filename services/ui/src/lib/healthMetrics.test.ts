@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_STEP_LENGTH_M,
+  milesFromSteps,
+  stepLengthM,
   DEFAULT_STEP_GOAL,
   dailyStepSeries,
   elapsedLabel,
@@ -292,5 +295,23 @@ describe('syncAdvice', () => {
     const advice = syncAdvice(syncStatus(null, NOW));
     expect(advice).toMatch(/no sync yet/i);
     expect(advice).not.toMatch(/ago/);
+  });
+});
+
+describe('milesFromSteps', () => {
+  it('uses an adult step when no height is on file', () => {
+    // 0.72 m a step: about 2,235 steps to the mile.
+    expect(milesFromSteps(2235)).toBeCloseTo(1, 2);
+    expect(stepLengthM(null)).toBe(DEFAULT_STEP_LENGTH_M);
+    expect(stepLengthM(20)).toBe(DEFAULT_STEP_LENGTH_M);
+  });
+
+  it('sizes the step from height, so a child walks fewer miles per step', () => {
+    const adult = stepLengthM(180, 'male'); // 0.747 m
+    const child = stepLengthM(120, 'female'); // 0.496 m
+    expect(adult).toBeCloseTo(0.747, 3);
+    expect(child).toBeCloseTo(0.496, 3);
+    expect(milesFromSteps(10000, child)).toBeCloseTo(3.08, 2);
+    expect(milesFromSteps(10000, adult)).toBeCloseTo(4.64, 2);
   });
 });
