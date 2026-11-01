@@ -45,9 +45,10 @@ SUGGEST_TIMEOUT = 60.0
 
 SUGGEST_SYSTEM = (
     "You list Bible cross-references. Given a passage and a question about it, "
-    "reply with up to eight references to other passages anywhere in the Bible "
-    "that best help answer it: Old Testament texts it quotes, alludes to or "
-    "fulfils, parallel accounts, and passages that explain the same teaching. "
+    "reply with five to eight references to other passages anywhere in the "
+    "Bible that best help answer it: Old Testament texts it quotes, alludes to "
+    "or fulfils, the New Testament passages that take it up, parallel accounts, "
+    "and passages that explain the same teaching. "
     "Reply with the references only, one per line, like 'Isaiah 53:4-6'. No "
     "other words."
 )
