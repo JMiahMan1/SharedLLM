@@ -169,7 +169,9 @@ export default function ImportedBookReader({
     mutationFn: (payload: { page: BookPage; label: string }) =>
       api.createNote({
         title: `${book.title} - ${payload.label}`,
-        category: 'Bible',
+        // A folder inside Notes, where the Notes page lists it; a top-level
+        // "Bible" folder was saved but never shown.
+        category: 'Notes/Bible',
         content: `${book.title}\n${payload.label}\n\n${
           [payload.page.heading, ...payload.page.paragraphs].filter(Boolean).join('\n\n')
         }`,

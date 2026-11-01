@@ -10,6 +10,8 @@ from urllib.parse import unquote
 
 import pytest
 
+from services.execution.nextcloud_client import safe_filename
+
 from services.execution.handlers import meal_plan
 from services.execution.handlers import note as note_handler
 from services.execution.schemas import MealPlanRequest
@@ -70,7 +72,9 @@ class FakeProvider:
         return f"http://nextcloud.test/{path}"
 
     def sanitize_filename(self, value, fallback):
-        return (value or fallback).replace(" ", "_")
+        # The real rule: a fake that named files differently hid a save
+        # written to "Meal-plan.md" while every read asked for "Meal plan.md".
+        return safe_filename(value or "", fallback)
 
 
 @pytest.fixture

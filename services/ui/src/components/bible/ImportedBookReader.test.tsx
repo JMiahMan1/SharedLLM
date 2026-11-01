@@ -165,7 +165,7 @@ describe('imported book reader', () => {
     expect(apiMock.createNote).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Walk With Jesus PDF - 1st Edition - Page 1',
-        category: 'Bible',
+        category: 'Notes/Bible',
         content: expect.stringContaining('This is the first paragraph'),
       }),
     );

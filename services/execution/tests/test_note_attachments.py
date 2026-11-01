@@ -4,6 +4,8 @@ import base64
 
 import pytest
 
+from services.execution.nextcloud_client import safe_filename
+
 from services.execution.handlers import note as note_handler
 
 FILEID_REPLY = (
@@ -28,7 +30,9 @@ class FakeProvider:
         return f"http://nextcloud.test/{path}"
 
     def sanitize_filename(self, value, fallback):
-        return (value or fallback).replace(" ", "_")
+        # The real rule: a fake that named files differently hid a save
+        # written to "Meal-plan.md" while every read asked for "Meal plan.md".
+        return safe_filename(value or "", fallback)
 
     # The real provider's file helpers, over the faked http_client below.
     async def upload_file(self, path, data, content_type):

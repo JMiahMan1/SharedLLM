@@ -11,6 +11,8 @@ import { withShareNote } from './verseShare';
 
 export const PLAN_TITLE = 'Meal plan';
 export const PLAN_PATH = 'Recipes/Meal plan.md';
+/** Where saves once went by mistake (see mealPlanStore). */
+export const LEGACY_PLAN_PATH = 'Recipes/Meal-plan.md';
 export const PLAN_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 export type PlanDay = (typeof PLAN_DAYS)[number];
