@@ -149,9 +149,10 @@ def test_a_line_that_names_a_book_changes_the_book_even_when_unreadable():
         # Two numbers on one line: unreadable, but it still says the book is Job.
         "Job 3: 3 Let the day p wherein I was born, 4 4\n"
         "4: 9 By the blast of God they p, 4\n"
-        "1 Jn 2:17 the world passeth away 4\n"
+        "AARON (1)\n"
+        "1 Jn 2:17 and Aaron spake 2\n"
     )
     pages = [page, HEBREW, GREEK]
     found = {(o.osis, o.chapter, o.verse) for o in concordance.occurrences(pages, concordance.parse(pages))}
     assert ("Job", 4, 9) in found and ("Esth", 4, 9) not in found
-    assert ("1John", 2, 17) in found
+    assert ("1John", 2, 17) in found  # "1 Jn" with a space, a Greek number
