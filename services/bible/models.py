@@ -316,6 +316,23 @@ class ConcordanceLine(SQLModel, table=True):
     context: str = Field(default="")
 
 
+class ConcordanceGuess(SQLModel, table=True):
+    """The number a KJV word nearly always carries in one Testament.
+
+    Read from the concordance itself: where it prints "loved" in the New
+    Testament, nine times in ten or more it is G25. The word-for-word view
+    uses it, marked as inferred, for a verse line the scan did not keep.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    word: str = Field(index=True)
+    testament: str = Field(default="")  # "OT" or "NT"
+    strongs: str = Field(default="")
+    share: float = Field(default=0.0)
+    samples: int = Field(default=0)
+
+
 class InterlinearVerse(SQLModel, table=True):
     """One verse of an imported interlinear (see ``services/bible/interlinear``).
 

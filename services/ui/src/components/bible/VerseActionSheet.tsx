@@ -21,6 +21,7 @@ import BibleStudyNotes from './BibleStudyNotes';
 import JarvisStudyThread from './JarvisStudyThread';
 import InterlinearPanel from './InterlinearPanel';
 import WordStudyPanel from './WordStudyPanel';
+import WordForWord from './WordForWord';
 import ShareToChatSheet from './ShareToChatSheet';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -130,6 +131,15 @@ export default function VerseActionSheet({
     staleTime: 10 * 60 * 1000,
     retry: false,
   });
+  // The verse word for word with its Strong's numbers, as Blue Letter Bible opens a verse.
+  const wordForWord = useQuery({
+    queryKey: ['bible-lexicon-verse', verse.reference],
+    queryFn: () => api.getBibleLexiconVerse(verse.reference),
+    enabled: Boolean(lexicon.data?.installed),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+  const tokens = wordForWord.data?.tokens ?? [];
   const linkError = (q: typeof blbVerse) =>
     q.error ? `Blue Letter Bible link unavailable: ${q.error instanceof Error ? q.error.message : 'unknown error'}` : 'Loading link…';
   const blbTapped = () => void api.recordBibleEvent('blb_link_tap', verse.reference).catch(() => undefined);
@@ -274,7 +284,7 @@ export default function VerseActionSheet({
               {verse.reference}
               {version ? <span className="ml-1.5 text-xs font-normal text-slate-400">{version.toUpperCase()}</span> : null}
             </p>
-            <p className="text-xs text-slate-400 mt-1 line-clamp-2">{verse.text}</p>
+            {tokens.length === 0 && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{verse.text}</p>}
           </div>
           <button
             type="button"
@@ -285,6 +295,12 @@ export default function VerseActionSheet({
             <X size={16} />
           </button>
         </div>
+
+        {tokens.length > 0 && (
+          <div className="mb-3 rounded-2xl bg-white/[0.03] p-2">
+            <WordForWord tokens={tokens} onWord={(strongs) => setWordStudy(strongs)} />
+          </div>
+        )}
 
         {/* One tap on a colour highlights in it (or recolours); the current
             colour again, or the first tile, takes the highlight off. */}

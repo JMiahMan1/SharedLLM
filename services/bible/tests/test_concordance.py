@@ -156,3 +156,23 @@ def test_a_line_that_names_a_book_changes_the_book_even_when_unreadable():
     found = {(o.osis, o.chapter, o.verse) for o in concordance.occurrences(pages, concordance.parse(pages))}
     assert ("Job", 4, 9) in found and ("Esth", 4, 9) not in found
     assert ("1John", 2, 17) in found  # "1 Jn" with a space, a Greek number
+
+
+def test_a_kjv_verse_word_for_word(session):
+    from services.bible.models import BibleVerse
+
+    pages = [CONCORDANCE, HEBREW.replace("perish [71],", "perish [71], perished [9],"), GREEK]
+    concordance.install(session, pages, source="s")
+    session.add(BibleVerse(version_code="kjv", osis="Gen", chapter=2, verse=24,
+                           text="Therefore shall a man leave his father, and perished."))
+    session.commit()
+    out = concordance.verse_tokens(session, "Gen", 2, 24)
+    assert out["version"] == "kjv"
+    words = {t["text"]: t for t in out["tokens"] if t["text"][0].isalpha()}
+    # Printed for this verse by the concordance ("FATHER ... Ge 2:24 ... 1").
+    assert words["father"]["strongs"] == "H1" and not words["father"]["inferred"]
+    # Not printed here, but "perished" is H4 every time the KJV uses it.
+    assert words["perished"] == {**words["perished"], "strongs": "H4", "inferred": True}
+    assert "strongs" not in words["Therefore"]
+    assert "".join(t["text"] for t in out["tokens"]) == "Therefore shall a man leave his father, and perished."
+    assert concordance.verse_tokens(session, "Gen", 3, 1) == {"version": None, "tokens": []}

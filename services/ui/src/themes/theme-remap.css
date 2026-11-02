@@ -161,6 +161,7 @@
 [data-theme-scheme="dark"] .text-red-400\/60 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-400\/70 { color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-red-500\/40 { color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 85%, transparent) !important; }
+[data-theme-scheme="dark"] .text-sky-300\/60 { color: color-mix(in srgb, oklch(82.8% 0.111 230.318) 85%, transparent) !important; }
 [data-theme-scheme="dark"] .text-slate-600 { color: var(--site-text-muted) !important; }
 [data-theme-scheme="dark"] .text-slate-700 { color: var(--site-text-muted) !important; }
 
@@ -373,6 +374,7 @@
 [data-theme-scheme="light"] .text-sky-100 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-200 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-300 { color: oklch(50% 0.134 242.749) !important; }
+[data-theme-scheme="light"] .text-sky-300\/60 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 60%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-300\/80 { color: color-mix(in srgb, oklch(50% 0.134 242.749) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-sky-400 { color: oklch(50% 0.134 242.749) !important; }
 [data-theme-scheme="light"] .text-sky-500 { color: oklch(50% 0.134 242.749) !important; }

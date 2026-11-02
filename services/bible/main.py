@@ -3062,7 +3062,9 @@ def lexicon_verse(ref: str = Query(...), session: Session = Depends(get_session)
         raise HTTPException(status_code=400, detail="Name one verse for a word study.")
     label = book_table.book(span.book)["name"]
     out = concordance.verse_words(session, span.book, span.chapter_start, span.verse_start)
-    return {"reference": f"{label} {span.chapter_start}:{span.verse_start}", **out}
+    kjv = concordance.verse_tokens(session, span.book, span.chapter_start, span.verse_start)
+    return {"reference": f"{label} {span.chapter_start}:{span.verse_start}", **out,
+            "text_version": kjv["version"], "tokens": kjv["tokens"]}
 
 
 @app.get("/lexicon/search")

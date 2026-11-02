@@ -2708,10 +2708,23 @@ export interface BibleLexiconWord {
   context?: string;
 }
 
+/** One piece of a KJV verse: a word (with its Strong's number when known) or the space and punctuation between. */
+export interface BibleVerseToken {
+  text: string;
+  strongs?: string;
+  /** True when the number is the one this word nearly always carries, not one printed for this verse. */
+  inferred?: boolean;
+  transliteration?: string;
+  definition?: string;
+}
+
 export interface BibleLexiconVerse {
   reference: string;
   source: 'interlinear' | 'concordance';
   words: BibleLexiconWord[];
+  /** The verse word for word in the KJV, as Blue Letter Bible sets it; null when the KJV is not installed. */
+  text_version?: string | null;
+  tokens?: BibleVerseToken[];
 }
 
 export interface BibleLexiconHit {
