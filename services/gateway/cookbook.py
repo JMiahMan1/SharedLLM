@@ -37,7 +37,8 @@ _OWNER_LINE = re.compile(r"^Added by:[ \t]*(.*?)[ \t]*$", re.IGNORECASE)
 _IMAGE_LINE = re.compile(r"^Image:[ \t]*(\S+)[ \t]*$", re.IGNORECASE)
 _HEADER_LINE = re.compile(r"^(Tags|Times|Source):", re.IGNORECASE)
 #: The header the note API writes on every note: "# <title>", "Category: <dir>", blank.
-_STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?")
+# Notes written by the bulk importer have a blank line between the two.
+_STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\n(?:[ \t]*\n)?Category: [^\n]*\n(?:[ \t]*\n)?")
 _ATTACHMENT_LINK = re.compile(r"\]\(<?(\.attachments\.[0-9]{1,20}/[^)\s>]+)>?\)")
 _SUGGESTION_KEYS = {
     "recipe": "Recipe",
@@ -100,6 +101,32 @@ def strip_stored_header(text: str | None) -> str:
     while (m := _STORED_HEADER.match(out)):
         out = out[m.end():]
     return out
+
+
+_SMALL_WORDS = {"a", "an", "and", "as", "at", "for", "in", "of", "on", "or", "the", "to", "with"}
+
+
+def readable_title(name: str) -> str:
+    """A file-name title made readable ("beef-and-bean-burritos" is "Beef and
+    Bean Burritos"), as the browsing shelf shows it; a name with spaces is kept.
+    Saving under it writes the readable name back into the note."""
+    name = name.strip()
+    if " " in name or not re.search(r"[-_]", name):
+        return name
+    words = [w for w in re.split(r"[-_]+", name) if w]
+    return " ".join(
+        w if i and w.lower() in _SMALL_WORDS else w[:1].upper() + w[1:] for i, w in enumerate(words)
+    )
+
+
+def tidy_title(name: Any) -> str:
+    """A new recipe's name in the cookbook's style: readable words, and
+    capitalised when it came in all lower case ("quick beef stew" is "Quick
+    Beef Stew"). A name that already has capitals is kept as written."""
+    title = " ".join(readable_title(str(name or "")).split())
+    if title != title.lower():
+        return title
+    return readable_title(title.replace(" ", "-"))
 
 
 def stored_title(text: str | None) -> str:
@@ -293,7 +320,7 @@ async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any 
         "service": "cookbook",
         "detail": {
             "path": target,
-            "title": stored_title(text) or target.rsplit("/", 1)[-1][:-3],
+            "title": readable_title(stored_title(text) or target.rsplit("/", 1)[-1][:-3]),
             "etag": etag,
             "owner": owner,
             "image": image,
@@ -318,7 +345,7 @@ async def save_recipe(
     run: Runner, caller: Caller, title: Any, content: Any, path: Any = None, if_match: Any = None,
 ) -> dict:
     """Add a recipe (owned by whoever adds it), or change one the caller owns."""
-    name = str(title or "").strip()
+    name = tidy_title(title)
     if not name:
         return _fail("Give the recipe a name.")
     body = without_owner(str(content or ""))
@@ -342,7 +369,7 @@ async def save_recipe(
         )
     # The photo stays unless the change brings its own.
     stamped = with_owner(body, owner, recipe_image(str(content or "")) or detail.get("image"))
-    if name == detail["title"]:
+    if name == tidy_title(detail["title"]):
         res = await run(caller.house_creds, _note(
             "write", title=name, category=COOKBOOK_DIR, path=target, content=stamped,
             if_match=str(if_match) if if_match else None,

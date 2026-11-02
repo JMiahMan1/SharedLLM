@@ -99,3 +99,19 @@ def test_a_recipe_read_from_a_photo_shows_that_photo_and_matches_by_any_spelling
     assert cookbook.recipe_picture(body) == ".attachments.7/card.jpg"
     assert cookbook.recipe_picture("Image: .attachments.7/dish.jpg\n" + body) == ".attachments.7/dish.jpg"
     assert cookbook.title_key("Christmas-Sugar-Cookies") == cookbook.title_key("christmas sugar  cookies")
+
+
+def test_a_bulk_imported_note_keeps_its_name_when_its_photo_is_set():
+    # The importer wrote a blank line between the title and Category lines.
+    text = "# 20 Minute White Bean Chili\n\nCategory: Recipes\n\nTags: #soup\n"
+    assert cookbook.stored_title(text) == "20 Minute White Bean Chili"
+    assert cookbook.strip_stored_header(text) == "Tags: #soup\n"
+    assert cookbook.readable_title("beef-and-bean-burritos") == "Beef and Bean Burritos"
+    assert cookbook.readable_title("Mom's Chili-Mac") == "Mom's Chili-Mac"
+
+
+def test_a_new_recipe_is_named_in_the_cookbook_style():
+    assert cookbook.tidy_title("quick-beef-stew") == "Quick Beef Stew"
+    assert cookbook.tidy_title("  slow cooker chili with beans ") == "Slow Cooker Chili with Beans"
+    assert cookbook.tidy_title("Mom's Chili-Mac") == "Mom's Chili-Mac"
+    assert cookbook.tidy_title("BLT Pasta") == "BLT Pasta"
