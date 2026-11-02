@@ -13,6 +13,8 @@ vi.mock('../chat/ConversationAvatar', () => ({ default: () => <span data-testid=
 const apiMock = vi.hoisted(() => ({
   getBlbLink: vi.fn(),
   getBibleInterlinear: vi.fn(),
+  getBibleLexiconStatus: vi.fn(),
+  getBibleLexiconVerse: vi.fn(),
   recordBibleEvent: vi.fn(),
   getTalkConversations: vi.fn(),
   sendTalkMessage: vi.fn(),
@@ -39,6 +41,7 @@ function renderSheet(onShared = vi.fn()) {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.recordBibleEvent.mockResolvedValue({});
+  apiMock.getBibleLexiconStatus.mockResolvedValue({ installed: false, entries: 0, occurrences: 0, source: '' });
   apiMock.getBlbLink.mockImplementation(async (ref: string, tool?: string, version?: string) => ({
     ref,
     tool: tool ?? null,
@@ -113,5 +116,24 @@ describe('verseShareText', () => {
   it('matches the chat’s verse line', () => {
     expect(verseShareText('John 3:16', ' For God so loved ', 'nkjv')).toBe('📖 John 3:16 (NKJV): "For God so loved"');
     expect(verseShareText('John 3:16', 'For God', undefined, '  ')).toBe('📖 John 3:16: "For God"');
+  });
+});
+
+describe('Word study', () => {
+  it('is offered once a Strong’s concordance is installed, and opens on the verse', async () => {
+    apiMock.getBibleInterlinear.mockResolvedValue({ ref: 'John 3:16', available: false, attribution: null, verses: [] });
+    apiMock.getBibleLexiconStatus.mockResolvedValue({ installed: true, entries: 14000, occurrences: 200000, source: 's' });
+    apiMock.getBibleLexiconVerse.mockResolvedValue({ reference: 'John 3:16', source: 'concordance', words: [] });
+    renderSheet();
+    await userEvent.click(await screen.findByTestId('bible-action-word-study'));
+    expect(await screen.findByTestId('bible-word-study')).toBeInTheDocument();
+    expect(apiMock.getBibleLexiconVerse).toHaveBeenCalledWith('John 3:16');
+  });
+
+  it('is not offered without a concordance', async () => {
+    apiMock.getBibleInterlinear.mockResolvedValue({ ref: 'John 3:16', available: false, attribution: null, verses: [] });
+    renderSheet();
+    await waitFor(() => expect(apiMock.getBibleLexiconStatus).toHaveBeenCalled());
+    expect(screen.queryByTestId('bible-action-word-study')).toBeNull();
   });
 });

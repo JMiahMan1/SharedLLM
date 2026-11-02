@@ -340,6 +340,42 @@ class LibraryClient:
         log.info("Fetched %s from Nextcloud to %s (%d bytes)", wanted, destination, len(payload))
         return destination
 
+    async def download(self, *, root: str, path: str, destination: Path) -> Path:
+        """Stream one large file to ``destination`` without holding it in memory.
+
+        For a reference work (a scanned concordance runs to hundreds of MB),
+        where ``fetch``'s base64 would not fit this service.
+        """
+        wanted = normalise_path(path)
+        base = normalise_path(root)
+        if not _within(wanted, base) or wanted == base:
+            raise LibraryError(f"{wanted!r} is not a file inside the library folder {base!r}.")
+        url = f"{self._endpoint()}/providers/fetch/raw"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staged = destination.with_suffix(destination.suffix + ".part")
+        written = 0
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1800)) as session, session.post(
+                url,
+                json={"provider": {"kind": "nextcloud", "settings": {}}, "path": wanted},
+                headers={"X-Internal-Secret": self.internal_secret},
+            ) as response:
+                if response.status != 200:
+                    raise LibraryUnavailable(f"{url} answered {response.status}: {(await response.text())[:300]}")
+                with staged.open("wb") as handle:
+                    async for chunk in response.content.iter_chunked(1 << 20):
+                        handle.write(chunk)
+                        written += len(chunk)
+        except aiohttp.ClientError as exc:
+            staged.unlink(missing_ok=True)
+            raise LibraryUnavailable(f"Could not reach the storage service at {url}: {exc}") from exc
+        if not written:
+            staged.unlink(missing_ok=True)
+            raise LibraryUnavailable(f"{wanted!r} came back empty, so nothing was written.")
+        staged.replace(destination)
+        log.info("Downloaded %s to %s (%d bytes)", wanted, destination, written)
+        return destination
+
 
 async def _json(response: aiohttp.ClientResponse, url: str) -> dict:
     """Return the body as a dict, turning every failure into a stated reason."""

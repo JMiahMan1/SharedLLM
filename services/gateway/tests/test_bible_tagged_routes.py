@@ -46,3 +46,17 @@ def test_tagged_bibles_are_for_admins(monkeypatch):
     assert client.post("/api/bible/admin/library/tagged/5/install", json={"code": "nkjv"}).status_code == 200
     assert client.post("/api/bible/admin/library/tagged/sync").status_code == 200
     assert calls[1] == ("POST", "/admin/library/tagged/5/install", {"code": "nkjv"})
+
+
+def test_concordances_are_installed_by_admins_and_read_by_everyone(monkeypatch):
+    calls = _setup(monkeypatch, {"user": "kid", "is_admin": False})
+    client = TestClient(main.app)
+    assert client.get("/api/bible/admin/library/concordances").status_code == 403
+    assert client.post("/api/bible/admin/library/concordances/7/install").status_code == 403
+    assert client.get("/api/bible/lexicon/G0026", params={"limit": 999}).status_code == 200
+    assert client.get("/api/bible/lexicon/verse", params={"ref": "John 3:16"}).status_code == 200
+    assert calls == [("GET", "/lexicon/G0026", None), ("GET", "/lexicon/verse", None)]
+    calls = _setup(monkeypatch, {"user": "dad", "is_admin": True})
+    client = TestClient(main.app)
+    assert client.post("/api/bible/admin/library/concordances/7/install").status_code == 200
+    assert calls == [("POST", "/admin/library/concordances/7/install", None)]

@@ -282,6 +282,40 @@ class NarrationAudio(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class LexiconEntry(SQLModel, table=True):
+    """One Strong's dictionary entry, read from a concordance in the library.
+
+    ``strongs`` is ``H1843`` or ``G2744``. ``usage`` is a JSON list of the
+    KJV's renderings, ``[{"word": "mercy", "count": 137}, ...]``, and
+    ``usage_total`` their sum, which is how often the KJV translates the word.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    strongs: str = Field(primary_key=True)
+    language: str = Field(default="")  # hebrew, aramaic or greek
+    transliteration: str = Field(default="")
+    part_of_speech: str = Field(default="")
+    gk: str = Field(default="")
+    definition: str = Field(default="")
+    usage: str = Field(default="[]")
+    usage_total: int = Field(default=0)
+    source: str = Field(default="")
+    imported_at: datetime = Field(default_factory=utcnow)
+
+
+class ConcordanceLine(SQLModel, table=True):
+    """One verse a Strong's number is in, as the concordance prints it."""
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    strongs: str = Field(index=True)
+    osis: str = Field(index=True)
+    chapter: int = Field(index=True)
+    verse: int
+    word: str = Field(default="")
+    context: str = Field(default="")
+
+
 class InterlinearVerse(SQLModel, table=True):
     """One verse of an imported interlinear (see ``services/bible/interlinear``).
 

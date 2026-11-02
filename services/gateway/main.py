@@ -14029,6 +14029,36 @@ async def proxy_bible_interlinear(request: Request, ref: str):
     )
 
 
+@app.get("/api/bible/lexicon/status")
+async def proxy_bible_lexicon_status(request: Request):
+    """Whether a Strong's concordance is installed, so the reader offers a word study."""
+    await _bible_caller(request)
+    return await _bible_json("GET", "/lexicon/status", label="Failed to read the concordance")
+
+
+@app.get("/api/bible/lexicon/verse")
+async def proxy_bible_lexicon_verse(request: Request, ref: str):
+    """The words of one verse with their Strong's numbers."""
+    await _bible_caller(request)
+    return await _bible_json("GET", "/lexicon/verse", label="Failed to read the verse's words", params={"ref": ref})
+
+
+@app.get("/api/bible/lexicon/search")
+async def proxy_bible_lexicon_search(request: Request, q: str):
+    await _bible_caller(request)
+    return await _bible_json("GET", "/lexicon/search", label="Failed to search the lexicon", params={"q": q[:80]})
+
+
+@app.get("/api/bible/lexicon/{strongs}")
+async def proxy_bible_lexicon_entry(request: Request, strongs: str, limit: int = 50, offset: int = 0):
+    """One Strong's entry: definition, KJV renderings and the verses it is in."""
+    await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/lexicon/{quote(strongs[:12], safe='')}", label="Failed to read that word",
+        params={"limit": max(1, min(limit, 200)), "offset": max(0, offset)},
+    )
+
+
 # Reading aloud goes through the execution service's Kokoro engine, which
 # already expands scripture references into spoken chapter and verse numbers, so
 # the gateway only forwards a passage. The timeout is generous because the
@@ -14317,6 +14347,20 @@ async def proxy_bible_tagged_bibles(request: Request):
     """Books tagged "Bible" in Calibre: translation, file, and whether installed."""
     await _require_admin(request)
     return await _bible_json("GET", "/admin/library/tagged", label="Could not read the Bibles in the library", timeout=_BIBLE_IMPORT_TIMEOUT)
+
+
+@app.get("/api/bible/admin/library/concordances")
+async def proxy_bible_concordances(request: Request):
+    """Books tagged Concordance or Strong's in Calibre, and which is installed."""
+    await _require_admin(request)
+    return await _bible_json("GET", "/admin/library/concordances", label="Could not read the concordances in the library", timeout=_BIBLE_IMPORT_TIMEOUT)
+
+
+@app.post("/api/bible/admin/library/concordances/{book_id}/install")
+async def proxy_bible_concordance_install(request: Request, book_id: int):
+    """Start reading one tagged concordance into the lexicon (it runs in the background)."""
+    await _require_admin(request)
+    return await _bible_json("POST", f"/admin/library/concordances/{book_id}/install", label="Could not install that concordance")
 
 
 @app.post("/api/bible/admin/library/tagged/sync")

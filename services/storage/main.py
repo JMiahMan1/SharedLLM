@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 
 import aiohttp
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query, Response
 
 from services.common.http import get_client
 from services.common.secrets import secret_matches
@@ -474,6 +474,23 @@ async def fetch_provider_file(req: ProviderFetchRequest):
     except Exception as e:
         log.error(f"Fetch failed for {req.path}: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch that file") from e
+
+
+@app.post("/providers/fetch/raw", dependencies=[Depends(_require_internal_secret)])
+async def fetch_provider_file_raw(req: ProviderFetchRequest):
+    """The same file as ``/providers/fetch``, as the bytes themselves.
+
+    Base64 inside JSON costs a third again and has to be held whole by the
+    caller; a 250 MB scanned concordance does not fit a small service that
+    way. The caller writes this response to disk as it arrives.
+    """
+    provider = build_provider(req.provider)
+    payload = await provider.get_bytes(req.path)
+    if payload is None:
+        raise HTTPException(status_code=502, detail=f"{req.provider.kind} could not read {req.path!r} as bytes.")
+    if len(payload) > req.max_bytes:
+        raise HTTPException(status_code=413, detail=f"{req.path!r} is {len(payload)} bytes, over the {req.max_bytes} byte limit.")
+    return Response(content=payload, media_type="application/octet-stream")
 
 
 @app.post("/providers/search", dependencies=[Depends(_require_internal_secret)])

@@ -182,6 +182,11 @@ import type {
   FastingTraditions,
   TopicResources,
   TaggedBible,
+  BibleConcordances,
+  BibleLexiconStatus,
+  BibleLexiconEntry,
+  BibleLexiconVerse,
+  BibleLexiconHit,
   LibraryBook,
   LibraryAudit,
   BookInspection,
@@ -4988,6 +4993,27 @@ export const api = {
   },
 
   /** The imported word-by-word interlinear for a passage (`available` false when none). */
+  /** Whether a Strong's concordance is installed, so the reader can offer a word study. */
+  async getBibleLexiconStatus(): Promise<BibleLexiconStatus> {
+    const resp = await apiClient.get('/api/bible/lexicon/status');
+    return resp.data;
+  },
+
+  async getBibleLexiconEntry(strongs: string, offset = 0, limit = 50): Promise<BibleLexiconEntry> {
+    const resp = await apiClient.get(`/api/bible/lexicon/${encodeURIComponent(strongs)}`, { params: { offset, limit } });
+    return resp.data;
+  },
+
+  async getBibleLexiconVerse(ref: string): Promise<BibleLexiconVerse> {
+    const resp = await apiClient.get('/api/bible/lexicon/verse', { params: { ref } });
+    return resp.data;
+  },
+
+  async searchBibleLexicon(q: string): Promise<{ query: string; results: BibleLexiconHit[] }> {
+    const resp = await apiClient.get('/api/bible/lexicon/search', { params: { q } });
+    return resp.data;
+  },
+
   async getBibleInterlinear(ref: string): Promise<BibleInterlinear> {
     const resp = await apiClient.get('/api/bible/interlinear', { params: { ref } });
     return resp.data;
@@ -5298,6 +5324,18 @@ export const api = {
   },
 
   /** Install (or reinstall) one tagged Bible; `code` names the translation when the title does not. */
+  /** Books tagged Concordance or Strong's in Calibre, and which one is installed. */
+  async getConcordances(): Promise<BibleConcordances> {
+    const resp = await apiClient.get('/api/bible/admin/library/concordances', { timeout: 120_000 });
+    return resp.data;
+  },
+
+  /** Start reading one tagged concordance into the lexicon; it runs in the background. */
+  async installConcordance(id: number): Promise<{ state: string; title: string }> {
+    const resp = await apiClient.post(`/api/bible/admin/library/concordances/${id}/install`);
+    return resp.data;
+  },
+
   async installTaggedBible(id: number, code?: string): Promise<BibleImportRun> {
     const resp = await apiClient.post(`/api/bible/admin/library/tagged/${id}/install`, { code: code ?? '' }, { timeout: 900_000 });
     return resp.data;
