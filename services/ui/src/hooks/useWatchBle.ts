@@ -5,6 +5,7 @@ import {
   isWatchBleSupported,
   isWatchConnected,
   notifyWatch,
+  onWatchDisconnect,
   readWatchStats,
   type WatchStats,
 } from '../lib/watchBle';
@@ -80,6 +81,17 @@ export function useWatchBle(): UseWatchBleResult {
 
   const sendNotification = useCallback(async (title: string, text: string) => {
     await notifyWatch(title, text);
+  }, []);
+
+  // The plugin's own drop callback is the only timely signal that the watch
+  // went away; without it the panel would keep claiming "Connected" until the
+  // next 30 s poll happened to fail.
+  useEffect(() => {
+    return onWatchDisconnect(() => {
+      if (!mounted.current) return;
+      setConnected(false);
+      setStats(null);
+    });
   }, []);
 
   useEffect(() => {
