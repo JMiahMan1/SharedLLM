@@ -737,6 +737,20 @@ describe('Bible page', () => {
       });
     });
 
+    it('does not ask for a study Bible written for another translation', async () => {
+      // The saved study Bible explains NKJV; the reader has switched to KJV.
+      mocked.getBibleState.mockResolvedValue(
+        STATE({ preferences: { ...STATE().preferences, default_version: 'kjv', default_edition: 'nkjv-macarthur' } }),
+      );
+      mocked.getBibleEditions.mockResolvedValue({ version: 'kjv', default: '', editions: [], other_translations: [] });
+      renderPage();
+      await screen.findByTestId('bible-chapter-heading');
+      await waitFor(() => expect(mocked.getBibleStudyNotes).toHaveBeenCalled());
+      for (const call of mocked.getBibleStudyNotes.mock.calls) {
+        expect(call[2]).toEqual({ edition: undefined, crossVersion: false });
+      }
+    });
+
     it('asks the server for the study Bible the reader chose, not just the translation', async () => {
       renderPage();
       await screen.findByTestId('bible-chapter-heading');
