@@ -22,19 +22,23 @@ interface BibleStudyNotesProps {
 
 const KIND_LABELS: Record<BibleStudyNoteKind, string> = {
   commentary: 'Commentary',
+  article: 'Articles',
   footnote: 'Footnotes',
+  crossref: 'Cross references',
   introduction: 'Introductions',
   heading: 'Headings',
 };
 
 const KIND_STYLES: Record<BibleStudyNoteKind, string> = {
   commentary: 'text-amber-200 border-amber-400/40',
+  article: 'text-rose-200 border-rose-400/40',
   footnote: 'text-sky-200 border-sky-400/40',
+  crossref: 'text-slate-300 border-slate-400/40',
   introduction: 'text-emerald-200 border-emerald-400/40',
   heading: 'text-purple-200 border-purple-400/40',
 };
 
-const ORDER: BibleStudyNoteKind[] = ['commentary', 'introduction', 'heading', 'footnote'];
+const ORDER: BibleStudyNoteKind[] = ['introduction', 'commentary', 'article', 'heading', 'footnote', 'crossref'];
 
 /**
  * The study apparatus for a passage, opened from a verse.

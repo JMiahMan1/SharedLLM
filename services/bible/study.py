@@ -32,11 +32,14 @@ from services.bible.corpus import (
 from services.bible.models import BibleEdition, BibleVersion, StudyNote
 from services.bible.refs import VerseSpan
 
-NOTE_KINDS = ("commentary", "footnote", "introduction", "heading")
-DEFAULT_KINDS = ("commentary", "footnote")
+NOTE_KINDS = ("commentary", "article", "introduction", "footnote", "crossref", "heading")
+#: What a reader and Jarvis are given unless they ask for something else.
+DEFAULT_KINDS = ("commentary", "article", "introduction", "footnote")
+#: The study panel also lists cross references, which mean nothing to a model.
+READER_KINDS = (*DEFAULT_KINDS, "crossref")
 
 _SOURCE_MAX = 200
-_BODY_MAX = 20000
+_BODY_MAX = 100_000  # a book's introduction runs to tens of thousands of characters
 
 
 class StudyNoteError(ValueError):
@@ -418,9 +421,17 @@ def notes_for_span(
     for row in rows:
         if row.kind not in wanted:
             continue
-        if row.verse == 0:
+        # A chapter's own notes (verse 0: a book's introduction, a chapter
+        # feature, a psalm title's footnote) open the chapter, so they come
+        # with its first verse and with any passage that runs into the chapter.
+        if row.verse == 0 and row.chapter == span.chapter_start and span.verse_start > 1:
             continue
-        if row.chapter == span.chapter_start and span.verse_end is not None and not span.verse_start <= row.verse <= span.verse_end:
+        if (
+            row.verse
+            and row.chapter == span.chapter_start
+            and span.verse_end is not None
+            and not span.verse_start <= row.verse <= span.verse_end
+        ):
             continue
         record = _record(row, names)
         if record.identity in seen:

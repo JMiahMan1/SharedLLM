@@ -3206,7 +3206,7 @@ export interface BibleStudyNote {
   edition_name: string;
 }
 
-export type BibleStudyNoteKind = 'commentary' | 'footnote' | 'introduction' | 'heading';
+export type BibleStudyNoteKind = 'commentary' | 'article' | 'introduction' | 'footnote' | 'crossref' | 'heading';
 
 /**
  * One study Bible on top of an installed translation. A translation can have

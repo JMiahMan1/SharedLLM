@@ -319,3 +319,28 @@ def test_editions_list_needs_a_database_url(monkeypatch):
     with pytest.raises(CorpusError) as caught:
         editions._database_url("")
     assert "BIBLE_DATABASE_URL" in str(caught.value)
+
+
+def test_a_chapters_own_notes_come_with_its_first_verse_and_every_kind_is_kept(loaded):
+    corpus.ensure_default_edition(loaded, "kjv")
+    study.import_notes(
+        loaded,
+        "kjv",
+        [
+            _note(3, 0, "introduction", "Who is the author?", "kjv-macarthur"),
+            _note(3, 1, "article", "Born again", "kjv-macarthur"),
+            _note(3, 1, "crossref", "Gen. 1:1", "kjv-macarthur"),
+        ],
+        source="macarthur.epub",
+        edition="kjv-macarthur",
+        name="The MacArthur Study Bible",
+    )
+    first = study.notes_for_span(loaded, "kjv", parse_one("John 3:1"), edition="kjv-macarthur",
+                                 kinds=study.READER_KINDS)
+    assert sorted(n.kind for n in first) == ["article", "crossref", "introduction"]
+    assert [n.as_dict()["reference"] for n in first if n.kind == "introduction"] == ["John 3"]
+    later = study.notes_for_span(loaded, "kjv", parse_one("John 3:2"), edition="kjv-macarthur",
+                                 kinds=study.READER_KINDS)
+    assert later == []
+    # Cross references are for the reader, not for a model's prompt.
+    assert "crossref" not in study.DEFAULT_KINDS
