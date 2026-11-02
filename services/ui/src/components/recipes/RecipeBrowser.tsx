@@ -43,50 +43,53 @@ function Chip({ active, onClick, children, testId }: { active: boolean; onClick:
 }
 
 function RecipeTile({ recipe, onOpen }: { recipe: CookbookRecipe; onOpen: () => void }) {
+  const time = formatCookTime(recipe.total_minutes);
   return (
     <button
       type="button"
       onClick={onOpen}
       data-testid={`recipe-tile-${recipe.path}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-white/5 bg-white/[0.03] text-left transition hover:-translate-y-0.5 hover:border-purple-400/40 hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-white/5 bg-white/[0.03] text-left shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:border-purple-400/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400"
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden">
+      <div className="relative aspect-[4/5] w-full overflow-hidden sm:aspect-[4/4.4]">
         <RecipePhoto
           path={recipe.image ? recipe.path : null}
           meal={recipe.meal}
-          className="h-full w-full transition-transform duration-300 group-hover:scale-105"
+          className="h-full w-full transition-transform duration-500 group-hover:scale-105"
         />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" aria-hidden />
         {recipe.made > 0 && (
-          <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
+          <span className="absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
             Made {recipe.made}×
           </span>
         )}
-        {recipe.total_minutes ? (
-          <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white backdrop-blur">
-            <Clock size={10} aria-hidden /> {formatCookTime(recipe.total_minutes)}
+        {recipe.ratings > 0 && (
+          <span className="absolute right-2 top-2 flex items-center gap-0.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-amber-200 backdrop-blur">
+            ★ {recipe.rating?.toFixed(1)}
           </span>
-        ) : null}
+        )}
+        <div className="absolute inset-x-0 bottom-0 p-3">
+          <span className="line-clamp-2 text-[15px] font-semibold leading-tight text-white drop-shadow sm:text-base">{recipe.title}</span>
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-white/75">
+            {time ? (
+              <span className="flex items-center gap-1">
+                <Clock size={11} aria-hidden /> {time}
+              </span>
+            ) : null}
+            {recipe.proteins[0] && recipe.proteins[0] !== 'vegetarian' ? <span>{PROTEIN_LABELS[recipe.proteins[0]] ?? recipe.proteins[0]}</span> : null}
+            {recipe.proteins[0] === 'vegetarian' ? <span>Meatless</span> : null}
+            {recipe.calories ? (
+              <span className="flex items-center gap-0.5">
+                <Flame size={10} aria-hidden /> {recipe.calories}
+              </span>
+            ) : null}
+          </span>
+        </div>
       </div>
-      <div className="flex flex-1 flex-col gap-1 p-3">
-        <span className="line-clamp-2 text-sm font-semibold leading-snug text-slate-100">{recipe.title}</span>
-        <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
-          <StarRating value={recipe.rating} size={11} />
-          {recipe.ratings > 0 ? <span>{recipe.rating?.toFixed(1)}</span> : <span className="text-slate-500">Not rated</span>}
-        </span>
-        <span className="mt-auto flex flex-wrap gap-1 pt-1 text-[10px] text-slate-400">
-          <span className="rounded-full bg-white/5 px-1.5 py-0.5">{MEAL_LABELS[recipe.meal] ?? recipe.meal}</span>
-          {recipe.proteins.slice(0, 2).map((protein) => (
-            <span key={protein} className="rounded-full bg-white/5 px-1.5 py-0.5">
-              {PROTEIN_LABELS[protein] ?? protein}
-            </span>
-          ))}
-          {recipe.calories ? (
-            <span className="flex items-center gap-0.5 rounded-full bg-white/5 px-1.5 py-0.5">
-              <Flame size={9} aria-hidden /> {recipe.calories}
-            </span>
-          ) : null}
-        </span>
-      </div>
+      <span className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-slate-400">
+        <span>{MEAL_LABELS[recipe.meal] ?? recipe.meal}</span>
+        {recipe.ratings > 0 ? <StarRating value={recipe.rating} size={11} /> : <span className="text-slate-500">Not rated</span>}
+      </span>
     </button>
   );
 }

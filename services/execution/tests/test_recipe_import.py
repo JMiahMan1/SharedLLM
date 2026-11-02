@@ -488,7 +488,7 @@ async def test_recipe_staples_ranks_the_shelf(monkeypatch):
     async def fake_body(_provider, note):
         return bodies[note["path"]]
 
-    monkeypatch.setattr(recipe_import, "_read_note_body", fake_body)
+    monkeypatch.setattr(recipe_import, "_read_note_text", fake_body)
     result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
 
     assert result.status == "SUCCESS"
@@ -509,7 +509,7 @@ async def test_recipe_staples_ties_break_alphabetically(monkeypatch):
 
     monkeypatch.setattr(recipe_import, "resolve_personal_data_provider", lambda _ctx: _FakeProvider())
     monkeypatch.setattr(recipe_import, "_walk_webdav_dir", _async_return(notes))
-    monkeypatch.setattr(recipe_import, "_read_note_body", _async_return("eggs"))
+    monkeypatch.setattr(recipe_import, "_read_note_text", _async_return("eggs"))
     result = await recipe_import.handle_recipe(_request(action="recipe_staples", url=None))
 
     assert [row["title"] for row in result.detail["ranked"]] == ["Apple", "Zucchini"]

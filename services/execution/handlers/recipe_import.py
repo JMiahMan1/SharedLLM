@@ -479,7 +479,23 @@ async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
 
 
 async def _read_note_body(provider, note: dict) -> str:
-    """One note's readable body, cached by the note's version.
+    """One note's readable body (see ``_read_note_text``)."""
+    return note_body(await _read_note_text(provider, note))
+
+
+def note_title(text: str, path: str) -> str:
+    """A recipe's name: the "# <title>" its note was stored with, else its
+    file name made readable ("beef-stew" is "Beef stew")."""
+    first = (text or "").lstrip().split("\n", 1)[0]
+    if first.startswith("# ") and first[2:].strip():
+        return first[2:].strip()
+    stem = path.rsplit("/", 1)[-1].removesuffix(".md")
+    words = re.sub(r"[-_]+", " ", stem).strip()
+    return words[:1].upper() + words[1:]
+
+
+async def _read_note_text(provider, note: dict) -> str:
+    """One note's whole text, stored header included, cached by the note's version.
 
     A read that fails is an empty body, never an error: ranking simply treats
     that note as having no staples.
@@ -501,12 +517,12 @@ async def _read_note_body(provider, note: dict) -> str:
         return ""
     if resp["status_code"] != 200:
         return ""
-    body = note_body(resp["text"])
-    _body_cache[url] = (version, body)
+    text = resp["text"]
+    _body_cache[url] = (version, text)
     _body_cache.move_to_end(url)
     while len(_body_cache) > _BODY_CACHE_MAX:
         _body_cache.popitem(last=False)
-    return body
+    return text
 
 
 async def _recipe_staples(req: RecipeRequest) -> ExecutionResult:
@@ -530,10 +546,10 @@ async def _recipe_staples(req: RecipeRequest) -> ExecutionResult:
 
     async def one(note: dict) -> dict:
         async with gate:
-            body = await _read_note_body(provider, note)
-        staples = staple_matches(body)
+            text = await _read_note_text(provider, note)
+        staples = staple_matches(note_body(text))
         return {
-            "title": note.get("title") or "",
+            "title": note_title(text, str(note.get("path") or note.get("title") or "")),
             "path": note.get("path") or "",
             "score": len(staples),
             "staples": staples,
@@ -566,8 +582,9 @@ async def _recipe_catalog(req: RecipeRequest) -> ExecutionResult:
 
     async def one(note: dict) -> dict:
         async with gate:
-            body = await _read_note_body(provider, note)
-        title = note.get("title") or ""
+            text = await _read_note_text(provider, note)
+        body = note_body(text)
+        title = note_title(text, str(note.get("path") or note.get("title") or ""))
         staples = staple_matches(body)
         return {
             "title": title,

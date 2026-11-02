@@ -92,3 +92,10 @@ async def test_a_food_com_photo_comes_from_the_index_before_the_page(monkeypatch
     sent.clear()
     assert await main._source_photo(caller, "https://example.com/chili") is None
     assert sent == ["url_import"]
+
+
+def test_a_recipe_read_from_a_photo_shows_that_photo_and_matches_by_any_spelling():
+    body = "Tags: #photo-import\n\n## Notes\nChill.\n![card.jpg](.attachments.7/card.jpg)\n"
+    assert cookbook.recipe_picture(body) == ".attachments.7/card.jpg"
+    assert cookbook.recipe_picture("Image: .attachments.7/dish.jpg\n" + body) == ".attachments.7/dish.jpg"
+    assert cookbook.title_key("Christmas-Sugar-Cookies") == cookbook.title_key("christmas sugar  cookies")

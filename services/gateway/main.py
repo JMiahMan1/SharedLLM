@@ -5611,9 +5611,11 @@ async def recipe_unmade(request: Request, recipe: str, day: str):
 
 
 @app.get("/api/media/recipe-image")
-async def recipe_image(request: Request, path: str = "", url: str = ""):
+async def recipe_image(request: Request, path: str = "", url: str = "", file: str = ""):
     """A recipe's photo for an <img>: the one kept beside a cookbook recipe
-    (``path``), or a search result's (``url``). Signed with ``?mt=&user=``."""
+    (``path``; ``file`` names another picture the recipe links, such as the
+    card it was photographed from), or a search result's (``url``). Signed
+    with ``?mt=&user=``."""
     creds = await _resolve_identity_from_media_token(request) or await _resolve_identity_from_request(request)
     if not _identity_cred_dict(creds).get("user"):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -5629,7 +5631,9 @@ async def recipe_image(request: Request, path: str = "", url: str = ""):
         raise HTTPException(status_code=404, detail="No photo")
     house = await cookbook_creds()
     read = await _cookbook_run(house, {"action": "read", "storage": "nextcloud", "path": target})
-    link = cookbook.recipe_image(cookbook.strip_stored_header(read.get("message"))) if read.get("status") == "SUCCESS" else None
+    body = cookbook.strip_stored_header(read.get("message")) if read.get("status") == "SUCCESS" else ""
+    # ``file`` must be a picture this recipe links; otherwise its cover.
+    link = (file if file in cookbook.attachment_links(body) else None) if file else cookbook.recipe_picture(body)
     if not link:
         raise HTTPException(status_code=404, detail="No photo")
     if link.startswith(("http://", "https://")):
