@@ -153,6 +153,8 @@ describe('Word study', () => {
     const view = await screen.findByTestId('bible-word-for-word');
     expect(view).toHaveTextContent('G25');
     expect(view).not.toHaveTextContent('≈');
+    // The key at the foot of the sheet says what a faded number means.
+    expect(screen.getByTestId('bible-word-for-word-key')).toHaveTextContent('inferred');
     expect(screen.getByRole('button', { name: "world, Strong's G2889" })).toHaveTextContent('world,');
     for (const action of ['highlight', 'bookmark', 'study', 'ask', 'memorize', 'copy', 'share', 'blb', 'interlinear', 'word-study']) {
       expect(screen.getByTestId(`bible-action-${action}`)).toBeInTheDocument();
