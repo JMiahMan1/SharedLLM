@@ -25,7 +25,7 @@ function words(tokens: BibleVerseToken[]): { lead: string; words: Word[] } {
 /**
  * A verse word for word, as Blue Letter Bible sets it: each KJV word over its
  * Strong's number, the numbered ones a tap away from their lexicon entry. A
- * number marked "≈" is the one the word nearly always carries in that
+ * faded, dotted number is the one the word nearly always carries in that
  * Testament, used where the scanned concordance did not keep this verse's line.
  */
 export default function WordForWord({
@@ -50,11 +50,15 @@ export default function WordForWord({
               </span>
               <span
                 className={`block text-[10px] leading-tight tabular-nums ${
-                  w.token.strongs ? (w.token.inferred ? 'text-sky-300/60' : 'text-sky-300') : 'text-transparent'
+                  w.token.strongs
+                    ? w.token.inferred
+                      ? 'text-sky-300/60 underline decoration-dotted underline-offset-2'
+                      : 'text-sky-300'
+                    : 'text-transparent'
                 }`}
                 aria-hidden={!w.token.strongs}
               >
-                {w.token.strongs ? `${w.token.inferred ? '≈' : ''}${w.token.strongs}` : '·'}
+                {w.token.strongs ?? '·'}
               </span>
             </>
           );
@@ -79,7 +83,7 @@ export default function WordForWord({
       </div>
       <p className="mt-1.5 text-[11px] text-slate-500">
         KJV word for word · tap a word for its Strong&apos;s entry
-        {anyInferred ? ' · ≈ the number this word usually carries' : ''}
+        {anyInferred ? " · faded, dotted numbers are the one that word usually carries (this verse's line was not in the scan)" : ''}
       </p>
     </div>
   );
