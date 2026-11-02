@@ -83,7 +83,7 @@ async def verse_text(ref: str, username: str | None = None) -> str:
         return ref
     if len(text) > 300:
         text = text[:297].rsplit(" ", 1)[0] + "…"
-    return f"“{text}” ({data.get('reference') or ref}, {data.get('version') or ''})".replace(", )", ")")
+    return f"“{text}” ({data.get('reference') or ref}, {str(data.get('version') or '').upper()})".replace(", )", ")")
 
 
 async def shared_started(fast: dict, owner: str, viewers: list[str]) -> int:
