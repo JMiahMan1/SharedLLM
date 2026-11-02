@@ -132,3 +132,26 @@ def test_the_admin_list_says_which_tagged_concordance_is_installed(client, sessi
     assert [b["state"] for b in listing["books"]] == ["installed", "needs attention"]
     assert client.post("/admin/library/concordances/8/install").status_code == 422
     assert client.post("/admin/library/concordances/99/install").status_code == 404
+
+
+def test_search_puts_the_entries_rendered_with_the_word_first(session):
+    pages = [CONCORDANCE, HEBREW, GREEK.replace("Alpha:- Alpha [4]", "the first:- Alpha [4], perish [1]")]
+    concordance.install(session, pages, source="s")
+    # H4 is rendered "perish" 71 times, G1 once; both match, H4 comes first.
+    assert [r["strongs"] for r in concordance.search(session, "perish")][:2] == ["H4", "G1"]
+
+
+def test_a_line_that_names_a_book_changes_the_book_even_when_unreadable():
+    page = (
+        "9 Exhaustive Concordance PERISH\n"
+        "PERISH (3)\n"
+        "Est 4:16 and if I p, I p. 4\n"
+        # Two numbers on one line: unreadable, but it still says the book is Job.
+        "Job 3: 3 Let the day p wherein I was born, 4 4\n"
+        "4: 9 By the blast of God they p, 4\n"
+        "1 Jn 2:17 the world passeth away 4\n"
+    )
+    pages = [page, HEBREW, GREEK]
+    found = {(o.osis, o.chapter, o.verse) for o in concordance.occurrences(pages, concordance.parse(pages))}
+    assert ("Job", 4, 9) in found and ("Esth", 4, 9) not in found
+    assert ("1John", 2, 17) in found
