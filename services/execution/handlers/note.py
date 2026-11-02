@@ -63,7 +63,8 @@ _LIST_PROPS = (
 )
 
 #: The header create/write put on a note: "# <title>", "Category: <dir>", blank.
-_STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?")
+# Notes written by the bulk importer have a blank line between the two.
+_STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\n(?:[ \t]*\n)?Category: [^\n]*\n(?:[ \t]*\n)?")
 
 
 def note_body(content: str | None) -> str:

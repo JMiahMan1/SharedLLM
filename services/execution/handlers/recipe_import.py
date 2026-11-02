@@ -483,15 +483,27 @@ async def _read_note_body(provider, note: dict) -> str:
     return note_body(await _read_note_text(provider, note))
 
 
+_SMALL_WORDS = {"a", "an", "and", "as", "at", "for", "in", "of", "on", "or", "the", "to", "with"}
+
+
+def readable_title(name: str) -> str:
+    """A file-name title made readable: "beef-and-bean-burritos" is "Beef and
+    Bean Burritos". A title with spaces in it is already a name and is kept."""
+    name = name.strip()
+    if " " in name or not re.search(r"[-_]", name):
+        return name
+    words = [w for w in re.split(r"[-_]+", name) if w]
+    return " ".join(
+        w if i and w.lower() in _SMALL_WORDS else w[:1].upper() + w[1:] for i, w in enumerate(words)
+    )
+
+
 def note_title(text: str, path: str) -> str:
-    """A recipe's name: the "# <title>" its note was stored with, else its
-    file name made readable ("beef-stew" is "Beef stew")."""
+    """A recipe's name: the "# <title>" its note was stored with, else its file name."""
     first = (text or "").lstrip().split("\n", 1)[0]
     if first.startswith("# ") and first[2:].strip():
-        return first[2:].strip()
-    stem = path.rsplit("/", 1)[-1].removesuffix(".md")
-    words = re.sub(r"[-_]+", " ", stem).strip()
-    return words[:1].upper() + words[1:]
+        return readable_title(first[2:])
+    return readable_title(path.rsplit("/", 1)[-1].removesuffix(".md"))
 
 
 async def _read_note_text(provider, note: dict) -> str:

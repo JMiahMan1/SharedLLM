@@ -51,4 +51,6 @@ def test_a_recipe_is_named_by_its_stored_title_not_its_file_name():
 
     stored = "# 20 Minute White Bean Chili\nCategory: Recipes\n\nTags: #soup\n"
     assert note_title(stored, "/Recipes/20-minute-white-bean-chili.md") == "20 Minute White Bean Chili"
-    assert note_title("Tags: #soup\n", "/Recipes/beef-and-bean-burritos.md") == "Beef and bean burritos"
+    assert note_title("Tags: #soup\n", "/Recipes/beef-and-bean-burritos.md") == "Beef and Bean Burritos"
+    assert note_title("# 5-tacos\nCategory: Recipes\n", "/Recipes/5-tacos.md") == "5 Tacos"
+    assert note_title("# Mom's Chili-Mac\nCategory: Recipes\n", "/Recipes/x.md") == "Mom's Chili-Mac"
