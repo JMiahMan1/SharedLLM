@@ -257,9 +257,9 @@ async def test_a_storage_failure_keeps_its_status(monkeypatch):
         await _client().list_books()
 
 
-async def test_the_action_set_is_exactly_the_four_reads():
+async def test_the_action_set_is_reads_and_tagging_never_a_delete():
     annotation = CalibreRequest.model_fields["action"].annotation
-    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "fetch_text"}
+    assert set(typing.get_args(annotation)) == {"list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"}
 
 
 async def test_delete_is_not_a_nameable_action():
@@ -359,3 +359,33 @@ async def test_fetch_text_leads_with_the_book_and_returns_the_prose(monkeypatch)
         "Memories of Bethany by John R. Macduff (11 characters):"
     )
     assert "Prose here." in result.message
+
+
+async def test_only_an_admin_may_change_tags(monkeypatch):
+    calls = []
+
+    async def set_tags(**kw):
+        calls.append(kw)
+        return {"tags": ["Lent", "fasting"]}
+
+    _stub(monkeypatch, set_tags=set_tags)
+    child = CalibreRequest(user_context=UserContext(user="kid"), action="tag", book_id=7, add_tags=["fasting"])
+    assert (await calibre_handler.handle_calibre(child)).status == "FAILURE" and not calls
+    admin = CalibreRequest(user_context=UserContext(user="dad", is_admin=True), action="tag", book_id=7, add_tags=["fasting"])
+    result = await calibre_handler.handle_calibre(admin)
+    assert result.status == "SUCCESS" and "Lent, fasting" in result.message
+    assert calls == [{"book_id": 7, "add": ["fasting"], "remove": []}]
+
+
+async def test_the_audit_suggests_and_says_nothing_was_removed(monkeypatch):
+    book = {"id": 2, "title": "Great Lent", "authors": ["Alexander Schmemann"], "tags": []}
+
+    async def audit():
+        return {"books": 10, "copies": [{"keep": {**book, "id": 1}, "others": [book]}], "editions": [],
+                "counts": {"copies": 1}, "no_file": {"count": 0}, "unreadable": {"count": 0},
+                "untagged": {"count": 1, "books": [book]}}
+
+    _stub(monkeypatch, audit=audit)
+    result = await calibre_handler.handle_calibre(CalibreRequest(user_context=UserContext(user="dad"), action="audit"))
+    assert "could remove Great Lent by Alexander Schmemann (id 2)" in result.message
+    assert "nothing has been removed" in result.message

@@ -62,7 +62,8 @@ def test_the_raven_table_row_points_at_execution():
     assert method == "POST"
     assert path == "/execute/calibre"
     assert requires_workspace is False
-    assert "read-only" in description
+    # Reads plus reversible tagging; deleting a book is never offered.
+    assert "No delete action exists" in description and "tag" in description
     assert "payload fields:" in hint
 
 

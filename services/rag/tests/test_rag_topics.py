@@ -39,3 +39,13 @@ def test_search_and_listing_keep_to_the_topic(tmp_path):
     assert listing["documents"] == []
     mine = asyncio.run(rag_main.list_tagged_resources(tag="fasting", user_id="mom", limit=50))
     assert [d["name"] for d in mine["documents"]] == ["notes.md"]
+
+
+def test_a_tag_change_in_calibre_reaches_the_books_rows(tmp_path):
+    _install(tmp_path, NumpyVecAdapter)
+    _add("dad", "Great Lent chapter one", "calibre_files", {"title": "Great Lent", "calibre_id": 7, "path": "a.txt", "is_metadata": True})
+    _add("dad", "Another book", "calibre_files", {"title": "Other", "calibre_id": 8, "path": "b.txt", "is_metadata": True})
+    out = asyncio.run(rag_main.set_calibre_book_tags({"calibre_id": 7, "tags": "Lent; fasting"}))
+    assert out["rows"] == 1
+    listing = asyncio.run(rag_main.list_tagged_resources(tag="fasting", user_id="x", limit=50))
+    assert [b["title"] for b in listing["books"]] == ["Great Lent"]

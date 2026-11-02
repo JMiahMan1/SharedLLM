@@ -5,8 +5,8 @@ answer from the family's books and cite a chapter rather than a character offset
 
 ## What this is
 
-The library lives at `cloud.sumemail.com/Books/Text` and is reached **over WebDAV, read-only**.
-Nothing in SharedLLM writes to it. Calibre (or Calibre-Web) remains the only writer of `metadata.db`.
+The library lives at `cloud.sumemail.com/Books/Text` and is reached **over WebDAV**.
+Calibre (or Calibre-Web) and Jarvis's librarian (below) write `metadata.db`; the indexer only reads it.
 
 ```
 cloud.sumemail.com/Books/Text     Nextcloud, one copy of the books
@@ -147,9 +147,43 @@ your own) and it becomes a resource for that topic. A file indexed from Nextclou
 
 A tag change reaches the index on the next crawl (Knowledge → Calibre → reindex).
 
+## Jarvis as librarian: adding books and tags
+
+`services/storage/calibre_writer.py` writes the library the way a careful second writer must,
+alongside Calibre or Calibre-Web:
+
+1. Download `metadata.db` and its ETag.
+2. Change a local copy with Calibre's SQL functions (`title_sort`, `uuid4`) registered, so its
+   triggers run as in Calibre; mark the book in `metadata_dirtied` so Calibre rewrites its OPF; run
+   `PRAGMA integrity_check`.
+3. Upload the book's own new folder (`Author/Title (id)/Title - Author.ext`, plus `cover.jpg` from an
+   EPUB).
+4. Back up the old `metadata.db` to `<library parent>/.jarvis-calibre-backups/` (newest 20 kept).
+5. Replace `metadata.db` with `If-Match: <ETag>`. A 412 means something else wrote it: the new folder
+   is removed and the change is made again on the fresh copy (three tries).
+
+A desktop Calibre with the library *open* keeps its own copy in memory and will not see these
+changes until reopened (and could overwrite them); close it, or use Calibre-Web, which reads the file
+afresh. The tests run against the real schema (`services/storage/tests/fixtures/`).
+
+Routes (storage, internal): `POST /calibre/books` (search, `tag`, `untagged`), `/calibre/tags`,
+`/calibre/audit`, `/calibre/books/{id}/tags`, `/calibre/books/add` (multipart). Gateway:
+`GET /api/library/books|tags|audit` for anyone signed in; `POST /api/library/books` and
+`/api/library/books/{id}/tags` for admins. After a tag change the book's RAG rows are patched at once
+(`POST /rag/calibre/tags`); a new book's author folder is re-indexed in the background.
+
+The audit lists duplicate copies (same title and author, keeping the readable, tagged one), other
+editions ("(Annotated)", "Revised edition"...; numbered volumes are never merged), records with no
+file, books only in a format Jarvis cannot read, and untagged books. Jarvis's `CalibreRequest` has
+`tags`, `by_tag`, `audit` and, for admins, `tag`; there is no delete. The UI is Knowledge → Family
+library.
+
 ## What is deliberately not supported
 
-- **Writes.** `write_content` returns a refusal. `metadata.db` belongs to Calibre.
+- **Writes through the provider.** `write_content` still refuses: a file dropped in the folder is
+  not a book. Books are added and tagged through the librarian (above), never by writing files.
+- **Deleting books.** Jarvis can suggest what the family may not need (the audit) but never deletes;
+  removing a book is done by a person in Calibre.
 - **PDF and DOCX text.** Only `EPUB`, `AZW3`, `MOBI` and `FB2` are extracted. A PDF-only book still
   appears as a searchable metadata row rather than a failure, and nothing pretends its bytes are text.
   (The Bible importer is the exception, because it has its own PDF reader (see

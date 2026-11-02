@@ -504,7 +504,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-library",
         "topic": "Raven protocol: answer book questions from the Calibre library",
-        "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text) finds a book or reads its text. Only fall back to WebSearchRequest when the library plainly has nothing on the subject; a web answer about a book this shelf holds is a wrong-source answer.",
+        "rule": "For questions about books, authors, sermons, commentaries, or theology, search the household's own library FIRST: ContextSearchRequest with collection_name 'calibre_files' returns matching passages (cite them as `Source: Title by Author, chapter`), and CalibreRequest (actions: list, search, get_book, fetch_text, tags, by_tag, audit, tag) finds a book, reads its text, shows what the shelf holds on a topic, audits it for copies and gaps, and (for admins) tags it. Only fall back to WebSearchRequest when the library plainly has nothing on the subject; a web answer about a book this shelf holds is a wrong-source answer.",
         "tags": ["protocol", "library", "calibre", "research"],
     },
     {
@@ -2511,6 +2511,27 @@ async def get_toolchain(user_id: str = "default"):
     except Exception as e:
         log.error(f"Failed to list toolchain: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.post("/rag/calibre/tags", dependencies=[Depends(require_internal)])
+async def set_calibre_book_tags(body: dict):
+    """A book's tags changed in Calibre: patch them into every row of it.
+
+    The text of the book is unchanged, so nothing is re-embedded; only the
+    ``tags`` metadata that topics (``topics.py``) filter on is rewritten.
+    """
+    try:
+        book_id = int(body.get("calibre_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="calibre_id is required") from None
+    tags = str(body.get("tags") or "")
+    cur = _conn().execute(
+        "UPDATE rag_items SET metadata = json_set(metadata, '$.tags', ?) "
+        "WHERE collection_name = 'calibre_files' AND json_extract(metadata, '$.calibre_id') = ?",
+        [tags, book_id],
+    )
+    _conn().commit()
+    return {"status": "SUCCESS", "rows": cur.rowcount}
 
 
 @app.get("/rag/resources/tagged", dependencies=[Depends(require_internal)])

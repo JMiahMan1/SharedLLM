@@ -3660,6 +3660,42 @@ export interface FastingTraditions {
   today: string;
 }
 
+/** One book in the family's Calibre library (gateway /api/library). */
+export interface LibraryBook {
+  id: number;
+  title: string;
+  authors: string[];
+  tags: string[];
+  series: string | null;
+  series_index: number | null;
+  formats: string[];
+  /** Has a format Jarvis can read (EPUB, AZW3, MOBI, FB2). */
+  readable: boolean;
+  path: string;
+}
+
+export interface LibraryAuditGroup {
+  why: string;
+  keep: LibraryBook;
+  others: LibraryBook[];
+}
+
+export interface LibraryAuditList {
+  count: number;
+  books: LibraryBook[];
+  why: string;
+}
+
+export interface LibraryAudit {
+  books: number;
+  copies: LibraryAuditGroup[];
+  editions: LibraryAuditGroup[];
+  no_file: LibraryAuditList;
+  unreadable: LibraryAuditList;
+  untagged: LibraryAuditList;
+  counts: { copies: number; editions: number };
+}
+
 /** The family's resources on one topic (gateway /api/resources). */
 export interface TopicResources {
   topic: string;

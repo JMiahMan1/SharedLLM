@@ -24,6 +24,7 @@ import {
 import toast from 'react-hot-toast';
 import { api, type StorageEntry, type RagStats, type StorageStatus, type SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import LibraryPanel from '../components/knowledge/LibraryPanel';
 import Modal from '../components/ui/Modal';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -497,6 +498,8 @@ const KnowledgeHub = () => {
           </div>
         </div>
       </div>
+
+      <LibraryPanel isAdmin={isAdmin} />
 
       {/* Manual Ingestion Form */}
       <section className="glass-panel p-6 border-white/5 relative overflow-hidden">

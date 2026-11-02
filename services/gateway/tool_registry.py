@@ -580,9 +580,10 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "edition, verse of the day, catalogue. No state or mark writes exist.",
      "payload fields: action, ref, q, version, edition, kind, cross_version, book, limit, day, scope."),
     ("CalibreRequest", SVC_EXECUTION, "POST", "/execute/calibre", False,
-     "Calibre library, read-only: list or search the shelf, fetch one book's "
-     "metadata or text. No delete or write actions exist.",
-     "payload fields: action, query, book_id, path, limit, max_chars."),
+     "Calibre library, as its librarian: list or search the shelf, fetch one "
+     "book's metadata or text, list tags, books by tag, audit for copies and "
+     "gaps; add/remove tags (admins). No delete action exists.",
+     "payload fields: action, query, book_id, path, limit, max_chars, tag, untagged, add_tags, remove_tags."),
     ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
      "LLM backend info: loaded models, VRAM, Ollama state.",
      "payload fields: (none required)."),
