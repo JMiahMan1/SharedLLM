@@ -79,7 +79,7 @@ class ProviderFetchRequest(BaseModel):
 
     provider: ProviderConfig
     path: str
-    max_bytes: int = 256 * 1024 * 1024
+    max_bytes: int = 1024 * 1024 * 1024
 
 
 class ProviderWriteRequest(BaseModel):

@@ -43,7 +43,7 @@ from services.bible.refs import ReferenceError
 
 KINDS = ("json", "pdf", "epub")
 SUFFIX_KINDS = {".json": "json", ".pdf": "pdf", ".epub": "epub"}
-MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 
 class ImportRefusal(ValueError):
     """The request cannot be attempted at all (a 400)."""
