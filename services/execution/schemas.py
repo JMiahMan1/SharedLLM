@@ -3,9 +3,17 @@
 Pydantic schemas for all Execution Bridge endpoints.
 Strict validation is the primary defense against malformed gateway payloads.
 """
+import typing
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _accepts_none(annotation: Any) -> bool:
+    """Whether a field's type allows None (``str | None``, ``Optional[str]``, ``Any``)."""
+    if annotation is Any or annotation is type(None):
+        return True
+    return type(None) in typing.get_args(annotation)
 
 
 class BaseRequest(BaseModel):
@@ -99,10 +107,18 @@ class BaseRequest(BaseModel):
             if "format" in field_names and "format" not in data and "response_format" in data:
                 data["format"] = data["response_format"]
 
-            # Normalize empty strings to None for optional fields only
+            # Normalize empty strings to None for optional fields only. A field
+            # that defaults to "" but cannot hold None (``item: str = ""``) keeps
+            # its "": turning it into None 422'd every driving event the phone sent.
             for field_name in field_names:
                 field_info = cls.model_fields.get(field_name)
-                if field_info is not None and not field_info.is_required() and field_name in data and data[field_name] == "":
+                if (
+                    field_info is not None
+                    and not field_info.is_required()
+                    and field_name in data
+                    and data[field_name] == ""
+                    and _accepts_none(field_info.annotation)
+                ):
                     data[field_name] = None
 
         return data

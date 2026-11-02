@@ -2850,17 +2850,20 @@ async def get_entities(request: Request):
 
 
 # --- Middleware & Security ---
-def _response_log_level(status_code: object, path: str = "") -> str:
+def _response_log_level(status_code: object, path: str = "", *, probe: bool = False) -> str:
     """ERROR for a 5xx, WARNING for a 4xx, INFO otherwise.
 
     Except a 404 outside ``/api/`` and ``/execute/``: nothing in the app asks
     for those (scanners probing ``/``, ``/.env``, ``/wp-login.php`` do), so
-    the refusal is right and is not a problem for the dashboard.
+    the refusal is right and is not a problem for the dashboard. ``probe`` is
+    the same refusal inside ``/api/``: no route matched and the request carried
+    no sign-in (bots guess ``/api/bedrock``, ``/api/v1/foundation-models``),
+    while the app always signs its requests, so its own wrong path still shows.
     """
     code = status_code if isinstance(status_code, int) else 0
     if code >= 500:
         return "ERROR"
-    if code == 404 and not path.startswith(("/api/", "/execute/")):
+    if code == 404 and (probe or not path.startswith(("/api/", "/execute/"))):
         return "INFO"
     if code >= 400:
         return "WARNING"
@@ -2988,7 +2991,10 @@ async def secure_logging_middleware(request: Request, call_next):
     # Failures carry their level so the dashboard's "Recent problems" panel
     # (``/api/admin/logs?level=warning,error``) can find them among the
     # request lines; everything used to be INFO.
-    level = _response_log_level(status_code, request.url.path)
+    probe = "endpoint" not in request.scope and not (
+        request.headers.get("authorization") or request.query_params.get("token") or request.query_params.get("mt")
+    )
+    level = _response_log_level(status_code, request.url.path, probe=probe)
     if level != "INFO" or not _is_routine_poll(request.url.path):
         _run_in_background(emit_log(level, f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
