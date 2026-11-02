@@ -1,424 +1,133 @@
-import { useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Camera, Check, Download, Inbox, Link2, Loader2, Pencil, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { BookOpen, CalendarDays, ChefHat, ImagePlus, Inbox, Loader2, MoreHorizontal, Plus, ShoppingCart, Users } from 'lucide-react';
 import { api } from '../services/api';
-import { noteBody } from '../lib/notesMeta';
 import { errorText } from '../lib/errorText';
-import { blobToBase64 } from '../lib/base64';
-import { downloadBlobUrl } from '../lib/artifactKinds';
-import { appendAttachment, attachmentMarkdown } from '../lib/noteAttachments';
 import { isKidMode } from '../lib/healthSwitches';
-import type { CookbookSuggestion, ExecutionResponse, RecipeEstimate } from '../types/api';
+import type { CookbookRecipe, ExecutionResponse } from '../types/api';
+import type { PlanDay } from '../lib/mealPlan';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
 import LogRecipeSheet from '../components/health/LogRecipeSheet';
-import { recipeSharePreview, recipeShareText } from '../lib/recipeShare';
-import { LEGACY_SHOPPING_PATH, SHOPPING_PATH, buildShoppingList, ingredientLines, shoppingShareText } from '../lib/shoppingList';
-import { readShoppingList, saveShoppingList } from '../lib/shoppingListStore';
-import { PHOTO_LABEL, buildRecipeNote, nutritionLine, type ImportedRecipe, type RecipeSearchItem } from '../lib/recipeImport';
-import { readMealPlan, saveMealPlan } from '../lib/mealPlanStore';
-import { mirrorItems, plannedPushDays } from '../lib/skylightMeals';
-import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../lib/recipeNutrition';
-import { confirmDialog } from '../components/ui/confirmDialog';
-import {
-  emptyPlan,
-  LEGACY_PLAN_PATH,
-  PLAN_PATH,
-  planLevel,
-  pickSurprise,
-  planDayOf,
-  planShareText,
-  PLAN_DAYS,
-  type PlanDay,
-  type WeeklyPlan,
-} from '../lib/mealPlan';
+import RecipeBrowser from '../components/recipes/RecipeBrowser';
+import RecipeView, { type RecipeShareRequest } from '../components/recipes/RecipeView';
+import RecipeEditor from '../components/recipes/RecipeEditor';
+import AddRecipe from '../components/recipes/AddRecipe';
+import WeekPlan from '../components/recipes/WeekPlan';
+import ShoppingList from '../components/recipes/ShoppingList';
+import SuggestionsPanel from '../components/recipes/SuggestionsPanel';
+import { usePlan } from '../components/recipes/usePlan';
 
 export const RECIPES_DIR = 'Recipes';
-// The model sometimes flags a word with where it was ("simmer (line 8)"); that
-// note is not part of the reading, so a fix replaces just the word itself.
-const LINE_NOTE = /\s*[([]\s*line\s*\d+[^)\]]*[)\]]\s*$|\s*[-–—]\s*line\s*\d+\s*$/i;
 
-interface RecipeSummary {
-  title: string;
-  path: string;
-  modified?: string;
-}
+type Tab = 'recipes' | 'week' | 'list';
 
-/** One pending share: what the sheet shows and the message it builds. */
-interface ShareRequest {
-  reference: string;
-  text: string;
-  heading: string;
-  previewIcon: string;
-  buildMessage: (note: string) => string;
-}
-
-/** Who added the open recipe, and whether the caller may change it. */
-interface RecipeAccess {
-  ownerLabel: string;
-  canChange: boolean;
-  etag?: string;
-}
-
-/** A recipe on its way to Health: the note body carries its nutrition. */
 interface LogRequest {
   title: string;
   path: string;
   body: string;
-  /** Set when logging the week plan's dinner: the day to tick cooked. */
   planDay?: PlanDay;
 }
 
-/** The week plan and shopping list live in Recipes/ too; they are not recipes. */
-const NOT_RECIPES = new Set([PLAN_PATH, LEGACY_PLAN_PATH, SHOPPING_PATH, LEGACY_SHOPPING_PATH]);
-
-function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
-  const detail = response?.detail as { notes?: RecipeSummary[] } | undefined;
-  return (detail?.notes ?? []).filter((note) => !NOT_RECIPES.has((note.path ?? '').replace(/^\/+/, '')));
-}
-
-/** One cookbook recipe by path, or by title when only the plan names it. */
-function readRecipe(title: string, path?: string): Promise<ExecutionResponse> {
-  return api.cookbookRead(path ? { path } : { title });
-}
+const TABS: [Tab, string, typeof ChefHat][] = [
+  ['recipes', 'Recipes', ChefHat],
+  ['week', 'This week', CalendarDays],
+  ['list', 'Shopping list', ShoppingCart],
+];
 
 /**
- * The family cookbook, stored as markdown in the household account's
- * `Recipes/` folder in Nextcloud.
+ * The family cookbook: a shelf everyone browses like a media library (photos,
+ * kinds of meal, proteins, ratings, how often each is made), a recipe card to
+ * cook from, the week's dinners, and the shopping list they make, with Skylight
+ * as the kitchen display.
  *
- * Everyone reads every recipe. Only whoever added a recipe changes or deletes
- * it (one the Admin account added, any admin); anyone else suggests a change,
- * which waits for the owner or an admin to approve. The week plan and shopping
- * list stay each person's own (the "Send as" switch picks the Admin account's).
+ * Recipes live in the household account's `Recipes/` folder. Everyone reads
+ * every recipe; only whoever added one changes it (an admin, for recipes added
+ * as Admin) and anyone else suggests a change for them to approve. The week
+ * plan and shopping list are each person's own, or the Admin account's when an
+ * admin switches "Send as" to Admin.
+ *
+ * Where you are is in the address (`?tab=`, `?recipe=`, `?add=1`, `?edit=`),
+ * so the phone's Back button walks back out of a recipe.
  */
 export default function Recipes() {
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<RecipeSummary | null>(null);
-  const [access, setAccess] = useState<RecipeAccess | null>(null);
-  const [suggestNote, setSuggestNote] = useState('');
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const [resolving, setResolving] = useState<string | null>(null);
-  const [adopting, setAdopting] = useState(false);
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const [saving, setSaving] = useState(false);
-  // Which recipe's delete is in flight, so a second tap cannot send another.
-  const [deletingPath, setDeletingPath] = useState<string | null>(null);
-  const [share, setShare] = useState<ShareRequest | null>(null);
-  const [sharePath, setSharePath] = useState<string | null>(null);
-  const [sharingList, setSharingList] = useState(false);
-  const [teaching, setTeaching] = useState(false);
-  const [listing, setListing] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importUrl, setImportUrl] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [imported, setImported] = useState<ImportedRecipe | null>(null);
-  const [savingImport, setSavingImport] = useState(false);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoRaw, setPhotoRaw] = useState('');
-  const [photoDraft, setPhotoDraft] = useState('');
-  const [photoUncertain, setPhotoUncertain] = useState<string[]>([]);
-  const [photoSuggestions, setPhotoSuggestions] = useState<Record<string, string[]>>({});
-  const [photoFixes, setPhotoFixes] = useState<Record<string, string>>({});
-  const [photoFixed, setPhotoFixed] = useState<string[]>([]);
-  const [photoMissing, setPhotoMissing] = useState<string[]>([]);
-  const [readingPhoto, setReadingPhoto] = useState(false);
-  const photoRef = useRef<HTMLInputElement>(null);
-  const [filter, setFilter] = useState('');
-  const [mealQuery, setMealQuery] = useState('');
-  const [mealSearching, setMealSearching] = useState(false);
-  const [mealResults, setMealResults] = useState<RecipeSearchItem[]>([]);
-  const [searchLoadingId, setSearchLoadingId] = useState<string | null>(null);
-  const [planOpen, setPlanOpen] = useState(false);
-  const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan());
-  const [planExists, setPlanExists] = useState(false);
-  const [planBusy, setPlanBusy] = useState(false);
-  const [planLevels, setPlanLevels] = useState<Record<string, string>>({});
+  const [params, setParams] = useSearchParams();
+  const tab = (['week', 'list'].includes(params.get('tab') ?? '') ? params.get('tab') : 'recipes') as Tab;
+  const openPath = params.get('recipe');
+  const editing = params.get('edit');
+  const adding = params.get('add') === '1';
+  const [share, setShare] = useState<RecipeShareRequest | null>(null);
   const [logRequest, setLogRequest] = useState<LogRequest | null>(null);
-  const [loggingPlanned, setLoggingPlanned] = useState(false);
-  const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
-  const [estimating, setEstimating] = useState(false);
-  // Which Skylight action is in flight ("week", "list", or a recipe title/path),
-  // so a second tap cannot send another.
-  const [skylightBusy, setSkylightBusy] = useState<string | null>(null);
-  // Phase 6 staple-overlap ranking: which recipes use the most household staples.
-  const [rankByStaples, setRankByStaples] = useState(false);
-  // Phase 7 no-credentials fallback: building the week's .ics download.
-  const [icsBusy, setIcsBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
   const isAdmin = Boolean(me?.is_admin);
-  // Kid mode hides calorie numbers, so the USDA estimate is not offered there.
-  const { data: healthProfile } = useQuery({
-    queryKey: ['health-profile'],
-    queryFn: () => api.getHealthProfile(),
-    staleTime: 300_000,
-    retry: false,
-  });
+  const { data: healthProfile } = useQuery({ queryKey: ['health-profile'], queryFn: () => api.getHealthProfile(), staleTime: 300_000, retry: false });
   const kid = isKidMode(healthProfile);
   const [sendAs, setSendAs] = useSendAsPref(isAdmin, 'notes');
   const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
 
-  const {
-    data,
-    isLoading,
-    isError: recipesError,
-    error: recipesErrorObj,
-    refetch: refetchRecipes,
-  } = useQuery({
-    queryKey: ['recipes'],
-    queryFn: () => api.cookbookList(),
-  });
-
-  // Changes waiting on the caller (to approve) or from them (still pending).
-  const suggestionsQuery = useQuery({
-    queryKey: ['recipe-suggestions'],
-    queryFn: () => api.cookbookSuggestions(),
-    staleTime: 30_000,
-    retry: false,
-  });
-  const suggestions: CookbookSuggestion[] = suggestionsQuery.data ?? [];
-  const toReview = suggestions.filter((suggestion) => suggestion.can_review).length;
-
-  // Recipes still in the caller's own folder from before the cookbook.
-  const personalQuery = useQuery({
-    queryKey: ['recipe-personal'],
-    queryFn: () => api.cookbookPersonal(),
-    staleTime: 300_000,
-    retry: false,
-  });
+  const catalog = useQuery({ queryKey: ['recipe-catalog'], queryFn: () => api.recipeCatalog(), staleTime: 60_000 });
+  const recipes: CookbookRecipe[] = useMemo(() => catalog.data?.recipes ?? [], [catalog.data]);
+  const suggestionsQuery = useQuery({ queryKey: ['recipe-suggestions'], queryFn: () => api.cookbookSuggestions(), staleTime: 30_000, retry: false });
+  const suggestions = suggestionsQuery.data ?? [];
+  const toReview = suggestions.filter((s) => s.can_review).length;
+  const personalQuery = useQuery({ queryKey: ['recipe-personal'], queryFn: () => api.cookbookPersonal(), staleTime: 300_000, retry: false });
   const personal = personalQuery.data ?? [];
-
-  const recipes = notesOf(data);
-
-  // Which source URLs are already on the shelf, so a search result that is
-  // already imported is marked instead of offered again. Read when the import
-  // panel opens (and refreshed after a save), not on every keystroke.
-  const sourcesQuery = useQuery({
-    queryKey: ['recipe-sources'],
-    queryFn: () => api.recipeSources(),
-    enabled: importOpen,
-    staleTime: 30_000,
-    retry: false,
-  });
-  const importedSources = useMemo(() => new Set(sourcesQuery.data ?? []), [sourcesQuery.data]);
-
-  // Phase 6: rank the shelf by how many household staples each recipe uses.
-  // Read only when the person asks for it (it reads every recipe note).
-  const staplesQuery = useQuery({
-    queryKey: ['recipe-staples'],
-    queryFn: () => api.recipeStaples(),
-    enabled: rankByStaples,
-    staleTime: 60_000,
-    retry: false,
-  });
-  const stapleRanks = useMemo(() => {
-    const ranks = new Map<string, { score: number; staples: string[] }>();
-    for (const row of staplesQuery.data ?? []) ranks.set(row.title, { score: row.score, staples: row.staples });
-    return ranks;
-  }, [staplesQuery.data]);
-
-  // Whether the household's Skylight is connected, so the page can show a clear
-  // no-credentials state instead of a button that quietly does nothing. A false
-  // `configured` is the cheap credentials probe; a failed probe is not treated
-  // as "off" (the push endpoints report the real reason).
-  const skylightQuery = useQuery({
-    queryKey: ['skylight-meals'],
-    queryFn: () => api.getSkylightMeals(),
-    staleTime: 300_000,
-    retry: false,
-  });
+  const skylightQuery = useQuery({ queryKey: ['skylight-meals'], queryFn: () => api.getSkylightMeals(), staleTime: 300_000, retry: false });
   const skylightOff =
-    skylightQuery.data?.configured === false
-    // A disabled account gets HTTP 400 from the gateway ("Skylight is disabled
-    // for your account"), which axios raises as an error - so the probe's own
-    // `configured` flag is not the only "off" signal. A network failure (no
-    // response) is not treated as off; the push endpoints report the real reason.
-    || (skylightQuery.error as { response?: { status?: number } } | null)?.response?.status === 400;
+    skylightQuery.data?.configured === false ||
+    (skylightQuery.error as { response?: { status?: number } } | null)?.response?.status === 400;
+  const { plan, save: savePlan, setDay } = usePlan(asUser);
 
-  // Which recipe the editor is showing. A read that lands after the person has
-  // clicked another one must not paint over the one they are looking at.
-  const openPathRef = useRef<string | null>(null);
-
-  const read = useMutation({
-    mutationFn: (recipe: RecipeSummary) => readRecipe(recipe.title, recipe.path),
-    onSuccess: (res: ExecutionResponse, recipe: RecipeSummary) => {
-      if (openPathRef.current !== recipe.path) return;
-      // The cookbook returns the recipe without its stored header or owner line.
-      if (res.status === 'SUCCESS') {
-        const detail = (res.detail ?? {}) as { owner_label?: string; can_change?: boolean; etag?: string | null };
-        setBody(noteBody(res.message ?? ''));
-        setAccess({
-          ownerLabel: detail.owner_label ?? '',
-          canChange: Boolean(detail.can_change),
-          etag: detail.etag ?? undefined,
-        });
-        setEstimate(null);
-      } else {
-        // Nothing from the previous recipe may stay in the editor: saving it
-        // would write one recipe's text over another one's file.
-        setBody('');
-        setEstimate(null);
-        toast.error(res.message || 'Could not open that recipe');
-      }
-    },
-    onError: (error: Error) => {
-      setBody('');
-      setEstimate(null);
-      toast.error(error.message || 'Could not open that recipe');
-    },
-  });
-
-  const openRecipe = (recipe: RecipeSummary) => {
-    openPathRef.current = recipe.path;
-    setSelected(recipe);
-    setAccess(null);
-    setSuggestNote('');
-    setTitle(recipe.title);
-    // Cleared before the read, so the editor never shows the previous body
-    // under the new recipe's name while the request is in flight.
-    setBody('');
-    setEstimate(null);
-    read.mutate(recipe);
-  };
-
-  const startNew = () => {
-    openPathRef.current = null;
-    setSelected(null);
-    setAccess(null);
-    setSuggestNote('');
-    setTitle('');
-    setBody('');
-    setEstimate(null);
-  };
-
-  const save = async () => {
-    const name = title.trim();
-    if (!name) {
-      toast.error('Give the recipe a name');
-      return;
+  const go = (next: Record<string, string | null>) => {
+    const merged = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(next)) {
+      if (value === null) merged.delete(key);
+      else merged.set(key, value);
     }
-    setSaving(true);
-    try {
-      // Someone else's recipe: the change waits for its owner or an admin.
-      if (selected && access && !access.canChange) {
-        const sent = await api.cookbookSuggest({ path: selected.path, content: body, message: suggestNote.trim() });
-        if (sent.status === 'SUCCESS') {
-          toast.success(sent.message || 'Change suggested');
-          setSuggestNote('');
-          queryClient.invalidateQueries({ queryKey: ['recipe-suggestions'] });
-        } else {
-          toast.error(sent.message || 'Could not send the suggestion');
-        }
-        return;
-      }
-      // Editing an open recipe saves over it (or renames it); otherwise it is new.
-      const saved = await api.cookbookSave({
-        title: name,
-        content: body,
-        path: selected?.path,
-        if_match: selected ? access?.etag : undefined,
-        as_user: selected ? undefined : asUser,
-      });
-      if (saved.status === 'SUCCESS') {
-        toast.success('Recipe saved');
-        if ((saved.detail as { left_old_copy?: boolean } | undefined)?.left_old_copy) {
-          toast.error('Saved under the new name, but the old copy is still there');
-        }
-        startNew();
-        queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      } else {
-        toast.error(saved.message || 'Could not save the recipe');
-      }
-    } catch {
-      toast.error('Could not save the recipe');
-    } finally {
-      setSaving(false);
-    }
+    setParams(merged);
+    window.scrollTo?.({ top: 0 });
+  };
+  const home = () => go({ recipe: null, edit: null, add: null });
+  const refreshCatalog = () => void queryClient.invalidateQueries({ queryKey: ['recipe-catalog'] });
+
+  const openRecipe = recipes.find((recipe) => recipe.path === openPath) ?? null;
+  const editRecipe = editing && editing !== 'new' ? recipes.find((recipe) => recipe.path === editing) ?? null : null;
+  const editBody = editRecipe ? (queryClient.getQueryData(['recipe-body', editRecipe.path]) as ExecutionResponse | undefined) : undefined;
+
+  const afterSave = (path: string | null) => {
+    refreshCatalog();
+    void queryClient.invalidateQueries({ queryKey: ['recipe-sources'] });
+    void queryClient.invalidateQueries({ queryKey: ['recipe-suggestions'] });
+    if (path) void queryClient.invalidateQueries({ queryKey: ['recipe-body', path] });
+    go({ edit: null, add: null, tab: null, recipe: path });
   };
 
-  const remove = async (recipe: RecipeSummary) => {
-    if (!(await confirmDialog({ title: 'Delete this recipe?', body: `Delete the recipe "${recipe.title}"?`, confirmLabel: 'Delete', danger: true }))) return;
-    setDeletingPath(recipe.path);
-    try {
-      const res = await api.cookbookDelete(recipe.path);
-      if (res.status === 'SUCCESS') {
-        toast.success('Recipe removed');
-        if (selected?.path === recipe.path) startNew();
-        queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      } else {
-        toast.error(res.message || 'Could not remove that recipe');
-      }
-    } catch {
-      toast.error('Could not remove that recipe');
-    } finally {
-      setDeletingPath(null);
-    }
-  };
-
-  const openShare = async (recipe: RecipeSummary) => {
-    setSharePath(recipe.path);
-    try {
-      const res = await readRecipe(recipe.title, recipe.path);
-      if (res.status === 'SUCCESS' && res.message) {
-        const recipeBody = noteBody(res.message);
-        setShare({
-          reference: recipe.title,
-          text: recipeSharePreview(recipeBody),
-          heading: `Share ${recipe.title} to chat`,
-          previewIcon: '🍽',
-          buildMessage: (note) => recipeShareText(recipe.title, recipeBody, note),
-        });
-      } else {
-        toast.error(res.message || 'Could not read that recipe');
-      }
-    } catch {
-      toast.error('Could not read that recipe');
-    } finally {
-      setSharePath(null);
-    }
-  };
-
-  const resolveSuggestion = async (suggestion: CookbookSuggestion, decision: 'approve' | 'reject' | 'withdraw') => {
-    setResolving(suggestion.path);
-    try {
-      const res = await api.cookbookResolve(suggestion.path, decision);
-      if (res.status === 'SUCCESS') {
-        toast.success(res.message || 'Done');
-        queryClient.invalidateQueries({ queryKey: ['recipe-suggestions'] });
-        if (decision === 'approve') {
-          queryClient.invalidateQueries({ queryKey: ['recipes'] });
-          if (selected?.path === suggestion.recipe) openRecipe(selected);
-        }
-      } else {
-        toast.error(res.message || 'Could not do that');
-      }
-    } catch {
-      toast.error('Could not do that');
-    } finally {
-      setResolving(null);
-    }
-  };
-
-  const adoptPersonal = async () => {
-    setAdopting(true);
+  const adopt = async () => {
+    setBusy('adopt');
     try {
       const res = await api.cookbookAdopt();
       if (res.status === 'SUCCESS') toast.success(res.message || 'Moved into the family cookbook');
       else toast.error(res.message || 'Could not move your recipes');
-      queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      queryClient.invalidateQueries({ queryKey: ['recipe-personal'] });
+      refreshCatalog();
+      void queryClient.invalidateQueries({ queryKey: ['recipe-personal'] });
     } catch {
       toast.error('Could not move your recipes');
     } finally {
-      setAdopting(false);
+      setBusy(null);
     }
   };
 
   const teachJarvis = async () => {
-    setTeaching(true);
+    setMenuOpen(false);
+    setBusy('teach');
     try {
       const res = await api.syncNotesRag({ cookbook: true });
       if (res.status === 'SUCCESS') toast.success('Jarvis is learning the recipes');
@@ -426,1391 +135,201 @@ export default function Recipes() {
     } catch {
       toast.error('Could not sync the recipes');
     } finally {
-      setTeaching(false);
+      setBusy(null);
     }
   };
 
-  const sharePlan = () => {
-    setShare({
-      reference: 'Meal plan',
-      text: planShareText(plan),
-      heading: 'Share the week plan to chat',
-      previewIcon: '🍽',
-      buildMessage: (note) => planShareText(plan, note),
-    });
-  };
-
-  const shareList = async () => {
-    setSharingList(true);
+  const findPhotos = async () => {
+    setMenuOpen(false);
     try {
-      const { text: listBody } = await readShoppingList(asUser);
-      if (!listBody) {
-        toast.error('Build the shopping list first');
-        return;
-      }
-      setShare({
-        reference: 'Shopping list',
-        text: shoppingShareText(listBody),
-        heading: 'Share the shopping list to chat',
-        previewIcon: '🛒',
-        buildMessage: (note) => shoppingShareText(listBody, note),
-      });
+      const res = await api.findRecipePhotos();
+      toast.success(res.message || 'Looking for photos in the background');
     } catch {
-      toast.error('Could not read the shopping list');
-    } finally {
-      setSharingList(false);
+      toast.error('Could not start looking for photos');
     }
   };
 
-  const loadLevel = async (recipeTitle: string) => {
-    if (!recipeTitle || recipeTitle in planLevels) return;
-    const recipe = recipes.find((candidate) => candidate.title === recipeTitle);
-    if (!recipe) return;
-    // One attempt per title; the level chip is optional, never the point.
-    setPlanLevels((current) => ({ ...current, [recipeTitle]: '' }));
-    try {
-      const res = await readRecipe(recipe.title, recipe.path);
-      if (res.status === 'SUCCESS') {
-        const level = planLevel(res.message ?? '');
-        if (level) setPlanLevels((current) => ({ ...current, [recipeTitle]: level }));
-      }
-    } catch {
-      // The chip stays absent; the plan still works.
-    }
-  };
+  let content: React.ReactNode;
+  if (adding) {
+    content = (
+      <AddRecipe
+        existingTitles={recipes.map((r) => r.title)}
+        asUser={asUser}
+        onSaved={afterSave}
+        onWriteOwn={() => go({ add: null, edit: 'new' })}
+        onLog={(title, body) => setLogRequest({ title, path: '', body })}
+        onBack={home}
+      />
+    );
+  } else if (editing === 'new' || editRecipe) {
+    content = (
+      <RecipeEditor
+        key={editing}
+        path={editRecipe?.path}
+        initialTitle={editRecipe?.title ?? ''}
+        initialBody={editBody?.status === 'SUCCESS' ? editBody.message ?? '' : ''}
+        canChange={editRecipe ? editRecipe.can_change : true}
+        ownerLabel={editRecipe?.owner_label}
+        etag={(editBody?.detail as { etag?: string } | undefined)?.etag ?? undefined}
+        asUser={asUser}
+        onSaved={(path) => (editRecipe && !editRecipe.can_change ? go({ edit: null }) : afterSave(path))}
+        onCancel={() => go({ edit: null })}
+      />
+    );
+  } else if (openRecipe) {
+    content = (
+      <RecipeView
+        key={openRecipe.path}
+        recipe={openRecipe}
+        plan={plan}
+        onPlan={(day, title) => setDay(day, title)}
+        onBack={() => go({ recipe: null })}
+        onEdit={() => go({ edit: openRecipe.path })}
+        onStatsChanged={refreshCatalog}
+        onDeleted={() => {
+          refreshCatalog();
+          go({ recipe: null });
+        }}
+        onShare={setShare}
+        onLog={(title, path, body) => setLogRequest({ title, path, body })}
+        skylightOff={skylightOff}
+        kid={kid}
+      />
+    );
+  } else if (tab === 'week') {
+    content = (
+      <WeekPlan
+        plan={plan}
+        save={savePlan}
+        recipes={recipes}
+        asUser={asUser}
+        skylightOff={skylightOff}
+        onOpen={(recipe) => go({ recipe: recipe.path })}
+        onShare={setShare}
+        onLog={(title, path, body, day) => setLogRequest({ title, path, body, planDay: day })}
+        onListBuilt={() => void queryClient.invalidateQueries({ queryKey: ['shopping-list'] })}
+      />
+    );
+  } else if (tab === 'list') {
+    content = <ShoppingList asUser={asUser} skylightOff={skylightOff} onShare={setShare} onGoToWeek={() => go({ tab: 'week' })} />;
+  } else {
+    content = (
+      <RecipeBrowser
+        recipes={recipes}
+        me={catalog.data?.me ?? me?.username ?? ''}
+        loading={catalog.isLoading}
+        error={catalog.isError ? errorText(catalog.error, 'Could not open the cookbook') : null}
+        onRetry={() => void catalog.refetch()}
+        onOpen={(recipe) => go({ recipe: recipe.path })}
+      />
+    );
+  }
 
-  const openPlan = async () => {
-    if (planOpen) {
-      setPlanOpen(false);
-      return;
-    }
-    setPlanBusy(true);
-    try {
-      const stored = await readMealPlan(asUser);
-      setPlan(stored.plan);
-      setPlanExists(stored.exists);
-      setPlanOpen(true);
-    } catch {
-      toast.error('Could not open the week plan');
-    } finally {
-      setPlanBusy(false);
-    }
-  };
-
-  const setPlanDay = (day: PlanDay, recipeTitle: string) => {
-    setPlan((current) => ({ ...current, [day]: { ...current[day], title: recipeTitle || null } }));
-    void loadLevel(recipeTitle);
-  };
-
-  const toggleCooked = (day: PlanDay) => {
-    setPlan((current) => ({ ...current, [day]: { ...current[day], cooked: !current[day].cooked } }));
-  };
-
-  const planSurprise = () => {
-    const pool = recipes.map((recipe) => recipe.title).filter((candidate) => !plannedTitles.includes(candidate));
-    if (pool.length === 0) {
-      toast.error('Every recipe is already in the week');
-      return;
-    }
-    const next = { ...plan };
-    for (const day of PLAN_DAYS) {
-      if (next[day].title || pool.length === 0) continue;
-      const pick = pickSurprise(pool);
-      if (!pick) break;
-      next[day] = { ...next[day], title: pick };
-      void loadLevel(pick);
-    }
-    setPlan(next);
-  };
-
-  // Today's planned dinner goes to Health from the note itself, so the
-  // values are the ones the recipe states, not the editor's draft.
-  const logPlannedDinner = async (recipeTitle: string) => {
-    const known = recipes.find((recipe) => recipe.title === recipeTitle)?.path;
-    setLoggingPlanned(true);
-    try {
-      const res = await readRecipe(recipeTitle, known);
-      const path = known ?? String((res.detail as { path?: string } | undefined)?.path ?? '');
-      if (res.status === 'SUCCESS') setLogRequest({ title: recipeTitle, path, body: noteBody(res.message ?? ''), planDay: planDayOf() });
-      else toast.error(res.message || 'Could not read that recipe');
-    } catch {
-      toast.error('Could not read that recipe');
-    } finally {
-      setLoggingPlanned(false);
-    }
-  };
-
-  const savePlan = async () => {
-    setPlanBusy(true);
-    try {
-      const saved = await saveMealPlan(plan, planExists, asUser);
-      if (saved.response.status === 'SUCCESS') {
-        toast.success('Week plan saved');
-        setPlanExists(true);
-        queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      } else {
-        toast.error(saved.response.message || 'Could not save the week plan');
-      }
-    } catch {
-      toast.error('Could not save the week plan');
-    } finally {
-      setPlanBusy(false);
-    }
-  };
-
-  // Phase 7 no-credentials fallback: the week's dinners as an .ics the
-  // household's own calendar (Google/iCloud) can import, when Skylight is not
-  // set up. Nothing is written; the file is built from the saved note.
-  const downloadWeekIcs = async () => {
-    if (!PLAN_DAYS.some((day) => plan[day].title)) {
-      toast.error('Plan some dinners first');
-      return;
-    }
-    setIcsBusy(true);
-    try {
-      const out = await api.mealPlanIcs(asUser);
-      if (!out.ics) {
-        toast.error('No dinners are planned yet');
-        return;
-      }
-      downloadBlobUrl(
-        URL.createObjectURL(new Blob([out.ics], { type: 'text/calendar' })),
-        'meal-plan.ics',
-      );
-      toast.success(`Added ${out.events} dinner${out.events === 1 ? '' : 's'} to the calendar file`);
-    } catch {
-      toast.error('Could not build the calendar file');
-    } finally {
-      setIcsBusy(false);
-    }
-  };
-
-  const buildList = async () => {
-    // A dinner already cooked needs no shopping: log -> plan -> list closes the loop.
-    const planned = PLAN_DAYS.filter((day) => !plan[day].cooked)
-      .map((day) => plan[day].title)
-      .filter(Boolean) as string[];
-    if (planned.length === 0) {
-      toast.error(PLAN_DAYS.some((day) => plan[day].title) ? 'Every planned dinner is already cooked' : 'Pick some dinners first');
-      return;
-    }
-    setListing(true);
-    try {
-      const ingredients: string[] = [];
-      for (const recipeTitle of planned) {
-        const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path;
-        const res = await readRecipe(recipeTitle, path);
-        if (res.status === 'SUCCESS') ingredients.push(...ingredientLines(noteBody(res.message ?? '')));
-      }
-      const existing = await readShoppingList(asUser);
-      const saved = await saveShoppingList(buildShoppingList(existing.text ?? '', ingredients), existing.exists, asUser);
-      if (saved.response.status === 'SUCCESS') {
-        toast.success('Shopping list ready');
-        queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      } else {
-        toast.error(saved.response.message || 'Could not build the shopping list');
-      }
-    } catch {
-      toast.error('Could not build the shopping list');
-    } finally {
-      setListing(false);
-    }
-  };
-
-  // The one place the "not connected" state is turned into a message. It never
-  // lets a push look like it worked: the caller either sends or is told why not.
-  const skylightUnavailable = () => {
-    if (skylightOff) {
-      toast.error('Skylight is not connected. Add the account in Settings first.');
-      return true;
-    }
-    return false;
-  };
-
-  const sendRecipeToSkylight = async (recipeTitle: string, recipeBody: string) => {
-    if (skylightUnavailable()) return;
-    setSkylightBusy(recipeTitle);
-    try {
-      const res = await api.sendSkylightRecipe({ title: recipeTitle, body: recipeBody });
-      if (res.status === 'SUCCESS') toast.success(res.message || `Sent “${recipeTitle}” to Skylight`);
-      else toast.error(res.message || 'Skylight could not take that recipe');
-    } catch {
-      toast.error('Skylight could not take that recipe');
-    } finally {
-      setSkylightBusy(null);
-    }
-  };
-
-  // A card has no body in hand, so read the note first (like Share to chat).
-  const sendRecipeCardToSkylight = async (recipe: RecipeSummary) => {
-    if (skylightUnavailable()) return;
-    setSkylightBusy(recipe.path);
-    try {
-      const res = await readRecipe(recipe.title, recipe.path);
-      if (res.status !== 'SUCCESS') {
-        toast.error(res.message || 'Could not read that recipe');
-        return;
-      }
-      const sent = await api.sendSkylightRecipe({ title: recipe.title, body: noteBody(res.message ?? '') });
-      if (sent.status === 'SUCCESS') toast.success(sent.message || `Sent “${recipe.title}” to Skylight`);
-      else toast.error(sent.message || 'Skylight could not take that recipe');
-    } catch {
-      toast.error('Skylight could not take that recipe');
-    } finally {
-      setSkylightBusy(null);
-    }
-  };
-
-  const pushWeekToSkylight = async () => {
-    if (skylightUnavailable()) return;
-    const days = plannedPushDays(plan);
-    if (days.length === 0) {
-      toast.error('Plan some dinners first');
-      return;
-    }
-    setSkylightBusy('week');
-    try {
-      const payload: Array<{ date: string; title: string; body: string }> = [];
-      for (const entry of days) {
-        const path = recipes.find((recipe) => recipe.title === entry.title)?.path;
-        const res = await readRecipe(entry.title, path);
-        payload.push({
-          date: entry.date,
-          title: entry.title,
-          body: res.status === 'SUCCESS' ? noteBody(res.message ?? '') : '',
-        });
-      }
-      const out = await api.pushSkylightWeek({ days: payload });
-      const planned = out.planned?.length ?? 0;
-      const failed = out.failed?.length ?? 0;
-      if (planned > 0 && failed === 0) toast.success(`Pushed ${planned} dinner${planned === 1 ? '' : 's'} to Skylight`);
-      else if (planned > 0) toast.error(`Pushed ${planned}, but ${failed} could not be planned`);
-      else toast.error(out.message || 'Skylight could not take the week plan');
-    } catch {
-      toast.error('Skylight could not take the week plan');
-    } finally {
-      setSkylightBusy(null);
-    }
-  };
-
-  const sendListToSkylight = async () => {
-    if (skylightUnavailable()) return;
-    setSkylightBusy('list');
-    try {
-      const { text } = await readShoppingList(asUser);
-      if (!text) {
-        toast.error('Build the shopping list first');
-        return;
-      }
-      const items = mirrorItems(text);
-      if (items.length === 0) {
-        toast.error('The shopping list is empty');
-        return;
-      }
-      const out = await api.mirrorSkylightList({ items });
-      if (out.status === 'SUCCESS') toast.success(out.message || `Added ${out.added ?? 0} item(s) to the Skylight list`);
-      else toast.error(out.message || 'Skylight could not update the grocery list');
-    } catch {
-      toast.error('Skylight could not update the grocery list');
-    } finally {
-      setSkylightBusy(null);
-    }
-  };
-
-  const clearPhoto = () => {
-    setPhotoFile(null);
-    setPhotoRaw('');
-    setPhotoDraft('');
-    setPhotoUncertain([]);
-    setPhotoSuggestions({});
-    setPhotoFixes({});
-    setPhotoFixed([]);
-    setPhotoMissing([]);
-  };
-
-  const readLink = async () => {
-    const url = importUrl.trim();
-    if (!url) {
-      toast.error('Paste a recipe link first');
-      return;
-    }
-    setImporting(true);
-    clearPhoto();
-    try {
-      const res = await api.importRecipe(url);
-      if (res.status === 'SUCCESS' && res.detail?.recipe) {
-        setImported(res.detail.recipe as ImportedRecipe);
-      } else {
-        setImported(null);
-        toast.error(res.message || 'That link could not be read');
-      }
-    } catch {
-      toast.error('That link could not be read');
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const readPhoto = async (file: File) => {
-    setReadingPhoto(true);
-    setImported(null);
-    setPhotoRaw('');
-    setPhotoUncertain([]);
-    setPhotoSuggestions({});
-    setPhotoFixes({});
-    setPhotoFixed([]);
-    setPhotoMissing([]);
-    try {
-      const draft = await api.readRecipePhoto(file);
-      const importedPhoto: ImportedRecipe = {
-        ...draft.recipe,
-        source_url: '',
-        site: 'photo import',
-        source_kind: 'photo',
-      };
-      setPhotoFile(file);
-      setPhotoRaw(draft.raw_text);
-      setPhotoUncertain(draft.uncertain);
-      setPhotoSuggestions(draft.suggestions ?? {});
-      // Each flagged word starts on its best reading so accepting is one click.
-      setPhotoFixes(
-        Object.fromEntries(
-          draft.uncertain.map((phrase) => [phrase, (draft.suggestions?.[phrase]?.[0] ?? '').trim()]),
-        ),
-      );
-      setPhotoMissing(draft.missing);
-      setPhotoDraft(buildRecipeNote(importedPhoto, [PHOTO_LABEL]));
-      setImported(importedPhoto);
-      if (draft.missing.length > 0) {
-        toast.error(`The photo did not give the ${draft.missing.join(', ')} - fill them in before saving`);
-      }
-    } catch (error) {
-      toast.error(errorText(error, 'That photo could not be read. Type the recipe instead.'));
-    } finally {
-      setReadingPhoto(false);
-    }
-  };
-
-  // Apply one accepted reading to the draft. Nothing changes until this runs.
-  const applyPhotoFix = (phrase: string) => {
-    const value = (photoFixes[phrase] ?? '').trim();
-    if (!value) {
-      toast.error('Type the correction first');
-      return;
-    }
-    const target = phrase.replace(LINE_NOTE, '').trim();
-    if (target && photoDraft.includes(target)) {
-      setPhotoDraft(photoDraft.replace(target, value));
-      setPhotoFixed((prev) => (prev.includes(phrase) ? prev : [...prev, phrase]));
-      return;
-    }
-    toast.error('Could not find that line in the draft - edit it directly');
-  };
-
-  // Keep the original page with the recipe: upload the photo beside the note
-  // and link it from the body. Best effort - the recipe is already saved.
-  const attachPhoto = async (title: string, path: string, body: string, etag?: string) => {
-    if (!photoFile) return;
-    try {
-      const res = await api.cookbookAttach({
-        path,
-        filename: photoFile.name || 'recipe-photo.jpg',
-        data: await blobToBase64(photoFile),
-      });
-      const link = res.detail?.link;
-      if (res.status !== 'SUCCESS' || typeof link !== 'string') {
-        toast.error('Saved, but the photo could not be kept with it');
-        return;
-      }
-      const name = typeof res.detail?.name === 'string' ? res.detail.name : photoFile.name || 'recipe-photo.jpg';
-      await api.cookbookSave({
-        title,
-        content: appendAttachment(body, attachmentMarkdown(link, name, photoFile.type)),
-        path,
-        if_match: etag,
-      });
-    } catch {
-      toast.error('Saved, but the photo could not be kept with it');
-    }
-  };
-
-  const saveImported = async () => {
-    if (!imported) return;
-    if (recipes.some((recipe) => recipe.title === imported.title)) {
-      toast.error('A recipe with that name is already on the shelf');
-      return;
-    }
-    if (imported.source_url && importedSources.has(imported.source_url)) {
-      toast.error('That recipe is already on the shelf');
-      return;
-    }
-    setSavingImport(true);
-    try {
-      const labels = imported.source_kind === 'photo' ? [PHOTO_LABEL] : [];
-      const content =
-        imported.source_kind === 'photo' && photoDraft ? photoDraft : buildRecipeNote(imported, labels);
-      const saved = await api.cookbookSave({ title: imported.title, content, as_user: asUser });
-      if (saved.status !== 'SUCCESS') {
-        toast.error(saved.message || 'Could not save the recipe');
-        return;
-      }
-      const savedDetail = (saved.detail ?? {}) as { path?: string; etag?: string | null };
-      if (imported.source_kind === 'photo' && savedDetail.path) {
-        await attachPhoto(imported.title, savedDetail.path, content, savedDetail.etag ?? undefined);
-      }
-      toast.success('Recipe saved');
-      queryClient.invalidateQueries({ queryKey: ['recipes'] });
-      queryClient.invalidateQueries({ queryKey: ['recipe-sources'] });
-      setImported(null);
-      setImportUrl('');
-      clearPhoto();
-      setImportOpen(false);
-    } catch {
-      toast.error('Could not save the recipe');
-    } finally {
-      setSavingImport(false);
-    }
-  };
-
-  const searchMealDb = async () => {
-    const query = mealQuery.trim();
-    if (query.length < 2) {
-      toast.error('Type at least two letters to search');
-      return;
-    }
-    setMealSearching(true);
-    try {
-      const res = await api.searchRecipes(query);
-      const results = (res.detail?.results ?? res.detail?.recipes ?? []) as RecipeSearchItem[];
-      setMealResults(results);
-      if (res.status !== 'SUCCESS' || results.length === 0) {
-        toast.error(res.message || 'No recipes found');
-      }
-    } catch {
-      toast.error('The search could not be completed');
-    } finally {
-      setMealSearching(false);
-    }
-  };
-
-  const openSearchResult = async (item: RecipeSearchItem) => {
-    clearPhoto();
-    if (item.source !== 'foodcom' || item.id === undefined || item.id === null) {
-      setImported(item as ImportedRecipe);
-      return;
-    }
-    setSearchLoadingId(item.source_url);
-    try {
-      const res = await api.fetchRecipe(Number(item.id));
-      if (res.status !== 'SUCCESS' || !res.detail?.recipe) {
-        toast.error(res.message || 'Could not read that recipe');
-        return;
-      }
-      setImported(res.detail.recipe as ImportedRecipe);
-    } catch {
-      toast.error('Could not read that recipe');
-    } finally {
-      setSearchLoadingId(null);
-    }
-  };
-
-  const suggesting = Boolean(selected && access && !access.canChange);
-  const today = planDayOf();
-  const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
-  const repeated = Array.from(
-    new Set(plannedTitles.filter((candidate, index) => plannedTitles.indexOf(candidate) !== index)),
-  );
-
-  const filterText = filter.trim().toLowerCase();
-  const filteredRecipes = filterText
-    ? recipes.filter((recipe) => recipe.title.toLowerCase().includes(filterText))
-    : recipes;
-  // Phase 6: most staples first (ties alphabetical); unknown sorts last. Kept a
-  // plain derivation, not a memo, so it always reflects the latest rank read.
-  const visibleRecipes = rankByStaples
-    ? [...filteredRecipes].sort((a, b) => {
-        const scoreA = stapleRanks.get(a.title)?.score ?? -1;
-        const scoreB = stapleRanks.get(b.title)?.score ?? -1;
-        return scoreB - scoreA || a.title.localeCompare(b.title);
-      })
-    : filteredRecipes;
-
-  // The open recipe's own stated nutrition, for the editor (Phase 10).
-  const nutrition = useMemo(() => parseRecipeNutrition(body), [body]);
-  const recipeServings = useMemo(() => parseRecipeServings(body), [body]);
-  const recipeIngredients = useMemo(() => ingredientLines(body), [body]);
-
-  // When the note states no nutrition, estimate one from the USDA seed. The
-  // result is labelled an estimate and names every ingredient it could not
-  // match; it is never written into the note.
-  const runEstimate = async () => {
-    if (recipeIngredients.length === 0) {
-      toast.error('This recipe has no ingredient lines to estimate from');
-      return;
-    }
-    setEstimating(true);
-    try {
-      setEstimate(await api.estimateRecipeNutrition(recipeIngredients));
-    } catch {
-      toast.error('The estimate could not be built right now');
-    } finally {
-      setEstimating(false);
-    }
-  };
-
+  const inDetail = adding || Boolean(editing) || Boolean(openRecipe);
   return (
     <div className="space-y-4" data-testid="recipes">
-      <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <BookOpen size={16} className="text-orange-300" />
-          <span className="text-sm font-semibold text-slate-200">Family cookbook</span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
-            <Users size={11} /> shared
-          </span>
-        </div>
-        <p className="text-xs text-slate-400">
-          Everyone can read every recipe. Only the person who added a recipe can change it (an admin, for recipes added
-          as Admin); anyone else can suggest a change for them to approve.
-        </p>
-        {personal.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 py-2" data-testid="recipe-personal">
-            <span className="text-xs text-sky-100">
-              {personal.length} of your recipe{personal.length === 1 ? ' is' : 's are'} still only in your own folder.
-            </span>
-            <button
-              type="button"
-              onClick={() => void adoptPersonal()}
-              disabled={adopting}
-              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-            >
-              {adopting ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
-              Add them to the family cookbook
-            </button>
-          </div>
-        )}
-        <input
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Filter recipes…"
-          aria-label="Filter recipes"
-          className="glass-input min-h-11 w-full px-2 py-1 text-base sm:max-w-xs sm:text-sm"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void openPlan()}
-            disabled={planBusy}
-            className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-          >
-            {planBusy ? <Loader2 size={14} className="animate-spin" /> : <CalendarDays size={14} />}
-            {planOpen ? 'Back to recipes' : 'Week plan'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void teachJarvis()}
-            disabled={teaching}
-            className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-          >
-            {teaching ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-            Teach Jarvis
-          </button>
-          <button
-            type="button"
-            onClick={() => setImportOpen((open) => !open)}
-            className="glass-button min-h-11 px-3 text-xs"
-          >
-            <Plus size={14} /> {importOpen ? 'Close' : 'Add a recipe'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRankByStaples((on) => !on)}
-            aria-pressed={rankByStaples}
-            data-testid="rank-staples"
-            className={`glass-button min-h-11 px-3 text-xs ${rankByStaples ? 'ring-1 ring-emerald-400/50' : ''}`}
-          >
-            <Utensils size={14} /> {rankByStaples ? 'Ranked by staples' : 'Rank by staples'}
-          </button>
-          {suggestions.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSuggestionsOpen((open) => !open)}
-              aria-pressed={suggestionsOpen}
-              data-testid="recipe-suggestions-toggle"
-              className={`glass-button min-h-11 px-3 text-xs ${toReview > 0 ? 'ring-1 ring-amber-400/60' : ''}`}
-            >
-              <Inbox size={14} /> Suggested changes ({toReview > 0 ? `${toReview} to review` : suggestions.length})
-            </button>
-          )}
-          {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
-        </div>
-        {skylightOff && (
-          <p className="text-[11px] text-amber-200" data-testid="skylight-off">
-            Skylight is not connected. Add the account in Settings to send recipes and the week plan.
-          </p>
-        )}
-      </div>
-
-      {suggestionsOpen && suggestions.length > 0 && (
-        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-suggestions">
-          <span className="text-sm font-semibold text-slate-200">Suggested changes</span>
-          {suggestions.map((suggestion) => (
-            <div key={suggestion.path} className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs text-slate-300">
-                <span className="font-semibold text-slate-100">{suggestion.recipe_title || suggestion.recipe}</span>
-                {' · '}
-                {suggestion.mine ? `you suggested this; waiting for ${suggestion.owner_label}` : `from ${suggestion.by}`}
-              </p>
-              {suggestion.message && <p className="text-xs italic text-slate-400">“{suggestion.message}”</p>}
-              <div className="grid gap-2 sm:grid-cols-2">
-                <details className="rounded-lg border border-white/10 p-2" open={!suggestion.current}>
-                  <summary className="cursor-pointer text-[11px] text-slate-400">Now</summary>
-                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-400">
-                    {suggestion.current ?? 'This recipe has since been deleted.'}
-                  </pre>
-                </details>
-                <details className="rounded-lg border border-emerald-400/30 p-2" open>
-                  <summary className="cursor-pointer text-[11px] text-emerald-200">Suggested</summary>
-                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-200">{suggestion.content}</pre>
-                </details>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {suggestion.can_review && suggestion.current !== null && (
-                  <button
-                    type="button"
-                    onClick={() => void resolveSuggestion(suggestion, 'approve')}
-                    disabled={resolving === suggestion.path}
-                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                  >
-                    <Check size={14} /> Approve
-                  </button>
-                )}
-                {suggestion.can_review && (
-                  <button
-                    type="button"
-                    onClick={() => void resolveSuggestion(suggestion, 'reject')}
-                    disabled={resolving === suggestion.path}
-                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                  >
-                    <X size={14} /> Turn down
-                  </button>
-                )}
-                {suggestion.mine && !suggestion.can_review && (
-                  <button
-                    type="button"
-                    onClick={() => void resolveSuggestion(suggestion, 'withdraw')}
-                    disabled={resolving === suggestion.path}
-                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                  >
-                    <X size={14} /> Withdraw
-                  </button>
-                )}
-              </div>
+      {!inDetail && (
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="mr-auto flex items-center gap-2">
+              <BookOpen size={20} className="text-orange-300" />
+              <h1 className="text-xl font-bold text-white">Family cookbook</h1>
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
+                <Users size={11} /> shared
+              </span>
             </div>
-          ))}
-        </div>
-      )}
-
-      {importOpen && (
-        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
-          <span className="text-sm font-semibold text-slate-200">Add a recipe</span>
-          <form
-            className="flex flex-wrap items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void searchMealDb();
-            }}
-          >
-            <input
-              value={mealQuery}
-              onChange={(event) => setMealQuery(event.target.value)}
-              placeholder="Search 500,000 recipes: chicken chili, banana bread…"
-              aria-label="Search recipes"
-              enterKeyHint="search"
-              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
-            />
-            <button
-              type="submit"
-              disabled={mealSearching}
-              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-            >
-              {mealSearching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-              Search
-            </button>
-          </form>
-          <p className="text-[10px] text-slate-500">
-            The Food.com collection, with calories and protein per serving where the cook gave them.
-          </p>
-          {sourcesQuery.isError && (
-            <p className="text-[11px] text-amber-200">
-              Could not check which recipes are already on the shelf, so one may be offered twice.
-            </p>
-          )}
-          {mealResults.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="meal-results">
-              {mealResults.map((result) => {
-                const alreadyImported = importedSources.has(result.source_url);
-                return (
-                  <button
-                    key={result.source_url}
-                    type="button"
-                    onClick={() => void openSearchResult(result)}
-                    disabled={alreadyImported || searchLoadingId === result.source_url}
-                    data-testid={alreadyImported ? 'meal-result-imported' : undefined}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-purple-400/40 disabled:opacity-60"
-                  >
-                    {result.image ? (
-                      <img src={result.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
-                    ) : null}
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-semibold text-slate-100">{result.title}</span>
-                      <span className="block truncate text-[10px] text-slate-400">
-                        {[
-                          result.source === 'foodcom' ? 'Food.com' : 'TheMealDB',
-                          result.description,
-                          result.total_minutes ? `${result.total_minutes} min` : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                      <span className="block truncate text-[10px] text-emerald-300/80" data-testid="meal-result-nutrition">
-                        {[
-                          typeof result.calories === 'number' ? `${Math.round(result.calories)} kcal` : '',
-                          typeof result.protein_g === 'number' ? `${Math.round(result.protein_g)} g protein` : '',
-                          typeof result.calories === 'number' ? 'per serving' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                      {alreadyImported ? (
-                        <span className="block text-[10px] text-emerald-300">Already in Recipes</span>
-                      ) : searchLoadingId === result.source_url ? (
-                        <span className="block text-[10px] text-slate-500">Reading the recipe…</span>
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className="text-center text-[10px] uppercase tracking-wide text-slate-500">or bring your own</div>
-          <p className="text-xs text-slate-400">Paste a recipe page - Jarvis reads its published recipe data.</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={importUrl}
-              onChange={(event) => setImportUrl(event.target.value)}
-              placeholder="https://…"
-              aria-label="Recipe link"
-              className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => void readLink()}
-              disabled={importing}
-              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-            >
-              {importing ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-              Read the link
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => photoRef.current?.click()}
-              disabled={readingPhoto}
-              data-testid="recipe-photo-button"
-              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-            >
-              {readingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-              {readingPhoto ? 'Reading the photo…' : 'Photo or handwriting'}
-            </button>
-            <input
-              ref={photoRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              aria-label="Recipe photo"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void readPhoto(file);
-                event.target.value = '';
-              }}
-            />
-            <span className="text-[10px] text-slate-500">
-              Reads a recipe page, card or handwriting with the local vision model.
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                startNew();
-                setImportOpen(false);
-                // The editor is below the shelf; on a phone it is off screen.
-                requestAnimationFrame(() => {
-                  const name = document.getElementById('recipe-name');
-                  name?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  name?.focus();
-                });
-              }}
-              data-testid="recipe-write-own"
-              className="glass-button min-h-11 px-3 text-xs"
-            >
-              <Pencil size={14} /> Write it yourself
-            </button>
-            <span className="text-[10px] text-slate-500">Type or paste a family recipe into the editor.</span>
-          </div>
-          {imported && (
-            <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3" data-testid="recipe-import-preview">
-              <div className="flex items-start gap-3">
-                {imported.image ? (
-                  <img src={imported.image} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
-                ) : null}
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-100">{imported.title}</div>
-                  <div className="text-xs text-slate-400">
-                    {imported.site}
-                    {imported.total_minutes ? ` · ${imported.total_minutes} min total` : ''}
-                    {imported.yield ? ` · ${imported.yield}` : ''}
-                    {` · ${imported.ingredients.length} ingredients · ${imported.instructions.length} steps`}
-                  </div>
-                  {imported.description ? (
-                    <div className="text-[11px] text-slate-500">{imported.description}</div>
-                  ) : null}
-                  {nutritionLine(imported) ? (
-                    <div className="text-[11px] text-emerald-300/80" data-testid="imported-nutrition">
-                      {nutritionLine(imported)?.replace(/^\*[^*]*\*\s*/, 'Per serving: ')}
-                    </div>
-                  ) : imported.source_kind !== 'photo' ? (
-                    <div className="text-[11px] text-slate-500">No nutrition was given for this recipe; logging it asks for the numbers.</div>
-                  ) : null}
-                </div>
-              </div>
-              {imported.source_kind === 'photo' ? (
-                <textarea
-                  value={photoDraft}
-                  onChange={(event) => setPhotoDraft(event.target.value)}
-                  aria-label="Recipe draft"
-                  rows={10}
-                  className="glass-input w-full resize-y px-3 py-2 text-sm"
-                />
-              ) : null}
-              {imported.source_kind === 'photo' && (photoMissing.length > 0 || photoUncertain.length > 0) ? (
-                <div
-                  className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2 text-[11px] text-amber-200"
-                  data-testid="recipe-photo-review"
-                >
-                  {photoMissing.length > 0 ? (
-                    <div>The photo did not give the {photoMissing.join(', ')} - fill them in before saving.</div>
-                  ) : null}
-                  {photoUncertain.length > 0 ? (
-                    <div className="space-y-2" data-testid="recipe-photo-uncertain">
-                      <div>
-                        Check against the page - each one starts on a suggested reading you can
-                        accept or type over:
-                      </div>
-                      {photoUncertain.map((phrase) => {
-                        const readings = photoSuggestions[phrase] ?? [];
-                        const fixed = photoFixed.includes(phrase);
-                        return (
-                          <div key={phrase} className="flex flex-wrap items-center gap-1.5">
-                            <span
-                              className={`min-w-0 max-w-full truncate ${fixed ? 'line-through opacity-60' : ''}`}
-                              title={phrase}
-                            >
-                              {fixed ? '✓' : '•'} {phrase}
-                            </span>
-                            <input
-                              value={photoFixes[phrase] ?? ''}
-                              onChange={(event) =>
-                                setPhotoFixes((prev) => ({ ...prev, [phrase]: event.target.value }))
-                              }
-                              placeholder="Type the reading"
-                              aria-label={`Correction for ${phrase}`}
-                              className="glass-input min-w-0 flex-1 px-2 py-1 text-[11px]"
-                            />
-                            {readings.slice(1).map((reading) => (
-                              <button
-                                key={reading}
-                                type="button"
-                                onClick={() => setPhotoFixes((prev) => ({ ...prev, [phrase]: reading }))}
-                                className="glass-button min-w-0 max-w-full truncate px-2 py-1 text-[11px]"
-                                title={`Use "${reading}"`}
-                              >
-                                {reading}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => applyPhotoFix(phrase)}
-                              aria-label={`Accept correction for ${phrase}`}
-                              disabled={!(photoFixes[phrase] ?? '').trim()}
-                              className="glass-button shrink-0 px-2 py-1 text-[11px] disabled:opacity-50"
-                            >
-                              Accept
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {imported.source_kind === 'photo' && photoRaw ? (
-                <details className="rounded-lg border border-white/10 bg-black/20 p-2">
-                  <summary className="cursor-pointer text-[11px] text-slate-400">Raw transcription from the photo</summary>
-                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-300">{photoRaw}</pre>
-                </details>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void saveImported()}
-                  disabled={savingImport}
-                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                >
-                  {savingImport ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Save to Recipes
-                </button>
-                {imported.source_kind !== 'photo' && (
-                  <button
-                    type="button"
-                    // Log it without keeping it: the entry has no recipe to link back to.
-                    onClick={() => setLogRequest({ title: imported.title, path: '', body: buildRecipeNote(imported) })}
-                    data-testid="imported-log-health"
-                    className="glass-button min-h-11 px-3 text-xs"
-                  >
-                    <Utensils size={14} /> Log to Health
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImported(null);
-                    clearPhoto();
-                  }}
-                  className="glass-button min-h-11 px-3 text-xs"
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {planOpen && (
-        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="meal-plan">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-semibold text-slate-200">This week&apos;s dinners</span>
+            {suggestions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSuggestionsOpen((open) => !open)}
+                aria-pressed={suggestionsOpen}
+                data-testid="recipe-suggestions-toggle"
+                className={`glass-button min-h-11 px-3 text-xs ${toReview > 0 ? 'ring-1 ring-amber-400/60' : ''}`}
+              >
+                <Inbox size={14} /> {toReview > 0 ? `${toReview} to review` : `${suggestions.length} suggested`}
+              </button>
+            )}
             <div className="flex items-center gap-2">
-              <button type="button" onClick={planSurprise} className="glass-button min-h-11 px-3 text-xs">
-                <Shuffle size={14} /> Surprise me
-              </button>
-              <button type="button" onClick={sharePlan} className="glass-button min-h-11 px-3 text-xs">
-                <Share2 size={14} /> Share plan
-              </button>
-            </div>
-          </div>
-          {recipes.length === 0 && (
-            <p className="text-xs text-slate-500">Add a few recipes first, then pick one per day.</p>
-          )}
-          {PLAN_DAYS.map((day) => (
-            <div key={day} className="flex flex-wrap items-center gap-2">
-              <label className="flex h-11 w-24 shrink-0 items-center gap-2 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={plan[day].cooked}
-                  onChange={() => toggleCooked(day)}
-                  aria-label={`${day} cooked`}
-                  className="h-4 w-4 accent-purple-400"
-                />
-                {day}
-              </label>
-              <select
-                value={plan[day].title ?? ''}
-                onChange={(event) => setPlanDay(day, event.target.value)}
-                aria-label={`Plan for ${day}`}
-                className="glass-input min-h-11 min-w-0 flex-1 px-2 py-1 text-base sm:text-sm"
-              >
-                <option value="">Pick a recipe…</option>
-                {recipes.map((recipe) => (
-                  <option key={recipe.path} value={recipe.title}>
-                    {recipe.title}
-                  </option>
-                ))}
-              </select>
-              {plan[day].title && planLevels[plan[day].title as string] ? (
-                <span className="rounded-full border border-purple-400/40 bg-purple-400/10 px-2 py-0.5 text-[10px] text-purple-200">
-                  Level {planLevels[plan[day].title as string]}
-                </span>
-              ) : null}
-              {day === today && plan[day].title ? (
-                <button
-                  type="button"
-                  onClick={() => void logPlannedDinner(plan[day].title as string)}
-                  disabled={loggingPlanned}
-                  data-testid="plan-log-today"
-                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                >
-                  {loggingPlanned ? <Loader2 size={14} className="animate-spin" /> : <Utensils size={14} />}
-                  Log tonight&apos;s dinner
-                </button>
-              ) : null}
-            </div>
-          ))}
-          {repeated.length > 0 && (
-            <p className="text-xs text-amber-300" data-testid="plan-repeat">
-              Heads up: {repeated.join(', ')} planned more than once this week.
-            </p>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void buildList()}
-              disabled={listing}
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {listing ? <Loader2 size={14} className="animate-spin" /> : <ShoppingCart size={14} />}
-              Build shopping list
+            <button type="button" onClick={() => go({ add: '1' })} className="glass-button min-h-11 bg-purple-500/20 px-4 text-sm font-semibold text-white">
+              <Plus size={16} /> <span className="sm:hidden">Add</span><span className="hidden sm:inline">Add a recipe</span>
             </button>
-            <button
-              type="button"
-              onClick={() => void shareList()}
-              disabled={sharingList}
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {sharingList ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
-              Share list
-            </button>
-            <button
-              type="button"
-              onClick={() => void sendListToSkylight()}
-              disabled={skylightBusy === 'list'}
-              data-testid="list-send-skylight"
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {skylightBusy === 'list' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              Send to Skylight list
-            </button>
-            <button
-              type="button"
-              onClick={() => void savePlan()}
-              disabled={planBusy}
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {planBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save plan
-            </button>
-            <button
-              type="button"
-              onClick={() => void pushWeekToSkylight()}
-              disabled={skylightBusy === 'week'}
-              data-testid="plan-send-skylight"
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {skylightBusy === 'week' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              Push week
-            </button>
-            <button
-              type="button"
-              onClick={() => void downloadWeekIcs()}
-              disabled={icsBusy || !PLAN_DAYS.some((day) => plan[day].title)}
-              data-testid="plan-ics"
-              className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-            >
-              {icsBusy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              Add week to calendar (.ics)
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!planOpen && (
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="space-y-2">
-          {isLoading && <p className="text-xs text-slate-500">Loading recipes…</p>}
-          {recipesError && (
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
-              <p className="text-xs text-amber-200">
-                {errorText(recipesErrorObj, 'Could not load your recipes')}
-              </p>
-              <button
-                type="button"
-                onClick={() => void refetchRecipes()}
-                className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
-              >
-                Try again
+            <div className="relative">
+              <button type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label="More cookbook actions" className="glass-button flex h-11 w-11 items-center justify-center p-0">
+                {busy === 'teach' ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
               </button>
-            </div>
-          )}
-          {!isLoading && !recipesError && recipes.length === 0 && (
-            <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-              No recipes yet. Add the first one on the right.
-            </p>
-          )}
-          {!isLoading && recipes.length > 0 && visibleRecipes.length === 0 && (
-            <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-              No recipes match “{filter.trim()}”.
-            </p>
-          )}
-          {rankByStaples && staplesQuery.isError && (
-            <p className="text-[11px] text-amber-200" data-testid="rank-staples-error">
-              Could not rank the shelf right now.
-            </p>
-          )}
-          {visibleRecipes.map((recipe) => (
-            <div
-              key={recipe.path}
-              className={`flex items-center gap-2 rounded-xl border p-1.5 pl-3 ${
-                selected?.path === recipe.path ? 'border-purple-400/40 bg-purple-500/10' : 'border-white/5 bg-white/5'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => openRecipe(recipe)}
-                aria-current={selected?.path === recipe.path ? 'true' : undefined}
-                className="min-h-11 min-w-0 flex-1 truncate text-left text-sm text-slate-100"
-              >
-                {recipe.title}
-              </button>
-              {rankByStaples && (
-                <span
-                  className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[10px] tabular-nums text-emerald-200"
-                  title={
-                    stapleRanks.get(recipe.title)?.staples.join(', ') || 'Reading staples…'
-                  }
-                  data-testid={`staple-chip-${recipe.path}`}
-                >
-                  {stapleRanks.get(recipe.title)?.score ?? '…'}
-                </span>
-              )}
-              <button
-                type="button"
-                aria-label={`Send ${recipe.title} to Skylight`}
-                onClick={() => void sendRecipeCardToSkylight(recipe)}
-                disabled={skylightBusy === recipe.path}
-                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
-              >
-                {skylightBusy === recipe.path ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Send size={14} />
-                )}
-              </button>
-              <button
-                type="button"
-                aria-label={`Share ${recipe.title}`}
-                onClick={() => void openShare(recipe)}
-                disabled={sharePath === recipe.path}
-                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
-              >
-                {sharePath === recipe.path ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Share2 size={14} />
-                )}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              {selected ? 'Editing' : 'New recipe'}
-            </span>
-            {selected && (
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const recipeBody = body;
-                    setShare({
-                      reference: selected.title,
-                      text: recipeSharePreview(recipeBody),
-                      heading: `Share ${selected.title} to chat`,
-                      previewIcon: '🍽',
-                      buildMessage: (note) => recipeShareText(selected.title, recipeBody, note),
-                    });
-                  }}
-                  className="glass-button min-h-11 px-3 text-xs"
-                >
-                  <Share2 size={14} /> Share to chat
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void sendRecipeToSkylight(selected.title, body)}
-                  disabled={skylightBusy === selected.title}
-                  data-testid="recipe-send-skylight"
-                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                >
-                  {skylightBusy === selected.title ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Send size={14} />
-                  )}
-                  Send to Skylight
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLogRequest({ title: selected.title, path: selected.path, body })}
-                  disabled={read.isPending}
-                  data-testid="recipe-log-health"
-                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                >
-                  <Utensils size={14} /> Log to Health
-                </button>
-                {access?.canChange && (
-                  <button
-                    type="button"
-                    aria-label={`Delete ${selected.title}`}
-                    onClick={() => void remove(selected)}
-                    disabled={deletingPath === selected.path}
-                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-                  >
-                    {deletingPath === selected.path ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    Delete
+              {menuOpen && (
+                <div className="absolute right-0 z-30 mt-1 w-64 space-y-1 rounded-xl border border-white/10 bg-slate-900/95 p-2 shadow-xl backdrop-blur" role="menu">
+                  <button type="button" role="menuitem" onClick={() => void teachJarvis()} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-xs text-slate-200 hover:bg-white/10">
+                    <BookOpen size={14} /> Teach Jarvis the recipes
                   </button>
-                )}
-                <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
-                  <Plus size={14} /> New recipe
-                </button>
-              </div>
-            )}
-          </div>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            id="recipe-name"
-            placeholder="Recipe name"
-            aria-label="Recipe name"
-            className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
-          />
-          {selected && access ? (
-            <p className="text-[11px] text-slate-400" data-testid="recipe-owner">
-              Added by {access.canChange && access.ownerLabel !== 'an admin' ? 'you' : access.ownerLabel}
-              {access.canChange ? '' : ` · only ${access.ownerLabel} can change it, so your edits are sent as a suggestion`}
-            </p>
-          ) : null}
-          {nutrition.status === 'ok' ? (
-            <p className="text-[11px] text-slate-400" data-testid="recipe-nutrition">
-              Per serving{nutrition.perServing.source ? ` (${nutrition.perServing.source})` : ''}:{' '}
-              {Math.round(nutrition.perServing.calories)} kcal · P {nutrition.perServing.protein_g} g · C{' '}
-              {nutrition.perServing.carbs_g} g · F {nutrition.perServing.fat_g} g
-              {recipeServings
-                ? ` · whole recipe (${recipeServings} servings): ${portionTotals(nutrition.perServing, recipeServings).calories} kcal`
-                : ''}
-            </p>
-          ) : null}
-          {nutrition.status !== 'ok' && !kid ? (
-            <div className="space-y-1" data-testid="recipe-estimate">
-              <button
-                type="button"
-                onClick={() => void runEstimate()}
-                disabled={estimating}
-                data-testid="recipe-estimate-button"
-                className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
-              >
-                {estimating ? <Loader2 size={14} className="animate-spin" /> : <Utensils size={14} />}
-                Estimate from ingredients (USDA)
-              </button>
-              {estimate ? (
-                <div
-                  className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2 text-[11px] text-amber-100"
-                  data-testid="recipe-estimate-result"
-                >
-                  <p className="text-amber-200">
-                    Estimate from USDA food data - not the recipe&apos;s own numbers.
-                  </p>
-                  {!estimate.seed.present ? (
-                    <p>USDA food data is not installed on this server.</p>
-                  ) : (
-                    <>
-                      <ul className="space-y-0.5">
-                        {estimate.ingredients.map((item, index) => (
-                          <li key={`${item.text}-${index}`}>
-                            {item.status === 'matched'
-                              ? `${item.text} - ${item.food} (${item.grams} g): ${Math.round(
-                                  item.nutrients?.calories ?? 0,
-                                )} kcal`
-                              : `${item.text} - unknown (${item.reason})`}
-                          </li>
-                        ))}
-                      </ul>
-                      {estimate.totals ? (
-                        <p data-testid="recipe-estimate-total">
-                          {estimate.complete
-                            ? 'Whole recipe'
-                            : `Whole recipe, partial (${estimate.unknown} ingredient${estimate.unknown === 1 ? '' : 's'} unknown)`}
-                          : {Math.round(estimate.totals.calories ?? 0)} kcal · P{' '}
-                          {estimate.totals.protein_g ?? '?'} g · C {estimate.totals.carbs_g ?? '?'} g · F{' '}
-                          {estimate.totals.fat_g ?? '?'} g
-                          {recipeServings
-                            ? ` · ${Math.round((estimate.totals.calories ?? 0) / recipeServings)} kcal a serving (${recipeServings} servings)`
-                            : ''}
-                        </p>
-                      ) : (
-                        <p data-testid="recipe-estimate-total">
-                          No ingredient could be matched, so there is no estimate.
-                        </p>
-                      )}
-                    </>
+                  {isAdmin && (
+                    <button type="button" role="menuitem" onClick={() => void findPhotos()} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-xs text-slate-200 hover:bg-white/10">
+                      <ImagePlus size={14} /> Find missing photos
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <div className="border-t border-white/10 px-1 pt-2">
+                      <p className="mb-1 text-[10px] text-slate-500">Week plan, list and new recipes as</p>
+                      <SendAsSelector value={sendAs} onChange={setSendAs} />
+                    </div>
                   )}
                 </div>
-              ) : null}
+              )}
             </div>
-          ) : null}
-          <textarea
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            placeholder="Ingredients and steps (markdown)"
-            aria-label="Recipe body"
-            rows={10}
-            className="glass-input w-full resize-y px-3 py-2 text-base sm:text-sm"
-          />
-          {suggesting && (
-            <input
-              value={suggestNote}
-              onChange={(event) => setSuggestNote(event.target.value)}
-              placeholder="Why the change? (optional)"
-              aria-label="Note for the recipe's owner"
-              maxLength={500}
-              className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
+            </div>
+          </div>
+
+          <nav className="flex gap-1 rounded-2xl border border-white/5 bg-white/[0.03] p-1" aria-label="Cookbook sections">
+            {TABS.map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => go({ tab: key === 'recipes' ? null : key })}
+                aria-current={tab === key ? 'page' : undefined}
+                className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl text-sm transition ${
+                  tab === key ? 'bg-purple-500/25 font-semibold text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Icon size={15} className="hidden min-[400px]:block" /> {label}
+              </button>
+            ))}
+          </nav>
+
+          {personal.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-sky-400/30 bg-sky-400/10 px-4 py-2" data-testid="recipe-personal">
+              <span className="mr-auto text-xs text-sky-100">
+                {personal.length} of your recipe{personal.length === 1 ? ' is' : 's are'} still only in your own folder.
+              </span>
+              <button type="button" onClick={() => void adopt()} disabled={busy === 'adopt'} className="glass-button min-h-11 px-3 text-xs disabled:opacity-60">
+                {busy === 'adopt' ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
+                Add them to the family cookbook
+              </button>
+            </div>
+          )}
+          {suggestionsOpen && suggestions.length > 0 && (
+            <SuggestionsPanel
+              suggestions={suggestions}
+              onApproved={(path) => {
+                refreshCatalog();
+                void queryClient.invalidateQueries({ queryKey: ['recipe-body', path] });
+              }}
             />
           )}
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || read.isPending}
-            className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
-          >
-            {saving ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : suggesting ? (
-              <Send size={14} />
-            ) : selected ? (
-              <Save size={14} />
-            ) : (
-              <Plus size={14} />
-            )}
-            {suggesting ? 'Suggest this change' : selected ? 'Save changes' : 'Save recipe'}
-          </button>
-        </div>
-      </div>
+        </header>
       )}
+
+      {content}
 
       {share && (
         <ShareToChatSheet
           reference={share.reference}
           text={share.text}
           heading={share.heading}
-          previewIcon={share.previewIcon}
+          previewIcon="🍽"
           buildMessage={share.buildMessage}
           onClose={() => setShare(null)}
         />
       )}
-
       {logRequest && (
         <LogRecipeSheet
           title={logRequest.title}
@@ -1818,7 +337,8 @@ export default function Recipes() {
           body={logRequest.body}
           planDay={logRequest.planDay}
           asUser={asUser}
-          onMarkedCooked={(day) => setPlan((current) => ({ ...current, [day]: { ...current[day], cooked: true } }))}
+          // The sheet ticks the day in the saved plan itself; read it back.
+          onMarkedCooked={() => void queryClient.invalidateQueries({ queryKey: ['meal-plan'] })}
           onClose={() => setLogRequest(null)}
         />
       )}

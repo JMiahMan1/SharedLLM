@@ -97,6 +97,16 @@ export function buildShoppingList(previousBody: string, ingredientTexts: string[
   return lines.join('\n');
 }
 
+/** The list note for these rows, as the shopping list tab edits it (ticks, added and cleared items). */
+export function writeShoppingList(rows: ShoppingItem[]): string {
+  const lines = ['#shopping-list', ''];
+  for (const row of rows) lines.push(`- [${row.checked ? 'x' : ' '}] ${row.text.trim()}`);
+  if (rows.length === 0) lines.push('Nothing to buy yet - plan some dinners first.');
+  lines.push('');
+  lines.push("Made from the week's plan (`Meal plan`).");
+  return lines.join('\n');
+}
+
 /** The chat message a shared shopping list becomes (short by design). */
 export function shoppingShareText(body: string, note?: string): string {
   const items = parseShoppingList(body);

@@ -3660,6 +3660,48 @@ export interface FoodLabelDraft {
 }
 
 /** One shelf recipe's staple overlap (services/execution/handlers/recipe_import.py). */
+/** One recipe on the family cookbook's shelf, with what browsing filters and sorts on. */
+export interface CookbookRecipe {
+  title: string;
+  path: string;
+  modified?: string;
+  tags: string[];
+  /** breakfast | main | soup | salad | side | bread | dessert | snack | drink */
+  meal: string;
+  /** chicken | beef | pork | turkey | seafood | lamb | vegetarian */
+  proteins: string[];
+  total_minutes: number | null;
+  servings: number | null;
+  /** Stated calories per serving. */
+  calories: number | null;
+  ingredients: number;
+  level: number | null;
+  owner: string;
+  owner_label: string;
+  can_change: boolean;
+  source: string;
+  /** The photo kept beside the note (or its web address before it is pulled). */
+  image: string | null;
+  staples: string[];
+  /** The family's average stars, and how many people rated it. */
+  rating: number | null;
+  ratings: number;
+  my_rating: number | null;
+  made: number;
+  made_by_me: number;
+  last_made: string | null;
+}
+
+export interface RecipeStat {
+  recipe: string;
+  rating: number | null;
+  ratings: number;
+  mine: number | null;
+  made: number;
+  made_by_me: number;
+  last_made: string | null;
+}
+
 /** A change someone suggested to a cookbook recipe, waiting for its owner or an admin. */
 export interface CookbookSuggestion {
   id: string;

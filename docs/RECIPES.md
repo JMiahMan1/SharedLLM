@@ -419,3 +419,27 @@ account is connected, everything above still works.
   Recipes still in someone's own folder from before the cookbook are moved in
   by that person from the Recipes page ("Add them to the family cookbook"),
   attachments included. Nothing is moved for them.
+
+## Recipes page redesign (browse, card, week, list)
+
+- **Browse:** one call, `/api/recipes/catalog`, returns every recipe with what
+  the shelf filters on. Execution's `recipe_catalog` reads each note through
+  the version cache: meal and protein (tags first, then the recipe's own
+  words; broth alone is not a meat), time, servings, stated calories, staples,
+  owner and photo. The gateway adds the family's stars and times made from
+  health (`reciperating`, `recipemade`).
+- **Recipe card:** a servings stepper scales each ingredient's leading amount
+  (`lib/recipeScale.ts`, fractions as a cook writes them). Stars are each
+  person's own. "We made it" counts once per person per day. Ticking a
+  planned dinner cooked counts as a making on that day.
+- **Editor:** fields, not markdown (`lib/recipeDoc.ts`), written back as the
+  same note shape. A non-owner's save becomes a suggestion.
+- **Photos:** a recipe's photo is an `Image:` line the gateway keeps, like
+  `Added by:`. Saving with `image_url` downloads the photo (public addresses
+  only, every redirect checked, images up to 6 MB) and stores it beside the
+  note. Cards load it from `/api/media/recipe-image` (signed media token).
+  Admins can run "Find missing photos" to fill photos in from each recipe's
+  source page.
+- Renaming a recipe carries its stars and makings to the new path.
+- Where you are is in the address (`?tab=week|list`, `?recipe=`, `?add=1`,
+  `?edit=`), so Back works on the phone.
