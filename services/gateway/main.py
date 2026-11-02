@@ -5666,6 +5666,31 @@ async def cookbook_find_photos(request: Request):
     return {"status": "SUCCESS", "message": "Looking for photos in the background.", "detail": {"running": True}}
 
 
+async def _source_photo(caller: cookbook.Caller, url: str) -> str | None:
+    """A recipe's photo address: the offline Food.com index's (by the recipe id
+    its address ends in), else the photo its page publishes."""
+    tries = []
+    food_id = re.search(r"food\.com/recipe/[^/?#]*?-(\d+)/?(?:[?#]|$)", url)
+    if food_id:
+        tries.append({"action": "shelf_fetch", "id": int(food_id.group(1))})
+    tries.append({"action": "url_import", "url": url})
+    for payload in tries:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/recipes",
+                json={"user_context": caller.house_creds, **payload},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            try:
+                page = json.loads(await resp.text())
+            except (json.JSONDecodeError, ValueError):
+                continue
+        image = (((page or {}).get("detail") or {}).get("recipe") or {}).get("image")
+        if image:
+            return str(image)
+    return None
+
+
 async def _sweep_photos(caller: cookbook.Caller) -> None:
     listing = await cookbook.list_recipes(_cookbook_run, caller)
     found = 0
@@ -5678,18 +5703,8 @@ async def _sweep_photos(caller: cookbook.Caller) -> None:
         source = re.search(r"^Source:\s*(https?://\S+)", body, re.M | re.I)
         if not source:
             continue
-        async with shared_http_client() as client:
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/recipes",
-                json={"user_context": caller.house_creds, "action": "url_import", "url": source.group(1)},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-            )
-            try:
-                page = json.loads(await resp.text())
-            except (json.JSONDecodeError, ValueError):
-                continue
-        image = (((page or {}).get("detail") or {}).get("recipe") or {}).get("image")
-        if image and await _pull_recipe_photo(caller, path, str(image)):
+        image = await _source_photo(caller, source.group(1))
+        if image and await _pull_recipe_photo(caller, path, image):
             found += 1
     log.info("[cookbook] photo sweep added %d photo(s)", found)
 
