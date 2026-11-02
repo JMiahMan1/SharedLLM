@@ -5,7 +5,7 @@ import {
   type MediaEvent, type PlayersState,
 } from '../store/ingest';
 import { MAX_RECENT_SEARCHES, resetMediaStore, useMediaStore } from '../store/mediaStore';
-import { deviceOptions, playingElsewhere, selectPlayer } from '../store/selectors';
+import { deviceOptions, playingElsewhere, selectPlayer, shownPlayer } from '../store/selectors';
 
 const T0 = Date.parse('2026-10-24T12:00:00Z');
 
@@ -301,5 +301,21 @@ describe('selectors', () => {
     expect(playingElsewhere(withOwn, 'me').map((p) => p.id)).toEqual([K, 'ma:office']);
     // Without the id the row is still visible; the caller is what names it.
     expect(playingElsewhere(withOwn).map((p) => p.id)).toContain('ma:me');
+  });
+});
+
+describe('shownPlayer', () => {
+  const rows = (wrapperTitle: string): MediaStatus[] => [
+    { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', ma_player_id: 'media_player.office_tv_chrome', media_title: wrapperTitle },
+    { entity_id: 'media_player.office_tv_chrome', friendly_name: 'Office TV Cast', state: 'playing', media_title: 'Pharaoh', media_content_id: 'http://ma/flow.flac' },
+  ] as MediaStatus[];
+
+  it('shows a titleless Music Assistant wrapper through the device it plays on, and the player itself otherwise', () => {
+    const { players } = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('') }, T0);
+    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')?.item?.title).toBe('Pharaoh');
+    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')).toBe(players['media_player.office_tv_chrome']);
+    const own = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('Its own') }, T0).players;
+    expect(shownPlayer(own, 'media_player.office_tv_chrome_2')?.item?.title).toBe('Its own');
+    expect(shownPlayer(players, '')).toBeNull();
   });
 });

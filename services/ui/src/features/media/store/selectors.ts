@@ -52,6 +52,21 @@ export function deviceOptions(
   return [...byId.values()].sort((a, b) => Number(b.online) - Number(a.online));
 }
 
+/**
+ * The player whose now-playing details stand for output `id`. Music
+ * Assistant's wrapper around a Cast device ("Office TV") reports playing
+ * with no title of its own: the track is on the Cast entity it plays
+ * through, which its `maPlayerId` names, so that one's title, artwork and
+ * clock are shown. Returns store objects as they are, so it is a stable
+ * selector.
+ */
+export function shownPlayer(players: Record<OutputId, RemotePlayer>, id: OutputId | null | undefined): RemotePlayer | null {
+  const own = id ? players[id] ?? null : null;
+  if (!own || own.item?.title) return own;
+  const through = own.maPlayerId && own.maPlayerId !== own.id ? players[own.maPlayerId] : undefined;
+  return through?.item?.title ? through : own;
+}
+
 /** Outputs other than this device with something loaded ("Playing in your home"). */
 export function playingElsewhere(
   players: Record<OutputId, RemotePlayer>,

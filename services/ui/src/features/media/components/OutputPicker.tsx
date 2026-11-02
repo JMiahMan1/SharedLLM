@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Cast, Check, ChevronDown, Headphones, Speaker, Tv } from 'lucide-react';
 import Modal from '../../../components/ui/Modal';
 import { useMediaStore } from '../store/mediaStore';
+import { shownPlayer } from '../store/selectors';
 import { useMediaScreen } from '../pages/MediaScreen';
 import { muted, row, text } from './ui';
 
@@ -21,7 +22,7 @@ export function OutputPicker() {
 
   // "Playing: Song" for a busy device (UX-37).
   const nowDoing = (id: string): string | null => {
-    const p = players[id];
+    const p = shownPlayer(players, id);
     if (!p?.item?.title || (p.status !== 'playing' && p.status !== 'paused')) return null;
     return `${p.status === 'playing' ? 'Playing' : 'Paused'}: ${p.item.title}`;
   };
