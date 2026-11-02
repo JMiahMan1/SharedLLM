@@ -414,6 +414,16 @@ def install(session, pages: list[str], *, source: str) -> dict:
 #: How sure the concordance has to be before a word's number is inferred.
 _GUESS_SHARE = 0.9
 _GUESS_SAMPLES = 5
+# English the KJV adds for a verb's tense and person: in Greek and Hebrew it
+# is part of the verb, so no number is guessed for it.
+_AUXILIARIES = frozenset(
+    ["shall", "will", "should", "would", "be", "is", "was", "are", "were", "am", "art", "been", "being", "hath", "have", "had", "has", "do", "did", "doth", "dost", "may", "might", "must", "can", "could", "let", "shalt", "wilt"]
+)
+# Hebrew carries pronouns, the article and most prepositions inside other
+# words; in the Old Testament a guess for one of these would name the wrong word.
+_HEBREW_INSIDE = frozenset(
+    ["i", "me", "my", "mine", "thou", "thee", "thy", "thine", "he", "him", "his", "she", "her", "it", "its", "we", "us", "our", "ye", "you", "your", "they", "them", "their", "the", "a", "an", "of", "to", "unto", "in", "into", "with", "by", "for", "from", "at", "on", "upon"]
+)
 
 
 def _guesses(entries: dict[str, Entry]) -> list[dict]:
@@ -422,16 +432,23 @@ def _guesses(entries: dict[str, Entry]) -> list[dict]:
     from collections import Counter, defaultdict
 
     seen: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    usual: set[tuple[str, str]] = set()  # (word, number) where the word is one of its three commonest renderings
     for entry in entries.values():
-        for rendering, count in entry.usage:
+        ranked = sorted(entry.usage, key=lambda u: -u[1])
+        for position, (rendering, count) in enumerate(ranked):
             word = rendering.lower().strip("*").replace("\u2019", "'")
-            if count and re.fullmatch(r"[a-z][a-z'\-]*", word):
-                seen[(word, entry.strongs[0])][entry.strongs] += count
+            if not count or not re.fullmatch(r"[a-z][a-z'\-]*", word) or word in _AUXILIARIES:
+                continue
+            if entry.strongs[0] == "H" and word in _HEBREW_INSIDE:
+                continue
+            seen[(word, entry.strongs[0])][entry.strongs] += count
+            if position < 3:
+                usual.add((word, entry.strongs))
     rows = []
     for (word, letter), counts in seen.items():
         strongs, top = counts.most_common(1)[0]
         total = sum(counts.values())
-        if total >= _GUESS_SAMPLES and top / total >= _GUESS_SHARE:
+        if total >= _GUESS_SAMPLES and top / total >= _GUESS_SHARE and (word, strongs) in usual:
             rows.append({"word": word, "testament": "NT" if letter == "G" else "OT", "strongs": strongs,
                          "share": round(top / total, 3), "samples": total})
     return rows
