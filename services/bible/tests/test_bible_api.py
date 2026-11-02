@@ -691,3 +691,10 @@ def test_requests_return_their_database_connections(loaded_client: TestClient, e
         assert engine.pool.checkedout() == before
     finally:
         gc.enable()
+
+
+def test_a_chapter_runs_on_in_paragraphs_until_the_reader_chooses_lines(loaded_client: TestClient):
+    assert loaded_client.get("/state", params={"username": "new"}).json()["preferences"]["layout"] == "flow"
+    body = loaded_client.put("/state", params={"username": "sam"}, json={"layout": "verses"}).json()
+    assert body["preferences"]["layout"] == "verses"
+    assert loaded_client.put("/state", params={"username": "sam"}, json={"layout": "columns"}).status_code == 422

@@ -85,22 +85,36 @@ afterEach(() => {
 });
 
 describe('the reference bar on a phone', () => {
-  it('shows one line with the passage in hand, not the whole control panel', () => {
+  it('is one line: the passage and version pills and a few icons, nothing else', () => {
     pretendPhone(true);
     renderBar();
 
     expect(screen.getByTestId('bible-phone-bar')).toBeInTheDocument();
     expect(screen.getByTestId('bible-browse-open')).toHaveTextContent('John 3');
-    // The rest of the controls are not merely hidden -- they are not in the
-    // document, so nothing can be tabbed to or found twice.
-    expect(screen.queryByTestId('bible-reference-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bible-version-open')).toBeInTheDocument();
+    // The controls are not merely hidden -- they are not in the document
+    // until their panel opens, so nothing can be tabbed to or found twice.
     expect(screen.queryByTestId('bible-version-select')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bible-book-select')).not.toBeInTheDocument();
   });
 
-  it('keeps stepping chapters available without opening anything', () => {
+  it('opens the passage chooser as a sheet: search, book and chapter, and the books', () => {
     pretendPhone(true);
-    const onStep = vi.fn();
+    renderBar();
+
+    fireEvent.click(screen.getByTestId('bible-browse-open'));
+
+    const sheet = screen.getByTestId('bible-browse-sheet');
+    expect(sheet).toHaveClass('fixed');
+    expect(screen.getByTestId('bible-ref-input')).toBeInTheDocument();
+    expect(screen.getByTestId('bible-book-select')).toBeInTheDocument();
+    // The book in hand is open on its chapters, the chapter in hand marked.
+    expect(screen.getByTestId('bible-pick-John-3')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('picks a chapter from the grid and gets out of the way', () => {
+    pretendPhone(true);
+    const onPosition = vi.fn();
     render(
       <ReferenceBar
         books={BOOKS}
@@ -110,28 +124,16 @@ describe('the reference bar on a phone', () => {
         input=""
         onInput={noop}
         onSubmit={noop}
-        onPosition={noop}
+        onPosition={onPosition}
         onPreferences={noop}
-        onStep={onStep}
       />,
     );
 
-    fireEvent.click(screen.getByTestId('bible-next-chapter'));
-    expect(onStep).toHaveBeenCalledWith(1);
-    expect(screen.queryByTestId('bible-browse-sheet')).not.toBeInTheDocument();
-  });
-
-  it('opens the chooser as a sheet holding every control', () => {
-    pretendPhone(true);
-    renderBar();
-
     fireEvent.click(screen.getByTestId('bible-browse-open'));
+    fireEvent.click(screen.getByTestId('bible-pick-John-5'));
 
-    expect(screen.getByTestId('bible-browse-sheet')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-reference-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-version-select')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-book-select')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-ref-input')).toBeInTheDocument();
+    expect(onPosition).toHaveBeenCalledWith({ book: 'John', chapter: 5, verse: 1 });
+    expect(screen.queryByTestId('bible-browse-sheet')).not.toBeInTheDocument();
   });
 
   it('closes the sheet once a passage has been chosen', () => {
@@ -148,7 +150,6 @@ describe('the reference bar on a phone', () => {
         onSubmit={noop}
         onPosition={onPosition}
         onPreferences={noop}
-        onStep={noop}
       />,
     );
 
@@ -173,7 +174,6 @@ describe('the reference bar on a phone', () => {
         onSubmit={noop}
         onPosition={onPosition}
         onPreferences={noop}
-        onStep={noop}
       />,
     );
 
@@ -183,16 +183,41 @@ describe('the reference bar on a phone', () => {
     expect(screen.queryByTestId('bible-browse-sheet')).not.toBeInTheDocument();
     expect(onPosition).not.toHaveBeenCalled();
   });
+
+  it('keeps compare and focus in text settings on a narrow screen', () => {
+    pretendPhone(true);
+    const onFocus = vi.fn();
+    render(
+      <ReferenceBar
+        books={BOOKS}
+        versions={VERSIONS}
+        position={{ book: 'John', chapter: 3, verse: 1 }}
+        preferences={PREFERENCES}
+        input=""
+        onInput={noop}
+        onSubmit={noop}
+        onPosition={noop}
+        onPreferences={noop}
+        onFocus={onFocus}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('bible-display-toggle'));
+    fireEvent.click(screen.getByTestId('bible-focus-open-narrow'));
+    expect(onFocus).toHaveBeenCalled();
+    expect(screen.queryByTestId('bible-display-panel')).not.toBeInTheDocument();
+  });
 });
 
 describe('the reference bar everywhere else', () => {
-  it('is the full bar, with no phone header and no sheet', () => {
+  it('is the same header, its panels dropping down rather than sheets', () => {
     // No stub: this is what jsdom reports, and what a desktop browser does.
     renderBar();
 
     expect(screen.getByTestId('bible-reference-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-version-select')).toBeInTheDocument();
     expect(screen.queryByTestId('bible-phone-bar')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('bible-browse-sheet')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('bible-version-open'));
+    expect(screen.getByTestId('bible-version-select')).toBeInTheDocument();
+    expect(screen.getByTestId('bible-version-panel').parentElement).toHaveClass('absolute');
   });
 });

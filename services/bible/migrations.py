@@ -49,6 +49,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("narrationaudio", "chunk_index", "INTEGER", "0"),
     ("importedbook", "cadence", "TEXT", "'day'"),
     ("userbiblestate", "devotional_work", "TEXT", "''"),
+    ("userbiblestate", "layout", "TEXT", "'flow'"),
 )
 
 
