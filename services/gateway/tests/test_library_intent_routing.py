@@ -139,3 +139,9 @@ def test_only_the_library_header_carries_the_do_not_research_instruction():
     for other in ("ha_entities", "nextcloud_files", "system_capabilities",
                   "system_learnings"):
         assert "ALREADY RETRIEVED" not in _collection_header(other)
+
+
+def test_a_fasting_question_searches_the_library_but_breakfast_does_not():
+    assert "calibre_files" in _collections_for_query("what did the early church teach about fasting?")
+    assert "calibre_files" in _collections_for_query("how did the church fathers keep Lent")
+    assert "calibre_files" not in _collections_for_query("what's for breakfast, it was an excellent dinner")

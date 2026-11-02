@@ -9448,6 +9448,58 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
     )
     return await _proxy_json_response(resp)
 
+#: Topics a feature may ask for (rag topics.py): a Calibre tag such as
+#: "fasting" or "jarvis:fasting", or a Nextcloud "Resources/<Topic>/" folder.
+RESOURCE_TOPIC = re.compile(r"^[a-z][a-z0-9 _-]{0,40}$")
+
+
+@app.get("/api/resources")
+async def get_resources(request: Request, topic: str, q: str = ""):
+    """The family's books and documents about one topic, and with ``q`` the
+    passages in them that answer it (the Fasting card's "From our library")."""
+    creds = await _resolve_identity_from_request(request)
+    user = (creds.get("user") or "").lower()
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    topic = topic.strip().lower().removeprefix("jarvis:")
+    if not RESOURCE_TOPIC.match(topic):
+        raise HTTPException(status_code=400, detail="Unknown topic")
+    client = get_http_client()
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    try:
+        resp = await client.get(
+            f"{RAG_SVC}/rag/resources/tagged", params={"tag": topic, "user_id": user, "limit": 50},
+            headers=headers, timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        listing = await resp.json() if resp.status == 200 else {}
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        log.warning("[resources] listing for %s failed: %s", topic, exc)
+        listing = {}
+    passages: list[dict] = []
+    if q.strip():
+        # Calibre books are indexed under the Nextcloud account that crawled them.
+        owners = list(dict.fromkeys([str(creds.get("nextcloud_user") or user).lower(), user]))
+        for owner in owners:
+            try:
+                resp = await client.post(
+                    f"{RAG_SVC}/rag/search",
+                    json={"query": q.strip()[:500], "user_id": owner, "k": 4, "collection_name": "all", "tags": [topic]},
+                    headers=headers, timeout=aiohttp.ClientTimeout(total=15.0),
+                )
+                hits = (await resp.json()).get("results", []) if resp.status == 200 else []
+            except (aiohttp.ClientError, TimeoutError):
+                hits = []
+            for hit in hits:
+                meta = hit.get("metadata") or {}
+                passages.append({
+                    "text": str(hit.get("content") or "")[:1200],
+                    "title": meta.get("title") or meta.get("name"),
+                    "author": meta.get("author"),
+                    "chapter": meta.get("chapter"),
+                })
+    return {"topic": topic, "books": listing.get("books", []), "documents": listing.get("documents", []), "passages": passages[:6]}
+
+
 @app.get("/api/storage/stats")
 async def get_storage_stats(request: Request):
     # Resolve user and nextcloud IDs from request. An unproven caller is a 401:
@@ -14851,6 +14903,12 @@ async def get_health_streaks(request: Request, day: str | None = None):
 @app.get("/api/health/fasting")
 async def get_health_fasting(request: Request):
     return await _health_json("GET", "/fasting", request)
+
+
+@app.get("/api/health/fasting/traditions")
+async def get_health_fasting_traditions(request: Request):
+    """The early church's fasts, and the Scripture and guidance shown during a fast."""
+    return await _health_json("GET", "/fasting/traditions", request)
 
 
 @app.post("/api/health/fasting/start")

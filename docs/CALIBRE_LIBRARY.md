@@ -131,6 +131,22 @@ new shelf in Admin > LLM & Settings takes effect without a restart. The
 gateway's `POST /api/storage/index` also reads it from Identity on every
 request, so a new path applies to the next crawl without a restart either.
 
+## Topics: books as resources for features
+
+Tag a book in Calibre with a topic (`fasting`, or `jarvis:fasting` to keep Jarvis's tags apart from
+your own) and it becomes a resource for that topic. A file indexed from Nextcloud under a
+`Resources/<Topic>/` folder counts the same way. `services/rag/topics.py` decides membership.
+
+- `POST /rag/search` takes `tags: [...]` and keeps only hits about those topics; Jarvis's
+  `ContextSearchRequest` passes it through.
+- `GET /rag/resources/tagged?tag=` lists the books (the shared library, whoever indexed it) and the
+  caller's own documents on a topic. The gateway serves it as `GET /api/resources?topic=&q=`, with
+  passages for `q`. The Fasting card's "From our library" uses it.
+- Questions about fasting, the early church or the Fathers route to the library
+  (`LIBRARY_INTENT_SIGNALS`).
+
+A tag change reaches the index on the next crawl (Knowledge → Calibre → reindex).
+
 ## What is deliberately not supported
 
 - **Writes.** `write_content` returns a refusal. `metadata.db` belongs to Calibre.

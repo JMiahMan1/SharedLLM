@@ -209,6 +209,15 @@ class ContextSearchRequest(BaseModel):
         ),
     )
     k: int = Field(5, description="Number of results to return")
+    tags: list[str] | None = Field(
+        None,
+        description=(
+            "Optional topics to keep to, e.g. [\"fasting\"]: only books tagged with "
+            "one in Calibre (\"fasting\" or \"jarvis:fasting\") or files kept under a "
+            "Resources/<Topic>/ folder. Use for questions about a topic the family "
+            "keeps resources on (fasting, prayer, Bible study, health)."
+        ),
+    )
 
 class HAConfigRequest(BaseModel):
     """Inspect Home Assistant integration configurations via WebSocket API."""

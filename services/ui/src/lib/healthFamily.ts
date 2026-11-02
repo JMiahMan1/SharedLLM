@@ -6,6 +6,7 @@
  */
 import type { HealthFamilyPerson } from '../types/api';
 import { formatMinutes } from './healthHub';
+import { fastClock } from './fastingClock';
 
 export function sharedCycleLine(cycle: HealthFamilyPerson['cycle'] | undefined): string | null {
   if (!cycle?.enabled || !cycle.phase_label) return null;
@@ -27,8 +28,8 @@ function clockTime(iso: string, now: Date): string {
 }
 
 /**
- * A shared fast in one line: when it started, how long so far, and the time
- * left to the owner's own target; or the last one when none is running.
+ * A shared fast in one line: which fast, when it started, how long so far,
+ * and the time left to its planned end; or the last one when none is running.
  */
 export function sharedFastingLine(
   fasting: HealthFamilyPerson['fasting'] | undefined,
@@ -37,14 +38,18 @@ export function sharedFastingLine(
   if (!fasting) return null;
   const { active, last } = fasting;
   if (active) {
-    const parts = [`Fasting since ${clockTime(active.started_at, now)}`, `${formatMinutes(active.elapsed_minutes)} so far`];
-    if (active.target_hours) {
+    const clock = fastClock(active, now);
+    const parts = [`${active.kind_name ?? 'Fasting'} since ${clockTime(active.started_at, now)}`, `${formatMinutes(clock.elapsedSeconds / 60)} so far`];
+    if (clock.remainingSeconds !== null) {
       parts.push(
-        active.reached
-          ? `${active.target_hours}h goal reached`
-          : `${formatMinutes(active.remaining_minutes)} left of ${active.target_hours}h`,
+        clock.reached
+          ? 'complete'
+          : active.days && clock.day
+            ? `day ${Math.min(clock.day, active.days)} of ${active.days}`
+            : `${formatMinutes(clock.remainingSeconds / 60)} left`,
       );
     }
+    if (active.intention) parts.push(`praying for ${active.intention}`);
     return parts.join(' · ');
   }
   if (last?.ended_at) {

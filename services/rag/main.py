@@ -37,7 +37,7 @@ from fastapi.responses import JSONResponse
 from services.common.entity_ids import usable_entity_id as _usable_entity_id
 from services.common.secrets import secret_matches
 from services.config import INTERNAL_SECRET
-from services.rag import db
+from services.rag import db, topics
 from services.rag.schemas import IngestRequest, SearchRequest, SearchResponse, SearchResultItem
 from services.rag.store import VectorStoreAdapter, build_adapter
 from services.shared.info_endpoint import info_router
@@ -633,11 +633,15 @@ def _hybrid_search(
     k: int,
     alpha: float,
     use_rrf: bool,
+    tags: list[str] | None = None,
 ) -> list[SearchResultItem]:
     user_id = user_id.lower()
 
-    vec_res = _adapter().search(collection, user_id, query_vector, k * 2)
-    bm25_res = _bm25_search(collection, user_id, query, k * 2)
+    # The indexes narrow only by collection and user, so a topic filter takes
+    # a wider pool of candidates and keeps the ones about that topic.
+    pool = k * (8 if tags else 2)
+    vec_res = _adapter().search(collection, user_id, query_vector, pool)
+    bm25_res = _bm25_search(collection, user_id, query, pool)
 
     K_RRF = 60
     vec_scores: dict[str, float] = {}
@@ -659,16 +663,24 @@ def _hybrid_search(
         for doc_id in set(vec_scores) | set(bm25_scores):
             fused[doc_id] = vec_scores.get(doc_id, 0.0) + bm25_scores.get(doc_id, 0.0)
 
-    ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:k]
+    ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
+    if not tags:
+        ranked = ranked[:k]
 
     results: list[SearchResultItem] = []
+    kept: list[tuple[str, float]] = []
     for doc_id, score in ranked:
+        if len(results) >= k:
+            break
         row = _conn().execute(
             "SELECT content, metadata, usage_count, last_used_at FROM rag_items WHERE id = ?",
             [doc_id],
         ).fetchone()
         if row:
             meta = json.loads(row["metadata"])
+            if not topics.matches(meta, tags):
+                continue
+            kept.append((doc_id, score))
             # Surface usage tracking in the result metadata so callers (and the
             # UI) can see how often a lesson has been reused.
             meta["usage_count"] = row["usage_count"] or 0
@@ -688,7 +700,7 @@ def _hybrid_search(
     #    Bumped separately via /rag/learning/{id}/applied so the ♻-style
     #    metric reflects real usefulness, not just search frequency.
     if collection == "system_learnings" and results:
-        _bump_retrieved([doc_id for doc_id, _ in ranked if _item_exists(doc_id)])
+        _bump_retrieved([doc_id for doc_id, _ in kept if _item_exists(doc_id)])
     return results
 
 
@@ -731,7 +743,7 @@ def _bump_columns(doc_ids: list[str], set_clause: str) -> None:
 
 
 def _search_all_collections(
-    user_id: str, query: str, k: int, alpha: float, use_rrf: bool
+    user_id: str, query: str, k: int, alpha: float, use_rrf: bool, tags: list[str] | None = None,
 ) -> list[SearchResultItem]:
     """Search every collection the user (or the shared ``default`` user) owns.
 
@@ -754,7 +766,7 @@ def _search_all_collections(
     seen_contents: set[str] = set()
     for coll in collections:
         try:
-            res = _hybrid_search(coll, user_id, query, query_vector, k, alpha, use_rrf)
+            res = _hybrid_search(coll, user_id, query, query_vector, k, alpha, use_rrf, tags)
         except Exception as e:  # pragma: no cover - isolated per collection
             log.debug(f"Search failed for collection {coll}: {e}")
             res = []
@@ -778,12 +790,12 @@ async def search(req: SearchRequest):
     try:
         if req.collection_name in (None, "", "all", "__all__"):
             results = _search_all_collections(
-                req.user_id, req.query, req.k, req.alpha, req.use_rrf
+                req.user_id, req.query, req.k, req.alpha, req.use_rrf, req.tags
             )
         else:
             results = _hybrid_search(
                 req.collection_name, req.user_id, req.query,
-                embed([req.query])[0], req.k, req.alpha, req.use_rrf
+                embed([req.query])[0], req.k, req.alpha, req.use_rrf, req.tags
             )
         return SearchResponse(results=results)
     except Exception as e:
@@ -2499,6 +2511,48 @@ async def get_toolchain(user_id: str = "default"):
     except Exception as e:
         log.error(f"Failed to list toolchain: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/resources/tagged", dependencies=[Depends(require_internal)])
+async def list_tagged_resources(tag: str = Query(..., min_length=1, max_length=64), user_id: str = "default", limit: int = 50):
+    """The books and documents about one topic (``topics.py``), once each.
+
+    The family's Calibre library is shared, so its books are listed whoever
+    indexed them; any other file is listed only for its owner (or the shared
+    ``default`` user). Contents are not returned, only what each item is.
+    """
+    want = tag.strip().lower().removeprefix("jarvis:")
+    like = f"%{want}%"
+    rows = _conn().execute(
+        "SELECT collection_name, user_id, metadata FROM rag_items "
+        "WHERE (metadata LIKE ? COLLATE NOCASE) "
+        "AND (collection_name = 'calibre_files' OR user_id = ? OR user_id = 'default') "
+        "AND json_extract(metadata, '$.is_metadata') = 1 LIMIT 5000",
+        [like, user_id.lower()],
+    ).fetchall()
+    books: dict[str, dict] = {}
+    documents: dict[str, dict] = {}
+    for row in rows:
+        try:
+            meta = json.loads(row["metadata"])
+        except Exception:
+            continue
+        if not topics.matches(meta, [want]):
+            continue
+        if row["collection_name"] == "calibre_files":
+            key = str(meta.get("calibre_id") or meta.get("path"))
+            books.setdefault(key, {
+                "title": meta.get("title") or meta.get("name"),
+                "author": meta.get("author") or meta.get("authors"),
+                "calibre_id": meta.get("calibre_id"),
+                "tags": meta.get("tags"),
+                "path": meta.get("path"),
+            })
+        else:
+            path = str(meta.get("path") or "")
+            documents.setdefault(path, {"name": meta.get("name") or path.rsplit("/", 1)[-1], "path": path, "collection": row["collection_name"]})
+    ordered = sorted(books.values(), key=lambda b: str(b.get("title") or "").lower())
+    return {"topic": want, "books": ordered[:limit], "documents": list(documents.values())[:limit]}
 
 
 @app.get("/rag/resources/nextcloud", dependencies=[Depends(require_internal)])

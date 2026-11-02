@@ -48,6 +48,10 @@ class SearchRequest(BaseModel):
     collection_name: str = "nextcloud"
     alpha: float = Field(0.5, description="Weighting for BM25 (0.0) vs Dense Vector (1.0)")
     use_rrf: bool = Field(True, description="Enable Reciprocal Rank Fusion for hybrid results")
+    tags: list[str] | None = Field(
+        default=None, max_length=8,
+        description="Only items about one of these topics (a Calibre tag, or a Resources/<Topic>/ folder); see topics.py",
+    )
 
 class SearchResultItem(BaseModel):
     content: str

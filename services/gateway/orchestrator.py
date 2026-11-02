@@ -64,6 +64,9 @@ LIBRARY_INTENT_SIGNALS = (
     "hymns", "theology", "meditation", "meditate", "quote", "quotation", "cite",
     "passage", "exposition", "gospel", "epistle", "psalm", "psalms", "proverb",
     "proverbs", "testament", "chapter", "verse", "scripture", "biblical",
+    # The family keeps books on fasting and the early church. Not "fast"
+    # (breakfast) or "lent" (excellent): signals match as substrings.
+    "fasting", "fasted", "early church", "church fathers", "patristic",
 )
 
 # How a collection is named to the model. The internal name is an identifier,

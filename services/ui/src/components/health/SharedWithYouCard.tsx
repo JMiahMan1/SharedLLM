@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Hourglass, Moon, Smartphone, Users, Utensils } from 'lucide-react';
 import { formatMinutes } from '../../lib/healthHub';
 import { sharedCycleLine, sharedFastingLine } from '../../lib/healthFamily';
@@ -26,6 +26,15 @@ export default function SharedWithYouCard({
   renderActions?: (person: HealthFamilyPerson) => ReactNode;
 }) {
   const lookup = useFamilyDirectory();
+  // A shared fast's time left is worked out from its start and end, so a
+  // once-a-minute tick keeps it current between reads.
+  const sharing = people.some((person) => person.fasting?.active);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!sharing) return undefined;
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [sharing]);
   // A failed read used to render nothing at all, which reads the same as a
   // family that has chosen to share nothing.
   if (error) {
@@ -75,7 +84,7 @@ export default function SharedWithYouCard({
           const cycle = person.cycle;
           const digital = person.digital;
           const cycleLine = sharedCycleLine(cycle);
-          const fastingLine = sharedFastingLine(person.fasting);
+          const fastingLine = sharedFastingLine(person.fasting, now);
           const nothing = !person.sleep && !person.nutrition && !cycle && !digital && !fastingLine;
           return (
             <li key={person.user_id} className="space-y-1.5 py-2.5 text-xs" data-testid={`shared-${person.user_id}`}>

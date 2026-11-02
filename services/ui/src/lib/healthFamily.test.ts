@@ -21,13 +21,27 @@ describe('sharedFastingLine', () => {
     const line = sharedFastingLine({ active: fast({}), last: null }, now);
     expect(line).toMatch(/^Fasting since 8:00/);
     expect(line).toContain('10h so far');
-    expect(line).toContain('6h left of 16h');
+    expect(line).toContain('6h left');
   });
 
-  it('says the goal is reached instead of a time left', () => {
-    expect(sharedFastingLine({ active: fast({ reached: true, remaining_minutes: 0 }), last: null }, now)).toContain(
-      '16h goal reached',
-    );
+  it('counts from the start and end times, not the numbers when it was read', () => {
+    // The server's numbers are from an hour ago; the line is for now.
+    const line = sharedFastingLine({ active: fast({ remaining_minutes: 420 }), last: null }, now);
+    expect(line).toContain('6h left');
+    const later = new Date(2026, 10, 2, 1, 0);
+    expect(sharedFastingLine({ active: fast({}), last: null }, later)).toContain('complete');
+  });
+
+  it('names the kind of fast, its day in a season, and what it is for', () => {
+    const lent = fast({
+      kind: 'lent', kind_name: 'Great Lent (the Forty Days)', target_hours: null, days: 40,
+      ends_at: new Date(2026, 11, 11, 8, 0).toISOString(), intention: 'our neighbors',
+      started_at: new Date(2026, 9, 30, 8, 0).toISOString(),
+    });
+    const line = sharedFastingLine({ active: lent, last: null }, now);
+    expect(line).toMatch(/^Great Lent \(the Forty Days\) since/);
+    expect(line).toContain('day 3 of 40');
+    expect(line).toContain('praying for our neighbors');
   });
 
   it('shows the last fast when none is running', () => {
