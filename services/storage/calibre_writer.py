@@ -44,7 +44,7 @@ UNDEFINED_DATE = "0101-01-01 00:00:00+00:00"
 #: Folder and file names stay short enough for Calibre on Windows too.
 PATH_LIMIT = 60
 FORMATS = {"epub", "pdf", "mobi", "azw3", "fb2", "txt", "docx", "rtf", "cbz", "djvu"}
-MAX_BOOK_BYTES = 200 * 1024 * 1024
+MAX_BOOK_BYTES = 1024 * 1024 * 1024  # a scanned reference work (a concordance) runs to hundreds of MB
 ATTEMPTS = 3
 BACKUPS_KEPT = 20
 

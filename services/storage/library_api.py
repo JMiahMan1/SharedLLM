@@ -249,7 +249,7 @@ async def inspect_book(
     """Everything Jarvis can find about a book before it is added (nothing is saved)."""
     data = await file.read(MAX_BOOK_BYTES + 1)
     if not data or len(data) > MAX_BOOK_BYTES:
-        raise HTTPException(status_code=422, detail="Choose a book file under 200 MB.")
+        raise HTTPException(status_code=422, detail=f"Choose a book file under {MAX_BOOK_BYTES // (1024 * 1024)} MB.")
     # Suggestions without the library's own tags are still suggestions.
     existing: list[str] = []
     with suppress(HTTPException):

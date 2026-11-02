@@ -24,7 +24,7 @@ from services.common.epub_text import EpubTextError, read_chapters
 
 SUPPORTED_SUFFIXES = (".pdf", ".epub")
 BOOK_KINDS = ("devotional", "study")
-MAX_BOOK_BYTES = 256 * 1024 * 1024
+MAX_BOOK_BYTES = 1024 * 1024 * 1024
 MAX_CHAPTERS = 2000
 
 _TITLE_AUTHOR = re.compile(r"^(?P<title>.+?)\s+-\s+(?P<author>.+)$")

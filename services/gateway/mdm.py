@@ -100,7 +100,7 @@ WIPE_TTL_S = 24 * 3600
 #: The most recent MDM actions kept in the audit log.
 AUDIT_MAX = 500
 #: One Library book may not exceed this when it is opened in the app.
-MAX_LIBRARY_BOOK_BYTES = 200 * 1024 * 1024
+MAX_LIBRARY_BOOK_BYTES = 1024 * 1024 * 1024
 #: The most books one Library listing returns. A shelf can hold thousands; the
 #: response is bounded and says when it was cut, rather than shipping all of them.
 LIBRARY_MAX_BOOKS = 500
