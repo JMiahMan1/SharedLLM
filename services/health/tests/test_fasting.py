@@ -53,3 +53,32 @@ def test_minors_never_get_fasting(client):
 
 def test_stopping_with_nothing_running_is_a_404(client):
     assert client.post("/fasting/stop", json={}).status_code == 404
+
+
+def test_a_shared_fast_shows_its_start_target_and_time_left(client):
+    # The client fixture's caller is the fast's owner; "teen" is who it is shared with.
+    started = (datetime.now(UTC) - timedelta(hours=10)).isoformat()
+    client.post("/fasting/start", json={"started_at": started, "target_hours": 16})
+    assert client.put("/shares", json={"viewer": "teen", "scope": "fasting"}).status_code == 200
+
+    people = client.get("/family", headers={"X-User-Id": "teen"}).json()["people"]
+    shared = people[0]["fasting"]
+    assert people[0]["scopes"] == ["fasting"]
+    assert shared["active"]["started_at"] == started
+    assert shared["active"]["target_hours"] == 16
+    assert 359 <= shared["active"]["remaining_minutes"] <= 361
+    assert shared["last"] is None
+
+    client.post("/fasting/stop", json={})
+    shared = client.get("/family", headers={"X-User-Id": "teen"}).json()["people"][0]["fasting"]
+    assert shared["active"] is None and shared["last"]["ended_at"] is not None
+
+
+def test_a_fast_is_not_shared_without_the_owner_choosing_to(client):
+    client.post("/fasting/start", json={})
+    assert client.get("/family", headers={"X-User-Id": "teen"}).json()["people"] == []
+
+
+def test_a_minor_has_no_fasting_to_share(client):
+    client.put("/profile", json={"kid_mode": True})
+    assert client.put("/shares", json={"viewer": "parent", "scope": "fasting"}).status_code == 422

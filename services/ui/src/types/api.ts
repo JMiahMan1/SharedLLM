@@ -2195,7 +2195,7 @@ export interface FoodSearchItem {
 
 export interface HealthShare {
   viewer: string;
-  scope: 'sleep' | 'nutrition' | 'cycle' | 'digital';
+  scope: 'sleep' | 'nutrition' | 'cycle' | 'digital' | 'fasting';
 }
 
 export interface HealthFamilyPerson {
@@ -2241,6 +2241,11 @@ export interface HealthFamilyPerson {
     available: boolean;
     screen_time_min: number | null;
     day: string;
+  };
+  /** A fast the owner chose to share: the one running now and the last finished one. */
+  fasting?: {
+    active: HealthFast | null;
+    last: HealthFast | null;
   };
 }
 

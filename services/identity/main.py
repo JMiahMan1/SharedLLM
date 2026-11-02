@@ -5480,6 +5480,14 @@ def internal_screen_time(username: str, day: str, session: Session = Depends(get
     }
 
 
+@app.get("/api/internal/family-role/{username}")
+def internal_family_role(username: str, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: one account's family role ("other" for an unknown account)."""
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    role = (subject.family_role if subject else None) or "other"
+    return {"username": username.strip().lower(), "family_role": role if role in roles.FAMILY_ROLES else "other"}
+
+
 @app.get("/api/internal/may-view-raw")
 def internal_may_view_raw(
     viewer: str,

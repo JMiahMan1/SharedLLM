@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { Moon, Smartphone, Users, Utensils } from 'lucide-react';
+import { Hourglass, Moon, Smartphone, Users, Utensils } from 'lucide-react';
 import { formatMinutes } from '../../lib/healthHub';
-import { sharedCycleLine } from '../../lib/healthFamily';
+import { sharedCycleLine, sharedFastingLine } from '../../lib/healthFamily';
 import { useFamilyDirectory } from '../chat/familyDirectory';
 import type { HealthFamilyPerson } from '../../types/api';
 
@@ -75,7 +75,8 @@ export default function SharedWithYouCard({
           const cycle = person.cycle;
           const digital = person.digital;
           const cycleLine = sharedCycleLine(cycle);
-          const nothing = !person.sleep && !person.nutrition && !cycle && !digital;
+          const fastingLine = sharedFastingLine(person.fasting);
+          const nothing = !person.sleep && !person.nutrition && !cycle && !digital && !fastingLine;
           return (
             <li key={person.user_id} className="space-y-1.5 py-2.5 text-xs" data-testid={`shared-${person.user_id}`}>
               <p className="font-semibold text-slate-200">{name}</p>
@@ -113,6 +114,12 @@ export default function SharedWithYouCard({
                         ? 'No screen use reported today'
                         : `${formatMinutes(digital.screen_time_min)} of screen time today`}
                   </span>
+                </p>
+              )}
+              {fastingLine && (
+                <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400" data-testid={`shared-fasting-${person.user_id}`}>
+                  <Hourglass size={12} className="shrink-0 text-amber-300" aria-hidden />
+                  <span className="min-w-0 break-words">{fastingLine}</span>
                 </p>
               )}
               {cycle && (
