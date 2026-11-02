@@ -26,6 +26,11 @@ const EXTRA_ITEMS: NavItem[] = [
 ];
 
 /** When the bell was last opened; notices newer than this light the dot. */
+/** A notice's link when it is a path inside the app; anything else is not followed. */
+function inAppPath(url: unknown): string | null {
+  return typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') ? url : null;
+}
+
 const SEEN_KEY = 'jarvis_notifications_seen_at';
 /** When "Clear all" was last used; older notices stay hidden on this device. */
 const CLEARED_KEY = 'jarvis_notifications_cleared_at';
@@ -261,13 +266,35 @@ const Header = () => {
                   )
                 ) : visible.slice(0, 10).map((n) => (
                   <SwipeToDismiss key={n.id} label={n.title} onDismiss={() => dismissNotification(String(n.id))}>
-                    <div className="p-3 pr-10 rounded-xl bg-white/5 border border-white/5">
-                      <p className="text-xs text-white font-medium break-words">{n.title}</p>
-                      {(n.body || n.error) && (
-                        <p className="text-[11px] text-slate-400 mt-1 break-words line-clamp-2">{n.body || n.error}</p>
-                      )}
-                      <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
-                    </div>
+                    {(() => {
+                      // The whole message, and a tap goes where the notice
+                      // points (a verse, a chat, a report), as on the phone.
+                      const target = inAppPath(n.data?.url);
+                      const content = (
+                        <>
+                          <p className="text-xs text-white font-medium break-words">{n.title}</p>
+                          {(n.body || n.error) && (
+                            <p className="text-[11px] text-slate-300 mt-1 break-words whitespace-pre-line">{n.body || n.error}</p>
+                          )}
+                          <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
+                        </>
+                      );
+                      return target ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNotifications(false);
+                            navigate(target);
+                          }}
+                          className="block w-full p-3 pr-10 rounded-xl bg-white/5 border border-white/5 text-left hover:bg-white/10 hover:border-white/15"
+                          data-testid="notification-open"
+                        >
+                          {content}
+                        </button>
+                      ) : (
+                        <div className="p-3 pr-10 rounded-xl bg-white/5 border border-white/5">{content}</div>
+                      );
+                    })()}
                   </SwipeToDismiss>
                 ))}
               </div>

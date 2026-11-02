@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './Header';
+import { api } from '../../services/api';
 
 const logout = vi.fn();
 
@@ -49,6 +50,7 @@ function renderHeader() {
           <Route path="/settings" element={<div>Settings Page</div>} />
           <Route path="/identity" element={<div>Identity Page</div>} />
           <Route path="/admin" element={<div>Admin Page</div>} />
+          <Route path="/bible" element={<div>Bible Page</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -137,6 +139,21 @@ describe('Header notifications bell', () => {
     fireEvent.click(bell);
     const titles = screen.getAllByText(/Michele (left|arrived)/).map((el) => el.textContent);
     expect(titles).toEqual(['Michele arrived at Home', 'Michele left Home']);
+  });
+
+  it('shows a notice in full and opens where it points when tapped', async () => {
+    const long = 'Peter went up to pray at the sixth hour (Acts 10:9). Pray the Lord\'s Prayer, then read Psalm 63:1-8: “O God, You are my God; early will I seek You; my soul thirsts for You.” (Psalm 63:1, NKJV)';
+    vi.mocked(api.getTelemetryNotifications).mockResolvedValueOnce({
+      notifications: [
+        { id: 'p1', kind: 'fast_prayer', title: 'Sixth hour: time to pray', body: long, created_at: '2026-11-02T19:05:00+00:00', read: false, data: { url: '/bible?ref=Psalm%2063%3A1-8' } },
+      ],
+    });
+    renderHeader();
+    fireEvent.click(await screen.findByRole('button', { name: /notifications, 1 new/i }));
+    const notice = await screen.findByTestId('notification-open');
+    expect(notice).toHaveTextContent('my soul thirsts for You');
+    fireEvent.click(notice);
+    expect(await screen.findByText('Bible Page')).toBeInTheDocument();
   });
 
   it('Clear all empties the list on this device, closes the panel and stays cleared', async () => {

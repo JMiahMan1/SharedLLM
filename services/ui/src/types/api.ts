@@ -2625,6 +2625,8 @@ export interface TelemetryNotification {
   error?: string;
   created_at: string;
   read: boolean;
+  /** Where a tap goes (`data.url`, an in-app path), as on the phone. */
+  data?: { url?: string } & Record<string, unknown>;
 }
 
 
