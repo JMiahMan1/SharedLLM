@@ -74,6 +74,14 @@ def remember(key: str, mime: str, data: bytes) -> None:
         _cache_bytes -= len(old)
 
 
+def forget(key: str) -> None:
+    """Drop a cached photo (one that was just deleted)."""
+    global _cache_bytes
+    hit = _cache.pop(key, None)
+    if hit:
+        _cache_bytes -= len(hit[1])
+
+
 async def fetch(url: str) -> tuple[str, bytes]:
     """(mime, bytes) of a public image, following up to three checked redirects."""
     hit = cached(url)

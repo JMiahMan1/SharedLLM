@@ -115,3 +115,58 @@ def test_a_new_recipe_is_named_in_the_cookbook_style():
     assert cookbook.tidy_title("  slow cooker chili with beans ") == "Slow Cooker Chili with Beans"
     assert cookbook.tidy_title("Mom's Chili-Mac") == "Mom's Chili-Mac"
     assert cookbook.tidy_title("BLT Pasta") == "BLT Pasta"
+
+
+class _Shelf:
+    """A one-recipe cookbook in memory, answering the note actions the photo functions use."""
+
+    def __init__(self, body: str):
+        self.text = "# Chili\nCategory: Recipes\n" + body
+        self.deleted: list[str] = []
+
+    async def __call__(self, creds, payload):
+        action = payload["action"]
+        if action == "read":
+            return {"status": "SUCCESS", "message": self.text, "detail": {"etag": '"1"'}}
+        if action == "attachment_upload":
+            return {"status": "SUCCESS", "detail": {"link": ".attachments.9/new.jpg"}}
+        if action == "write":
+            self.text = f"# {payload['title']}\nCategory: Recipes\n" + payload["content"]
+            return {"status": "SUCCESS", "detail": {"path": payload["path"]}}
+        if action == "attachment_delete":
+            self.deleted.append(payload["attachment"])
+            return {"status": "SUCCESS"}
+        raise AssertionError(action)
+
+
+def _who(user: str, admin: bool = False) -> cookbook.Caller:
+    return cookbook.Caller(user=user, is_admin=admin, house="house", house_creds={"user": "house"}, own_creds={"user": user})
+
+
+@pytest.mark.asyncio
+async def test_anyone_adds_a_photo_and_the_first_becomes_the_cover():
+    shelf = _Shelf("Added by: mom\n\n## Steps\n1. Cook.\n")
+    res = await cookbook.add_photo(shelf, _who("kid"), "Recipes/Chili.md", "dinner.jpg", "eA==")
+    assert res["status"] == "SUCCESS"
+    body = cookbook.strip_stored_header(shelf.text)
+    assert "Image: .attachments.9/new.jpg" in body and "![Photo by kid](.attachments.9/new.jpg)" in body
+    assert cookbook.recipe_owner(body, "house") == "mom"
+
+
+@pytest.mark.asyncio
+async def test_only_the_owner_picks_the_cover_or_removes_a_photo():
+    body = "Image: .attachments.9/a.jpg\nAdded by: mom\n\n## Steps\n1. Cook.\n\n![Photo by dad](.attachments.9/b.jpg)\n"
+    shelf = _Shelf(body)
+    path = "Recipes/Chili.md"
+    assert (await cookbook.set_cover(shelf, _who("dad"), path, ".attachments.9/b.jpg"))["detail"].get("forbidden")
+    assert (await cookbook.set_cover(shelf, _who("mom"), path, ".attachments.9/elsewhere.jpg"))["status"] == "FAILURE"
+    assert (await cookbook.set_cover(shelf, _who("mom"), path, ".attachments.9/b.jpg"))["status"] == "SUCCESS"
+    assert cookbook.recipe_image(cookbook.strip_stored_header(shelf.text)) == ".attachments.9/b.jpg"
+
+    # Removing the cover hands it to the next photo and deletes the file.
+    assert (await cookbook.remove_photo(shelf, _who("mom"), path, ".attachments.9/b.jpg"))["status"] == "SUCCESS"
+    left = cookbook.strip_stored_header(shelf.text)
+    assert ".attachments.9/b.jpg" not in left and cookbook.recipe_image(left) == ".attachments.9/a.jpg"
+    assert shelf.deleted == [".attachments.9/b.jpg"]
+    assert (await cookbook.remove_photo(shelf, _who("mom"), path, ".attachments.9/a.jpg"))["status"] == "SUCCESS"
+    assert cookbook.recipe_image(cookbook.strip_stored_header(shelf.text)) is None

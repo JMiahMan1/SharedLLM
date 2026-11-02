@@ -22,6 +22,7 @@ vi.mock('../services/api', async (importOriginal) => {
       cookbookSave: vi.fn(),
       cookbookDelete: vi.fn(),
       cookbookAttach: vi.fn(),
+      cookbookPhoto: vi.fn(),
       cookbookSuggest: vi.fn(),
       cookbookSuggestions: vi.fn(),
       cookbookResolve: vi.fn(),
@@ -187,13 +188,40 @@ describe('the recipe card', () => {
     expect(list).toHaveTextContent('salt to taste');
   });
 
-  it('links the photographed original at the bottom of the card', async () => {
-    m.cookbookRead.mockResolvedValue(ok(`${CHILI_BODY}\n![card.jpg](.attachments.42/card.jpg)\n`, { path: CHILI.path, can_change: true, owner_label: 'Mom' }));
+  it('shows the photographed original among the photos at the bottom of the card', async () => {
+    m.cookbookRead.mockResolvedValue(ok(`${CHILI_BODY.replace('Tags: #dinner', 'Tags: #dinner #photo-import')}\n![card.jpg](.attachments.42/card.jpg)\n`, { path: CHILI.path, can_change: true, owner_label: 'Mom' }));
     renderAt();
     fireEvent.click(await screen.findByTestId(`recipe-tile-${CHILI.path}`));
-    const originals = await screen.findByTestId('recipe-originals');
-    expect(originals).toHaveTextContent('card.jpg');
+    const photos = await screen.findByTestId('recipe-photos');
+    expect(photos).toHaveTextContent('Original recipe');
     expect(screen.getByTestId('recipe-steps')).not.toHaveTextContent('.attachments');
+  });
+
+  it('adds a photo anyone took, and lets the owner choose the cover and remove one', async () => {
+    m.cookbookRead.mockResolvedValue(ok(`${CHILI_BODY}\n![Photo by dad](.attachments.42/a.jpg)\n![Photo by mom](.attachments.42/b.jpg)\n`, { path: CHILI.path, can_change: true, owner_label: 'Mom', image: '.attachments.42/a.jpg' }));
+    m.cookbookPhoto.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'cookbook', detail: {} } as never);
+    renderAt();
+    fireEvent.click(await screen.findByTestId(`recipe-tile-${CHILI.path}`));
+    await screen.findByTestId('recipe-photos');
+    expect(screen.getAllByTestId('recipe-photo')[0]).toHaveTextContent('Cover');
+
+    fireEvent.change(screen.getByTestId('recipe-photo-input'), { target: { files: [new File(['x'], 'dinner.jpg', { type: 'image/jpeg' })] } });
+    await waitFor(() => expect(m.cookbookPhoto).toHaveBeenCalledWith(expect.objectContaining({ path: CHILI.path, action: 'add', data: expect.any(String) })));
+
+    fireEvent.click(screen.getByLabelText('Make Photo by mom the cover'));
+    await waitFor(() => expect(m.cookbookPhoto).toHaveBeenCalledWith({ path: CHILI.path, action: 'cover', link: '.attachments.42/b.jpg' }));
+
+    fireEvent.click(screen.getByLabelText('Remove Photo by dad'));
+    await waitFor(() => expect(m.cookbookPhoto).toHaveBeenCalledWith({ path: CHILI.path, action: 'remove', link: '.attachments.42/a.jpg' }));
+  });
+
+  it("does not offer the cover or removal on someone else's recipe", async () => {
+    m.cookbookRead.mockResolvedValue(ok(`${CHILI_BODY}\n![Photo by dad](.attachments.42/a.jpg)\n`, { path: CHILI.path, can_change: false, owner_label: 'Mom' }));
+    renderAt();
+    fireEvent.click(await screen.findByTestId(`recipe-tile-${ROAST.path}`));
+    await screen.findByTestId('recipe-photos');
+    expect(screen.getByTestId('recipe-photo-take')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Remove /)).toBeNull();
   });
 
   it('records stars and a making', async () => {

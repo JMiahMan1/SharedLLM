@@ -14,11 +14,10 @@ import { PLAN_DAYS, planDayOf, type PlanDay, type WeeklyPlan } from '../../lib/m
 import { weekDates } from '../../lib/skylightMeals';
 import { recipeSharePreview, recipeShareText } from '../../lib/recipeShare';
 import { localDay } from '../../lib/healthHub';
-import { attachmentName } from '../../lib/noteAttachments';
-import { recipePhotoUrl } from '../../lib/recipePhoto';
-import { useMediaToken } from '../../lib/mediaToken';
+import { recipePictures } from '../../lib/recipePhoto';
 import { confirmDialog } from '../ui/confirmDialog';
 import RecipePhoto from './RecipePhoto';
+import RecipePhotos from './RecipePhotos';
 import StarRating from './StarRating';
 
 export interface RecipeShareRequest {
@@ -28,54 +27,12 @@ export interface RecipeShareRequest {
   buildMessage: (note: string) => string;
 }
 
-/** The link inside an attachment line: `.attachments.42/card.jpg`. */
-function attachmentTarget(line: string): string {
-  return /\]\(<?([^)>\s]+)>?\)/.exec(line)?.[1] ?? '';
-}
-
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0 px-2 text-center">
       <p className="truncate text-base font-semibold text-white sm:text-lg">{value}</p>
       <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
     </div>
-  );
-}
-
-/**
- * The pictures a recipe keeps beside it (the card or page it was read from),
- * each a thumbnail that opens the full picture.
- */
-function OriginalPictures({ path, lines }: { path: string; lines: string[] }) {
-  useMediaToken();
-  const pictures = lines.map(attachmentTarget).filter(Boolean);
-  if (pictures.length === 0) return null;
-  return (
-    <section className="glass-panel rounded-3xl border border-white/5 p-5" aria-labelledby="original-heading" data-testid="recipe-originals">
-      <h3 id="original-heading" className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300">
-        <Camera size={14} aria-hidden /> Original recipe
-      </h3>
-      <div className="mt-3 flex flex-wrap gap-3">
-        {pictures.map((link) => {
-          const src = recipePhotoUrl({ path, file: link });
-          return (
-            <a
-              key={link}
-              href={src ?? undefined}
-              target="_blank"
-              rel="noreferrer"
-              className="group flex w-40 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/20 hover:border-purple-400/40"
-              data-testid="recipe-original-link"
-            >
-              {src ? <img src={src} alt="The original recipe" loading="lazy" className="aspect-[3/4] w-full object-cover transition group-hover:opacity-90" /> : <span className="aspect-[3/4] w-full" />}
-              <span className="flex items-center gap-1 truncate px-2 py-1.5 text-[11px] text-purple-300">
-                <ExternalLink size={10} aria-hidden /> <span className="truncate">{attachmentName(link)}</span>
-              </span>
-            </a>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -124,6 +81,11 @@ export default function RecipeView({
   const ok = bodyQuery.data?.status === 'SUCCESS';
   const body = ok ? bodyQuery.data?.message ?? '' : '';
   const doc = useMemo(() => parseRecipeDoc(body), [body]);
+  const coverLink = ok ? (typeof bodyQuery.data?.detail?.image === 'string' ? bodyQuery.data.detail.image : null) : recipe.image;
+  const pictures = useMemo(
+    () => recipePictures(coverLink, doc.attachments, doc.tags.includes('photo-import')),
+    [coverLink, doc.attachments, doc.tags],
+  );
   const baseServings = doc.servings ?? recipe.servings;
   // The servings asked for; until then the recipe's own.
   const [servingsPick, setServingsPick] = useState<number | null>(null);
@@ -252,7 +214,21 @@ export default function RecipeView({
       </button>
 
       <div className="glass-panel overflow-hidden rounded-3xl border border-white/5 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <RecipePhoto path={recipe.image ? recipe.path : null} meal={recipe.meal} className="aspect-[16/10] w-full md:aspect-auto md:h-full md:min-h-80" />
+        <div className="relative">
+          <RecipePhoto
+            path={pictures.length || recipe.image ? recipe.path : null}
+            file={pictures[0]?.link ?? recipe.image}
+            meal={recipe.meal}
+            className="aspect-[16/10] w-full md:aspect-auto md:h-full md:min-h-80"
+          />
+          <button
+            type="button"
+            onClick={() => document.getElementById('photos-heading')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            className="absolute bottom-3 right-3 flex min-h-11 items-center gap-1.5 rounded-full bg-black/60 px-3 text-xs text-white backdrop-blur hover:bg-black/75"
+          >
+            <Camera size={14} aria-hidden /> {pictures.length ? `Photos (${pictures.length})` : 'Add a photo'}
+          </button>
+        </div>
         <div className="flex flex-col gap-4 p-5 sm:p-6">
           <div>
             <p className="flex flex-wrap items-center gap-x-2 text-[11px] font-medium uppercase tracking-wider text-purple-300/90">
@@ -508,7 +484,18 @@ export default function RecipeView({
           </section>
         </div>
       )}
-      {ok ? <OriginalPictures path={recipe.path} lines={doc.attachments} /> : null}
+      {ok ? (
+        <RecipePhotos
+          path={recipe.path}
+          pictures={pictures}
+          canChange={recipe.can_change}
+          ownerLabel={recipe.owner_label}
+          onChanged={() => {
+            void bodyQuery.refetch();
+            onStatsChanged();
+          }}
+        />
+      ) : null}
     </article>
   );
 }

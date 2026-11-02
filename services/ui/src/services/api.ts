@@ -2965,6 +2965,19 @@ export const api = {
     return resp.data;
   },
 
+  /** A recipe's photos: add one (base64 `data` or a web `url`), choose the cover, or remove one. */
+  async cookbookPhoto(payload: {
+    path: string;
+    action: 'add' | 'cover' | 'remove';
+    data?: string;
+    filename?: string;
+    url?: string;
+    link?: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/photo', payload, { timeout: 120_000 });
+    return resp.data;
+  },
+
   async cookbookSuggest(payload: { path: string; content: string; message?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/recipes/cookbook/suggest', payload, { timeout: 60_000 });
     return resp.data;
