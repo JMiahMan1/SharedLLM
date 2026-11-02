@@ -41,7 +41,7 @@ export default function RecipePhoto({
         className={`flex items-center justify-center bg-gradient-to-br ${GRADIENTS[meal] ?? GRADIENTS.main} ${className}`}
         aria-hidden
       >
-        <span className="text-4xl drop-shadow">{MEAL_EMOJI[meal] ?? '🍽️'}</span>
+        <span className="-translate-y-3 text-5xl drop-shadow-lg">{MEAL_EMOJI[meal] ?? '🍽️'}</span>
       </div>
     );
   }

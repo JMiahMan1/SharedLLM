@@ -204,6 +204,17 @@ def parse_suggestion(text: str | None) -> dict | None:
     }
 
 
+_ATTACHED_IMAGE = re.compile(r"!\[[^\]\n]*\]\(<?(\.attachments\.[0-9]{1,20}/[^)\s>]+)>?\)")
+
+
+def recipe_picture(body: str | None) -> str | None:
+    """What a recipe's cover shows: its photo, else the picture it was read from."""
+    if link := recipe_image(body):
+        return link
+    m = _ATTACHED_IMAGE.search(body or "")
+    return m.group(1) if m else None
+
+
 def attachment_links(text: str | None) -> list[str]:
     """The relative attachment links in a note's markdown, in order."""
     return list(dict.fromkeys(_ATTACHMENT_LINK.findall(text or "")))
@@ -249,11 +260,16 @@ async def list_recipes(run: Runner, caller: Caller) -> dict:
 
 async def _find_by_title(run: Runner, caller: Caller, title: str) -> str | None:
     notes, _ = await _listing(run, caller.house_creds, COOKBOOK_DIR)
-    wanted = title.strip().lower()
+    wanted = title_key(title)
     for note in notes or []:
-        if is_recipe_path(note.get("path")) and str(note.get("title") or "").strip().lower() == wanted:
+        if is_recipe_path(note.get("path")) and title_key(note.get("title")) == wanted:
             return clean_path(note.get("path"))
     return None
+
+
+def title_key(title: Any) -> str:
+    """A recipe name to compare by: "Beef Stew" and the file name "beef-stew" match."""
+    return " ".join(re.sub(r"[-_]+", " ", str(title or "")).lower().split())
 
 
 async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any = None) -> dict:

@@ -9,11 +9,13 @@ import { buildShoppingList, ingredientLines } from '../../lib/shoppingList';
 import { readShoppingList, saveShoppingList } from '../../lib/shoppingListStore';
 import { downloadBlobUrl } from '../../lib/artifactKinds';
 import { noteBody } from '../../lib/notesMeta';
+import { recipeTitleKey } from '../../lib/recipeDoc';
 import RecipePhoto from './RecipePhoto';
 import type { RecipeShareRequest } from './RecipeView';
 
 function readByTitle(recipes: CookbookRecipe[], title: string) {
-  const path = recipes.find((recipe) => recipe.title === title)?.path;
+  const key = recipeTitleKey(title);
+  const path = recipes.find((recipe) => recipeTitleKey(recipe.title) === key)?.path;
   return api.cookbookRead(path ? { path } : { title });
 }
 
@@ -48,7 +50,10 @@ export default function WeekPlan({
   const [busy, setBusy] = useState<string | null>(null);
   const dates = useMemo(() => weekDates(), []);
   const today = planDayOf();
-  const byTitle = useMemo(() => new Map(recipes.map((recipe) => [recipe.title, recipe])), [recipes]);
+  const byTitle = useMemo(() => {
+    const map = new Map(recipes.map((recipe) => [recipeTitleKey(recipe.title), recipe]));
+    return { get: (title: string) => map.get(recipeTitleKey(title)) };
+  }, [recipes]);
   const planned = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
   const repeated = [...new Set(planned.filter((title, index) => planned.indexOf(title) !== index))];
 
@@ -281,7 +286,7 @@ export default function WeekPlan({
                         {[recipe.total_minutes ? `${recipe.total_minutes} min` : '', recipe.made ? `made ${recipe.made}×` : '', recipe.rating ? `${recipe.rating.toFixed(1)}★` : ''].filter(Boolean).join(' · ')}
                       </span>
                     </span>
-                    {plan[picking].title === recipe.title && <Check size={14} className="text-emerald-300" />}
+                    {recipeTitleKey(plan[picking].title ?? '') === recipeTitleKey(recipe.title) && <Check size={14} className="text-emerald-300" />}
                   </button>
                 </li>
               ))}

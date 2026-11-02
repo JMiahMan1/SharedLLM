@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
-  ArrowLeft, CalendarPlus, Check, ChefHat, Clock, ExternalLink, Loader2, Minus, MoreHorizontal, Pencil, Plus,
+  ArrowLeft, CalendarPlus, Camera, Check, ChefHat, ExternalLink, Loader2, Minus, MoreHorizontal, Pencil, Plus,
   Send, Share2, Trash2, Utensils,
 } from 'lucide-react';
 import { api } from '../../services/api';
@@ -14,6 +14,9 @@ import { PLAN_DAYS, planDayOf, type PlanDay, type WeeklyPlan } from '../../lib/m
 import { weekDates } from '../../lib/skylightMeals';
 import { recipeSharePreview, recipeShareText } from '../../lib/recipeShare';
 import { localDay } from '../../lib/healthHub';
+import { attachmentName } from '../../lib/noteAttachments';
+import { recipePhotoUrl } from '../../lib/recipePhoto';
+import { useMediaToken } from '../../lib/mediaToken';
 import { confirmDialog } from '../ui/confirmDialog';
 import RecipePhoto from './RecipePhoto';
 import StarRating from './StarRating';
@@ -23,6 +26,57 @@ export interface RecipeShareRequest {
   text: string;
   heading: string;
   buildMessage: (note: string) => string;
+}
+
+/** The link inside an attachment line: `.attachments.42/card.jpg`. */
+function attachmentTarget(line: string): string {
+  return /\]\(<?([^)>\s]+)>?\)/.exec(line)?.[1] ?? '';
+}
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0 px-2 text-center">
+      <p className="truncate text-base font-semibold text-white sm:text-lg">{value}</p>
+      <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+    </div>
+  );
+}
+
+/**
+ * The pictures a recipe keeps beside it (the card or page it was read from),
+ * each a thumbnail that opens the full picture.
+ */
+function OriginalPictures({ path, lines }: { path: string; lines: string[] }) {
+  useMediaToken();
+  const pictures = lines.map(attachmentTarget).filter(Boolean);
+  if (pictures.length === 0) return null;
+  return (
+    <section className="glass-panel rounded-3xl border border-white/5 p-5" aria-labelledby="original-heading" data-testid="recipe-originals">
+      <h3 id="original-heading" className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-300">
+        <Camera size={14} aria-hidden /> Original recipe
+      </h3>
+      <div className="mt-3 flex flex-wrap gap-3">
+        {pictures.map((link) => {
+          const src = recipePhotoUrl({ path, file: link });
+          return (
+            <a
+              key={link}
+              href={src ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              className="group flex w-40 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/20 hover:border-purple-400/40"
+              data-testid="recipe-original-link"
+            >
+              {src ? <img src={src} alt="The original recipe" loading="lazy" className="aspect-[3/4] w-full object-cover transition group-hover:opacity-90" /> : <span className="aspect-[3/4] w-full" />}
+              <span className="flex items-center gap-1 truncate px-2 py-1.5 text-[11px] text-purple-300">
+                <ExternalLink size={10} aria-hidden /> <span className="truncate">{attachmentName(link)}</span>
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function dayLabel(day: PlanDay, date: string): string {
@@ -185,6 +239,7 @@ export default function RecipeView({
     update(next);
   };
 
+  const perServingCalories = nutrition.status === 'ok' ? Math.round(nutrition.perServing.calories) : null;
   const sourceUrl = /https?:\/\/\S+/.exec(doc.source)?.[0];
   const sourceSite = doc.source.replace(/https?:\/\/\S+\s*-?\s*(imported from\s*)?/i, '').trim();
   const perServing = nutrition.status === 'ok' ? nutrition.perServing : null;
@@ -197,10 +252,16 @@ export default function RecipeView({
       </button>
 
       <div className="glass-panel overflow-hidden rounded-3xl border border-white/5 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <RecipePhoto path={recipe.image ? recipe.path : null} meal={recipe.meal} className="aspect-[16/10] w-full md:aspect-auto md:h-full md:min-h-72" />
-        <div className="flex flex-col gap-3 p-5">
+        <RecipePhoto path={recipe.image ? recipe.path : null} meal={recipe.meal} className="aspect-[16/10] w-full md:aspect-auto md:h-full md:min-h-80" />
+        <div className="flex flex-col gap-4 p-5 sm:p-6">
           <div>
-            <h2 className="text-2xl font-bold leading-tight text-white">{recipe.title}</h2>
+            <p className="flex flex-wrap items-center gap-x-2 text-[11px] font-medium uppercase tracking-wider text-purple-300/90">
+              <span className="flex items-center gap-1"><ChefHat size={11} aria-hidden /> {MEAL_LABELS[recipe.meal] ?? recipe.meal}</span>
+              {recipe.proteins.map((protein) => (
+                <span key={protein}>· {PROTEIN_LABELS[protein] ?? protein}</span>
+              ))}
+            </p>
+            <h2 className="mt-1 text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl">{recipe.title}</h2>
             <p className="mt-1 text-xs text-slate-400" data-testid="recipe-owner">
               Added by {recipe.can_change && recipe.owner_label !== 'an admin' ? 'you' : recipe.owner_label}
               {sourceUrl ? (
@@ -214,22 +275,15 @@ export default function RecipeView({
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 text-[11px] text-slate-300">
-            <span className="flex items-center gap-1 rounded-full bg-white/5 px-2 py-1">
-              <ChefHat size={11} aria-hidden /> {MEAL_LABELS[recipe.meal] ?? recipe.meal}
-            </span>
-            {recipe.proteins.map((protein) => (
-              <span key={protein} className="rounded-full bg-white/5 px-2 py-1">{PROTEIN_LABELS[protein] ?? protein}</span>
-            ))}
-            {doc.totalMinutes ?? recipe.total_minutes ? (
-              <span className="flex items-center gap-1 rounded-full bg-white/5 px-2 py-1">
-                <Clock size={11} aria-hidden />
-                {doc.prepMinutes ? `${formatCookTime(doc.prepMinutes)} prep · ` : ''}
-                {doc.cookMinutes ? `${formatCookTime(doc.cookMinutes)} cook · ` : ''}
-                {formatCookTime(doc.totalMinutes ?? recipe.total_minutes)} total
-              </span>
-            ) : null}
-            {recipe.level ? <span className="rounded-full bg-white/5 px-2 py-1">Level {recipe.level}</span> : null}
+          <div className="grid grid-cols-4 divide-x divide-white/10 rounded-2xl border border-white/5 bg-black/20 py-3" data-testid="recipe-stats">
+            <Stat label="Prep" value={formatCookTime(doc.prepMinutes) || '–'} />
+            <Stat label="Total" value={formatCookTime(doc.totalMinutes ?? recipe.total_minutes) || '–'} />
+            <Stat label="Serves" value={baseServings ?? '–'} />
+            {perServingCalories && !kid ? (
+              <Stat label="Cal / serving" value={perServingCalories} />
+            ) : (
+              <Stat label="Level" value={recipe.level ?? '–'} />
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3 rounded-2xl border border-white/5 bg-black/20 p-3 sm:grid-cols-2">
@@ -454,6 +508,7 @@ export default function RecipeView({
           </section>
         </div>
       )}
+      {ok ? <OriginalPictures path={recipe.path} lines={doc.attachments} /> : null}
     </article>
   );
 }

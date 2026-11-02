@@ -16,6 +16,8 @@ _TIMES_LINE = re.compile(r"^Times:\s*(.*)$", re.I | re.M)
 _OWNER_LINE = re.compile(r"^Added by:\s*(\S.*?)\s*$", re.I | re.M)
 _SOURCE_LINE = re.compile(r"^Source:\s*(.*)$", re.I | re.M)
 _IMAGE_LINE = re.compile(r"^Image:\s*(\S+)\s*$", re.I | re.M)
+# A picture kept beside the note, e.g. the photographed card a recipe was read from.
+_ATTACHED_IMAGE = re.compile(r"!\[[^\]\n]*\]\(<?(\.attachments\.\d{1,20}/[^)\s>]+)>?\)")
 _TAG = re.compile(r"#([a-z0-9][a-z0-9-]*)", re.I)
 _SECTION = re.compile(r"^##\s+(.+?)\s*$", re.M)
 _CALORIES = re.compile(r"(\d+(?:\.\d+)?)\s*kcal", re.I)
@@ -129,6 +131,7 @@ def facets(title: str, body: str) -> dict:
         "level": int(level) if level else None,
         "owner": owner.group(1).strip().lower() if owner else None,
         "source": source.group(1).strip() if source else "",
-        # A relative link is a photo kept beside the note; a URL is not pulled yet.
-        "image": image.group(1) if image else None,
+        # A relative link is a photo kept beside the note; a URL is not pulled
+        # yet. With no photo of the dish, the photographed original stands in.
+        "image": image.group(1) if image else (attached.group(1) if (attached := _ATTACHED_IMAGE.search(text)) else None),
     }

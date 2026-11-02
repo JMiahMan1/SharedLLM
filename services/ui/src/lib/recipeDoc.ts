@@ -6,7 +6,11 @@
  * reads it as fields and the editor writes the fields back in that same
  * shape, so every other reader (shopping list, Health, Skylight, the server's
  * browsing facts) keeps working. Sections it does not know are kept as written.
+ * Pictures kept beside the note (the card a recipe was photographed from) are
+ * lifted out wherever they sit and written back at the end.
  */
+
+import { ATTACHMENT_LINE } from './noteAttachments';
 
 export interface RecipeDoc {
   tags: string[];
@@ -24,6 +28,8 @@ export interface RecipeDoc {
   nutrition: string;
   /** Any other `## Section`, kept verbatim and written back after Notes. */
   extra: string;
+  /** Attachment lines (`![card.jpg](.attachments.42/card.jpg)`), as written. */
+  attachments: string[];
 }
 
 const STEP_HEADINGS = new Set(['steps', 'instructions', 'directions', 'method', 'preparation']);
@@ -42,7 +48,7 @@ function bullet(line: string): string {
 export function parseRecipeDoc(body: string): RecipeDoc {
   const doc: RecipeDoc = {
     tags: [], prepMinutes: null, cookMinutes: null, totalMinutes: null, servings: null, source: '',
-    intro: '', ingredients: [], steps: [], notes: '', nutrition: '', extra: '',
+    intro: '', ingredients: [], steps: [], notes: '', nutrition: '', extra: '', attachments: [],
   };
   const intro: string[] = [];
   const extra: string[] = [];
@@ -61,6 +67,10 @@ export function parseRecipeDoc(body: string): RecipeDoc {
   };
 
   for (const line of body.split('\n')) {
+    if (ATTACHMENT_LINE.test(line.trim())) {
+      doc.attachments.push(line.trim());
+      continue;
+    }
     const heading = /^##\s+(.+?)\s*$/.exec(line);
     if (heading) {
       flush();
@@ -113,6 +123,7 @@ export function buildRecipeDoc(doc: RecipeDoc): string {
   if (doc.notes.trim()) lines.push('', '## Notes', doc.notes.trim());
   if (doc.extra.trim()) lines.push('', doc.extra.trim());
   if (doc.nutrition.trim()) lines.push('', '## Nutrition', doc.nutrition.trim());
+  if (doc.attachments.length) lines.push('', ...doc.attachments);
   return lines.join('\n').replace(/^\n+/, '');
 }
 
@@ -136,4 +147,9 @@ export function formatCookTime(minutes: number | null | undefined): string {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} h ${rest}` : `${hours} h`;
+}
+
+/** A recipe name to compare by: "Beef Stew" and an older "beef-stew" are one recipe. */
+export function recipeTitleKey(title: string): string {
+  return title.replace(/[-_]+/g, ' ').toLowerCase().split(/\s+/).filter(Boolean).join(' ');
 }

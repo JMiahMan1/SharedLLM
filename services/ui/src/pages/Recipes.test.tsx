@@ -187,6 +187,15 @@ describe('the recipe card', () => {
     expect(list).toHaveTextContent('salt to taste');
   });
 
+  it('links the photographed original at the bottom of the card', async () => {
+    m.cookbookRead.mockResolvedValue(ok(`${CHILI_BODY}\n![card.jpg](.attachments.42/card.jpg)\n`, { path: CHILI.path, can_change: true, owner_label: 'Mom' }));
+    renderAt();
+    fireEvent.click(await screen.findByTestId(`recipe-tile-${CHILI.path}`));
+    const originals = await screen.findByTestId('recipe-originals');
+    expect(originals).toHaveTextContent('card.jpg');
+    expect(screen.getByTestId('recipe-steps')).not.toHaveTextContent('.attachments');
+  });
+
   it('records stars and a making', async () => {
     m.rateRecipe.mockResolvedValue(stat({ rating: 4.7, ratings: 3, mine: 5 }));
     m.recipeMade.mockResolvedValue(stat({ made: 8, made_by_me: 1, last_made: '2026-11-01' }));

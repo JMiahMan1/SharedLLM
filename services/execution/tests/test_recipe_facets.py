@@ -38,3 +38,17 @@ def test_the_meal_comes_from_tags_first_then_the_title():
     assert facets("Chocolate Chip Cookies", "")["meal"] == "dessert"
     assert facets("Sunday Pot Roast", "## Ingredients\n- 3 lb chuck roast\n")["proteins"] == ["beef"]
     assert facets("Shrimp Tacos", "## Ingredients\n- 1 lb shrimp\n- bacon\n")["proteins"] == ["pork", "seafood"]
+
+
+def test_the_photographed_original_is_the_cover_when_there_is_no_photo():
+    card = "## Notes\nChill.\n![card.jpg](.attachments.7/card.jpg)\n"
+    assert facets("Sugar Cookies", card)["image"] == ".attachments.7/card.jpg"
+    assert facets("Sugar Cookies", "Image: .attachments.7/dish.jpg\n" + card)["image"] == ".attachments.7/dish.jpg"
+
+
+def test_a_recipe_is_named_by_its_stored_title_not_its_file_name():
+    from services.execution.handlers.recipe_import import note_title
+
+    stored = "# 20 Minute White Bean Chili\nCategory: Recipes\n\nTags: #soup\n"
+    assert note_title(stored, "/Recipes/20-minute-white-bean-chili.md") == "20 Minute White Bean Chili"
+    assert note_title("Tags: #soup\n", "/Recipes/beef-and-bean-burritos.md") == "Beef and bean burritos"
