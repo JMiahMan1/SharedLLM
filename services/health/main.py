@@ -640,7 +640,7 @@ class ShareIn(BaseModel):
     @field_validator("scope")
     @classmethod
     def _scope(cls, value: str) -> str:
-        if value not in ("sleep", "nutrition", "cycle", "digital"):
+        if value not in ("sleep", "nutrition", "cycle", "digital", "fasting"):
             raise ValueError("scope must be sleep, nutrition, cycle or digital")
         return value
 
@@ -1860,6 +1860,9 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
                     detail="A minor can only share cycle data with their designated mother or trusted adult.",
                 )
 
+    if body.scope == "fasting" and body.enabled and _is_minor(session.get(HealthProfile, user)):
+        raise HTTPException(status_code=422, detail="Fasting is for adults only, so there is none to share.")
+
     if body.scope == "digital" and body.enabled and _is_minor(session.get(HealthProfile, user)):
         # A minor's digital wellbeing is the parents'; it is not theirs to open.
         raise HTTPException(
@@ -1880,6 +1883,21 @@ def put_share(body: ShareIn, request: Request, session: Session = Depends(get_se
         session.delete(row)
     session.commit()
     return {"owner": user, "viewer": viewer, "scope": body.scope, "enabled": body.enabled}
+
+
+def _fasting_share(session: Session, owner: str) -> dict:
+    """The owner's running fast (start, target, time left) and their last finished one."""
+    now = datetime.now(UTC)
+    active = _active_fast(session, owner)
+    last = session.exec(
+        select(FastingSession)
+        .where(FastingSession.user_id == owner, FastingSession.ended_at.is_not(None))  # type: ignore[union-attr]
+        .order_by(FastingSession.ended_at.desc())  # type: ignore[union-attr]
+    ).first()
+    return {
+        "active": _fast_out(active, now) if active else None,
+        "last": _fast_out(last, now) if last else None,
+    }
 
 
 @app.get("/family")
@@ -1948,6 +1966,8 @@ def family_summary(
                 # is the last period's start date, and the text speaks to the
                 # owner ("your period is late") rather than to a viewer.
             }
+        if "fasting" in scopes:
+            entry["fasting"] = _fasting_share(session, owner)
         if "digital" in scopes:
             # The health store holds no phone data. The grant is the whole of
             # what is stored here; the gateway fills the number in from

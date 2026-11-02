@@ -14386,7 +14386,42 @@ async def get_health_shares(request: Request):
 
 @app.put("/api/health/shares")
 async def put_health_share(request: Request):
-    return await _health_json("PUT", "/shares", request, body=await request.json())
+    body = await _request_json_object(request)
+    if body.get("scope") == "fasting" and body.get("enabled", True):
+        # Fasting is shared among the parents, the adult children and the
+        # teens; never with a young child or an account that is not family.
+        ident = await _acting_identity(request)
+        if not ident:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        viewer = str(body.get("viewer") or "").strip().lower()
+        for who in (ident["user"], viewer):
+            if await _family_role(who) not in FASTING_SHARE_ROLES:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Fasting is shared only among parents, adult children and teens.",
+                )
+    return await _health_json("PUT", "/shares", request, body=body)
+
+
+FASTING_SHARE_ROLES = frozenset({"father", "mother", "adult_child", "teen"})
+
+
+async def _family_role(user: str) -> str:
+    """``user``'s family role from identity ("other" when it cannot be read)."""
+    if not re.fullmatch(r"[a-z0-9_.-]{1,64}", user or ""):
+        return "other"
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/internal/family-role/{user}",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status != 200:
+                return "other"
+            return str(((await resp.json(content_type=None)) or {}).get("family_role") or "other")
+    except Exception as exc:
+        log.warning("[health] family role lookup failed: %s", exc)
+        return "other"
 
 
 @app.get("/api/health/family")
