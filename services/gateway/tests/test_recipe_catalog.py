@@ -59,3 +59,36 @@ def test_a_photo_line_survives_an_edit_that_does_not_mention_it():
     body = cookbook.with_owner("Tags: #x\n\n## Steps\n1. go", "mom", ".attachments.7/photo.jpg")
     assert cookbook.recipe_image(body) == ".attachments.7/photo.jpg"
     assert "Image:" not in cookbook.without_owner(body)
+
+
+@pytest.mark.asyncio
+async def test_a_food_com_photo_comes_from_the_index_before_the_page(monkeypatch):
+    sent = []
+
+    class Resp:
+        def __init__(self, body):
+            self.body = body
+
+        async def text(self):
+            import json
+            return json.dumps(self.body)
+
+    class Client:
+        async def post(self, url, json=None, **kw):
+            sent.append(json["action"])
+            image = "https://img/7.jpg" if json["action"] == "shelf_fetch" and json["id"] == 12345 else None
+            return Resp({"status": "SUCCESS", "detail": {"recipe": {"image": image}}})
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def http():
+        yield Client()
+
+    monkeypatch.setattr(main, "shared_http_client", http)
+    caller = cookbook.Caller(user="dad", is_admin=True, house="house", house_creds={"user": "house"}, own_creds={})
+    assert await main._source_photo(caller, "https://www.food.com/recipe/white-chili-12345") == "https://img/7.jpg"
+    assert sent == ["shelf_fetch"]
+    sent.clear()
+    assert await main._source_photo(caller, "https://example.com/chili") is None
+    assert sent == ["url_import"]
