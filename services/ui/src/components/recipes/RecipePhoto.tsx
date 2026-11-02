@@ -22,19 +22,24 @@ const GRADIENTS: Record<string, string> = {
 export default function RecipePhoto({
   path,
   url,
+  file,
   meal = 'main',
   className = '',
 }: {
   /** A cookbook recipe with a kept photo. */
   path?: string | null;
+  /** Which of its photos (default: its cover); also keeps a changed cover from showing a stale copy. */
+  file?: string | null;
   /** A search result's photo on the web. */
   url?: string | null;
   meal?: string;
   className?: string;
 }) {
   useMediaToken();
-  const [failed, setFailed] = useState(false);
-  const src = failed ? null : recipePhotoUrl(path ? { path } : { url });
+  // The address that would not load; a new photo gets its own try.
+  const [failed, setFailed] = useState<string | null>(null);
+  const wanted = recipePhotoUrl(path ? { path, file } : { url });
+  const src = wanted && wanted !== failed ? wanted : null;
   if (!src) {
     return (
       <div
@@ -45,5 +50,5 @@ export default function RecipePhoto({
       </div>
     );
   }
-  return <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} className={`object-cover ${className}`} />;
+  return <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} className={`object-cover ${className}`} />;
 }

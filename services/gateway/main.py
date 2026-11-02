@@ -5633,7 +5633,7 @@ async def recipe_image(request: Request, path: str = "", url: str = "", file: st
     read = await _cookbook_run(house, {"action": "read", "storage": "nextcloud", "path": target})
     body = cookbook.strip_stored_header(read.get("message")) if read.get("status") == "SUCCESS" else ""
     # ``file`` must be a picture this recipe links; otherwise its cover.
-    link = (file if file in cookbook.attachment_links(body) else None) if file else cookbook.recipe_picture(body)
+    link = (file if file in cookbook.recipe_photos(body) or file in cookbook.attachment_links(body) else None) if file else cookbook.recipe_picture(body)
     if not link:
         raise HTTPException(status_code=404, detail="No photo")
     if link.startswith(("http://", "https://")):
@@ -5718,6 +5718,34 @@ async def _sweep_photos(caller: cookbook.Caller) -> None:
 async def cookbook_delete(request: Request):
     body = await _request_json_object(request)
     return await cookbook.delete_recipe(_cookbook_run, await _cookbook_caller(request), body.get("path"))
+
+
+@app.post("/api/recipes/cookbook/photo")
+async def cookbook_photo(request: Request):
+    """A recipe's photos: ``add`` one (``data`` as base64 with ``filename``, or
+    a web ``url``), make one the ``cover``, or ``remove`` one (by ``link``)."""
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request)
+    action = str(body.get("action") or "")
+    path = body.get("path")
+    if action == "cover":
+        return await cookbook.set_cover(_cookbook_run, caller, path, body.get("link"))
+    if action == "remove":
+        result = await cookbook.remove_photo(_cookbook_run, caller, path, body.get("link"))
+        recipe_images.forget(f"{cookbook.clean_path(path)}#{body.get('link')}")
+        return result
+    if action != "add":
+        raise HTTPException(status_code=400, detail="Unknown photo action")
+    data, filename = body.get("data"), body.get("filename")
+    if not data and body.get("url"):
+        try:
+            mime, raw = await recipe_images.fetch(str(body["url"]))
+        except (recipe_images.ImageRefused, aiohttp.ClientError, TimeoutError, ValueError):
+            return {"status": "FAILURE", "message": "That address did not give a photo.", "service": "cookbook", "detail": {}}
+        data, filename = base64.b64encode(raw).decode("ascii"), recipe_images.filename_for(str(body["url"]), mime)
+    if not data:
+        raise HTTPException(status_code=400, detail="No photo given")
+    return await cookbook.add_photo(_cookbook_run, caller, path, filename, data)
 
 
 @app.post("/api/recipes/cookbook/attach")

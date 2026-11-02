@@ -54,6 +54,7 @@ function RecipeTile({ recipe, onOpen }: { recipe: CookbookRecipe; onOpen: () => 
       <div className="relative aspect-[4/5] w-full overflow-hidden sm:aspect-[4/4.4]">
         <RecipePhoto
           path={recipe.image ? recipe.path : null}
+          file={recipe.image}
           meal={recipe.meal}
           className="h-full w-full transition-transform duration-500 group-hover:scale-105"
         />

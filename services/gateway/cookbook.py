@@ -601,3 +601,104 @@ async def set_image(run: Runner, caller: Caller, path: Any, link: str) -> dict:
         "write", title=stored_title(text) or target.rsplit("/", 1)[-1][:-3], category=COOKBOOK_DIR,
         path=target, content=with_owner(body, owner, link),
     ))
+
+
+# ── Photos ──────────────────────────────────────────────────────────────────
+# A recipe's photos are pictures kept beside its note, each linked on a line
+# of its own at the end ("![Photo by mom](.attachments.42/dinner.jpg)"). The
+# "Image:" line names the cover. Anyone in the family may add a photo of what
+# they cooked; choosing the cover and removing a photo is for whoever may
+# change the recipe.
+
+_PHOTO_LINE = re.compile(r"^!\[[^\]\n]*\]\(<?(\.attachments\.[0-9]{1,20}/[^)\s>]+)>?\)\s*$")
+
+
+def recipe_photos(body: str | None) -> list[str]:
+    """Every picture a recipe shows, cover first, once each."""
+    links = [recipe_image(body) or ""]
+    links += [m.group(1) for line in (body or "").split("\n") if (m := _PHOTO_LINE.match(line.strip()))]
+    return [link for link in dict.fromkeys(links) if link]
+
+
+async def _write_back(run: Runner, caller: Caller, target: str, text: str, body: str, image: str | None, etag: str | None) -> dict:
+    owner = recipe_owner(body, caller.house)
+    return await run(caller.house_creds, _note(
+        "write", title=stored_title(text) or target.rsplit("/", 1)[-1][:-3], category=COOKBOOK_DIR,
+        path=target, content=with_owner(body, owner, image), if_match=etag,
+    ))
+
+
+async def add_photo(run: Runner, caller: Caller, path: Any, filename: Any, data: Any) -> dict:
+    """Keep a photo with a recipe; it becomes the cover when there is none."""
+    current = await read_recipe(run, caller, path)
+    if not _succeeded(current):
+        return current
+    target = current["detail"]["path"]
+    up = await run(caller.house_creds, _note(
+        "attachment_upload", path=target, filename=filename or "photo.jpg", data=data,
+    ))
+    link = (up.get("detail") or {}).get("link") if _succeeded(up) else None
+    if not link:
+        return up if not _succeeded(up) else _fail("The photo could not be kept.")
+    text, etag, res = await _read(run, caller.house_creds, target)
+    if text is None:
+        return res
+    body = strip_stored_header(text)
+    label = f"Photo by {caller.user}".replace("]", "")
+    body = body.rstrip() + f"\n\n![{label}]({link})\n"
+    res = await _write_back(run, caller, target, text, body, recipe_image(body) or link, etag)
+    if not _succeeded(res):
+        await run(caller.house_creds, _note("attachment_delete", path=target, attachment=link))
+        return res
+    return _ok("Photo added.", link=link)
+
+
+async def set_cover(run: Runner, caller: Caller, path: Any, link: Any) -> dict:
+    """Make one of a recipe's photos its cover."""
+    current = await read_recipe(run, caller, path)
+    if not _succeeded(current):
+        return current
+    if not current["detail"]["can_change"]:
+        return _fail(f"Only {current['detail']['owner_label']} can choose this recipe's cover.", forbidden=True)
+    target = current["detail"]["path"]
+    text, etag, res = await _read(run, caller.house_creds, target)
+    if text is None:
+        return res
+    body = strip_stored_header(text)
+    if str(link or "") not in recipe_photos(body):
+        return _fail("That is not one of this recipe's photos.")
+    # A cover that is only on the "Image:" line stays among the photos.
+    old = recipe_image(body)
+    if old and old not in recipe_photos(without_owner(body)):
+        body = body.rstrip() + f"\n\n![Photo]({old})\n"
+    res = await _write_back(run, caller, target, text, body, str(link), etag)
+    return _ok("Cover chosen.", link=str(link)) if _succeeded(res) else res
+
+
+async def remove_photo(run: Runner, caller: Caller, path: Any, link: Any) -> dict:
+    """Take a photo off a recipe and delete the file kept for it."""
+    current = await read_recipe(run, caller, path)
+    if not _succeeded(current):
+        return current
+    if not current["detail"]["can_change"]:
+        return _fail(f"Only {current['detail']['owner_label']} can remove this recipe's photos.", forbidden=True)
+    target = current["detail"]["path"]
+    text, etag, res = await _read(run, caller.house_creds, target)
+    if text is None:
+        return res
+    body = strip_stored_header(text)
+    link = str(link or "")
+    if link not in recipe_photos(body):
+        return _fail("That is not one of this recipe's photos.")
+    kept = [line for line in body.split("\n") if not ((m := _PHOTO_LINE.match(line.strip())) and m.group(1) == link)]
+    body = re.sub(r"\n{3,}", "\n\n", "\n".join(kept))
+    cover = recipe_image(body)
+    if cover == link:  # the next photo, if any, takes its place
+        rest = recipe_photos(without_owner(body))
+        cover = rest[0] if rest else None
+    res = await _write_back(run, caller, target, text, body, cover, etag)
+    if not _succeeded(res):
+        return res
+    if not link.startswith(("http://", "https://")):
+        await run(caller.house_creds, _note("attachment_delete", path=target, attachment=link))
+    return _ok("Photo removed.", cover=cover)
