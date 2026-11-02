@@ -168,6 +168,32 @@ class CalibreClient:
         _cache["entries_at"] = now
         return list(entries)
 
+    async def _library(self, route: str, body: dict[str, Any], timeout: float = LIST_TIMEOUT_SECONDS) -> dict[str, Any]:
+        """One call to storage's librarian routes (``/calibre/...``)."""
+        url = f"{self._storage_endpoint()}/calibre/{route}"
+        resp = await http_client.request(
+            "POST", url, json={"library_path": await self._library_path(), **body},
+            headers=self._headers(), timeout=timeout,
+        )
+        return _decode(resp, url)
+
+    async def tags(self) -> list[dict[str, Any]]:
+        """Every tag on the shelf with how many books carry it."""
+        return list((await self._library("tags", {})).get("tags") or [])
+
+    async def books(self, *, tag: str = "", query: str = "", untagged: bool = False, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        body = await self._library("books", {"tag": tag, "q": query, "untagged": untagged, "limit": limit})
+        return list(body.get("books") or []), int(body.get("total") or 0)
+
+    async def audit(self) -> dict[str, Any]:
+        return await self._library("audit", {}, timeout=FETCH_TIMEOUT_SECONDS)
+
+    async def set_tags(self, *, book_id: int, add: list[str], remove: list[str]) -> dict[str, Any]:
+        """Add and remove tags on one book (storage writes metadata.db safely)."""
+        out = await self._library(f"books/{int(book_id)}/tags", {"add": add, "remove": remove}, timeout=FETCH_TIMEOUT_SECONDS)
+        clear_cache()
+        return out
+
     async def list_books(self, *, limit: int = 20) -> tuple[list[dict[str, Any]], int]:
         """The first ``limit`` books and how many the shelf holds in total."""
         entries = await self._entries()

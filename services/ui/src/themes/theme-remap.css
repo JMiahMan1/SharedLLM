@@ -7,6 +7,7 @@
 [data-site-theme-active] .bg-indigo-500\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/20 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
+[data-site-theme-active] .bg-indigo-500\/25 { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-500\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-600 { background-color: var(--site-accent) !important; }
@@ -14,6 +15,7 @@
 [data-site-theme-active] .bg-indigo-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-600\/40 { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-600\/80 { background-color: color-mix(in srgb, var(--site-accent) 80%, transparent) !important; }
+[data-site-theme-active] .bg-indigo-950\/10 { background-color: color-mix(in srgb, var(--site-accent) 10%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-950\/40 { background-color: color-mix(in srgb, var(--site-accent) 20%, transparent) !important; }
 [data-site-theme-active] .bg-indigo-950\/5 { background-color: color-mix(in srgb, var(--site-accent) 5%, transparent) !important; }
 [data-site-theme-active] .bg-purple-300\/60 { background-color: color-mix(in srgb, var(--site-accent) 60%, transparent) !important; }
@@ -112,6 +114,7 @@
 [data-site-theme-active] .text-indigo-100 { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .text-indigo-200 { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .text-indigo-300 { color: var(--site-accent-text) !important; }
+[data-site-theme-active] .text-indigo-300\/70 { color: color-mix(in srgb, var(--site-accent-text) 70%, transparent) !important; }
 [data-site-theme-active] .text-indigo-400 { color: var(--site-accent-text) !important; }
 [data-site-theme-active] .text-indigo-400\/50 { color: color-mix(in srgb, var(--site-accent-text) 50%, transparent) !important; }
 [data-site-theme-active] .text-indigo-400\/70 { color: color-mix(in srgb, var(--site-accent-text) 70%, transparent) !important; }

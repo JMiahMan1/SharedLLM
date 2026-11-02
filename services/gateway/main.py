@@ -9448,6 +9448,94 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
     )
     return await _proxy_json_response(resp)
 
+# --- The family library (Calibre) as a librarian sees it -------------------
+# Everyone signed in can browse; adding books and changing tags is for admins,
+# and goes through storage's calibre_writer (version-checked and backed up).
+
+
+async def _library_path() -> str:
+    path = (await fetch_global_setting("calibre_library_path")).strip()
+    if not path:
+        raise HTTPException(status_code=503, detail="No Calibre library is configured (Admin → LLM & Settings → calibre_library_path).")
+    return path
+
+
+async def _storage_library(method: str, path: str, *, json_body: dict | None = None, data=None, timeout: float = 60.0):
+    client = get_http_client()
+    async with client.request(
+        method, f"{STORAGE_SVC}{path}", json=json_body, data=data,
+        headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=timeout),
+    ) as resp:
+        try:
+            body = await resp.json(content_type=None)
+        except (aiohttp.ContentTypeError, ValueError):
+            body = {"detail": (await resp.text())[:300]}
+        if resp.status >= 400:
+            detail = body.get("detail") if isinstance(body, dict) else None
+            raise HTTPException(status_code=resp.status, detail=detail or "The library could not do that.")
+        return body
+
+
+async def _signed_in(request: Request) -> str:
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return ident["user"]
+
+
+@app.get("/api/library/books")
+async def library_books(request: Request, q: str = "", tag: str = "", author: str = "", untagged: bool = False,
+                        limit: int = 50, offset: int = 0):
+    await _signed_in(request)
+    return await _storage_library("POST", "/calibre/books", json_body={
+        "library_path": await _library_path(), "q": q[:200], "tag": tag[:100], "author": author[:200],
+        "untagged": untagged, "limit": max(1, min(limit, 500)), "offset": max(0, offset),
+    })
+
+
+@app.get("/api/library/tags")
+async def library_tags(request: Request):
+    await _signed_in(request)
+    return await _storage_library("POST", "/calibre/tags", json_body={"library_path": await _library_path()})
+
+
+@app.get("/api/library/audit")
+async def library_audit(request: Request):
+    """Copies, other editions, books with no file or no readable text, untagged books."""
+    await _signed_in(request)
+    return await _storage_library("POST", "/calibre/audit", json_body={"library_path": await _library_path()}, timeout=120.0)
+
+
+@app.post("/api/library/books/{book_id}/tags")
+async def library_book_tags(book_id: int, request: Request):
+    who = await _require_admin(request)
+    body = await _request_json_object(request)
+    add = [str(t) for t in (body.get("add") or [])][:20]
+    remove = [str(t) for t in (body.get("remove") or [])][:20]
+    log.info("[library] %s tags book %s: +%s -%s", who, book_id, add, remove)
+    return await _storage_library("POST", f"/calibre/books/{book_id}/tags", json_body={
+        "library_path": await _library_path(), "add": add, "remove": remove,
+    }, timeout=180.0)
+
+
+@app.post("/api/library/books")
+async def library_add_book(request: Request):
+    """Add a book (multipart: file, title, authors, tags, series, comments)."""
+    who = await _require_admin(request)
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        raise HTTPException(status_code=422, detail="Choose a book file to add.")
+    data = await upload.read()
+    out = aiohttp.FormData()
+    out.add_field("library_path", await _library_path())
+    for key in ("title", "authors", "tags", "series", "comments"):
+        out.add_field(key, str(form.get(key) or "")[:4000])
+    out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
+    log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
+    return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)
+
+
 #: Topics a feature may ask for (rag topics.py): a Calibre tag such as
 #: "fasting" or "jarvis:fasting", or a Nextcloud "Resources/<Topic>/" folder.
 RESOURCE_TOPIC = re.compile(r"^[a-z][a-z0-9 _-]{0,40}$")

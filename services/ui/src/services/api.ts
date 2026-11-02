@@ -181,6 +181,8 @@ import type {
   HealthFastingState,
   FastingTraditions,
   TopicResources,
+  LibraryBook,
+  LibraryAudit,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -2285,6 +2287,35 @@ export const api = {
   /** The running fast and the last week's (adults only; `allowed: false` for a minor). */
   async getHealthFasting(): Promise<HealthFastingState> {
     const resp = await apiClient.get('/api/health/fasting');
+    return resp.data;
+  },
+
+  /** The family's Calibre library: search, by tag, or untagged. */
+  async libraryBooks(params: { q?: string; tag?: string; untagged?: boolean; limit?: number; offset?: number }): Promise<{ total: number; books: LibraryBook[] }> {
+    const resp = await apiClient.get('/api/library/books', { params });
+    return resp.data;
+  },
+
+  async libraryTags(): Promise<{ tags: { name: string; books: number }[] }> {
+    const resp = await apiClient.get('/api/library/tags');
+    return resp.data;
+  },
+
+  /** Copies, other editions, books with no file or only PDF, and untagged books. */
+  async libraryAudit(): Promise<LibraryAudit> {
+    const resp = await apiClient.get('/api/library/audit', { timeout: 120_000 });
+    return resp.data;
+  },
+
+  /** Add and remove tags on one book (admins). */
+  async libraryTagBook(id: number, add: string[], remove: string[]): Promise<{ book_id: number; tags: string[] }> {
+    const resp = await apiClient.post(`/api/library/books/${id}/tags`, { add, remove }, { timeout: 180_000 });
+    return resp.data;
+  },
+
+  /** Add a book to the library (admins): the file, with title, authors, tags, series and comments. */
+  async libraryAddBook(form: FormData): Promise<{ book_id: number; title: string; tags: string[]; path: string }> {
+    const resp = await apiClient.post('/api/library/books', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600_000 });
     return resp.data;
   },
 

@@ -1108,18 +1108,26 @@ class BibleRequest(BaseRequest):
 
 
 class CalibreRequest(BaseRequest):
-    """Read-only actions over the family's Calibre library.
+    """The family's Calibre library, for Jarvis as its librarian.
 
-    The action set is a closed ``Literal`` on purpose: there is no approval
-    gate anywhere in this codebase's tool path, and a Calibre delete or
-    overwrite of ``metadata.db`` cannot be undone, so the irreversible verbs
-    are not nameable here at all. Mutating the library is done through
-    Calibre itself, which owns the database.
+    Reads: list, search, get_book, fetch_text, tags (every tag and its count),
+    by_tag (the books with one tag, or untagged ones), audit (copies, other
+    editions, books with no file or no readable text, untagged books).
+
+    One write: ``tag`` adds and removes tags on a book, for admins only. It is
+    reversible and storage backs up ``metadata.db`` first. The action set is a
+    closed ``Literal`` on purpose: there is no approval gate in this tool path,
+    and deleting a book cannot be undone, so no delete is nameable here.
+    Books are added from Knowledge → Library, which needs the file.
     """
 
     user_context: UserContext
-    action: Literal["list", "search", "get_book", "fetch_text"]
+    action: Literal["list", "search", "get_book", "fetch_text", "tags", "by_tag", "audit", "tag"]
     query: str | None = Field(None, description="Words from a title, author or tag; required for action=search")
+    tag: str | None = Field(None, description="The tag for action=by_tag (e.g. fasting); omit with untagged=true")
+    untagged: bool = Field(False, description="action=by_tag: list books with no tags at all")
+    add_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to add to book_id")
+    remove_tags: list[str] = Field(default_factory=list, max_length=20, description="action=tag: tags to remove from book_id")
     book_id: int | None = Field(None, description="Calibre book id; preferred locator for get_book and fetch_text")
     path: str | None = Field(None, description="Shelf path locator (ends in ' (<id>).txt'); alternative to book_id")
     limit: int = Field(20, ge=1, le=100, description="Max books returned by list and search")

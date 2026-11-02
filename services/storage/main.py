@@ -27,6 +27,7 @@ from services.storage.indexer import (
     is_indexer_paused,
     set_indexer_pause,
 )
+from services.storage.library_api import router as library_router
 from services.storage.models import (
     IndexScanRequest,
     ProviderFetchRequest,
@@ -72,6 +73,7 @@ app = FastAPI(title="Librarian Storage Service", lifespan=lifespan)
 
 app.include_router(info_router)
 app.include_router(artifacts_router)
+app.include_router(library_router)
 
 RAG_SVC = RAG_SVC_URL
 
