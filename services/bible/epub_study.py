@@ -89,6 +89,8 @@ class _Element:
     start: int
     paragraphs: list[str]
     parent: _Element | None = None
+    #: Only these keep their text: a study Bible runs to thousands of elements.
+    wanted: bool = False
 
     def ancestors(self) -> list[_Element]:
         out, node = [], self.parent
@@ -98,15 +100,25 @@ class _Element:
         return out
 
 
-class _Document(HTMLParser):
-    """One document as text, remembering where every element's text starts and ends.
+def _marked(ident: str) -> bool:
+    return bool(ident) and (bool(_INTRO_ID.match(ident)) or any(p.match(ident) for p, _k in _POSITIONAL))
 
-    ``spans`` holds each element of interest (an id, an ``epub:type``, a link
-    or a top-level box) with the text it encloses, split into paragraphs.
+
+def _is_note(epub_type: str) -> bool:
+    return any(word in epub_type.split() for word in ("endnote", "footnote", "rearnote"))
+
+
+class _Document(HTMLParser):
+    """One document as text: its paragraphs, its links, and the elements of interest.
+
+    ``closed`` holds only the elements this module reads (one whose id says
+    where it belongs, an EPUB3 note, and -- with ``boxes`` -- a top-level box),
+    each with the text it encloses split into paragraphs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, boxes: bool = False) -> None:
         super().__init__(convert_charrefs=True)
+        self._boxes = boxes
         self.text: list[str] = []
         self.stack: list[_Element] = []
         self.closed: list[_Element] = []
@@ -132,8 +144,20 @@ class _Document(HTMLParser):
         if tag == "a":
             self._link = []
             self._href = data.get("href", "")
+        ident = data.get("id", "")
+        if tag not in _BLOCKS and _marked(ident):
+            # An id on a link names the paragraph around it (the ESV's cross references).
+            block = next((e for e in reversed(self.stack) if e.tag in _BLOCKS), None)
+            if block is not None:
+                block.wanted = True
         if tag not in {"br", "img", "hr", "link", "meta"}:
-            self.stack.append(_Element(tag, data, len(self.text), [], self.stack[-1] if self.stack else None))
+            element = _Element(tag, data, len(self.text), [], self.stack[-1] if self.stack else None)
+            element.wanted = (
+                _marked(ident)
+                or _is_note(data.get("epub:type", ""))
+                or (self._boxes and tag == "div" and not any(e.tag == "div" for e in self.stack))
+            )
+            self.stack.append(element)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
@@ -158,8 +182,9 @@ class _Document(HTMLParser):
             if self.stack[index].tag == tag:
                 element = self.stack.pop(index)
                 del self.stack[index:]
-                self.closed.append(element)
-                element.paragraphs = _paragraphs("".join(self.text[element.start:]))
+                if element.wanted:
+                    element.paragraphs = _paragraphs("".join(self.text[element.start:]))
+                    self.closed.append(element)
                 return
 
     def handle_data(self, data: str) -> None:
@@ -192,12 +217,13 @@ def _body(paragraphs: Iterable[str]) -> str:
     return "\n\n".join(p for p in paragraphs if not _NAVIGATION.match(p))
 
 
-def _parse(markup: str) -> _Document:
-    document = _Document()
+def _parse(markup: str, *, boxes: bool = False) -> _Document:
+    document = _Document(boxes=boxes)
     document.feed(markup)
     document.close()
     while document.stack:  # unclosed elements still hold their text
         document.handle_endtag(document.stack[-1].tag)
+    document.text = []
     return document
 
 
@@ -227,7 +253,8 @@ def _target(href: str) -> str:
 
 # -- by id ---------------------------------------------------------------
 
-def _by_id(document: _Document, extras: StudyExtras, taken: set[int]) -> None:
+def _by_id(document: _Document, extras: StudyExtras) -> None:
+    taken: set[int] = set()
     for element in document.closed:
         ident = element.attrs.get("id", "")
         intro = _INTRO_ID.match(ident)
@@ -275,8 +302,7 @@ def _endnotes(document: _Document, extras: StudyExtras, chapters: dict[str, _Cha
     the chapter document the note links back to, which names its book.
     """
     for element in document.closed:
-        kind = element.attrs.get("epub:type", "")
-        if not any(word in kind.split() for word in ("endnote", "footnote", "rearnote")):
+        if not _is_note(element.attrs.get("epub:type", "")):
             continue
         text = " ".join(element.paragraphs).lstrip("*\u2020 ").strip()
         reference = _REFERENCE.match(text)
@@ -408,12 +434,22 @@ def harvest(documents: list[tuple[str, str]], *, structured: bool) -> StudyExtra
     by its numbering, where there are no ids to go by.
     """
     extras = StudyExtras()
-    parsed = {name.rsplit("/", 1)[-1]: _parse(markup) for name, markup in documents}
-    chapters = {name: c for name, d in parsed.items() if (c := _chapter_of(d)) is not None}
-    taken: set[int] = set()
-    for document in parsed.values():
-        _by_id(document, extras, taken)
+    kept: dict[str, _Document] = {}
+    chapters: dict[str, _Chapter] = {}
+    # One document at a time: a study Bible is tens of megabytes of markup,
+    # so only what a later step needs is held on to.
+    for name, markup in documents:
+        key = name.rsplit("/", 1)[-1]
+        document = _parse(markup, boxes=structured)
+        if (where := _chapter_of(document)) is not None:
+            chapters[key] = where
+        _by_id(document, extras)
+        if structured or any(_is_note(e.attrs.get("epub:type", "")) for e in document.closed):
+            if not structured:
+                document.paragraphs = []
+            kept[key] = document
+    for document in kept.values():
         _endnotes(document, extras, chapters)
     if structured:
-        _structured(list(parsed), parsed, chapters, extras)
+        _structured(list(kept), kept, chapters, extras)
     return extras
