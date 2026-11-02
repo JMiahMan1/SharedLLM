@@ -42,6 +42,8 @@
 [data-site-theme-active] .bg-violet-400\/15 { background-color: color-mix(in srgb, var(--site-accent) 15%, transparent) !important; }
 [data-site-theme-active] .bg-violet-400\/25 { background-color: color-mix(in srgb, var(--site-accent) 25%, transparent) !important; }
 [data-site-theme-active] .bg-violet-600\/30 { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
+[data-site-theme-active] .border-indigo-400 { border-color: var(--site-accent) !important; }
+[data-site-theme-active] .border-indigo-400\/40 { border-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .border-indigo-400\/60 { border-color: color-mix(in srgb, var(--site-accent) 60%, transparent) !important; }
 [data-site-theme-active] .border-indigo-500 { border-color: var(--site-accent) !important; }
 [data-site-theme-active] .border-indigo-500\/10 { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
@@ -96,6 +98,7 @@
 [data-site-theme-active] .hover\:bg-purple-500\/40:hover { background-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
 [data-site-theme-active] .hover\:bg-purple-600:hover { background-color: var(--site-accent) !important; }
 [data-site-theme-active] .hover\:bg-purple-600\/30:hover { background-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
+[data-site-theme-active] .hover\:border-indigo-400\/70:hover { border-color: color-mix(in srgb, var(--site-accent) 70%, transparent) !important; }
 [data-site-theme-active] .hover\:border-indigo-500\/30:hover { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-indigo-500\/50:hover { border-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }
 [data-site-theme-active] .hover\:border-purple-400\/40:hover { border-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }

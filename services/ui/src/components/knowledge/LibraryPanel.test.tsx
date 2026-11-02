@@ -104,6 +104,19 @@ describe('LibraryPanel', () => {
     expect(sent.get('cover_url')).toBe('https://books.google.com/cover.jpg');
   });
 
+  it('shows the chosen file, and takes one dropped on it', async () => {
+    vi.mocked(api.libraryInspectBook).mockResolvedValue({
+      title: 'Great Lent', authors: [], comments: '', publisher: '', published: '', isbn: '', language: '', series: '',
+      subjects: [], cover_url: '', cover_preview: '', tags: [], sources: { title: 'the file name' },
+    });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    expect(screen.getByTestId('library-dropzone')).toHaveTextContent('Choose a book file, or drop it here');
+    fireEvent.drop(screen.getByTestId('library-dropzone'), { dataTransfer: { files: [new File(['x'], 'Great Lent.epub')] } });
+    expect(await screen.findByTestId('library-chosen-file')).toHaveTextContent('Great Lent.epub');
+    await waitFor(() => expect(api.libraryInspectBook).toHaveBeenCalled());
+  });
+
   it('adds by hand when auto-fill is off', async () => {
     vi.mocked(api.libraryAddBook).mockResolvedValue({ book_id: 13, title: 'Notes', tags: [], path: 'x' });
     renderPanel(true);
