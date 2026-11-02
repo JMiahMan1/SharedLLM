@@ -2848,6 +2848,8 @@ export interface BiblePreferences {
   reminder_time?: string;
   read_aloud_voice: string;
   split_view: 'compare' | 'parallel';
+  /** How a chapter is set: running on in paragraphs, or one verse to a line. */
+  layout?: 'flow' | 'verses';
   /** Imported devotional (e.g. "book:2") whose reading leads Today; empty picks the built-in sources. */
   devotional_work?: string;
 }

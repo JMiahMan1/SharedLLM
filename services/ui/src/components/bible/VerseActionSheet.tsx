@@ -56,8 +56,10 @@ const COLORS: Array<{ id: string; label: string; className: string }> = [
   { id: 'purple', label: 'Purple', className: 'bg-purple-400' },
 ];
 
+// Actions are tiles in a grid, like the Bible App's row of verse actions: an
+// icon over a short label, every one a thumb-sized target.
 const ACTION_CLASS =
-  'w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left text-sm min-h-11 pointer-coarse:min-h-11 hover:bg-white/5 transition-colors';
+  'flex min-h-[4.5rem] w-full flex-col items-center justify-center gap-1.5 rounded-2xl px-1.5 py-2 text-center text-[11px] leading-tight text-slate-200 hover:bg-white/[0.07] transition-colors [&>span]:flex-none [&>span]:line-clamp-2';
 
 /**
  * What you can do to a verse, as a bottom sheet on a phone and a centred dialog
@@ -240,24 +242,28 @@ export default function VerseActionSheet({
     });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={`Actions for ${verse.reference}`}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label={`Actions for ${verse.reference}`}>
+      {/* A light scrim, as on Bible.com: the chosen verse stays readable above the panel. */}
       <button
         type="button"
         aria-label="Close verse actions"
         onClick={onClose}
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/25"
         data-testid="bible-sheet-scrim"
       />
       <div
-        className="relative w-full sm:max-w-md bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
+        className="relative w-full sm:mb-6 sm:max-w-xl bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[min(80dvh,40rem)] overflow-y-auto overscroll-contain"
         data-testid="bible-verse-sheet"
       >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" aria-hidden />
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-amber-300" data-testid="bible-sheet-ref">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Currently selected</p>
+            <p className="text-sm font-semibold text-slate-100" data-testid="bible-sheet-ref">
               {verse.reference}
+              {version ? <span className="ml-1.5 text-xs font-normal text-slate-400">{version.toUpperCase()}</span> : null}
             </p>
-            <p className="text-xs text-slate-400 mt-1 line-clamp-3">{verse.text}</p>
+            <p className="text-xs text-slate-400 mt-1 line-clamp-2">{verse.text}</p>
           </div>
           <button
             type="button"
@@ -269,34 +275,44 @@ export default function VerseActionSheet({
           </button>
         </div>
 
-        <div className="space-y-1">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onToggleMark('highlight', color)}
-            className={ACTION_CLASS}
-            data-testid="bible-action-highlight"
-          >
-            {highlight ? <BookmarkCheck size={16} className="text-amber-300" /> : <Highlighter size={16} className="text-amber-300" />}
-            <span className="flex-1">{highlight ? 'Remove highlight' : 'Highlight'}</span>
-          </button>
-
-          <div className="flex items-center gap-2 px-3 py-1" data-testid="bible-mark-colors">
-            {COLORS.map((c) => (
+        {/* One tap on a colour highlights in it (or recolours); the current
+            colour again, or the first tile, takes the highlight off. */}
+        <div className="mb-2 flex items-center gap-1 overflow-x-auto rounded-2xl bg-white/[0.04] px-2" data-testid="bible-mark-colors">
+          <span className="mr-1 flex shrink-0 items-center gap-1.5 text-xs text-slate-300">
+            <Highlighter size={14} className="text-amber-300" aria-hidden /> Highlight
+          </span>
+          {COLORS.map((c) => {
+            const on = highlight ? highlight.color === c.id : color === c.id;
+            return (
               <button
                 key={c.id}
                 type="button"
-                onClick={() => setColor(c.id)}
-                aria-label={c.label}
-                aria-pressed={color === c.id}
-                className={`min-h-11 min-w-11 rounded-full flex items-center justify-center ${
-                  color === c.id ? 'ring-2 ring-white/70' : 'opacity-60'
-                }`}
+                disabled={busy}
+                onClick={() => {
+                  setColor(c.id);
+                  onToggleMark('highlight', c.id);
+                }}
+                aria-label={highlight?.color === c.id ? `Remove the ${c.label.toLowerCase()} highlight` : `Highlight ${c.label.toLowerCase()}`}
+                aria-pressed={on}
+                className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full"
               >
-                <span className={`w-5 h-5 rounded-full ${c.className}`} />
+                <span className={`h-7 w-7 rounded-full ${c.className} ${on && highlight ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-950' : ''}`} />
               </button>
-            ))}
-          </div>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-4 gap-1 sm:grid-cols-5">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onToggleMark('highlight', highlight ? highlight.color : color)}
+            className={ACTION_CLASS}
+            data-testid="bible-action-highlight"
+          >
+            {highlight ? <BookmarkCheck size={18} className="text-amber-300" /> : <Highlighter size={18} className="text-amber-300" />}
+            <span>{highlight ? 'Remove highlight' : 'Highlight'}</span>
+          </button>
 
           <button
             type="button"
@@ -305,8 +321,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-bookmark"
           >
-            <Bookmark size={16} className={bookmark ? 'text-purple-300' : 'text-slate-400'} />
-            <span className="flex-1">{bookmark ? 'Remove bookmark' : 'Bookmark'}</span>
+            <Bookmark size={18} className={bookmark ? 'text-purple-300' : 'text-slate-400'} />
+            <span>{bookmark ? 'Remove bookmark' : 'Bookmark'}</span>
           </button>
 
           <button
@@ -316,8 +332,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-study"
           >
-            <BookMarked size={16} className="text-amber-300" />
-            <span className="flex-1">Study notes</span>
+            <BookMarked size={18} className="text-amber-300" />
+            <span>Study notes</span>
           </button>
 
           <button
@@ -330,8 +346,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-ask"
           >
-            <Sparkles size={16} className="text-sky-300" />
-            <span className="flex-1">Ask about this verse</span>
+            <Sparkles size={18} className="text-sky-300" />
+            <span>Ask about this verse</span>
           </button>
 
           <button
@@ -341,8 +357,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-memorize"
           >
-            <Brain size={16} className="text-fuchsia-300" />
-            <span className="flex-1">Memorise this verse</span>
+            <Brain size={18} className="text-fuchsia-300" />
+            <span>Memorise this verse</span>
           </button>
 
           <button
@@ -352,8 +368,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-note"
           >
-            <NotebookPen size={16} className="text-slate-400" />
-            <span className="flex-1">Save to Notes</span>
+            <NotebookPen size={18} className="text-slate-400" />
+            <span>Save to Notes</span>
           </button>
 
           {noteMark && (
@@ -364,8 +380,8 @@ export default function VerseActionSheet({
               className={ACTION_CLASS}
               data-testid="bible-action-open-note"
             >
-              <NotebookPen size={16} className="text-sky-300" />
-              <span className="flex-1">Open your note</span>
+              <NotebookPen size={18} className="text-sky-300" />
+              <span>Open your note</span>
             </button>
           )}
 
@@ -376,8 +392,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-copy"
           >
-            <Link2 size={16} className="text-slate-400" />
-            <span className="flex-1">Copy</span>
+            <Link2 size={18} className="text-slate-400" />
+            <span>Copy</span>
           </button>
 
           <button
@@ -387,8 +403,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-share"
           >
-            <Share2 size={16} className="text-slate-400" />
-            <span className="flex-1">Share</span>
+            <Share2 size={18} className="text-slate-400" />
+            <span>Share</span>
           </button>
 
           <button
@@ -398,8 +414,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-share-chat"
           >
-            <MessageCircle size={16} className="text-sky-300" />
-            <span className="flex-1">Share to Family chat</span>
+            <MessageCircle size={18} className="text-sky-300" />
+            <span>Share to Family chat</span>
           </button>
 
           <button
@@ -409,8 +425,8 @@ export default function VerseActionSheet({
             className={ACTION_CLASS}
             data-testid="bible-action-share-image"
           >
-            <ImageIcon size={16} className="text-slate-400" />
-            <span className="flex-1">Share as image</span>
+            <ImageIcon size={18} className="text-slate-400" />
+            <span>Share as image</span>
           </button>
 
           {blbVerse.data ? (
@@ -422,13 +438,13 @@ export default function VerseActionSheet({
               className={ACTION_CLASS}
               data-testid="bible-action-blb"
             >
-              <ExternalLink size={16} className="text-slate-400" />
-              <span className="flex-1">Open on Blue Letter Bible</span>
+              <ExternalLink size={18} className="text-slate-400" />
+              <span>Open on Blue Letter Bible</span>
             </a>
           ) : (
             <button type="button" onClick={() => setStatus(linkError(blbVerse))} className={`${ACTION_CLASS} opacity-60`} data-testid="bible-action-blb">
-              <ExternalLink size={16} className="text-slate-400" />
-              <span className="flex-1">Open on Blue Letter Bible</span>
+              <ExternalLink size={18} className="text-slate-400" />
+              <span>Open on Blue Letter Bible</span>
             </button>
           )}
 
@@ -439,8 +455,8 @@ export default function VerseActionSheet({
               className={ACTION_CLASS}
               data-testid="bible-action-interlinear"
             >
-              <ScrollText size={16} className="text-amber-300" />
-              <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
+              <ScrollText size={18} className="text-amber-300" />
+              <span>Interlinear (Greek &amp; Hebrew)</span>
             </button>
           ) : blbInterlinear.data && !interlinear.isLoading ? (
             <a
@@ -451,8 +467,8 @@ export default function VerseActionSheet({
               className={ACTION_CLASS}
               data-testid="bible-action-interlinear"
             >
-              <ScrollText size={16} className="text-slate-400" />
-              <span className="flex-1">Interlinear on Blue Letter Bible</span>
+              <ScrollText size={18} className="text-slate-400" />
+              <span>Interlinear on Blue Letter Bible</span>
             </a>
           ) : (
             <button
@@ -461,8 +477,8 @@ export default function VerseActionSheet({
               className={`${ACTION_CLASS} opacity-60`}
               data-testid="bible-action-interlinear"
             >
-              <ScrollText size={16} className="text-slate-400" />
-              <span className="flex-1">Interlinear (Greek &amp; Hebrew)</span>
+              <ScrollText size={18} className="text-slate-400" />
+              <span>Interlinear (Greek &amp; Hebrew)</span>
             </button>
           )}
         </div>

@@ -194,6 +194,9 @@ class UserBibleState(SQLModel, table=True):
     reminder_time: str = Field(default="")
     read_aloud_voice: str = Field(default="")
     split_view: str = Field(default="compare")
+    #: How a chapter is set: "flow" (verses run on in paragraphs, as a printed
+    #: Bible) or "verses" (one verse to a line).
+    layout: str = Field(default="flow")
     #: Imported devotional whose daily reading leads the Today tab; blank
     #: uses the built-in devotional sources.
     devotional_work: str = Field(default="")

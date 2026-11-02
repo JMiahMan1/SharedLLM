@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { BookMarked, BookOpen, Brain, Gamepad2, Maximize2, Search, Sparkles, Trophy, X } from 'lucide-react';
+import { BookMarked, BookOpen, Brain, ChevronLeft, ChevronRight, Gamepad2, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import type {
@@ -60,6 +60,7 @@ const DEFAULT_PREFERENCES: BiblePreferences = {
   reminder_time: '',
   read_aloud_voice: '',
   split_view: 'compare',
+  layout: 'flow',
 };
 
 
@@ -117,6 +118,7 @@ function BibleReaderPane({
   const [activeVerse, setActiveVerse] = useState<BibleVerse | null>(null);
   const [speakingVerses, setSpeakingVerses] = useState<{ start: number; end: number } | null>(null);
   const [focusing, setFocusing] = useState(false);
+  const [listening, setListening] = useState(false);
   // A new requested passage (a link, a search hit, a cross-reference, a turned
   // page) replaces the search and fills the passage box. Adjusted during render
   // rather than by remounting the pane, so Focus mode and the rest of the
@@ -284,11 +286,32 @@ function BibleReaderPane({
   // Swiping the page turns it: left for the next chapter, right for the last.
   const swipe = useSwipe(() => step(1), () => step(-1));
 
+  // The arrow keys turn the page on a keyboard, as they do on Bible.com,
+  // unless the reader is typing or a panel is open.
+  const stepRef = useRef(step);
+  useEffect(() => {
+    stepRef.current = step;
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]'))) return;
+      if (event.key === 'ArrowRight') stepRef.current(1);
+      else if (event.key === 'ArrowLeft') stepRef.current(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const toggleMark = async (kind: 'highlight' | 'bookmark', color: string) => {
     if (!activeVerse) return;
     const ref = activeVerse.reference;
     const existing = marksOnVerse(marks, activeVerse).find((m) => m.kind === kind);
-    if (existing && existing.verse_end === existing.verse_start) {
+    // A highlight in another colour is recoloured (the server keeps one mark
+    // per verse and kind); the same colour again, or a bookmark, comes off.
+    const recolour = kind === 'highlight' && existing && existing.color !== color;
+    if (existing && existing.verse_end === existing.verse_start && !recolour) {
       await api.deleteBibleMark(existing.id);
     } else {
       await api.putBibleMark({ ref, kind, color, version_code: version });
@@ -300,7 +323,7 @@ function BibleReaderPane({
 
   return (
     <>
-      <div className="glass-panel p-4 rounded-2xl border border-white/10">
+      <div className="sticky top-2 z-30 rounded-full border border-white/10 bg-slate-950/80 px-1.5 py-1 shadow-lg backdrop-blur-xl">
         <ReferenceBar
           books={books}
           versions={versions}
@@ -312,9 +335,24 @@ function BibleReaderPane({
           onSubmit={submit}
           onPosition={applyPosition}
           onPreferences={onPreferences}
-          onStep={step}
+          onFocus={() => setFocusing(true)}
+          listening={listening}
+          onListen={() => setListening((on) => !on)}
         />
       </div>
+      {passage?.reference && !searching ? (
+        // Kept mounted while hidden, so closing the player never cuts off the voice.
+        <div className={listening ? '' : 'hidden'} data-testid="bible-listen-panel">
+          <BibleReadAloud
+            reference={passage.reference}
+            version={version}
+            voice={preferences.read_aloud_voice}
+            onVoiceChange={(read_aloud_voice) => onPreferences({ read_aloud_voice })}
+            text={passage.verses.map((verse) => verse.text).join(' ')}
+            onVersesChange={setSpeakingVerses}
+          />
+        </div>
+      ) : null}
 
       {searching ? (
         <section className="glass-panel rounded-2xl p-4 border border-white/10" data-testid="bible-search-results">
@@ -371,35 +409,28 @@ function BibleReaderPane({
       ) : (
         <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
           <section
-            className="rounded-2xl p-4 sm:p-6 border border-[var(--page-rule)] shadow-lg"
+            className="rounded-3xl px-4 pb-10 pt-8 sm:px-10 sm:pt-12 shadow-lg"
             style={pageStyle(preferences.page)}
             data-testid="bible-page-surface"
             data-page={toneOf(preferences.page)}
             {...swipe}
           >
-            <div className="flex items-baseline justify-between gap-3 mb-3">
-              <h2 className="font-serif text-xl text-[var(--page-ink)] truncate" data-testid="bible-chapter-heading">
+            <header className="mb-6 text-center sm:mb-8">
+              <h2
+                className={`text-[1.75rem] font-bold leading-tight text-[var(--page-ink)] sm:text-4xl ${preferences.theme === 'sans' ? 'font-sans' : 'font-serif'}`}
+                data-testid="bible-chapter-heading"
+              >
                 {shownChapter ? `${shownChapter.book_name} ${shownChapter.chapter_start}` : 'Reading'}
               </h2>
-              <div className="flex items-center gap-2 shrink-0">
+              <p className="mt-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--page-muted)]">
+                {passage?.version}
                 {passage?.offline && (
-                  <span className="text-[11px] text-[var(--page-muted)]" data-testid="bible-offline-copy" title="The server could not be reached; this is the copy saved on this device.">
-                    Offline copy
+                  <span data-testid="bible-offline-copy" title="The server could not be reached; this is the copy saved on this device.">
+                    {' '}· Offline copy
                   </span>
                 )}
-                <span className="text-[11px] text-[var(--page-muted)] tabular-nums">{passage?.version}</span>
-                <button
-                  type="button"
-                  onClick={() => setFocusing(true)}
-                  aria-label="Read this chapter without the controls"
-                  data-testid="bible-focus-open"
-                  className="min-h-11 pointer-coarse:min-h-11 px-2 rounded-xl border border-[var(--page-rule)] text-[11px] text-[var(--page-muted)] hover:bg-[var(--page-hover)] flex items-center gap-1.5"
-                >
-                  <Maximize2 size={13} />
-                  Focus
-                </button>
-              </div>
-            </div>
+              </p>
+            </header>
             {compareFailure && !parallel && (
               <div
                 className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-[var(--page-muted)]"
@@ -444,6 +475,9 @@ function BibleReaderPane({
                     error={error instanceof Error ? error.message : null}
                     onVerseTap={setActiveVerse}
                     onRetry={() => void refetch()}
+                    // Two panes line up verse by verse, so each keeps one verse to a line.
+                    layout="verses"
+                    selectedKey={activeVerse ? `${activeVerse.chapter}:${activeVerse.verse}` : null}
                   />
                 )}
               </ParallelReader>
@@ -462,8 +496,38 @@ function BibleReaderPane({
                 error={error instanceof Error ? error.message : null}
                 onVerseTap={setActiveVerse}
                 onRetry={() => void refetch()}
+                layout={preferences.layout ?? 'flow'}
+                selectedKey={activeVerse ? `${activeVerse.chapter}:${activeVerse.verse}` : null}
               />
             )}
+            {/* The page turns from round arrows at the foot of the text, as on
+                Bible.com; they stay in reach while reading (above the phone's
+                own navigation bar) and never cover the words at the end. */}
+            <nav
+              aria-label="Chapters"
+              className="pointer-events-none sticky bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-20 -mx-2 mt-8 flex justify-between sm:-mx-4 md:bottom-6"
+            >
+              {/* Small and see-through on a phone, flush with the page edges,
+                  so they never sit on the words. */}
+              <button
+                type="button"
+                onClick={() => step(-1)}
+                aria-label="Previous chapter"
+                data-testid="bible-prev-chapter"
+                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[var(--page-rule)] bg-[var(--page-paper)]/80 text-[var(--page-ink)] opacity-80 shadow-md backdrop-blur hover:opacity-100 sm:h-12 sm:w-12 sm:opacity-100"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                type="button"
+                onClick={() => step(1)}
+                aria-label="Next chapter"
+                data-testid="bible-next-chapter"
+                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[var(--page-rule)] bg-[var(--page-paper)]/80 text-[var(--page-ink)] opacity-80 shadow-md backdrop-blur hover:opacity-100 sm:h-12 sm:w-12 sm:opacity-100"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </nav>
           </section>
           {notesAlongside && (
             <div className="mt-4 lg:mt-0">
@@ -481,16 +545,6 @@ function BibleReaderPane({
         </div>
       )}
 
-      {passage?.reference && !searching ? (
-        <BibleReadAloud
-          reference={passage.reference}
-          version={version}
-          voice={preferences.read_aloud_voice}
-          onVoiceChange={(read_aloud_voice) => onPreferences({ read_aloud_voice })}
-          text={passage.verses.map((verse) => verse.text).join(' ')}
-          onVersesChange={setSpeakingVerses}
-        />
-      ) : null}
 
 
       {focusing && (
@@ -658,16 +712,21 @@ export default function Bible() {
   const refreshMarks = () => queryClient.invalidateQueries({ queryKey: ['bible-marks'] });
 
   return (
-    <div className="space-y-4 sm:space-y-5 max-w-4xl mx-auto pb-28 px-1 sm:px-0" data-testid="bible-page">
-      <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-100">Bible</h1>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Read, mark and remember
-          {version ? ` (${version.toUpperCase()})` : ' (no translation loaded yet)'}.
-        </p>
-        {/* Five tabs share a phone's width while they fit; with large system text
-            the row scrolls rather than letting labels run into each other. */}
-        <div className="mt-3 sm:mt-4 -mx-1 px-1 flex gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="group" aria-label="Bible sections">
+    <div className="mx-auto max-w-4xl space-y-4 px-1 pb-28 sm:space-y-5 sm:px-0" data-testid="bible-page">
+      {/* A slim section bar in the Bible App's manner: the reader is the page,
+          and the sections sit above it as tabs rather than a header card. The
+          row scrolls sideways on a narrow screen instead of wrapping or running
+          off the edge. */}
+      <header className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-4">
+        <h1 className="shrink-0 text-lg font-bold text-slate-100 sm:text-xl">
+          Bible
+          <span className="sr-only">
+            {version ? ` (${version.toUpperCase()})` : ' (no translation loaded yet)'}
+          </span>
+        </h1>
+        {/* Six sections always in view: equal columns with the icon over the
+            label on a phone or tablet, a row of pills on a wide screen. */}
+        <nav className="grid grid-cols-6 gap-1 lg:flex lg:flex-1" role="group" aria-label="Bible sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -677,13 +736,16 @@ export default function Bible() {
                 setTab(id);
               }}
               data-testid={`bible-tab-${id}`}
-              className={`glass-button flex-1 sm:flex-none shrink-0 min-w-[4.5rem] whitespace-nowrap flex-col sm:flex-row gap-0.5 sm:gap-2 px-1.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm min-h-12 sm:min-h-11 pointer-coarse:min-h-12 justify-center ${tab === id ? 'text-purple-200 border-purple-400/50' : 'text-slate-300'}`}
+              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-0.5 text-[10px] leading-tight min-[380px]:text-[11px] transition-colors sm:text-xs lg:min-h-11 lg:flex-row lg:gap-1.5 lg:rounded-full lg:px-3.5 lg:text-sm ${
+                tab === id ? 'bg-slate-100 font-semibold text-slate-900' : 'text-slate-300 hover:bg-white/10 hover:text-white'
+              }`}
             >
-              <Icon size={15} /> {label}
+              <Icon size={16} aria-hidden className="shrink-0" />
+              <span className="max-w-full truncate">{label}</span>
             </button>
           ))}
-        </div>
-      </div>
+        </nav>
+      </header>
 
       {tab === 'read' && (
         loadError ? (

@@ -227,6 +227,11 @@ const MARKS = (): { marks: BibleMark[] } => ({
   ],
 });
 
+/** The reader's header opens its controls in panels: the passage, the version, compare. */
+const openPanel = async (testId: 'bible-browse-open' | 'bible-version-open' | 'bible-compare-open' | 'bible-display-toggle') => {
+  fireEvent.click(await screen.findByTestId(testId));
+};
+
 const renderPage = (entry = '/bible') => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -387,6 +392,7 @@ describe('Bible page', () => {
     renderPage();
 
     await screen.findByTestId('bible-chapter-heading');
+    await openPanel('bible-browse-open');
     fireEvent.change(screen.getByTestId('bible-ref-input'), { target: { value: 'shepherd' } });
     fireEvent.click(screen.getByTestId('bible-ref-go'));
 
@@ -398,6 +404,7 @@ describe('Bible page', () => {
     renderPage();
 
     await screen.findByTestId('bible-chapter-heading');
+    await openPanel('bible-browse-open');
     fireEvent.change(screen.getByTestId('bible-ref-input'), { target: { value: 'a' } });
     fireEvent.click(screen.getByTestId('bible-ref-go'));
 
@@ -543,6 +550,7 @@ describe('Bible page', () => {
 
     renderPage('/bible?ref=John%203');
 
+    await openPanel('bible-version-open');
     const select = (await screen.findByTestId('bible-version-select')) as HTMLSelectElement;
     const labels = Array.from(select.options).map((o) => o.textContent);
     expect(labels.some((l) => l?.includes('English Standard Version'))).toBe(true);
@@ -667,6 +675,7 @@ describe('Bible page', () => {
     );
     mocked.getBibleStudyNotes.mockClear();
 
+    await openPanel('bible-browse-open');
     fireEvent.change(screen.getByTestId('bible-ref-input'), { target: { value: 'shepherd' } });
     fireEvent.click(screen.getByTestId('bible-ref-go'));
 
@@ -745,6 +754,7 @@ describe('Bible page', () => {
 
     it('offers both study Bibles over the same translation, with how much each carries', async () => {
       renderPage();
+      await openPanel('bible-version-open');
       const picker = (await screen.findByTestId('bible-edition-select')) as HTMLSelectElement;
       expect(picker.value).toBe('nkjv-macarthur');
       const options = Array.from(picker.options).map((o) => o.textContent);
@@ -756,6 +766,7 @@ describe('Bible page', () => {
 
     it('remembers a study Bible change so the next device opens the same one', async () => {
       renderPage();
+      await openPanel('bible-version-open');
       fireEvent.change(await screen.findByTestId('bible-edition-select'), {
         target: { value: 'nkjv' },
       });
@@ -772,6 +783,7 @@ describe('Bible page', () => {
 
     it('marks the translation in hand as a favourite', async () => {
       renderPage();
+      await openPanel('bible-version-open');
       const toggle = await screen.findByTestId('bible-favorite-toggle');
       expect(toggle).toHaveAttribute('aria-pressed', 'false');
       const shown = (await screen.findByTestId('bible-version-select')) as HTMLSelectElement;
@@ -787,6 +799,7 @@ describe('Bible page', () => {
         STATE({ preferences: { ...STATE().preferences, default_version: 'kjv', favorite_version: 'asv' } }),
       );
       renderPage();
+      await openPanel('bible-version-open');
       const toggle = await screen.findByTestId('bible-favorite-toggle');
       expect(toggle).toHaveAttribute('aria-pressed', 'false');
       fireEvent.click(await screen.findByTestId('bible-favorite-switch'));
@@ -799,6 +812,7 @@ describe('Bible page', () => {
         STATE({ preferences: { ...STATE().preferences, default_version: shown, favorite_version: shown } }),
       );
       renderPage();
+      await openPanel('bible-version-open');
       const toggle = await screen.findByTestId('bible-favorite-toggle');
       await waitFor(() => expect(toggle).toHaveAttribute('aria-pressed', 'true'));
       await waitFor(() =>
@@ -875,6 +889,7 @@ describe('comparing two translations', () => {
   const openCompare = async () => {
     renderPage();
     await screen.findByTestId('bible-chapter-heading');
+    await openPanel('bible-compare-open');
     const toggle = await screen.findByTestId('bible-compare-toggle');
     fireEvent.click(toggle);
     return toggle;
@@ -927,6 +942,7 @@ describe('comparing two translations', () => {
     );
     renderPage();
 
+    await openPanel('bible-compare-open');
     const toggle = await screen.findByTestId('bible-compare-toggle');
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
@@ -943,6 +959,7 @@ describe('comparing two translations', () => {
     );
     renderPage();
 
+    await openPanel('bible-compare-open');
     const panes = await screen.findByTestId('bible-split-view-parallel');
     expect(screen.getByTestId('bible-split-view-compare')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(panes);
