@@ -11,6 +11,7 @@ import { mediaKeys } from '../api/keys';
 import { useLivePosition } from '../engine/useLivePosition';
 import { isLiveItem } from '../store/ingest';
 import { useMediaStore } from '../store/mediaStore';
+import { shownPlayer } from '../store/selectors';
 import { useMediaScreen } from '../pages/MediaScreen';
 
 const TRANSPORT = ['play', 'resume', 'pause', 'next', 'previous', 'stop'];
@@ -25,13 +26,15 @@ export function ActiveOutputCard() {
   const { player, playback, devices } = useMediaScreen();
   const target = useMediaStore((s) => s.activeOutputId);
   const remote = useMediaStore((s) => (target ? s.players[target] ?? null : null));
+  // What it is playing: its own track, or the one on the device it plays through.
+  const shown = useMediaStore((s) => shownPlayer(s.players, target));
   const playingInOtherTab = useMediaStore((s) => s.playingInOtherTab);
-  const remotePosition = useLivePosition(remote);
+  const remotePosition = useLivePosition(shown && remote ? { ...shown, status: remote.status } : remote);
   const isWeb = !target;
   const device = devices.find((d) => d.id === target);
 
   // Music Assistant knows the real title and the favourite flag for its items.
-  const activeUri = isWeb ? player.mediaUri : remote?.item?.uri || null;
+  const activeUri = isWeb ? player.mediaUri : shown?.item?.uri || null;
   const maItemUri = activeUri && activeUri.includes('://') ? activeUri : null;
   const { data: detail } = useQuery({
     queryKey: mediaKeys.detail(maItemUri ?? ''),
@@ -71,14 +74,14 @@ export function ActiveOutputCard() {
         trackKey: player.mediaUri || player.mediaTitle || '',
       }
     : {
-        title: detail?.name && maItemUri === remote?.item?.uri ? detail.name : remote?.item?.title,
-        artist: [remote?.item?.artist, remote?.item?.album].filter(Boolean).join(' · '),
-        coverUrl: proxiedImage(remote?.item?.image, imageWidth(80)),
+        title: detail?.name && maItemUri === shown?.item?.uri ? detail.name : shown?.item?.title,
+        artist: [shown?.item?.artist, shown?.item?.album].filter(Boolean).join(' · '),
+        coverUrl: proxiedImage(shown?.item?.image, imageWidth(80)),
         state: remote?.status === 'buffering' ? 'playing' : remote?.status ?? 'idle',
         position: remotePosition,
-        duration: remote?.item?.durationSec ?? 0,
-        isLive: Boolean(remote?.item?.isLive),
-        trackKey: remote?.item?.uri || remote?.item?.title || '',
+        duration: shown?.item?.durationSec ?? 0,
+        isLive: Boolean(shown?.item?.isLive),
+        trackKey: shown?.item?.uri || shown?.item?.title || '',
       };
 
   const status = 'text-sm text-center text-[var(--site-text-muted)]';

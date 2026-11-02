@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useOptionalWebPlayer } from '../../../context/webPlayerContext';
 import { useMediaStore } from '../store/mediaStore';
+import { shownPlayer } from '../store/selectors';
 
 /**
  * The polite live region that tells a screen reader what started playing
@@ -15,10 +16,11 @@ export function NowPlayingAnnouncer() {
   const player = useOptionalWebPlayer();
   const activeId = useMediaStore((s) => s.activeOutputId);
   const remote = useMediaStore((s) => (activeId ? s.players[activeId] ?? null : null));
+  const shown = useMediaStore((s) => shownPlayer(s.players, activeId));
 
   const isWeb = !activeId;
-  const title = (isWeb ? player?.mediaTitle : remote?.item?.title) ?? null;
-  const uri = (isWeb ? player?.mediaUri : remote?.item?.uri) ?? null;
+  const title = (isWeb ? player?.mediaTitle : shown?.item?.title) ?? null;
+  const uri = (isWeb ? player?.mediaUri : shown?.item?.uri) ?? null;
   const status = isWeb
     ? (player?.mediaTitle ? (player.isPlaying ? 'playing' : 'paused') : 'idle')
     : remote?.status ?? 'idle';
