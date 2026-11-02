@@ -204,3 +204,19 @@ def test_a_shared_fast_asks_for_prayer_with_a_verse_to_open(client, sent):
     assert notice["data"]["url"].startswith("/bible?ref=")
     assert notice["actions"][0]["label"].startswith("Read ")
     assert "for michele]" in notice["body"]
+
+
+def test_a_running_fasts_start_can_be_corrected_and_its_end_moves_with_it(client):
+    started = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+    body = client.post("/fasting/start", json={"started_at": started, "target_hours": 36}).json()
+    fixed = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    after = client.patch("/fasting/active", json={"started_at": fixed}).json()
+    assert 59 <= after["elapsed_minutes"] <= 61
+    assert after["started_at"] == datetime.fromisoformat(fixed).isoformat()
+    # The fast keeps its length: the planned end moved with the start.
+    length = lambda f: datetime.fromisoformat(f["ends_at"]) - datetime.fromisoformat(f["started_at"])  # noqa: E731
+    assert length(after) == length(body) == timedelta(hours=36)
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    assert client.patch("/fasting/active", json={"started_at": future}).status_code == 422
+    client.post("/fasting/stop", json={})
+    assert client.patch("/fasting/active", json={"started_at": fixed}).status_code == 404

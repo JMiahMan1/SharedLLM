@@ -2359,6 +2359,12 @@ export const api = {
     return resp.data;
   },
 
+  /** Correct when the running fast began (a planned end moves with it). */
+  async adjustHealthFast(startedAt: string): Promise<HealthFast> {
+    const resp = await apiClient.patch('/api/health/fasting/active', { started_at: startedAt });
+    return resp.data;
+  },
+
   async stopHealthFast(body: { ended_at?: string } = {}): Promise<HealthFast> {
     const resp = await apiClient.post('/api/health/fasting/stop', body);
     return resp.data;

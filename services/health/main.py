@@ -2654,6 +2654,11 @@ class FastStopIn(BaseModel):
     ended_at: str | None = None
 
 
+class FastAdjustIn(BaseModel):
+    #: When the running fast really began.
+    started_at: str
+
+
 def _fast_out(row: FastingSession, now: datetime) -> dict:
     started = datetime.fromisoformat(row.started_at)
     until = datetime.fromisoformat(row.ended_at) if row.ended_at else now
@@ -2743,6 +2748,30 @@ def start_fast(body: FastStartIn, request: Request, background: BackgroundTasks,
     session.refresh(row)
     if row.notify_shared:
         background.add_task(fasting_notices.shared_started, _fast_out(row, now), user, _fasting_viewers(session, user))
+    return _fast_out(row, now)
+
+
+@app.patch("/fasting/active")
+def adjust_fast(body: FastAdjustIn, request: Request, session: Session = Depends(get_session)):
+    """Correct when the running fast began; a planned end moves with it."""
+    user = _user(request)
+    _refuse_minor_fasting(session, user)
+    row = _active_fast(session, user)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No fast is running")
+    now = datetime.now(UTC)
+    started_at = datetime.fromisoformat(_instant(body.started_at, field="started_at"))
+    if started_at > now:
+        raise HTTPException(status_code=422, detail="started_at cannot be in the future")
+    if now - started_at > timedelta(hours=fasting.MAX_FAST_HOURS):
+        raise HTTPException(status_code=422, detail=f"A fast cannot have started more than {fasting.MAX_FAST_HOURS} hours ago")
+    shift = started_at - datetime.fromisoformat(row.started_at)
+    row.started_at = started_at.isoformat()
+    if row.ends_at:
+        row.ends_at = (datetime.fromisoformat(row.ends_at) + shift).isoformat()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
     return _fast_out(row, now)
 
 
