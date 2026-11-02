@@ -299,9 +299,28 @@ def occurrences(pages: list[str], entries: dict[str, Entry] | None = None) -> li
             prefix, last = ("G", 5624) if book in new_testament else ("H", 8674)
             for number in re.split(r"\s*\+\s*", match["numbers"]):
                 value = _count(number.split(".")[0])
-                if 1 <= value <= last and (entries is None or _renders(entries.get(f"{prefix}{value}"), word)):
+                if entries is not None:
+                    value = _corrected(entries, prefix, value, last, word)
+                if value and 1 <= value <= last:
                     found.append(Occurrence(f"{prefix}{value}", book, chapter, verse, word, match["context"]))
     return found
+
+
+def _corrected(entries: dict[str, Entry], prefix: str, value: int, last: int, word: str) -> int | None:
+    """The number as printed when the dictionary agrees with the headword, else
+    the one entry a single misread digit away that does ("WORLD ... 2880" is
+    2889, kosmos), else nothing."""
+    if 1 <= value <= last and _renders(entries.get(f"{prefix}{value}"), word):
+        return value
+    digits = str(value)
+    candidates = {
+        int(digits[:i] + d + digits[i + 1 :])
+        for i in range(len(digits))
+        for d in "0123456789"
+        if d != digits[i] and not (i == 0 and d == "0")
+    }
+    agreeing = [n for n in candidates if 1 <= n <= last and _renders(entries.get(f"{prefix}{n}"), word)]
+    return agreeing[0] if len(agreeing) == 1 else None
 
 
 # -- installing and reading ----------------------------------------------------
@@ -352,7 +371,7 @@ def install(session, pages: list[str], *, source: str) -> dict:
     """Replace the installed concordance with the one these pages hold."""
     from sqlalchemy import delete, insert
 
-    from services.bible.models import ConcordanceLine, LexiconEntry
+    from services.bible.models import ConcordanceGuess, ConcordanceLine, LexiconEntry
 
     if not looks_like_concordance(pages):
         raise ValueError(
@@ -362,6 +381,7 @@ def install(session, pages: list[str], *, source: str) -> dict:
     found = occurrences(pages, entries)
     session.exec(delete(ConcordanceLine))
     session.exec(delete(LexiconEntry))
+    session.exec(delete(ConcordanceGuess))
     rows = [
         {
             **{k: v for k, v in entry.as_dict().items() if k in {"strongs", "transliteration", "part_of_speech", "gk", "definition", "usage_total"}},
@@ -379,6 +399,9 @@ def install(session, pages: list[str], *, source: str) -> dict:
     ]
     for start in range(0, len(lines), 5000):
         session.execute(insert(ConcordanceLine), lines[start : start + 5000])
+    guesses = _guesses(entries)
+    if guesses:
+        session.execute(insert(ConcordanceGuess), guesses)
     session.commit()
     return {
         "entries": len(rows),
@@ -386,6 +409,90 @@ def install(session, pages: list[str], *, source: str) -> dict:
         "greek": sum(1 for r in rows if r["strongs"][0] == "G"),
         "occurrences": len(lines),
     }
+
+
+#: How sure the concordance has to be before a word's number is inferred.
+_GUESS_SHARE = 0.9
+_GUESS_SAMPLES = 5
+
+
+def _guesses(entries: dict[str, Entry]) -> list[dict]:
+    """From the dictionaries' KJV translation counts, which are complete: the
+    word "everlasting" in the New Testament is G166 25 times of 26."""
+    from collections import Counter, defaultdict
+
+    seen: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    for entry in entries.values():
+        for rendering, count in entry.usage:
+            word = rendering.lower().strip("*").replace("\u2019", "'")
+            if count and re.fullmatch(r"[a-z][a-z'\-]*", word):
+                seen[(word, entry.strongs[0])][entry.strongs] += count
+    rows = []
+    for (word, letter), counts in seen.items():
+        strongs, top = counts.most_common(1)[0]
+        total = sum(counts.values())
+        if total >= _GUESS_SAMPLES and top / total >= _GUESS_SHARE:
+            rows.append({"word": word, "testament": "NT" if letter == "G" else "OT", "strongs": strongs,
+                         "share": round(top / total, 3), "samples": total})
+    return rows
+
+
+_TOKEN = re.compile(r"[A-Za-z][A-Za-z'\u2019\-]*|[^A-Za-z]+")
+
+
+def verse_tokens(session, osis: str, chapter: int, verse: int) -> dict:
+    """The KJV verse word for word, as Blue Letter Bible sets it: each word
+    with the Strong's number the concordance prints for it in this verse, or
+    -- marked ``inferred`` -- the one that word nearly always carries."""
+    from sqlmodel import select
+
+    from services.bible.books import BOOKS
+    from services.bible.models import BibleVerse, ConcordanceGuess, ConcordanceLine, LexiconEntry
+
+    row = session.exec(
+        select(BibleVerse).where(BibleVerse.version_code == "kjv", BibleVerse.osis == osis,
+                                 BibleVerse.chapter == chapter, BibleVerse.verse == verse)
+    ).first()
+    if row is None:
+        return {"version": None, "tokens": []}
+    testament = "NT" if osis in {b["osis"] for b in BOOKS[39:]} else "OT"
+    printed: dict[str, list[str]] = {}
+    for line in session.exec(
+        select(ConcordanceLine).where(ConcordanceLine.osis == osis, ConcordanceLine.chapter == chapter,
+                                      ConcordanceLine.verse == verse)
+    ).all():
+        printed.setdefault(line.word.lower(), []).append(line.strongs)
+    words = [t for t in _TOKEN.findall(row.text)]
+    lowered = {t.lower().replace("\u2019", "'") for t in words if t[0].isalpha()}
+    guesses = {
+        g.word: g.strongs
+        for g in session.exec(
+            select(ConcordanceGuess).where(ConcordanceGuess.testament == testament, ConcordanceGuess.word.in_(lowered))
+        ).all()
+    } if lowered else {}
+    tokens: list[dict] = []
+    for text in words:
+        if not text[0].isalpha():
+            tokens.append({"text": text})
+            continue
+        key = text.lower().replace("\u2019", "'")
+        if printed.get(key):
+            tokens.append({"text": text, "strongs": printed[key].pop(0), "inferred": False})
+        elif key in guesses:
+            tokens.append({"text": text, "strongs": guesses[key], "inferred": True})
+        else:
+            tokens.append({"text": text})
+    keys = {t["strongs"] for t in tokens if t.get("strongs")}
+    entries = {e.strongs: e for e in session.exec(select(LexiconEntry).where(LexiconEntry.strongs.in_(keys))).all()} if keys else {}
+    for token in tokens:
+        found = entries.get(token.get("strongs", ""))
+        if token.get("strongs") and found is None:
+            token.pop("strongs")
+            token.pop("inferred", None)
+        elif found is not None:
+            token["transliteration"] = found.transliteration
+            token["definition"] = found.definition
+    return {"version": "kjv", "tokens": tokens}
 
 
 def status(session) -> dict:

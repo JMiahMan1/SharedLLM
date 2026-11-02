@@ -15,6 +15,7 @@ const apiMock = vi.hoisted(() => ({
   getBibleInterlinear: vi.fn(),
   getBibleLexiconStatus: vi.fn(),
   getBibleLexiconVerse: vi.fn(),
+  getBibleLexiconEntry: vi.fn(),
   recordBibleEvent: vi.fn(),
   getTalkConversations: vi.fn(),
   sendTalkMessage: vi.fn(),
@@ -135,5 +136,28 @@ describe('Word study', () => {
     renderSheet();
     await waitFor(() => expect(apiMock.getBibleLexiconStatus).toHaveBeenCalled());
     expect(screen.queryByTestId('bible-action-word-study')).toBeNull();
+  });
+
+  it('opens the verse word for word, each numbered word a tap from its entry, with every action still below', async () => {
+    apiMock.getBibleInterlinear.mockResolvedValue({ ref: 'John 3:16', available: false, attribution: null, verses: [] });
+    apiMock.getBibleLexiconStatus.mockResolvedValue({ installed: true, entries: 14000, occurrences: 200000, source: 's' });
+    apiMock.getBibleLexiconVerse.mockResolvedValue({
+      reference: 'John 3:16', source: 'concordance', words: [], text_version: 'kjv',
+      tokens: [
+        { text: 'For' }, { text: ' ' }, { text: 'God', strongs: 'G2316', inferred: false }, { text: ' so ' },
+        { text: 'loved', strongs: 'G25', inferred: true }, { text: ' ' }, { text: 'world', strongs: 'G2889', inferred: false }, { text: ',' },
+      ],
+    });
+    apiMock.getBibleLexiconEntry.mockRejectedValue(new Error('not needed'));
+    renderSheet();
+    const view = await screen.findByTestId('bible-word-for-word');
+    expect(view).toHaveTextContent('≈G25');
+    expect(screen.getByRole('button', { name: "world, Strong's G2889" })).toHaveTextContent('world,');
+    for (const action of ['highlight', 'bookmark', 'study', 'ask', 'memorize', 'copy', 'share', 'blb', 'interlinear', 'word-study']) {
+      expect(screen.getByTestId(`bible-action-${action}`)).toBeInTheDocument();
+    }
+    await userEvent.click(screen.getByRole('button', { name: "loved, Strong's G25 (inferred)" }));
+    expect(await screen.findByTestId('bible-word-study')).toBeInTheDocument();
+    expect(apiMock.getBibleLexiconEntry).toHaveBeenCalledWith('G25', 0, 50);
   });
 });
