@@ -1,16 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Camera, Download, Link2, Loader2, Pencil, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils } from 'lucide-react';
+import { BookOpen, CalendarDays, Camera, Check, Download, Inbox, Link2, Loader2, Pencil, Plus, Save, Search, Send, Share2, ShoppingCart, Shuffle, Trash2, Users, Utensils, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import { saveNote } from '../lib/noteSave';
 import { noteBody } from '../lib/notesMeta';
 import { errorText } from '../lib/errorText';
 import { blobToBase64 } from '../lib/base64';
 import { downloadBlobUrl } from '../lib/artifactKinds';
 import { appendAttachment, attachmentMarkdown } from '../lib/noteAttachments';
 import { isKidMode } from '../lib/healthSwitches';
-import type { ExecutionResponse, RecipeEstimate } from '../types/api';
+import type { CookbookSuggestion, ExecutionResponse, RecipeEstimate } from '../types/api';
 import SendAsSelector from '../components/chat/SendAsSelector';
 import { useSendAsPref } from '../components/chat/sendAsPref';
 import ShareToChatSheet from '../components/bible/ShareToChatSheet';
@@ -37,7 +36,6 @@ import {
 } from '../lib/mealPlan';
 
 export const RECIPES_DIR = 'Recipes';
-const STORAGE = 'nextcloud';
 // The model sometimes flags a word with where it was ("simmer (line 8)"); that
 // note is not part of the reading, so a fix replaces just the word itself.
 const LINE_NOTE = /\s*[([]\s*line\s*\d+[^)\]]*[)\]]\s*$|\s*[---]\s*line\s*\d+\s*$/i;
@@ -57,6 +55,13 @@ interface ShareRequest {
   buildMessage: (note: string) => string;
 }
 
+/** Who added the open recipe, and whether the caller may change it. */
+interface RecipeAccess {
+  ownerLabel: string;
+  canChange: boolean;
+  etag?: string;
+}
+
 /** A recipe on its way to Health: the note body carries its nutrition. */
 interface LogRequest {
   title: string;
@@ -74,17 +79,28 @@ function notesOf(response: ExecutionResponse | undefined): RecipeSummary[] {
   return (detail?.notes ?? []).filter((note) => !NOT_RECIPES.has((note.path ?? '').replace(/^\/+/, '')));
 }
 
+/** One cookbook recipe by path, or by title when only the plan names it. */
+function readRecipe(title: string, path?: string): Promise<ExecutionResponse> {
+  return api.cookbookRead(path ? { path } : { title });
+}
+
 /**
- * Family recipes, stored as markdown in Nextcloud under `Recipes/`.
+ * The family cookbook, stored as markdown in the household account's
+ * `Recipes/` folder in Nextcloud.
  *
- * The same notes storage the rest of the house uses means one backup, one sync
- * and one mobile app. Because notes resolve to the caller's own account, an
- * admin can switch to the Admin identity with the shared "Send as" control to
- * keep one house cookbook, and every other member keeps their own.
+ * Everyone reads every recipe. Only whoever added a recipe changes or deletes
+ * it (one the Admin account added, any admin); anyone else suggests a change,
+ * which waits for the owner or an admin to approve. The week plan and shopping
+ * list stay each person's own (the "Send as" switch picks the Admin account's).
  */
 export default function Recipes() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<RecipeSummary | null>(null);
+  const [access, setAccess] = useState<RecipeAccess | null>(null);
+  const [suggestNote, setSuggestNote] = useState('');
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [resolving, setResolving] = useState<string | null>(null);
+  const [adopting, setAdopting] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
@@ -152,9 +168,28 @@ export default function Recipes() {
     error: recipesErrorObj,
     refetch: refetchRecipes,
   } = useQuery({
-    queryKey: ['recipes', asUser ?? 'me'],
-    queryFn: () => api.listNotes({ storage: STORAGE, directories: [RECIPES_DIR], as_user: asUser }),
+    queryKey: ['recipes'],
+    queryFn: () => api.cookbookList(),
   });
+
+  // Changes waiting on the caller (to approve) or from them (still pending).
+  const suggestionsQuery = useQuery({
+    queryKey: ['recipe-suggestions'],
+    queryFn: () => api.cookbookSuggestions(),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const suggestions: CookbookSuggestion[] = suggestionsQuery.data ?? [];
+  const toReview = suggestions.filter((suggestion) => suggestion.can_review).length;
+
+  // Recipes still in the caller's own folder from before the cookbook.
+  const personalQuery = useQuery({
+    queryKey: ['recipe-personal'],
+    queryFn: () => api.cookbookPersonal(),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const personal = personalQuery.data ?? [];
 
   const recipes = notesOf(data);
 
@@ -162,8 +197,8 @@ export default function Recipes() {
   // already imported is marked instead of offered again. Read when the import
   // panel opens (and refreshed after a save), not on every keystroke.
   const sourcesQuery = useQuery({
-    queryKey: ['recipe-sources', asUser ?? 'me'],
-    queryFn: () => api.recipeSources(asUser),
+    queryKey: ['recipe-sources'],
+    queryFn: () => api.recipeSources(),
     enabled: importOpen,
     staleTime: 30_000,
     retry: false,
@@ -173,8 +208,8 @@ export default function Recipes() {
   // Phase 6: rank the shelf by how many household staples each recipe uses.
   // Read only when the person asks for it (it reads every recipe note).
   const staplesQuery = useQuery({
-    queryKey: ['recipe-staples', asUser ?? 'me'],
-    queryFn: () => api.recipeStaples(asUser),
+    queryKey: ['recipe-staples'],
+    queryFn: () => api.recipeStaples(),
     enabled: rankByStaples,
     staleTime: 60_000,
     retry: false,
@@ -208,13 +243,18 @@ export default function Recipes() {
   const openPathRef = useRef<string | null>(null);
 
   const read = useMutation({
-    mutationFn: (recipe: RecipeSummary) => api.readNote(recipe.title, STORAGE, recipe.path, asUser),
+    mutationFn: (recipe: RecipeSummary) => readRecipe(recipe.title, recipe.path),
     onSuccess: (res: ExecutionResponse, recipe: RecipeSummary) => {
       if (openPathRef.current !== recipe.path) return;
-      // note_read returns the whole file; the editor shows the recipe without
-      // the stored header, or every save would stack another copy of it.
+      // The cookbook returns the recipe without its stored header or owner line.
       if (res.status === 'SUCCESS') {
+        const detail = (res.detail ?? {}) as { owner_label?: string; can_change?: boolean; etag?: string | null };
         setBody(noteBody(res.message ?? ''));
+        setAccess({
+          ownerLabel: detail.owner_label ?? '',
+          canChange: Boolean(detail.can_change),
+          etag: detail.etag ?? undefined,
+        });
         setEstimate(null);
       } else {
         // Nothing from the previous recipe may stay in the editor: saving it
@@ -234,6 +274,8 @@ export default function Recipes() {
   const openRecipe = (recipe: RecipeSummary) => {
     openPathRef.current = recipe.path;
     setSelected(recipe);
+    setAccess(null);
+    setSuggestNote('');
     setTitle(recipe.title);
     // Cleared before the read, so the editor never shows the previous body
     // under the new recipe's name while the request is in flight.
@@ -245,6 +287,8 @@ export default function Recipes() {
   const startNew = () => {
     openPathRef.current = null;
     setSelected(null);
+    setAccess(null);
+    setSuggestNote('');
     setTitle('');
     setBody('');
     setEstimate(null);
@@ -258,21 +302,35 @@ export default function Recipes() {
     }
     setSaving(true);
     try {
+      // Someone else's recipe: the change waits for its owner or an admin.
+      if (selected && access && !access.canChange) {
+        const sent = await api.cookbookSuggest({ path: selected.path, content: body, message: suggestNote.trim() });
+        if (sent.status === 'SUCCESS') {
+          toast.success(sent.message || 'Change suggested');
+          setSuggestNote('');
+          queryClient.invalidateQueries({ queryKey: ['recipe-suggestions'] });
+        } else {
+          toast.error(sent.message || 'Could not send the suggestion');
+        }
+        return;
+      }
       // Editing an open recipe saves over it (or renames it); otherwise it is new.
-      const saved = await saveNote({
+      const saved = await api.cookbookSave({
         title: name,
         content: body,
-        category: RECIPES_DIR,
-        previous: selected ? { title: selected.title, category: RECIPES_DIR, path: selected.path } : undefined,
-        asUser,
+        path: selected?.path,
+        if_match: selected ? access?.etag : undefined,
+        as_user: selected ? undefined : asUser,
       });
-      if (saved.response.status === 'SUCCESS') {
+      if (saved.status === 'SUCCESS') {
         toast.success('Recipe saved');
-        if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
+        if ((saved.detail as { left_old_copy?: boolean } | undefined)?.left_old_copy) {
+          toast.error('Saved under the new name, but the old copy is still there');
+        }
         startNew();
         queryClient.invalidateQueries({ queryKey: ['recipes'] });
       } else {
-        toast.error(saved.response.message || 'Could not save the recipe');
+        toast.error(saved.message || 'Could not save the recipe');
       }
     } catch {
       toast.error('Could not save the recipe');
@@ -285,7 +343,7 @@ export default function Recipes() {
     if (!(await confirmDialog({ title: 'Delete this recipe?', body: `Delete the recipe "${recipe.title}"?`, confirmLabel: 'Delete', danger: true }))) return;
     setDeletingPath(recipe.path);
     try {
-      const res = await api.deleteNote(recipe.title, STORAGE, recipe.path, asUser);
+      const res = await api.cookbookDelete(recipe.path);
       if (res.status === 'SUCCESS') {
         toast.success('Recipe removed');
         if (selected?.path === recipe.path) startNew();
@@ -303,7 +361,7 @@ export default function Recipes() {
   const openShare = async (recipe: RecipeSummary) => {
     setSharePath(recipe.path);
     try {
-      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      const res = await readRecipe(recipe.title, recipe.path);
       if (res.status === 'SUCCESS' && res.message) {
         const recipeBody = noteBody(res.message);
         setShare({
@@ -323,10 +381,46 @@ export default function Recipes() {
     }
   };
 
+  const resolveSuggestion = async (suggestion: CookbookSuggestion, decision: 'approve' | 'reject' | 'withdraw') => {
+    setResolving(suggestion.path);
+    try {
+      const res = await api.cookbookResolve(suggestion.path, decision);
+      if (res.status === 'SUCCESS') {
+        toast.success(res.message || 'Done');
+        queryClient.invalidateQueries({ queryKey: ['recipe-suggestions'] });
+        if (decision === 'approve') {
+          queryClient.invalidateQueries({ queryKey: ['recipes'] });
+          if (selected?.path === suggestion.recipe) openRecipe(selected);
+        }
+      } else {
+        toast.error(res.message || 'Could not do that');
+      }
+    } catch {
+      toast.error('Could not do that');
+    } finally {
+      setResolving(null);
+    }
+  };
+
+  const adoptPersonal = async () => {
+    setAdopting(true);
+    try {
+      const res = await api.cookbookAdopt();
+      if (res.status === 'SUCCESS') toast.success(res.message || 'Moved into the family cookbook');
+      else toast.error(res.message || 'Could not move your recipes');
+      queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      queryClient.invalidateQueries({ queryKey: ['recipe-personal'] });
+    } catch {
+      toast.error('Could not move your recipes');
+    } finally {
+      setAdopting(false);
+    }
+  };
+
   const teachJarvis = async () => {
     setTeaching(true);
     try {
-      const res = await api.syncNotesRag({ directories: [RECIPES_DIR] });
+      const res = await api.syncNotesRag({ cookbook: true });
       if (res.status === 'SUCCESS') toast.success('Jarvis is learning the recipes');
       else toast.error(res.message || 'Could not sync the recipes');
     } catch {
@@ -375,7 +469,7 @@ export default function Recipes() {
     // One attempt per title; the level chip is optional, never the point.
     setPlanLevels((current) => ({ ...current, [recipeTitle]: '' }));
     try {
-      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      const res = await readRecipe(recipe.title, recipe.path);
       if (res.status === 'SUCCESS') {
         const level = planLevel(res.message ?? '');
         if (level) setPlanLevels((current) => ({ ...current, [recipeTitle]: level }));
@@ -432,10 +526,11 @@ export default function Recipes() {
   // Today's planned dinner goes to Health from the note itself, so the
   // values are the ones the recipe states, not the editor's draft.
   const logPlannedDinner = async (recipeTitle: string) => {
-    const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path ?? `${RECIPES_DIR}/${recipeTitle}.md`;
+    const known = recipes.find((recipe) => recipe.title === recipeTitle)?.path;
     setLoggingPlanned(true);
     try {
-      const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
+      const res = await readRecipe(recipeTitle, known);
+      const path = known ?? String((res.detail as { path?: string } | undefined)?.path ?? '');
       if (res.status === 'SUCCESS') setLogRequest({ title: recipeTitle, path, body: noteBody(res.message ?? ''), planDay: planDayOf() });
       else toast.error(res.message || 'Could not read that recipe');
     } catch {
@@ -503,8 +598,8 @@ export default function Recipes() {
     try {
       const ingredients: string[] = [];
       for (const recipeTitle of planned) {
-        const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path ?? `${RECIPES_DIR}/${recipeTitle}.md`;
-        const res = await api.readNote(recipeTitle, STORAGE, path, asUser);
+        const path = recipes.find((recipe) => recipe.title === recipeTitle)?.path;
+        const res = await readRecipe(recipeTitle, path);
         if (res.status === 'SUCCESS') ingredients.push(...ingredientLines(noteBody(res.message ?? '')));
       }
       const existing = await readShoppingList(asUser);
@@ -551,7 +646,7 @@ export default function Recipes() {
     if (skylightUnavailable()) return;
     setSkylightBusy(recipe.path);
     try {
-      const res = await api.readNote(recipe.title, STORAGE, recipe.path, asUser);
+      const res = await readRecipe(recipe.title, recipe.path);
       if (res.status !== 'SUCCESS') {
         toast.error(res.message || 'Could not read that recipe');
         return;
@@ -577,8 +672,8 @@ export default function Recipes() {
     try {
       const payload: Array<{ date: string; title: string; body: string }> = [];
       for (const entry of days) {
-        const path = recipes.find((recipe) => recipe.title === entry.title)?.path ?? `${RECIPES_DIR}/${entry.title}.md`;
-        const res = await api.readNote(entry.title, STORAGE, path, asUser);
+        const path = recipes.find((recipe) => recipe.title === entry.title)?.path;
+        const res = await readRecipe(entry.title, path);
         payload.push({
           date: entry.date,
           title: entry.title,
@@ -717,12 +812,10 @@ export default function Recipes() {
   const attachPhoto = async (title: string, path: string, body: string, etag?: string) => {
     if (!photoFile) return;
     try {
-      const res = await api.noteAttachment({
-        action: 'upload',
+      const res = await api.cookbookAttach({
         path,
         filename: photoFile.name || 'recipe-photo.jpg',
         data: await blobToBase64(photoFile),
-        as_user: asUser,
       });
       const link = res.detail?.link;
       if (res.status !== 'SUCCESS' || typeof link !== 'string') {
@@ -730,13 +823,11 @@ export default function Recipes() {
         return;
       }
       const name = typeof res.detail?.name === 'string' ? res.detail.name : photoFile.name || 'recipe-photo.jpg';
-      await saveNote({
+      await api.cookbookSave({
         title,
         content: appendAttachment(body, attachmentMarkdown(link, name, photoFile.type)),
-        category: RECIPES_DIR,
-        previous: { title, category: RECIPES_DIR, path },
-        asUser,
-        ifMatch: etag,
+        path,
+        if_match: etag,
       });
     } catch {
       toast.error('Saved, but the photo could not be kept with it');
@@ -758,18 +849,14 @@ export default function Recipes() {
       const labels = imported.source_kind === 'photo' ? [PHOTO_LABEL] : [];
       const content =
         imported.source_kind === 'photo' && photoDraft ? photoDraft : buildRecipeNote(imported, labels);
-      const saved = await saveNote({
-        title: imported.title,
-        content,
-        category: RECIPES_DIR,
-        asUser,
-      });
-      if (saved.response.status !== 'SUCCESS') {
-        toast.error(saved.response.message || 'Could not save the recipe');
+      const saved = await api.cookbookSave({ title: imported.title, content, as_user: asUser });
+      if (saved.status !== 'SUCCESS') {
+        toast.error(saved.message || 'Could not save the recipe');
         return;
       }
-      if (imported.source_kind === 'photo' && saved.path) {
-        await attachPhoto(imported.title, saved.path, content, saved.etag);
+      const savedDetail = (saved.detail ?? {}) as { path?: string; etag?: string | null };
+      if (imported.source_kind === 'photo' && savedDetail.path) {
+        await attachPhoto(imported.title, savedDetail.path, content, savedDetail.etag ?? undefined);
       }
       toast.success('Recipe saved');
       queryClient.invalidateQueries({ queryKey: ['recipes'] });
@@ -827,6 +914,7 @@ export default function Recipes() {
     }
   };
 
+  const suggesting = Boolean(selected && access && !access.canChange);
   const today = planDayOf();
   const plannedTitles = PLAN_DAYS.map((day) => plan[day].title).filter(Boolean) as string[];
   const repeated = Array.from(
@@ -875,17 +963,31 @@ export default function Recipes() {
       <div className="glass-panel p-4 rounded-2xl border border-white/5 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <BookOpen size={16} className="text-orange-300" />
-          <span className="text-sm font-semibold text-slate-200">Family recipes</span>
-          {asUser === 'admin' && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
-              <Users size={11} /> shared cookbook
-            </span>
-          )}
+          <span className="text-sm font-semibold text-slate-200">Family cookbook</span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
+            <Users size={11} /> shared
+          </span>
         </div>
         <p className="text-xs text-slate-400">
-          Saved in Nextcloud under <code className="text-slate-300">{RECIPES_DIR}/</code>: yours, or the house account
-          when an admin switches.
+          Everyone can read every recipe. Only the person who added a recipe can change it (an admin, for recipes added
+          as Admin); anyone else can suggest a change for them to approve.
         </p>
+        {personal.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 py-2" data-testid="recipe-personal">
+            <span className="text-xs text-sky-100">
+              {personal.length} of your recipe{personal.length === 1 ? ' is' : 's are'} still only in your own folder.
+            </span>
+            <button
+              type="button"
+              onClick={() => void adoptPersonal()}
+              disabled={adopting}
+              className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+            >
+              {adopting ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />}
+              Add them to the family cookbook
+            </button>
+          </div>
+        )}
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
@@ -928,6 +1030,17 @@ export default function Recipes() {
           >
             <Utensils size={14} /> {rankByStaples ? 'Ranked by staples' : 'Rank by staples'}
           </button>
+          {suggestions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSuggestionsOpen((open) => !open)}
+              aria-pressed={suggestionsOpen}
+              data-testid="recipe-suggestions-toggle"
+              className={`glass-button min-h-11 px-3 text-xs ${toReview > 0 ? 'ring-1 ring-amber-400/60' : ''}`}
+            >
+              <Inbox size={14} /> Suggested changes ({toReview > 0 ? `${toReview} to review` : suggestions.length})
+            </button>
+          )}
           {isAdmin && <SendAsSelector value={sendAs} onChange={(next) => { startNew(); setSendAs(next); }} />}
         </div>
         {skylightOff && (
@@ -936,6 +1049,66 @@ export default function Recipes() {
           </p>
         )}
       </div>
+
+      {suggestionsOpen && suggestions.length > 0 && (
+        <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-suggestions">
+          <span className="text-sm font-semibold text-slate-200">Suggested changes</span>
+          {suggestions.map((suggestion) => (
+            <div key={suggestion.path} className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+              <p className="text-xs text-slate-300">
+                <span className="font-semibold text-slate-100">{suggestion.recipe_title || suggestion.recipe}</span>
+                {' · '}
+                {suggestion.mine ? `you suggested this; waiting for ${suggestion.owner_label}` : `from ${suggestion.by}`}
+              </p>
+              {suggestion.message && <p className="text-xs italic text-slate-400">“{suggestion.message}”</p>}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <details className="rounded-lg border border-white/10 p-2" open={!suggestion.current}>
+                  <summary className="cursor-pointer text-[11px] text-slate-400">Now</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-400">
+                    {suggestion.current ?? 'This recipe has since been deleted.'}
+                  </pre>
+                </details>
+                <details className="rounded-lg border border-emerald-400/30 p-2" open>
+                  <summary className="cursor-pointer text-[11px] text-emerald-200">Suggested</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-200">{suggestion.content}</pre>
+                </details>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {suggestion.can_review && suggestion.current !== null && (
+                  <button
+                    type="button"
+                    onClick={() => void resolveSuggestion(suggestion, 'approve')}
+                    disabled={resolving === suggestion.path}
+                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                  >
+                    <Check size={14} /> Approve
+                  </button>
+                )}
+                {suggestion.can_review && (
+                  <button
+                    type="button"
+                    onClick={() => void resolveSuggestion(suggestion, 'reject')}
+                    disabled={resolving === suggestion.path}
+                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                  >
+                    <X size={14} /> Turn down
+                  </button>
+                )}
+                {suggestion.mine && !suggestion.can_review && (
+                  <button
+                    type="button"
+                    onClick={() => void resolveSuggestion(suggestion, 'withdraw')}
+                    disabled={resolving === suggestion.path}
+                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                  >
+                    <X size={14} /> Withdraw
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {importOpen && (
         <div className="glass-panel space-y-3 rounded-2xl border border-white/5 p-4" data-testid="recipe-import">
@@ -1438,19 +1611,6 @@ export default function Recipes() {
                   <Share2 size={14} />
                 )}
               </button>
-              <button
-                type="button"
-                aria-label={`Delete ${recipe.title}`}
-                onClick={() => void remove(recipe)}
-                disabled={deletingPath === recipe.path}
-                className="glass-button flex h-11 w-11 shrink-0 items-center justify-center p-0 disabled:opacity-60"
-              >
-                {deletingPath === recipe.path ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Trash2 size={14} />
-                )}
-              </button>
             </div>
           ))}
         </div>
@@ -1501,6 +1661,18 @@ export default function Recipes() {
                 >
                   <Utensils size={14} /> Log to Health
                 </button>
+                {access?.canChange && (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${selected.title}`}
+                    onClick={() => void remove(selected)}
+                    disabled={deletingPath === selected.path}
+                    className="glass-button min-h-11 px-3 text-xs disabled:opacity-60"
+                  >
+                    {deletingPath === selected.path ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    Delete
+                  </button>
+                )}
                 <button type="button" onClick={startNew} className="glass-button min-h-11 px-3 text-xs">
                   <Plus size={14} /> New recipe
                 </button>
@@ -1515,6 +1687,12 @@ export default function Recipes() {
             aria-label="Recipe name"
             className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
           />
+          {selected && access ? (
+            <p className="text-[11px] text-slate-400" data-testid="recipe-owner">
+              Added by {access.canChange && access.ownerLabel !== 'an admin' ? 'you' : access.ownerLabel}
+              {access.canChange ? '' : ` · only ${access.ownerLabel} can change it, so your edits are sent as a suggestion`}
+            </p>
+          ) : null}
           {nutrition.status === 'ok' ? (
             <p className="text-[11px] text-slate-400" data-testid="recipe-nutrition">
               Per serving{nutrition.perServing.source ? ` (${nutrition.perServing.source})` : ''}:{' '}
@@ -1591,14 +1769,32 @@ export default function Recipes() {
             rows={10}
             className="glass-input w-full resize-y px-3 py-2 text-base sm:text-sm"
           />
+          {suggesting && (
+            <input
+              value={suggestNote}
+              onChange={(event) => setSuggestNote(event.target.value)}
+              placeholder="Why the change? (optional)"
+              aria-label="Note for the recipe's owner"
+              maxLength={500}
+              className="glass-input min-h-11 w-full px-3 py-2 text-base sm:text-sm"
+            />
+          )}
           <button
             type="button"
             onClick={() => void save()}
             disabled={saving || read.isPending}
             className="glass-button min-h-11 px-3 py-2 text-sm disabled:opacity-60"
           >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : selected ? <Save size={14} /> : <Plus size={14} />}
-            {selected ? 'Save changes' : 'Save recipe'}
+            {saving ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : suggesting ? (
+              <Send size={14} />
+            ) : selected ? (
+              <Save size={14} />
+            ) : (
+              <Plus size={14} />
+            )}
+            {suggesting ? 'Suggest this change' : selected ? 'Save changes' : 'Save recipe'}
           </button>
         </div>
       </div>

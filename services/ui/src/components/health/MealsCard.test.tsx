@@ -13,6 +13,7 @@ vi.mock('../../services/api', async (importOriginal) => {
     api: {
       ...(actual.api as Record<string, unknown>),
       readNote: vi.fn(),
+      cookbookRead: vi.fn(),
       getFoodEntries: vi.fn(),
     },
   };
@@ -43,6 +44,13 @@ function mockNotes(recipeBody: string | null) {
     if (title === 'Meal plan') return { status: 'SUCCESS', message: PLAN, service: 'note_read' } as never;
     if (recipeBody === null) return { status: 'FAILURE', message: 'not found', service: 'note_read' } as never;
     return { status: 'SUCCESS', message: recipeBody, service: 'note_read' } as never;
+  });
+  // The recipe itself comes from the family cookbook, found by its title.
+  vi.mocked(api.cookbookRead).mockImplementation(async () => {
+    if (recipeBody === null) return { status: 'FAILURE', message: 'not found', service: 'cookbook' } as never;
+    return {
+      status: 'SUCCESS', message: recipeBody, service: 'cookbook', detail: { path: 'Recipes/Chicken-Chili.md' },
+    } as never;
   });
 }
 

@@ -49,7 +49,7 @@ from services.common.screen_time import evaluate as evaluate_screen_time, weekly
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
-from services.gateway import calls, drawing, family_safety, mdm, network_routes, notices, push_routes
+from services.gateway import calls, cookbook, drawing, family_safety, mdm, network_routes, notices, push_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -5398,10 +5398,7 @@ async def proxy_recipe_fetch(request: Request):
 @app.post("/api/recipes/sources")
 async def proxy_recipe_sources(request: Request):
     """The source URLs already imported, so search does not offer them again."""
-    body = await request.json()
-    return await _proxy_execution_with_identity(
-        request, "/execute/recipes", {"action": "recipe_sources"}, as_user=body.get("as_user")
-    )
+    return await _proxy_execution_as_cookbook(request, "/execute/recipes", {"action": "recipe_sources"})
 
 
 @app.post("/api/recipes/staples")
@@ -5412,10 +5409,7 @@ async def proxy_recipe_staples(request: Request):
     the page can float up the dinners that need nothing special. Cached by each
     note's version, like the duplicate guard.
     """
-    body = await request.json()
-    return await _proxy_execution_with_identity(
-        request, "/execute/recipes", {"action": "recipe_staples"}, as_user=body.get("as_user")
-    )
+    return await _proxy_execution_as_cookbook(request, "/execute/recipes", {"action": "recipe_staples"})
 
 
 @app.post("/api/recipes/import")
@@ -5427,6 +5421,141 @@ async def proxy_recipe_import(request: Request):
         "url": body.get("url"),
     }
     return await _proxy_execution_with_identity(request, "/execute/recipes", payload, as_user=body.get("as_user"))
+
+
+async def cookbook_creds() -> dict:
+    """The household (Admin) account the family cookbook lives in."""
+    house = _identity_cred_dict(await resolve_first_user())
+    if not house.get("user"):
+        raise HTTPException(status_code=503, detail="The family cookbook is unavailable")
+    return house
+
+
+async def _cookbook_caller(request: Request, as_user: Any = None) -> cookbook.Caller:
+    creds = _identity_cred_dict(await _resolve_identity_from_request(request))
+    user = str(creds.get("user") or "").lower()
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to use the cookbook")
+    is_admin = bool(creds.get("is_admin"))
+    if as_user == "admin" and not is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can add recipes as the Admin identity")
+    house = await cookbook_creds()
+    return cookbook.Caller(
+        user=user,
+        is_admin=is_admin,
+        house=str(house["user"]).lower(),
+        house_creds=house,
+        own_creds=creds,
+        as_house=as_user == "admin",
+    )
+
+
+async def _cookbook_run(creds: dict, payload: dict) -> dict:
+    """One note action in execution, as ``creds``; its result, whatever the status."""
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/note",
+            json={"user_context": creds, **payload},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        text = await resp.text()
+    try:
+        result = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        result = None
+    if not isinstance(result, dict):
+        return {"status": "FAILURE", "message": f"The notes service answered HTTP {resp.status}.", "service": "cookbook"}
+    return result
+
+
+async def _proxy_execution_as_cookbook(request: Request, endpoint: str, payload: dict) -> JSONResponse:
+    """A read of the whole cookbook, for any signed-in member."""
+    await _cookbook_caller(request)
+    house = await cookbook_creds()
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}{endpoint}",
+            json={"user_context": house, **payload},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        text = await resp.text()
+    try:
+        content = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        content = {"detail": text}
+    return JSONResponse(status_code=resp.status, content=content)
+
+
+@app.post("/api/recipes/cookbook/list")
+async def cookbook_list(request: Request):
+    """Every recipe in the family cookbook (everyone reads the same shelf)."""
+    return await cookbook.list_recipes(_cookbook_run, await _cookbook_caller(request))
+
+
+@app.post("/api/recipes/cookbook/read")
+async def cookbook_read(request: Request):
+    """One recipe by path (or title), with who added it and who may change it."""
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request)
+    return await cookbook.read_recipe(_cookbook_run, caller, body.get("path"), body.get("title"))
+
+
+@app.post("/api/recipes/cookbook/save")
+async def cookbook_save(request: Request):
+    """Add a recipe, or change one the caller added (renaming it if the title changed)."""
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request, body.get("as_user"))
+    return await cookbook.save_recipe(
+        _cookbook_run, caller, body.get("title"), body.get("content"), body.get("path"), body.get("if_match"),
+    )
+
+
+@app.post("/api/recipes/cookbook/delete")
+async def cookbook_delete(request: Request):
+    body = await _request_json_object(request)
+    return await cookbook.delete_recipe(_cookbook_run, await _cookbook_caller(request), body.get("path"))
+
+
+@app.post("/api/recipes/cookbook/attach")
+async def cookbook_attach(request: Request):
+    """Keep a file (a recipe's original photo) beside a recipe the caller may change."""
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request)
+    return await cookbook.attach(_cookbook_run, caller, body.get("path"), body.get("filename"), body.get("data"))
+
+
+@app.post("/api/recipes/cookbook/suggest")
+async def cookbook_suggest(request: Request):
+    """Suggest a change to someone else's recipe, for its owner or an admin to approve."""
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request)
+    return await cookbook.suggest(_cookbook_run, caller, body.get("path"), body.get("content"), body.get("message"))
+
+
+@app.post("/api/recipes/cookbook/suggestions")
+async def cookbook_suggestions(request: Request):
+    """The suggested changes the caller can approve, and their own still waiting."""
+    return await cookbook.list_suggestions(_cookbook_run, await _cookbook_caller(request))
+
+
+@app.post("/api/recipes/cookbook/suggestions/resolve")
+async def cookbook_resolve_suggestion(request: Request):
+    body = await _request_json_object(request)
+    caller = await _cookbook_caller(request)
+    return await cookbook.resolve_suggestion(_cookbook_run, caller, body.get("path"), body.get("decision"))
+
+
+@app.post("/api/recipes/cookbook/personal")
+async def cookbook_personal(request: Request):
+    """How many recipes are still in the caller's own folder, from before the cookbook."""
+    notes = await cookbook.personal_recipes(_cookbook_run, await _cookbook_caller(request))
+    return {"status": "SUCCESS", "message": f"{len(notes)} recipe(s)", "detail": {"titles": [n.get("title") for n in notes]}}
+
+
+@app.post("/api/recipes/cookbook/adopt")
+async def cookbook_adopt(request: Request):
+    """Move the caller's own recipes into the family cookbook, still theirs to change."""
+    return await cookbook.adopt(_cookbook_run, await _cookbook_caller(request))
 
 
 @app.post("/api/recipes/plan")
@@ -5443,6 +5572,8 @@ async def proxy_recipe_plan(request: Request):
         "text": body.get("text"),
         "day": body.get("day"),
         "recipe": body.get("recipe"),
+        # The recipe is matched against the family cookbook; the plan is the caller's.
+        "shelf_context": await cookbook_creds(),
     }
     return await _proxy_execution_with_identity(request, "/execute/meal_plan", payload, as_user=body.get("as_user"))
 
@@ -6876,13 +7007,20 @@ async def proxy_sync_notes_rag(request: Request):
         "storage": body.get("storage", "nextcloud"),
         "directories": body.get("directories"),
     }
-    read = await _proxy_execution_with_identity(request, "/execute/note", payload)
+    # The Recipes page teaches the family cookbook, indexed under the caller.
+    if body.get("cookbook"):
+        payload["directories"] = [cookbook.COOKBOOK_DIR]
+        read = await _proxy_execution_as_cookbook(request, "/execute/note", payload)
+    else:
+        read = await _proxy_execution_with_identity(request, "/execute/note", payload)
     result = json.loads(read.body or b"{}")
     if read.status_code != 200 or not isinstance(result, dict) or result.get("status") != "SUCCESS":
         return read
     creds = await _resolve_identity_from_request(request)
     user_id = str(creds.get("user") or "").lower()
     notes = (result.get("detail") or {}).get("synced") or []
+    if body.get("cookbook"):
+        notes = [n for n in notes if cookbook.is_recipe_path(n.get("path"))]
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     indexed = passages = 0
     async with shared_http_client() as client:

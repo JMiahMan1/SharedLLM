@@ -420,6 +420,7 @@ class NoteRequest(BaseRequest):
     destination: str | None = None # move: the note's new path
     meta: dict | None = None # meta_write: the shared notes index to store
     if_match: str | None = None # write: the ETag the note was opened at; a newer file is refused (412)
+    if_none_match: bool = False # write without path: refuse (412) rather than overwrite a note already there
     version: str | None = None # version_read / version_restore: a version id from ``versions``
     share_with: str | None = None # share_add: the Nextcloud user id to share with
     share_id: str | None = None # share_remove: the share's id from ``shares``
@@ -471,6 +472,9 @@ class MealPlanRequest(BaseRequest):
     text: str | None = None  # the spoken sentence, e.g. "add a slow-cooker meal to Tuesday"
     day: str | None = None  # an explicit plan day ("Tue" / "Tuesday") when already resolved
     recipe: str | None = None  # an explicit recipe title when the assistant already found one
+    # The family cookbook's account (the gateway fills it in): the recipe is
+    # matched against that shelf, while the plan stays in the caller's own.
+    shelf_context: UserContext | None = None
 
 
 # Timers / Alarms / Household Reminders
