@@ -6,16 +6,14 @@ import { api } from '../../services/api';
 import type { FastKind } from '../../types/api';
 import { formatMinutes } from '../../lib/healthHub';
 import { errorText } from '../../lib/errorText';
-import { fastClock, formatCountdown, localWhen } from '../../lib/fastingClock';
+import { fastClock, formatCountdown, localWhen, startedAtFromClock } from '../../lib/fastingClock';
 import FastingGuide from './FastingGuide';
 
-/** `HH:MM` today (or yesterday, when that time has not come yet today) as an ISO instant. */
-function startedAtFromClock(clock: string, now = new Date()): string {
-  const [hours, minutes] = clock.split(':').map(Number);
-  const when = new Date(now);
-  when.setHours(hours, minutes, 0, 0);
-  if (when > now) when.setDate(when.getDate() - 1);
-  return when.toISOString();
+/** An instant as a `datetime-local` value in this device's time. */
+function localInput(iso: string): string {
+  const at = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
 /** A clock that ticks once a second while something is counting. */
@@ -54,6 +52,8 @@ export default function FastingCard() {
   const [notifyShared, setNotifyShared] = useState(true);
   const [prayerReminders, setPrayerReminders] = useState(true);
   const [startClock, setStartClock] = useState('');
+  /** The running fast's start being corrected, as a `datetime-local` value. */
+  const [correcting, setCorrecting] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['health-fasting'],
@@ -103,6 +103,15 @@ export default function FastingCard() {
     },
     onError: (error) => toast.error(errorText(error, 'Could not start the fast')),
   });
+  const adjust = useMutation({
+    mutationFn: (value: string) => api.adjustHealthFast(new Date(value).toISOString()),
+    onSuccess: () => {
+      setCorrecting(null);
+      toast.success('Start time corrected');
+      refresh();
+    },
+    onError: (error) => toast.error(errorText(error, 'Could not change the start time')),
+  });
   const stop = useMutation({
     mutationFn: () => api.stopHealthFast(),
     onSuccess: (fast) => {
@@ -149,7 +158,44 @@ export default function FastingCard() {
             Began {localWhen(active.started_at, now)}
             {clock.ends ? ` · ends ${localWhen(clock.ends, now)}` : ' · no end set'}
             {clock.remainingSeconds !== null ? ` · ${formatCountdown(clock.elapsedSeconds)} so far` : ''}
+            {correcting === null && (
+              <button
+                type="button"
+                onClick={() => setCorrecting(localInput(active.started_at))}
+                className="ml-1.5 inline-flex min-h-11 items-center text-amber-300 hover:text-amber-200"
+                data-testid="fasting-correct-start"
+              >
+                Change
+              </button>
+            )}
           </p>
+          {correcting !== null && (
+            <form
+              className="mt-2 flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (correcting) adjust.mutate(correcting);
+              }}
+            >
+              <label className="block min-w-0 flex-1 text-[11px] text-slate-500">
+                Began
+                <input
+                  type="datetime-local"
+                  value={correcting}
+                  max={localInput(new Date().toISOString())}
+                  onChange={(e) => setCorrecting(e.target.value)}
+                  className="glass-input mt-1 min-h-11 w-full px-2 text-base sm:text-sm"
+                  data-testid="fasting-correct-input"
+                />
+              </label>
+              <button type="submit" disabled={adjust.isPending || !correcting} className="glass-button min-h-11 px-3 text-xs disabled:opacity-50">
+                Save
+              </button>
+              <button type="button" onClick={() => setCorrecting(null)} className="min-h-11 px-2 text-xs text-slate-400">
+                Cancel
+              </button>
+            </form>
+          )}
           {activeKind?.pattern.type === 'days' ? <p className="mt-1 text-[11px] text-slate-400">Each day: {activeKind.pattern.daily}</p> : null}
           {active.intention ? <p className="mt-1 text-[12px] text-slate-300">Praying for: {active.intention}</p> : null}
           {clock.percent !== null && (
@@ -259,6 +305,11 @@ export default function FastingCard() {
           <label className="block text-[11px] text-slate-500">
             Started at (leave empty for now)
             <input type="time" value={startClock} onChange={(e) => setStartClock(e.target.value)} className="glass-input mt-1 min-h-11 w-full px-2 text-base sm:text-sm" />
+            {startClock && (
+              <span className="mt-1 block text-[11px] text-amber-200" data-testid="fasting-start-preview">
+                Begins {localWhen(startedAtFromClock(startClock), new Date())}
+              </span>
+            )}
           </label>
           <button
             type="button"

@@ -62,3 +62,16 @@ export function localWhen(value: string | Date, now: Date = new Date()): string 
   if (days < 6) return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
   return `${at.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
 }
+
+/**
+ * `HH:MM` as the instant a fast began: that time today, exactly as entered.
+ * A time that has not come yet is now, since a fast cannot start in the
+ * future. The day is never guessed; a fast begun yesterday has its start
+ * changed with a full date once it is running.
+ */
+export function startedAtFromClock(clock: string, now = new Date()): string {
+  const [hours, minutes] = clock.split(':').map(Number);
+  const when = new Date(now);
+  when.setHours(hours, minutes, 0, 0);
+  return (when > now ? now : when).toISOString();
+}

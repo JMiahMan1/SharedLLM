@@ -15,6 +15,7 @@ vi.mock('../../services/api', async (importOriginal) => {
       getHealthFasting: vi.fn(),
       startHealthFast: vi.fn(),
       stopHealthFast: vi.fn(),
+      adjustHealthFast: vi.fn(),
       getFastingTraditions: vi.fn(),
       getBiblePassage: vi.fn(),
       getResources: vi.fn(),
@@ -103,6 +104,17 @@ describe('FastingCard', () => {
 
     fireEvent.click(screen.getByTestId('fasting-stop'));
     await waitFor(() => expect(api.stopHealthFast).toHaveBeenCalled());
+  });
+
+  it("corrects a running fast's start time", async () => {
+    const fast = running();
+    vi.mocked(api.getHealthFasting).mockResolvedValue({ allowed: true, active: fast, recent: [], presets: [12, 14, 16] });
+    vi.mocked(api.adjustHealthFast).mockResolvedValue(fast);
+    renderCard();
+    fireEvent.click(await screen.findByTestId('fasting-correct-start'));
+    fireEvent.change(screen.getByTestId('fasting-correct-input'), { target: { value: '2026-11-01T19:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.adjustHealthFast).toHaveBeenCalledWith(new Date('2026-11-01T19:30').toISOString()));
   });
 
   it('guides a running fast with its rule, Scripture, the Fathers and the library', async () => {

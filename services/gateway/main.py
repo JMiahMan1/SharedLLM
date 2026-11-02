@@ -15100,6 +15100,12 @@ async def start_health_fast(request: Request):
     return await _health_json("POST", "/fasting/start", request, body=await request.json())
 
 
+@app.patch("/api/health/fasting/active")
+async def adjust_health_fast(request: Request):
+    """Correct when the running fast began."""
+    return await _health_json("PATCH", "/fasting/active", request, body=await request.json())
+
+
 @app.post("/api/health/fasting/stop")
 async def stop_health_fast(request: Request):
     return await _health_json("POST", "/fasting/stop", request, body=await request.json())
