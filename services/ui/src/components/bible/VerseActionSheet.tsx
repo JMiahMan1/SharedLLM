@@ -21,7 +21,7 @@ import BibleStudyNotes from './BibleStudyNotes';
 import JarvisStudyThread from './JarvisStudyThread';
 import InterlinearPanel from './InterlinearPanel';
 import WordStudyPanel from './WordStudyPanel';
-import WordForWord from './WordForWord';
+import WordForWord, { WordForWordKey } from './WordForWord';
 import ShareToChatSheet from './ShareToChatSheet';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -553,6 +553,8 @@ export default function VerseActionSheet({
             {status}
           </p>
         )}
+
+        {tokens.length > 0 && <WordForWordKey inferred={tokens.some((t) => t.strongs && t.inferred)} />}
       </div>
 
       {studyOpen && (

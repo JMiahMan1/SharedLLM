@@ -36,7 +36,6 @@ export default function WordForWord({
   onWord: (strongs: string) => void;
 }) {
   const { lead, words: list } = words(tokens);
-  const anyInferred = list.some((w) => w.token.inferred);
   return (
     <div data-testid="bible-word-for-word">
       <div className="flex flex-wrap items-start gap-x-1 gap-y-1.5">
@@ -81,9 +80,29 @@ export default function WordForWord({
           );
         })}
       </div>
-      <p className="mt-1.5 text-[11px] text-slate-500">
-        KJV word for word · tap a word for its Strong&apos;s entry
-        {anyInferred ? " · faded, dotted numbers are the one that word usually carries (this verse's line was not in the scan)" : ''}
+      <p className="mt-1.5 text-[11px] text-slate-500">KJV word for word · tap a word for its Strong&apos;s entry</p>
+    </div>
+  );
+}
+
+/** The key to the numbers, set at the foot of the verse sheet. */
+export function WordForWordKey({ inferred }: { inferred: boolean }) {
+  return (
+    <div className="mt-3 space-y-1.5 border-t border-white/10 pt-3 text-[11px] leading-relaxed text-slate-400" data-testid="bible-word-for-word-key">
+      <p className="font-semibold uppercase tracking-wider text-slate-500">About the Strong&apos;s numbers</p>
+      <p>
+        <span className="tabular-nums text-sky-300">G2889</span> — the number Strong&apos;s concordance prints for this word in this verse.
+      </p>
+      {inferred && (
+        <p>
+          <span className="tabular-nums text-sky-300/60 underline decoration-dotted underline-offset-2">G25</span> — inferred.
+          The scanned concordance lost this verse&apos;s line, so this is the number the word carries at least nine times in
+          ten elsewhere in the same Testament. It is usually right; tap it to check the entry.
+        </p>
+      )}
+      <p>
+        A word with no number has no separate word behind it in the Hebrew or Greek (&ldquo;shall&rdquo;, &ldquo;is&rdquo; are part of
+        the verb), or the concordance does not number it.
       </p>
     </div>
   );
