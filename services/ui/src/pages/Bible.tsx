@@ -20,6 +20,7 @@ import ParallelReader from '../components/bible/ParallelReader';
 import FocusReader from '../components/bible/FocusReader';
 import { pageStyle, toneOf } from '../components/bible/readingPage';
 import { useSwipe } from '../lib/useSwipe';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
 import BibleReadAloud from '../components/bible/BibleReadAloud';
 import ChapterNotes from '../components/bible/ChapterNotes';
@@ -119,6 +120,25 @@ function BibleReaderPane({
   const [speakingVerses, setSpeakingVerses] = useState<{ start: number; end: number } | null>(null);
   const [focusing, setFocusing] = useState(false);
   const [listening, setListening] = useState(false);
+  // On a phone the header slides away while reading down the page and comes
+  // back on the first scroll up, as in the Bible App, so the text has the
+  // whole screen.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const [scrolledDown, setScrolledDown] = useState(false);
+  useEffect(() => {
+    if (!isPhone) return undefined;
+    let last = 0;
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="dialog"]')) return;
+      const top = target instanceof HTMLElement ? target.scrollTop : window.scrollY;
+      if (Math.abs(top - last) < 8) return;
+      setScrolledDown(top > last && top > 160);
+      last = top;
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', onScroll, { capture: true });
+  }, [isPhone]);
   // A new requested passage (a link, a search hit, a cross-reference, a turned
   // page) replaces the search and fills the passage box. Adjusted during render
   // rather than by remounting the pane, so Focus mode and the rest of the
@@ -178,7 +198,13 @@ function BibleReaderPane({
     shownChapter && !shownChapter.whole_book
       ? `${shownChapter.book_name} ${shownChapter.chapter_start}`
       : null;
-  const edition = preferences.default_edition || undefined;
+  // A study Bible explains one translation; after switching translation the
+  // saved one may not fit, and the server refuses it ("explains nkjv, not
+  // kjv"). Only an edition installed for this translation is asked for.
+  const edition =
+    preferences.default_edition && editions.some((e) => e.code === preferences.default_edition && e.installed)
+      ? preferences.default_edition
+      : undefined;
   const { data: studyData, isFetching: studyLoading } = useQuery({
     queryKey: ['bible-study-index', studyScope, version, edition ?? '', preferences.cross_version_notes],
     queryFn: () =>
@@ -323,7 +349,14 @@ function BibleReaderPane({
 
   return (
     <>
-      <div className="sticky top-2 z-30 rounded-full border border-white/10 bg-slate-950/80 px-1.5 py-1 shadow-lg backdrop-blur-xl">
+      {/* Opaque rather than blurred: a backdrop filter would make the header the
+          containing block of its "fixed" click-outside layer. */}
+      <div
+        className="sticky top-2 z-30 rounded-full border border-white/10 bg-slate-950/95 px-1.5 py-1 shadow-lg transition-transform duration-200"
+        style={isPhone && scrolledDown && !activeVerse ? { transform: 'translateY(-160%)' } : undefined}
+        data-testid="bible-reader-header"
+        data-hidden={(isPhone && scrolledDown && !activeVerse) || undefined}
+      >
         <ReferenceBar
           books={books}
           versions={versions}
@@ -570,7 +603,7 @@ function BibleReaderPane({
           marks={marksOnVerse(marks, activeVerse)}
           version={version}
           page={preferences.page}
-          edition={preferences.default_edition}
+          edition={edition ?? ''}
           crossVersion={preferences.cross_version_notes}
           onEditionChange={(code) => onPreferences({ default_edition: code })}
           onCrossVersionChange={(on) => onPreferences({ cross_version_notes: on })}

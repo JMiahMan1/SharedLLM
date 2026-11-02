@@ -121,6 +121,16 @@ export default function ReferenceBar({
   };
   const close = () => setPanel(null);
 
+  // Escape closes whatever panel is open.
+  useEffect(() => {
+    if (!panel) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPanel(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panel]);
+
   // The chooser opens on the book in hand, its chapters showing, rather than
   // at Genesis with forty books to scroll past.
   useEffect(() => {
@@ -681,12 +691,21 @@ export default function ReferenceBar({
         </div>
       </div>
 
-      {/* The scrim (and a phone's sheet) go to the body: the header's backdrop
-          blur would otherwise make it their containing block, pinning "fixed"
-          inside the header instead of to the screen. A larger screen's panel
-          stays here, dropping down from the header. */}
-      {scrim && createPortal(scrim, document.body)}
-      {sheet && (isPhone ? createPortal(sheet, document.body) : sheet)}
+      {/* A phone's scrim and sheet go to the body, above the app's own bottom
+          bar. A larger screen's dropdown stays here, under the header, with
+          its scrim beside it in the same stacking context: a scrim in the body
+          would sit above the header's dropdown and swallow every click on it. */}
+      {isPhone ? (
+        <>
+          {scrim && createPortal(scrim, document.body)}
+          {sheet && createPortal(sheet, document.body)}
+        </>
+      ) : (
+        <>
+          {scrim}
+          {sheet}
+        </>
+      )}
     </div>
   );
 }
