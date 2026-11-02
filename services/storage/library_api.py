@@ -12,11 +12,13 @@ import json
 import logging
 import re
 from collections import defaultdict
+from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from services.storage import book_lookup
 from services.storage.artifacts_api import require_internal_secret
 from services.storage.calibre_writer import MAX_BOOK_BYTES, LibraryWriteError, LibraryWriter
 from services.storage.models import IndexScanRequest, ProviderConfig
@@ -113,6 +115,9 @@ _NOISE = re.compile(
 )
 
 
+_VOLUME = re.compile(r"\b(?:vol(?:ume)?|part|book|no|number)\.?\s*([ivxlc]+|\d+)\b", re.IGNORECASE)
+
+
 def _key(text: str) -> str:
     text = re.sub(r"^(a|an|the)\s+", "", text.strip().lower())
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
@@ -126,7 +131,10 @@ def audit(books: list[dict[str, Any]], limit: int = 40) -> dict[str, Any]:
     for book in books:
         author = _key(book["authors"][0]) if book["authors"] else ""
         exact[(_key(book["title"]), author)].append(book)
-        near[(_key(_NOISE.sub(" ", book["title"])), author)].append(book)
+        # Volume, part and book numbers survive the noise stripping, so the
+        # volumes of one work are never taken for editions of it.
+        volumes = " ".join(_VOLUME.findall(book["title"])).lower()
+        near[(_key(_NOISE.sub(" ", book["title"])) + (f" vol {volumes}" if volumes else ""), author)].append(book)
     copies = [group for group in exact.values() if len(group) > 1]
     seen = {b["id"] for group in copies for b in group}
     editions = [group for group in near.values() if len(group) > 1 and not {b["id"] for b in group} <= seen]
@@ -222,6 +230,23 @@ def _list(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
 
 
+@router.post("/books/inspect")
+async def inspect_book(
+    library_path: str = Form(...),
+    file: UploadFile = File(...),
+    online: bool = Form(default=True),
+):
+    """Everything Jarvis can find about a book before it is added (nothing is saved)."""
+    data = await file.read(MAX_BOOK_BYTES + 1)
+    if not data or len(data) > MAX_BOOK_BYTES:
+        raise HTTPException(status_code=422, detail="Choose a book file under 200 MB.")
+    # Suggestions without the library's own tags are still suggestions.
+    existing: list[str] = []
+    with suppress(HTTPException):
+        existing = sorted({t for book in (await _catalog(library_path)).values() for t in book["tags"]})
+    return await book_lookup.inspect(data, file.filename or "book", existing, online=online)
+
+
 @router.post("/books/add")
 async def add_book(
     background: BackgroundTasks,
@@ -232,13 +257,20 @@ async def add_book(
     tags: str = Form(default=""),
     series: str = Form(default=""),
     comments: str = Form(default=""),
+    publisher: str = Form(default=""),
+    published: str = Form(default=""),
+    isbn: str = Form(default=""),
+    language: str = Form(default=""),
+    cover_url: str = Form(default=""),
 ):
     data = await file.read(MAX_BOOK_BYTES + 1)
     writer = LibraryWriter(_provider(library_path).client, library_path)
+    cover = await book_lookup.fetch_cover(cover_url) if cover_url else None
     try:
         result = await writer.add_book(
             data, file.filename or "book", title=title, authors=[a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
-            tags=_list(tags), series=series, comments=comments,
+            tags=_list(tags), series=series, comments=comments, publisher=publisher, published=published,
+            isbn=isbn, language=language, cover=cover,
         )
     except LibraryWriteError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

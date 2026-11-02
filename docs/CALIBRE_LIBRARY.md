@@ -172,6 +172,18 @@ Routes (storage, internal): `POST /calibre/books` (search, `tag`, `untagged`), `
 `/api/library/books/{id}/tags` for admins. After a tag change the book's RAG rows are patched at once
 (`POST /rag/calibre/tags`); a new book's author folder is re-indexed in the background.
 
+**Auto-fill before adding** (`services/storage/book_lookup.py`, `POST /calibre/books/inspect`, gateway
+`POST /api/library/books/inspect`, admins): Jarvis reads the file's own details (an EPUB's OPF: title,
+authors, subjects, description, ISBN, publisher, date, language, cover; a PDF's document info via
+`pypdf`), then asks Google Books and Open Library (by ISBN, else title and author) for what is
+missing, and falls back to a "Title - Author" file name. Each field comes from the first source that
+has it, and the form says which. Tags are suggested from the library's own tags that the subjects
+name, and the app's topics (fasting, prayer, lent, bible-study, early-church, health) when the
+title, subjects or description use their words (whole words: "breakfast" is not a fast). Every
+field stays editable and nothing is saved until "Add to the library". A catalogue cover is fetched
+only from the catalogues' own hosts, over HTTPS. Publisher, date, ISBN and language are written to
+Calibre's own tables.
+
 The audit lists duplicate copies (same title and author, keeping the readable, tagged one), other
 editions ("(Annotated)", "Revised edition"...; numbered volumes are never merged), records with no
 file, books only in a format Jarvis cannot read, and untagged books. Jarvis's `CalibreRequest` has

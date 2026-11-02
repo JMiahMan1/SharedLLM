@@ -21,6 +21,8 @@ CATALOG = {
     4: _book(4, "The Lenten Spring", "Thomas Hopko"),
     5: _book(5, "Works of John Wesley - Vol. 02", "John Wesley", formats=()),
     6: _book(6, "Works of John Wesley - Vol. 08", "John Wesley", ["Wesley"]),
+    10: _book(10, "Henry of Guise; (Vol. I of 3)", "G. P. R. James"),
+    11: _book(11, "Henry of Guise; (Vol. II of 3)", "G. P. R. James"),
 }
 
 
@@ -38,7 +40,7 @@ def test_books_are_found_by_topic_words_and_untagged(monkeypatch):
     words = client.post("/calibre/books", json={**LIB, "q": "lent schmemann"}, headers=H).json()
     assert {b["id"] for b in words["books"]} == {1, 2}
     untagged = client.post("/calibre/books", json={**LIB, "untagged": True}, headers=H).json()
-    assert {b["id"] for b in untagged["books"]} == {2, 4, 5}
+    assert {b["id"] for b in untagged["books"]} == {2, 4, 5, 10, 11}
     assert client.post("/calibre/books", json=LIB).status_code in (401, 403)
 
 
@@ -56,8 +58,8 @@ def test_the_audit_names_copies_editions_and_gaps_but_never_two_volumes():
     assert copy["keep"]["id"] == 1 and [b["id"] for b in copy["others"]] == [2]
     assert len(report["editions"]) == 1 and {report["editions"][0]["keep"]["id"], report["editions"][0]["others"][0]["id"]} == {3, 4}
     assert report["no_file"]["count"] == 1 and report["unreadable"]["count"] == 1
-    # Vol. 02 and Vol. 08 are different books.
-    assert not any("Wesley" in g["keep"]["title"] for g in report["copies"] + report["editions"])
+    # Numbered volumes are different books, in or out of parentheses.
+    assert not any("Wesley" in g["keep"]["title"] or "Guise" in g["keep"]["title"] for g in report["copies"] + report["editions"])
 
 
 def test_a_tag_change_is_written_and_sent_to_the_index(monkeypatch):

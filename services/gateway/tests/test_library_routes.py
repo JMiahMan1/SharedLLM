@@ -45,3 +45,11 @@ def test_only_an_admin_changes_tags_or_adds_books(monkeypatch):
 def test_signed_out_is_refused(monkeypatch):
     _setup(monkeypatch, None)
     assert TestClient(main.app).get("/api/library/books").status_code == 401
+
+
+def test_inspecting_a_book_is_for_admins(monkeypatch):
+    calls = _setup(monkeypatch, {"user": "kid", "is_admin": False})
+    assert TestClient(main.app).post("/api/library/books/inspect", files={"file": ("a.epub", b"x")}).status_code == 403
+    calls = _setup(monkeypatch, {"user": "dad", "is_admin": True})
+    assert TestClient(main.app).post("/api/library/books/inspect", files={"file": ("a.epub", b"x")}).status_code == 200
+    assert calls[0][1] == "/calibre/books/inspect"

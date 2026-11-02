@@ -7,3 +7,5 @@ pydantic
 pydantic-settings
 aiohttp
 sqlmodel
+python-multipart
+pypdf
