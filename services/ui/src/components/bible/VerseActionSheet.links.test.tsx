@@ -151,7 +151,8 @@ describe('Word study', () => {
     apiMock.getBibleLexiconEntry.mockRejectedValue(new Error('not needed'));
     renderSheet();
     const view = await screen.findByTestId('bible-word-for-word');
-    expect(view).toHaveTextContent('≈G25');
+    expect(view).toHaveTextContent('G25');
+    expect(view).not.toHaveTextContent('≈');
     expect(screen.getByRole('button', { name: "world, Strong's G2889" })).toHaveTextContent('world,');
     for (const action of ['highlight', 'bookmark', 'study', 'ask', 'memorize', 'copy', 'share', 'blb', 'interlinear', 'word-study']) {
       expect(screen.getByTestId(`bible-action-${action}`)).toBeInTheDocument();
