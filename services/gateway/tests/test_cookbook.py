@@ -11,6 +11,7 @@ class Store:
 
     def __init__(self):
         self.files: dict[str, dict[str, str]] = {"house": {}, "jeremiah": {}, "michele": {}, "gracie": {}}
+        self.deleted: list[str] = []
 
     def put(self, account, path, title, body):
         category = path.rsplit("/", 1)[0]
@@ -35,7 +36,14 @@ class Store:
             return {"status": "SUCCESS", "detail": {"path": path}}
         if action == "delete":
             notes.pop(payload["path"], None)
+            self.deleted.append(payload["path"])
             return {"status": "SUCCESS"}
+        if action == "move":
+            # Like Nextcloud: the same file (same id, same attachments) under a new name.
+            source = payload["path"]
+            target = f"{source.rsplit('/', 1)[0]}/{re.sub(r'[^A-Za-z0-9._-]+', '-', payload['title']).strip('-')}.md"
+            notes[target] = notes.pop(source)
+            return {"status": "SUCCESS", "detail": {"path": target, "from": source}}
         raise AssertionError(action)
 
 
@@ -166,3 +174,59 @@ def test_owner_line_sits_after_the_header_lines():
     assert body.split("\n")[:3] == ["Tags: #x", "Source: a", "Added by: gracie"]
     assert cookbook.recipe_owner(body, "house") == "gracie"
     assert cookbook.recipe_owner("## Steps\nAdded by: someone", "house") == "house"
+
+
+
+@pytest.mark.asyncio
+async def test_a_rename_moves_the_recipe_and_keeps_its_photos(store):
+    store.put("house", "Recipes/5-tacos.md", "5-tacos",
+              "Image: .attachments.42/photo.jpg\nAdded by: house\n\n## Ingredients\n- [ ] tortillas")
+    current = await cookbook.read_recipe(store.run, caller("dad", is_admin=True), "Recipes/5-tacos.md")
+    res = await cookbook.save_recipe(store.run, caller("dad", is_admin=True), "$5 Tacos", current["message"], "Recipes/5-tacos.md")
+    assert res["status"] == "SUCCESS" and res["detail"]["path"] == "Recipes/5-Tacos.md"
+    # Moved, never deleted: Nextcloud would take the attachment folder with a delete.
+    assert store.deleted == [] and "Recipes/5-tacos.md" not in store.files["house"]
+    saved = store.files["house"]["Recipes/5-Tacos.md"]
+    assert saved.startswith("# $5 Tacos") and "Image: .attachments.42/photo.jpg" in saved
+
+
+@pytest.mark.asyncio
+async def test_a_rename_onto_another_recipe_is_refused(store):
+    current = await cookbook.read_recipe(store.run, caller("michele"), "Recipes/Chili.md")
+    res = await cookbook.save_recipe(store.run, caller("michele"), "Old Soup", current["message"], "Recipes/Chili.md")
+    assert res["status"] == "FAILURE" and res["detail"].get("exists")
+    assert "Recipes/Chili.md" in store.files["house"]
+
+
+@pytest.mark.parametrize(("typed", "kept"), [
+    ("$5 Tacos", "$5 Tacos"),
+    ("Chili-Mac", "Chili-Mac"),
+    ("50/50 Bars", "50/50 Bars"),
+    ("Mom's Chili & Cornbread", "Mom's Chili & Cornbread"),
+    ("crème brûlée", "Crème Brûlée"),
+    ("mom's chili-mac with beans", "Mom's Chili-mac with Beans"),
+    ("quick-beef-stew", "Quick Beef Stew"),
+    ("  #1   Burger ", "#1 Burger"),
+])
+def test_a_name_keeps_every_character_it_was_typed_with(typed, kept):
+    assert cookbook.tidy_title(typed) == kept
+
+
+def test_names_match_the_way_their_files_do():
+    assert cookbook.title_key("$5 Tacos") == cookbook.title_key("5-Tacos") == "5 tacos"
+    assert cookbook.title_key("Crème Brûlée") == cookbook.title_key("creme-brulee")
+    assert cookbook.display_title("$5 Tacos", "Recipes/5-Tacos.md") == "$5 Tacos"
+    assert cookbook.display_title("Chili-Mac", "Recipes/Chili-Mac-and-Cheese.md") == "Chili-Mac"
+    assert cookbook.display_title("5-tacos", "Recipes/5-tacos.md") == "5 Tacos"
+    assert cookbook.display_title("Chili-Mac", "Recipes/Chili-Mac.md") == "Chili-Mac"
+
+
+@pytest.mark.asyncio
+async def test_a_name_with_symbols_is_saved_and_read_back_exactly(store):
+    res = await cookbook.save_recipe(store.run, caller("michele"), "$5 Tacos", "## Ingredients\n- [ ] tortillas")
+    path = res["detail"]["path"]
+    back = await cookbook.read_recipe(store.run, caller("michele"), path)
+    assert back["detail"]["title"] == "$5 Tacos"
+    # "5 Tacos" would be the same file: refused, not overwritten.
+    again = await cookbook.save_recipe(store.run, caller("michele"), "5 Tacos", "x")
+    assert again["status"] == "FAILURE" and again["detail"].get("exists")

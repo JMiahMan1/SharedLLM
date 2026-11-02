@@ -54,3 +54,12 @@ def test_a_recipe_is_named_by_its_stored_title_not_its_file_name():
     assert note_title("Tags: #soup\n", "/Recipes/beef-and-bean-burritos.md") == "Beef and Bean Burritos"
     assert note_title("# 5-tacos\nCategory: Recipes\n", "/Recipes/5-tacos.md") == "5 Tacos"
     assert note_title("# Mom's Chili-Mac\nCategory: Recipes\n", "/Recipes/x.md") == "Mom's Chili-Mac"
+
+
+def test_a_stored_name_with_symbols_is_shown_exactly():
+    from services.execution.handlers.recipe_import import note_title
+
+    assert note_title("# $5 Tacos\nCategory: Recipes\n", "/Recipes/5-Tacos.md") == "$5 Tacos"
+    assert note_title("# Chili-Mac\nCategory: Recipes\n", "/Recipes/Chili-Mac.md") == "Chili-Mac"
+    assert note_title("# 5-tacos\nCategory: Recipes\n", "/Recipes/5-tacos.md") == "5 Tacos"
+    assert note_title("# Chili-Mac\nCategory: Recipes\n", "/Recipes/Chili-Mac-2.md") == "Chili-Mac"

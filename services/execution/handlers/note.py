@@ -1101,6 +1101,12 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
         elif action == "move":
             source = (req.path or "").lstrip("/")
             destination = (req.destination or "").lstrip("/")
+            # A rename in place: the new name's file in the same folder. The
+            # file moves (keeping its Nextcloud file id), so the attachment
+            # folder named after that id, and every link into it, still holds.
+            if not destination and req.title and source:
+                folder = source.rsplit("/", 1)[0] if "/" in source else "Notes"
+                destination = f"{folder}/{provider.sanitize_filename(req.title, 'note')}.md"
             if not source or not destination:
                 return ExecutionResult(status="FAILURE", message="move requires path and destination.", service="note_move")
             if source == destination:

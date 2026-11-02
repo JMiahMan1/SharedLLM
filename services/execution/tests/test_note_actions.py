@@ -1069,3 +1069,25 @@ async def test_a_note_made_without_a_folder_goes_where_notes_are_listed(provider
 ])
 def test_every_category_is_a_folder_the_notes_page_lists(category, folder):
     assert note_handler._category_dir(category) == folder
+
+
+async def test_a_rename_in_place_moves_the_file_so_its_attachments_stay(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    calls: list[tuple[str, str]] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        calls.append((method, url))
+        if method == "PROPFIND":
+            return {"status_code": 404, "text": ""}
+        if method == "MOVE":
+            return {"status_code": 201, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("move", path="Recipes/5-tacos.md", title="$5 Tacos"))
+
+    assert result.status == "SUCCESS" and result.detail["path"] == "Recipes/5-Tacos.md"
+    # A MOVE keeps the file (and its .attachments.<id> folder); nothing is deleted.
+    assert ("MOVE", "http://nextcloud.test/Recipes/5-tacos.md") in calls
+    assert not any(method == "DELETE" for method, _ in calls)

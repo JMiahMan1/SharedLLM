@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -120,13 +121,32 @@ def readable_title(name: str) -> str:
 
 
 def tidy_title(name: Any) -> str:
-    """A new recipe's name in the cookbook's style: readable words, and
-    capitalised when it came in all lower case ("quick beef stew" is "Quick
-    Beef Stew"). A name that already has capitals is kept as written."""
-    title = " ".join(readable_title(str(name or "")).split())
+    """A recipe's name in the cookbook's style, every character kept.
+
+    A file-name slug ("quick-beef-stew") becomes words; a name typed all in
+    lower case is capitalised word by word ("mom's chili-mac" is "Mom's
+    Chili-mac", "crème brûlée" is "Crème Brûlée"); anything with a capital is
+    kept exactly as written ("$5 Tacos", "50/50 Bars", "Chili-Mac")."""
+    title = " ".join(str(name or "").split())
+    if " " not in title and re.search(r"[-_]", title) and title == title.lower():
+        return readable_title(title)
     if title != title.lower():
         return title
-    return readable_title(title.replace(" ", "-"))
+    words = title.split(" ")
+    return " ".join(
+        w if i and w in _SMALL_WORDS else w[:1].upper() + w[1:] for i, w in enumerate(words)
+    )
+
+
+def display_title(stored: str, path: str) -> str:
+    """The name to show: the stored "# title" exactly, unless it is only the
+    lower-case file name it was saved under (then that file name as words)."""
+    stem = path.rsplit("/", 1)[-1].removesuffix(".md")
+    # Only a lower-case slug was a file name (the bulk import's "5-tacos"); a
+    # name with a capital was typed ("Chili-Mac") and is kept.
+    if stored and (stored != stem or stored != stored.lower()):
+        return stored
+    return readable_title(stored or stem)
 
 
 def stored_title(text: str | None) -> str:
@@ -295,8 +315,10 @@ async def _find_by_title(run: Runner, caller: Caller, title: str) -> str | None:
 
 
 def title_key(title: Any) -> str:
-    """A recipe name to compare by: "Beef Stew" and the file name "beef-stew" match."""
-    return " ".join(re.sub(r"[-_]+", " ", str(title or "")).lower().split())
+    """A recipe name to compare by, as its file name would be: "$5 Tacos",
+    "5 tacos" and "5-Tacos" match, as do "Crème Brûlée" and "creme-brulee"."""
+    plain = unicodedata.normalize("NFKD", str(title or "")).encode("ascii", "ignore").decode("ascii")
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", plain.lower()).split())
 
 
 async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any = None) -> dict:
@@ -320,7 +342,7 @@ async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any 
         "service": "cookbook",
         "detail": {
             "path": target,
-            "title": readable_title(stored_title(text) or target.rsplit("/", 1)[-1][:-3]),
+            "title": display_title(stored_title(text), target),
             "etag": etag,
             "owner": owner,
             "image": image,
@@ -378,19 +400,21 @@ async def save_recipe(
             res.setdefault("detail", {})["owner"] = owner
         return res
 
-    # A rename writes the new file first and only then removes the old one,
-    # whose attachments follow the new copy.
-    res = await _create(run, caller, name, stamped)
-    if not _succeeded(res):
-        return res
-    new_path = clean_path((res.get("detail") or {}).get("path"))
-    left_old = False
-    if new_path and new_path != target:
-        old = await run(caller.house_creds, _note(
-            "delete", title=detail["title"], path=target, attachments_to=new_path,
-        ))
-        left_old = not _succeeded(old)
-    res.setdefault("detail", {}).update(owner=owner, left_old_copy=left_old)
+    # A rename moves the file, then saves it under the new name. Moving keeps
+    # its Nextcloud file id, and with it the ".attachments.<id>" folder its
+    # photos live in. (Writing a new file and deleting the old one lost them:
+    # Nextcloud Notes deletes a deleted note's attachment folder.)
+    if await _find_by_title(run, caller, name) not in (None, target):
+        return _fail(f"A recipe called “{name}” is already in the cookbook.", exists=True)
+    moved = await run(caller.house_creds, _note("move", path=target, title=name))
+    if not _succeeded(moved):
+        return moved
+    new_path = clean_path((moved.get("detail") or {}).get("path")) or target
+    res = await run(caller.house_creds, _note(
+        "write", title=name, category=COOKBOOK_DIR, path=new_path, content=stamped,
+    ))
+    if _succeeded(res):
+        res.setdefault("detail", {}).update(path=new_path, owner=owner, renamed_from=target)
     return res
 
 

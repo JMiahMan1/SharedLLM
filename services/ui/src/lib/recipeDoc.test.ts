@@ -60,5 +60,8 @@ describe('recipe notes as fields', () => {
 
   it('matches a recipe by name however its words are joined', () => {
     expect(recipeTitleKey('20-minute-white-bean-chili')).toBe(recipeTitleKey('20 Minute White Bean Chili'));
+    expect(recipeTitleKey('$5 Tacos')).toBe(recipeTitleKey('5-Tacos'));
+    expect(recipeTitleKey('Crème Brûlée')).toBe(recipeTitleKey('creme-brulee'));
+    expect(recipeTitleKey('$5 Tacos')).not.toBe(recipeTitleKey('$50 Tacos'));
   });
 });

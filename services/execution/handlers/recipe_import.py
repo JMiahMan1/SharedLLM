@@ -501,9 +501,13 @@ def readable_title(name: str) -> str:
 def note_title(text: str, path: str) -> str:
     """A recipe's name: the "# <title>" its note was stored with, else its file name."""
     first = (text or "").lstrip().split("\n", 1)[0]
-    if first.startswith("# ") and first[2:].strip():
-        return readable_title(first[2:])
-    return readable_title(path.rsplit("/", 1)[-1].removesuffix(".md"))
+    stem = path.rsplit("/", 1)[-1].removesuffix(".md")
+    stored = first[2:].strip() if first.startswith("# ") else ""
+    # The stored name exactly ("$5 Tacos", "Chili-Mac"), unless it is only
+    # the lower-case file name it was saved under ("5-tacos"), shown as words.
+    if stored and (stored != stem or stored != stored.lower()):
+        return stored
+    return readable_title(stored or stem)
 
 
 async def _read_note_text(provider, note: dict) -> str:
