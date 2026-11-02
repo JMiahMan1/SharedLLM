@@ -35,7 +35,7 @@ SECTIONS = (
 _ENTRY_START = re.compile(r"^(\d{1,4})\s+(\S.*)$")
 _GK = re.compile(r"\bGK:\s*([\d][\d\s&,]*)")
 # "[-> 2596+3624]." / ")-+ 2545)." / "[cf. 3045|." -- the related entries.
-_RELATED = re.compile(r"^\s*[\[\(\|)\]{}]?\s*(?:[-\u2014]\s*[>\xbb+*\u2666]|cf\.)[^\]\)|}]{0,80}[\]\)|}]\.?\s*")
+_RELATED = re.compile(r"^\s*[\[\(\|)\]{}]?\s*(?:[-\u2014]\s*[>\xbb+*\u2666]|cf\.)[^\]\)|}]{0,600}[\]\)|}]\.?\s*")
 _USAGE_SPLIT = re.compile(r":\s*-\s*|:\u2014\s*|;-\s*")
 _USAGE = re.compile(r"([^,\[\(\|]+?)\s*[\[\(\|]\s*([0-9lIOo]{1,4})\s*[\]\)\|jJ1]")
 _POS = re.compile(r"^(?:n|v|a|adv|pp|p|pron|conj|prep|interj|particle|pt|inj|adj|n\.pr)[\w.\[\]|]*", re.IGNORECASE)
@@ -110,7 +110,7 @@ _RELATED_END = re.compile(r"[\]\)|}]|(?<=[\d\s])j(?=[.\s])")
 def _strip_related(text: str) -> str:
     """Drop the related entries that open the definition ("[-> 2596+3624].")."""
     text = _RELATED.sub("", text, count=1)
-    end = _RELATED_END.search(text[:70])
+    end = _RELATED_END.search(text[:600])
     if end:
         prefix = text[: end.start()]
         # Numbers and arrows, not words: "\\u2014> 25]" or "-\u2666 433; cf. 410]".
@@ -211,9 +211,10 @@ def looks_like_concordance(pages: list[str]) -> bool:
 _CONCORDANCE_HEAD = re.compile(r"Exhaustive Concordance|The Strongest Strong", re.IGNORECASE)
 _HEADWORD = re.compile(r"^([A-Z][A-Z'\u2019\-]+(?: [A-Z][A-Z'\u2019\-]+)*)\s*\((\d+)\)")
 _LINE = re.compile(
-    r"^(?:(?P<book>[1-3IlL]?[A-Za-z]{1,4})\s+)?(?P<chapter>\d{1,3}):\s?(?P<verse>\d{1,3})\s+"
+    r"^(?:(?P<book>(?:[1-3IlL] ?)?[A-Za-z]{1,4})\s+)?(?P<chapter>\d{1,3}):\s?(?P<verse>\d{1,3})\s+"
     r"(?P<context>.+?)\s+(?P<numbers>(?:[\dIlOo]{1,4}(?:\.\d+)?)(?:\s*\+\s*[\dIlOo]{1,4}(?:\.\d+)?)*|NIH|NIG)\s*$"
 )
+_NAMED_BOOK = re.compile(r"^((?:[1-3IlL] ?)?[A-Za-z]{1,4})\s+\d{1,3}:")
 # OCR's readings of the concordance's book abbreviations.
 _BOOK_OCR = {"zee": "Zech", "mai": "Mal", "phm": "Phlm", "un": "1John", "lob": "Job", "pnp": "Phil", "ml": "Mal"}
 
@@ -231,6 +232,7 @@ class Occurrence:
 def _concordance_book(token: str) -> str | None:
     from services.bible.books import resolve_book
 
+    token = token.replace(" ", "")  # "1 Jn"
     if not token:
         return None
     lowered = token.lower()
@@ -280,11 +282,15 @@ def occurrences(pages: list[str], entries: dict[str, Entry] | None = None) -> li
             if head:
                 word, book = head[1].title(), None
                 continue
+            # A line that names a book changes the book even when the rest of
+            # it cannot be read; otherwise the lines after it would be credited
+            # to the book before.
+            named = _NAMED_BOOK.match(line)
+            if named:
+                book = _concordance_book(named[1])
             match = _LINE.match(line)
             if not match or not word:
                 continue
-            if match["book"]:
-                book = _concordance_book(match["book"])
             if not book or match["numbers"] in ("NIH", "NIG"):
                 continue
             chapter, verse = int(match["chapter"]), int(match["verse"])
@@ -550,7 +556,15 @@ def search(session, query: str, *, limit: int = 30) -> list[dict]:
         .where(or_(LexiconEntry.transliteration.ilike(like), LexiconEntry.usage.ilike(f'%"word": "{text.lower()}%'),
                    LexiconEntry.usage.ilike(f'%"word": "{text}%')))
         .order_by(LexiconEntry.usage_total.desc())
-        .limit(limit)
+        .limit(300)
     ).all()
+    wanted = text.lower()
+
+    def rendered(row) -> int:
+        # How often the KJV renders this entry with the searched word: "love"
+        # is agape and agapao before thelo, which it renders "love" once.
+        return sum(u["count"] for u in json.loads(row.usage or "[]") if u["word"].lower().strip("*") == wanted)
+
+    rows = sorted(rows, key=lambda r: (-rendered(r), r.transliteration.lower() != wanted, -r.usage_total))[:limit]
     return [{"strongs": r.strongs, "transliteration": r.transliteration, "definition": r.definition,
              "usage_total": r.usage_total} for r in rows]
