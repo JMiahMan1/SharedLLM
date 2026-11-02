@@ -68,3 +68,30 @@ def test_covers_come_only_from_the_catalogues():
     assert asyncio.run(book_lookup.fetch_cover("http://covers.openlibrary.org/b/id/1-L.jpg")) is None
     assert asyncio.run(book_lookup.fetch_cover("https://169.254.169.254/latest")) is None
     assert asyncio.run(book_lookup.fetch_cover("https://example.com/cover.jpg")) is None
+
+
+def test_open_library_language_is_english_when_listed_and_never_a_guess():
+    class Session:
+        def __init__(self, languages):
+            self.languages = languages
+
+        def get(self, url, timeout=None):
+            body = {"docs": [{"title": "Great Lent", "language": self.languages}]} if "search.json" in url else {}
+
+            class Resp:
+                status = 200
+
+                async def json(self, content_type=None):
+                    return body
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *a):
+                    return False
+
+            return Resp()
+
+    assert asyncio.run(book_lookup.open_library(Session(["dut", "eng", "rus"]), "Great Lent", "", ""))["language"] == "eng"
+    assert asyncio.run(book_lookup.open_library(Session(["dut", "rus"]), "Great Lent", "", ""))["language"] == ""
+    assert asyncio.run(book_lookup.open_library(Session(["fre"]), "Great Lent", "", ""))["language"] == "fre"
