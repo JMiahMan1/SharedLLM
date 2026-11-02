@@ -21,8 +21,8 @@ def sent(monkeypatch):
         out.append(payload)
         return True
 
-    async def verse(ref):
-        return f"[{ref}]"
+    async def verse(ref, username=None):
+        return f"[{ref} for {username}]"
 
     monkeypatch.setattr(fasting_notices.notify, "send", send)
     monkeypatch.setattr(fasting_notices, "verse_text", verse)
@@ -175,3 +175,32 @@ def test_the_hours_of_prayer_are_due_only_inside_the_fast():
     assert fasting_notices.due([late], at_noon, PHOENIX) == []
     done = fasting_notices.due([row], datetime(2026, 11, 4, 15, 3, tzinfo=PHOENIX), PHOENIX)
     assert [what for _, what, _ in done] == ["complete"]
+
+
+
+@pytest.mark.asyncio
+async def test_an_hour_of_prayer_carries_the_psalm_and_opens_it_in_the_bible(sent, engine, monkeypatch):
+    from sqlmodel import Session
+
+    started = datetime(2026, 11, 4, 6, 0, tzinfo=PHOENIX)
+    with Session(engine) as session:
+        session.add(FastingSession(user_id="jeremiah", started_at=started.isoformat(),
+                                   ends_at=datetime(2026, 11, 4, 15, 0, tzinfo=PHOENIX).isoformat()))
+        session.commit()
+    await fasting_notices.remind_once(lambda: engine, lambda: PHOENIX, now=datetime(2026, 11, 4, 12, 5, tzinfo=PHOENIX))
+    prayer = next(n for n in sent if n.get("kind") == "fast_prayer")
+    assert prayer["title"] == "Sixth hour: time to pray"
+    psalm = prayer["data"]["url"].split("ref=", 1)[1]
+    assert prayer["data"]["url"].startswith("/bible?ref=Psalm")
+    # The psalm's words are in the message, in the person's translation.
+    assert "for jeremiah]" in prayer["body"] and "Lord's Prayer" in prayer["body"]
+    assert [a["label"] for a in prayer["actions"]][1] == "Open my fast" and psalm
+
+
+def test_a_shared_fast_asks_for_prayer_with_a_verse_to_open(client, sent):
+    client.put("/shares", json={"viewer": "michele", "scope": "fasting"})
+    client.post("/fasting/start", json={"kind": "station"})
+    notice = next(n for n in sent if n.get("kind") == "fast_shared")
+    assert notice["data"]["url"].startswith("/bible?ref=")
+    assert notice["actions"][0]["label"].startswith("Read ")
+    assert "for michele]" in notice["body"]
