@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
+from services.bible import epub_study
 from services.bible.books import BOOK_BY_OSIS, BOOK_ORDER, BOOKS, resolve_book
 from services.bible.corpus import CorpusError
 
@@ -216,6 +217,10 @@ class StudyReport:
     skipped: dict[str, int] = field(default_factory=dict)
     blocks_seen: int = 0
     orphan_footnotes: int = 0
+    #: Notes placed by id or by structure (``epub_study``), by kind.
+    placed: dict[str, int] = field(default_factory=dict)
+    #: Blocks of that kind whose verse could not be read, left out.
+    unplaced: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -225,6 +230,8 @@ class StudyReport:
             "missing_footnotes": self.missing_footnotes,
             "orphan_footnotes": self.orphan_footnotes,
             "blocks_seen": self.blocks_seen,
+            "placed": dict(self.placed),
+            "unplaced": dict(self.unplaced),
             "skipped": dict(self.skipped),
         }
 
@@ -272,17 +279,12 @@ def _spine_order(archive: zipfile.ZipFile) -> list[str]:
         except ET.ParseError:
             continue
         base = candidate.rsplit("/", 1)[0] + "/" if "/" in candidate else ""
-        order: list[str] = []
-        for item in root.iter(f"{_OPF_NS}spine"):
-            ref = item.get("idref")
-            if not ref:
-                continue
-            for node in root.iter(f"{_OPF_NS}item"):
-                if node.get("id") == ref:
-                    href = node.get("href")
-                    if href:
-                        order.append(base + href)
-                    break
+        hrefs = {node.get("id"): node.get("href") for node in root.iter(f"{_OPF_NS}item")}
+        order = [
+            base + hrefs[ref]
+            for item in root.iter(f"{_OPF_NS}itemref")
+            if (ref := item.get("idref")) and hrefs.get(ref)
+        ]
         if order:
             return order
     return sorted(archive.namelist())
@@ -1110,6 +1112,7 @@ def extract(path: str) -> dict:
     reports: list[BookReport] = []
     warnings: list[str] = []
     total_books = len(BOOKS)
+    numbered_mode = False
 
     if not verses:
         commentary = _CommentaryHarvester()
@@ -1134,6 +1137,7 @@ def extract(path: str) -> dict:
                 "verse_count": 0,
                 "mode": "commentary",
             }
+        numbered_mode = True
         numbered = _NumberedHarvester(_heading_classes(path))
         for _name, markup in documents:
             numbered.feed(markup)
@@ -1151,6 +1155,12 @@ def extract(path: str) -> dict:
                     f"{sum(numbered.declined.values())} paragraphs were not kept as verse text "
                     f"while reading numbered paragraphs ({named})"
                 )
+
+    if verses:
+        with zipfile.ZipFile(path) as archive:
+            spine = {name: index for index, name in enumerate(_spine_order(archive))}
+        in_order = sorted(documents, key=lambda doc: spine.get(doc[0], len(spine)))
+        notes = _with_extras(notes, study_report, epub_study.harvest(in_order, structured=numbered_mode))
 
     for number, entry in enumerate(BOOKS, start=1):
         osis = entry["osis"]
@@ -1239,6 +1249,27 @@ def _join_notes(
     return notes, report
 
 
+def _with_extras(
+    notes: list[StudyNote], report: StudyReport, extras: epub_study.StudyExtras
+) -> list[StudyNote]:
+    """The linked notes plus everything ``epub_study`` placed, each body once per verse and kind."""
+    seen = {(n.book, n.chapter, n.verse, n.kind, n.body) for n in notes}
+    ordinals: Counter[tuple[int, int, int, str]] = Counter((n.book, n.chapter, n.verse, n.kind) for n in notes)
+    merged = list(notes)
+    placed: Counter[str] = Counter()
+    for book, chapter, verse, kind, body in extras.notes:
+        if (book, chapter, verse, kind, body) in seen:
+            continue
+        seen.add((book, chapter, verse, kind, body))
+        key = (book, chapter, verse, kind)
+        merged.append(StudyNote(book, chapter, verse, kind, body, ordinals[key]))
+        ordinals[key] += 1
+        placed[kind] += 1
+    report.placed = dict(placed)
+    report.unplaced = dict(extras.unplaced)
+    return merged
+
+
 def _title_of(path: str) -> str:
     try:
         archive = zipfile.ZipFile(path)
@@ -1262,6 +1293,10 @@ def report_lines(result: dict) -> list[str]:
         f"  study  {study.commentary} commentary notes, {study.footnotes} footnotes"
         f" ({study.blocks_seen} blocks found)"
     )
+    if study.placed:
+        lines.append("  study  also " + ", ".join(f"{count} {kind}" for kind, count in sorted(study.placed.items())))
+    if study.unplaced:
+        lines.append("  ! not placed on a verse: " + ", ".join(f"{count} {kind}" for kind, count in sorted(study.unplaced.items())))
     if study.missing_commentary or study.missing_footnotes:
         lines.append(
             f"  ! {study.missing_commentary} cited commentary blocks and"

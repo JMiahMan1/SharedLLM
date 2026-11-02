@@ -407,7 +407,7 @@ def study_notes(
     except ReferenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    wanted = study.DEFAULT_KINDS
+    wanted = study.READER_KINDS
     if kind:
         wanted = tuple(k.strip() for k in kind.split(",") if k.strip())
         unknown = [k for k in wanted if k not in study.NOTE_KINDS]

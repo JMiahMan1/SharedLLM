@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BookMarked } from 'lucide-react';
 import type { BibleStudyNote, BibleStudyNoteKind } from '../../types/api';
 
@@ -15,10 +16,36 @@ interface ChapterNotesProps {
 
 const KIND_LABELS: Record<BibleStudyNoteKind, string> = {
   commentary: 'Commentary',
+  article: 'Article',
   footnote: 'Note',
+  crossref: 'Cross references',
   introduction: 'Introduction',
   heading: 'Heading',
 };
+
+/** Where a long note (a book's introduction, an article) is cut until asked for. */
+const PREVIEW_CHARS = 600;
+
+function NoteBody({ body }: { body: string }) {
+  const [open, setOpen] = useState(false);
+  const long = body.length > PREVIEW_CHARS;
+  return (
+    <>
+      <p className="text-[12px] leading-relaxed text-slate-300 whitespace-pre-wrap">
+        {long && !open ? `${body.slice(0, PREVIEW_CHARS).trimEnd()}…` : body}
+      </p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="mt-1 min-h-11 text-[11px] font-semibold text-amber-300"
+        >
+          {open ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </>
+  );
+}
 
 /**
  * The chapter's commentary, beside the text rather than behind a tap.
@@ -117,7 +144,7 @@ export default function ChapterNotes({
                 {KIND_LABELS[note.kind] ?? note.kind}
               </span>
             </button>
-            <p className="text-[12px] leading-relaxed text-slate-300">{note.body}</p>
+            <NoteBody body={note.body} />
           </li>
         ))}
       </ul>
