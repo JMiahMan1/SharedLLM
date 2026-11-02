@@ -91,3 +91,25 @@ def test_a_study_bible_already_installed_from_an_upload_is_not_installed_twice(s
     assert tagged.due(session, [book]) == []
     row = tagged.describe(session, book)
     assert row["state"] == "installed" and row["edition"] == "nlt-courage" and "another copy" in row["reason"]
+
+
+def test_reinstalling_a_copy_whose_notes_were_not_found_keeps_the_old_notes(client, session, monkeypatch):
+    from fastapi.responses import JSONResponse
+
+    from services.bible.models import BibleEdition, StudyNote
+
+    session.add(BibleEdition(code="nlt-courage", version_code="nlt", name="Courage For Life", publisher="Tyndale",
+                             license_class="licensed", rights_holder="Tyndale"))
+    session.add(StudyNote(version_code="nlt", edition_code="nlt-courage", osis="John", chapter=1, verse=1,
+                          body="In the beginning", source="/data/imports/nlt.epub"))
+    session.commit()
+    book = _book(3, "NLT Courage For Life Study Bible for Men")
+
+    async def fake_books():
+        return [book]
+
+    monkeypatch.setattr(bible_main, "_tagged_books", fake_books)
+    monkeypatch.setattr(bible_main, "_admin_import_run", lambda plan, registry: JSONResponse({"status": "succeeded"}))
+    assert client.post("/admin/library/tagged/3/install", json={}).status_code == 200
+    session.expire_all()
+    assert [n.source for n in session.exec(bible_main.select(StudyNote)).all()] == ["/data/imports/nlt.epub"]
