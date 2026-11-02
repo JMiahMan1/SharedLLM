@@ -26,6 +26,7 @@ import type {
 import { useHaptics } from '../../hooks/useHaptics';
 import InterlinearAdminSection from './InterlinearAdminSection';
 import BibleBooksPanel from './BibleBooksPanel';
+import TaggedBiblesSection from './TaggedBiblesSection';
 
 const KIND_LABELS: Record<BibleImportKind, string> = {
   json: 'Plain text (JSON)',
@@ -186,6 +187,8 @@ export default function BibleAdminPanel() {
           </ul>
         )}
       </section>
+
+      <TaggedBiblesSection knownCodes={knownCodes} onReport={report} onFailed={failed} />
 
       <ProviderSection
         providers={data?.providers ?? []}

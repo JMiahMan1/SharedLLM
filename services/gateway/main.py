@@ -14312,6 +14312,33 @@ async def proxy_bible_admin_provider_estimate(
     )
 
 
+@app.get("/api/bible/admin/library/tagged")
+async def proxy_bible_tagged_bibles(request: Request):
+    """Books tagged "Bible" in Calibre: translation, file, and whether installed."""
+    await _require_admin(request)
+    return await _bible_json("GET", "/admin/library/tagged", label="Could not read the Bibles in the library", timeout=_BIBLE_IMPORT_TIMEOUT)
+
+
+@app.post("/api/bible/admin/library/tagged/sync")
+async def proxy_bible_tagged_sync(request: Request):
+    """Install every newly tagged Bible now rather than at the next sync."""
+    await _require_admin(request)
+    return await _bible_json("POST", "/admin/library/tagged/sync", label="Could not install the tagged Bibles", timeout=_BIBLE_IMPORT_TIMEOUT)
+
+
+@app.post("/api/bible/admin/library/tagged/{book_id}/install")
+async def proxy_bible_tagged_install(book_id: int, request: Request):
+    """Install (or reinstall) one tagged Bible, optionally as a chosen translation."""
+    await _require_admin(request)
+    body = await _request_json_object(request)
+    resp = await _bible_call(
+        "POST", f"/admin/library/tagged/{book_id}/install", json={"code": str(body.get("code") or "")[:16]},
+        timeout=_BIBLE_IMPORT_TIMEOUT,
+    )
+    # The import's own report (a refusal included) is what the admin page shows.
+    return await _bible_import_response(resp)
+
+
 @app.post("/api/bible/admin/library")
 async def proxy_bible_admin_library(request: Request):
     """List one folder of the Nextcloud book library.

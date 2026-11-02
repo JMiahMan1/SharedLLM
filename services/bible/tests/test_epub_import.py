@@ -866,3 +866,60 @@ def test_a_verse_own_number_is_only_stripped_when_it_matches_the_position(tmp_pa
     assert verse_text(result, "Gen", 1, 1) == "In the beginning God created"
     assert verse_text(result, "Gen", 1, 2) == "20 men and 1,600 camels"
     assert verse_text(result, "Gen", 1, 16) == "\u201cFor God so loved"
+
+
+def test_a_psalm_titled_and_set_line_by_line_keeps_every_line_and_no_title(tmp_path: Path) -> None:
+    """The ESV Study Bible parks a psalm's verse-1 anchor on its heading, puts
+    the superscription and an acrostic letter between, and sets each poetic line
+    as its own paragraph ("line", "line-indent", "line-group")."""
+    path = build_epub(
+        tmp_path / "esv-psalms.epub",
+        book_filter={"Ps"},
+        documents={
+            "OEBPS/book19.html": (
+                "<html><body>"
+                f'<p id="{anchor(19, 1, 1)}" class="psalm-book">Book One</p>'
+                '<p class="heading">The Way of the Righteous</p>'
+                '<p class="line-group-after-heading"><span class="chapter-num"> 1 </span> Blessed is the man</p>'
+                '<p class="line-indent">who walks not in the counsel of the wicked;</p>'
+                f'<p id="{anchor(19, 23, 1)}" class="heading">The LORD Is My Shepherd</p>'
+                '<p class="psalm-title">A Psalm of David.</p>'
+                '<p class="line-group"><span class="chapter-num"> 23 </span> The LORD is my shepherd;'
+                ' <span class="crossref"><a href="#x">d</a></span>I shall not want.</p>'
+                f'<p class="line-indent"><span id="{anchor(19, 23, 2)}" class="verse-num">2</span> He makes me lie down in green pastures.</p>'
+                '<p class="line">He leads me beside still waters.</p>'
+                f'<p id="{anchor(19, 119, 1)}" class="heading">Your Word Is a Lamp</p>'
+                '<p class="psalm-acrostic-title">Aleph</p>'
+                '<p class="line-group">Blessed are those whose way is blameless,</p>'
+                '<p class="line-indent">who walk in the law of the LORD!</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Ps", 1, 1) == "Blessed is the man who walks not in the counsel of the wicked;"
+    assert verse_text(result, "Ps", 23, 1) == "The LORD is my shepherd; I shall not want."
+    assert verse_text(result, "Ps", 23, 2) == "He makes me lie down in green pastures. He leads me beside still waters."
+    assert verse_text(result, "Ps", 119, 1) == "Blessed are those whose way is blameless, who walk in the law of the LORD!"
+
+
+def test_a_typeset_fraction_is_not_a_verse_number(tmp_path: Path) -> None:
+    """The NLT sets 10½ as small numerals in spans; the "2" must not open verse 2."""
+    path = build_epub(
+        tmp_path / "nlt-ezekiel.epub",
+        numbered=True,
+        book_filter={"Ezek"},
+        documents={
+            "OEBPS/book26.html": (
+                "<html><body>"
+                '<p class="hd"><a href="book26.html">Ezekiel</a> <a href="book26.html">41</a></p>'
+                '<p class="v"><span>1</span>He measured the walls, and they were 10<span>1</span>/<span>2</span> feet*'
+                ' thick. <span>2</span>The doorway was 17<span>1</span>/<span>2</span> feet wide, and the walls'
+                ' were 8<span>3</span>/<span>4</span> feet long. They hiss: &quot;We have seen it!#8221;</p>'
+                "</body></html>"
+            )
+        },
+    )
+    result = extract(str(path))
+    assert verse_text(result, "Ezek", 41, 1) == "He measured the walls, and they were 10½ feet thick."
+    assert verse_text(result, "Ezek", 41, 2) == "The doorway was 17½ feet wide, and the walls were 8¾ feet long. They hiss: \"We have seen it!”"

@@ -33,7 +33,7 @@ import aiohttp
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, delete, select
 from starlette.concurrency import run_in_threadpool
 
 from services.bible import achievements as ach
@@ -55,6 +55,7 @@ from services.bible import (
     study,
     study_ask,
     study_sources,
+    tagged,
     verse_context,
     votd,
 )
@@ -73,6 +74,7 @@ from services.bible.models import (
     PlanEnrollment,
     PlanReflection,
     ReadingEvent,
+    StudyNote,
     UserBibleState,
     VerseMark,
     utcnow,
@@ -138,11 +140,13 @@ async def lifespan(app: FastAPI):
         bool(BLB_BASE_URL),
     )
     reminder_task = asyncio.create_task(reminders.reminder_loop(_db, TELEMETRY_SVC_URL, INTERNAL_SECRET))
+    tagged_task = asyncio.create_task(_tagged_sync_loop())
     context_task = asyncio.create_task(
         verse_context.ensure_daily_loop(_db, GATEWAY_INTERNAL_URL, INTERNAL_SECRET)
     )
     yield
     reminder_task.cancel()
+    tagged_task.cancel()
     context_task.cancel()
 
 
@@ -2834,6 +2838,106 @@ async def admin_library_post(request: Request):
             detail='The body must be a JSON object such as {"path": "Author/Work"}.',
         )
     return await _library_listing(str(body.get("path") or ""))
+
+
+# --- Bibles tagged "Bible" in the family library (tagged.py) -----------------
+
+
+async def _tagged_books() -> list[dict]:
+    root = await _library_root()
+    try:
+        return await _library_client(root).tagged_books(root=root)
+    except library.LibraryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/admin/library/tagged")
+async def admin_tagged_bibles():
+    """Every book tagged "Bible" in Calibre: which translation, which file, installed or not."""
+    books = await _tagged_books()
+
+    def describe_all() -> list[dict]:
+        with Session(_db()) as session:
+            return [tagged.describe(session, book) for book in books]
+
+    rows = await run_in_threadpool(describe_all)
+    return {"books": rows, "count": len(rows), "tag": "Bible", "auto_sync_hours": tagged.SYNC_EVERY_S // 3600}
+
+
+class TaggedInstall(BaseModel):
+    #: Install as this translation when the title does not say (or says wrongly).
+    code: str = ""
+
+
+@app.post("/admin/library/tagged/{book_id}/install")
+async def admin_install_tagged_bible(book_id: int, payload: TaggedInstall):
+    """Install (or reinstall) one tagged Bible through the ordinary importer."""
+    book = next((b for b in await _tagged_books() if int(b.get("id") or 0) == book_id), None)
+    if book is None:
+        raise HTTPException(status_code=404, detail="That book is not tagged Bible in the library.")
+    def existing() -> list[tuple[str, str, str]]:
+        with Session(_db()) as session:
+            return tagged.installed_editions(session)
+
+    known = await run_in_threadpool(existing)
+    plan, reason = tagged.plan_for(book, code=payload.code.strip().lower() or None, existing=known)
+    if plan is None:
+        raise HTTPException(status_code=422, detail=reason)
+    response = await run_in_threadpool(_admin_import_run, plan, await _provider_registry())
+    if tagged.installed_elsewhere(plan, known) and response.status_code == 200:
+        # The same study Bible was installed from another copy; now that this
+        # one is in, the other copy's notes go, so nothing is doubled.
+        def drop_other_copies() -> int:
+            with Session(_db()) as session:
+                result = session.exec(
+                    delete(StudyNote).where(
+                        StudyNote.edition_code == plan.edition,
+                        StudyNote.source != plan.source_label()[: study._SOURCE_MAX],
+                    )
+                )
+                session.commit()
+                return int(result.rowcount or 0)
+
+        dropped = await run_in_threadpool(drop_other_copies)
+        log.info("[Bible] %s reinstalled from the library; %d notes from another copy removed", plan.edition, dropped)
+    return response
+
+
+async def _sync_tagged() -> int:
+    """Install every tagged Bible not yet tried from its file. Returns how many ran."""
+    books = await _tagged_books()
+
+    def plans() -> list[importer.ImportPlan]:
+        with Session(_db()) as session:
+            return tagged.due(session, books)
+
+    todo = await run_in_threadpool(plans)
+    registry = await _provider_registry()
+    for plan in todo:
+        log.info("[Bible] installing tagged Bible %s as %s (%s)", plan.library_path, plan.code, plan.edition)
+        await run_in_threadpool(_admin_import_run, plan, registry)
+    return len(todo)
+
+
+@app.post("/admin/library/tagged/sync")
+async def admin_sync_tagged_bibles():
+    """Look for newly tagged Bibles now instead of at the next sync."""
+    return {"installed": await _sync_tagged()}
+
+
+async def _tagged_sync_loop() -> None:
+    """Every few hours, install any Bible newly tagged in the library."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            ran = await _sync_tagged()
+            if ran:
+                log.info("[Bible] tagged-Bible sync installed %d book(s)", ran)
+        except HTTPException as exc:  # no library configured, storage down: try later
+            log.info("[Bible] tagged-Bible sync skipped: %s", exc.detail)
+        except Exception as exc:
+            log.warning("[Bible] tagged-Bible sync failed: %s", exc)
+        await asyncio.sleep(tagged.SYNC_EVERY_S)
 
 
 @app.get("/admin/imports")
