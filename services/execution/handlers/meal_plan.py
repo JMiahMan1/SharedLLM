@@ -283,7 +283,7 @@ async def _recipe_title(req: MealPlanRequest, name: str) -> str:
     reply names the title, so nothing is silently dropped.
     """
     listing = await handle_note(NoteRequest(
-        user_context=req.user_context,
+        user_context=req.shelf_context or req.user_context,
         action="list",
         storage="nextcloud",
         directories=[RECIPES_DIR],
@@ -291,7 +291,10 @@ async def _recipe_title(req: MealPlanRequest, name: str) -> str:
     titles: list[str] = []
     if listing.status == "SUCCESS":
         notes = (listing.detail or {}).get("notes") or []
-        titles = [str(note.get("title")) for note in notes if note.get("title")]
+        titles = [
+            str(note.get("title")) for note in notes
+            if note.get("title") and "/Suggestions/" not in str(note.get("path") or "")
+        ]
     return match_recipe_title(name, titles)
 
 

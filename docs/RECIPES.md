@@ -401,3 +401,21 @@ account is connected, everything above still works.
 - [x] Family tab reaches Recipes; a recipe shares to a chat in one tap.
 - [x] A week's plan produces a tappable shopping list that survives regeneration.
 - [x] Jarvis answers dinner questions from the imported set in chat.
+
+## Family cookbook (shared recipes)
+
+- Every recipe lives in the household (Admin) account's `Recipes/` folder and
+  everyone reads the same shelf, through `/api/recipes/cookbook/*` in the
+  gateway (`services/gateway/cookbook.py`). Members never hold the Admin
+  account's credentials.
+- Each recipe names who added it on an `Added by:` line, which the gateway
+  writes and re-stamps on every save; the client's copy of that line is ignored.
+  Only that person changes or deletes the recipe. A recipe added as Admin, or
+  one from before the line existed, is changed by any admin.
+- Anyone else's edit becomes a suggestion in `Recipes/Suggestions/`. The
+  recipe's owner or any admin approves or turns it down; the sender can
+  withdraw it.
+- The week plan and shopping list stay in each person's own `Recipes/` folder.
+  Recipes still in someone's own folder from before the cookbook are moved in
+  by that person from the Recipes page ("Add them to the family cookbook"),
+  attachments included. Nothing is moved for them.

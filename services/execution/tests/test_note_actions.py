@@ -259,6 +259,26 @@ async def test_a_new_note_never_sends_if_match(provider, monkeypatch):
     assert "If-Match" not in sent[0]
 
 
+async def test_a_new_note_can_refuse_to_replace_one_already_there(provider, monkeypatch):
+    """The family cookbook adds recipes this way, so one never replaces another."""
+    import services.execution.http_client as http_client
+
+    sent: list[dict] = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        sent.append(headers or {})
+        return {"status_code": 412, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    result = await note_handler.handle_note(
+        request("write", title="Chili", category="Recipes", content="x", if_none_match=True)
+    )
+    assert sent[0]["If-None-Match"] == "*"
+    assert result.status == "FAILURE"
+    assert result.detail == {"conflict": True, "exists": True}
+
+
 def test_note_body_keeps_a_markdown_heading_that_is_not_the_stored_header():
     assert note_handler.note_body("# Shopping\n- [ ] milk") == "# Shopping\n- [ ] milk"
     assert note_handler.note_body("# T\nCategory: Recipes\n\nStep 1") == "Step 1"

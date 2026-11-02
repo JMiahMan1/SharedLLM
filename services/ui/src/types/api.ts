@@ -3655,6 +3655,27 @@ export interface FoodLabelDraft {
 }
 
 /** One shelf recipe's staple overlap (services/execution/handlers/recipe_import.py). */
+/** A change someone suggested to a cookbook recipe, waiting for its owner or an admin. */
+export interface CookbookSuggestion {
+  id: string;
+  /** The suggestion's own note (what approve/reject/withdraw name). */
+  path: string;
+  /** The recipe it changes. */
+  recipe: string;
+  recipe_title: string;
+  by: string;
+  at: string;
+  message: string;
+  /** The proposed recipe text. */
+  content: string;
+  /** The recipe as it stands, or null when it has since been deleted. */
+  current: string | null;
+  owner: string;
+  owner_label: string;
+  mine: boolean;
+  can_review: boolean;
+}
+
 export interface RecipeStapleRank {
   title: string;
   path: string;

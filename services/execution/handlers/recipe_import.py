@@ -431,6 +431,21 @@ async def _read_note_source(provider, note: dict) -> str:
     return source
 
 
+#: Recipes/ also holds the week plan, the shopping list and the cookbook's
+#: suggested changes; none of them is a recipe on the shelf.
+_NOT_SHELF = frozenset({"Meal plan.md", "Meal-plan.md", "Shopping list.md", "Shopping-list.md"})
+
+
+def _shelf(notes: list[dict]) -> list[dict]:
+    out = []
+    for note in notes:
+        rel = str(note.get("path") or "").strip("/").removeprefix(_RECIPES_DIR + "/")
+        if rel in _NOT_SHELF or rel.startswith("Suggestions/"):
+            continue
+        out.append(note)
+    return out
+
+
 async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
     """The source URLs already imported into ``Recipes/`` (the duplicate guard).
 
@@ -442,7 +457,7 @@ async def _recipe_sources(req: RecipeRequest) -> ExecutionResult:
     if not provider:
         return ExecutionResult.fail(missing_account_message(req.user_context), service="recipe_sources")
     try:
-        notes = await _walk_webdav_dir(provider, _RECIPES_DIR)
+        notes = _shelf(await _walk_webdav_dir(provider, _RECIPES_DIR))
     except Exception as exc:  # a listing failure is a blank guard, not a 500
         log.warning("[recipe_import] recipe listing failed: %s", str(exc) or type(exc).__name__)
         return ExecutionResult.fail("Could not read the recipe shelf right now.", service="recipe_sources")
@@ -505,7 +520,7 @@ async def _recipe_staples(req: RecipeRequest) -> ExecutionResult:
     if not provider:
         return ExecutionResult.fail(missing_account_message(req.user_context), service="recipe_staples")
     try:
-        notes = await _walk_webdav_dir(provider, _RECIPES_DIR)
+        notes = _shelf(await _walk_webdav_dir(provider, _RECIPES_DIR))
     except Exception as exc:  # a listing failure is reported, not a 500
         log.warning("[recipe_import] recipe listing failed: %s", str(exc) or type(exc).__name__)
         return ExecutionResult.fail("Could not read the recipe shelf right now.", service="recipe_staples")

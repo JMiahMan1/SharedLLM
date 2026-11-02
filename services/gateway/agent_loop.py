@@ -4172,6 +4172,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     }
                     if isinstance(payload, dict):
                         payload["user_context"] = _uc
+                        # A dinner is matched against the family cookbook,
+                        # which lives in the household account.
+                        if lookup_action == "mealplanrequest":
+                            from services.gateway.main import cookbook_creds
+                            try:
+                                payload["shelf_context"] = await cookbook_creds()
+                            except Exception:  # the caller's own shelf still plans it
+                                log.warning("cookbook unavailable for meal plan matching")
                     # Fan-out payloads (compound git pipelines) also need creds
                     # and the mission workspace id so each step runs scoped.
                     if _git_batch:

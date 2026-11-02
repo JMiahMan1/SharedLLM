@@ -9,7 +9,6 @@ import { parseRecipeNutrition, parseRecipeServings, portionTotals } from '../../
 import { eatenDinner } from '../../lib/recipeEaten';
 import LogRecipeSheet from './LogRecipeSheet';
 
-const STORAGE = 'nextcloud';
 const RECIPES_DIR = 'Recipes';
 
 /**
@@ -38,11 +37,10 @@ export default function MealsCard({ kid = false }: { kid?: boolean }) {
 
   const dinner = planQuery.data?.plan[today] ?? null;
   const title = dinner?.title ?? '';
-  const path = title ? `${RECIPES_DIR}/${title}.md` : '';
-
+  // The plan names the recipe by title; the family cookbook finds its file.
   const recipeQuery = useQuery({
     queryKey: ['recipe-note', title],
-    queryFn: () => api.readNote(title, STORAGE, path),
+    queryFn: () => api.cookbookRead({ title }),
     enabled: Boolean(title),
     staleTime: 300_000,
     retry: false,
@@ -58,6 +56,7 @@ export default function MealsCard({ kid = false }: { kid?: boolean }) {
   });
 
   const body = recipeQuery.data?.status === 'SUCCESS' ? recipeQuery.data.message ?? '' : '';
+  const path = String((recipeQuery.data?.detail as { path?: string } | undefined)?.path ?? (title ? `${RECIPES_DIR}/${title}.md` : ''));
   const parsed = useMemo(() => parseRecipeNutrition(body), [body]);
   const servings = useMemo(() => parseRecipeServings(body), [body]);
   const eaten = useMemo(

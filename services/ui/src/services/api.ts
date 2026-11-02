@@ -173,6 +173,7 @@ import type {
   HealthCheersDay,
   FoodLabelDraft,
   RecipePhotoDraft,
+  CookbookSuggestion,
   RecipeStapleRank,
   RecipeEstimate,
   HealthFastingState,
@@ -2876,7 +2877,7 @@ export const api = {
     return resp.data;
   },
 
-  async syncNotesRag(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
+  async syncNotesRag(payload: { storage?: string; directories?: string[]; cookbook?: boolean } = {}): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/sync_rag', payload, { timeout: 60_000 });
     return resp.data;
   },
@@ -2890,6 +2891,73 @@ export const api = {
   }): Promise<ExecutionResponse> {
     // The activity beacon: a light page view for the family profile.
     const resp = await apiClient.post('/api/activity', payload);
+    return resp.data;
+  },
+
+  /**
+   * The family cookbook: one shelf everyone reads. A recipe is changed only by
+   * whoever added it (the Admin account's, by any admin); anyone else suggests
+   * a change for the owner or an admin to approve. `read` returns the recipe
+   * without its "Added by" line, with `detail.owner_label` and `detail.can_change`.
+   */
+  async cookbookList(): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/list', {}, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async cookbookRead(payload: { path?: string; title?: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/read', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async cookbookSave(payload: {
+    title: string;
+    content: string;
+    path?: string;
+    if_match?: string;
+    as_user?: 'admin';
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/save', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async cookbookDelete(path: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/delete', { path }, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async cookbookAttach(payload: { path: string; filename: string; data: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/attach', payload, { timeout: 120_000 });
+    return resp.data;
+  },
+
+  async cookbookSuggest(payload: { path: string; content: string; message?: string }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/suggest', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  async cookbookSuggestions(): Promise<CookbookSuggestion[]> {
+    const resp = await apiClient.post('/api/recipes/cookbook/suggestions', {}, { timeout: 60_000 });
+    const rows = (resp.data?.detail?.suggestions ?? []) as unknown[];
+    return rows.filter(
+      (row): row is CookbookSuggestion => Boolean(row) && typeof (row as CookbookSuggestion).path === 'string',
+    );
+  },
+
+  async cookbookResolve(path: string, decision: 'approve' | 'reject' | 'withdraw'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/suggestions/resolve', { path, decision }, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /** Titles still in the caller's own Recipes/ folder, from before the cookbook. */
+  async cookbookPersonal(): Promise<string[]> {
+    const resp = await apiClient.post('/api/recipes/cookbook/personal', {}, { timeout: 60_000 });
+    const titles = (resp.data?.detail?.titles ?? []) as unknown[];
+    return titles.filter((title): title is string => typeof title === 'string');
+  },
+
+  async cookbookAdopt(): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/adopt', {}, { timeout: 300_000 });
     return resp.data;
   },
 
@@ -2915,8 +2983,8 @@ export const api = {
    * The source URLs already imported into Recipes/ (the duplicate-import
    * guard). Reads every recipe note server-side; a repeat call is cached.
    */
-  async recipeSources(as_user?: 'admin'): Promise<string[]> {
-    const resp = await apiClient.post('/api/recipes/sources', { as_user }, { timeout: 60_000 });
+  async recipeSources(): Promise<string[]> {
+    const resp = await apiClient.post('/api/recipes/sources', {}, { timeout: 60_000 });
     const sources = (resp.data?.detail?.sources ?? []) as unknown[];
     return sources.filter((source): source is string => typeof source === 'string');
   },
@@ -2925,8 +2993,8 @@ export const api = {
    * The shelf ranked by how many household staples each recipe uses (Phase 6).
    * Reads every recipe note server-side; each read is cached by its version.
    */
-  async recipeStaples(as_user?: 'admin'): Promise<RecipeStapleRank[]> {
-    const resp = await apiClient.post('/api/recipes/staples', { as_user }, { timeout: 60_000 });
+  async recipeStaples(): Promise<RecipeStapleRank[]> {
+    const resp = await apiClient.post('/api/recipes/staples', {}, { timeout: 60_000 });
     const ranked = (resp.data?.detail?.ranked ?? []) as unknown[];
     return ranked.filter(
       (row): row is RecipeStapleRank =>

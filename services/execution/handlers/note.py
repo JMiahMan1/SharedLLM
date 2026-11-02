@@ -934,11 +934,21 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             # file at ``path``. Nextcloud answers 412 when it has changed.
             if req.if_match and req.path:
                 headers["If-Match"] = req.if_match
+            # A new note asked not to replace one of the same name.
+            elif req.if_none_match and not req.path:
+                headers["If-None-Match"] = "*"
             resp = await http_request(
                 "PUT", url, data=content.encode('utf-8'),
                 auth=(provider.username, provider.password), verify=False,
                 headers=headers,
             )
+            if resp["status_code"] == 412 and not req.path:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="A note with that name is already there, so it was not overwritten.",
+                    service="note_write",
+                    detail={"conflict": True, "exists": True},
+                )
             if resp["status_code"] == 412:
                 return ExecutionResult(
                     status="FAILURE",

@@ -18,10 +18,16 @@ vi.mock('../services/api', async (importOriginal) => {
       ...(actual.api as Record<string, unknown>),
       getMe: vi.fn(),
       getHealthProfile: vi.fn(),
-      listNotes: vi.fn(),
-      readNote: vi.fn(),
-      writeNote: vi.fn(),
-      deleteNote: vi.fn(),
+      cookbookList: vi.fn(),
+      cookbookRead: vi.fn(),
+      cookbookSave: vi.fn(),
+      cookbookDelete: vi.fn(),
+      cookbookAttach: vi.fn(),
+      cookbookSuggest: vi.fn(),
+      cookbookSuggestions: vi.fn(),
+      cookbookResolve: vi.fn(),
+      cookbookPersonal: vi.fn(),
+      cookbookAdopt: vi.fn(),
       syncNotesRag: vi.fn(),
       importRecipe: vi.fn(),
       searchRecipes: vi.fn(),
@@ -31,7 +37,6 @@ vi.mock('../services/api', async (importOriginal) => {
       mealPlanIcs: vi.fn(),
       estimateRecipeNutrition: vi.fn(),
       readRecipePhoto: vi.fn(),
-      noteAttachment: vi.fn(),
       getTalkConversations: vi.fn(),
       sendTalkMessage: vi.fn(),
       getSkylightMeals: vi.fn(),
@@ -48,10 +53,16 @@ vi.mock('../components/chat/familyDirectory', async (importOriginal) => ({
 }));
 
 const getMe = vi.mocked(api.getMe);
-const listNotes = vi.mocked(api.listNotes);
-const readNote = vi.mocked(api.readNote);
-const writeNote = vi.mocked(api.writeNote);
-const deleteNote = vi.mocked(api.deleteNote);
+// The page reads and writes the family cookbook; these keep the old names.
+const listNotes = vi.mocked(api.cookbookList);
+const readNote = vi.mocked(api.cookbookRead);
+const writeNote = vi.mocked(api.cookbookSave);
+const deleteNote = vi.mocked(api.cookbookDelete);
+const cookbookSuggest = vi.mocked(api.cookbookSuggest);
+const cookbookSuggestions = vi.mocked(api.cookbookSuggestions);
+const cookbookResolve = vi.mocked(api.cookbookResolve);
+const cookbookPersonal = vi.mocked(api.cookbookPersonal);
+const cookbookAdopt = vi.mocked(api.cookbookAdopt);
 const syncNotesRag = vi.mocked(api.syncNotesRag);
 const importRecipe = vi.mocked(api.importRecipe);
 const searchRecipes = vi.mocked(api.searchRecipes);
@@ -60,7 +71,7 @@ const recipeSources = vi.mocked(api.recipeSources);
 const recipeStaples = vi.mocked(api.recipeStaples);
 const estimateRecipeNutrition = vi.mocked(api.estimateRecipeNutrition);
 const readRecipePhoto = vi.mocked(api.readRecipePhoto);
-const noteAttachment = vi.mocked(api.noteAttachment);
+const noteAttachment = vi.mocked(api.cookbookAttach);
 const getTalkConversations = vi.mocked(api.getTalkConversations);
 const sendTalkMessage = vi.mocked(api.sendTalkMessage);
 const getSkylightMeals = vi.mocked(api.getSkylightMeals);
@@ -79,6 +90,9 @@ function renderRecipes() {
   );
 }
 
+/** A recipe the caller added, so the editor saves rather than suggests. */
+const OWNED = { owner_label: 'Mom', can_change: true, etag: '"e1"' };
+
 const listResponse = (titles: string[]) => ({
   status: 'SUCCESS' as const,
   message: '',
@@ -92,7 +106,7 @@ describe('Recipes', () => {
     getMe.mockResolvedValue({ username: 'mom', is_admin: false } as never);
     vi.mocked(api.getHealthProfile).mockResolvedValue({ kid_mode: false } as never);
     listNotes.mockResolvedValue(listResponse(['Pancakes']));
-    readNote.mockResolvedValue({ status: 'SUCCESS', message: 'flour, milk', service: 'note_read' });
+    readNote.mockResolvedValue({ status: 'SUCCESS', message: 'flour, milk', service: 'note_read', detail: OWNED });
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write' });
     deleteNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_delete' });
     syncNotesRag.mockResolvedValue({ status: 'SUCCESS', message: 'queued', service: 'notes_sync_rag' });
@@ -100,6 +114,8 @@ describe('Recipes', () => {
     searchRecipes.mockResolvedValue({ status: 'FAILURE', message: 'not stubbed', service: 'recipe_import' });
     recipeSources.mockResolvedValue([]);
     recipeStaples.mockResolvedValue([]);
+    cookbookSuggestions.mockResolvedValue([]);
+    cookbookPersonal.mockResolvedValue([]);
     readRecipePhoto.mockResolvedValue({
       raw_text: '',
       recipe: {
@@ -135,9 +151,7 @@ describe('Recipes', () => {
   it('lists recipes from the Recipes folder in Nextcloud', async () => {
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
-    expect(listNotes).toHaveBeenCalledWith(
-      expect.objectContaining({ directories: [RECIPES_DIR], as_user: undefined }),
-    );
+    expect(listNotes).toHaveBeenCalled();
   });
 
   it('invites the first recipe when the book is empty', async () => {
@@ -165,7 +179,7 @@ describe('Recipes', () => {
 
     await waitFor(() =>
       expect(writeNote).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Soup', content: 'stock, bones', category: RECIPES_DIR, as_user: undefined }),
+        expect.objectContaining({ title: 'Soup', content: 'stock, bones', path: undefined, as_user: undefined }),
       ),
     );
   });
@@ -183,14 +197,16 @@ describe('Recipes', () => {
     expect(screen.queryByTestId('send-as-selector')).toBeNull();
   });
 
-  it('lets an admin keep the cookbook in the Admin account', async () => {
+  it('lets an admin add a recipe as the Admin account', async () => {
     getMe.mockResolvedValue({ username: 'dad', is_admin: true } as never);
     renderRecipes();
     await waitFor(() => expect(screen.getByTestId('send-as-selector')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('radio', { name: /admin/i }));
-    await waitFor(() => expect(listNotes).toHaveBeenCalledWith(expect.objectContaining({ as_user: 'admin' })));
     expect(screen.getByTestId('send-as-badge')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Recipe name'), { target: { value: 'Stew' } });
+    fireEvent.click(screen.getByRole('button', { name: /save recipe/i }));
+    await waitFor(() => expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Stew', as_user: 'admin' })));
   });
 
   it('deletes a recipe after asking', async () => {
@@ -199,14 +215,15 @@ describe('Recipes', () => {
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
 
-    fireEvent.click(screen.getByLabelText('Delete Pancakes'));
-    await waitFor(() => expect(deleteNote).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Pancakes'));
+    fireEvent.click(await screen.findByLabelText('Delete Pancakes'));
+    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith(`${RECIPES_DIR}/Pancakes.md`));
     expect(confirm).toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
   it('edits an open recipe in place, without stacking the stored header', async () => {
-    readNote.mockResolvedValue({ status: 'SUCCESS', message: '# Pancakes\nCategory: Recipes\n\nflour, milk', service: 'note_read' });
+    readNote.mockResolvedValue({ status: 'SUCCESS', message: '# Pancakes\nCategory: Recipes\n\nflour, milk', service: 'note_read', detail: OWNED });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
 
@@ -217,13 +234,15 @@ describe('Recipes', () => {
 
     await waitFor(() =>
       expect(writeNote).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Pancakes', content: 'flour, milk, eggs', path: `${RECIPES_DIR}/Pancakes.md` }),
+        expect.objectContaining({
+          title: 'Pancakes', content: 'flour, milk, eggs', path: `${RECIPES_DIR}/Pancakes.md`, if_match: '"e1"',
+        }),
       ),
     );
     expect(deleteNote).not.toHaveBeenCalled();
   });
 
-  it('renaming a recipe writes the new one, then removes the old file', async () => {
+  it('renaming a recipe sends the new name for the old file (the server moves it)', async () => {
     writeNote.mockResolvedValue({ status: 'SUCCESS', message: 'ok', service: 'note_write', detail: { path: `${RECIPES_DIR}/Crepes.md` } });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
@@ -233,18 +252,17 @@ describe('Recipes', () => {
     fireEvent.change(screen.getByLabelText('Recipe name'), { target: { value: 'Crepes' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
 
-    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith(
-        'Pancakes', 'nextcloud', `${RECIPES_DIR}/Pancakes.md`, undefined, `${RECIPES_DIR}/Crepes.md`,
-      ),
+    await waitFor(() =>
+      expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Crepes', path: `${RECIPES_DIR}/Pancakes.md` })),
     );
-    expect(writeNote).toHaveBeenCalledWith(expect.objectContaining({ title: 'Crepes', path: undefined }));
+    expect(deleteNote).not.toHaveBeenCalled();
   });
 
   it('shares a recipe from the list to a family chat', async () => {
     readNote.mockResolvedValue({
       status: 'SUCCESS',
       message: '# Pancakes\nCategory: Recipes\n\nflour, milk, syrup',
-      service: 'note_read',
+      service: 'note_read', detail: OWNED,
     });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
@@ -270,7 +288,7 @@ describe('Recipes', () => {
     fireEvent.click(screen.getByRole('button', { name: /teach jarvis/i }));
 
     await waitFor(() =>
-      expect(syncNotesRag).toHaveBeenCalledWith({ directories: [RECIPES_DIR] }),
+      expect(syncNotesRag).toHaveBeenCalledWith({ cookbook: true }),
     );
   });
 
@@ -313,7 +331,7 @@ describe('Recipes', () => {
     await waitFor(() => expect(writeNote).toHaveBeenCalled());
     const body = writeNote.mock.calls[0][0] as { title: string; content: string; category: string };
     expect(body.title).toBe('Best Lemonade');
-    expect(body.category).toBe(RECIPES_DIR);
+    expect((body as { path?: string }).path).toBeUndefined();
     expect(body.content).toContain('Tags:');
     expect(body.content).toContain('- [ ] 4 cups water');
   });
@@ -507,7 +525,7 @@ describe('Recipes', () => {
         '## Nutrition',
         '*Per serving, as stated by the submitter - foodcom:* 350.2 kcal · 12 g fat · 30 g carbs · 25 g protein',
       ].join('\n'),
-      service: 'note_read',
+      service: 'note_read', detail: OWNED,
     });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
@@ -522,7 +540,7 @@ describe('Recipes', () => {
     readNote.mockResolvedValue({
       status: 'SUCCESS',
       message: '## Ingredients\n- [ ] 2 lb chicken\n- [ ] flour',
-      service: 'note_read',
+      service: 'note_read', detail: OWNED,
     });
     estimateRecipeNutrition.mockResolvedValue({
       estimate: true,
@@ -562,7 +580,7 @@ describe('Recipes', () => {
     readNote.mockResolvedValue({
       status: 'SUCCESS',
       message: '## Ingredients\n- [ ] 2 lb chicken',
-      service: 'note_read',
+      service: 'note_read', detail: OWNED,
     });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
@@ -626,8 +644,7 @@ describe('Recipes', () => {
     expect(first.content).toContain('- [ ] 2 cups flour');
 
     await waitFor(() => expect(noteAttachment).toHaveBeenCalled());
-    const upload = noteAttachment.mock.calls[0][0] as { action: string; path: string };
-    expect(upload.action).toBe('upload');
+    const upload = noteAttachment.mock.calls[0][0] as { path: string };
     expect(upload.path).toBe("Recipes/Nana's Pancakes.md");
     // The link lands in the note on the second save.
     await waitFor(() => expect(writeNote).toHaveBeenCalledTimes(2));
@@ -681,7 +698,7 @@ describe('Recipes', () => {
     readNote.mockResolvedValue({
       status: 'SUCCESS',
       message: '# Pancakes\nCategory: Recipes\n\n## Ingredients\n- [ ] flour\n\n## Steps\n1. Mix.',
-      service: 'note_read',
+      service: 'note_read', detail: OWNED,
     });
     renderRecipes();
     await waitFor(() => expect(screen.getByText('Pancakes')).toBeTruthy());
@@ -733,7 +750,7 @@ describe('Recipes', () => {
     expect(recipeStaples).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('rank-staples'));
 
-    await waitFor(() => expect(recipeStaples).toHaveBeenCalledWith(undefined));
+    await waitFor(() => expect(recipeStaples).toHaveBeenCalled());
     const chip = await screen.findByTestId(`staple-chip-${RECIPES_DIR}/Chicken Chili.md`);
     expect(chip).toHaveTextContent('3');
     expect(chip.getAttribute('title')).toContain('chicken');
@@ -743,5 +760,53 @@ describe('Recipes', () => {
       .getAllByRole('button', { name: /Pancakes|Chicken Chili/ })
       .map((button) => button.textContent);
     expect(titles[0]).toBe('Chicken Chili');
+  });
+
+  it("sends an edit to someone else's recipe as a suggestion, never a save", async () => {
+    readNote.mockResolvedValue({
+      status: 'SUCCESS', message: 'flour, milk', service: 'note_read',
+      detail: { owner_label: 'Michele', can_change: false, etag: '"e1"' },
+    });
+    cookbookSuggest.mockResolvedValue({ status: 'SUCCESS', message: 'Sent to Michele to approve.', service: 'cookbook' });
+    renderRecipes();
+    fireEvent.click(await screen.findByText('Pancakes'));
+
+    expect(await screen.findByTestId('recipe-owner')).toHaveTextContent(/only Michele can change it/);
+    expect(screen.queryByLabelText('Delete Pancakes')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Recipe body'), { target: { value: 'flour, milk, eggs' } });
+    fireEvent.change(screen.getByLabelText("Note for the recipe's owner"), { target: { value: 'needs eggs' } });
+    fireEvent.click(screen.getByRole('button', { name: /suggest this change/i }));
+
+    await waitFor(() =>
+      expect(cookbookSuggest).toHaveBeenCalledWith({
+        path: `${RECIPES_DIR}/Pancakes.md`, content: 'flour, milk, eggs', message: 'needs eggs',
+      }),
+    );
+    expect(writeNote).not.toHaveBeenCalled();
+  });
+
+  it('lets the owner approve a suggested change', async () => {
+    cookbookSuggestions.mockResolvedValue([{
+      id: 's1', path: 'Recipes/Suggestions/s1.md', recipe: `${RECIPES_DIR}/Pancakes.md`, recipe_title: 'Pancakes',
+      by: 'gracie', at: '2026-11-01T10:00:00Z', message: 'needs eggs', content: 'flour, milk, eggs',
+      current: 'flour, milk', owner: 'mom', owner_label: 'Mom', mine: false, can_review: true,
+    }]);
+    cookbookResolve.mockResolvedValue({ status: 'SUCCESS', message: 'Change approved.', service: 'cookbook' });
+    renderRecipes();
+
+    fireEvent.click(await screen.findByTestId('recipe-suggestions-toggle'));
+    expect(screen.getByTestId('recipe-suggestions')).toHaveTextContent('from gracie');
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+    await waitFor(() => expect(cookbookResolve).toHaveBeenCalledWith('Recipes/Suggestions/s1.md', 'approve'));
+  });
+
+  it('offers to move recipes still in my own folder into the cookbook', async () => {
+    cookbookPersonal.mockResolvedValue(['Tacos', 'Soup']);
+    cookbookAdopt.mockResolvedValue({ status: 'SUCCESS', message: 'Moved 2 recipe(s).', service: 'cookbook' });
+    renderRecipes();
+
+    expect(await screen.findByTestId('recipe-personal')).toHaveTextContent('2 of your recipes');
+    fireEvent.click(screen.getByRole('button', { name: /add them to the family cookbook/i }));
+    await waitFor(() => expect(cookbookAdopt).toHaveBeenCalled());
   });
 });

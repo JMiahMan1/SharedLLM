@@ -236,6 +236,15 @@ def _proxy_fake(monkeypatch, answer, status=200):
     async def fake():
         yield _Exec()
 
+    async def _caller(_request, _body=None):
+        return {"user": "dad", "is_admin": False}
+
+    async def _house():
+        return {"user": "house", "is_admin": True}
+
+    # The family cookbook lives in the household account.
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _caller)
+    monkeypatch.setattr(gateway_main, "resolve_first_user", _house)
     monkeypatch.setattr(gateway_main, "_resolve_acting_identity", _creds)
     monkeypatch.setattr(gateway_main, "shared_http_client", fake)
     return sent
@@ -255,7 +264,8 @@ def test_recipe_sources_proxies_the_duplicate_guard(client, monkeypatch):
     assert body["detail"]["sources"] == ["https://www.food.com/recipe/chili-1"]
     assert sent[0]["url"].endswith("/execute/recipes")
     assert sent[0]["json"]["action"] == "recipe_sources"
-    assert sent[0]["json"]["user_context"]["user"] == "dad"
+    # The duplicate guard reads the family cookbook, not the caller's own folder.
+    assert sent[0]["json"]["user_context"]["user"] == "house"
 
 
 def test_planning_a_meal_forwards_the_sentence_and_identity(client, monkeypatch):
@@ -299,7 +309,7 @@ def test_staple_ranking_proxies_the_shelf_scan(client, monkeypatch):
     assert body["detail"]["ranked"][0]["title"] == "Chili"
     assert sent[0]["url"].endswith("/execute/recipes")
     assert sent[0]["json"]["action"] == "recipe_staples"
-    assert sent[0]["json"]["user_context"]["user"] == "dad"
+    assert sent[0]["json"]["user_context"]["user"] == "house"
 
 
 def test_the_ics_fallback_forwards_the_action(client, monkeypatch):
