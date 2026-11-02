@@ -3674,6 +3674,26 @@ export interface LibraryBook {
   path: string;
 }
 
+/** What Jarvis found about a book before it is added (nothing is saved yet). */
+export interface BookInspection {
+  title: string;
+  authors: string[];
+  comments: string;
+  publisher: string;
+  published: string;
+  isbn: string;
+  language: string;
+  series: string;
+  subjects: string[];
+  /** A catalogue's cover, used when the file has none. */
+  cover_url: string;
+  /** The file's own cover, ready to show. */
+  cover_preview: string;
+  tags: { name: string; why: string; existing: boolean }[];
+  /** Where each field came from: "the file", "Google Books", "Open Library", "the file name". */
+  sources: Record<string, string>;
+}
+
 export interface LibraryAuditGroup {
   why: string;
   keep: LibraryBook;

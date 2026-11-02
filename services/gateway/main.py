@@ -9518,9 +9518,26 @@ async def library_book_tags(book_id: int, request: Request):
     }, timeout=180.0)
 
 
+@app.post("/api/library/books/inspect")
+async def library_inspect_book(request: Request):
+    """Fill in a book before adding it: the file's own details, Google Books and
+    Open Library, and suggested tags. Nothing is saved."""
+    await _require_admin(request)
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        raise HTTPException(status_code=422, detail="Choose a book file first.")
+    out = aiohttp.FormData()
+    out.add_field("library_path", await _library_path())
+    out.add_field("online", "false" if str(form.get("online") or "").lower() == "false" else "true")
+    out.add_field("file", await upload.read(), filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
+    return await _storage_library("POST", "/calibre/books/inspect", data=out, timeout=120.0)
+
+
 @app.post("/api/library/books")
 async def library_add_book(request: Request):
-    """Add a book (multipart: file, title, authors, tags, series, comments)."""
+    """Add a book (multipart: file, title, authors, tags, series, comments,
+    publisher, published, isbn, language, and a catalogue cover_url)."""
     who = await _require_admin(request)
     form = await request.form()
     upload = form.get("file")
@@ -9529,8 +9546,8 @@ async def library_add_book(request: Request):
     data = await upload.read()
     out = aiohttp.FormData()
     out.add_field("library_path", await _library_path())
-    for key in ("title", "authors", "tags", "series", "comments"):
-        out.add_field(key, str(form.get(key) or "")[:4000])
+    for key in ("title", "authors", "tags", "series", "comments", "publisher", "published", "isbn", "language", "cover_url"):
+        out.add_field(key, str(form.get(key) or "")[:8000])
     out.add_field("file", data, filename=getattr(upload, "filename", None) or "book", content_type="application/octet-stream")
     log.info("[library] %s adds %s (%d bytes)", who, getattr(upload, "filename", "book"), len(data))
     return await _storage_library("POST", "/calibre/books/add", data=out, timeout=600.0)

@@ -183,6 +183,7 @@ import type {
   TopicResources,
   LibraryBook,
   LibraryAudit,
+  BookInspection,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -2310,6 +2311,14 @@ export const api = {
   /** Add and remove tags on one book (admins). */
   async libraryTagBook(id: number, add: string[], remove: string[]): Promise<{ book_id: number; tags: string[] }> {
     const resp = await apiClient.post(`/api/library/books/${id}/tags`, { add, remove }, { timeout: 180_000 });
+    return resp.data;
+  },
+
+  /** Everything Jarvis can find about a book file before adding it (admins); nothing is saved. */
+  async libraryInspectBook(file: File): Promise<BookInspection> {
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await apiClient.post('/api/library/books/inspect', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120_000 });
     return resp.data;
   },
 

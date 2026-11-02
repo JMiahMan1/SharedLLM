@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { BookPlus, ClipboardCheck, Library, Loader2, Plus, Search, Tag, X } from 'lucide-react';
+import { BookPlus, ClipboardCheck, Library, Loader2, Plus, Search, Tag, Wand2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
-import type { LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
+import type { BookInspection, LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
 
 /** Topics the app's features read (Fasting, Bible, Health); offered first when tagging. */
 const TOPICS = ['fasting', 'prayer', 'lent', 'bible-study', 'health', 'early-church'];
@@ -88,21 +88,61 @@ function BookRow({ book, isAdmin }: { book: LibraryBook; isAdmin: boolean }) {
   );
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  title: 'title', authors: 'authors', comments: 'description', publisher: 'publisher', published: 'date',
+  isbn: 'ISBN', language: 'language', cover: 'cover',
+};
+
+/** "title and authors from the file; description and cover from Google Books". */
+function sourcesLine(sources: Record<string, string>): string {
+  const bySource = new Map<string, string[]>();
+  for (const [field, source] of Object.entries(sources)) {
+    if (!FIELD_LABELS[field]) continue;
+    bySource.set(source, [...(bySource.get(source) ?? []), FIELD_LABELS[field]]);
+  }
+  return [...bySource.entries()].map(([source, fields]) => `${fields.join(', ')} from ${source}`).join('; ');
+}
+
+function splitTags(value: string): string[] {
+  return value.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
 function AddBook({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
-  const [authors, setAuthors] = useState('');
-  const [tags, setTags] = useState('');
-  const [series, setSeries] = useState('');
+  const [autoFill, setAutoFill] = useState(true);
+  const [fields, setFields] = useState({
+    title: '', authors: '', tags: '', series: '', comments: '', publisher: '', published: '', isbn: '', language: '',
+  });
+  const [found, setFound] = useState<BookInspection | null>(null);
+  const set = (key: keyof typeof fields, value: string) => setFields((current) => ({ ...current, [key]: value }));
+
+  const inspect = useMutation({
+    mutationFn: (chosen: File) => api.libraryInspectBook(chosen),
+    onSuccess: (out) => {
+      setFound(out);
+      // Everything found is filled in; every field stays editable.
+      setFields((current) => ({
+        title: out.title || current.title,
+        authors: out.authors.join(' & ') || current.authors,
+        tags: [...new Set([...splitTags(current.tags), ...out.tags.map((t) => t.name)])].join(', '),
+        series: out.series || current.series,
+        comments: out.comments || current.comments,
+        publisher: out.publisher || current.publisher,
+        published: out.published || current.published,
+        isbn: out.isbn || current.isbn,
+        language: out.language || current.language,
+      }));
+    },
+    onError: (error) => toast.error(errorText(error, 'Jarvis could not look the book up; fill it in by hand')),
+  });
+
   const add = useMutation({
     mutationFn: () => {
       const form = new FormData();
       if (file) form.append('file', file);
-      form.append('title', title);
-      form.append('authors', authors);
-      form.append('tags', tags);
-      form.append('series', series);
+      for (const [key, value] of Object.entries(fields)) form.append(key, value);
+      if (found?.cover_url && !found.cover_preview) form.append('cover_url', found.cover_url);
       return api.libraryAddBook(form);
     },
     onSuccess: (out) => {
@@ -112,6 +152,17 @@ function AddBook({ onDone }: { onDone: () => void }) {
     },
     onError: (error) => toast.error(errorText(error, 'The book could not be added')),
   });
+
+  const choose = (chosen: File | null) => {
+    setFile(chosen);
+    setFound(null);
+    if (chosen && autoFill) inspect.mutate(chosen);
+  };
+  const tags = splitTags(fields.tags);
+  const toggleTag = (name: string) =>
+    set('tags', (tags.some((t) => t.toLowerCase() === name.toLowerCase()) ? tags.filter((t) => t.toLowerCase() !== name.toLowerCase()) : [...tags, name]).join(', '));
+  const cover = found?.cover_preview || found?.cover_url || '';
+
   return (
     <form
       onSubmit={(event) => {
@@ -122,24 +173,84 @@ function AddBook({ onDone }: { onDone: () => void }) {
         }
         add.mutate();
       }}
-      className="mt-3 grid gap-2 rounded-xl border border-indigo-500/20 bg-indigo-950/10 p-3 sm:grid-cols-2"
+      className="mt-3 space-y-2 rounded-xl border border-indigo-500/20 bg-indigo-950/10 p-3"
       data-testid="library-add"
     >
-      <label className="text-[11px] text-slate-400 sm:col-span-2">
-        Book file (EPUB is best: Jarvis can read it, and its title, author and cover come with it)
-        <input
-          type="file"
-          accept=".epub,.pdf,.mobi,.azw3,.fb2,.txt,.docx,.rtf,.cbz,.djvu"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="mt-1 block w-full text-xs text-slate-300"
-          data-testid="library-add-file"
-        />
-      </label>
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (from the EPUB if blank)" aria-label="Title" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
-      <input value={authors} onChange={(e) => setAuthors(e.target.value)} placeholder="Author(s), separated by &" aria-label="Authors" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
-      <input value={tags} onChange={(e) => setTags(e.target.value)} list="library-tag-list" placeholder="Tags, comma separated (e.g. fasting, lent)" aria-label="Tags" className="glass-input min-h-11 px-3 text-base sm:text-sm" data-testid="library-add-tags" />
-      <input value={series} onChange={(e) => setSeries(e.target.value)} placeholder="Series (optional)" aria-label="Series" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
-      <button type="submit" disabled={add.isPending} className="glass-button min-h-11 px-4 text-xs font-semibold sm:col-span-2" data-testid="library-add-submit">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-0 flex-1 text-[11px] text-slate-400">
+          Book file (EPUB is best: Jarvis can read it, and it carries its own details and cover)
+          <input
+            type="file"
+            accept=".epub,.pdf,.mobi,.azw3,.fb2,.txt,.docx,.rtf,.cbz,.djvu"
+            onChange={(event) => choose(event.target.files?.[0] ?? null)}
+            className="mt-1 block w-full text-xs text-slate-300"
+            data-testid="library-add-file"
+          />
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-xs text-slate-300">
+          <input type="checkbox" checked={autoFill} onChange={(e) => setAutoFill(e.target.checked)} className="h-4 w-4 accent-indigo-400" />
+          Auto-fill and tag
+        </label>
+        <button
+          type="button"
+          onClick={() => file && inspect.mutate(file)}
+          disabled={!file || inspect.isPending}
+          className="glass-button min-h-11 px-3 text-xs disabled:opacity-50"
+          data-testid="library-autofill"
+        >
+          {inspect.isPending ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} Look it up
+        </button>
+      </div>
+
+      {inspect.isPending && <p className="flex items-center gap-2 text-xs text-slate-400"><Loader2 size={13} className="animate-spin" /> Reading the book and looking it up…</p>}
+      {found && (
+        <p className="text-[11px] text-slate-400" data-testid="library-found">
+          {sourcesLine(found.sources) || 'Nothing found; fill it in by hand.'} Check everything before adding.
+        </p>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input value={fields.title} onChange={(e) => set('title', e.target.value)} placeholder="Title" aria-label="Title" className="glass-input min-h-11 px-3 text-base sm:text-sm" data-testid="library-add-title" />
+          <input value={fields.authors} onChange={(e) => set('authors', e.target.value)} placeholder="Author(s), separated by &" aria-label="Authors" className="glass-input min-h-11 px-3 text-base sm:text-sm" data-testid="library-add-authors" />
+          <input value={fields.series} onChange={(e) => set('series', e.target.value)} placeholder="Series (optional)" aria-label="Series" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
+          <input value={fields.publisher} onChange={(e) => set('publisher', e.target.value)} placeholder="Publisher" aria-label="Publisher" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
+          <input value={fields.published} onChange={(e) => set('published', e.target.value)} placeholder="Published (e.g. 1969 or 1969-05-01)" aria-label="Published" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={fields.isbn} onChange={(e) => set('isbn', e.target.value)} placeholder="ISBN" aria-label="ISBN" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
+            <input value={fields.language} onChange={(e) => set('language', e.target.value)} placeholder="Language (en)" aria-label="Language" className="glass-input min-h-11 px-3 text-base sm:text-sm" />
+          </div>
+        </div>
+        {cover ? (
+          <img src={cover} alt="Cover" className="hidden aspect-[2/3] w-28 rounded-lg object-cover sm:block" data-testid="library-add-cover" />
+        ) : (
+          <div className="hidden aspect-[2/3] w-28 items-center justify-center rounded-lg border border-dashed border-white/10 text-[10px] text-slate-500 sm:flex">No cover</div>
+        )}
+      </div>
+      <textarea value={fields.comments} onChange={(e) => set('comments', e.target.value)} placeholder="Description" aria-label="Description" rows={3} className="glass-input w-full resize-y px-3 py-2 text-base sm:text-sm" />
+      <input value={fields.tags} onChange={(e) => set('tags', e.target.value)} list="library-tag-list" placeholder="Tags, comma separated (e.g. fasting, lent)" aria-label="Tags" className="glass-input min-h-11 w-full px-3 text-base sm:text-sm" data-testid="library-add-tags" />
+      {found && found.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" data-testid="library-suggested-tags">
+          {found.tags.map((tag) => {
+            const on = tags.some((t) => t.toLowerCase() === tag.name.toLowerCase());
+            return (
+              <button
+                key={tag.name}
+                type="button"
+                onClick={() => toggleTag(tag.name)}
+                aria-pressed={on}
+                title={tag.why}
+                className={`min-h-9 rounded-full border px-3 text-xs ${on ? 'border-indigo-400/60 bg-indigo-500/25 text-white' : 'border-white/10 text-slate-400'}`}
+              >
+                {tag.name}
+                {!tag.existing ? <span className="ml-1 text-[10px] text-amber-300">new</span> : null}
+                <span className="ml-1 text-[10px] text-slate-500">· {tag.why}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <button type="submit" disabled={add.isPending || inspect.isPending} className="glass-button min-h-11 w-full px-4 text-xs font-semibold disabled:opacity-60" data-testid="library-add-submit">
         {add.isPending ? <Loader2 size={14} className="animate-spin" /> : <BookPlus size={14} />} Add to the library
       </button>
     </form>

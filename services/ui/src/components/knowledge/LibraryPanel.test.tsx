@@ -16,6 +16,7 @@ vi.mock('../../services/api', async (importOriginal) => {
       libraryAudit: vi.fn(),
       libraryTagBook: vi.fn(),
       libraryAddBook: vi.fn(),
+      libraryInspectBook: vi.fn(),
     },
   };
 });
@@ -70,18 +71,49 @@ describe('LibraryPanel', () => {
     await waitFor(() => expect(api.libraryTagBook).toHaveBeenCalledWith(7, [], ['Lent']));
   });
 
-  it('adds a book with its tags', async () => {
+  it('fills in a chosen book, keeps every field editable, and adds it', async () => {
+    vi.mocked(api.libraryInspectBook).mockResolvedValue({
+      title: 'A Hunger for God', authors: ['John Piper'], comments: 'Desiring God through fasting and prayer.',
+      publisher: 'Crossway', published: '1997', isbn: '9781581349184', language: 'en', series: '', subjects: ['Fasting'],
+      cover_url: 'https://books.google.com/cover.jpg', cover_preview: '',
+      tags: [{ name: 'fasting', why: 'mentions “fasting”', existing: false }, { name: 'prayer', why: 'mentions “prayer”', existing: true }],
+      sources: { title: 'the file', comments: 'Google Books', cover: 'Google Books' },
+    });
     vi.mocked(api.libraryAddBook).mockResolvedValue({ book_id: 12, title: 'A Hunger for God', tags: ['fasting'], path: 'x' });
     renderPanel(true);
     fireEvent.click(await screen.findByTestId('library-add-button'));
     const form = screen.getByTestId('library-add');
     fireEvent.change(within(form).getByTestId('library-add-file'), { target: { files: [new File(['x'], 'piper.epub')] } });
-    fireEvent.change(within(form).getByTestId('library-add-tags'), { target: { value: 'fasting' } });
+
+    await waitFor(() => expect(within(form).getByTestId('library-add-title')).toHaveValue('A Hunger for God'));
+    expect(within(form).getByTestId('library-add-authors')).toHaveValue('John Piper');
+    expect(within(form).getByTestId('library-add-tags')).toHaveValue('fasting, prayer');
+    expect(within(form).getByTestId('library-found')).toHaveTextContent('description, cover from Google Books');
+    expect(within(form).getByTestId('library-add-cover')).toHaveAttribute('src', 'https://books.google.com/cover.jpg');
+
+    // Edit a field and drop a suggested tag before adding.
+    fireEvent.change(within(form).getByTestId('library-add-title'), { target: { value: 'A Hunger for God (2nd ed.)' } });
+    fireEvent.click(within(within(form).getByTestId('library-suggested-tags')).getByRole('button', { name: /prayer/ }));
     fireEvent.click(within(form).getByTestId('library-add-submit'));
     await waitFor(() => expect(api.libraryAddBook).toHaveBeenCalled());
     const sent = vi.mocked(api.libraryAddBook).mock.calls[0][0];
     expect((sent.get('file') as File).name).toBe('piper.epub');
+    expect(sent.get('title')).toBe('A Hunger for God (2nd ed.)');
     expect(sent.get('tags')).toBe('fasting');
+    expect(sent.get('isbn')).toBe('9781581349184');
+    expect(sent.get('cover_url')).toBe('https://books.google.com/cover.jpg');
+  });
+
+  it('adds by hand when auto-fill is off', async () => {
+    vi.mocked(api.libraryAddBook).mockResolvedValue({ book_id: 13, title: 'Notes', tags: [], path: 'x' });
+    renderPanel(true);
+    fireEvent.click(await screen.findByTestId('library-add-button'));
+    const form = screen.getByTestId('library-add');
+    fireEvent.click(within(form).getByLabelText('Auto-fill and tag'));
+    fireEvent.change(within(form).getByTestId('library-add-file'), { target: { files: [new File(['x'], 'notes.pdf')] } });
+    fireEvent.click(within(form).getByTestId('library-add-submit'));
+    await waitFor(() => expect(api.libraryAddBook).toHaveBeenCalled());
+    expect(api.libraryInspectBook).not.toHaveBeenCalled();
   });
 
   it('audits the shelf and only suggests', async () => {

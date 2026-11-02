@@ -183,6 +183,40 @@ class NewBook:
     series_index: float = 1.0
     comments: str = ""
     has_cover: bool = False
+    publisher: str = ""
+    #: "2007", "2007-03" or "2007-03-15"; Calibre stores a full timestamp.
+    published: str = ""
+    isbn: str = ""
+    #: ISO 639 code, two letters ("en") or three ("eng").
+    language: str = ""
+
+
+#: The two-letter codes a book is most likely to carry, as Calibre's three-letter ones.
+_LANGUAGES = {"en": "eng", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por", "el": "ell",
+              "la": "lat", "ru": "rus", "nl": "nld", "he": "heb", "ar": "ara", "zh": "zho", "ko": "kor", "ja": "jpn"}
+
+
+def calibre_language(code: str) -> str:
+    code = (code or "").strip().lower().split("-")[0]
+    if len(code) == 3:
+        return code
+    return _LANGUAGES.get(code, "")
+
+
+def calibre_date(value: str) -> str:
+    """A published date as Calibre stores it, or its "unknown" date."""
+    m = re.match(r"^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", (value or "").strip())
+    if not m:
+        return UNDEFINED_DATE
+    year, month, day = int(m.group(1)), int(m.group(2) or 1), int(m.group(3) or 1)
+    if not (100 <= year <= 2999 and 1 <= month <= 12 and 1 <= day <= 31):
+        return UNDEFINED_DATE
+    return f"{year:04d}-{month:02d}-{day:02d} 12:00:00+00:00"
+
+
+def clean_isbn(value: str) -> str:
+    digits = re.sub(r"[^0-9Xx]", "", value or "").upper()
+    return digits if len(digits) in (10, 13) else ""
 
 
 def insert_book(conn: sqlite3.Connection, book: NewBook) -> tuple[int, str, str]:
@@ -193,7 +227,7 @@ def insert_book(conn: sqlite3.Connection, book: NewBook) -> tuple[int, str, str]
     cur = conn.execute(
         "INSERT INTO books (title, timestamp, pubdate, series_index, author_sort, path, has_cover, last_modified) "
         "VALUES (?, ?, ?, ?, ?, '', ?, ?)",
-        [title, now, UNDEFINED_DATE, book.series_index, " & ".join(author_sort(a) for a in authors), int(book.has_cover), now],
+        [title, now, calibre_date(book.published), book.series_index, " & ".join(author_sort(a) for a in authors), int(book.has_cover), now],
     )
     book_id = int(cur.lastrowid)
     folder = book_folder(book_id, title, authors[0])
@@ -209,6 +243,15 @@ def insert_book(conn: sqlite3.Connection, book: NewBook) -> tuple[int, str, str]
                      [book_id, _item_id(conn, "series", book.series.strip(), with_sort=True)])
     if book.comments.strip():
         conn.execute("INSERT INTO comments (book, text) VALUES (?, ?)", [book_id, book.comments.strip()])
+    if book.publisher.strip() and _has_table(conn, "books_publishers_link"):
+        conn.execute("INSERT INTO books_publishers_link (book, publisher) VALUES (?, ?)",
+                     [book_id, _item_id(conn, "publishers", book.publisher.strip()[:200], with_sort=True)])
+    if (isbn := clean_isbn(book.isbn)) and _has_table(conn, "identifiers"):
+        conn.execute("INSERT OR REPLACE INTO identifiers (book, type, val) VALUES (?, 'isbn', ?)", [book_id, isbn])
+    if (lang := calibre_language(book.language)) and _has_table(conn, "books_languages_link"):
+        row = conn.execute("SELECT id FROM languages WHERE lang_code = ?", [lang]).fetchone()
+        lang_id = int(row[0]) if row else int(conn.execute("INSERT INTO languages (lang_code) VALUES (?)", [lang]).lastrowid)
+        conn.execute("INSERT OR IGNORE INTO books_languages_link (book, lang_code, item_order) VALUES (?, ?, 0)", [book_id, lang_id])
     name = book_file_name(title, authors[0])
     conn.execute("INSERT INTO data (book, format, uncompressed_size, name) VALUES (?, ?, ?, ?)",
                  [book_id, book.fmt.upper(), book.size, name])
@@ -230,7 +273,8 @@ _NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container", "opf": "http://ww
 
 def epub_details(data: bytes) -> dict[str, Any]:
     """Title, authors, subjects, description and cover image of an EPUB (any may be missing)."""
-    out: dict[str, Any] = {"title": "", "authors": [], "tags": [], "comments": "", "cover": None}
+    out: dict[str, Any] = {"title": "", "authors": [], "tags": [], "comments": "", "cover": None,
+                           "publisher": "", "published": "", "isbn": "", "language": ""}
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             container = ElementTree.fromstring(zf.read("META-INF/container.xml"))
@@ -246,6 +290,13 @@ def epub_details(data: bytes) -> dict[str, Any]:
                 out["tags"] = [e.text.strip() for e in meta.findall("dc:subject", _NS) if e.text and e.text.strip()]
                 desc = meta.findtext("dc:description", default="", namespaces=_NS) or ""
                 out["comments"] = desc.strip()
+                out["publisher"] = (meta.findtext("dc:publisher", default="", namespaces=_NS) or "").strip()
+                out["published"] = (meta.findtext("dc:date", default="", namespaces=_NS) or "").strip()[:10]
+                out["language"] = (meta.findtext("dc:language", default="", namespaces=_NS) or "").strip()
+                for ident in meta.findall("dc:identifier", _NS):
+                    if isbn := clean_isbn((ident.text or "").replace("urn:isbn:", "")):
+                        out["isbn"] = isbn
+                        break
             manifest = opf.find("opf:manifest", _NS)
             href = None
             if manifest is not None:
@@ -377,7 +428,8 @@ class LibraryWriter:
         return await self._change(edit)
 
     async def add_book(self, data: bytes, filename: str, *, title: str = "", authors: list[str] | None = None,
-                       tags: list[str] | None = None, series: str = "", comments: str = "") -> dict:
+                       tags: list[str] | None = None, series: str = "", comments: str = "", publisher: str = "",
+                       published: str = "", isbn: str = "", language: str = "", cover: bytes | None = None) -> dict:
         fmt = PurePosixPath(filename).suffix.lower().lstrip(".")
         if fmt not in FORMATS:
             raise LibraryWriteError(f"{filename} is not a book format Calibre keeps ({', '.join(sorted(FORMATS))}).")
@@ -385,7 +437,10 @@ class LibraryWriter:
             raise LibraryWriteError("The book file is empty.")
         if len(data) > MAX_BOOK_BYTES:
             raise LibraryWriteError(f"The book is larger than {MAX_BOOK_BYTES // (1024 * 1024)} MB.")
-        found = epub_details(data) if fmt == "epub" else {"title": "", "authors": [], "tags": [], "comments": "", "cover": None}
+        found = epub_details(data) if fmt == "epub" else {"title": "", "authors": [], "tags": [], "comments": "", "cover": None,
+                                                           "publisher": "", "published": "", "isbn": "", "language": ""}
+        if cover:
+            found["cover"] = cover
         book = NewBook(
             title=(title or found["title"] or PurePosixPath(filename).stem).strip(),
             authors=[a for a in (authors or found["authors"]) if a.strip()] or ["Unknown"],
@@ -395,6 +450,10 @@ class LibraryWriter:
             series=series,
             comments=comments or found["comments"],
             has_cover=bool(found["cover"]),
+            publisher=publisher or found["publisher"],
+            published=published or found["published"],
+            isbn=isbn or found["isbn"],
+            language=language or found["language"],
         )
 
         def edit(conn):
