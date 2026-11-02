@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Highlighter,
   ImageIcon,
+  Languages,
   Link2,
   MessageCircle,
   NotebookPen,
@@ -19,6 +20,7 @@ import {
 import BibleStudyNotes from './BibleStudyNotes';
 import JarvisStudyThread from './JarvisStudyThread';
 import InterlinearPanel from './InterlinearPanel';
+import WordStudyPanel from './WordStudyPanel';
 import ShareToChatSheet from './ShareToChatSheet';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -95,6 +97,8 @@ export default function VerseActionSheet({
   const [askOpen, setAskOpen] = useState(false);
   const [noteBody, setNoteBody] = useState<string | null>(null);
   const [interlinearOpen, setInterlinearOpen] = useState(false);
+  /** The word study, open on the verse (empty string) or on one Strong's number. */
+  const [wordStudy, setWordStudy] = useState<string | null>(null);
   const [shareChatOpen, setShareChatOpen] = useState(false);
   const { trigger } = useHaptics();
 
@@ -117,6 +121,13 @@ export default function VerseActionSheet({
     queryKey: ['bible-interlinear', verse.reference],
     queryFn: () => api.getBibleInterlinear(verse.reference),
     staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+  // A word study is offered once a Strong's concordance is installed from the library.
+  const lexicon = useQuery({
+    queryKey: ['bible-lexicon-status'],
+    queryFn: () => api.getBibleLexiconStatus(),
+    staleTime: 10 * 60 * 1000,
     retry: false,
   });
   const linkError = (q: typeof blbVerse) =>
@@ -448,6 +459,21 @@ export default function VerseActionSheet({
             </button>
           )}
 
+          {lexicon.data?.installed && (
+            <button
+              type="button"
+              onClick={() => {
+                void trigger('light');
+                setWordStudy('');
+              }}
+              className={ACTION_CLASS}
+              data-testid="bible-action-word-study"
+            >
+              <Languages size={18} className="text-sky-300" />
+              <span>Word study (Strong&apos;s)</span>
+            </button>
+          )}
+
           {interlinear.data?.available ? (
             <button
               type="button"
@@ -526,7 +552,29 @@ export default function VerseActionSheet({
       )}
 
       {interlinearOpen && interlinear.data?.available && (
-        <InterlinearPanel data={interlinear.data} blbUrl={blbInterlinear.data?.url} onClose={() => setInterlinearOpen(false)} />
+        <InterlinearPanel
+          data={interlinear.data}
+          blbUrl={blbInterlinear.data?.url}
+          onWord={lexicon.data?.installed ? (strongs) => setWordStudy(strongs) : undefined}
+          onClose={() => setInterlinearOpen(false)}
+        />
+      )}
+
+      {wordStudy !== null && (
+        <WordStudyPanel
+          reference={verse.reference}
+          initialStrongs={wordStudy || undefined}
+          onOpenRef={
+            onOpenRef
+              ? (ref) => {
+                  setWordStudy(null);
+                  onClose();
+                  onOpenRef(ref);
+                }
+              : undefined
+          }
+          onClose={() => setWordStudy(null)}
+        />
       )}
 
       {shareChatOpen && (

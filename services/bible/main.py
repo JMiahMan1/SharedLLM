@@ -40,6 +40,7 @@ from services.bible import achievements as ach
 from services.bible import (
     blb_links,
     book_import,
+    concordance,
     corpus,
     games,
     importer,
@@ -2913,6 +2914,179 @@ async def admin_install_tagged_bible(book_id: int, payload: TaggedInstall):
     return response
 
 
+# -- Strong's concordance: tagged in the library, read into a lexicon ---------
+
+#: The one concordance install that may run at a time, and how it went.
+_concordance_job: dict = {"state": "idle", "book_id": None, "title": "", "message": ""}
+
+
+async def _tagged_concordances() -> list[dict]:
+    root = await _library_root()
+    client = _library_client(root)
+    books: dict[int, dict] = {}
+    try:
+        for tag in ("concordance", "strong's", "strongs"):
+            for book in await client.tagged_books(root=root, tag=tag):
+                books.setdefault(int(book.get("id") or 0), book)
+    except library.LibraryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return list(books.values())
+
+
+def _concordance_pdf(book: dict) -> str | None:
+    return next((str(f["path"]) for f in book.get("files") or [] if str(f.get("format")).upper() == "PDF"), None)
+
+
+def _describe_concordance(session: Session, book: dict, installed_source: str) -> dict:
+    path = _concordance_pdf(book)
+    source = tagged.source_of(path) if path else ""
+    run = tagged.last_run(session, path) if path else None
+    if _concordance_job["state"] == "running" and _concordance_job["book_id"] == book.get("id"):
+        state, reason = "installing", "Reading the dictionaries and the concordance; this takes several minutes."
+    elif path and installed_source == source:
+        state, reason = "installed", ""
+    elif not path:
+        state, reason = "needs attention", "Only a PDF of a Strong's concordance can be read."
+    elif run is not None and run.status != "succeeded":
+        state, reason = "failed", run.message
+    else:
+        state, reason = "ready", ""
+    return {"id": book.get("id"), "title": book.get("title"), "authors": book.get("authors") or [],
+            "file": path, "state": state, "reason": reason}
+
+
+@app.get("/admin/library/concordances")
+async def admin_concordances():
+    """Books tagged Concordance or Strong's in Calibre, and the one installed."""
+    books = await _tagged_concordances()
+
+    def describe_all() -> dict:
+        with Session(_db()) as session:
+            installed = concordance.status(session)
+            return {"installed": installed,
+                    "books": [_describe_concordance(session, b, installed["source"]) for b in books]}
+
+    out = await run_in_threadpool(describe_all)
+    return {**out, "job": dict(_concordance_job), "tags": ["Concordance", "Strong's"]}
+
+
+async def _install_concordance(book: dict) -> None:
+    path = _concordance_pdf(book)
+    if not path:
+        return
+    _concordance_job.update(state="running", book_id=book.get("id"), title=book.get("title") or "", message="")
+    started = time.monotonic()
+    destination = _import_dir() / "concordance" / library.candidate_names(path)
+    status, message, counts = "failed", "", {}
+    try:
+        root = await _library_root()
+        await _library_client(root).download(root=root, path=path, destination=destination)
+        pages = await run_in_threadpool(concordance.pdf_pages, str(destination))
+
+        def write() -> dict:
+            with Session(_db()) as session:
+                return concordance.install(session, pages, source=tagged.source_of(path))
+
+        counts = await run_in_threadpool(write)
+        status = "succeeded"
+        message = (f"Installed {counts['hebrew']} Hebrew and {counts['greek']} Greek entries "
+                   f"and {counts['occurrences']} verse references from {book.get('title')}.")
+    except Exception as exc:  # a refused or unreadable file is reported, not raised into the loop
+        message = f"{book.get('title')} could not be installed as a concordance: {exc}"
+        log.warning("[Bible] %s", message)
+    finally:
+        destination.unlink(missing_ok=True)
+
+    def record() -> None:
+        with Session(_db()) as session:
+            session.add(ImportRun(source=tagged.source_of(path), kind="concordance", code="strongs",
+                                  name=str(book.get("title") or ""), status=status, message=message,
+                                  note_count=int(counts.get("entries", 0)),
+                                  duration_ms=int((time.monotonic() - started) * 1000)))
+            session.commit()
+
+    await run_in_threadpool(record)
+    _concordance_job.update(state="idle" if status == "succeeded" else "failed", message=message)
+
+
+@app.post("/admin/library/concordances/{book_id}/install", status_code=202)
+async def admin_install_concordance(book_id: int):
+    """Read one tagged concordance into the lexicon, in the background."""
+    if _concordance_job["state"] == "running":
+        raise HTTPException(status_code=409, detail=f"{_concordance_job['title']} is still being installed.")
+    book = next((b for b in await _tagged_concordances() if int(b.get("id") or 0) == book_id), None)
+    if book is None:
+        raise HTTPException(status_code=404, detail="That book is not tagged Concordance or Strong's in the library.")
+    if not _concordance_pdf(book):
+        raise HTTPException(status_code=422, detail="Only a PDF of a Strong's concordance can be read.")
+    _concordance_job.update(state="running", book_id=book_id, title=book.get("title") or "", message="")
+    asyncio.create_task(_install_concordance(book))  # noqa: RUF006 -- tracked in _concordance_job
+    return {"state": "running", "title": book.get("title")}
+
+
+async def _sync_concordance() -> None:
+    """Install a tagged concordance when none is, once per file."""
+    def needed() -> bool:
+        with Session(_db()) as session:
+            return not concordance.status(session)["installed"]
+
+    if _concordance_job["state"] == "running" or not await run_in_threadpool(needed):
+        return
+    for book in await _tagged_concordances():
+        path = _concordance_pdf(book)
+
+        def tried(path: str | None = path) -> bool:
+            with Session(_db()) as session:
+                return path is None or tagged.last_run(session, path) is not None
+
+        if not await run_in_threadpool(tried):
+            await _install_concordance(book)
+            return
+
+
+# -- the lexicon a reader opens from a word -----------------------------------
+
+@app.get("/lexicon/status")
+def lexicon_status(session: Session = Depends(get_session)) -> dict:
+    return concordance.status(session)
+
+
+@app.get("/lexicon/verse")
+def lexicon_verse(ref: str = Query(...), session: Session = Depends(get_session)) -> dict:
+    """The words of one verse with their Strong's numbers and short definitions."""
+    try:
+        span = parse_reference(ref)[0]
+    except ReferenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if span.whole_book:
+        raise HTTPException(status_code=400, detail="Name one verse for a word study.")
+    label = book_table.book(span.book)["name"]
+    out = concordance.verse_words(session, span.book, span.chapter_start, span.verse_start)
+    return {"reference": f"{label} {span.chapter_start}:{span.verse_start}", **out}
+
+
+@app.get("/lexicon/search")
+def lexicon_search(q: str = Query(..., max_length=80), session: Session = Depends(get_session)) -> dict:
+    return {"query": q, "results": concordance.search(session, q)}
+
+
+@app.get("/lexicon/{strongs}")
+def lexicon_entry(
+    strongs: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    """One Strong's entry, BLB-style: definition, KJV renderings and where it is used."""
+    found = concordance.entry(session, strongs)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"{strongs} is not in the installed concordance.")
+    path = blb_links.lexicon_path(found["strongs"])
+    base = (BLB_BASE_URL or "").rstrip("/")
+    return {**found, "blb_url": f"{base}{path}" if base and path else None,
+            "occurrences": concordance.verses(session, found["strongs"], limit=limit, offset=offset)}
+
+
 async def _sync_tagged() -> int:
     """Install every tagged Bible not yet tried from its file. Returns how many ran."""
     books = await _tagged_books()
@@ -2943,6 +3117,7 @@ async def _tagged_sync_loop() -> None:
             ran = await _sync_tagged()
             if ran:
                 log.info("[Bible] tagged-Bible sync installed %d book(s)", ran)
+            await _sync_concordance()
         except HTTPException as exc:  # no library configured, storage down: try later
             log.info("[Bible] tagged-Bible sync skipped: %s", exc.detail)
         except Exception as exc:

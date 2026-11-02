@@ -2648,6 +2648,79 @@ export interface TaggedBible {
   installed_at: string | null;
 }
 
+/** A Calibre book tagged "Concordance" or "Strong's", as Admin › Bible shows it. */
+export interface TaggedConcordance {
+  id: number;
+  title: string;
+  authors: string[];
+  file: string | null;
+  state: 'installed' | 'installing' | 'ready' | 'failed' | 'needs attention';
+  reason: string;
+}
+
+export interface BibleLexiconStatus {
+  installed: boolean;
+  entries: number;
+  occurrences: number;
+  source: string;
+}
+
+export interface BibleConcordances {
+  installed: BibleLexiconStatus;
+  books: TaggedConcordance[];
+  job: { state: 'idle' | 'running' | 'failed'; book_id: number | null; title: string; message: string };
+  tags: string[];
+}
+
+/** Where a Strong's word is used: every verse from an interlinear, or those the concordance's text gave. */
+export interface BibleLexiconOccurrences {
+  source: 'interlinear' | 'concordance' | 'none';
+  total: number;
+  complete: boolean;
+  verses: { reference: string; osis: string; chapter: number; verse: number; word: string; context: string }[];
+}
+
+/** One Strong's entry, BLB-style (bible concordance.py). */
+export interface BibleLexiconEntry {
+  strongs: string;
+  language: 'hebrew' | 'aramaic' | 'greek' | string;
+  /** The original word, from the interlinear when one is installed. */
+  lemma: string;
+  transliteration: string;
+  part_of_speech: string;
+  gk: string;
+  definition: string;
+  gloss: string;
+  usage: { word: string; count: number }[];
+  usage_total: number;
+  source: string;
+  blb_url: string | null;
+  occurrences: BibleLexiconOccurrences;
+}
+
+export interface BibleLexiconWord {
+  word: string;
+  original: string;
+  transliteration: string;
+  strongs: string;
+  definition: string;
+  in_lexicon: boolean;
+  context?: string;
+}
+
+export interface BibleLexiconVerse {
+  reference: string;
+  source: 'interlinear' | 'concordance';
+  words: BibleLexiconWord[];
+}
+
+export interface BibleLexiconHit {
+  strongs: string;
+  transliteration: string;
+  definition: string;
+  usage_total: number;
+}
+
 export interface BibleVersionInfo {
   code: string;
   name: string;

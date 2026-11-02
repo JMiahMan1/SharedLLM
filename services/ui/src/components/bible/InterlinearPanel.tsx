@@ -9,11 +9,14 @@ import type { BibleInterlinear } from '../../types/api';
 export default function InterlinearPanel({
   data,
   blbUrl,
+  onWord,
   onClose,
 }: {
   data: BibleInterlinear;
   /** The same passage on Blue Letter Bible's interlinear tab, when known. */
   blbUrl?: string;
+  /** Opens a word's Strong's entry here, when a concordance is installed (else BLB's). */
+  onWord?: (strongs: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -54,7 +57,18 @@ export default function InterlinearPanel({
                       </>
                     );
                     const cls = 'min-w-[4.5rem] rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-center';
-                    return word.x ? (
+                    return onWord && word.s ? (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => onWord(word.s)}
+                        className={`${cls} hover:bg-white/10`}
+                        title={word.l ? `${word.l}: ${word.d}` : word.d}
+                        data-testid={`bible-interlinear-word-${i}`}
+                      >
+                        {body}
+                      </button>
+                    ) : word.x ? (
                       <a key={i} href={word.x} target="_blank" rel="noopener noreferrer" className={`${cls} hover:bg-white/10`} title={word.l ? `${word.l}: ${word.d}` : word.d}>
                         {body}
                       </a>
