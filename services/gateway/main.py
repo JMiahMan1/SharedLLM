@@ -49,7 +49,7 @@ from services.common.screen_time import evaluate as evaluate_screen_time, weekly
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
-from services.gateway import calls, cookbook, drawing, family_safety, mdm, network_routes, notices, push_routes
+from services.gateway import calls, cookbook, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -5508,12 +5508,191 @@ async def cookbook_read(request: Request):
 
 @app.post("/api/recipes/cookbook/save")
 async def cookbook_save(request: Request):
-    """Add a recipe, or change one the caller added (renaming it if the title changed)."""
+    """Add a recipe, or change one the caller added (renaming it if the title changed).
+
+    ``image_url`` (a search result's or an imported page's photo) is downloaded
+    and kept beside the saved recipe; a photo that cannot be fetched leaves the
+    recipe saved without one.
+    """
     body = await _request_json_object(request)
     caller = await _cookbook_caller(request, body.get("as_user"))
-    return await cookbook.save_recipe(
+    result = await cookbook.save_recipe(
         _cookbook_run, caller, body.get("title"), body.get("content"), body.get("path"), body.get("if_match"),
     )
+    if result.get("status") != "SUCCESS":
+        return result
+    detail = result.setdefault("detail", {})
+    saved = cookbook.clean_path(detail.get("path"))
+    old = cookbook.clean_path(body.get("path"))
+    if old and saved and saved != old:
+        # Stars and times made follow a renamed recipe.
+        try:
+            await _health_json("POST", "/recipes/rename", request, body={"old": old, "new": saved})
+        except HTTPException as exc:
+            log.warning("[cookbook] stats did not follow %s -> %s: %s", old, saved, exc.detail)
+    if saved and body.get("image_url"):
+        detail["photo"] = await _pull_recipe_photo(caller, saved, str(body["image_url"]))
+    return result
+
+
+async def _pull_recipe_photo(caller: cookbook.Caller, path: str, url: str) -> bool:
+    """Download a recipe's photo and keep it beside the note; False when it could not be."""
+    try:
+        mime, data = await recipe_images.fetch(url)
+    except (recipe_images.ImageRefused, aiohttp.ClientError, TimeoutError, ValueError) as exc:
+        log.info("[cookbook] photo for %s not pulled: %s", path, exc)
+        return False
+    up = await _cookbook_run(caller.house_creds, {
+        "action": "attachment_upload", "storage": "nextcloud", "path": path,
+        "filename": recipe_images.filename_for(url, mime), "data": base64.b64encode(data).decode("ascii"),
+    })
+    link = (up.get("detail") or {}).get("link") if up.get("status") == "SUCCESS" else None
+    if not link:
+        return False
+    return (await cookbook.set_image(_cookbook_run, caller, path, link)).get("status") == "SUCCESS"
+
+
+@app.post("/api/recipes/catalog")
+async def recipe_catalog(request: Request):
+    """The whole shelf for browsing: each recipe's meal, protein, time, servings,
+    calories, staples, photo and owner, with the family's stars and times made."""
+    caller = await _cookbook_caller(request)
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/recipes",
+            json={"user_context": caller.house_creds, "action": "recipe_catalog"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        text = await resp.text()
+    try:
+        catalog = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        catalog = None
+    if not isinstance(catalog, dict) or catalog.get("status") != "SUCCESS":
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": "The cookbook could not be read right now."})
+    try:
+        stats = (await _health_json("GET", "/recipes/stats", request)).get("recipes") or {}
+    except HTTPException:
+        stats = {}
+    recipes = []
+    for row in (catalog.get("detail") or {}).get("recipes") or []:
+        owner = row.get("owner") or caller.house
+        stat = stats.get(row.get("path")) or {}
+        recipes.append({
+            **row,
+            "owner": owner,
+            "owner_label": cookbook.owner_label(owner, caller),
+            "can_change": cookbook.can_change(owner, caller),
+            "rating": stat.get("rating"),
+            "ratings": stat.get("ratings", 0),
+            "my_rating": stat.get("mine"),
+            "made": stat.get("made", 0),
+            "made_by_me": stat.get("made_by_me", 0),
+            "last_made": stat.get("last_made"),
+        })
+    return {"status": "SUCCESS", "recipes": recipes, "me": caller.user, "is_admin": caller.is_admin}
+
+
+@app.put("/api/recipes/rating")
+async def rate_recipe(request: Request):
+    body = await _request_json_object(request)
+    return await _health_json("PUT", "/recipes/rating", request, body={"recipe": body.get("recipe"), "stars": body.get("stars")})
+
+
+@app.post("/api/recipes/made")
+async def recipe_made(request: Request):
+    body = await _request_json_object(request)
+    return await _health_json("POST", "/recipes/made", request, body={"recipe": body.get("recipe"), "day": body.get("day")})
+
+
+@app.delete("/api/recipes/made")
+async def recipe_unmade(request: Request, recipe: str, day: str):
+    return await _health_json("DELETE", "/recipes/made", request, params={"recipe": recipe, "day": day})
+
+
+@app.get("/api/media/recipe-image")
+async def recipe_image(request: Request, path: str = "", url: str = ""):
+    """A recipe's photo for an <img>: the one kept beside a cookbook recipe
+    (``path``), or a search result's (``url``). Signed with ``?mt=&user=``."""
+    creds = await _resolve_identity_from_media_token(request) or await _resolve_identity_from_request(request)
+    if not _identity_cred_dict(creds).get("user"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if url:
+        try:
+            mime, data = await recipe_images.fetch(url)
+        except (recipe_images.ImageRefused, aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail="No photo") from exc
+        return Response(content=data, media_type=mime, headers=headers)
+    target = cookbook.clean_path(path)
+    if not cookbook.is_recipe_path(target):
+        raise HTTPException(status_code=404, detail="No photo")
+    house = await cookbook_creds()
+    read = await _cookbook_run(house, {"action": "read", "storage": "nextcloud", "path": target})
+    link = cookbook.recipe_image(cookbook.strip_stored_header(read.get("message"))) if read.get("status") == "SUCCESS" else None
+    if not link:
+        raise HTTPException(status_code=404, detail="No photo")
+    if link.startswith(("http://", "https://")):
+        try:
+            mime, data = await recipe_images.fetch(link)
+        except (recipe_images.ImageRefused, aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail="No photo") from exc
+        return Response(content=data, media_type=mime, headers=headers)
+    key = f"{target}#{link}"
+    hit = recipe_images.cached(key)
+    if hit is None:
+        got = await _cookbook_run(house, {"action": "attachment_read", "storage": "nextcloud", "path": target, "attachment": link})
+        detail = got.get("detail") or {}
+        if got.get("status") != "SUCCESS" or not detail.get("data"):
+            raise HTTPException(status_code=404, detail="No photo")
+        hit = (str(detail.get("mime") or "image/jpeg"), base64.b64decode(detail["data"]))
+        recipe_images.remember(key, *hit)
+    return Response(content=hit[1], media_type=hit[0], headers=headers)
+
+
+_photo_sweep: asyncio.Task | None = None
+
+
+@app.post("/api/recipes/cookbook/find-photos")
+async def cookbook_find_photos(request: Request):
+    """Admins: fill in photos for recipes that have none, from each one's source page."""
+    global _photo_sweep
+    caller = await _cookbook_caller(request)
+    if not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Only an admin can fill in the cookbook's photos")
+    if _photo_sweep and not _photo_sweep.done():
+        return {"status": "SUCCESS", "message": "Already looking for photos.", "detail": {"running": True}}
+    _photo_sweep = asyncio.create_task(_sweep_photos(caller))
+    return {"status": "SUCCESS", "message": "Looking for photos in the background.", "detail": {"running": True}}
+
+
+async def _sweep_photos(caller: cookbook.Caller) -> None:
+    listing = await cookbook.list_recipes(_cookbook_run, caller)
+    found = 0
+    for note in (listing.get("detail") or {}).get("notes") or []:
+        path = cookbook.clean_path(note.get("path"))
+        read = await _cookbook_run(caller.house_creds, {"action": "read", "storage": "nextcloud", "path": path})
+        body = cookbook.strip_stored_header(read.get("message")) if read.get("status") == "SUCCESS" else ""
+        if not body or cookbook.recipe_image(body):
+            continue
+        source = re.search(r"^Source:\s*(https?://\S+)", body, re.M | re.I)
+        if not source:
+            continue
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/recipes",
+                json={"user_context": caller.house_creds, "action": "url_import", "url": source.group(1)},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            try:
+                page = json.loads(await resp.text())
+            except (json.JSONDecodeError, ValueError):
+                continue
+        image = (((page or {}).get("detail") or {}).get("recipe") or {}).get("image")
+        if image and await _pull_recipe_photo(caller, path, str(image)):
+            found += 1
+    log.info("[cookbook] photo sweep added %d photo(s)", found)
+
 
 
 @app.post("/api/recipes/cookbook/delete")

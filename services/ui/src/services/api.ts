@@ -173,7 +173,9 @@ import type {
   HealthCheersDay,
   FoodLabelDraft,
   RecipePhotoDraft,
+  CookbookRecipe,
   CookbookSuggestion,
+  RecipeStat,
   RecipeStapleRank,
   RecipeEstimate,
   HealthFastingState,
@@ -2916,8 +2918,40 @@ export const api = {
     path?: string;
     if_match?: string;
     as_user?: 'admin';
+    /** A photo to download and keep beside the recipe (an import's or a search result's). */
+    image_url?: string | null;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/recipes/cookbook/save', payload, { timeout: 60_000 });
+    return resp.data;
+  },
+
+  /** The whole shelf with browsing facts, family stars and times made. */
+  async recipeCatalog(): Promise<{ recipes: CookbookRecipe[]; me: string; is_admin: boolean }> {
+    const resp = await apiClient.post('/api/recipes/catalog', {}, { timeout: 90_000 });
+    const data = resp.data ?? {};
+    return { recipes: Array.isArray(data.recipes) ? data.recipes : [], me: String(data.me ?? ''), is_admin: Boolean(data.is_admin) };
+  },
+
+  /** The caller's stars for a recipe (0 clears them). */
+  async rateRecipe(recipe: string, stars: number): Promise<RecipeStat> {
+    const resp = await apiClient.put('/api/recipes/rating', { recipe, stars });
+    return resp.data;
+  },
+
+  /** Count a making of a recipe today (or on `day`); once per person and day. */
+  async recipeMade(recipe: string, day?: string): Promise<RecipeStat> {
+    const resp = await apiClient.post('/api/recipes/made', { recipe, day });
+    return resp.data;
+  },
+
+  async recipeUnmade(recipe: string, day: string): Promise<RecipeStat> {
+    const resp = await apiClient.delete('/api/recipes/made', { params: { recipe, day } });
+    return resp.data;
+  },
+
+  /** Admins: fill in photos for recipes without one, from their source pages (runs in the background). */
+  async findRecipePhotos(): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/recipes/cookbook/find-photos', {});
     return resp.data;
   },
 

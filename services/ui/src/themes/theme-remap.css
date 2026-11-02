@@ -72,6 +72,7 @@
 [data-site-theme-active] .from-purple-300 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-400 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-500 { --tw-gradient-from: var(--site-accent); }
+[data-site-theme-active] .from-purple-500\/30 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 30%, transparent); }
 [data-site-theme-active] .from-purple-500\/70 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 70%, transparent); }
 [data-site-theme-active] .from-purple-600 { --tw-gradient-from: var(--site-accent); }
 [data-site-theme-active] .from-purple-950\/20 { --tw-gradient-from: color-mix(in srgb, var(--site-accent) 20%, transparent); }
@@ -96,6 +97,7 @@
 [data-site-theme-active] .hover\:border-indigo-500\/30:hover { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-indigo-500\/50:hover { border-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }
 [data-site-theme-active] .hover\:border-purple-400\/40:hover { border-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
+[data-site-theme-active] .hover\:border-purple-400\/50:hover { border-color: color-mix(in srgb, var(--site-accent) 50%, transparent) !important; }
 [data-site-theme-active] .hover\:border-purple-500\/25:hover { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-purple-500\/30:hover { border-color: color-mix(in srgb, var(--site-accent) 30%, transparent) !important; }
 [data-site-theme-active] .hover\:border-purple-500\/40:hover { border-color: color-mix(in srgb, var(--site-accent) 40%, transparent) !important; }
@@ -130,6 +132,7 @@
 [data-site-theme-active] .to-indigo-500\/15 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 15%, transparent); }
 [data-site-theme-active] .to-indigo-500\/5 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 5%, transparent); }
 [data-site-theme-active] .to-indigo-600 { --tw-gradient-to: var(--site-accent); }
+[data-site-theme-active] .to-indigo-600\/20 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .to-indigo-950\/20 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 20%, transparent); }
 [data-site-theme-active] .to-purple-400 { --tw-gradient-to: var(--site-accent); }
 [data-site-theme-active] .to-purple-500\/10 { --tw-gradient-to: color-mix(in srgb, var(--site-accent) 10%, transparent); }
@@ -256,6 +259,7 @@
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.03\]:hover { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.05\]:hover { background-color: rgba(17, 24, 39, 0.03) !important; }
+[data-theme-scheme="light"] .hover\:bg-white\/\[0\.06\]:hover { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.07\]:hover { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(17, 24, 39, 0.05) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.12\]:hover { background-color: rgba(17, 24, 39, 0.07) !important; }

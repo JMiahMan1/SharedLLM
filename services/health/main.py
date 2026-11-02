@@ -55,6 +55,8 @@ from services.health.models import (
     HealthShare,
     MetricSample,
     OffProduct,
+    RecipeMade,
+    RecipeRating,
     SleepSession,
     utcnow,
 )
@@ -2723,6 +2725,151 @@ def delete_fast(fast_id: int, request: Request, session: Session = Depends(get_s
     session.delete(row)
     session.commit()
     return {"deleted": fast_id}
+
+
+# --- family cookbook: stars and times made ---------------------------------
+# A recipe is named by its note path in the family cookbook ("Recipes/Chili.md").
+# Stars are each person's own; the shelf shows the family average and how many
+# times anyone made it.
+
+RECIPE_PATH_RE = re.compile(r"^Recipes/[^/\\]{1,200}\.md$")
+
+
+def _recipe_key(value: str) -> str:
+    key = (value or "").strip().lstrip("/")
+    if not RECIPE_PATH_RE.match(key) or ".." in key:
+        raise HTTPException(status_code=422, detail="recipe must be a cookbook note path")
+    return key
+
+
+class RecipeRatingIn(BaseModel):
+    recipe: str
+    stars: int = Field(ge=0, le=5)  # 0 clears the person's rating
+
+
+class RecipeMadeIn(BaseModel):
+    recipe: str
+    day: str | None = None
+
+
+class RecipeRenameIn(BaseModel):
+    old: str
+    new: str
+
+
+@app.put("/recipes/rating")
+def rate_recipe(body: RecipeRatingIn, request: Request, session: Session = Depends(get_session)):
+    user = _user(request)
+    recipe = _recipe_key(body.recipe)
+    row = session.exec(select(RecipeRating).where(RecipeRating.user_id == user, RecipeRating.recipe == recipe)).first()
+    if body.stars == 0:
+        if row is not None:
+            session.delete(row)
+    elif row is None:
+        session.add(RecipeRating(user_id=user, recipe=recipe, stars=body.stars))
+    else:
+        row.stars = body.stars
+        row.updated_at = utcnow()
+        session.add(row)
+    session.commit()
+    return _recipe_stat(session, recipe, user)
+
+
+@app.post("/recipes/made")
+def made_recipe(body: RecipeMadeIn, request: Request, session: Session = Depends(get_session)):
+    """Count one making of a recipe (once per person and day, so a repeat tap is harmless)."""
+    user = _user(request)
+    recipe = _recipe_key(body.recipe)
+    day = _day(body.day or date.today().isoformat())
+    exists = session.exec(
+        select(RecipeMade).where(RecipeMade.user_id == user, RecipeMade.recipe == recipe, RecipeMade.day == day)
+    ).first()
+    if exists is None:
+        session.add(RecipeMade(user_id=user, recipe=recipe, day=day))
+        session.commit()
+    return _recipe_stat(session, recipe, user)
+
+
+@app.delete("/recipes/made")
+def unmade_recipe(recipe: str, day: str, request: Request, session: Session = Depends(get_session)):
+    """Take back one "made it" (a mistaken tap), the caller's own only."""
+    user = _user(request)
+    key = _recipe_key(recipe)
+    row = session.exec(
+        select(RecipeMade).where(RecipeMade.user_id == user, RecipeMade.recipe == key, RecipeMade.day == _day(day))
+    ).first()
+    if row is not None:
+        session.delete(row)
+        session.commit()
+    return _recipe_stat(session, key, user)
+
+
+@app.post("/recipes/rename")
+def rename_recipe_stats(body: RecipeRenameIn, request: Request, session: Session = Depends(get_session)):
+    """A cookbook rename carries its stars and makings to the new path (the gateway calls it)."""
+    _user(request)
+    old, new = _recipe_key(body.old), _recipe_key(body.new)
+    for row in session.exec(select(RecipeRating).where(RecipeRating.recipe == old)).all():
+        clash = session.exec(
+            select(RecipeRating).where(RecipeRating.recipe == new, RecipeRating.user_id == row.user_id)
+        ).first()
+        if clash is None:
+            row.recipe = new
+            session.add(row)
+        else:
+            session.delete(row)
+    for row in session.exec(select(RecipeMade).where(RecipeMade.recipe == old)).all():
+        clash = session.exec(
+            select(RecipeMade).where(RecipeMade.recipe == new, RecipeMade.user_id == row.user_id, RecipeMade.day == row.day)
+        ).first()
+        if clash is None:
+            row.recipe = new
+            session.add(row)
+        else:
+            session.delete(row)
+    session.commit()
+    return {"old": old, "new": new}
+
+
+def _recipe_stat(session: Session, recipe: str, user: str) -> dict:
+    stats = _recipe_stats(session, user, only=recipe)
+    return {"recipe": recipe, **stats.get(recipe, _empty_stat())}
+
+
+def _empty_stat() -> dict:
+    return {"rating": None, "ratings": 0, "mine": None, "made": 0, "made_by_me": 0, "last_made": None}
+
+
+def _recipe_stats(session: Session, user: str, only: str | None = None) -> dict[str, dict]:
+    ratings = select(RecipeRating)
+    makings = select(RecipeMade)
+    if only:
+        ratings = ratings.where(RecipeRating.recipe == only)
+        makings = makings.where(RecipeMade.recipe == only)
+    out: dict[str, dict] = {}
+    for row in session.exec(ratings).all():
+        stat = out.setdefault(row.recipe, _empty_stat() | {"_sum": 0})
+        stat["_sum"] += row.stars
+        stat["ratings"] += 1
+        if row.user_id == user:
+            stat["mine"] = row.stars
+    for row in session.exec(makings).all():
+        stat = out.setdefault(row.recipe, _empty_stat() | {"_sum": 0})
+        stat["made"] += 1
+        if row.user_id == user:
+            stat["made_by_me"] += 1
+        if stat["last_made"] is None or row.day > stat["last_made"]:
+            stat["last_made"] = row.day
+    for stat in out.values():
+        total = stat.pop("_sum", 0)
+        stat["rating"] = round(total / stat["ratings"], 1) if stat["ratings"] else None
+    return out
+
+
+@app.get("/recipes/stats")
+def recipe_stats(request: Request, session: Session = Depends(get_session)):
+    """Every cookbook recipe's family rating and times made, with the caller's own stars."""
+    return {"recipes": _recipe_stats(session, _user(request))}
 
 
 # --- export ----------------------------------------------------------------

@@ -32,6 +32,9 @@ NOT_RECIPES = frozenset({
 MAX_MESSAGE = 500
 
 _OWNER_LINE = re.compile(r"^Added by:[ \t]*(.*?)[ \t]*$", re.IGNORECASE)
+#: The recipe's photo: a link to the file kept beside the note (or, before it
+#: is pulled, the photo's web address).
+_IMAGE_LINE = re.compile(r"^Image:[ \t]*(\S+)[ \t]*$", re.IGNORECASE)
 _HEADER_LINE = re.compile(r"^(Tags|Times|Source):", re.IGNORECASE)
 #: The header the note API writes on every note: "# <title>", "Category: <dir>", blank.
 _STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\nCategory: [^\n]*\n(?:[ \t]*\n)?")
@@ -117,18 +120,29 @@ def recipe_owner(body: str | None, default: str) -> str:
 
 
 def without_owner(body: str | None) -> str:
-    """The recipe without its "Added by:" line (the editor never shows it)."""
-    lines = [line for line in (body or "").split("\n") if not _OWNER_LINE.match(line)]
+    """The recipe without its "Added by:" and "Image:" lines (the server keeps those)."""
+    lines = [line for line in (body or "").split("\n") if not (_OWNER_LINE.match(line) or _IMAGE_LINE.match(line))]
     return "\n".join(lines)
 
 
-def with_owner(body: str | None, owner: str) -> str:
-    """The recipe with one "Added by:" line, after its Tags/Times/Source lines."""
+def recipe_image(body: str | None) -> str | None:
+    """The recipe's photo link from its "Image:" line, if it has one."""
+    for line in (body or "").splitlines():
+        if line.startswith("## "):
+            break
+        m = _IMAGE_LINE.match(line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def with_owner(body: str | None, owner: str, image: str | None = None) -> str:
+    """The recipe with one "Added by:" line (and its photo), after its Tags/Times/Source lines."""
     lines = without_owner(body).split("\n")
     at = 0
     while at < len(lines) and _HEADER_LINE.match(lines[at]):
         at += 1
-    entry = [f"Added by: {owner}"]
+    entry = ([f"Image: {image}"] if image else []) + [f"Added by: {owner}"]
     if at == 0 and lines and lines[0].strip():
         entry.append("")
     return "\n".join(lines[:at] + entry + lines[at:])
@@ -256,6 +270,7 @@ async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any 
         return res
     body = strip_stored_header(text)
     owner = recipe_owner(body, caller.house)
+    image = recipe_image(body)
     return {
         "status": "SUCCESS",
         "message": without_owner(body),
@@ -265,6 +280,7 @@ async def read_recipe(run: Runner, caller: Caller, path: Any = None, title: Any 
             "title": stored_title(text) or target.rsplit("/", 1)[-1][:-3],
             "etag": etag,
             "owner": owner,
+            "image": image,
             "owner_label": owner_label(owner, caller),
             "can_change": can_change(owner, caller),
             "can_review": can_review(owner, caller),
@@ -293,7 +309,7 @@ async def save_recipe(
     target = clean_path(path)
     if not target:
         owner = caller.author
-        res = await _create(run, caller, name, with_owner(body, owner))
+        res = await _create(run, caller, name, with_owner(body, owner, recipe_image(str(content or ""))))
         if _succeeded(res):
             res.setdefault("detail", {})["owner"] = owner
         return res
@@ -308,7 +324,8 @@ async def save_recipe(
             f"Only {owner_label(owner, caller)} can change this recipe. Suggest the change instead.",
             owner=owner, forbidden=True,
         )
-    stamped = with_owner(body, owner)
+    # The photo stays unless the change brings its own.
+    stamped = with_owner(body, owner, recipe_image(str(content or "")) or detail.get("image"))
     if name == detail["title"]:
         res = await run(caller.house_creds, _note(
             "write", title=name, category=COOKBOOK_DIR, path=target, content=stamped,
@@ -458,7 +475,7 @@ async def resolve_suggestion(run: Runner, caller: Caller, path: Any, decision: A
         detail = recipe["detail"]
         write = await run(caller.house_creds, _note(
             "write", title=detail["title"], category=COOKBOOK_DIR, path=detail["path"],
-            content=with_owner(suggestion["content"], detail["owner"]),
+            content=with_owner(suggestion["content"], detail["owner"], detail.get("image")),
         ))
         if not _succeeded(write):
             return write
@@ -525,3 +542,19 @@ async def adopt(run: Runner, caller: Caller) -> dict:
     if kept:
         message += f" {len(kept)} stayed in your folder."
     return _ok(message, moved=moved, kept=kept)
+
+
+async def set_image(run: Runner, caller: Caller, path: Any, link: str) -> dict:
+    """Point a recipe's "Image:" line at ``link`` (a photo just kept beside it)."""
+    target = clean_path(path)
+    if not is_recipe_path(target):
+        return _fail("That is not a recipe in the cookbook.")
+    text, _, res = await _read(run, caller.house_creds, target)
+    if text is None:
+        return res
+    body = strip_stored_header(text)
+    owner = recipe_owner(body, caller.house)
+    return await run(caller.house_creds, _note(
+        "write", title=stored_title(text) or target.rsplit("/", 1)[-1][:-3], category=COOKBOOK_DIR,
+        path=target, content=with_owner(body, owner, link),
+    ))

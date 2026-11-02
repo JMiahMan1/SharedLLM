@@ -375,3 +375,29 @@ class ChallengeMember(SQLModel, table=True):  # type: ignore
     challenge_id: int = Field(index=True)
     user_id: str = Field(index=True)
     joined_at: str = Field(default_factory=utcnow)
+
+
+class RecipeRating(SQLModel, table=True):  # type: ignore
+    """One person's stars for one family-cookbook recipe (its note path)."""
+
+    __tablename__ = "reciperating"
+    __table_args__ = (UniqueConstraint("user_id", "recipe"), {"extend_existing": True})
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    recipe: str = Field(index=True)
+    stars: int
+    updated_at: str = Field(default_factory=utcnow)
+
+
+class RecipeMade(SQLModel, table=True):  # type: ignore
+    """A day someone made a cookbook recipe (once per person, recipe and day)."""
+
+    __tablename__ = "recipemade"
+    __table_args__ = (UniqueConstraint("user_id", "recipe", "day"), {"extend_existing": True})
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    recipe: str = Field(index=True)
+    day: str
+    created_at: str = Field(default_factory=utcnow)

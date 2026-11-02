@@ -20,6 +20,7 @@ from urllib.parse import quote, urlparse
 import aiohttp
 
 from services.execution.handlers.note import _walk_webdav_dir, note_body
+from services.execution.handlers.recipe_facets import facets
 from services.execution.handlers.recipe_seed import get_seed
 from services.execution.http_client import get_session, host_of
 from services.execution.personal_data import missing_account_message, resolve_personal_data_provider
@@ -548,6 +549,39 @@ async def _recipe_staples(req: RecipeRequest) -> ExecutionResult:
     )
 
 
+async def _recipe_catalog(req: RecipeRequest) -> ExecutionResult:
+    """Every recipe with what the shelf browses by: meal, protein, time,
+    servings, calories, staples, owner and photo. Bodies are read through the
+    same version cache as the staple ranking, so a repeat call is cheap."""
+    provider = resolve_personal_data_provider(req.user_context)
+    if not provider:
+        return ExecutionResult.fail(missing_account_message(req.user_context), service="recipe_catalog")
+    try:
+        notes = _shelf(await _walk_webdav_dir(provider, _RECIPES_DIR))
+    except Exception as exc:  # a listing failure is reported, not a 500
+        log.warning("[recipe_import] recipe listing failed: %s", str(exc) or type(exc).__name__)
+        return ExecutionResult.fail("Could not read the recipe shelf right now.", service="recipe_catalog")
+
+    gate = asyncio.Semaphore(_SOURCE_CONCURRENCY)
+
+    async def one(note: dict) -> dict:
+        async with gate:
+            body = await _read_note_body(provider, note)
+        title = note.get("title") or ""
+        staples = staple_matches(body)
+        return {
+            "title": title,
+            "path": str(note.get("path") or "").lstrip("/"),
+            "modified": note.get("modified"),
+            **facets(title, body),
+            "staples": staples,
+        }
+
+    recipes = list(await asyncio.gather(*(one(note) for note in notes)))
+    recipes.sort(key=lambda row: row["title"].lower())
+    return ExecutionResult.ok(f"{len(recipes)} recipe(s)", service="recipe_catalog", detail={"recipes": recipes})
+
+
 async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
     if req.action == "recipe_search":
         return await _recipe_search(req)
@@ -557,6 +591,8 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
         return await _recipe_sources(req)
     if req.action == "recipe_staples":
         return await _recipe_staples(req)
+    if req.action == "recipe_catalog":
+        return await _recipe_catalog(req)
     if req.action != "url_import":
         return ExecutionResult.fail(
             f"Unknown recipe action: {req.action}", service="recipe_import"
