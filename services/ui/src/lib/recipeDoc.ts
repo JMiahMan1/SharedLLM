@@ -149,7 +149,19 @@ export function formatCookTime(minutes: number | null | undefined): string {
   return rest ? `${hours} h ${rest}` : `${hours} h`;
 }
 
-/** A recipe name to compare by: "Beef Stew" and an older "beef-stew" are one recipe. */
+/**
+ * A recipe name to compare by, the way its file name is made: "$5 Tacos",
+ * "5 tacos" and "5-Tacos" are one recipe, and so are "Crème Brûlée" and
+ * "creme-brulee".
+ */
 export function recipeTitleKey(title: string): string {
-  return title.replace(/[-_]+/g, ' ').toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+  return title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
 }

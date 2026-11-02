@@ -5695,6 +5695,11 @@ async def _source_photo(caller: cookbook.Caller, url: str) -> str | None:
     return None
 
 
+async def _photo_present(caller: cookbook.Caller, path: str, link: str) -> bool:
+    got = await _cookbook_run(caller.house_creds, {"action": "attachment_read", "storage": "nextcloud", "path": path, "attachment": link})
+    return got.get("status") == "SUCCESS"
+
+
 async def _sweep_photos(caller: cookbook.Caller) -> None:
     listing = await cookbook.list_recipes(_cookbook_run, caller)
     found = 0
@@ -5702,8 +5707,11 @@ async def _sweep_photos(caller: cookbook.Caller) -> None:
         path = cookbook.clean_path(note.get("path"))
         read = await _cookbook_run(caller.house_creds, {"action": "read", "storage": "nextcloud", "path": path})
         body = cookbook.strip_stored_header(read.get("message")) if read.get("status") == "SUCCESS" else ""
-        if not body or cookbook.recipe_image(body):
+        if not body:
             continue
+        link = cookbook.recipe_image(body)
+        if link and (link.startswith(("http://", "https://")) or await _photo_present(caller, path, link)):
+            continue  # a photo that is there (a link whose file is gone is fetched again)
         source = re.search(r"^Source:\s*(https?://\S+)", body, re.M | re.I)
         if not source:
             continue
