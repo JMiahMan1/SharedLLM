@@ -392,6 +392,19 @@ live search is the ecosystem-standard pattern.
   last week's fasts, with neutral copy. `GET /fasting`, `POST /fasting/start`, `POST
   /fasting/stop`, `DELETE /fasting/{id}` (`services/health/fasting.py`, `FastingSession`;
   gateway `/api/health/fasting…`). A profile in kid mode or under 18 gets `allowed: false` and 403s.
+- [x] Fasting in the Christian tradition. A fast has a kind from `services/health/fasting_traditions.py`
+  (Wednesday & Friday station fast until the ninth hour, fast until evening, xerophagy, the Paschal
+  forty hours, Great Lent, the Nativity fast, Ember days, before baptism, before Communion, a fast of
+  intercession, the Daniel fast, or a window of one's own), each with its rule and cited sources
+  (Didache, Hermas, Irenaeus via Eusebius, Nicaea, Leo, Augustine, ...). The kind sets a planned end
+  (`ends_at`: a time of day, a window up to 72 h, or a season of days up to 50); the card counts down
+  to it every second in the device's own time. `GET /fasting/traditions` serves the kinds and the
+  guide shown under a fast: today's verse, why the Church fasts, the heart of the fast, the
+  psalms, the Fathers (paraphrased, cited), the hours of prayer and practical helps, plus books from
+  the library tagged `fasting` (`GET /api/resources?topic=fasting`, see CALIBRE_LIBRARY.md).
+  `fasting_notices.py`: on start and end, everyone the fast is shared with (scope `fasting`) is asked
+  to pray, with a verse (and the intention, if given); while it runs the person is reminded at the
+  third, sixth and ninth hours and told when it is complete. Both can be turned off per fast.
 
 ### Phase 5 - budget and day view
 

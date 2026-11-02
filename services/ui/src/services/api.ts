@@ -179,6 +179,8 @@ import type {
   RecipeStapleRank,
   RecipeEstimate,
   HealthFastingState,
+  FastingTraditions,
+  TopicResources,
   HealthCycleSummary,
   HealthCyclePeriod,
   HealthCycleLog,
@@ -2286,7 +2288,27 @@ export const api = {
     return resp.data;
   },
 
-  async startHealthFast(body: { started_at?: string; target_hours?: number | null }): Promise<HealthFast> {
+  /** Books and documents about a topic (a Calibre tag or a Resources/<Topic>/ folder), and passages for `q`. */
+  async getResources(topic: string, q?: string): Promise<TopicResources> {
+    const resp = await apiClient.get('/api/resources', { params: { topic, ...(q ? { q } : {}) } });
+    return resp.data;
+  },
+
+  async getFastingTraditions(): Promise<FastingTraditions> {
+    const resp = await apiClient.get('/api/health/fasting/traditions');
+    return resp.data;
+  },
+
+  async startHealthFast(body: {
+    started_at?: string;
+    target_hours?: number | null;
+    kind?: string | null;
+    until?: string | null;
+    days?: number | null;
+    intention?: string | null;
+    notify_shared?: boolean;
+    prayer_reminders?: boolean;
+  }): Promise<HealthFast> {
     const resp = await apiClient.post('/api/health/fasting/start', body);
     return resp.data;
   },

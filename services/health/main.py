@@ -18,6 +18,7 @@ Design commitments:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import aiohttp
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, field_validator
@@ -38,7 +39,21 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from services.common.secrets import secret_matches
 from services.common.sqlite import add_missing_columns, apply_sqlite_pragmas
 from services.config import INTERNAL_SECRET
-from services.health import challenges, cheers, cycle, fasting, food_seed, goals, preferences, recipe_estimate, scoring, streaks, weekly
+from services.health import (
+    challenges,
+    cheers,
+    cycle,
+    fasting,
+    fasting_notices,
+    fasting_traditions,
+    food_seed,
+    goals,
+    preferences,
+    recipe_estimate,
+    scoring,
+    streaks,
+    weekly,
+)
 from services.health.models import (
     ChallengeMember,
     Checkin,
@@ -159,7 +174,12 @@ async def lifespan(app: FastAPI):
             session.commit()
             log.info("[Health] reset %d profile(s) from sex=other to not set", len(legacy))
     log.info("[Health] ready db=%s", _database_url())
-    yield
+    # The hours of prayer and the end of a running fast (fasting_notices).
+    reminders = asyncio.create_task(fasting_notices.reminder_loop(_db, _household_tz))
+    try:
+        yield
+    finally:
+        reminders.cancel()
 
 
 app = FastAPI(title="Jarvis Health Service", lifespan=lifespan)
@@ -2619,6 +2639,15 @@ class FastStartIn(BaseModel):
     # When the fast began; defaults to now (a person often starts after dinner).
     started_at: str | None = None
     target_hours: int | None = Field(default=None, ge=fasting.MIN_TARGET_HOURS, le=fasting.MAX_TARGET_HOURS)
+    #: One of fasting_traditions.KINDS (the station fast, Lent, ...).
+    kind: str | None = Field(default=None, max_length=32)
+    #: End at this time of day (HH:MM, household time), e.g. 15:00 for the ninth hour.
+    until: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    #: A season of this many days (Lent, the Daniel fast).
+    days: int | None = Field(default=None, ge=1, le=fasting.MAX_DAYS)
+    intention: str | None = Field(default=None, max_length=280)
+    notify_shared: bool = True
+    prayer_reminders: bool = True
 
 
 class FastStopIn(BaseModel):
@@ -2628,12 +2657,20 @@ class FastStopIn(BaseModel):
 def _fast_out(row: FastingSession, now: datetime) -> dict:
     started = datetime.fromisoformat(row.started_at)
     until = datetime.fromisoformat(row.ended_at) if row.ended_at else now
+    ends_at = datetime.fromisoformat(row.ends_at) if row.ends_at else None
     return {
         "id": row.id,
         "started_at": row.started_at,
         "ended_at": row.ended_at,
         "target_hours": row.target_hours,
-        **fasting.progress(started, until, row.target_hours),
+        "kind": row.kind,
+        "kind_name": fasting_traditions.name_of(row.kind) if row.kind else None,
+        "ends_at": row.ends_at,
+        "days": row.days,
+        "intention": row.intention,
+        "notify_shared": row.notify_shared,
+        "prayer_reminders": row.prayer_reminders,
+        **fasting.progress(started, until, row.target_hours, ends_at, row.days),
     }
 
 
@@ -2676,7 +2713,7 @@ def get_fasting(request: Request, session: Session = Depends(get_session)):
 
 
 @app.post("/fasting/start")
-def start_fast(body: FastStartIn, request: Request, session: Session = Depends(get_session)):
+def start_fast(body: FastStartIn, request: Request, background: BackgroundTasks, session: Session = Depends(get_session)):
     user = _user(request)
     _refuse_minor_fasting(session, user)
     if _active_fast(session, user) is not None:
@@ -2688,15 +2725,29 @@ def start_fast(body: FastStartIn, request: Request, session: Session = Depends(g
         raise HTTPException(status_code=422, detail="started_at cannot be in the future")
     if now - started_at > timedelta(hours=fasting.MAX_FAST_HOURS):
         raise HTTPException(status_code=422, detail=f"A fast cannot have started more than {fasting.MAX_FAST_HOURS} hours ago")
-    row = FastingSession(user_id=user, started_at=started, target_hours=body.target_hours)
+    if body.kind and body.kind not in fasting_traditions.KIND_KEYS:
+        raise HTTPException(status_code=422, detail="Unknown kind of fast")
+    ends = fasting_traditions.planned_end(
+        body.kind, started_at, target_hours=body.target_hours, days=body.days, until=body.until, tz=_household_tz(),
+    )
+    pattern = (fasting_traditions.kind(body.kind) or {}).get("pattern") or {}
+    days = body.days or (pattern.get("days") if not (body.target_hours or body.until) else None)
+    row = FastingSession(
+        user_id=user, started_at=started, target_hours=body.target_hours, kind=body.kind,
+        ends_at=ends.isoformat() if ends else None, days=days,
+        intention=(body.intention or "").strip() or None,
+        notify_shared=body.notify_shared, prayer_reminders=body.prayer_reminders,
+    )
     session.add(row)
     session.commit()
     session.refresh(row)
+    if row.notify_shared:
+        background.add_task(fasting_notices.shared_started, _fast_out(row, now), user, _fasting_viewers(session, user))
     return _fast_out(row, now)
 
 
 @app.post("/fasting/stop")
-def stop_fast(body: FastStopIn, request: Request, session: Session = Depends(get_session)):
+def stop_fast(body: FastStopIn, request: Request, background: BackgroundTasks, session: Session = Depends(get_session)):
     user = _user(request)
     _refuse_minor_fasting(session, user)
     row = _active_fast(session, user)
@@ -2713,7 +2764,22 @@ def stop_fast(body: FastStopIn, request: Request, session: Session = Depends(get
     session.add(row)
     session.commit()
     session.refresh(row)
+    if row.notify_shared:
+        background.add_task(fasting_notices.shared_ended, _fast_out(row, now), user, _fasting_viewers(session, user))
     return _fast_out(row, now)
+
+
+def _fasting_viewers(session: Session, owner: str) -> list[str]:
+    """Who the person shares their fasting with."""
+    return list(session.exec(
+        select(HealthShare.viewer).where(HealthShare.owner == owner, HealthShare.scope == "fasting")
+    ).all())
+
+
+@app.get("/fasting/traditions")
+def fasting_catalog():
+    """The kinds of fast the early church kept, and the Scripture and guidance for a fast."""
+    return {**fasting_traditions.catalog(), "today": fasting_traditions.verse_of_day(datetime.now(_household_tz()).date())}
 
 
 @app.delete("/fasting/{fast_id}")

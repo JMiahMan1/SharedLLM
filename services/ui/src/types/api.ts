@@ -3614,6 +3614,58 @@ export interface HealthFast {
   percent: number | null;
   remaining_minutes: number | null;
   reached: boolean;
+  /** Present on fasts started since kinds were added. */
+  elapsed_seconds?: number;
+  remaining_seconds?: number | null;
+  kind?: string | null;
+  kind_name?: string | null;
+  /** The planned end (an instant); a season of days ends days later. */
+  ends_at?: string | null;
+  days?: number | null;
+  /** Day of a season (1-based). */
+  day?: number | null;
+  intention?: string | null;
+  notify_shared?: boolean;
+  prayer_reminders?: boolean;
+}
+
+/** One cited source: a Father, a council, or Scripture, with a short paraphrase. */
+export interface FastSource {
+  cite: string;
+  note: string;
+}
+
+/** A kind of fast the early church kept (health fasting_traditions.KINDS). */
+export interface FastKind {
+  key: string;
+  name: string;
+  era: string;
+  summary: string;
+  rule: string;
+  pattern: { type: 'hours'; hours: number } | { type: 'until'; clock: string } | { type: 'days'; days: number; daily: string };
+  sources: FastSource[];
+  scripture: string[];
+  caution?: string;
+}
+
+export interface FastingTraditions {
+  kinds: FastKind[];
+  why: string[];
+  heart: string[];
+  psalms: string[];
+  fathers: FastSource[];
+  prayer_hours: { clock: string; name: string; reason: string; scripture: string }[];
+  helps: string[];
+  /** The fasting verse for today. */
+  today: string;
+}
+
+/** The family's resources on one topic (gateway /api/resources). */
+export interface TopicResources {
+  topic: string;
+  books: { title: string | null; author: string | null; calibre_id?: number | null; tags?: string | null }[];
+  documents: { name: string; path: string; collection: string }[];
+  passages: { text: string; title: string | null; author: string | null; chapter: string | null }[];
 }
 
 export interface HealthFastingState {

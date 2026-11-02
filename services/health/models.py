@@ -83,6 +83,18 @@ class FastingSession(SQLModel, table=True):  # type: ignore
     started_at: str = Field(index=True)
     ended_at: str | None = None
     target_hours: int | None = None
+    #: The kind of fast (``fasting_traditions.KINDS``), e.g. "station" or "lent".
+    kind: str | None = None
+    #: When it is planned to end (an instant); a season of days ends days later.
+    ends_at: str | None = None
+    #: A season's length in days (Lent, the Daniel fast); None for one fast.
+    days: int | None = None
+    #: What the person is fasting for, shown only to those they share it with.
+    intention: str | None = None
+    #: Ask those it is shared with to pray, at the start and the end.
+    notify_shared: bool = True
+    #: Remind the person at the hours of prayer while it runs.
+    prayer_reminders: bool = True
     created_at: str = Field(default_factory=utcnow)
 
 
