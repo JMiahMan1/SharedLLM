@@ -46,12 +46,22 @@ async def _catalog(library_path: str) -> dict[int, dict[str, Any]]:
         raise HTTPException(status_code=502, detail="The Calibre library could not be read.") from exc
 
 
+def _files(book: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each format's file at its full path in Nextcloud (what a fetch takes)."""
+    out = []
+    for entry in book.get("files") or []:
+        full = str(entry.get("path") or "")
+        out.append({"format": full.rsplit(".", 1)[-1].upper() if "." in full else "", "path": full, "size": entry.get("size")})
+    return out
+
+
 def _row(book: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": book["id"], "title": book["title"], "authors": book["authors"], "tags": book["tags"],
         "series": book["series"] or None, "series_index": book.get("series_index"),
         "formats": book["formats"], "readable": bool(set(book["formats"]) & _TEXT_FORMATS),
         "path": book["path"],
+        "files": _files(book),
     }
 
 

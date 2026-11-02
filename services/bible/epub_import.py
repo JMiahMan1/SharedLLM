@@ -47,7 +47,47 @@ _WHITESPACE = re.compile(r"\s+")
 _CONTINUES_VERSE = frozenset({
     "sl", "sl1", "sl2", "sl3", "slf", "slb", "sll", "sls", "slr",
     "bq", "bql", "bqs", "bqf", "pc", "pcon", "pf", "paft",
+    # The ESV Study Bible's text documents: poetry is set line by line
+    # ("line", "line-indent", "line-group"), prose paragraphs carry no
+    # number until the next verse begins inside them, and a psalm's closing
+    # doxology (Ps 41:13, 72:18-19) is scripture too.
+    "line", "line-indent", "line-indent2", "line-group", "line-group-after-heading",
+    "line-space", "normal", "no-indent", "no-indent-line-space", "psalm-doxology",
 })
+
+# Titles set between verses: section headings, a psalm's superscription ("A
+# Psalm of David."), an acrostic letter ("Aleph"), the five books of the
+# Psalter ("Book One") and the Song of Songs' speaker labels. None is
+# scripture text, and a verse anchor parked on one (the ESV puts Psalm 23:1's
+# on its heading) defers to the paragraph that carries the verse.
+_TITLE_CLASSES = frozenset({
+    "heading", "subheading", "psalm-title", "psalm-acrostic-title", "psalm-book", "speaker",
+})
+
+# A typeset fraction: "10<span>1</span>/<span>2</span>" reads as 10\u2063 1/2
+# while harvesting (the invisible separator marks where the small numerals
+# began) and is written as the character a printed Bible uses.
+_FRACTION_MARK = "\u2063"
+_VULGAR = {"1/2": "½", "1/4": "¼", "3/4": "¾", "1/3": "⅓", "2/3": "⅔", "1/8": "⅛", "3/8": "⅜", "5/8": "⅝", "7/8": "⅞"}
+_MARKED_FRACTION = re.compile(r"(\d)\u2063\s*(\d+)\s*/\s*(\d+)")
+# An entity whose ampersand was lost on the way into the archive ("it!#8221;").
+_BARE_ENTITY = re.compile(r"(?<!&)#(\d{3,5});")
+
+
+def _clean_text(text: str) -> str:
+    """Final tidy of a verse: fractions as printed, stray entities decoded."""
+    text = _MARKED_FRACTION.sub(
+        lambda m: m[1] + _VULGAR.get(f"{m[2]}/{m[3]}", f" {m[2]}/{m[3]}"), text,
+    ).replace(_FRACTION_MARK, "")
+
+    def entity(m: re.Match[str]) -> str:
+        code = int(m[1])
+        return chr(code) if 160 <= code <= 0x2FFF else m[0]
+
+    # A footnote mark that escaped its link ("Kiriath-jearim,*"): scripture
+    # text never carries an asterisk.
+    text = re.sub(r"\s*\*", "", text)
+    return _BARE_ENTITY.sub(entity, text)
 
 # Study material we keep and join back onto a verse. Commentary ids encode the
 # same nine digits as the verse anchor they belong to; footnote ids are a flat
@@ -305,6 +345,7 @@ class _VerseHarvester(HTMLParser):
         self._marker = 0
         self._heading_anchor = False
         self._after_heading = False
+        self._title = False
 
     def _start(self, match: re.Match[str], heading_anchor: bool = False) -> None:
         self._flush()
@@ -321,7 +362,19 @@ class _VerseHarvester(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         data = dict(attrs)
-        if tag == "p":
+        if tag == "p" and _class_of(data) in _TITLE_CLASSES:
+            # A title between verses: never text. It ends the open verse,
+            # unless that verse's anchor sat on a title and its text is still
+            # to come (then the next non-title paragraph carries it).
+            css = _class_of(data)
+            self.skipped[css] += 1
+            self._in_paragraph = True
+            self._title = True
+            self._paragraph_open = False
+            if not (self._after_heading and self._verse is not None):
+                self._flush()
+                self._after_verse = False
+        elif tag == "p":
             self._in_paragraph = True
             css = _class_of(data)
             if self._after_heading and self._verse is not None:
@@ -354,7 +407,7 @@ class _VerseHarvester(HTMLParser):
             self._target(ident[:-1])
         match = VERSE_ANCHOR.match(ident)
         if match:
-            self._start(match, heading_anchor=(tag == "p" and _class_of(data) == "heading"))
+            self._start(match, heading_anchor=(tag == "p" and _class_of(data) in _TITLE_CLASSES))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
@@ -368,6 +421,12 @@ class _VerseHarvester(HTMLParser):
             self._hidden -= 1
         elif tag in {"span", "a"} and self._marker:
             self._marker -= 1
+        elif tag == "p" and self._title:
+            self._title = False
+            self._in_paragraph = False
+            if self._heading_anchor:
+                self._heading_anchor = False
+                self._after_heading = True
         elif tag == "p":
             self._in_paragraph = False
             if self._heading_anchor:
@@ -384,6 +443,7 @@ class _VerseHarvester(HTMLParser):
             or self._hidden
             or self._marker
             or self._heading_anchor
+            or self._title
             or not self._in_paragraph
         ):
             return
@@ -392,7 +452,7 @@ class _VerseHarvester(HTMLParser):
     def _flush(self) -> None:
         if self._verse is None:
             return
-        text = _WHITESPACE.sub(" ", "".join(self._buffer)).strip()
+        text = _clean_text(_WHITESPACE.sub(" ", "".join(self._buffer)).strip())
         text = _strip_own_number(text, self._verse[2])
         if text:
             self.verses.setdefault(self._verse, text)
@@ -811,6 +871,14 @@ class _NumberedHarvester(HTMLParser):
             self._buffer.extend(parts)
             self._seen = True
             return
+        # Small numerals straight after a digit or a slash are a typeset
+        # fraction ("10<span>1</span>/<span>2</span> feet"), never a verse
+        # number: a verse number always follows a space or begins the line.
+        before = "".join(self._buffer)[-1:]
+        if before.isdigit() or before == "/":
+            self._buffer.extend([_FRACTION_MARK if before.isdigit() else "", *parts])
+            self._seen = True
+            return
         if self._p_first_digits is None:
             self._p_first_digits = number
         context = self._book is not None and self._chapter is not None
@@ -963,7 +1031,7 @@ class _NumberedHarvester(HTMLParser):
         self._open = None
         self._range_end = None
         self._open_parts = []
-        text = _WHITESPACE.sub(" ", "".join(parts)).strip()
+        text = _clean_text(_WHITESPACE.sub(" ", "".join(parts)).strip())
         if not text:
             self.declined["a verse that carried no text"] += 1
             return

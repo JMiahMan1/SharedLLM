@@ -262,6 +262,27 @@ class LibraryClient:
             )
         return describe(raw, path=wanted, root=base)
 
+    async def tagged_books(self, *, root: str, tag: str = "bible") -> list[dict]:
+        """Every Calibre book carrying ``tag`` (storage's librarian route)."""
+        base = normalise_path(root)
+        if not base or base == "/":
+            raise LibraryUnavailable(f"{LIBRARY_SETTING} is not set, so there is no library to read.")
+        url = f"{self._endpoint()}/calibre/books"
+        timeout = aiohttp.ClientTimeout(total=LIST_TIMEOUT_SECONDS)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                url,
+                json={"library_path": base, "tag": tag, "limit": 500},
+                headers={"X-Internal-Secret": self.internal_secret},
+            ) as response:
+                body = await _json(response, url)
+        except aiohttp.ClientError as exc:
+            raise LibraryUnavailable(f"Could not reach the storage service at {url}: {exc}") from exc
+        books = body.get("books") if isinstance(body, dict) else None
+        if not isinstance(books, list):
+            raise LibraryUnavailable(f"{url} did not return a list of books.")
+        return books
+
     async def fetch(
         self, *, root: str, path: str, destination: Path, provider: str = "nextcloud"
     ) -> Path:

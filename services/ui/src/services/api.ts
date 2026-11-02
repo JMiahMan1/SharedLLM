@@ -181,6 +181,7 @@ import type {
   HealthFastingState,
   FastingTraditions,
   TopicResources,
+  TaggedBible,
   LibraryBook,
   LibraryAudit,
   BookInspection,
@@ -5290,6 +5291,18 @@ export const api = {
    * A POST because the folder is operator input: WebDAV names carry slashes and
    * can carry semicolons, so a query string is the wrong place for one.
    */
+  /** Books tagged "Bible" in the Calibre library, with what each would install as. */
+  async getTaggedBibles(): Promise<{ books: TaggedBible[]; count: number; auto_sync_hours: number }> {
+    const resp = await apiClient.get('/api/bible/admin/library/tagged', { timeout: 120_000 });
+    return resp.data;
+  },
+
+  /** Install (or reinstall) one tagged Bible; `code` names the translation when the title does not. */
+  async installTaggedBible(id: number, code?: string): Promise<BibleImportRun> {
+    const resp = await apiClient.post(`/api/bible/admin/library/tagged/${id}/install`, { code: code ?? '' }, { timeout: 900_000 });
+    return resp.data;
+  },
+
   async getBibleLibrary(path?: string): Promise<BibleLibraryListing> {
     const resp = await apiClient.post('/api/bible/admin/library', { path: path ?? '' });
     return resp.data;

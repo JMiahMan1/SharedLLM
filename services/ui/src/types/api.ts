@@ -2632,6 +2632,22 @@ export interface TelemetryNotification {
 
 // Bible (services/bible)
 
+/** A Calibre book tagged "Bible", as Admin › Bible shows it (bible tagged.py). */
+export interface TaggedBible {
+  id: number;
+  title: string;
+  authors: string[];
+  file: string | null;
+  format: string | null;
+  /** The translation, worked out from the title, or null when it cannot be told. */
+  code: string | null;
+  edition: string | null;
+  edition_name: string | null;
+  state: 'installed' | 'ready' | 'failed' | 'needs attention';
+  reason: string;
+  installed_at: string | null;
+}
+
 export interface BibleVersionInfo {
   code: string;
   name: string;
