@@ -442,7 +442,7 @@ function BibleReaderPane({
       ) : (
         <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
           <section
-            className="rounded-3xl px-4 pb-10 pt-8 sm:px-10 sm:pt-12 shadow-lg"
+            className="rounded-3xl px-4 pb-8 pt-8 shadow-lg sm:px-10 sm:pt-12 md:px-16"
             style={pageStyle(preferences.page)}
             data-testid="bible-page-surface"
             data-page={toneOf(preferences.page)}
@@ -533,32 +533,34 @@ function BibleReaderPane({
                 selectedKey={activeVerse ? `${activeVerse.chapter}:${activeVerse.verse}` : null}
               />
             )}
-            {/* The page turns from round arrows at the foot of the text, as on
-                Bible.com; they stay in reach while reading (above the phone's
-                own navigation bar) and never cover the words at the end. */}
+            {/* Turning the page never covers the words. From a tablet up the
+                round arrows float in the page's own side margin (md:px-16),
+                which the text never enters. On a phone there is no margin to
+                spare, so they sit after the last verse instead; swiping still
+                turns the page from anywhere. */}
             <nav
               aria-label="Chapters"
-              className="pointer-events-none sticky bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-20 -mx-2 mt-8 flex justify-between sm:-mx-4 md:bottom-6"
+              className="mt-10 flex justify-between gap-3 md:pointer-events-none md:sticky md:bottom-6 md:z-20 md:-mx-14 md:mt-8"
             >
-              {/* Small and see-through on a phone, flush with the page edges,
-                  so they never sit on the words. */}
               <button
                 type="button"
                 onClick={() => step(-1)}
                 aria-label="Previous chapter"
                 data-testid="bible-prev-chapter"
-                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[var(--page-rule)] bg-[var(--page-paper)]/80 text-[var(--page-ink)] opacity-80 shadow-md backdrop-blur hover:opacity-100 sm:h-12 sm:w-12 sm:opacity-100"
+                className="pointer-events-auto flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--page-rule)] px-4 text-sm text-[var(--page-ink)] hover:bg-[var(--page-hover)] md:h-12 md:w-12 md:justify-center md:bg-[var(--page-paper)] md:px-0 md:shadow-lg"
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={20} aria-hidden />
+                <span className="md:sr-only">Previous</span>
               </button>
               <button
                 type="button"
                 onClick={() => step(1)}
                 aria-label="Next chapter"
                 data-testid="bible-next-chapter"
-                className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[var(--page-rule)] bg-[var(--page-paper)]/80 text-[var(--page-ink)] opacity-80 shadow-md backdrop-blur hover:opacity-100 sm:h-12 sm:w-12 sm:opacity-100"
+                className="pointer-events-auto flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--page-rule)] px-4 text-sm text-[var(--page-ink)] hover:bg-[var(--page-hover)] md:h-12 md:w-12 md:justify-center md:bg-[var(--page-paper)] md:px-0 md:shadow-lg"
               >
-                <ChevronRight size={20} />
+                <span className="md:sr-only">Next</span>
+                <ChevronRight size={20} aria-hidden />
               </button>
             </nav>
           </section>
