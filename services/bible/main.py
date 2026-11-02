@@ -33,7 +33,7 @@ import aiohttp
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session, SQLModel, create_engine, delete, select
+from sqlmodel import Session, SQLModel, create_engine, delete, func, select
 from starlette.concurrency import run_in_threadpool
 
 from services.bible import achievements as ach
@@ -2889,6 +2889,16 @@ async def admin_install_tagged_bible(book_id: int, payload: TaggedInstall):
         # one is in, the other copy's notes go, so nothing is doubled.
         def drop_other_copies() -> int:
             with Session(_db()) as session:
+                # Only once this copy has filed notes of its own: a copy whose
+                # notes the reader cannot find must not empty the edition.
+                own = session.exec(
+                    select(func.count()).select_from(StudyNote).where(
+                        StudyNote.edition_code == plan.edition,
+                        StudyNote.source == plan.source_label()[: study._SOURCE_MAX],
+                    )
+                ).one()
+                if not own:
+                    return 0
                 result = session.exec(
                     delete(StudyNote).where(
                         StudyNote.edition_code == plan.edition,
