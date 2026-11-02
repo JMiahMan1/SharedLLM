@@ -34,3 +34,18 @@ def test_a_service_restarting_is_a_503_to_retry_not_a_500(monkeypatch):
     assert resp.status_code == 503
     assert resp.headers["Retry-After"] == "5"
     assert not any(level == "ERROR" for level, _ in logged)
+
+
+def test_a_bot_guessing_api_paths_is_not_a_problem_but_the_app_missing_one_is(monkeypatch):
+    logged = []
+
+    async def emit(level, message, context):
+        logged.append((level, message))
+
+    monkeypatch.setattr(main, "emit_log", emit)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/api/v1/foundation-models").status_code == 404
+    assert client.get("/api/old-route", headers={"Authorization": "Bearer k"}).status_code == 404
+    levels = {message.split()[2]: level for level, message in logged if "RESPONSE" in message}
+    assert levels["/api/v1/foundation-models"] == "INFO"
+    assert levels["/api/old-route"] == "WARNING"

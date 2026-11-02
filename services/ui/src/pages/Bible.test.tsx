@@ -349,6 +349,17 @@ describe('Bible page', () => {
     expect(mocked.recordBibleEvent).toHaveBeenCalledWith('chapter_complete', 'John 3');
   });
 
+  it('records nothing for a chapter only flicked past', async () => {
+    const { unmount } = renderPage('/bible?ref=John%203:16');
+
+    await screen.findByTestId('bible-chapter-heading');
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+    expect(mocked.putBibleState).not.toHaveBeenCalledWith(expect.objectContaining({ chapter: 3 }));
+    expect(mocked.recordBibleEvent).not.toHaveBeenCalledWith('chapter_complete', 'John 3');
+    expect(mocked.postActivity).not.toHaveBeenCalled();
+  });
+
   it('lands the chapter on the activity feed so the family profile sees it', async () => {
     renderPage('/bible?ref=John%203:16');
 

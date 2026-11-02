@@ -210,24 +210,31 @@ function BibleReaderPane({
     : position;
   useEffect(() => {
     if (!passage || !shownChapter || shownChapter.whole_book) return;
-    void api.putBibleState({
-      book: shownChapter.book,
-      chapter: shownChapter.chapter_start,
-      verse: position.verse,
-    });
-    void api.recordBibleEvent(
-      'chapter_complete',
-      `${shownChapter.book_name} ${shownChapter.chapter_start}`
-    );
-    // The same chapter lands on the person's activity feed (parents-only), so
-    // the digital profile sees what was actually read.
-    void api
-      .postActivity({
-        feature: 'bible',
-        item: `${shownChapter.book_name} ${shownChapter.chapter_start}`,
-        event: 'read',
-      })
-      .catch(() => undefined);
+    // Only a chapter the reader stays on is recorded. Paging through eighteen
+    // chapters in three seconds once sent four requests per chapter at once,
+    // stalled the Bible service for twenty seconds, and logged every chapter
+    // flicked past as read.
+    const timer = window.setTimeout(() => {
+      void api.putBibleState({
+        book: shownChapter.book,
+        chapter: shownChapter.chapter_start,
+        verse: position.verse,
+      });
+      void api.recordBibleEvent(
+        'chapter_complete',
+        `${shownChapter.book_name} ${shownChapter.chapter_start}`
+      );
+      // The same chapter lands on the person's activity feed (parents-only), so
+      // the digital profile sees what was actually read.
+      void api
+        .postActivity({
+          feature: 'bible',
+          item: `${shownChapter.book_name} ${shownChapter.chapter_start}`,
+          event: 'read',
+        })
+        .catch(() => undefined);
+    }, CHAPTER_DWELL_MS);
+    return () => window.clearTimeout(timer);
     // `position.verse` is intentionally not a dependency: it changes on every
     // verse tap, and the chapter is what this records.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -541,6 +548,9 @@ function BibleReaderPane({
  * parsed result, so a reference the server cannot parse shows that error
  * instead of silently falling back to the previous chapter.
  */
+/** How long a chapter stays on screen before it counts as read (and is saved as the place to resume). */
+const CHAPTER_DWELL_MS = 3000;
+
 export default function Bible() {
   const { trigger } = useHaptics();
   const queryClient = useQueryClient();
