@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { BookPlus, ClipboardCheck, Library, Loader2, Plus, Search, Tag, Wand2, X } from 'lucide-react';
+import { BookPlus, ClipboardCheck, FileCheck, Library, Loader2, Plus, Search, Tag, Upload, Wand2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
 import type { BookInspection, LibraryAuditGroup, LibraryAuditList, LibraryBook } from '../../types/api';
@@ -111,6 +111,7 @@ function AddBook({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [autoFill, setAutoFill] = useState(true);
+  const [dragging, setDragging] = useState(false);
   const [fields, setFields] = useState({
     title: '', authors: '', tags: '', series: '', comments: '', publisher: '', published: '', isbn: '', language: '',
   });
@@ -176,17 +177,45 @@ function AddBook({ onDone }: { onDone: () => void }) {
       className="mt-3 space-y-2 rounded-xl border border-indigo-500/20 bg-indigo-950/10 p-3"
       data-testid="library-add"
     >
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-0 flex-1 text-[11px] text-slate-400">
-          Book file (EPUB is best: Jarvis can read it, and it carries its own details and cover)
-          <input
-            type="file"
-            accept=".epub,.pdf,.mobi,.azw3,.fb2,.txt,.docx,.rtf,.cbz,.djvu"
-            onChange={(event) => choose(event.target.files?.[0] ?? null)}
-            className="mt-1 block w-full text-xs text-slate-300"
-            data-testid="library-add-file"
-          />
-        </label>
+      <label
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          choose(event.dataTransfer.files?.[0] ?? null);
+        }}
+        className={`flex min-h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-5 text-center transition focus-within:outline focus-within:outline-2 focus-within:outline-indigo-400 ${
+          dragging ? 'border-indigo-400 bg-indigo-500/15' : file ? 'border-emerald-400/40 bg-emerald-500/5' : 'border-indigo-400/40 bg-white/[0.02] hover:border-indigo-400/70 hover:bg-indigo-500/10'
+        }`}
+        data-testid="library-dropzone"
+      >
+        {file ? (
+          <>
+            <FileCheck size={22} className="text-emerald-300" aria-hidden />
+            <span className="text-sm font-semibold text-slate-100" data-testid="library-chosen-file">{file.name}</span>
+            <span className="text-[11px] text-slate-400">{(file.size / 1_048_576).toFixed(1)} MB · click to choose a different file</span>
+          </>
+        ) : (
+          <>
+            <Upload size={22} className="text-indigo-300" aria-hidden />
+            <span className="text-sm font-semibold text-slate-100">Choose a book file, or drop it here</span>
+            <span className="text-[11px] text-slate-400">EPUB is best: Jarvis can read it, and it brings its own details and cover. PDF, MOBI, AZW3 and others work too.</span>
+          </>
+        )}
+        <input
+          type="file"
+          accept=".epub,.pdf,.mobi,.azw3,.fb2,.txt,.docx,.rtf,.cbz,.djvu"
+          onChange={(event) => choose(event.target.files?.[0] ?? null)}
+          className="sr-only"
+          aria-label="Book file"
+          data-testid="library-add-file"
+        />
+      </label>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <label className="flex min-h-11 items-center gap-2 text-xs text-slate-300">
           <input type="checkbox" checked={autoFill} onChange={(e) => setAutoFill(e.target.checked)} className="h-4 w-4 accent-indigo-400" />
           Auto-fill and tag
