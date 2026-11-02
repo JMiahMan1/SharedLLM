@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
 import re
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -112,7 +113,11 @@ async def google_books(session: aiohttp.ClientSession, title: str, author: str, 
         q = f"intitle:{title}" + (f"+inauthor:{author}" if author else "")
     else:
         return _blank()
-    data = await _json(session, f"https://www.googleapis.com/books/v1/volumes?maxResults=3&q={quote(q)}")
+    # Without a key Google shares one daily quota among everyone and soon
+    # answers 429; GOOGLE_BOOKS_API_KEY (free) gives the family its own.
+    key = os.getenv("GOOGLE_BOOKS_API_KEY", "").strip()
+    url = f"https://www.googleapis.com/books/v1/volumes?maxResults=3&q={quote(q)}" + (f"&key={quote(key)}" if key else "")
+    data = await _json(session, url)
     items = data.get("items") or []
     if not items:
         return _blank()
@@ -154,7 +159,10 @@ async def open_library(session: aiohttp.ClientSession, title: str, author: str, 
     if doc.get("first_publish_year"):
         out["published"] = str(doc["first_publish_year"])
     out["isbn"] = next((clean_isbn(i) for i in doc.get("isbn") or [] if clean_isbn(i)), "")
-    out["language"] = (doc.get("language") or [""])[0]
+    # A work lists the language of every translation; English when it is one,
+    # otherwise only an unambiguous single language.
+    languages = list(doc.get("language") or [])
+    out["language"] = "eng" if "eng" in languages else (languages[0] if len(languages) == 1 else "")
     if doc.get("cover_i"):
         out["cover_url"] = f"https://covers.openlibrary.org/b/id/{doc['cover_i']}-L.jpg"
     if doc.get("key"):
