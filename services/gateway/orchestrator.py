@@ -865,7 +865,7 @@ async def _fetch_rag_context(
 
     # Proactively inject weather context for weather-related queries
     weather_keywords = ["weather", "forecast", "rain", "snow", "temperature", "outside", "humid", "wind", "storm", "sunny", "cloudy", "cold", "hot", "warm"]
-    if any(kw in q for kw in weather_keywords) and creds:
+    if any(kw in q for kw in weather_keywords):
         weather_ctx = await _fetch_weather_context(creds)
         if weather_ctx:
             rag_context += f"\n[WEATHER]\n{weather_ctx}\n"
@@ -953,8 +953,36 @@ async def _fetch_weather_entities(creds: ResolvedCredentials) -> list[dict]:
         return []
 
 
+async def _open_meteo_context() -> dict:
+    """The household forecast from execution's Open-Meteo cache (docs/WEATHER.md).
+
+    ``{"text", "summary"}``; both empty when execution has no forecast, so the
+    callers fall back to Home Assistant's weather entities.
+    """
+    settings = await get_all_settings()
+    exec_svc = _get(settings, "execution_svc_url")
+    try:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{exec_svc}/weather/context",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status != 200:
+                return {"text": "", "summary": ""}
+            data = await resp.json()
+            return data if isinstance(data, dict) else {"text": "", "summary": ""}
+    except Exception as e:
+        log.warning(f"Open-Meteo weather context unavailable: {type(e).__name__}: {e}")
+        return {"text": "", "summary": ""}
+
+
 async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
-    """Dynamically discover weather entities from HA and return live forecast data."""
+    """The Open-Meteo forecast, else live forecast data from HA's weather entities."""
+    text = (await _open_meteo_context()).get("text") or ""
+    if text:
+        return text
     weather_entities = await _fetch_weather_entities(creds)
     if not weather_entities:
         return ""
@@ -999,8 +1027,12 @@ async def watch_weather_answer(creds: ResolvedCredentials) -> str:
     """A one-line weather answer for the watch, without the LLM.
 
     The assistant path took 35-73 s and could exceed the model's context; the
-    watch's HTTP timeout is shorter than that. HA already has the live state.
+    watch's HTTP timeout is shorter than that. The Open-Meteo summary comes
+    first; HA's weather entity is the fallback.
     """
+    summary = (await _open_meteo_context()).get("summary") or ""
+    if summary:
+        return summary
     weather_entities = await _fetch_weather_entities(creds)
     if not weather_entities:
         return "I couldn't read the weather right now."

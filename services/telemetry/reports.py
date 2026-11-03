@@ -98,6 +98,22 @@ async def collect_power_stats(session: aiohttp.ClientSession, period: str) -> di
     }
 
 
+async def collect_weather_stats(period: str) -> dict[str, Any] | None:
+    """The window's weather and what it did to every tracked metric (docs/WEATHER.md).
+
+    Optional: None when execution or Open-Meteo is away, and the report is
+    written without it.
+    """
+    from services.common import weather_client
+
+    rep = await weather_client.correlations(days=PERIOD_DAYS.get(period, 7) + 1)
+    if not rep or not rep.get("days"):
+        return None
+    days = [{"date": d["date"], **{k: d["weather"][k] for k in ("mean", "min", "max", "precip", "hdd", "cdd")}}
+            for d in rep["days"]]
+    return {"units": rep.get("units"), "days": days, "insights": rep.get("insights", [])}
+
+
 def build_prompt(
     report_type: str, period: str, stats: dict[str, Any], start: datetime, end: datetime
 ) -> str:
@@ -106,12 +122,14 @@ def build_prompt(
     if report_type == "power":
         focus = (
             "Focus on energy use: totals, peak periods, standby/always-on waste, "
-            "and the single highest-impact change to make next."
+            "and the single highest-impact change to make next. Where weather is given, "
+            "say how much of the use the heat or cold explains."
         )
     else:
         focus = (
             "Focus on activity: step consistency, workout mix, goal progress, "
-            "and one concrete, achievable suggestion. Do not give medical advice."
+            "and one concrete, achievable suggestion. Do not give medical advice. "
+            "Where weather is given, note any rainy or very hot or cold days that explain a dip."
         )
     return (
         f"Write a {period} {report_type} report for the {label} (window {window}).\n"
@@ -157,6 +175,10 @@ async def generate_report(
         stats = await collect_power_stats(session, period)
     else:
         stats = await collect_health_stats(session, user, period, tz)
+    if stats:
+        weather = await collect_weather_stats(period)
+        if weather:
+            stats = {**stats, "weather": weather}
     if not stats or (report_type == "health" and not stats.get("days_with_data")):
         return {
             "id": new_id(),

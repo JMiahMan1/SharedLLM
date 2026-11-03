@@ -64,6 +64,12 @@ allow sound after a tap, so audio is unlocked by the first tap on the page and
 again when a timer is set. A speaker picked in the widget still gets the
 spoken alert, and the phone still gets its notice.
 
+Weather (`components/widgets/WeatherWidget.tsx`) is the household's Open-Meteo
+forecast with the person's own weather heads-up, the next 12 hours and, when
+wide or tall, the week; tall adds weather against energy use for admins. The
+Climate widget shows the outdoor temperature from the same query. See
+`docs/WEATHER.md`.
+
 Health today (`components/widgets/HealthTodayWidget.tsx`) is the Health hub's today card:
 readiness, last night, water, food, active minutes and tonight's planned dinner, following the
 person's own card switches and kid mode. Steps stay on the Health widget, the only dashboard
@@ -119,7 +125,7 @@ widget can be added back from the dashboard's widget list, so this only sets
 the starting board:
 
 - **Child**: chores progress, upcoming events, active media, quick notes,
-  verse of the day and device control for the devices they are assigned.
+  verse of the day, weather and device control for the devices they are assigned.
 - **Teen**: the child set plus climate control.
 - **Mother, adult child, other adults**: everything except Workspaces and the
   assistant (the assistant has its own enabled flag), so a teen or adult can

@@ -18,6 +18,8 @@ import {
 import { useWidgetStore } from '../../stores/widgetStore';
 import { useHaptics } from '../../hooks/useHaptics';
 import { WidgetCard } from './WidgetCard';
+import { useHouseholdWeather } from '../../hooks/useWeather';
+import { round as roundTemp } from '../../lib/weather';
 
 /**
  * Climate: a Nest-style thermostat widget for one or many Home Assistant
@@ -153,6 +155,21 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     refetchInterval: POLL_MS,
     refetchOnWindowFocus: true,
   });
+
+  // The outdoor reading next to the thermostats: always the home forecast
+  // (not a person's own place elsewhere), shared with the Weather widget's
+  // query when they are the same, and nothing at all when there is no forecast.
+  const { data: weather } = useHouseholdWeather();
+  const outdoorTemp = weather?.current?.temp;
+  const outdoor = typeof outdoorTemp === 'number' ? (
+    <span
+      className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-300"
+      title={`Outside: ${weather?.current.label ?? ''}`}
+      data-testid="climate-outdoor"
+    >
+      Out {roundTemp(outdoorTemp)}°
+    </span>
+  ) : null;
 
   /**
    * Paint a control change into the cached entity before Home Assistant has
@@ -730,7 +747,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
         onRetry={() => void refetch()}
         settingsButton={settingsButton}
         accentColor={focusAttrs ? actionTone(focusAttrs.hvac_action, focusAttrs.hvac_mode).stroke : undefined}
-        actions={devices.length > 1 ? configureButton : undefined}
+        actions={(outdoor || devices.length > 1) ? <>{outdoor}{devices.length > 1 ? configureButton : null}</> : undefined}
       >
         {body()}
       </WidgetCard>

@@ -12,6 +12,37 @@ from services.execution.schemas import ExecutionResult, UserContext
 
 log = logging.getLogger("execution/telemetry")
 
+_NO_READING = (None, "unavailable", "unknown")
+
+
+def power_watts(state: dict | None, power_attr: str | None = None) -> float | None:
+    """Watts a Home Assistant state reports, or None.
+
+    The enrolment's ``power_attribute`` wins, then the state itself (a power
+    sensor), then ``current_power_w`` (smart plugs). Shared by the telemetry
+    ingestion loop and the weather energy rollup so both read power alike.
+    """
+    if not state:
+        return None
+    raw = state.get("state")
+    attrs = state.get("attributes") or {}
+    if power_attr and attrs.get(power_attr) is not None:
+        try:
+            return float(attrs.get(power_attr))
+        except (TypeError, ValueError):
+            pass
+    if raw not in _NO_READING:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    if "current_power_w" in attrs:
+        try:
+            return float(attrs.get("current_power_w"))
+        except (TypeError, ValueError):
+            pass
+    return None
+
 
 async def _call_identity(method: str, path: str, json_data: dict | None = None) -> dict:
     from services.common.http import get_client

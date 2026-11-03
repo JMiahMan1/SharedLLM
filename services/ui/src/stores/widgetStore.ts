@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap } from 'lucide-react';
+import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap, CloudSun } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -66,6 +66,9 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // The member's own suggestions (music, video, podcasts, books), shown to
   // everyone by default; the activity behind them stays parents-only.
   { key: 'recommendations', label: 'For You', icon: Sparkles, minSize: 'small', defaultSize: 'medium' },
+  // Open-Meteo forecast, the person's own weather reminders and, for admins,
+  // weather against the household's energy use (docs/WEATHER.md).
+  { key: 'weather', label: 'Weather', icon: CloudSun, minSize: 'small', defaultSize: 'medium' },
 ];
 
 /**

@@ -68,6 +68,7 @@ from services.execution.handlers import gh as gh_handler
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.handlers import volumes as volume_handler
+from services.execution.handlers.telemetry import power_watts
 from services.execution.media_links import media_file_url
 from services.execution.media_playback_service import LOCAL_PLAYER_ALIASES, MediaPlaybackService
 from services.execution.schemas import (
@@ -264,6 +265,19 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
 
             enrollments = enroll_data.get("enrollments", [])
             power_enrollments = [e for e in enrollments if e.get("power_tracking")]
+            # Outdoor conditions ride along on every snapshot (docs/WEATHER.md);
+            # the weather loop keeps the cache warm, so this is a Redis read.
+            outdoor: dict[str, Any] = {}
+            if power_enrollments:
+                try:
+                    from services.execution.weather import STALE_KEEP_S, home_forecast
+
+                    fc = await home_forecast(max_age_s=STALE_KEEP_S)
+                    cur = (fc or {}).get("current") or {}
+                    if cur.get("temp") is not None:
+                        outdoor = {"outdoor_temp": cur["temp"], "weather": cur.get("icon")}
+                except Exception as ex:
+                    log.debug(f"[telemetry] no outdoor reading: {ex}")
 
             for e in power_enrollments:
                 entity_id = e.get("entity_id")
@@ -275,29 +289,15 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                     if not state:
                         continue
                     raw = state.get("state")
-                    attrs = state.get("attributes", {})
                     is_available = raw not in (None, "unavailable", "unknown", "none", "")
-                    power_w = None
-
-                    if power_attr:
-                        attr_value = attrs.get(power_attr)
-                        if attr_value is not None:
-                            with suppress(TypeError, ValueError):
-                                power_w = float(attr_value)
-
-                    if power_w is None:
-                        if raw not in (None, "unavailable", "unknown"):
-                            with suppress(TypeError, ValueError):
-                                power_w = float(raw)
-                        if power_w is None and "current_power_w" in attrs:
-                            with suppress(TypeError, ValueError):
-                                power_w = float(attrs.get("current_power_w"))
+                    power_w = power_watts(state, power_attr)
                     snapshot = {
                         "entity_id": entity_id,
                         "power_w": power_w,
                         "is_available": is_available,
                         "state": raw,
                         "source": "ha-poll",
+                        **outdoor,
                     }
                     # Best-effort: when a tracked device goes unavailable, push a
                     # semantic telemetry alert into RAG for recall (Section 6).
@@ -453,6 +453,9 @@ async def lifespan(app: FastAPI):
     from services.execution.calendar_reminders import calendar_reminder_loop
     from services.execution.home_alerts import home_alert_loop
     reminder_tasks = [asyncio.create_task(calendar_reminder_loop()), asyncio.create_task(home_alert_loop())]
+    # Open-Meteo forecast: weather reminders and the weather-vs-energy rollup
+    from services.execution.weather import weather_loop
+    reminder_tasks.append(asyncio.create_task(weather_loop()))
     # Home Assistant's speech-to-text, passed through, recognising who speaks
     from services.execution.wyoming_stt import serve as serve_voice_stt
     voice_stt_task = asyncio.create_task(serve_voice_stt())
@@ -555,6 +558,10 @@ app = FastAPI(
 )
 
 app.include_router(info_router)
+
+from services.execution.weather import router as weather_router  # noqa: E402
+
+app.include_router(weather_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

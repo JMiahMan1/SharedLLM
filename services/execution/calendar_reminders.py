@@ -8,6 +8,9 @@ reminders off). An all-day event has no start worth counting down to, so it
 gets one morning notice at 8:00 on each of its days instead. Clock times are
 the person's ``timezone`` calendar setting, else the household's. Telemetry's
 ``once`` key keeps each event to one reminder across rounds and restarts.
+When the forecast expects rain, storms or snow at the event's start, the
+reminder says so ("Rain likely (70%), 54°F."). The forecast is the person's
+own place from Settings > Weather, else the household's.
 """
 from __future__ import annotations
 
@@ -75,8 +78,14 @@ def _key(event: dict) -> str:
     return str(event.get("id") or event.get("summary") or "event")
 
 
-def due(events: list[dict], now: datetime, lead_min: int) -> list[dict]:
-    """The notices due at ``now`` (aware, in the person's zone)."""
+def due(events: list[dict], now: datetime, lead_min: int, forecast: dict | None = None) -> list[dict]:
+    """The notices due at ``now`` (aware, in the person's zone).
+
+    ``forecast`` (the person's forecast, optional) adds a weather note to a timed
+    event's reminder when rain, storms or snow are likely at its start.
+    """
+    from services.common.weather import event_note
+
     out = []
     morning = now.replace(hour=MORNING.hour, minute=MORNING.minute, second=0, microsecond=0)
     for ev in events:
@@ -106,13 +115,50 @@ def due(events: list[dict], now: datetime, lead_min: int) -> list[dict]:
         if lead_min and 0 < left <= lead_min * 60:
             mins = max(1, round(left / 60))
             soon = f"In {mins} min" if mins < 60 else f"In {mins // 60} h {mins % 60:02d} min"
+            weather = event_note(forecast, start.timestamp()) if forecast else ""
             out.append({
                 **base,
                 "title": f"{title} at {_clock(start.timestamp(), now.tzinfo)}"[:120],
-                "body": f"{soon}{f' at {where}' if where else ''}.",
+                "body": f"{soon}{f' at {where}' if where else ''}.{f' {weather}' if weather else ''}",
                 "once": f"calendar:{_key(ev)}:{ev['start_time']}"[:200],
             })
     return out
+
+
+class _Forecasts:
+    """Forecasts for one round, looked up only when a reminder is due.
+
+    The household's once per round at most, each person's when one of their
+    events is due; never raises (no forecast just leaves the note out).
+    """
+
+    def __init__(self) -> None:
+        self._home: dict | None = None
+        self._home_read = False
+
+    async def home(self) -> dict | None:
+        if not self._home_read:
+            self._home_read = True
+            try:
+                from services.execution.weather import STALE_KEEP_S, home_forecast
+
+                # Cached by the weather loop.
+                self._home = await home_forecast(max_age_s=STALE_KEEP_S)
+            except Exception as e:
+                log.info(f"[calendar_reminders] no forecast for weather notes: {type(e).__name__}: {e}")
+        return self._home
+
+    async def for_user(self, user: str) -> dict | None:
+        """``user``'s own forecast (Settings > Weather), else the household's."""
+        try:
+            from services.execution.weather import STALE_KEEP_S, own_forecast
+
+            fc, _ = await own_forecast(user, max_age_s=STALE_KEEP_S)
+            if fc:
+                return fc
+        except Exception as e:
+            log.info(f"[calendar_reminders] no own forecast for {user}: {type(e).__name__}: {e}")
+        return await self.home()
 
 
 async def remind_once(now_utc: datetime | None = None) -> int:
@@ -122,6 +168,7 @@ async def remind_once(now_utc: datetime | None = None) -> int:
 
     now_utc = now_utc or datetime.now(pytz.utc)
     sent = 0
+    forecasts = _Forecasts()
     for user in await notify.family():
         creds = await resolve_internal_user(rag_user=user)
         if not creds:
@@ -136,7 +183,10 @@ async def remind_once(now_utc: datetime | None = None) -> int:
         except Exception as e:
             log.info(f"[calendar_reminders] no calendar for {user}: {e}")
             continue
-        for note in due(events, now, lead):
+        notes = due(events, now, lead)
+        if notes:  # only then is the weather worth looking up
+            notes = due(events, now, lead, await forecasts.for_user(user))
+        for note in notes:
             if await notify.send({"user": user, **note}):
                 sent += 1
                 log.info(f"[calendar_reminders] {user}: {note['title']}")

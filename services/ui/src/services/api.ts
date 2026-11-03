@@ -1,5 +1,8 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
+import type {
+  MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
+} from '../lib/weather';
 import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
@@ -482,6 +485,16 @@ export function resolveUserId(userId?: string): string | undefined {
 function withUserParam(target: URLSearchParams, userId?: string): void {
   const resolved = resolveUserId(userId);
   if (resolved) target.set('user_id', resolved);
+}
+
+/** Settings > Weather as the identity service reports it (docs/WEATHER.md). */
+function myWeather(data: Partial<MyWeatherPrefs> | undefined): MyWeatherPrefs {
+  return {
+    location: data?.location ?? null,
+    units: data?.units ?? null,
+    follow: data?.follow === true,
+    live: data?.live === true,
+  };
 }
 
 export const apiClient = axios.create({
@@ -4778,6 +4791,48 @@ export const api = {
   // their position or be silently ignored -- neither is worth the API surface.
   // The one cross-user read, `getBibleActivitySummary`, is consent-gated
   // server-side and exists so the family view can ask.
+  /** The household forecast and the caller's own weather heads-up (docs/WEATHER.md). */
+  /** The caller's forecast (their own place, else home); `household` is always home. */
+  async getWeather(household = false): Promise<WeatherResponse> {
+    const resp = await apiClient.get('/api/weather', household ? { params: { household: true } } : undefined);
+    return resp.data;
+  },
+
+  /** Admins: daily weather against energy use, the kWh-per-degree-day fit and the week's projection. */
+  async getWeatherEnergy(days = 30): Promise<WeatherEnergyReport> {
+    const resp = await apiClient.get('/api/weather/energy', { params: { days } });
+    return resp.data;
+  },
+
+  /** The caller's own weather place and units (null = the household default the admin set). */
+  async getMyWeather(): Promise<MyWeatherPrefs> {
+    const resp = await apiClient.get('/api/users/me/weather');
+    return myWeather(resp.data);
+  },
+
+  async setMyWeather(prefs: Partial<Omit<MyWeatherPrefs, 'live'>>): Promise<MyWeatherPrefs> {
+    const resp = await apiClient.put('/api/users/me/weather', prefs);
+    return myWeather(resp.data);
+  },
+
+  /** Admins: every tracked metric against the weather (fits, rainy vs dry days, insights). */
+  async getWeatherCorrelations(days = 60): Promise<WeatherCorrelations> {
+    const resp = await apiClient.get('/api/weather/correlations', { params: { days } });
+    return resp.data;
+  },
+
+  /** Admins: what a hook, action or sensor metric may name (events, services, modes, metrics). */
+  async getWeatherIntegrations(): Promise<WeatherIntegrations> {
+    const resp = await apiClient.get('/api/weather/integrations');
+    return resp.data;
+  },
+
+  /** Admins: send one weather reminder rule to yourself now. */
+  async testWeatherReminder(rule: WeatherReminder): Promise<{ sent: boolean; would_trigger: boolean; body: string }> {
+    const resp = await apiClient.post('/api/weather/reminders/test', { rule });
+    return resp.data;
+  },
+
   async getBibleDaily(work?: string): Promise<BibleDailyResponse> {
     const resp = await apiClient.get('/api/bible/daily', { params: work ? { work } : undefined });
     return resp.data;

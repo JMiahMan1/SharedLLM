@@ -13,7 +13,8 @@ export type WidgetKey =
   | 'climate'
   | 'presence'
   | 'bible_daily'
-  | 'recommendations';
+  | 'recommendations'
+  | 'weather';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';

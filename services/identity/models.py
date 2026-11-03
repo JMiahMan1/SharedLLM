@@ -273,6 +273,20 @@ class UserThemeSetting(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserWeatherSetting(SQLModel, table=True):  # type: ignore
+    """Per-user weather preference (docs/WEATHER.md).
+
+    A new table rather than a column, so it is created by ``create_all`` on
+    start with no migration. data JSON keys:
+      - location: {name, latitude, longitude}; absent = the household default
+      - units: "imperial" or "metric"; absent = the household's
+      - follow: true = where their phone is (falls back to location, then home)
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
+
 class UserCredentialShare(SQLModel, table=True):  # type: ignore
     """Per-user permission to use the system default user's credentials.
 
@@ -567,6 +581,14 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- HOME ALERTS (category "home", docs/INTEGRATIONS.md) ---
     {"key": "home_alert_entities", "value": "[]", "description": "Home Assistant entities that send home notices (JSON list of {entity_id, event, people, minutes, watts}). event is doorbell, motion_away, garage_open, door_unlocked_night, appliance_done or water_leak; people empty = everyone. Edit in Admin > Users & Devices > Home alerts."},
+
+    # --- WEATHER (Open-Meteo; category "weather", docs/WEATHER.md) ---
+    {"key": "weather_reminders", "value": "[]", "description": "Weather reminders (JSON list of {id, kind, title, note, people, hours, threshold, location}). kind is rain, snow, freeze, heat or wind; people empty = everyone; location empty = home. Edit in Admin > Users & Devices > Weather reminders."},
+    {"key": "weather_location", "value": "", "description": "Where the household forecast is for, as JSON {name, latitude, longitude}; empty uses Home Assistant's zone.home"},
+    {"key": "weather_units", "value": "imperial", "description": "Weather units: imperial (°F, mph, inches) or metric (°C, km/h, mm). Reminder thresholds are in these units."},
+    {"key": "weather_metrics", "value": "[]", "description": "Home Assistant sensors tracked against the weather (JSON list of {name, label, entity_id, mode, unit}); mode is power, counter, mean or on_time. Edit in Admin > Users & Devices > Weather integrations."},
+    {"key": "weather_hooks", "value": "[]", "description": "Weather events sent to other services (JSON list of {id, events, service, path, filter}); events: forecast.updated, condition.changed, alert.started, day.completed; service is any configured *_SVC_URL name. Edit in Admin > Weather integrations."},
+    {"key": "weather_api_url", "value": "", "description": "Open-Meteo server for forecasts; empty uses the public https://api.open-meteo.com (set a self-hosted Open-Meteo here)"},
 
     # --- LOCAL TTS HARDWARE ---
     {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
