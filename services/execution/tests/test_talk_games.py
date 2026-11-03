@@ -507,10 +507,24 @@ async def test_typing_stop_the_game_ends_it_instead_of_counting_as_a_guess(talk,
     assert talk.posted == [{"message": "end the game"}]
 
 
-def test_stopping_when_no_game_is_running_says_so(talk, monkeypatch):
+def test_stopping_a_game_the_server_forgot_closes_it_in_the_room(talk, monkeypatch):
+    """A restart forgets in-memory games while the room still shows one running.
+
+    The Stop button must still work: it posts the Game over line, which is what
+    every client reads to drop its "Game in progress" bar.
+    """
     monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    asyncio.run(talk.handle_talk(_request(game_command="start", game_kind="trivia")))
+    games.registry.reset()  # what a restart of the execution service does
+    talk.posted.clear()
+
     result = asyncio.run(talk.handle_talk(_request(game_command="stop")))
-    assert result.status == "FAILURE" and "No game" in result.message
+
+    assert result.status == "SUCCESS"
+    assert talk.posted and "Game over" in talk.posted[-1]["message"]
+    assert games.registry.get("room-1") is None
 
 
 def test_stop_phrases():
