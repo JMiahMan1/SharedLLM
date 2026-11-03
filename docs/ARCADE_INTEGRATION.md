@@ -107,14 +107,14 @@ collection made for phones, shown first on Family → Games
   pause when hidden, the score bridge, ...). A failing benchmark game stays in
   the ordinary arcade; the gateway also drops any card not marked
   `mobile_compatible`.
-- **Who sees what.** New games start in **testing**. Players see a game only
-  when an admin has **published** it *and* the family rates it at least
-  `FAMILY_GAMES_MIN_RATING` (default 4.0) from `FAMILY_GAMES_MIN_VOTES`
-  (default 2) votes, best rated first. Each member's latest vote is the one
-  that counts. Admins get a **Test & publish** panel: every game with its state
-  and why it is not on the shelf ("In testing", "Needs 1 more family vote",
-  "Rated 3.2★, below the 4★ bar"), Test play, votes, and Publish / Unpublish /
-  Back to testing.
+- **Who sees what.** New games start in **testing**. Players see a game as soon
+  as an admin **publishes** it; the family's votes only order the shelf (best
+  rated first), since nobody can vote on a game they cannot play. Admins get a
+  **Test & publish** panel: every game with its state ("In testing",
+  "Unpublished"), Test play, votes, and Publish / Unpublish / Back to testing.
+- **Benchmark shelf.** `GET /api/arcade/games` shows only benchmark games that
+  are also published to the family, so an untested benchmark result never
+  reaches the family.
 - **Routes.** `GET /api/arcade/family` (shelf; admins also get `review` and
   `unpublished`), `PUT /api/arcade/family/{slug}/state` (admin; forwards
   `ARCADE_ADMIN_TOKEN` to the arcade, 503 naming the variable when unset).

@@ -53,8 +53,6 @@ const base: FamilyGamesResponse = {
   arcade_available: true,
   play_base: 'https://games.sumemail.com',
   is_admin: false,
-  min_rating: 4,
-  min_votes: 2,
   games: [card('family-cloud-hop')],
   review: [],
   unpublished: [],

@@ -49,8 +49,6 @@ ARCADE_ADMIN_TOKEN = os.getenv("ARCADE_ADMIN_TOKEN", "")
 # The bar a published Family Game must clear before family members see it:
 # at least this many family votes with at least this average. Admins always
 # see every game, with the reason one is not on the shelf.
-FAMILY_GAMES_MIN_RATING = float(os.getenv("FAMILY_GAMES_MIN_RATING", "4.0"))
-FAMILY_GAMES_MIN_VOTES = int(os.getenv("FAMILY_GAMES_MIN_VOTES", "2"))
 
 # alpaca audio server (TTS + music generation). No default on purpose: an unset
 # value fails with a clear message instead of probing a guessed host.
