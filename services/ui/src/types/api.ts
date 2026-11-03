@@ -835,6 +835,43 @@ export interface ArcadeScoreboardResponse {
 
 export type ArcadeSort = 'benchmark' | 'family' | 'plays' | 'title';
 
+/** Which arcade board: the benchmark shelf or the Family Games collection. */
+export type ArcadeCollection = 'arcade' | 'family';
+
+export type FamilyGameState = 'testing' | 'published' | 'unpublished';
+
+export interface FamilyGameCard extends Omit<ArcadeGameCard, 'top_score'> {
+  collection: 'family';
+  family_state: FamilyGameState;
+  source: 'built-in' | 'benchmark';
+  tagline?: string;
+  description?: string;
+  emoji?: string;
+  art?: { from?: string; to?: string } | null;
+  genre?: string;
+  ages?: string;
+  how_to?: string[];
+  model?: string;
+  top_score?: { initials: string; score: number } | null;
+  /** Gateway verdict: on the family shelf, and if not, why not. */
+  on_shelf: boolean;
+  shelf_reason: string;
+}
+
+export interface FamilyGamesResponse {
+  success: boolean;
+  arcade_available: boolean;
+  error?: string;
+  play_base: string;
+  is_admin: boolean;
+  min_rating: number;
+  min_votes: number;
+  admin_token_configured?: boolean;
+  games: FamilyGameCard[];
+  review: FamilyGameCard[];
+  unpublished: FamilyGameCard[];
+}
+
 export interface ArcadeGamesResponse {
   success: boolean;
   arcade_available: boolean;

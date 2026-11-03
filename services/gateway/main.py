@@ -66,10 +66,13 @@ from services.gateway.config import (
     ALPACA_ARCADE_PUBLIC_URL,
     ALPACA_ARCADE_URL,
     ALPACA_AUDIO_URL,
+    ARCADE_ADMIN_TOKEN,
     BIBLE_SVC,
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
+    FAMILY_GAMES_MIN_RATING,
+    FAMILY_GAMES_MIN_VOTES,
     GEO_SVC,
     HEALTH_SVC,
     IDENTITY_SVC,
@@ -4550,6 +4553,140 @@ async def _fetch_arcade_games(sort: str | None = None) -> list:
     return games
 
 
+def _arcade_collection(request: Request) -> str:
+    """Which arcade board a request is about: the benchmark shelf or Family Games."""
+    value = (request.query_params.get("collection") or "").strip().lower()
+    return "family" if value == "family" else "arcade"
+
+
+def _family_game_verdict(game: dict) -> dict:
+    """Whether a Family Game is on the family shelf, and if not, why.
+
+    Family members only see games an admin approved (published) that the
+    family also rates highly: at least FAMILY_GAMES_MIN_VOTES votes averaging
+    FAMILY_GAMES_MIN_RATING or more. Admins see the verdict on every card.
+    """
+    rating = game.get("rating") or {}
+    votes = int(rating.get("count") or 0)
+    average = float(rating.get("average") or 0.0)
+    state = game.get("family_state") or "testing"
+    rated_high = votes >= FAMILY_GAMES_MIN_VOTES and average >= FAMILY_GAMES_MIN_RATING
+    if state != "published":
+        reason = "Unpublished" if state == "unpublished" else "In testing"
+    elif votes < FAMILY_GAMES_MIN_VOTES:
+        need = FAMILY_GAMES_MIN_VOTES - votes
+        reason = f"Needs {need} more family vote{'s' if need != 1 else ''}"
+    elif not rated_high:
+        reason = f"Rated {average:.1f}★, below the {FAMILY_GAMES_MIN_RATING:g}★ bar"
+    else:
+        reason = ""
+    return {"on_shelf": state == "published" and rated_high, "shelf_reason": reason}
+
+
+def _family_sort_key(game: dict) -> tuple:
+    rating = game.get("rating") or {}
+    return (
+        -float(rating.get("average") or 0.0),
+        -int(rating.get("count") or 0),
+        -int(game.get("plays") or 0),
+        (game.get("title") or game.get("slug") or "").lower(),
+    )
+
+
+@app.get("/api/arcade/family")
+async def proxy_family_games(request: Request):
+    """The Family Games shelf for the signed-in member.
+
+    Players get only approved, highly rated games, best rated first. Admins
+    also get the review queue (games in testing, and published games still
+    short of the rating bar) and the unpublished games, so they can test,
+    vote and publish from the app. Always 200 with ``arcade_available``.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    is_admin = bool(ident.get("is_admin"))
+    base = {
+        "play_base": ALPACA_ARCADE_PUBLIC_URL,
+        "is_admin": is_admin,
+        "min_rating": FAMILY_GAMES_MIN_RATING,
+        "min_votes": FAMILY_GAMES_MIN_VOTES,
+    }
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{ALPACA_ARCADE_URL}/api/family/games",
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            data = await _safe_json(resp)
+        if resp.status >= 400 or not isinstance(data, dict) or not isinstance(data.get("games"), list):
+            raise ValueError(f"arcade responded {resp.status}")
+    except Exception as exc:  # report the failure, never swallow it
+        log.warning("arcade: family games fetch failed: %s", exc)
+        return {
+            "success": False,
+            "arcade_available": False,
+            "error": f"Arcade unreachable: {exc}",
+            **base,
+            "games": [],
+            "review": [],
+            "unpublished": [],
+        }
+    # Family Games are mobile games only; the arcade enforces it, and a card
+    # that does not say it is mobile compatible is never shown here either.
+    games = [
+        {**g, **_family_game_verdict(g)}
+        for g in data["games"]
+        if isinstance(g, dict) and g.get("slug") and g.get("mobile_compatible") is True
+    ]
+    shelf = sorted((g for g in games if g["on_shelf"]), key=_family_sort_key)
+    payload = {"success": True, "arcade_available": True, **base, "games": shelf}
+    if is_admin:
+        payload["review"] = sorted(
+            (g for g in games if not g["on_shelf"] and g.get("family_state") != "unpublished"),
+            key=_family_sort_key,
+        )
+        payload["unpublished"] = sorted(
+            (g for g in games if g.get("family_state") == "unpublished"), key=_family_sort_key
+        )
+        payload["admin_token_configured"] = bool(ARCADE_ADMIN_TOKEN)
+    else:
+        payload["review"] = []
+        payload["unpublished"] = []
+    return payload
+
+
+FAMILY_GAME_STATES = {"testing", "published", "unpublished"}
+
+
+@app.put("/api/arcade/family/{slug}/state")
+async def proxy_family_game_state(slug: str, request: Request):
+    """Admin: publish, unpublish or send a Family Game back to testing."""
+    admin = await _require_admin(request)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", slug):
+        raise HTTPException(status_code=422, detail="Invalid game slug")
+    body = await request.json()
+    state = body.get("state") if isinstance(body, dict) else None
+    if state not in FAMILY_GAME_STATES:
+        raise HTTPException(status_code=422, detail="state must be testing, published or unpublished")
+    if not ARCADE_ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="ARCADE_ADMIN_TOKEN is not set on the gateway; set it to the arcade's token to publish games",
+        )
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{ALPACA_ARCADE_URL}/api/admin/family/{slug}/state",
+                json={"state": state, "by": admin},
+                headers={"X-Arcade-Token": ARCADE_ADMIN_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+
+
 def _arcade_initials(username: str) -> str:
     """The arcade callsign for a signed-in family member."""
     return re.sub(r"[^A-Za-z0-9]", "", username or "")[:3].upper() or "YOU"
@@ -4566,6 +4703,7 @@ async def proxy_arcade_scoreboard(request: Request):
     """
     creds = await _require_identity_from_request(request)
     me = str((creds or {}).get("user") or "")
+    collection = _arcade_collection(request)
     headers = {}
     auth = request.headers.get("Authorization")
     if auth:
@@ -4600,7 +4738,7 @@ async def proxy_arcade_scoreboard(request: Request):
                 try:
                     resp = await client.get(
                         f"{ALPACA_ARCADE_URL}/api/players/{initials}",
-                        params={"player_id": username},
+                        params={"player_id": username, "collection": collection},
                         timeout=aiohttp.ClientTimeout(total=8.0),
                     )
                     if resp.status == 200:
@@ -4678,6 +4816,7 @@ async def proxy_arcade_highscores(request: Request):
         async with shared_http_client() as client:
             resp = await client.get(
                 f"{ALPACA_ARCADE_URL}/api/highscores",
+                params={"collection": _arcade_collection(request)},
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             if resp.status != 200:

@@ -3,6 +3,7 @@ import { Brain, Brush, ChevronRight, Crown, Gamepad2, Megaphone, MessageCircle, 
 import ChatPanel from '../components/chat/ChatPanel';
 import AnnouncementsPanel from '../components/family/AnnouncementsPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
+import FamilyGames from '../components/family/FamilyGames';
 import FamilyCalls from '../components/family/FamilyCalls';
 import DrawCanvas from '../components/family/DrawCanvas';
 import MakeMusic from '../components/family/MakeMusic';
@@ -101,7 +102,8 @@ export default function Family() {
       )}
 
       {tab === 'games' && (
-        <div className="space-y-4" data-testid="family-games">
+        <div className="space-y-4" data-testid="family-games-tab">
+          <FamilyGames />
           <ArcadeGames />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {BIBLE_GAMES.map(({ icon: Icon, name, detail, to }) => (

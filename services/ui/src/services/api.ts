@@ -54,6 +54,9 @@ import type {
   ArcadeScoreboardResponse,
   ArcadeSort,
   ArcadeHighscoresResponse,
+  ArcadeCollection,
+  FamilyGamesResponse,
+  FamilyGameState,
   TimerRecord,
   TimerDevicesResponse,
   SmokeTestResult,
@@ -3362,13 +3365,27 @@ export const api = {
     return resp.data;
   },
 
-  async getArcadeScoreboard(): Promise<ArcadeScoreboardResponse> {
-    const resp = await apiClient.get('/api/arcade/scoreboard');
+  async getArcadeScoreboard(collection: ArcadeCollection = 'arcade'): Promise<ArcadeScoreboardResponse> {
+    const resp = await apiClient.get('/api/arcade/scoreboard', {
+      params: collection === 'family' ? { collection } : undefined,
+    });
     return resp.data;
   },
 
-  async getArcadeHighscores(): Promise<ArcadeHighscoresResponse> {
-    const resp = await apiClient.get('/api/arcade/highscores');
+  async getArcadeHighscores(collection: ArcadeCollection = 'arcade'): Promise<ArcadeHighscoresResponse> {
+    const resp = await apiClient.get('/api/arcade/highscores', {
+      params: collection === 'family' ? { collection } : undefined,
+    });
+    return resp.data;
+  },
+
+  async getFamilyGames(): Promise<FamilyGamesResponse> {
+    const resp = await apiClient.get('/api/arcade/family');
+    return resp.data;
+  },
+
+  async setFamilyGameState(slug: string, state: FamilyGameState): Promise<{ success: boolean; state?: FamilyGameState }> {
+    const resp = await apiClient.put(`/api/arcade/family/${encodeURIComponent(slug)}/state`, { state });
     return resp.data;
   },
 

@@ -42,6 +42,15 @@ ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop
 ALPACA_ARCADE_PUBLIC_URL = os.getenv(
     "ALPACA_ARCADE_PUBLIC_URL", "https://games.sumemail.com"
 ).rstrip("/")
+# Shared secret the arcade requires for admin actions (publishing Family Games).
+# No default: an unset token makes publish/unpublish fail with a message naming
+# this variable instead of silently doing nothing.
+ARCADE_ADMIN_TOKEN = os.getenv("ARCADE_ADMIN_TOKEN", "")
+# The bar a published Family Game must clear before family members see it:
+# at least this many family votes with at least this average. Admins always
+# see every game, with the reason one is not on the shelf.
+FAMILY_GAMES_MIN_RATING = float(os.getenv("FAMILY_GAMES_MIN_RATING", "4.0"))
+FAMILY_GAMES_MIN_VOTES = int(os.getenv("FAMILY_GAMES_MIN_VOTES", "2"))
 
 # alpaca audio server (TTS + music generation). No default on purpose: an unset
 # value fails with a clear message instead of probing a guessed host.
