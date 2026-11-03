@@ -4751,6 +4751,7 @@ async def proxy_arcade_scoreboard(request: Request):
                 return {
                     "username": username,
                     "display_name": member.get("display_name") or username,
+                    "avatar": member.get("avatar"),
                     "initials": initials,
                     "player_url": f"{ALPACA_ARCADE_PUBLIC_URL}/player/{initials}",
                     "you": username == me,

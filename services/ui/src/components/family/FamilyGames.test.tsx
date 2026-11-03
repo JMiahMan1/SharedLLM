@@ -169,7 +169,13 @@ describe('FamilyGames', () => {
     renderIt();
     fireEvent.click(await screen.findByRole('button', { name: 'Play cloud hop' }));
     const frame = (await screen.findByTestId('family-player-frame')) as HTMLIFrameElement;
-    expect(frame.src).toBe('https://games.sumemail.com/play/family-cloud-hop?embed=1&player=KAT');
+    const url = new URL(frame.src);
+    expect(url.origin + url.pathname).toBe('https://games.sumemail.com/play/family-cloud-hop');
+    // The Jarvis member plays as themselves; the game is told the insets.
+    expect(url.searchParams.get('embed')).toBe('1');
+    expect(url.searchParams.get('player')).toBe('KAT');
+    expect(url.searchParams.get('name')).toBe('Kate');
+    expect(url.searchParams.get('safe')).toMatch(/^\d+,\d+,\d+,\d+$/);
 
     const post = (data: unknown, origin = 'https://games.sumemail.com') =>
       window.dispatchEvent(new MessageEvent('message', { data, origin }));
@@ -179,5 +185,23 @@ describe('FamilyGames', () => {
     post(run);
     await waitFor(() => expect(m.submit).toHaveBeenCalledTimes(1));
     expect(m.submit).toHaveBeenCalledWith('family-cloud-hop', 420, 'family-cloud-hop:r1');
+  });
+
+  it('opens edge to edge and closes from the game\'s own Exit', async () => {
+    m.getFamilyGames.mockResolvedValue(base);
+    renderIt();
+    fireEvent.click(await screen.findByRole('button', { name: 'Play cloud hop' }));
+    expect(await screen.findByTestId('family-player')).toBeInTheDocument();
+    expect(screen.getByTestId('family-player-splash')).toBeInTheDocument();
+
+    const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
+      window.dispatchEvent(new MessageEvent('message', { data, origin }));
+    relay({ source: 'arcade-relay', slug: 'family-cloud-hop', type: 'ready' });
+    await waitFor(() => expect(screen.getByTestId('family-player-splash')).toHaveAttribute('aria-hidden', 'true'));
+
+    relay({ source: 'arcade-relay', slug: 'family-cloud-hop', type: 'exit' }, 'https://evil.example');
+    expect(screen.getByTestId('family-player')).toBeInTheDocument();
+    relay({ source: 'arcade-relay', slug: 'family-cloud-hop', type: 'exit' });
+    await waitFor(() => expect(screen.queryByTestId('family-player')).not.toBeInTheDocument());
   });
 });

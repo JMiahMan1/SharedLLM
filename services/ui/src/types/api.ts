@@ -815,6 +815,8 @@ export interface ArcadeGameCard {
 export interface ArcadeScoreboardPlayer {
   username: string;
   display_name: string;
+  /** "preset:<id>", "upload:<version>" or null, from the family directory. */
+  avatar?: string | null;
   initials: string;
   player_url: string;
   you: boolean;
