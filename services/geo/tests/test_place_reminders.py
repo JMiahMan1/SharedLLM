@@ -60,6 +60,7 @@ def world(monkeypatch):
     monkeypatch.setattr(geo, "_viewer_may_see", may_see)
     monkeypatch.setattr(geo, "_send_notice", send)
     monkeypatch.setattr(geo, "compute_eta", eta)
+    monkeypatch.setattr(geo, "_spawn", lambda coro: coro.close())
     yield sent
     geo._zone_cache.update({"at": 0.0, "zones": []})
 
@@ -79,7 +80,7 @@ async def test_arriving_home_rings_the_reminder_once_for_that_person_only(world)
     entry = await _set(r)
     t = time.time()
     await geo._presence_transition(r, "jeremiah", *AWAY, t)
-    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 600, speed=0.0, activity="still")
     rung = _reminders(world)
     assert len(rung) == 1
     notice = rung[0]
@@ -90,7 +91,7 @@ async def test_arriving_home_rings_the_reminder_once_for_that_person_only(world)
     # Gone once it went off: leaving and coming back again is silent.
     assert await place_reminders.list_for(r, "jeremiah") == []
     await geo._presence_transition(r, "jeremiah", *AWAY, t + 1200)
-    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 1800)
+    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 1800, speed=0.0, activity="still")
     assert len(_reminders(world)) == 1
 
 
@@ -101,10 +102,10 @@ async def test_someone_elses_arrival_and_the_wrong_event_do_not_ring_it(world):
     t = time.time()
     # Michele arriving home is not Jeremiah's reminder.
     await geo._presence_transition(r, "michele", *AWAY, t)
-    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600, speed=0.0, activity="still")
     # Jeremiah arriving is not a departure.
     await geo._presence_transition(r, "jeremiah", *AWAY, t)
-    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 600, speed=0.0, activity="still")
     assert _reminders(world) == []
     await geo._presence_transition(r, "jeremiah", *AWAY, t + 1200)
     assert [n["body"] for n in _reminders(world)] == ["Left Home"]
