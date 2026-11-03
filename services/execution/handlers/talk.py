@@ -634,9 +634,18 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
         await _post_as_jarvis(provider, req.token, {"message": _game_wire(text, card)})
 
     if command == "stop":
-        stopped = _stop_game(req.token, (getattr(req.user_context, "user", None) or "").strip())
+        who = (getattr(req.user_context, "user", None) or "").strip()
+        stopped = _stop_game(req.token, who)
         if stopped is None:
-            return ExecutionResult(status="FAILURE", message="No game is running here.", service="talk_game")
+            # Games live in this process's memory, so a restart (a deploy)
+            # forgets a game while the room still shows it running: the chat
+            # decides "in progress" from its history, which has no "Game over"
+            # line. Refusing here left that banner stuck with a Stop button
+            # that could never work. Close it in the room instead: the line
+            # ends the game for every client, and stopping is idempotent.
+            by = f" {who} closed it." if who else ""
+            await say(f"🛑 Game over.{by} This game had already ended on Jarvis's side.")
+            return ExecutionResult(status="SUCCESS", message="Game closed.", service="talk_game")
         await say(stopped)
         return ExecutionResult(status="SUCCESS", message="Game stopped.", service="talk_game")
 
