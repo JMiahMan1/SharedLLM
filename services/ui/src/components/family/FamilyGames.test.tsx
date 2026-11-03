@@ -204,4 +204,15 @@ describe('FamilyGames', () => {
     relay({ source: 'arcade-relay', slug: 'family-cloud-hop', type: 'exit' });
     await waitFor(() => expect(screen.queryByTestId('family-player')).not.toBeInTheDocument());
   });
+
+  it('warms up the game host and the shelf games before Play is tapped', async () => {
+    m.getFamilyGames.mockResolvedValue(base);
+    const { unmount } = renderIt();
+    await screen.findByTestId('family-game-family-cloud-hop');
+    const hrefs = (rel: string) => [...document.head.querySelectorAll(`link[rel="${rel}"]`)].map((l) => l.getAttribute('href'));
+    expect(hrefs('preconnect')).toContain('https://games.sumemail.com');
+    expect(hrefs('prefetch')).toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
+    unmount();
+    expect(hrefs('prefetch')).not.toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
+  });
 });
