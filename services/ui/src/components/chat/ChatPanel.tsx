@@ -5,7 +5,7 @@ import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, Square, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -417,6 +417,27 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     }
   };
 
+  // Anyone in the room can end a game; typing "stop the game" does the same.
+  const playing = gameRunning(messages);
+  const [stopping, setStopping] = useState(false);
+  const stopGame = async () => {
+    if (!activeToken) return;
+    setStopping(true);
+    try {
+      const response = await api.stopTalkGame(activeToken);
+      if (response.status === 'SUCCESS') {
+        toast.success('Game stopped');
+      } else {
+        toast.error(response.message || 'Could not stop the game');
+      }
+      void refetchMessages();
+    } catch {
+      toast.error('Could not stop the game');
+    } finally {
+      setStopping(false);
+    }
+  };
+
   const remove = async (message: TalkMessage) => {
     if (typeof message.id !== 'number') return;
     try {
@@ -767,6 +788,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
                 Post poll
               </button>
             </div>
+          </div>
+        )}
+
+        {playing && (
+          <div className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1" data-testid="chat-game-bar">
+            <span className="flex min-w-0 items-center gap-2 text-xs text-emerald-200">
+              <Gamepad2 size={14} aria-hidden /> <span className="truncate">Game in progress</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void stopGame()}
+              disabled={stopping}
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-rose-200 hover:bg-rose-400/10 disabled:opacity-50"
+              data-testid="chat-game-stop"
+            >
+              <Square size={12} aria-hidden /> Stop game
+            </button>
           </div>
         )}
 

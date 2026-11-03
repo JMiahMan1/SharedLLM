@@ -110,6 +110,9 @@ describe('chat model', () => {
     expect(gameRunning([msg(3, '✅ Kiddo got it!\n\n🏆 Game over! Kiddo 3 ⭐' + card), msg(1, '🧠 Trivia - question 10 of 10')])).toBe(false);
     expect(gameRunning([msg(2, 'Not a pair' + card)])).toBe(true);
     expect(gameRunning([msg(1, 'hello'), msg(2, 'dinner at six')])).toBe(false);
+    // Stopped by a player (the Stop game button, or "stop the game" typed): the bar goes.
+    const stopped = '🛑 Game over. jeremiah stopped it. Final board: Kiddo 1 ⭐\n\n```jarvis-envelope\n{"kind":"game","title":"Game over"}\n```jarvis-envelope';
+    expect(gameRunning([msg(3, stopped), msg(1, '🧠 Trivia - question 4 of 10')])).toBe(false);
   });
 
   it('treats game posts as Jarvis even when a family member account carried them', () => {
