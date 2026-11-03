@@ -318,6 +318,33 @@ export default function FamilyGames() {
     return () => window.removeEventListener('message', onMessage);
   }, [playing, data?.play_base, submitScore, queryClient, trigger]);
 
+  // Warm up before Play is tapped: open the connection to the game host and
+  // fetch the shelf's games into the cache, so a launch is mostly local.
+  const playBase = data?.play_base;
+  const warmSlugs = [...(data?.games ?? []), ...(data?.review ?? [])].slice(0, 8).map((g) => g.slug).join(',');
+  useEffect(() => {
+    if (!playBase) return;
+    let origin: string;
+    try {
+      origin = new URL(playBase).origin;
+    } catch {
+      return;
+    }
+    const links: HTMLLinkElement[] = [];
+    const add = (rel: string, href: string) => {
+      const link = document.createElement('link');
+      link.rel = rel;
+      link.href = href;
+      if (rel === 'preconnect') link.crossOrigin = '';
+      document.head.appendChild(link);
+      links.push(link);
+    };
+    add('preconnect', origin);
+    add('dns-prefetch', origin);
+    for (const slug of warmSlugs ? warmSlugs.split(',') : []) add('prefetch', `${origin}/game/${slug}/index.html`);
+    return () => links.forEach((link) => link.remove());
+  }, [playBase, warmSlugs]);
+
   const open = (game: FamilyGameCard) => {
     submitted.current.clear();
     submitScore.reset();
