@@ -481,3 +481,42 @@ async def test_game_posts_are_marked_as_jarvis(talk, monkeypatch):
     prompt, verdict = talk.posted[0]["message"], talk.posted[-1]["message"]
     assert envelope(prompt)["kind"] == "assistant"
     assert envelope(verdict)["kind"] == "game" and envelope(verdict)["from"] == "jarvis"
+
+
+@pytest.mark.asyncio
+async def test_typing_stop_the_game_ends_it_instead_of_counting_as_a_guess(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    from services.execution.handlers import family_games as games
+
+    await talk.handle_talk(_request(game_command="start", game_kind="trivia"))
+    state = games.registry.get("room-1")
+    await talk.handle_talk(_request(action="send", message=state.answers[0]))
+    if talk._GAME_TASKS:
+        await asyncio.gather(*list(talk._GAME_TASKS))
+
+    result = await talk.handle_talk(_request(action="send", message="Stop the game!"))
+    if talk._GAME_TASKS:
+        await asyncio.gather(*list(talk._GAME_TASKS))
+    assert result.status == "SUCCESS"
+    assert games.registry.get("room-1") is None
+    last = str(talk.posted[-1]["message"])
+    assert "Game over" in last and "dad stopped it" in last and "1 ⭐" in last
+    # With nothing running, the same words are just a message.
+    talk.posted.clear()
+    await talk.handle_talk(_request(action="send", message="end the game"))
+    assert talk.posted == [{"message": "end the game"}]
+
+
+def test_stopping_when_no_game_is_running_says_so(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    result = asyncio.run(talk.handle_talk(_request(game_command="stop")))
+    assert result.status == "FAILURE" and "No game" in result.message
+
+
+def test_stop_phrases():
+    import services.execution.handlers.talk as talk_module
+
+    for text in ["stop the game", "End game.", "quit trivia", "please stop this game", "cancel bible trivia"]:
+        assert talk_module._STOP_GAME.match(text), text
+    for text in ["stop", "Moses", "the game was fun", "stop the car"]:
+        assert not talk_module._STOP_GAME.match(text), text

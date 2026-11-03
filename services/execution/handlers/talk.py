@@ -4,6 +4,7 @@ import binascii
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 from collections.abc import Awaitable, Callable
@@ -473,6 +474,25 @@ def _game_wire(text: str, card: dict | None = None) -> str:
 
 
 GAME_COMMANDS = ("start", "answer", "flip", "stop")
+# "stop the game", "end game", "quit trivia": typed in a room with a game
+# running, any player ends it, rather than it being judged as a guess.
+_STOP_GAME = re.compile(
+    r"^\s*(?:please\s+)?(?:stop|end|quit|cancel|finish)\s+(?:the\s+|this\s+)?(?:game|trivia|quiz|memory|bible\s+trivia)\s*[.!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _stop_game(token: str, who: str) -> str | None:
+    """End the room's game; the line Jarvis posts, or None when none is running."""
+    from services.execution.handlers import family_games as games
+
+    state = games.registry.get(token)
+    if state is None:
+        return None
+    games.registry.drop(token)
+    board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
+    by = f" {who} stopped it." if who else ""
+    return f"🛑 Game over.{by}" + (f" Final board: {board}" if board else " Good game.")
 GAME_KINDS = ("trivia", "bible", "memory")
 
 
@@ -614,8 +634,10 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
         await _post_as_jarvis(provider, req.token, {"message": _game_wire(text, card)})
 
     if command == "stop":
-        games.registry.drop(req.token)
-        await say("🛑 Game over. Good game.")
+        stopped = _stop_game(req.token, (getattr(req.user_context, "user", None) or "").strip())
+        if stopped is None:
+            return ExecutionResult(status="FAILURE", message="No game is running here.", service="talk_game")
+        await say(stopped)
         return ExecutionResult(status="SUCCESS", message="Game stopped.", service="talk_game")
 
     if command == "start":
@@ -1113,12 +1135,13 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
             text = (req.message or "").strip()
+            stop_line = _stop_game(req.token, req.user_context.user) if _STOP_GAME.match(text) else None
             # A short message can be an answer to a family game running here.
             # It is judged on arrival, before the post below, so the first
             # answer to reach the server is the one that counts.
             judged = (
                 _judge_game_answer(req.token, req.user_context.user, text)
-                if text and len(text) <= 120 and not text.startswith("/") and not validate_jarvis_mention(req.message)
+                if stop_line is None and text and len(text) <= 120 and not text.startswith("/") and not validate_jarvis_mention(req.message)
                 else None
             )
             ok, data, message = await _talk_request_with_retry(
@@ -1140,6 +1163,10 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 task = asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context, reply_to=question_id))
                 _JARVIS_TASKS.add(task)
                 task.add_done_callback(_JARVIS_TASKS.discard)
+            elif stop_line is not None:
+                task = asyncio.create_task(_post_as_jarvis(provider, req.token, {"message": _game_wire(stop_line)}))
+                _GAME_TASKS.add(task)
+                task.add_done_callback(_game_task_done)
             elif judged is not None:
                 # The verdict is already in; the bot's reply follows the
                 # player's own message, without holding up their send.
