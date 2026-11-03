@@ -34,6 +34,9 @@ class R:
     async def hdel(self, k, f):
         self.h.get(k, {}).pop(f, None)
 
+    async def zrevrange(self, k, a, b):
+        return []
+
 
 class _Sent(list):
     """(user, title, body) per notice, with the whole notices in ``payloads``."""
@@ -67,6 +70,16 @@ def world(monkeypatch):
     monkeypatch.setattr(geo, "_viewer_may_see", may_see)
     monkeypatch.setattr(geo, "_send_notice", send)
     monkeypatch.setattr(geo, "compute_eta", eta)
+    # The later look at a pending arrival is a background timer; tests run it
+    # by hand (``_confirm_pending_arrival``) instead of waiting two minutes.
+    later = []
+
+    def spawn(coro):
+        later.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(geo, "_spawn", spawn)
+    sent.later = later
     yield sent
     geo._zone_cache.update({"at": 0.0, "zones": []})
 
@@ -87,6 +100,7 @@ async def test_arriving_home(world):
     t = time.time()
     await geo._presence_transition(r, "michele", 33.25, -111.70, t)
     await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 750)   # still there
     assert ("jeremiah", "Michele arrived at Home", "") in world
 
 
@@ -206,6 +220,7 @@ async def test_presence_notices_are_family_presence_with_a_map_button(world):
     t = time.time()
     await geo._presence_transition(r, "michele", 33.25, -111.70, t)
     await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 750)   # still there
     notice = world.payloads[0]
     assert notice["category"] == "family_presence" and notice["tag"] == "presence:michele"
     assert notice["data"]["url"] == "/wander?person=michele"
@@ -227,6 +242,7 @@ async def test_an_important_place_is_a_safety_notice_for_the_chosen_people(world
     t = time.time()
     await geo._presence_transition(r, "leo", 33.25, -111.70, t)
     await geo._presence_transition(r, "leo", 33.30, -111.80, t + 60)
+    await geo._presence_transition(r, "leo", 33.30, -111.80, t + 200)
     by_user = {n["user"]: n for n in world.payloads}
     assert by_user["michele"]["category"] == "family_safety" and by_user["michele"]["priority"] == 4
     assert by_user["kate"]["category"] == "family_safety"
@@ -265,6 +281,7 @@ async def test_child_geofence_arrival_and_departure_alerts(world, monkeypatch):
     await geo._presence_transition(r, "noah", 33.25, -111.70, t)
     # Noah arrives at zone.work
     await geo._presence_transition(r, "noah", 33.30, -111.80, t + 60)
+    await geo._presence_transition(r, "noah", 33.30, -111.80, t + 200)
     by_user = {n["user"]: n for n in world.payloads}
     assert "jeremiah" in by_user and "michele" in by_user
     assert by_user["jeremiah"]["category"] == "family_safety"
@@ -274,7 +291,7 @@ async def test_child_geofence_arrival_and_departure_alerts(world, monkeypatch):
     # Noah leaves zone.work
     world.payloads.clear()
     world.clear()
-    await geo._presence_transition(r, "noah", 33.25, -111.70, t + 120)
+    await geo._presence_transition(r, "noah", 33.25, -111.70, t + 320)
     by_user = {n["user"]: n for n in world.payloads}
     assert "jeremiah" in by_user and "michele" in by_user
     assert by_user["jeremiah"]["category"] == "family_safety"
@@ -296,5 +313,58 @@ async def test_a_parent_who_does_not_share_location_still_hears(world, monkeypat
     t = time.time()
     await geo._presence_transition(r, "michele", 33.25, -111.70, t)
     await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 750)   # still there
     assert ("dana", "Michele arrived at Home", "") in world
     assert not any(user == "kate" for user, *_ in world)  # still not in the circle
+
+
+@pytest.mark.asyncio
+async def test_driving_past_a_place_does_not_say_you_arrived(world):
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.25, -111.70, t)
+    # One fix inside Work at 30 mph, the next one already past it.
+    assert await geo._presence_transition(r, "michele", 33.30, -111.80, t + 20, speed=13.0) == []
+    assert await geo._presence_transition(r, "michele", 33.31, -111.82, t + 40, speed=13.0) == []
+    assert world == []
+    # The look two minutes later finds nothing pending.
+    assert await geo._confirm_pending_arrival(r, "michele", "zone.work", t + 20, now=t + 200) is False
+    assert world == []
+
+
+@pytest.mark.asyncio
+async def test_a_pending_arrival_is_not_counted_while_still_travelling(world):
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.25, -111.70, t)
+    await geo._presence_transition(r, "michele", 33.30, -111.80, t + 20, speed=13.0)
+    # Still inside 3 minutes later but moving at speed (a big place, a long road).
+    assert await geo._presence_transition(r, "michele", 33.3005, -111.8005, t + 200, speed=12.0) == []
+    assert world == []
+
+
+@pytest.mark.asyncio
+async def test_arriving_on_foot_counts_at_once(world):
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.25, -111.70, t)
+    events = await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600, speed=0.4, activity="still")
+    assert [e["kind"] for e in events] == ["arrived"]
+    assert ("jeremiah", "Michele arrived at Home", "") in world
+
+
+@pytest.mark.asyncio
+async def test_a_phone_that_goes_quiet_after_arriving_is_counted_by_the_later_look(world):
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "michele", 33.25, -111.70, t)
+    await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 600)
+    assert world == [] and len(world.later) == 1
+    # Too soon: still pending.
+    assert await geo._confirm_pending_arrival(r, "michele", "zone.home", t + 600, now=t + 650) is False
+    assert await geo._confirm_pending_arrival(r, "michele", "zone.home", t + 600, now=t + 730) is True
+    assert ("jeremiah", "Michele arrived at Home", "") in world
+    # Counted once: the next fix at home is no change.
+    world.clear()
+    assert await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 900) == []
+    assert world == []

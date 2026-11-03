@@ -826,7 +826,7 @@ async def record_point(
     except Exception as e:
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
-    _spawn(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0))
+    _spawn(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0, speed, activity))
 
 
 # Arrival / departure notices
@@ -840,6 +840,14 @@ async def record_point(
 
 ZONE_EXIT_MARGIN_M = 50.0
 PRESENCE_REPEAT_S = 600
+#: An arrival counts once the person is still there this long after the
+#: first fix inside: driving past a saved place puts one fix inside it, and
+#: that used to tell the family they had arrived.
+ARRIVE_DWELL_S = 120.0
+#: Faster than this (m/s, about 9 mph) and the person is still travelling.
+ARRIVE_MAX_SPEED_MPS = 4.0
+#: What the phone reports when its owner has plainly stopped.
+STOPPED_ACTIVITIES = {"still", "walking", "on_foot", "running"}
 #: A zone drawn tighter than a phone can resolve is not a usable geofence.
 #: ``zone.home`` in this household is only 40 m across while an indoor fix can
 #: sit 200 m out, which flapped "left Home" / "arrived at Home" all day.
@@ -896,12 +904,21 @@ def _zone_at(zones: list[dict], lat: float, lon: float, margin: float = 0.0, onl
     return best
 
 
-async def _presence_transition(r, user: str, lat: float, lon: float, ts: float, acc: float = 0.0) -> list[dict]:
+async def _presence_transition(
+    r, user: str, lat: float, lon: float, ts: float, acc: float = 0.0,
+    speed: float | None = None, activity: str | None = None,
+) -> list[dict]:
     """Detect a zone change for the user's new fix and notify; returns the events.
 
     Leaving takes a fix outside the zone by more than the margin or the fix's
     own uncertainty, whichever is larger: an indoor network fix 90 m off at
-    the edge of home is not a departure."""
+    the edge of home is not a departure.
+
+    Arriving takes staying: the first fix inside a place only starts a pending
+    arrival, which counts once the person is still there ARRIVE_DWELL_S later
+    and not travelling (or at once when the phone says they are on foot or
+    still). A fix outside first cancels it quietly, so driving past a saved
+    place says nothing."""
     zones = await _zones_cached()
     if not zones or not r:
         return []
@@ -928,19 +945,65 @@ async def _presence_transition(r, user: str, lat: float, lon: float, ts: float, 
     still = _zone_at(usable, lat, lon, margin, only=current) if current else None
     inside = still or _zone_at(usable, lat, lon)
     new = inside["entity_id"] if inside else None
-    await r.set(key, json.dumps({"zone": new, "t": ts}))
     if state is None or new == current:
-        return []  # first sighting, or no change
+        # First sighting (taken as where they are), or no change.
+        await r.set(key, json.dumps({"zone": new, "t": ts}))
+        return []
     by_id = {z["entity_id"]: z for z in usable}
     events = []
     if current and current in by_id:
         events.append({"kind": "departed", "zone": by_id[current]})
+    record: dict = {"zone": None, "t": ts}
     if new:
-        events.append({"kind": "arrived", "zone": inside})
+        pending = state.get("pending")
+        since = float(state.get("pending_since", ts)) if pending == new else ts
+        stopped = (activity or "").lower() in STOPPED_ACTIVITIES and (speed is None or speed < ARRIVE_MAX_SPEED_MPS)
+        stayed = pending == new and ts - since >= ARRIVE_DWELL_S and (speed is None or speed < ARRIVE_MAX_SPEED_MPS)
+        if stopped or stayed:
+            record = {"zone": new, "t": ts}
+            events.append({"kind": "arrived", "zone": inside})
+        else:
+            record = {"zone": None, "t": ts, "pending": new, "pending_since": since}
+            if pending != new:
+                # A phone that has stopped may send nothing more for a while:
+                # look again once the dwell is up.
+                _spawn(_confirm_arrival_later(r, user, new, since))
+    await r.set(key, json.dumps(record))
     for ev in events:
         await _notify_presence(r, user, ev["kind"], ev["zone"])
         await _fire_place_reminders(r, user, ev["kind"], ev["zone"])
     return events
+
+
+async def _confirm_pending_arrival(r, user: str, zone_id: str, since: float, now: float | None = None) -> bool:
+    """Count a pending arrival if it is still pending: no fix since has put the
+    person outside, and the newest fix (if any) is not at driving speed."""
+    key = f"geo:zone_state:{user}"
+    raw = await r.get(key)
+    state = json.loads(raw) if raw else None
+    if not state or state.get("pending") != zone_id or float(state.get("pending_since", -1)) != since:
+        return False
+    now = time.time() if now is None else now
+    if now - since < ARRIVE_DWELL_S:
+        return False
+    latest = await _latest_fix(r, user)
+    if latest and float(latest.get("t", 0)) >= since and float(latest.get("spd") or 0.0) >= ARRIVE_MAX_SPEED_MPS:
+        return False
+    zone = next((z for z in await _zones_cached() if z["entity_id"] == zone_id), None)
+    if zone is None:
+        return False
+    await r.set(key, json.dumps({"zone": zone_id, "t": max(float(state.get("t", since)), since)}))
+    await _notify_presence(r, user, "arrived", zone)
+    await _fire_place_reminders(r, user, "arrived", zone)
+    return True
+
+
+async def _confirm_arrival_later(r, user: str, zone_id: str, since: float) -> None:
+    try:
+        await asyncio.sleep(ARRIVE_DWELL_S + 5)
+        await _confirm_pending_arrival(r, user, zone_id, since)
+    except Exception as e:
+        log.warning(f"[Geo] Arrival check failed for {user}: {e}")
 
 
 async def _fire_place_reminders(r, user: str, kind: str, zone: dict) -> None:
@@ -960,9 +1023,9 @@ async def _fire_place_reminders(r, user: str, kind: str, zone: dict) -> None:
         ))
 
 
-async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0) -> None:
+async def _safe_presence_transition(r, user, lat, lon, ts, acc=0.0, speed=None, activity=None) -> None:
     try:
-        await _presence_transition(r, user, lat, lon, ts, acc)
+        await _presence_transition(r, user, lat, lon, ts, acc, speed, activity)
     except Exception as e:
         log.warning(f"[Geo] Presence check failed for {user}: {e}")
     try:
