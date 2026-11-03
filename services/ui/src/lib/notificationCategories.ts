@@ -29,6 +29,11 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   { id: 'timers', label: 'Timers and alarms', description: 'When a timer or alarm goes off.' },
   { id: 'bible', label: 'Bible reading', description: 'Reminders for your reading plan.' },
   { id: 'home', label: 'Home', description: 'Doorbell, motion while away, doors, the garage, laundry and leaks.' },
+  {
+    id: 'weather',
+    label: 'Weather',
+    description: 'Rain, snow, freezes, heat and wind your household asked to hear about.',
+  },
   { id: 'reports', label: 'Reports', description: 'When a scheduled report is ready.' },
   { id: 'jobs', label: 'Finished jobs', description: 'Songs, pictures and audiobooks that are ready.' },
   { id: 'raven', label: 'Raven missions', description: 'Missions that finished or need your approval.' },

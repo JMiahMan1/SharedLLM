@@ -23,6 +23,7 @@ import type { CalendarEvent } from '../../types/widget';
 import type { ExecutionResponse } from '../../services/api';
 import { PLANNER_DARK, PLANNER_LIGHT, textOn } from '../../themes/plannerPalette';
 import { confirmDialog } from '../ui/confirmDialog';
+import { DayWeather } from './DayWeather';
 
 // Date helpers (native, no luxon)
 const DAY_MS = 86_400_000;
@@ -175,6 +176,7 @@ const MobileDayList = ({
               <span className="os-display text-lg font-bold" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink)' }}>{day.getDate()}</span>
               <span className="text-xs font-extrabold uppercase" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink-faint)' }}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
               <span className="text-xs font-bold" style={{ color: 'var(--os-ink-soft)' }}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
+              <DayWeather dateKey={key} className="self-center" />
               <span className="ml-auto text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-faint)' }}>Open ›</span>
             </button>
             <div className="flex flex-col gap-2">
@@ -234,6 +236,7 @@ const MobileMonthGrid = ({
               >
                 {day.getDate()}
               </span>
+              <span className="flex h-3 items-center"><DayWeather dateKey={key} variant="icon" /></span>
               <span
                 className="flex h-2 items-center gap-0.5"
                 role="img"
@@ -726,11 +729,14 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
               const isToday = key === todayKey;
               return (
                 <div key={key} className="flex gap-2 py-2 sm:gap-4">
+                  <div className="flex shrink-0 flex-col items-center gap-1.5">
                   <button onClick={() => openDay(key)} aria-label={`Open ${day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`} className="flex h-16 w-14 shrink-0 flex-col items-center justify-center rounded-2xl sm:h-20 sm:w-20" style={isToday ? { ...todayNum, boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)', color: 'var(--os-ink)' }}>
                     <span className={`text-xs font-extrabold uppercase ${isToday ? 'text-[var(--os-on-ember)]/80' : 'text-[var(--os-ink-faint)]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                     <span className="os-display text-2xl leading-none sm:text-3xl">{day.getDate()}</span>
                     <span className={`text-xs font-bold ${isToday ? 'text-[var(--os-on-ember)]/80' : 'text-[var(--os-ink-faint)]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
                   </button>
+                  <DayWeather dateKey={key} />
+                  </div>
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
                     {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" onSelect={setEditing} people={people} />)}
                   </div>
@@ -747,7 +753,8 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
       {view === 'day' && (
         <div className="mx-auto max-w-3xl">
           <div className="os-display text-5xl mb-1">{focused.toLocaleDateString('en-US', { weekday: 'long' })}</div>
-          <div className="text-xl font-bold mb-4" style={{ color: 'var(--os-ink-soft)' }}>{focused.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+          <div className="text-xl font-bold mb-1" style={{ color: 'var(--os-ink-soft)' }}>{focused.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+          <div className="mb-4 min-h-1"><DayWeather dateKey={ymd(focused)} variant="full" /></div>
           <div className="flex flex-col gap-3">
             {(byDay.get(ymd(focused)) ?? []).map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" onSelect={setEditing} people={people} />)}
             {(byDay.get(ymd(focused)) ?? []).length === 0 && (
@@ -771,9 +778,10 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
             const isToday = key === todayKey;
             return (
               <div key={key} className={`flex min-h-0 flex-col rounded-[1.25rem] p-2 ${isToday ? '' : ''}`} style={isToday ? todayCell('1.25rem') : { background: 'var(--os-paper-deep)' }}>
-                <button onClick={() => openDay(key)} className="mb-2 flex items-baseline gap-2 rounded-xl px-2 py-1 text-left">
+                <button onClick={() => openDay(key)} className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-xl px-2 py-1 text-left">
                   <span className={`text-sm font-extrabold uppercase ${isToday ? 'text-[#bf4526]' : 'text-[var(--os-ink-faint)]'}`} style={isToday ? { color: 'var(--os-ember-deep)' } : undefined}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                   <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[var(--os-on-ember)]' : 'text-[var(--os-ink)]'}`} style={isToday ? todayNum : { color: 'var(--os-ink)' }}>{day.getDate()}</span>
+                  <DayWeather dateKey={key} className="basis-full" />
                 </button>
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
                   {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} onSelect={setEditing} people={people} />)}
@@ -815,7 +823,10 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
               const overflow = evs.length - 3;
               return (
                 <button key={key} onClick={() => openDay(key)} className={`flex min-h-0 flex-col overflow-hidden rounded-2xl p-1.5 text-left ${isToday ? '' : ''}`} style={isToday ? todayCell('1rem') : inMonth ? { background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)' }}>
-                  <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[var(--os-on-ember)]' : inMonth ? 'text-[var(--os-ink)]' : 'text-[var(--os-ink-faint)]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
+                  <span className="mb-1 flex flex-wrap items-center justify-between gap-1">
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[var(--os-on-ember)]' : inMonth ? 'text-[var(--os-ink)]' : 'text-[var(--os-ink-faint)]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
+                    <DayWeather dateKey={key} />
+                  </span>
                   <span className="flex min-h-0 flex-col gap-1 overflow-hidden">
                     {evs.slice(0, 3).map((ev, idx) => {
                       const ad = isAllDay(ev);

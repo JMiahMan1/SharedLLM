@@ -19,6 +19,7 @@ import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import WatchPanel from '../components/settings/WatchPanel';
+import WeatherSettingsPanel from '../components/settings/WeatherSettingsPanel';
 import Toggle from '../components/ui/Toggle';
 import UserAvatar from '../components/UserAvatar';
 import { getAutoDropIn, setAutoDropIn } from '../lib/callSettings';
@@ -110,6 +111,11 @@ const Settings = () => {
         <SiteThemePanel />
         <MapStylePanel />
         <MobileMenuPanel />
+      </section>
+
+      <section className="space-y-4" aria-labelledby="settings-weather">
+        <h2 id="settings-weather" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Weather</h2>
+        <WeatherSettingsPanel />
       </section>
 
       <section className="space-y-4" aria-labelledby="settings-family">

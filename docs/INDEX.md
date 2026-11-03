@@ -23,6 +23,7 @@
 - `docs/DASHBOARD.md`: app shell (navigation, bell, readiness), dashboard widgets, settings, sign-in, docs page
 - `docs/INTEGRATIONS.md`: Accounts & Integrations page: each service's fields, API keys
 - `docs/FAMILY_HUB.md`: family chat (Nextcloud Talk), games, drawing, music, recipes, voice signatures, calls, phone notifications
+- `docs/WEATHER.md`: Open-Meteo forecast (household default, or each person's own place), reminders to phones and the actions they run, the Weather widget and calendar, any metric against the weather, events and hooks for other services
 - `docs/NETWORK.md`: home network monitoring through the OpenWrt router: setup, what is checked, alerts, Admin > Network, the read-only access it uses
 - `docs/PUSH.md`: phone notifications over self-hosted ntfy: publishing notices, the phone stream, categories and preferences, action buttons, UnifiedPush for other apps
 - `docs/BIBLE_STUDY.md`: Bible reader, study help, plans, games, memorization, interlinear

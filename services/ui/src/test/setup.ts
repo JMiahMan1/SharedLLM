@@ -994,6 +994,27 @@ export const server = setupServer(
   http.post('/api/config', () => HttpResponse.json({ config: { assistant_model: 'qwen3:8b', coding_model: 'qwen2.5-coder:7b', librarian_model: 'qwen3:8b' } })),
   http.get('/api/config/models', () => HttpResponse.json({ models: ['qwen3:8b', 'qwen2.5-coder:7b'] })),
 
+  // Weather: no home location by default, so widgets that read the
+  // forecast render their empty state unless a test supplies one.
+  http.get('/api/weather', () => HttpResponse.json({ detail: 'No home location' }, { status: 404 })),
+  // Arcade (Family > Games): nothing published by default.
+  http.get('/api/arcade/family', () => HttpResponse.json({
+    success: true, arcade_available: true, play_base: '', is_admin: false, games: [], review: [], unpublished: [],
+  })),
+  http.get('/api/arcade/games', () => HttpResponse.json({
+    success: true, arcade_available: true, play_base: '', featured_source: 'none', featured: [], games: [], count: 0,
+  })),
+  http.get('/api/arcade/scoreboard', () => HttpResponse.json({ success: true, arcade_available: true, players: [] })),
+  http.get('/api/arcade/highscores', () => HttpResponse.json({ success: true, arcade_available: true, players: [], games: [] })),
+  http.get('/api/users/me/weather', () => HttpResponse.json({ status: 'SUCCESS', location: null, units: null })),
+  http.get('/api/weather/integrations', () => HttpResponse.json({
+    events: ['forecast.updated', 'condition.changed', 'alert.started', 'day.completed'], services: [],
+    metric_modes: ['power', 'counter', 'mean', 'on_time'], metric_aggs: [], kinds: [], stream: 'weather:events', metrics: [],
+  })),
+  http.get('/api/weather/correlations', () => HttpResponse.json({ units: '°F', today: '', metrics: [], insights: [] })),
+  // Saved places (Wander; the Admin weather reminders pick from them).
+  http.get('/api/geo/saved-places', () => HttpResponse.json({ places: [] })),
+
   // Widgets Settings
   http.get('/api/widgets/settings', () => HttpResponse.json({
     widgets: widgetSettings,

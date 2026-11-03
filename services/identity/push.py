@@ -22,7 +22,7 @@ from services.identity.models import UnifiedPushRegistration, User, UserNotifica
 #: PushCategories.java).
 CATEGORIES = (
     "chat", "family_presence", "family_safety", "leave_by", "calendar", "timers", "bible",
-    "reports", "home", "jobs", "raven", "app_updates", "health", "admin",
+    "reports", "home", "weather", "jobs", "raven", "app_updates", "health", "admin",
 )
 #: Categories only admins receive.
 ADMIN_ONLY = frozenset({"admin"})

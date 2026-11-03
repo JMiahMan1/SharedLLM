@@ -33,6 +33,10 @@ reads the same endpoint.
 Each source reports `available`/`soft` so the page can say "temporarily
 unreachable" and poll every 30 s instead of every 5 minutes.
 
+Each day shows its weather (an icon and the high/low) for about a week ahead,
+from the person's own forecast place or the household's; days without a
+forecast look as before. See docs/WEATHER.md, Calendar.
+
 ## Changing events
 
 - **Add**: title + free-text time ("tomorrow at 2pm"), into the chosen or

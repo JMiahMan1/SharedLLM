@@ -73,6 +73,8 @@ final class PushCategories {
             "Reminders for your reading plan.", NORMAL, GROUP_REMINDERS, R.drawable.mi_bookmark),
         new Category("home", "Home",
             "Doorbell, motion while away, doors, the garage, laundry and leaks.", NORMAL, GROUP_HOME, R.drawable.mi_home),
+        new Category("weather", "Weather",
+            "Rain, snow, freezes, heat and wind your household asked to hear about.", NORMAL, GROUP_REMINDERS, R.drawable.mi_drop),
         new Category("reports", "Reports",
             "When a scheduled report is ready.", QUIET, GROUP_HOME, R.drawable.mi_description),
         new Category("jobs", "Finished jobs",

@@ -331,6 +331,17 @@ def test_deleting_a_user_drops_their_grant(client: TestClient, session: Session)
     assert _resolve(client, "casey")["mass_url"] is None
 
 
+def test_deleting_a_user_drops_their_weather_place(client: TestClient, session: Session):
+    from services.identity.models import UserWeatherSetting
+
+    _act_as(session, SHARED)
+    session.add(UserWeatherSetting(username="casey", data='{"location": {"latitude": 35, "longitude": -85}}'))
+    session.commit()
+    assert client.delete("/api/users/casey").status_code == 200
+    session.expire_all()
+    assert session.get(UserWeatherSetting, "casey") is None
+
+
 # Self-service credential writes
 
 

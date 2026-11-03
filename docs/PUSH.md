@@ -380,6 +380,7 @@ All in `services/ui/android/app/src/main/java/com/jarvisos/app/`.
 | bible | bible `reminders` | daily reading reminder |
 | reports | telemetry `deliver_notice` | scheduled report ready or failed |
 | home | execution `home_alerts` (Home Assistant) | doorbell, motion while nobody is home, garage open too long, door unlocked at night, washer or dryer done, water leak (priority 5); only entities mapped in the `home_alert_entities` setting, to everyone or the people listed |
+| weather | execution `weather` (Open-Meteo, docs/WEATHER.md) | a `weather_reminders` rule met within its window (rain, snow, freeze, heat, wind), once per episode, to the people listed or everyone; tag per rule (Open goes to the dashboard) |
 | jobs | gateway `notices` / execution | song generated, picture improved, audiobook converted (Open) |
 | raven | gateway `notices` | mission finished (to its owner), mission needs approval (to `@admins`: Approve, Reject) |
 | app_updates | gateway `notices` | new APK published (once per build; `audience: parents`) |

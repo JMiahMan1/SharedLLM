@@ -32,7 +32,8 @@ describe('Family hub', () => {
     renderWithProviders(<Family />);
 
     await user.click(screen.getByRole('tab', { name: /games/i }));
-    const games = await screen.findByTestId('family-games');
+    // The tab wraps the family's own games, the arcade and the Bible games.
+    const games = await screen.findByTestId('family-games-tab');
     // Real games only: each links to where it is played, nothing marked "planned".
     expect(within(games).getByRole('link', { name: /daily bible quiz/i })).toHaveAttribute('href', '/bible?tab=play');
     expect(within(games).getByRole('link', { name: /memory verses/i })).toHaveAttribute('href', '/bible?tab=memorize');

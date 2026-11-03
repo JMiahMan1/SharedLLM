@@ -59,6 +59,8 @@ import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel
 import { RolesPanel } from '../components/admin/RolesPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
+import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
+import { WeatherIntegrationsPanel } from '../components/admin/WeatherIntegrationsPanel';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
@@ -1079,6 +1081,10 @@ const Admin = () => {
           <EntityProtectionPanel users={users} />
 
           <HomeAlertsPanel users={users} />
+
+          <WeatherRemindersPanel users={users} />
+
+          <WeatherIntegrationsPanel />
         </div>
       )}
 

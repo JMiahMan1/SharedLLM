@@ -66,6 +66,7 @@ from services.identity.models import (
     UserCredentialShare,
     UserRole,
     UserThemeSetting,
+    UserWeatherSetting,
     UserWidget,
     UserWorkspaceSession,
     VoiceSignature,
@@ -1766,6 +1767,11 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     stale_voice = session.get(VoiceSignature, user.username)
     if stale_voice:
         session.delete(stale_voice)
+        session.commit()
+    # Nor their weather place (where they live, possibly).
+    stale_weather = session.get(UserWeatherSetting, user.username)
+    if stale_weather:
+        session.delete(stale_weather)
         session.commit()
     push.forget_user(session, user.username)
     _audit(request, session, "user.delete", username.lower(), actor=admin,
@@ -3734,17 +3740,18 @@ WIDGET_DEFAULT_SIZES: dict[str, str] = {
     'presence': 'medium',
     'bible_daily': 'medium',
     'recommendations': 'medium',
+    'weather': 'medium',
 }
 _WIDGET_ORDER = {key: index for index, key in enumerate(WIDGET_DEFAULT_SIZES)}
 WIDGET_SIZES = frozenset({'small', 'medium', 'wide', 'tall'})
 WIDGET_VISIBILITIES = frozenset({'visible', 'hidden', 'removed'})
 
 #: Widgets a child sees before they touch the dashboard: chores, calendar,
-#: music/media, notes, the verse of the day, their own suggestions and device
-#: control for the devices they are assigned.
+#: music/media, notes, the verse of the day, their own suggestions, the
+#: weather and device control for the devices they are assigned.
 CHILD_WIDGETS = frozenset({
     'chores_progress', 'upcoming_events', 'active_media', 'quick_notes',
-    'bible_daily', 'recommendations', 'device_control',
+    'bible_daily', 'recommendations', 'device_control', 'weather',
 })
 #: Teens get the child set plus climate control.
 TEEN_WIDGETS = CHILD_WIDGETS | {'climate'}
@@ -4185,6 +4192,120 @@ def delete_workspace_session(
 
 
 # Per-user website/widget theme (same pack schema as the web client)
+#: A phone fix older than this is not "where they are" for the weather.
+WEATHER_LIVE_MAX_AGE_S = 6 * 3600
+
+
+def _weather_prefs(session: Session, username: str) -> dict:
+    """What the person chose: ``follow`` their phone, their own ``location``, ``units``."""
+    row = session.exec(select(UserWeatherSetting).where(UserWeatherSetting.username == username)).first()
+    try:
+        data = json.loads(row.data) if row and row.data else {}
+    except (ValueError, TypeError):
+        data = {}
+    return {"location": data.get("location"), "units": data.get("units"), "follow": data.get("follow") is True}
+
+
+def _weather_live_location(session: Session, username: str, now: float | None = None) -> dict | None:
+    """Where the person's phone last reported, for their forecast; None when
+    sharing is paused, the fix is over ``WEATHER_LIVE_MAX_AGE_S`` old, or there
+    is none. Rounded to about a kilometre: plenty for weather, and nearby
+    fixes share one cached forecast."""
+    now = now or time.time()
+    if _location_paused(session, username, now) is not None:
+        return None
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == f"user_location:{username.lower()}")).first()
+    try:
+        fix = json.loads(row.value) if row and row.value else {}
+        lat, lon = float(fix["latitude"]), float(fix["longitude"])
+        at = float(fix.get("timestamp") or fix.get("updated_at") or 0)
+    except (TypeError, ValueError, KeyError):
+        return None
+    if now - at > WEATHER_LIVE_MAX_AGE_S or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return {"name": "Where you are", "latitude": round(lat, 2), "longitude": round(lon, 2)}
+
+
+@app.get("/api/users/me/weather")
+def get_user_weather(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """This person's weather choice; null means the household default (docs/WEATHER.md).
+
+    ``live``: they follow their phone and it reported recently enough to use.
+    """
+    return _my_weather(session, user.username)
+
+
+def _my_weather(session: Session, username: str) -> dict:
+    prefs = _weather_prefs(session, username)
+    live = prefs["follow"] and _weather_live_location(session, username) is not None
+    return {"status": "SUCCESS", **prefs, "live": live}
+
+
+@app.put("/api/users/me/weather")
+def update_user_weather(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    """Set or clear this person's weather location and units.
+
+    ``location``: ``{name, latitude, longitude}`` or null (back to the
+    household default the admin set). ``follow``: true to use where their
+    phone is (falling back to ``location``, then the household's). ``units``:
+    "imperial", "metric" or null. Missing keys are preserved.
+    """
+    row = session.exec(select(UserWeatherSetting).where(UserWeatherSetting.username == user.username)).first()
+    if row is None:
+        row = UserWeatherSetting(username=user.username, data="{}")
+        session.add(row)
+    try:
+        data = json.loads(row.data) if row.data else {}
+    except (ValueError, TypeError):
+        data = {}
+    body = body or {}
+    if "location" in body:
+        loc = body["location"]
+        if loc is None:
+            data.pop("location", None)
+        else:
+            try:
+                lat, lon = float(loc["latitude"]), float(loc["longitude"])
+            except (TypeError, ValueError, KeyError):
+                raise HTTPException(status_code=422, detail="location needs latitude and longitude") from None
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise HTTPException(status_code=422, detail="latitude must be -90 to 90 and longitude -180 to 180")
+            name = str(loc.get("name") or "").strip()[:60]
+            data["location"] = {"name": name or None, "latitude": round(lat, 4), "longitude": round(lon, 4)}
+    if "follow" in body:
+        if body["follow"] is True:
+            data["follow"] = True
+        elif body["follow"] in (False, None):
+            data.pop("follow", None)
+        else:
+            raise HTTPException(status_code=422, detail="follow must be true or false")
+    if "units" in body:
+        if body["units"] is None:
+            data.pop("units", None)
+        elif body["units"] in ("imperial", "metric"):
+            data["units"] = body["units"]
+        else:
+            raise HTTPException(status_code=422, detail="units must be imperial or metric")
+    row.data = json.dumps(data)
+    session.add(row)
+    session.commit()
+    return _my_weather(session, user.username)
+
+
+@app.get("/api/internal/weather/prefs", dependencies=[Depends(require_internal)])
+def internal_weather_prefs(username: str, session: Session = Depends(get_session)):
+    """The place a person's forecast is for, for execution (docs/WEATHER.md).
+
+    ``location`` is the effective one: where their phone is when they follow
+    it and it reported recently, else the place they chose, else null (the
+    household's). ``live`` says it came from the phone.
+    """
+    name = username.strip().lower()
+    prefs = _weather_prefs(session, name)
+    live = _weather_live_location(session, name) if prefs["follow"] else None
+    return {"status": "SUCCESS", **prefs, "location": live or prefs["location"], "live": live is not None}
+
+
 @app.get("/api/users/me/theme")
 def get_user_theme(
     session: Session = Depends(get_session),
@@ -6282,6 +6403,11 @@ def ingest_telemetry_snapshot(snapshot_data: dict, x_internal_secret: str = Head
             "state": snapshot_data.get("state"),
             "source": snapshot_data.get("source", "poll"),
         }
+        # Outdoor conditions at the time of the reading (execution's weather
+        # cache, docs/WEATHER.md), so any series can be read against the weather.
+        for extra in ("outdoor_temp", "weather"):
+            if snapshot_data.get(extra) is not None:
+                new_point[extra] = snapshot_data[extra]
         data_points.append(new_point)
         data_points = data_points[-1000:]
         if existing:
@@ -6436,11 +6562,28 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
             ) if total > 1 else None,
         })
 
+    outdoor = [float(p["outdoor_temp"]) for p in window if isinstance(p.get("outdoor_temp"), (int, float))]
+    if outdoor:
+        stats.update({
+            "avg_outdoor_temp": round(statistics.mean(outdoor), 1),
+            "min_outdoor_temp": min(outdoor),
+            "max_outdoor_temp": max(outdoor),
+        })
+        middle = statistics.median(outdoor)
+        paired = [(p["power_w"], p["outdoor_temp"]) for p in window
+                  if p.get("power_w") is not None and isinstance(p.get("outdoor_temp"), (int, float))]
+        hot = [w for w, t in paired if t >= middle]
+        cold = [w for w, t in paired if t < middle]
+        if hot and cold:
+            stats["avg_power_w_warmer_half"] = round(statistics.mean(hot), 1)
+            stats["avg_power_w_colder_half"] = round(statistics.mean(cold), 1)
+
     prompt_lines = [
         f"Analyze the following power telemetry for Home Assistant entity '{entity_id}'",
         f"covering the last {hours} hours. Produce a concise insight (3-5 sentences):",
         "describe usage patterns, note anomalies or availability issues, and offer one",
         "practical energy-saving suggestion. Reference the actual numbers.",
+        "Where outdoor temperatures are given, say whether the weather explains the usage.",
         "",
         json.dumps(stats, indent=2),
     ]

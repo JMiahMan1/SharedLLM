@@ -112,7 +112,8 @@ notify_deploy_result() {
     commit=$(sed -n 's/^Server now at commit: //p' "$REMOTE_LOG" 2>/dev/null | tail -1)
     [ -n "$commit" ] || commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     commit="$commit $(git log -1 --format=%s "$commit" 2>/dev/null || true)"
-    if [ -n "$DEPLOY_INTERRUPTED" ]; then
+    # :- so an exit before DEPLOY_INTERRUPTED is set (or a harness under set -u) still reports.
+    if [ -n "${DEPLOY_INTERRUPTED:-}" ]; then
         # Stopped by hand (or the machine went to sleep): say so. The EXIT
         # trap used to see status 0 here and send "Deploy finished" for a
         # deploy that never happened.
