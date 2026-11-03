@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, Play, Sparkles, Star, Trophy, Users } from 'lucide-react';
-import Modal from '../ui/Modal';
-import ArcadeHighscores from './ArcadeHighscores';
-import ArcadeScoreboard from './ArcadeScoreboard';
+import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, Play, Sparkles, Star, Trophy } from 'lucide-react';
+import FamilyLeaderboard from './FamilyLeaderboard';
+import GamePlayer from './GamePlayer';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import type { FamilyGameCard, FamilyGameState, FamilyGamesResponse } from '../../types/api';
@@ -274,7 +273,7 @@ export default function FamilyGames() {
     staleTime: 60_000,
     retry: false,
   });
-  const me = scoreboard?.players.find((player) => player.you);
+  const me = scoreboard?.players?.find((player) => player.you);
 
   const submitScore = useMutation({
     mutationFn: ({ slug, score, captureId }: { slug: string; score: number; captureId: string }) =>
@@ -382,46 +381,20 @@ export default function FamilyGames() {
         </div>
       )}
 
-      <ArcadeScoreboard
-        collection="family"
-        title="Family Games scoreboard"
-        description="Every finished game counts for the player who is signed in. No typing, no cheating."
-      />
-      <ArcadeHighscores collection="family" />
+      <FamilyLeaderboard games={data.games} onPlay={open} />
 
       {data.is_admin && <AdminPanel data={data} onPlay={open} />}
 
-      <Modal isOpen={playing !== null} onClose={() => setPlaying(null)} title={playing?.title} fullScreen>
-        {playing && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <iframe
-              ref={frameRef}
-              src={`${data.play_base}/play/${playing.slug}?embed=1&player=${encodeURIComponent(me?.initials ?? 'YOU')}`}
-              title={`${playing.title} game`}
-              data-testid="family-player-frame"
-              className="min-h-0 w-full flex-1 border-0 bg-black sm:rounded-xl"
-              allow="autoplay; fullscreen; gamepad"
-              allowFullScreen
-            />
-            <div className="flex flex-wrap items-center gap-2 px-1 pt-2 pb-[env(safe-area-inset-bottom)] text-[11px] text-slate-400">
-              <Users size={12} />
-              <span>
-                Playing as <b className="text-slate-200">{me?.display_name ?? me?.initials ?? 'you'}</b>
-              </span>
-              {playing.family_state === 'testing' && (
-                <span className="rounded-full border border-sky-400/40 bg-sky-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-sky-200">
-                  Testing
-                </span>
-              )}
-              <span className="ml-auto" aria-live="polite">
-                {submitScore.isPending && <span className="text-sky-300">Saving score…</span>}
-                {submitScore.isSuccess && <span className="text-emerald-300">Score saved</span>}
-                {submitScore.isError && <span className="text-rose-300">Could not save the score</span>}
-              </span>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {playing && (
+        <GamePlayer
+          title={playing.title}
+          emoji={playing.emoji}
+          art={playing.art}
+          src={`${data.play_base}/play/${playing.slug}?embed=1&player=${encodeURIComponent(me?.initials ?? 'YOU')}&name=${encodeURIComponent(me?.display_name ?? '')}`}
+          frameRef={frameRef}
+          onClose={() => setPlaying(null)}
+        />
+      )}
     </div>
   );
 }

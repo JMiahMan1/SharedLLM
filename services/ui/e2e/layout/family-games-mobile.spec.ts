@@ -49,18 +49,19 @@ const FAMILY = {
   unpublished: [card('family-garden-pipes', 'Garden Pipes', '🌻', 'unpublished', { shelf_reason: 'Unpublished' })],
 };
 
-const PLAYERS = ['Jeremiah', 'Michele', 'Kate', 'Samuel'].map((name, i) => ({
+const PLAYERS = ['Jeremiah', 'Michele', 'Kate', 'Samuel', 'Grandma'].map((name, i) => ({
   username: name.toLowerCase(),
   display_name: name,
   initials: name.slice(0, 3).toUpperCase(),
   player_url: `https://games.example.test/player/${name.slice(0, 3).toUpperCase()}`,
   you: i === 0,
-  best_score: 9000 - i * 1500,
+  avatar: null,
+  best_score: i === 4 ? 0 : 9000 - i * 1500,
   total_games: 2,
-  games_scored: 2,
-  submits: 5,
-  podiums: 1,
-  crowns: i === 0 ? 1 : 0,
+  games_scored: i === 4 ? 0 : 2,
+  submits: i === 4 ? 0 : 5,
+  podiums: i === 4 ? 0 : 2 - (i > 1 ? 1 : 0),
+  crowns: [2, 1, 0, 0, 0][i],
 }));
 
 async function mockApi(page: Page) {
@@ -75,7 +76,14 @@ async function mockApi(page: Page) {
           success: true,
           arcade_available: true,
           players: [],
-          games: FAMILY.games.map((g) => ({ slug: g.slug, title: g.title, scores: [{ initials: 'JER', score: 4200 }, { initials: 'KAT', score: 3100 }] })),
+          games: FAMILY.games.map((g, i) => ({
+            slug: g.slug,
+            title: g.title,
+            scores: [
+              i === 0 ? { initials: 'MIC', player_id: 'michele', score: 4200 } : { initials: 'JER', player_id: 'jeremiah', score: 12840 },
+              { initials: 'KAT', player_id: 'kate', score: 3100 },
+            ],
+          })),
         },
       });
     }
@@ -98,6 +106,8 @@ async function problems(page: Page, rootSelector: string) {
     const out: string[] = [];
     for (const el of root.querySelectorAll<HTMLElement>('*')) {
       const r = el.getBoundingClientRect();
+      // A sideways-scrolling row is meant to run past the edge.
+      if (el.closest('[data-scroll-x]')) continue;
       if (r.width > 0 && r.right > limit + 0.5) {
         out.push(`overflow ${el.tagName.toLowerCase()}[${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}] right=${Math.round(r.right)} > ${limit}`);
       }
