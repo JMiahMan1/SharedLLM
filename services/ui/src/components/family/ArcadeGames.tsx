@@ -129,7 +129,7 @@ export default function ArcadeGames() {
     refetchInterval: 120_000,
   });
   const { data: scoreboard } = useQuery({
-    queryKey: ['arcade-scoreboard'],
+    queryKey: ['arcade-scoreboard', 'arcade'],
     queryFn: () => api.getArcadeScoreboard(),
     staleTime: 60_000,
     retry: false,

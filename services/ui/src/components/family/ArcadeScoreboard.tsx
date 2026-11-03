@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Crown, Gamepad2, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
-import type { ArcadeScoreboardPlayer } from '../../types/api';
+import type { ArcadeCollection, ArcadeScoreboardPlayer } from '../../types/api';
 
 function score(value: number): string {
   return value > 0 ? value.toLocaleString() : 'No score yet';
@@ -40,11 +40,21 @@ function PlayerRow({ player, rank }: { player: ArcadeScoreboardPlayer; rank: num
   );
 }
 
+interface Props {
+  collection?: ArcadeCollection;
+  title?: string;
+  description?: string;
+}
+
 /** Family high scores, read live from each member's arcade player card. */
-export default function ArcadeScoreboard() {
+export default function ArcadeScoreboard({
+  collection = 'arcade',
+  title = 'Family high scores',
+  description = "Scores live in the arcade under each member's initials. Play a game and submit the score; the board updates here.",
+}: Props = {}) {
   const { data } = useQuery({
-    queryKey: ['arcade-scoreboard'],
-    queryFn: () => api.getArcadeScoreboard(),
+    queryKey: ['arcade-scoreboard', collection],
+    queryFn: () => api.getArcadeScoreboard(collection),
     staleTime: 60_000,
     refetchInterval: 120_000,
     retry: false,
@@ -53,15 +63,16 @@ export default function ArcadeScoreboard() {
   if (!data?.arcade_available || data.players.length === 0) return null;
 
   return (
-    <section className="glass-panel rounded-2xl border border-white/5 p-4" data-testid="arcade-scoreboard">
+    <section
+      className="glass-panel rounded-2xl border border-white/5 p-4"
+      data-testid={collection === 'family' ? 'family-scoreboard' : 'arcade-scoreboard'}
+    >
       <div className="flex items-center gap-2">
         <Gamepad2 size={16} className="text-amber-300" />
-        <h2 className="text-sm font-semibold text-slate-200">Family high scores</h2>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">Friendly competition</span>
+        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+        <span className="ml-auto hidden text-[10px] uppercase tracking-wider text-slate-500 sm:inline">Friendly competition</span>
       </div>
-      <p className="mt-1 text-xs text-slate-400">
-        Scores live in the arcade under each member's initials. Play a game and submit the score; the board updates here.
-      </p>
+      <p className="mt-1 text-xs text-slate-400">{description}</p>
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {data.players.map((player, index) => (
           <PlayerRow key={player.username} player={player} rank={index + 1} />

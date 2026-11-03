@@ -89,6 +89,48 @@ re-implement.
   eligible benchmark candidates and **Add** one, or **Hide**/**Unpublish** a
   game. The arcade is never bulk-published.
 
+## Family Games (phone-first collection)
+
+Benchmark games are whatever a model wrote. **Family Games** are a separate
+collection made for phones, shown first on Family → Games
+(`services/ui/src/components/family/FamilyGames.tsx`):
+
+- **Where they come from.** (1) Hand-built games shipped with the arcade
+  (`../alpaca/arcade/family_games/`, one shared touch kit, installed as
+  `family-<name>` at arcade startup); (2) Alpaca's `mobilegames` benchmark
+  category, whose prompts require the phone contract (any screen size, touch
+  only, safe areas, pause when hidden, the score bridge). A published
+  `mobilegames` result joins the collection automatically.
+- **Mobile games only.** A game enters the collection, and can be published,
+  only when its page passes the arcade's mobile contract
+  (`../alpaca/arcade/mobile.py`: touch controls, fits any screen, safe areas,
+  pause when hidden, the score bridge, ...). A failing benchmark game stays in
+  the ordinary arcade; the gateway also drops any card not marked
+  `mobile_compatible`.
+- **Who sees what.** New games start in **testing**. Players see a game only
+  when an admin has **published** it *and* the family rates it at least
+  `FAMILY_GAMES_MIN_RATING` (default 4.0) from `FAMILY_GAMES_MIN_VOTES`
+  (default 2) votes, best rated first. Each member's latest vote is the one
+  that counts. Admins get a **Test & publish** panel: every game with its state
+  and why it is not on the shelf ("In testing", "Needs 1 more family vote",
+  "Rated 3.2★, below the 4★ bar"), Test play, votes, and Publish / Unpublish /
+  Back to testing.
+- **Routes.** `GET /api/arcade/family` (shelf; admins also get `review` and
+  `unpublished`), `PUT /api/arcade/family/{slug}/state` (admin; forwards
+  `ARCADE_ADMIN_TOKEN` to the arcade, 503 naming the variable when unset).
+  `/api/arcade/scoreboard` and `/api/arcade/highscores` take
+  `?collection=family` for the Family Games scoreboard, which counts published
+  Family Games only.
+- **Scores.** The game posts `{source: "arcade-game", type: "score", score,
+  run_id}` once per finished run; the arcade page forwards it as
+  `arcade-score`; Jarvis saves it under the signed-in member and answers
+  `{source: "arcade-host", type: "saved", rank}`, which the game shows on its
+  result card. No initials are typed, no score is guessed from storage.
+- **Mobile check.** `e2e/layout/family-games-mobile.spec.ts` renders the tab at
+  412/375/360px and fails on any element past the right edge or any button
+  under 44px; `../alpaca/scripts/family_games_check.mjs` plays each game at
+  phone and tablet sizes.
+
 ## Design
 
 Status: item 1 (curation + list), the Games-tab display, item 2's embedded web

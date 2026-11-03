@@ -1,16 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { Trophy } from 'lucide-react';
 import { api } from '../../services/api';
+import type { ArcadeCollection } from '../../types/api';
 
 function score(value: number): string {
   return value.toLocaleString();
 }
 
 /** Top scores for each curated game, straight from the arcade's durable ledger. */
-export default function ArcadeHighscores() {
+export default function ArcadeHighscores({ collection = 'arcade' }: { collection?: ArcadeCollection } = {}) {
   const { data } = useQuery({
-    queryKey: ['arcade-highscores'],
-    queryFn: () => api.getArcadeHighscores(),
+    queryKey: ['arcade-highscores', collection],
+    queryFn: () => api.getArcadeHighscores(collection),
     staleTime: 60_000,
     refetchInterval: 120_000,
     retry: false,
@@ -20,7 +21,7 @@ export default function ArcadeHighscores() {
   if (!data?.arcade_available || games.length === 0) return null;
 
   return (
-    <section className="glass-panel rounded-2xl border border-white/5 p-4" data-testid="arcade-highscores">
+    <section className="glass-panel rounded-2xl border border-white/5 p-4" data-testid={collection === 'family' ? 'family-highscores' : 'arcade-highscores'}>
       <div className="flex items-center gap-2">
         <Trophy size={16} className="text-amber-300" />
         <h2 className="text-sm font-semibold text-slate-200">High scores by game</h2>
