@@ -210,8 +210,8 @@ function AdminPanel({ data, onPlay }: { data: FamilyGamesResponse; onPlay: (game
       {open && (
         <div className="mt-2 space-y-3">
           <p className="text-xs text-slate-400">
-            Players see a game only after you publish it <b>and</b> the family rates it at least {data.min_rating}★ from{' '}
-            {data.min_votes} or more votes. Test play and vote here first.
+            Players see a game as soon as you publish it. Family votes then set the order on the shelf. Test play
+            here first; games from the benchmark arcade are only shown once they are published here too.
           </p>
           {!canPublish && (
             <p className="flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2 text-xs text-amber-100" data-testid="family-token-missing">

@@ -866,8 +866,6 @@ export interface FamilyGamesResponse {
   error?: string;
   play_base: string;
   is_admin: boolean;
-  min_rating: number;
-  min_votes: number;
   admin_token_configured?: boolean;
   games: FamilyGameCard[];
   review: FamilyGameCard[];

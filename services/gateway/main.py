@@ -71,8 +71,6 @@ from services.gateway.config import (
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
-    FAMILY_GAMES_MIN_RATING,
-    FAMILY_GAMES_MIN_VOTES,
     GEO_SVC,
     HEALTH_SVC,
     IDENTITY_SVC,
@@ -4553,6 +4551,21 @@ async def _fetch_arcade_games(sort: str | None = None) -> list:
     return games
 
 
+async def _family_published_slugs() -> set[str]:
+    """Slugs an admin has published to the family. An arcade that cannot say
+    is treated as having published none, so nothing unapproved slips through."""
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/family/games", timeout=aiohttp.ClientTimeout(total=8.0))
+            data = await _safe_json(resp)
+    except Exception as exc:
+        log.warning("arcade: family states unavailable: %s", exc)
+        return set()
+    if resp.status >= 400 or not isinstance(data, dict) or not isinstance(data.get("games"), list):
+        return set()
+    return {g["slug"] for g in data["games"] if isinstance(g, dict) and g.get("slug") and g.get("family_state") == "published"}
+
+
 def _arcade_collection(request: Request) -> str:
     """Which arcade board a request is about: the benchmark shelf or Family Games."""
     value = (request.query_params.get("collection") or "").strip().lower()
@@ -4562,25 +4575,16 @@ def _arcade_collection(request: Request) -> str:
 def _family_game_verdict(game: dict) -> dict:
     """Whether a Family Game is on the family shelf, and if not, why.
 
-    Family members only see games an admin approved (published) that the
-    family also rates highly: at least FAMILY_GAMES_MIN_VOTES votes averaging
-    FAMILY_GAMES_MIN_RATING or more. Admins see the verdict on every card.
+    An admin publishing a game puts it on the shelf: the family cannot vote
+    on a game it cannot play, so votes only order the shelf. Admins see the
+    verdict on every card.
     """
-    rating = game.get("rating") or {}
-    votes = int(rating.get("count") or 0)
-    average = float(rating.get("average") or 0.0)
     state = game.get("family_state") or "testing"
-    rated_high = votes >= FAMILY_GAMES_MIN_VOTES and average >= FAMILY_GAMES_MIN_RATING
-    if state != "published":
-        reason = "Unpublished" if state == "unpublished" else "In testing"
-    elif votes < FAMILY_GAMES_MIN_VOTES:
-        need = FAMILY_GAMES_MIN_VOTES - votes
-        reason = f"Needs {need} more family vote{'s' if need != 1 else ''}"
-    elif not rated_high:
-        reason = f"Rated {average:.1f}★, below the {FAMILY_GAMES_MIN_RATING:g}★ bar"
-    else:
+    if state == "published":
         reason = ""
-    return {"on_shelf": state == "published" and rated_high, "shelf_reason": reason}
+    else:
+        reason = "Unpublished" if state == "unpublished" else "In testing"
+    return {"on_shelf": state == "published", "shelf_reason": reason}
 
 
 def _family_sort_key(game: dict) -> tuple:
@@ -4597,10 +4601,9 @@ def _family_sort_key(game: dict) -> tuple:
 async def proxy_family_games(request: Request):
     """The Family Games shelf for the signed-in member.
 
-    Players get only approved, highly rated games, best rated first. Admins
-    also get the review queue (games in testing, and published games still
-    short of the rating bar) and the unpublished games, so they can test,
-    vote and publish from the app. Always 200 with ``arcade_available``.
+    Players get the published games, best rated first. Admins also get the
+    review queue (games in testing) and the unpublished games, so they can
+    test, vote and publish from the app. Always 200 with ``arcade_available``.
     """
     ident = await _acting_identity(request)
     if not ident:
@@ -4609,8 +4612,6 @@ async def proxy_family_games(request: Request):
     base = {
         "play_base": ALPACA_ARCADE_PUBLIC_URL,
         "is_admin": is_admin,
-        "min_rating": FAMILY_GAMES_MIN_RATING,
-        "min_votes": FAMILY_GAMES_MIN_VOTES,
     }
     try:
         async with shared_http_client() as client:
@@ -4861,6 +4862,9 @@ async def proxy_arcade_games(request: Request = None):
         sort = None
     try:
         games = await _fetch_arcade_games(sort)
+        # Benchmark games are shown only once they are published to the family.
+        published = await _family_published_slugs()
+        games = [g for g in games if isinstance(g, dict) and g.get("slug") in published]
         featured_slugs = await _get_arcade_featured_slugs()
         ranked = _rank_arcade_games(games, featured_slugs, sort)
         return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}

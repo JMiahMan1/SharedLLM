@@ -68,6 +68,7 @@ async def test_arcade_games_returns_shelf(monkeypatch):
 
     monkeypatch.setattr(main, "_fetch_arcade_games", fake_fetch)
     monkeypatch.setattr(main, "_get_arcade_featured_slugs", no_curation)
+    monkeypatch.setattr(main, "_family_published_slugs", AsyncMock(return_value={"invaders"}))
 
     payload = await main.proxy_arcade_games()
 
@@ -291,6 +292,7 @@ async def test_arcade_games_forwards_the_requested_sort(monkeypatch):
 
     monkeypatch.setattr(main, "_fetch_arcade_games", fake_fetch)
     monkeypatch.setattr(main, "_get_arcade_featured_slugs", no_curation)
+    monkeypatch.setattr(main, "_family_published_slugs", AsyncMock(return_value={"a", "b"}))
     request = MagicMock()
     request.query_params = {"sort": "plays"}
 
@@ -339,3 +341,20 @@ async def test_arcade_highscores_marks_the_signed_in_player(monkeypatch):
     assert payload["players"][0]["you"] is True
     assert payload["players"][1]["you"] is False
     assert payload["games"][0]["slug"] == "space-invaders"
+
+
+@pytest.mark.asyncio
+async def test_benchmark_games_show_only_once_published_to_the_family(monkeypatch):
+    from services.gateway import main
+
+    async def fake_fetch(sort=None):
+        return [_game("published", "P", average=4, votes=2), _game("benchmark-only", "B", average=5, votes=9)]
+
+    monkeypatch.setattr(main, "_fetch_arcade_games", fake_fetch)
+    monkeypatch.setattr(main, "_get_arcade_featured_slugs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main, "_family_published_slugs", AsyncMock(return_value={"published"}))
+
+    payload = await main.proxy_arcade_games()
+
+    assert [g["slug"] for g in payload["games"]] == ["published"]
+    assert all(g["slug"] != "benchmark-only" for g in payload["featured"])

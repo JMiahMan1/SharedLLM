@@ -1,4 +1,4 @@
-"""Family Games shelf: only approved, highly rated games reach players.
+"""Family Games shelf: a game reaches players once an admin publishes it.
 
 Admins see the review queue and unpublished games, and publish through the
 arcade with the shared admin token.
@@ -75,18 +75,17 @@ def _as(monkeypatch, main, user, is_admin):
 
 
 @pytest.mark.asyncio
-async def test_players_only_see_published_games_that_clear_the_rating_bar(monkeypatch):
+async def test_players_see_every_published_game_best_rated_first(monkeypatch):
     from services.gateway import main
 
-    monkeypatch.setattr(main, "FAMILY_GAMES_MIN_RATING", 4.0)
-    monkeypatch.setattr(main, "FAMILY_GAMES_MIN_VOTES", 2)
     _client(monkeypatch, main, get_payload={"success": True, "games": GAMES})
     _as(monkeypatch, main, "kate", False)
 
     payload = await main.proxy_family_games(MagicMock())
 
     assert payload["arcade_available"] is True
-    assert [g["slug"] for g in payload["games"]] == ["great", "good"]
+    # Published is enough: a new game with one vote and a low-rated one are on the shelf too.
+    assert [g["slug"] for g in payload["games"]] == ["new-and-shiny", "great", "good", "unloved"]
     assert payload["review"] == [] and payload["unpublished"] == []
     assert payload["is_admin"] is False
     assert "admin_token_configured" not in payload
@@ -96,8 +95,6 @@ async def test_players_only_see_published_games_that_clear_the_rating_bar(monkey
 async def test_admins_get_the_review_queue_with_reasons(monkeypatch):
     from services.gateway import main
 
-    monkeypatch.setattr(main, "FAMILY_GAMES_MIN_RATING", 4.0)
-    monkeypatch.setattr(main, "FAMILY_GAMES_MIN_VOTES", 2)
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
     _client(monkeypatch, main, get_payload={"success": True, "games": GAMES})
     _as(monkeypatch, main, "jeremiah", True)
@@ -105,13 +102,9 @@ async def test_admins_get_the_review_queue_with_reasons(monkeypatch):
     payload = await main.proxy_family_games(MagicMock())
 
     review = {g["slug"]: g["shelf_reason"] for g in payload["review"]}
-    assert review == {
-        "testing-one": "In testing",
-        "new-and-shiny": "Needs 1 more family vote",
-        "unloved": "Rated 2.5★, below the 4★ bar",
-    }
+    assert review == {"testing-one": "In testing"}
     assert [g["slug"] for g in payload["unpublished"]] == ["retired"]
-    assert [g["slug"] for g in payload["games"]] == ["great", "good"]
+    assert [g["slug"] for g in payload["games"]] == ["new-and-shiny", "great", "good", "unloved"]
     assert payload["admin_token_configured"] is True
 
 
