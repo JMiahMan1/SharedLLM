@@ -147,3 +147,31 @@ for (const width of [412, 375, 360]) {
     await page.screenshot({ path: `../../.tmp/family-games-${width}-player.png` });
   });
 }
+
+// The Family tab bar shows every tab in full at every width: icons only on a
+// phone, icon and label from sm up. (On desktop it used to be capped at 384px,
+// which clipped the last tab, Create, behind a scroll.)
+for (const width of [360, 412, 640, 768, 1024, 1280, 1600]) {
+  test(`every Family tab is fully visible at ${width}px`, async ({ page }, info) => {
+    test.skip(info.project.name !== 'hermetic-desktop', 'one project is enough');
+    await page.setViewportSize({ width, height: 900 });
+    await mockApi(page);
+    await seedAuth(page);
+    await page.goto('/family?tab=games');
+    const bar = page.getByRole('tablist', { name: 'Family sections' });
+    await expect(bar).toBeVisible();
+    const clipped = await bar.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const out: string[] = [];
+      if (el.scrollWidth > el.clientWidth + 1) out.push(`bar scrolls: ${el.scrollWidth} > ${el.clientWidth}`);
+      if (box.right > window.innerWidth + 0.5) out.push(`bar runs off the page: right=${Math.round(box.right)}`);
+      for (const tab of el.querySelectorAll<HTMLElement>('[role="tab"]')) {
+        const r = tab.getBoundingClientRect();
+        if (r.left < box.left - 0.5 || r.right > box.right + 0.5) out.push(`${tab.getAttribute('aria-label')} clipped`);
+      }
+      return out;
+    });
+    expect(clipped).toEqual([]);
+    if (width >= 640) await expect(page.getByRole('tab', { name: 'Create' })).toContainText('Create');
+  });
+}
