@@ -7486,11 +7486,20 @@ async def proxy_get_skylight_chores(
     # narrow the view to their own chores ("me") or to one member by login name;
     # without it an admin still gets the whole frame and everyone else still gets
     # only their own, filtered by the Skylight category label.
+    # Whoever runs the chore chart (admins, the father, the mother) may look at
+    # anyone's, as they add and remove them; everyone else sees their own.
+    manager = bool(creds.get("is_admin"))
+    if not manager and scope and scope.strip().lower() not in ("", "me", "all"):
+        try:
+            acting = await _acting_identity(request)
+        except HTTPException:  # identity away: not shown as a manager, so refused below
+            acting = None
+        manager = bool(acting and acting.get("family_role") in CHORE_MANAGER_ROLES)
     try:
         scope_user = resolve_chore_scope(
             scope=scope,
             caller_user=creds.get("user") or "",
-            is_admin=bool(creds.get("is_admin")),
+            is_admin=manager,
         )
     except ChoreScopeError as e:
         return JSONResponse(status_code=403, content={"status": "FAILURE", "message": str(e)})
@@ -7526,6 +7535,68 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return await _proxy_json_response(resp)
+
+
+# --- Managing chores (docs/ACHIEVEMENTS.md, "Managing chores") ---------------
+# Adding, changing and removing chores is for parents: admins (the father
+# counts) and mothers. Everyone else keeps reading and ticking off their own.
+CHORE_MANAGER_ROLES = frozenset({"father", "mother"})
+
+
+async def _require_chore_manager(request: Request) -> str:
+    """403 unless the caller runs the chore chart; returns their username."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not (ident.get("is_admin") or ident.get("family_role") in CHORE_MANAGER_ROLES):
+        raise HTTPException(status_code=403, detail="Only a parent can manage chores")
+    return ident["user"]
+
+
+async def _skylight_chores_call(method: str, path: str, user: str, **kw):
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"user": user, **(kw.pop("params", None) or {})}
+    async with shared_http_client() as client:
+        resp = await client.request(method, f"{EXECUTION_SVC}/api/integrations/skylight{path}", headers=headers,
+                                    params=params, timeout=aiohttp.ClientTimeout(total=30.0), **kw)
+    return await _proxy_json_response(resp)
+
+
+@app.get("/api/integrations/skylight/members")
+async def proxy_skylight_members(request: Request):
+    """Who is on the Skylight chore chart (for choosing who a chore is for)."""
+    user = await _require_chore_manager(request)
+    return await _skylight_chores_call("GET", "/members", user)
+
+
+@app.post("/api/integrations/skylight/chores")
+async def proxy_create_skylight_chore(request: Request):
+    """Add a chore: ``{title, assignees, date, time, repeat, until, stars, emoji, note}``."""
+    user = await _require_chore_manager(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A chore is a JSON object")
+    return await _skylight_chores_call("POST", "/chores", user, json=body)
+
+
+@app.patch("/api/integrations/skylight/chores/{chore_id}")
+async def proxy_update_skylight_chore(chore_id: str, request: Request):
+    """Change a chore; ``apply_to`` ``one`` or ``all`` for a repeating one."""
+    user = await _require_chore_manager(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A change is a JSON object")
+    return await _skylight_chores_call("PATCH", f"/chores/{quote(chore_id, safe='')}", user, json=body)
+
+
+@app.delete("/api/integrations/skylight/chores/{chore_id}")
+async def proxy_delete_skylight_chore(chore_id: str, request: Request, apply_to: str | None = None):
+    """Remove a chore: ``apply_to=one`` (that day of a repeating chore) or ``all``."""
+    user = await _require_chore_manager(request)
+    if apply_to not in (None, "one", "all"):
+        raise HTTPException(status_code=422, detail="apply_to must be one or all")
+    params = {"apply_to": apply_to} if apply_to else {}
+    return await _skylight_chores_call("DELETE", f"/chores/{quote(chore_id, safe='')}", user, params=params)
 
 
 @app.get("/api/integrations/skylight/rewards")

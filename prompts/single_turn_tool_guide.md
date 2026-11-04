@@ -43,6 +43,19 @@ Plan a dinner into the family's week plan (`Recipes/Meal plan.md`) from a spoken
   - `{"tool": "MealPlanRequest", "text": "plan pizza for Friday", "recipe": "Pizza"}`
 - This tool has no delete action. A plan it cannot read is reported, never overwritten with an empty week.
 
+### ChoreRequest
+Family chores on the Skylight chore chart.
+- Fields: `tool`, `action`: `add`, `list`, `remove`, `update`, `complete` or `uncomplete`.
+- `add`: `title`, `assignee` (or `assignees`), optional `date` (`today`, `tomorrow`, `YYYY-MM-DD`), `time` (`"7am"`), `repeat` (`daily`, `weekdays`, `weekends`, `weekly`, `"mon, wed"`), `until`, `stars`, `emoji`, `note`.
+- `remove` / `update` / `complete`: the chore's `title` (and `assignee` when two people share a name); `scope` `one` (just that day, the default) or `all` (every day of a repeating chore); `update` takes `new_title`, `time`, `repeat`, `stars`.
+- `list`: optional `assignee` and `date`.
+- Only parents add, change or remove chores, and never from a voice alone; anyone lists and ticks off their own. When more than one chore matches, the reply names them: ask which one.
+- Examples:
+  - `{"tool": "ChoreRequest", "action": "add", "title": "Feed the chickens", "assignee": "Noah", "repeat": "daily", "time": "7am", "stars": 2}`
+  - `{"tool": "ChoreRequest", "action": "remove", "title": "Trash", "assignee": "Gracie", "scope": "all"}`
+  - `{"tool": "ChoreRequest", "action": "complete", "title": "fed the dog"}`
+  - `{"tool": "ChoreRequest", "action": "list"}`
+
 ### WorkspaceCreateRequest
 Create a new isolated workspace environment.
 - Fields: `tool`, `display_name` (or `name`), optional `id`.

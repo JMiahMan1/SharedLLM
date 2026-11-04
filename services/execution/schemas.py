@@ -496,6 +496,34 @@ class MealPlanRequest(BaseRequest):
     shelf_context: UserContext | None = None
 
 
+class ChoreRequest(BaseRequest):
+    """Family chores on Skylight, from a spoken or typed request.
+
+    ``add`` ("give Noah 'feed the chickens' every day at 7am, 2 stars"),
+    ``remove`` / ``update`` a chore found by ``title`` (and ``assignee``) or
+    ``chore_id``, ``list`` today's (or ``date``'s), and ``complete`` /
+    ``uncomplete``. Adding, changing and removing are for parents; anyone can
+    list and tick off their own. ``scope`` is ``one`` (just that day of a
+    repeating chore, the default) or ``all`` (every day of it).
+    """
+
+    user_context: UserContext
+    action: Literal["add", "list", "remove", "update", "complete", "uncomplete"] = "list"
+    title: str | None = None
+    assignee: str | None = None
+    assignees: list[str] | None = None
+    date: str | None = None  # YYYY-MM-DD, "today" or "tomorrow"
+    time: str | None = None  # "7am", "19:30"
+    repeat: str | None = None  # "daily", "weekdays", "weekly", "mon, wed", or an RRULE
+    until: str | None = None
+    stars: int | None = None
+    emoji: str | None = None
+    note: str | None = None
+    chore_id: str | None = None
+    scope: Literal["one", "all"] | None = None
+    new_title: str | None = None  # update: rename to this
+
+
 # Timers / Alarms / Household Reminders
 class TimerRequest(BaseRequest):
     user_context: UserContext

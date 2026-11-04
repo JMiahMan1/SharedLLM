@@ -43,6 +43,7 @@ from services.execution.handlers import (
     browser,
     calendar,
     calibre,
+    chores,
     climate,
     composite,
     diagnostics,
@@ -104,6 +105,7 @@ from services.execution.schemas import (
     LLMInfoRequest,
     LogbookRequest,
     MealPlanRequest,
+    ChoreRequest,
     MediaPlayRequest,
     MediaStateSyncRequest,
     MediaStatusRequest,
@@ -971,6 +973,10 @@ async def execute_recipes(req: RecipeRequest):
 @app.post("/execute/meal_plan", response_model=ExecutionResult)
 async def execute_meal_plan(req: MealPlanRequest):
     return await meal_plan.handle_meal_plan(req)
+
+@app.post("/execute/chores", response_model=ExecutionResult)
+async def execute_chores(req: ChoreRequest):
+    return await chores.handle_chores(req)
 
 @app.post("/execute/activity", response_model=ExecutionResult)
 async def execute_activity(req: ActivityRequest):
@@ -4652,6 +4658,70 @@ async def uncomplete_skylight_chore(
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
+
+
+# Managing chores (add / change / remove): services/execution/skylight_chores.py.
+# Who may is the caller's decision (the gateway allows admins and mothers, the
+# assistant's chores handler the same); these routes only talk to Skylight.
+
+
+@app.get("/api/integrations/skylight/members", dependencies=[Depends(require_internal)])
+async def get_skylight_members(user: str | None = None):
+    """The family members on the Skylight chore chart (who a chore can be for)."""
+    from services.execution import skylight_chores
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    members = await skylight_chores.list_members(session, _skylight_request)
+    if members is None:
+        return {"status": "FAILURE", "message": "Failed to read the Skylight chore chart"}
+    return {"status": "SUCCESS", "members": members}
+
+
+@app.post("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
+async def create_skylight_chore(body: dict, user: str | None = None):
+    """Add a chore: ``{title, assignees, date, time, repeat, until, stars, emoji, note}``."""
+    from services.execution import skylight_chores
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    try:
+        made = await skylight_chores.create(session, _skylight_request, body or {})
+    except skylight_chores.ChoreError as e:
+        return {"status": "FAILURE", "message": str(e)}
+    return {"status": "SUCCESS", "message": "Chore added", "created": len(made)}
+
+
+@app.patch("/api/integrations/skylight/chores/{chore_id}", dependencies=[Depends(require_internal)])
+async def update_skylight_chore(chore_id: str, body: dict, user: str | None = None):
+    """Change a chore; ``apply_to`` ``one`` (that day) or ``all`` for a repeating one."""
+    from services.execution import skylight_chores
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    try:
+        await skylight_chores.update(session, _skylight_request, chore_id, body or {})
+    except skylight_chores.ChoreError as e:
+        return {"status": "FAILURE", "message": str(e)}
+    return {"status": "SUCCESS", "message": "Chore updated"}
+
+
+@app.delete("/api/integrations/skylight/chores/{chore_id}", dependencies=[Depends(require_internal)])
+async def delete_skylight_chore(chore_id: str, apply_to: str | None = None, user: str | None = None):
+    """Remove a chore: ``apply_to=one`` (that day of a repeating chore) or ``all``."""
+    from services.execution import skylight_chores
+
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+    try:
+        await skylight_chores.delete(session, _skylight_request, chore_id, apply_to)
+    except skylight_chores.ChoreError as e:
+        return {"status": "FAILURE", "message": str(e)}
+    return {"status": "SUCCESS", "message": "Chore removed"}
 
 
 @app.get("/api/integrations/skylight/rewards", dependencies=[Depends(require_internal)])

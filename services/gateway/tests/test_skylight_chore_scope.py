@@ -157,3 +157,70 @@ def test_anonymous_callers_are_rejected(resolver, monkeypatch):
     resp = anon.get("/api/integrations/skylight/chores")
     assert resp.status_code == 401
     assert captured["calls"] == []
+
+
+# --- Managing chores: parents only ------------------------------------------
+
+
+@pytest.fixture
+def acting(monkeypatch):
+    """The caller ``_acting_identity`` sees (None = signed out)."""
+    who = {"ident": None}
+
+    async def _acting(request):
+        return who["ident"]
+
+    monkeypatch.setattr(gateway_main, "_acting_identity", _acting)
+    return who
+
+
+@pytest.mark.parametrize("ident, allowed", [
+    (None, 401),
+    ({"user": "noah", "is_admin": False, "family_role": "child"}, 403),
+    ({"user": "gran", "is_admin": False, "family_role": "other"}, 403),
+    ({"user": "mom", "is_admin": False, "family_role": "mother"}, 200),
+    ({"user": "jeremiah", "is_admin": True, "family_role": "father"}, 200),
+])
+def test_only_parents_add_change_or_remove_chores(monkeypatch, acting, ident, allowed):
+    acting["ident"] = ident
+    captured = _patch_execution(monkeypatch, payload={"status": "SUCCESS"})
+    client = TestClient(app)
+    calls = [
+        client.get("/api/integrations/skylight/members"),
+        client.post("/api/integrations/skylight/chores", json={"title": "Hay", "assignees": ["noah"]}),
+        client.patch("/api/integrations/skylight/chores/50-2026-11-03", json={"title": "Hay barn"}),
+        client.delete("/api/integrations/skylight/chores/50?apply_to=all"),
+    ]
+    assert [r.status_code for r in calls] == [allowed] * 4
+    if allowed == 200:
+        verbs = [(c["verb"], c["url"].split("/skylight")[1], c["params"]) for c in captured["calls"]]
+        user = ident["user"]
+        assert verbs == [
+            ("get", "/members", {"user": user}),
+            ("post", "/chores", {"user": user}),
+            ("patch", "/chores/50-2026-11-03", {"user": user}),
+            ("delete", "/chores/50", {"user": user, "apply_to": "all"}),
+        ]
+    else:
+        assert captured["calls"] == []
+
+
+def test_a_bad_apply_to_is_refused(monkeypatch, acting):
+    acting["ident"] = {"user": "mom", "is_admin": False, "family_role": "mother"}
+    _patch_execution(monkeypatch)
+    assert TestClient(app).delete("/api/integrations/skylight/chores/50?apply_to=everything").status_code == 422
+
+
+def test_a_mother_can_look_at_a_childs_chores_and_a_child_cannot(monkeypatch, resolver, acting):
+    key = resolver(user="mom", is_admin=False)
+    acting["ident"] = {"user": "mom", "is_admin": False, "family_role": "mother"}
+    captured = _patch_execution(monkeypatch)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {key}"}
+    assert client.get("/api/integrations/skylight/chores?scope=noah", headers=auth).status_code == 200
+    assert captured["calls"][-1]["params"]["user"] == "noah"
+
+    key = resolver(user="noah", is_admin=False)
+    acting["ident"] = {"user": "noah", "is_admin": False, "family_role": "child"}
+    resp = client.get("/api/integrations/skylight/chores?scope=gracie", headers={"Authorization": f"Bearer {key}"})
+    assert resp.status_code == 403, resp.text
