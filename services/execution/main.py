@@ -4012,10 +4012,13 @@ async def _skylight_request(
             log.error(f"[skylight] 401 on {method} {path}; session cleared, retry login")
             return None
         if resp.status in (200, 201):
+            # Some calls (DELETE /chores/{id}) answer 200 with an empty body,
+            # which aiohttp reads as None; that is success, never "failed".
             try:
-                return await resp.json()
+                data = await resp.json()
             except Exception:
                 return {}
+            return {} if data is None else data
         if resp.status in (202, 204):
             return {}
         body = await resp.text()
