@@ -260,6 +260,7 @@
 [data-theme-scheme="light"] .focus\:border-slate-600\/50:focus { border-color: var(--color-border-soft) !important; }
 [data-theme-scheme="light"] .from-amber-950\/30 { --tw-gradient-from: color-mix(in srgb, oklch(96.2% 0.059 95.617) 60%, transparent); }
 [data-theme-scheme="light"] .from-black\/85 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 85%, transparent); }
+[data-theme-scheme="light"] .from-emerald-950 { --tw-gradient-from: oklch(95% 0.052 163.051); }
 [data-theme-scheme="light"] .from-orange-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.4% 0.038 75.164) 60%, transparent); }
 [data-theme-scheme="light"] .from-sky-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.1% 0.026 236.824) 60%, transparent); }
 [data-theme-scheme="light"] .from-slate-800 { --tw-gradient-from: var(--ht-surface); }

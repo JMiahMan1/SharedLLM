@@ -40,6 +40,10 @@ export interface CallInfo {
   status: CallStatus;
   error: string | null;
   startedAt: number;
+  /** You started this call and are ringing the others. */
+  outgoing?: boolean;
+  /** People who declined the ring. */
+  declined?: string[];
 }
 
 interface CallContextValue {
@@ -155,6 +159,7 @@ interface CallEvents {
   onPeers: (peers: CallPeer[]) => void;
   onLocalStream: (stream: MediaStream | null) => void;
   onEnded: (message: string) => void;
+  onDeclined?: (name: string) => void;
 }
 
 function participant(value: unknown): CallParticipant | null {
@@ -179,6 +184,8 @@ function participant(value: unknown): CallParticipant | null {
  */
 class CallSession {
   roomName: string;
+  /** How many people were already in the call when this browser joined. */
+  peersAtJoin = 0;
 
   private readonly token: string;
   private readonly room: string;
@@ -368,6 +375,7 @@ class CallSession {
             ? (message.ice_servers as RTCIceServer[])
             : [];
           const peers = Array.isArray(message.peers) ? message.peers : [];
+          this.peersAtJoin = peers.length;
           for (const value of peers) {
             const info = participant(value);
             if (info) this.addPeer(info);
@@ -402,6 +410,10 @@ class CallSession {
   }
 
   private handleSignal(type: string, message: Record<string, unknown>): void {
+    if (type === 'declined') {
+      this.events.onDeclined?.(typeof message.name === 'string' && message.name ? message.name : 'Someone');
+      return;
+    }
     const from = typeof message.from === 'string' ? message.from : '';
     if (!from) return;
 
@@ -716,6 +728,9 @@ function CallOverlay({
   const connecting = call.status === 'connecting';
   const finished = call.status === 'ended' || call.status === 'error';
   const talking = peers.some((peer) => peer.connection === 'connected');
+  // Calling and nobody has picked up yet.
+  const calling = call.status === 'connected' && call.outgoing && peers.length === 0;
+  const unanswered = calling && now - call.startedAt >= RING_MAX_MS;
 
   return (
     <div className="fixed inset-0 z-[120] flex h-[100dvh] w-full items-stretch justify-center bg-slate-950/70 sm:pointer-events-none sm:h-auto sm:items-end sm:justify-end sm:bg-transparent sm:p-5">
@@ -737,7 +752,8 @@ function CallOverlay({
             <p className="truncate font-semibold text-white">{call.name || 'Family call'}</p>
             <p className="truncate text-xs text-slate-400">
               {call.status === 'connecting' && 'Connecting…'}
-              {call.status === 'connected' && (
+              {calling && (unanswered ? 'No answer yet' : 'Calling…')}
+              {call.status === 'connected' && !calling && (
                 `${peers.length + 1} in the call · ${elapsed(call.startedAt, now)}`
               )}
               {call.status === 'ended' && 'Call ended'}
@@ -772,15 +788,31 @@ function CallOverlay({
           ) : connecting ? (
             <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 text-center" data-testid="call-connecting">
               <Loader2 size={26} className="animate-spin text-emerald-300" />
-              <p className="text-sm text-slate-300">Starting a drop-in call…</p>
+              <p className="text-sm text-slate-300">Connecting…</p>
               <p className="text-xs text-slate-500">Allow the microphone if your browser asks.</p>
             </div>
           ) : (
             <>
-              {peers.length === 0 && (
+              {calling ? (
+                <div className="mb-3 flex flex-col items-center gap-1 rounded-xl bg-emerald-500/[0.07] px-3 py-3 text-center" data-testid="call-ringing">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-emerald-200">
+                    {!unanswered && <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />}
+                    {unanswered ? 'No one has answered yet' : `Calling ${call.name || 'the family'}…`}
+                  </span>
+                  <span className="text-xs leading-relaxed text-slate-400">
+                    {unanswered
+                      ? 'You can keep waiting - they can still join from Family → Calls - or hang up.'
+                      : 'Phones with auto drop-in answer by themselves; everyone else gets a ringing call.'}
+                  </span>
+                </div>
+              ) : peers.length === 0 && (
                 <p className="mb-3 rounded-xl bg-white/[0.05] px-3 py-2 text-center text-xs leading-relaxed text-slate-400" data-testid="call-waiting">
-                  You're live on the family line. Everyone gets a drop-in alert and can join from
-                  Family → Calls.
+                  Waiting for others to join.
+                </p>
+              )}
+              {(call.declined?.length ?? 0) > 0 && peers.length === 0 && (
+                <p className="mb-3 text-center text-xs text-rose-300" data-testid="call-declined">
+                  {call.declined!.join(', ')} declined.
                 </p>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -854,9 +886,68 @@ function CallOverlay({
   );
 }
 
+/** Full-screen incoming call: answer or decline, like a phone call. */
+function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswer: () => void; onDecline: () => void }) {
+  const caller = call.caller || call.participants[0]?.name || 'Someone';
+  const group = call.name && call.name !== caller ? call.name : '';
+  return (
+    <div
+      className="fixed inset-0 z-[140] flex flex-col items-center justify-between bg-gradient-to-b from-emerald-950 via-slate-950 to-slate-950 px-6 text-center sm:inset-auto sm:bottom-5 sm:right-5 sm:w-[360px] sm:rounded-3xl sm:border sm:border-emerald-400/30 sm:py-6 sm:shadow-2xl"
+      style={{ paddingTop: 'max(3.5rem, env(safe-area-inset-top))', paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={`${caller} is calling`}
+      data-testid="incoming-call"
+    >
+      <div className="flex flex-col items-center gap-3 sm:gap-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Family call</p>
+        <span className="relative mt-4 flex h-28 w-28 items-center justify-center sm:mt-2 sm:h-20 sm:w-20">
+          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20" />
+          <span className="relative flex h-full w-full items-center justify-center rounded-full bg-white/10 text-3xl font-bold text-white sm:text-2xl">
+            {initials(caller)}
+          </span>
+        </span>
+        <p className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-xl">{caller}</p>
+        <p className="text-sm text-slate-300">{group ? `is calling ${group}` : 'is calling you'}</p>
+      </div>
+      <div className="flex w-full max-w-xs items-center justify-around sm:mt-6">
+        <button
+          type="button"
+          onClick={onDecline}
+          aria-label="Decline"
+          className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300"
+        >
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-500 text-white shadow-lg transition active:scale-95 hover:bg-rose-400">
+            <PhoneOff size={26} />
+          </span>
+          Decline
+        </button>
+        <button
+          type="button"
+          onClick={onAnswer}
+          aria-label="Answer"
+          className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300"
+        >
+          <span className="flex h-16 w-16 animate-bounce items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg transition active:scale-95 hover:bg-emerald-400">
+            <Phone size={26} />
+          </span>
+          Answer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Owns the one call the app can be in. It sits above the router so moving
  * from Family to another page never drops the microphone or the call panel.
+ *
+ * Calling someone rings the conversation's other members (the gateway sends
+ * their phones a notice too). Each of their devices answers the way its
+ * owner chose: with auto drop-in on it joins by itself after a chime, like an
+ * Alexa drop-in; otherwise it shows a full-screen incoming call to answer or
+ * decline. A call that is no longer ringing (a group call in progress) shows
+ * as a quiet Join banner.
  */
 export function CallProvider({ children }: { children: ReactNode }) {
   const { token, user } = useAuth();
@@ -877,16 +968,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [muted, setMuted] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [autoDropIn, setAutoDropIn] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const seenCallsRef = useRef<Set<string>>(new Set());
-  const primedRef = useRef(false);
 
   useEffect(() => {
     tokenRef.current = token;
     usernameRef.current = user?.username;
     if (!token) {
-      primedRef.current = false;
-      seenCallsRef.current = new Set();
       autoTriedRef.current = new Set();
       setActiveCalls([]);
       setDismissed([]);
@@ -897,7 +985,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     let active = true;
     const refresh = () => {
       void getAutoDropIn().then((enabled) => {
-        if (active) autoDropInRef.current = enabled;
+        if (!active) return;
+        autoDropInRef.current = enabled;
+        setAutoDropIn(enabled);
       });
     };
     refresh();
@@ -933,29 +1023,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const list = Array.isArray(calls) ? calls : [];
         setActiveCalls(list);
 
-        const tokens = new Set(list.map((active) => active.token));
-        if (!primedRef.current) {
-          // The first poll is the baseline: calls already running should show
-          // in the banner, not trigger an automatic join.
-          primedRef.current = true;
-        } else if (!callRef.current) {
-          const fresh = list.find((active) => !seenCallsRef.current.has(active.token));
-          if (fresh && autoDropInRef.current && !autoTriedRef.current.has(fresh.token)) {
-            const username = usernameRef.current;
-            const alreadyOnCall = username
-              ? fresh.participants.some((person) => person.username === username)
-              : false;
-            if (!alreadyOnCall) {
-              autoTriedRef.current.add(fresh.token);
-              playDropInChime();
-              autoJoinRef.current(fresh);
-            }
+        // Drop-in: a call ringing this person is answered by this device on
+        // its own - also right after the app opens (from the call notice).
+        if (!callRef.current && autoDropInRef.current) {
+          const username = usernameRef.current;
+          const ringing = list.find((active) =>
+            active.ringing
+            && !autoTriedRef.current.has(active.token)
+            && !(username && active.participants.some((person) => person.username === username)));
+          if (ringing) {
+            autoTriedRef.current.add(ringing.token);
+            playDropInChime();
+            autoJoinRef.current(ringing);
           }
         }
+        const tokens = new Set(list.map((active) => active.token));
         for (const tried of autoTriedRef.current) {
           if (!tokens.has(tried)) autoTriedRef.current.delete(tried);
         }
-        seenCallsRef.current = tokens;
       } catch {
         // A call list is a convenience, not a reason to show an error on
         // every page when the gateway is briefly unavailable.
@@ -1038,15 +1123,28 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setLocalStream(null);
         setCall((current) => current ? { ...current, status: 'ended', error: message } : current);
       },
+      onDeclined: (who) => {
+        if (sessionRef.current !== session) return;
+        setCall((current) => current
+          ? { ...current, declined: [...(current.declined ?? []).filter((n) => n !== who), who] }
+          : current);
+      },
     });
     sessionRef.current = session;
 
     try {
       await session.start();
       if (sessionRef.current !== session) return;
+      // Nobody was there: this is a new call, so ring the others.
+      const outgoing = session.peersAtJoin === 0;
       setCall((current) => current
-        ? { ...current, status: 'connected', name: session.roomName || current.name }
+        ? { ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now() }
         : current);
+      if (outgoing) {
+        void api.ringCall(room).catch(() => {
+          // The call still works; the others can see it in their call list.
+        });
+      }
     } catch (error) {
       if (sessionRef.current === session) sessionRef.current = null;
       session.close();
@@ -1104,15 +1202,25 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const bannerCall = call ? undefined : activeCalls.find((active) => !dismissed.includes(active.token));
+  const decline = useCallback((room: string) => {
+    setDismissed((current) => current.includes(room) ? current : [...current, room]);
+    void api.declineCall(room).catch(() => {
+      // The ring stops on its own after a minute.
+    });
+  }, []);
+
+  const visible = call ? [] : activeCalls.filter((active) => !dismissed.includes(active.token));
+  // With auto drop-in on, the device is about to answer by itself.
+  const incomingCall = autoDropIn ? undefined : visible.find((active) => active.ringing);
+  const bannerCall = incomingCall ? undefined : visible.find((active) => !active.ringing);
+  const incomingToken = incomingCall?.token;
   const bannerToken = bannerCall?.token;
 
-  // Ring until the call is answered, dismissed or ended - but not forever. The
-  // chime repeats so a phone in a pocket still gets attention, and gives up
-  // after a minute so an unanswered call cannot ring all afternoon. The banner
-  // stays up either way.
+  // An incoming call rings until it is answered, declined or stops ringing
+  // (the gateway rings for a minute) - and never longer than RING_MAX_MS, so
+  // a phone left on a table cannot ring all afternoon.
   useEffect(() => {
-    if (!bannerToken) return;
+    if (!incomingToken) return;
     playDropInChime();
     const startedAt = Date.now();
     const timer = window.setInterval(() => {
@@ -1123,6 +1231,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       playDropInChime();
     }, RING_INTERVAL_MS);
     return () => window.clearInterval(timer);
+  }, [incomingToken]);
+
+  // A call already in progress is not ringing anybody: one chime when it
+  // first shows, then a quiet banner.
+  useEffect(() => {
+    if (bannerToken) playDropInChime();
   }, [bannerToken]);
 
   const value = useMemo<CallContextValue>(() => ({
@@ -1141,6 +1255,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   return (
     <CallContext.Provider value={value}>
       {children}
+      {incomingCall && typeof document !== 'undefined' && createPortal(
+        <IncomingCall
+          call={incomingCall}
+          onAnswer={() => void startCall(incomingCall.token, incomingCall.name || 'Family call')}
+          onDecline={() => decline(incomingCall.token)}
+        />,
+        document.body,
+      )}
       {bannerCall && typeof document !== 'undefined' && createPortal(
         <div
           className="fixed bottom-[calc(var(--bottom-bar)+0.75rem)] left-1/2 z-[130] flex w-[min(92vw,28rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-400/30 bg-slate-900 px-3 py-2.5 shadow-2xl"
@@ -1156,7 +1278,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">{bannerCall.name || 'Family call'}</p>
             <p className="truncate text-[11px] text-emerald-300">
-              {bannerCall.participants.map((person) => person.name).join(', ') || 'Someone'} on a drop-in call
+              {bannerCall.participants.map((person) => person.name).join(', ') || 'Someone'} on a call
             </p>
           </div>
           <button
@@ -1164,12 +1286,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
             onClick={() => void startCall(bannerCall.token, bannerCall.name || 'Family call')}
             className="min-h-9 shrink-0 rounded-xl bg-emerald-500 px-3 text-xs font-bold text-emerald-950 hover:bg-emerald-400"
           >
-            Drop in
+            Join
           </button>
           <button
             type="button"
             onClick={() => setDismissed((current) => [...current, bannerCall.token])}
-            aria-label="Dismiss drop-in alert"
+            aria-label="Dismiss call alert"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.07] hover:text-white"
           >
             <X size={15} />

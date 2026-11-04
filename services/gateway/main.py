@@ -7954,8 +7954,34 @@ async def _announce_call(request: Request, token: str) -> None:
     if not claimed:
         return
 
-    # Who is in the room. Talk actor ids are the household's nextcloud_user
-    # values, which is the mapping identity holds.
+    found = await _call_recipients(request, token, me)
+    if found is None:
+        return
+    display, recipients = found
+    if not recipients:
+        return
+
+    await _notify.send_many(
+        sorted(recipients),
+        lambda person: _notify.notice(
+            person,
+            "call",
+            f"{display or me} is on a family call",
+            "Tap to join.",
+            url="/family?tab=calls",
+            tag=f"call:{token}",
+            priority=4,
+        ),
+    )
+
+
+async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, set[str]] | None:
+    """``me``'s display name and the conversation's other members (usernames).
+
+    None when the room or the family list could not be read. Talk actor ids
+    are the household's nextcloud_user values, which is the mapping identity
+    holds; the Jarvis bot is a member of every room and never counts.
+    """
     try:
         joined = await _proxy_execution_with_identity(
             request, "/execute/talk", {"action": "participants", "token": token}
@@ -7963,7 +7989,7 @@ async def _announce_call(request: Request, token: str) -> None:
         people = (json.loads(joined.body).get("detail") or {}).get("participants") or []
     except Exception as e:
         log.warning("[call-notice] could not read the room: %s", e)
-        return
+        return None
 
     try:
         async with shared_http_client() as client:
@@ -7975,9 +8001,9 @@ async def _announce_call(request: Request, token: str) -> None:
             users = await resp.json(content_type=None) if resp.status == 200 else None
     except Exception as e:
         log.warning("[call-notice] could not list the family: %s", e)
-        return
+        return None
     if not isinstance(users, list):
-        return
+        return None
     by_talk: dict[str, str] = {}
     for u in users:
         if not isinstance(u, dict):
@@ -7999,21 +8025,54 @@ async def _announce_call(request: Request, token: str) -> None:
             display = str(person.get("display_name") or username)
             continue
         recipients.add(username)
-    if not recipients:
-        return
+    return display or me, recipients
 
+
+@app.post("/api/communication/calls/{room}/ring")
+async def ring_family_call(room: str, request: Request):
+    """Ring the conversation's other members for a call the caller just started.
+
+    Each of their devices then decides how to answer: one with auto drop-in on
+    joins by itself after a chime (like an Alexa drop-in); any other shows an
+    incoming call to answer or decline. The phone notice reaches them when
+    Jarvis is not open, and Answer opens the call. One ring per call.
+    """
+    from services.gateway import calls as _calls
+
+    if not _calls.ROOM_RE.match(room):
+        raise HTTPException(status_code=422, detail="Unknown call.")
+    ident = await _resolve_identity_from_request(request)
+    me = str(ident.get("user") or "")
+    if not me or not await _calls.hub.is_in(room, me):
+        raise HTTPException(status_code=409, detail="Join the call before ringing anyone.")
+
+    found = await _call_recipients(request, room, me)
+    if found is None:
+        return {"ringing": []}
+    display, recipients = found
+    if not recipients or not await _calls.hub.ring(room, me, display, recipients):
+        return {"ringing": []}
+
+    group = len(recipients) > 1
+    name = await _calls.hub.room_name(room)
+    answer = f"/family?tab=calls&answer={room}"
     await _notify.send_many(
         sorted(recipients),
         lambda person: _notify.notice(
             person,
             "call",
-            f"{display or me} is on a family call",
-            "Tap to join.",
-            url="/family?tab=calls",
-            tag=f"call:{token}",
+            f"{display} is calling",
+            f"Family call in {name}. Tap to answer." if group and name else "Tap to answer.",
+            url=answer,
+            tag=f"call:{room}",
+            # 4 pops up on the "Family calls" channel; 5 would go to the
+            # urgent SOS channel as an alarm.
             priority=4,
+            data={"call": room, "caller": display},
+            actions=[_notify.view_action(answer, "Answer")],
         ),
     )
+    return {"ringing": sorted(recipients)}
 
 
 @app.post("/api/communication/talk/call")

@@ -38,6 +38,11 @@ MAX_SIGNAL_BYTES = 128 * 1024
 #: Talk tokens are short alphanumeric ids. Keeping the character set tight
 #: means a room key can never collide with a path or a Redis-style key.
 ROOM_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+#: How long a new call rings the people it calls. A phone with auto drop-in on
+#: answers by itself inside this window; everyone else sees an incoming call
+#: they can answer or decline. After it, the call is still listed and can be
+#: joined, it just stops ringing.
+RING_SECONDS = 60
 
 #: A public STUN server is enough for a home network and most NATs. A TURN
 #: relay can be supplied through CALL_ICE_SERVERS without changing the code.
@@ -89,17 +94,42 @@ class Peer:
         }
 
 
+@dataclass
+class Ring:
+    """Who a call is ringing: the caller rang the conversation's members."""
+
+    caller: str
+    caller_name: str
+    recipients: set[str]
+    started_at: float = field(default_factory=time.time)
+    declined: set[str] = field(default_factory=set)
+
+    def rings(self, username: str, now: float) -> bool:
+        return (
+            username in self.recipients
+            and username not in self.declined
+            and now - self.started_at < RING_SECONDS
+        )
+
+
 class CallHub:
     """The in-process rooms and the people in them.
 
     Single-worker gateway: one uvicorn process owns these dicts. A gateway
     restart ends calls, which is the same thing a dropped signalling socket
     means to the browsers.
+
+    A room's ``_members`` are the conversation's members, recorded when the
+    caller rings them. Once they are known the call is listed only to them,
+    so a direct call between two people never shows up (or gets auto-answered
+    by a drop-in device) anywhere else in the family.
     """
 
     def __init__(self) -> None:
         self._rooms: dict[str, dict[str, Peer]] = {}
         self._names: dict[str, str] = {}
+        self._members: dict[str, set[str]] = {}
+        self._rings: dict[str, Ring] = {}
         self._lock = asyncio.Lock()
 
     async def join(self, peer: Peer, call_name: str = "") -> list[Peer] | None:
@@ -124,26 +154,68 @@ class CallHub:
             if not room:
                 self._rooms.pop(peer.room, None)
                 self._names.pop(peer.room, None)
+                self._members.pop(peer.room, None)
+                self._rings.pop(peer.room, None)
             return list(room.values())
+
+    async def is_in(self, room: str, username: str) -> bool:
+        async with self._lock:
+            return any(p.username == username for p in self._rooms.get(room, {}).values())
+
+    async def ring(self, room: str, caller: str, caller_name: str, recipients: set[str]) -> bool:
+        """Start ringing a call's other members. False if it already rang or ended.
+
+        One ring per call: a second "ring" (a retry, a second tab) changes
+        nothing, so nobody gets two incoming-call alerts for one call.
+        """
+        async with self._lock:
+            room_peers = self._rooms.get(room)
+            if not room_peers or room in self._rings:
+                return False
+            present = {p.username for p in room_peers.values()}
+            self._members[room] = {caller, *recipients}
+            self._rings[room] = Ring(caller, caller_name, set(recipients) - present)
+            return True
+
+    async def decline(self, room: str, username: str) -> list[Peer]:
+        """Stop ringing ``username``; returns the people in the call to tell."""
+        async with self._lock:
+            ring = self._rings.get(room)
+            if ring is None or username not in ring.recipients:
+                return []
+            ring.declined.add(username)
+            return list(self._rooms.get(room, {}).values())
 
     async def room_name(self, room: str) -> str:
         async with self._lock:
             return self._names.get(room, "")
 
-    async def snapshot(self) -> list[dict[str, Any]]:
-        """The active calls the Family list polls."""
+    async def snapshot(self, username: str = "") -> list[dict[str, Any]]:
+        """The active calls ``username`` may see, for the Family list.
+
+        ``ringing`` is true while the call is ringing this person: their app
+        shows an incoming call, or answers it by itself with auto drop-in on.
+        """
+        now = time.time()
         async with self._lock:
             calls = []
             for token, room in self._rooms.items():
                 if not room:
                     continue
                 participants = sorted(room.values(), key=lambda p: p.joined_at)
+                present = {p.username for p in participants}
+                members = self._members.get(token)
+                if members is not None and username not in members and username not in present:
+                    continue
+                ring = self._rings.get(token)
                 calls.append(
                     {
                         "token": token,
                         "name": self._names.get(token, ""),
                         "started_at": participants[0].joined_at,
                         "participants": [p.public() for p in participants],
+                        "ringing": bool(ring and username not in present and ring.rings(username, now)),
+                        "caller": ring.caller_name if ring else "",
                     }
                 )
             calls.sort(key=lambda c: c["started_at"], reverse=True)
@@ -224,9 +296,22 @@ def _display_name(user: dict[str, Any]) -> str:
 
 
 @router.get("/api/communication/calls")
-async def list_calls(_user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
-    """Every call currently in progress, for the Family Calls tab."""
-    return {"calls": await hub.snapshot()}
+async def list_calls(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """The calls in progress this person may see, for the Family Calls tab."""
+    return {"calls": await hub.snapshot(str(user.get("username") or ""))}
+
+
+@router.post("/api/communication/calls/{room}/decline")
+async def decline_call(room: str, user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """Stop the call ringing this person and tell the people in it."""
+    if not ROOM_RE.match(room):
+        raise HTTPException(status_code=422, detail="Unknown call.")
+    peers = await hub.decline(room, str(user.get("username") or ""))
+    await hub.broadcast(
+        peers,
+        {"type": "declined", "username": user.get("username") or "", "name": _display_name(user)},
+    )
+    return {"declined": bool(peers)}
 
 
 @router.websocket("/api/communication/calls/ws")

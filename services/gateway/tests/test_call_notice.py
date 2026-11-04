@@ -119,3 +119,37 @@ def test_a_failed_join_announces_nothing(monkeypatch):
 
     client.post("/api/communication/talk/call", json={"token": "room-family"})
     assert notices == []
+
+
+def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
+    import asyncio
+
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+    client = TestClient(app)
+
+    # Nobody can ring a call they are not in.
+    assert client.post("/api/communication/calls/room-family/ring").status_code == 409
+    assert notices == []
+
+    class _Socket:
+        async def send_json(self, payload):
+            pass
+
+    peer = calls.Peer(id="p1", room="room-family", username="michele", name="Michele", websocket=_Socket())
+    asyncio.run(calls.hub.join(peer, "Family"))
+
+    first = client.post("/api/communication/calls/room-family/ring")
+    assert first.json() == {"ringing": ["noah"]}
+    [notice] = notices
+    assert notice["user"] == "noah"
+    assert notice["category"] == "call"
+    assert notice["title"] == "Michele is calling"
+    assert notice["priority"] == 4
+    assert notice["data"]["url"] == "/family?tab=calls&answer=room-family"
+
+    notices.clear()
+    assert client.post("/api/communication/calls/room-family/ring").json() == {"ringing": []}
+    assert notices == []

@@ -109,3 +109,55 @@ def test_a_started_call_appears_in_the_list_with_its_people(one_loop_client):
         assert calls[0]["token"] == "family"
         assert calls[0]["name"] == "Family"
         assert [p["name"] for p in calls[0]["participants"]] == ["Mom"]
+
+
+def _calls_for(c, token):
+    return c.get("/api/communication/calls", headers={"Authorization": f"Bearer {token}"}).json()["calls"]
+
+
+def test_a_rung_call_rings_its_members_and_is_hidden_from_everyone_else(one_loop_client, monkeypatch):
+    c = one_loop_client
+
+    async def fake_user(token):
+        return {
+            "mom-token": {"username": "mom", "full_name": "Mom"},
+            "kid-token": {"username": "kid", "full_name": "Kid"},
+            "dad-token": {"username": "dad", "full_name": "Dad"},
+        }.get(token)
+
+    monkeypatch.setattr(calls, "_user_for_token", fake_user)
+
+    with c.websocket_connect("/api/communication/calls/ws?token=mom-token&room=mom-kid&name=Kid") as mom:
+        mom.receive_json()
+        import asyncio
+
+        assert asyncio.run(calls.hub.ring("mom-kid", "mom", "Mom", {"kid"})) is True
+        # One ring per call.
+        assert asyncio.run(calls.hub.ring("mom-kid", "mom", "Mom", {"kid"})) is False
+
+        [for_kid] = _calls_for(c, "kid-token")
+        assert for_kid["ringing"] is True and for_kid["caller"] == "Mom"
+        [for_mom] = _calls_for(c, "mom-token")
+        assert for_mom["ringing"] is False
+        # A direct call is nobody else's business, and a drop-in device of
+        # theirs must never answer it.
+        assert _calls_for(c, "dad-token") == []
+
+        # Declining stops the ring and tells the caller who said no.
+        response = c.post("/api/communication/calls/mom-kid/decline", headers={"Authorization": "Bearer kid-token"})
+        assert response.json() == {"declined": True}
+        assert mom.receive_json() == {"type": "declined", "username": "kid", "name": "Kid"}
+        [for_kid] = _calls_for(c, "kid-token")
+        assert for_kid["ringing"] is False
+        mom.send({"type": "websocket.disconnect", "code": 1000})
+
+
+def test_a_ring_stops_after_a_minute(monkeypatch):
+    import asyncio
+
+    ring = calls.Ring("mom", "Mom", {"kid"}, started_at=1000.0)
+    assert ring.rings("kid", 1000.0 + calls.RING_SECONDS - 1)
+    assert not ring.rings("kid", 1000.0 + calls.RING_SECONDS)
+    assert not ring.rings("dad", 1001.0)
+    # Ringing a call nobody is in does nothing.
+    assert asyncio.run(calls.hub.ring("empty", "mom", "Mom", {"kid"})) is False
