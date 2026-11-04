@@ -220,3 +220,35 @@ async def test_kids_list_and_tick_off_only_their_own(board):
     assert "only tick off your own" in (
         await ask("dad", voice=True, action="complete", title="Trash", assignee="gracie")).message
     assert (await ask("dad", action="complete", title="Trash", assignee="gracie")).status == "SUCCESS"
+
+
+# --- the Skylight client itself --------------------------------------------
+
+
+@pytest.mark.parametrize("status, body, expected", [
+    (200, None, {}),            # DELETE /chores/{id}: 200 with an empty body is success (seen live)
+    (200, {"data": 1}, {"data": 1}),
+    (204, None, {}),
+    (404, None, None),
+    (400, None, None),
+])
+async def test_skylight_request_reads_an_empty_200_as_success(monkeypatch, status, body, expected):
+    from services.execution import main
+
+    class Resp:
+        def __init__(self):
+            self.status = status
+
+        async def json(self):
+            return body
+
+        async def text(self):
+            return ""
+
+    class Client:
+        async def request(self, *a, **kw):
+            return Resp()
+
+    monkeypatch.setattr(main, "get_client", lambda: Client())
+    session = {"url": "https://sky", "frame_id": "f", "access_token": "t", "email": "e"}
+    assert await main._skylight_request(session, "DELETE", "/chores/1") == expected
