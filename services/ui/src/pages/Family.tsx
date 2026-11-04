@@ -69,7 +69,7 @@ export default function Family() {
           className="flex grow justify-end"
         >
         <div
-          className="flex w-full max-w-sm overflow-x-auto rounded-full border border-white/10 bg-slate-900/80 p-1 [scrollbar-width:none] sm:w-auto"
+          className="flex w-full max-w-sm overflow-x-auto rounded-full border border-white/10 bg-slate-900/80 p-1 [scrollbar-width:none] sm:w-auto sm:max-w-none"
           role="tablist"
           aria-label="Family sections"
         >
