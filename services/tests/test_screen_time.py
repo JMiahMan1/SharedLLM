@@ -24,6 +24,17 @@ def test_time_left_counts_bonus_and_never_goes_negative():
     assert evaluate(RULES, 500 * 60000, 0, WED(16))["remaining_min"] == 0
 
 
+def test_time_a_parent_gives_opens_bedtime_and_school_until_it_runs_out():
+    given = WED(21, 30)
+    s = evaluate(RULES, 0, 30, WED(21, 10), granted_until=given)
+    assert s["locked"] is False and s["granted_until"] == "2026-10-21T21:30:00-07:00"
+    assert (s["next_lock_reason"], s["next_lock_at"]) == ("bedtime", "2026-10-21T21:30:00-07:00")
+    assert evaluate(RULES, 0, 30, WED(21, 31), granted_until=given)["reason"] == "bedtime"
+    assert evaluate(RULES, 0, 20, WED(9), granted_until=WED(9, 20))["locked"] is False
+    # A parent's own pause still wins over time they gave.
+    assert evaluate({**RULES, "paused": True}, 0, 30, WED(21, 10), granted_until=given)["reason"] == "paused"
+
+
 def test_the_limit_locks_until_midnight():
     s = evaluate(RULES, used_ms=120 * 60000, bonus_min=0, now=WED(17))
     assert s["locked"] and s["reason"] == "limit"

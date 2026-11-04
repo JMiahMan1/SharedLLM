@@ -201,6 +201,13 @@ public class GuardRulesTest {
         assertEquals(0, GuardRules.bootsWithoutGuard(50, 3)); // counter reset (factory reset)
     }
 
+    @Test
+    public void theLockedCoverClosesOnceTimeIsGivenOrTheLockLifts() {
+        assertEquals(true, GuardRules.stillLocked(true, false));
+        assertEquals(false, GuardRules.stillLocked(false, false)); // a parent gave more time
+        assertEquals(false, GuardRules.stillLocked(true, true)); // a parent's unlock window
+    }
+
     private static boolean overlay(boolean deviceOwner, boolean protectedPhone, boolean locked, boolean unlocked, String pkg) {
         return GuardRules.lockOverlay(deviceOwner, protectedPhone, locked, unlocked, pkg, ALLOWED);
     }

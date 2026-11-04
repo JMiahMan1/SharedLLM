@@ -294,6 +294,37 @@ describe('Notes (Keep-style)', () => {
     expect(notesMetaWrites).toHaveLength(0);
   });
 
+  it('retries a stalled move once, and a note already gone counts as archived, not an error', async () => {
+    const tries: string[] = [];
+    server.use(
+      http.post('/api/communication/notes/move', async ({ request }) => {
+        const body = (await request.json()) as { path: string; destination: string };
+        tries.push(body.path);
+        // The first answer was lost; the move had happened, so the retry finds nothing.
+        if (tries.filter((p) => p === body.path).length === 1) return HttpResponse.json({ detail: 'timeout' }, { status: 504 });
+        return HttpResponse.json({ status: 'FAILURE', message: 'Could not move the note (HTTP 404).', service: 'note_move' });
+      }),
+    );
+    const errors = vi.spyOn(toast, 'error');
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Toaster />
+        <Notes />
+      </>,
+    );
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByTestId('select-notes'));
+    await user.click(screen.getByText('Trip ideas'));
+    await user.click(within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Archive' }));
+
+    await waitFor(() => expect(tries).toEqual(['Notes/Trip ideas.md', 'Notes/Trip ideas.md']));
+    expect(await screen.findByTestId('undo-toast', {}, { timeout: 3000 })).toHaveTextContent('Archived 1 note');
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it('teaches Jarvis just the selected notes, or picks what to learn from the menu', async () => {
     const taught: Array<Record<string, unknown>> = [];
     server.use(

@@ -1,4 +1,6 @@
 """Screen-time rules: a child reads theirs, their parents set them and answer requests."""
+from datetime import datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
@@ -107,7 +109,11 @@ def test_ask_then_a_parent_grants_and_it_counts_as_bonus(family):
     granted = family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True, "minutes": 20})
     assert granted.json()["request"]["granted_minutes"] == 20
     assert family("dad").post(f"/api/screen-time/requests/{rid}", json={"grant": True}).status_code == 409
-    assert family("kid").get(f"/api/screen-time/kid/rules?day={DAY}").json()["bonus_min"] == 20
+    rules = family("kid").get(f"/api/screen-time/kid/rules?day={DAY}").json()
+    assert rules["bonus_min"] == 20
+    # The given minutes count from the moment they were given.
+    given = datetime.fromisoformat(granted.json()["request"]["decided_at"])
+    assert datetime.fromisoformat(rules["granted_until"]) == given + timedelta(minutes=20)
 
 
 def test_bonus_and_pause(family):

@@ -1168,14 +1168,28 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 destination, _ = await _unique_note_path(provider, directory, stem)
             # Into another folder (archive, trash, restore), its attachment
             # folders move beside it so the relative links keep working.
-            text = await _note_text(provider, source) if _note_dir(source) != _note_dir(destination) else None
+            text = None
+            if _note_dir(source) != _note_dir(destination):
+                try:
+                    text = await _note_text(provider, source)
+                except Exception as e:  # its attachments stay put; the note still moves
+                    log.warning("Could not read %s before moving it: %s", source, str(e) or type(e).__name__)
             ok, reason = await _move_note(provider, source, destination)
             if not ok:
                 return ExecutionResult(status="FAILURE", message=reason, service="note_move")
-            await _carry_attachments(provider, text, source, destination)
+            # The note has moved: what follows is best effort, and a stalled
+            # Nextcloud connection here must not report the move as failed
+            # (a bulk archive showed an error for notes that had moved).
+            try:
+                await _carry_attachments(provider, text, source, destination)
+            except Exception as e:
+                log.warning("Attachments did not follow %s: %s", destination, str(e) or type(e).__name__)
             _forget_preview(provider.file_url(source))
             _forget_preview(provider.file_url(destination))
-            await _index_after_move(provider, source, destination)
+            try:
+                await _index_after_move(provider, source, destination)
+            except Exception as e:
+                log.warning("Could not update the notes index after moving %s: %s", source, str(e) or type(e).__name__)
             return ExecutionResult(
                 status="SUCCESS",
                 message="Note moved.",
