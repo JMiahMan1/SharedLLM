@@ -10,6 +10,7 @@ import RecapCard from '../components/guardian/RecapCard';
 import GuidanceCard from '../components/guardian/GuidanceCard';
 import JournalCard from '../components/guardian/JournalCard';
 import RequestsCard from '../components/guardian/RequestsCard';
+import ChoresCard from '../components/guardian/ChoresCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GeofenceAlertsCard from '../components/guardian/GeofenceAlertsCard';
 import DevicePolicyCard from '../components/guardian/DevicePolicyCard';
@@ -169,6 +170,7 @@ function GuardianChildren() {
           <RecapCard username={child.username} name={name} />
         </div>
         <RequestsCard username={child.username} name={name} />
+        <ChoresCard username={child.username} name={name} />
         <ConcernsCard username={child.username} name={name} />
         <GeofenceAlertsCard username={child.username} name={name} />
         <GuidanceCard username={child.username} name={name} />

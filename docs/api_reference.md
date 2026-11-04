@@ -176,6 +176,7 @@ Creating, changing and deleting a workspace (`POST /api/workspaces`,
 - `GET /v1/models`: OpenAI-compatible list models endpoint
 - `POST /v1/embeddings`: OpenAI-compatible batch embeddings generation endpoint (signed-in caller)
 - `GET /api/weather`: the caller's Open-Meteo forecast (their own place or phone from Settings > Weather, else the household's; `?household=true` is always the household's) plus their weather heads-up (signed-in caller); `GET /api/weather/energy?days=` and `POST /api/weather/reminders/test` are admin-only. 404 when no forecast location is set. See `docs/WEATHER.md`
+- `GET /api/integrations/skylight/members`, `POST /api/integrations/skylight/chores`, `PATCH`/`DELETE /api/integrations/skylight/chores/{id}` (`?apply_to=one|all`): parents (admins, the father, the mother) add, change and remove Skylight chores; `GET /api/integrations/skylight/chores?scope=<name>` lets them see anyone's. See `docs/ACHIEVEMENTS.md`, "Managing chores"
 - `GET /api/presence/all`, `GET /api/presence/rooms`, `GET /api/presence/{user_id}`:
   who is in which room (from the execution service). Signed-in caller only
 

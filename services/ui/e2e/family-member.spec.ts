@@ -139,6 +139,10 @@ async function mockApi(page: Page, viewer: Viewer) {
     }
     if (p === '/api/geo/steps') return json({ user_id: 'sam', daily_steps: { [day()]: 6400, [day(-1)]: 9100 }, today: 6400, goal: 10000 });
     if (p === '/api/geo/trips') return json({ trips: [], total_trips: 0 });
+    // The Time section's chores card (docs/ACHIEVEMENTS.md, "Managing chores"): Skylight, for parents.
+    if (p === '/api/integrations/skylight/chores') {
+      return json({ status: 'SUCCESS', chores: [{ id: '50', title: 'Feed the chickens', completed: false, assignees: ['Sam'], recurrence: 'RRULE:FREQ=DAILY' }] });
+    }
     if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) {
       // The server's rule: the father and admins only.
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);
@@ -185,6 +189,7 @@ test.describe('family member page', () => {
 
     await sectionButton('time').click();
     await expect(page.getByTestId('weekly-schedule')).toBeVisible();
+    await expect(page.getByTestId('guardian-chores')).toContainText('Feed the chickens');
     await expect(page.getByTestId('member-heatmap-grid')).toBeVisible();
     await page.screenshot({ path: info.outputPath('time.png'), fullPage: true });
 

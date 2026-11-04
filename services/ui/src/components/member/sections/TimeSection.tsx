@@ -5,6 +5,7 @@ import { HourHeatmap } from '../charts';
 import ScreenTimeControls from '../../health/ScreenTimeControls';
 import OfflineCodeSetting from '../../health/OfflineCodeSetting';
 import RequestsCard from '../../guardian/RequestsCard';
+import ChoresCard from '../../guardian/ChoresCard';
 import { activityQuery, hourHeatmap } from '../../../lib/memberPage';
 import { formatDayLabel } from '../../../lib/healthHub';
 
@@ -39,11 +40,12 @@ function HeatmapCard({ username }: { username: string }) {
   );
 }
 
-/** Time controls (Family Link's Controls tab): the weekly schedule and routines, the heatmap, requests answered, the offline code. */
+/** Time controls (Family Link's Controls tab): the weekly schedule and routines, their chores, the heatmap, requests answered, the offline code. */
 export default function TimeSection({ username, name }: { username: string; name: string }) {
   return (
     <>
       <ScreenTimeControls username={username} name={name} />
+      <ChoresCard username={username} name={name} />
       <HeatmapCard username={username} />
       <RequestsCard username={username} name={name} kinds={['time']} history />
       <OfflineCodeSetting />

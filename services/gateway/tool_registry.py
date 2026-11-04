@@ -491,6 +491,14 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "only that day's line is rewritten. A failed plan read is reported, never planned over.",
      "payload fields: text, day, recipe. text is the spoken sentence; day (\"Tue\") and "
      "recipe are optional when the caller already resolved them."),
+    ("ChoreRequest", SVC_EXECUTION, "POST", "/execute/chores", False,
+     "Family chores on the Skylight chore chart: add a chore for someone (one day or repeating: "
+     "\"give Noah feed the chickens every day at 7am\"), remove or rename one, list a day's chores, "
+     "and mark one done or not done (\"I fed the dog\"). Adding, changing and removing are for parents.",
+     "payload fields: action, title, assignee, assignees, date, time, repeat, until, stars, emoji, note, "
+     "chore_id, scope, new_title. action is add, list, remove, update, complete or uncomplete; date is "
+     "YYYY-MM-DD, today or tomorrow; time like 7am; repeat is daily, weekdays, weekends, weekly, days like "
+     "'mon and wed', or an RRULE; scope is one (just that day) or all (every day of a repeating chore)."),
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
      "Timers, alarms, and household reminders: create, list, pause, resume, reset, stop, cancel across one or multiple devices (speakers, ESPHome screens, mobile app).",
      "payload fields: action, type, id, query, title, duration_str, time_str, recurrence, target_device, target_devices, scope, emoji, sound, tts_enabled, esphome_script, flash_screen."),

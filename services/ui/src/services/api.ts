@@ -497,6 +497,29 @@ function myWeather(data: Partial<MyWeatherPrefs> | undefined): MyWeatherPrefs {
   };
 }
 
+/** Someone on the Skylight chore chart (a chore is assigned by their label). */
+export interface SkylightMember { id: string; label: string; color: string | null }
+
+/** A chore to add (docs/ACHIEVEMENTS.md, "Managing chores"). */
+export interface NewChore {
+  title: string;
+  assignees: string[];
+  date?: string;
+  time?: string;
+  /** once, daily, weekdays, weekends, weekly, "mon, wed" or an RRULE. */
+  repeat?: string;
+  until?: string;
+  stars?: number;
+  emoji?: string;
+  note?: string;
+}
+
+/** Skylight routes answer 200 with `status: FAILURE` and a message when Skylight refuses. */
+function skylightOk<T extends { status?: string; message?: string }>(data: T): T {
+  if (data?.status !== 'SUCCESS') throw new Error(data?.message || 'Skylight did not accept that');
+  return data;
+}
+
 export const apiClient = axios.create({
   baseURL: getBaseUrl(),
   headers: {
@@ -4094,6 +4117,30 @@ export const api = {
     const query = params.toString();
     const resp = await apiClient.get(`/api/integrations/skylight/chores${query ? `?${query}` : ''}`);
     return resp.data;
+  },
+
+  /** Parents: who is on the Skylight chore chart. */
+  async getSkylightMembers(): Promise<SkylightMember[]> {
+    const resp = await apiClient.get('/api/integrations/skylight/members');
+    return skylightOk(resp.data).members ?? [];
+  },
+
+  /** Parents: add a chore (one day, or repeating) for one or more people. */
+  async addSkylightChore(chore: NewChore): Promise<void> {
+    skylightOk((await apiClient.post('/api/integrations/skylight/chores', chore)).data);
+  },
+
+  /** Parents: change a chore; `apply_to` one (that day) or all (every day of a repeating one). */
+  async updateSkylightChore(choreId: string, change: Partial<NewChore> & { apply_to?: 'one' | 'all' }): Promise<void> {
+    skylightOk((await apiClient.patch(`/api/integrations/skylight/chores/${encodeURIComponent(choreId)}`, change)).data);
+  },
+
+  /** Parents: remove a chore; `applyTo` one (that day) or all (every day of a repeating one). */
+  async removeSkylightChore(choreId: string, applyTo?: 'one' | 'all'): Promise<void> {
+    const resp = await apiClient.delete(`/api/integrations/skylight/chores/${encodeURIComponent(choreId)}`, {
+      params: applyTo ? { apply_to: applyTo } : undefined,
+    });
+    skylightOk(resp.data);
   },
 
   async completeSkylightChore(choreId: string): Promise<{ status: string; message?: string }> {

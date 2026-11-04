@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Check, Star, Sun, Moon, User, Users } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Check, Plus, Star, Sun, Moon, Trash2, User, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { useDarkModeSync } from '../../hooks/useDarkModeSync';
@@ -7,6 +9,10 @@ import { useHaptics } from '../../hooks/useHaptics';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { hasChoresFor, type ChoreScope } from '../../lib/choreScope';
+import { canManageChores } from '../../lib/chores';
+import { useChoreRemoval } from '../../hooks/useChoreRemoval';
+import Modal from '../ui/Modal';
+import AddChoreForm from '../chores/AddChoreForm';
 import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 import { PLANNER_DARK, PLANNER_LIGHT, textOn } from '../../themes/plannerPalette';
@@ -71,6 +77,18 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   // while it is showing the narrowed list -- otherwise switching to "me" would
   // hide the only control that switches back.
   const [familyChores, setFamilyChores] = useState<ChoreItem[]>([]);
+  // Parents run the chore chart from here too: add (for anyone, or from a
+  // person's column) and, in the full view, remove (docs/ACHIEVEMENTS.md).
+  const manager = canManageChores(user);
+  const [adding, setAdding] = useState<{ person?: string } | null>(null);
+  const removal = useChoreRemoval();
+  const members = useQuery({
+    queryKey: ['skylight-members'],
+    queryFn: () => api.getSkylightMembers(),
+    enabled: manager && Boolean(adding) && !adding?.person,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
 
   const fetchChores = async (): Promise<ChoresPayload> => {
     if (!user?.username) {
@@ -213,12 +231,12 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const allCompleted = totalCount > 0 && completedCount === totalCount;
 
   const renderExpandedChore = (chore: ChoreItem, color: string) => (
+    <div key={chore.id} className="flex items-center gap-1">
     <button
-      key={chore.id}
       type="button"
       onClick={() => handleToggleComplete(chore)}
       disabled={completingIds.has(chore.id)}
-      className="flex w-full items-center gap-3 rounded-2xl p-3 text-left shadow-[var(--os-shadow)] transition disabled:opacity-60"
+      className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl p-3 text-left shadow-[var(--os-shadow)] transition disabled:opacity-60"
       style={{ background: 'var(--os-card)' }}
     >
       <span
@@ -239,6 +257,20 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       )}
       {chore.reward ? <StarBadge count={chore.reward} /> : null}
     </button>
+    {manager && (
+      <button
+        type="button"
+        onClick={() => removal.ask(chore)}
+        disabled={removal.busy}
+        aria-label={`Remove ${chore.title}`}
+        data-testid="chore-remove"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition hover:bg-black/5 disabled:opacity-50"
+        style={{ color: 'var(--os-ink-faint)' }}
+      >
+        <Trash2 size={18} aria-hidden />
+      </button>
+    )}
+    </div>
   );
 
   const renderPersonColumn = (name: string, groupChores: ChoreItem[], color: string) => {
@@ -290,10 +322,69 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
               {g.items.map((c) => renderExpandedChore(c, color))}
             </div>
           ))}
+          {manager && name !== 'Unassigned' && (
+            <button
+              type="button"
+              onClick={() => setAdding({ person: name })}
+              data-testid="chore-add-for"
+              className="mt-1 flex min-h-11 items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed text-sm font-bold transition hover:bg-black/5"
+              style={{ borderColor: 'var(--os-line)', color: 'var(--os-ink-faint)' }}
+            >
+              <Plus size={16} aria-hidden /> Add for {name}
+            </button>
+          )}
         </div>
       </div>
     );
   };
+
+  /** Parents: a button that opens the add-chore sheet (for anyone on the chart). */
+  const addButton = (tone: 'planner' | 'card') =>
+    manager ? (
+      <button
+        type="button"
+        onClick={() => setAdding({})}
+        data-testid="chore-add"
+        className={
+          tone === 'planner'
+            ? 'inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-bold transition hover:bg-black/5'
+            : 'flex min-h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-600/60 text-sm text-slate-300 transition hover:border-slate-400 hover:text-white'
+        }
+        style={tone === 'planner' ? { color: 'var(--os-ember-deep)', background: 'var(--os-ember-soft)' } : undefined}
+      >
+        <Plus size={15} aria-hidden /> Add chore
+      </button>
+    ) : null;
+
+  // Above the full-screen view too: portalled to the body, outside the planner palette.
+  const dialogs = createPortal(
+    <>
+      <Modal isOpen={Boolean(adding)} onClose={() => setAdding(null)} size="md"
+        title={adding?.person ? `New chore for ${adding.person}` : 'New chore'}>
+        <div className="p-4 sm:p-5">
+          {adding && (
+            adding.person ? (
+              <AddChoreForm person={adding.person} personName={adding.person} autoFocus onAdded={() => setAdding(null)} />
+            ) : members.isError ? (
+              <p className="text-sm text-amber-300">The Skylight chore chart could not be read right now.</p>
+            ) : members.isLoading ? (
+              <div className="h-24 skeleton rounded-xl" aria-hidden />
+            ) : (
+              <AddChoreForm
+                people={(members.data ?? []).map((m) => ({ value: m.label, label: m.label, color: m.color }))}
+                autoFocus
+                onAdded={() => setAdding(null)}
+              />
+            )
+          )}
+        </div>
+      </Modal>
+      <Modal isOpen={Boolean(removal.pendingId)} onClose={removal.cancel} size="sm" title="Remove chore">
+        <div className="p-4 sm:p-5">{removal.prompt}</div>
+      </Modal>
+    </>,
+    document.body,
+  );
 
   const renderExpanded = () => {
     if (totalCount === 0) {
@@ -305,6 +396,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
           <p className="text-sm" style={{ color: 'var(--os-ink-faint)' }}>
             All clear for today!
           </p>
+          {manager && <div className="mt-4">{addButton('planner')}</div>}
         </div>
       );
     }
@@ -312,7 +404,8 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     const names = Object.keys(assigneeGroups);
     return (
       <>
-        <style>{`.osk-overlay{${isDark ? PLANNER_DARK : PLANNER_LIGHT}--wc-ink:var(--os-ink);--wc-ink-faint:var(--os-ink-faint);--wc-ink-strong:var(--os-ink);--wc-border:var(--os-line);--wc-hover:var(--os-paper-deep);background:var(--os-paper)!important;}`}</style>
+        {/* Dark paper is a faint tint (3% white), so the full view needs the app's dark base under it or the dashboard shows through. */}
+        <style>{`.osk-overlay{${isDark ? PLANNER_DARK : PLANNER_LIGHT}--wc-ink:var(--os-ink);--wc-ink-faint:var(--os-ink-faint);--wc-ink-strong:var(--os-ink);--wc-border:var(--os-line);--wc-hover:var(--os-paper-deep);background:${isDark ? 'linear-gradient(var(--os-paper),var(--os-paper)),rgba(2,6,23,0.98)' : 'var(--os-paper)'}!important;backdrop-filter:blur(24px);}`}</style>
         <div className="osk-chores flex h-full flex-col">
           <div className="mb-4 flex shrink-0 items-end gap-4">
             <div className="flex-1">
@@ -325,6 +418,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
                 {completedCount}/{totalCount} done
               </div>
               {renderScopeToggle()}
+              {addButton('planner')}
             </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-4 overflow-y-auto pb-2">
@@ -428,6 +522,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       <div className="flex flex-col items-center justify-center text-center h-full">
         <p className="text-sm text-slate-400">No chores assigned</p>
         <p className="text-xs text-slate-500">All clear for today!</p>
+        {manager && <div className="mt-3 w-full max-w-56">{addButton('card')}</div>}
       </div>
     ) : (
       // justify-between pushed the ring to the top and the list to the bottom,
@@ -475,10 +570,13 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         <div className="space-y-2 pr-1 flex-1 min-h-0 overflow-y-auto">
           {localChores.map(renderCompactChore)}
         </div>
+        {manager && <div className="mt-2 shrink-0">{addButton('card')}</div>}
       </div>
     );
 
   return (
+    <>
+    {dialogs}
     <WidgetCard
       title="Today's Chores"
       isLoading={isLoading}
@@ -499,6 +597,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     >
       {renderCompact()}
     </WidgetCard>
+    </>
   );
 };
 

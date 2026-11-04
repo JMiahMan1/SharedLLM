@@ -539,7 +539,7 @@ ALLOWED_TOOLS = {
     "lightcontrolrequest", "mediaplayrequest", "mediatransportrequest", "mediastatusrequest",
     "tvcastrequest", "videoplayrequest", "climaterequest", "securityrequest",
     "announcementrequest", "haservicerequest", "calendarrequest",
-    "noterequest", "mealplanrequest", "timerrequest", "talkrequest",
+    "noterequest", "mealplanrequest", "chorerequest", "timerrequest", "talkrequest",
     "websearchrequest", "webreadrequest", "webscraperrequest", "codesearchrequest", "dockerlogsrequest",
     "gitoperationrequest", "deploymentrequest", "capabilityindexrequest",
     "volumeinventoryrequest", "workspacefilereadrequest",
@@ -4002,6 +4002,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "calendarrequest": (EXECUTION_SVC, "/execute/calendar"),
                 "noterequest": (EXECUTION_SVC, "/execute/note"),
                 "mealplanrequest": (EXECUTION_SVC, "/execute/meal_plan"),
+                "chorerequest": (EXECUTION_SVC, "/execute/chores"),
                 "timerrequest": (EXECUTION_SVC, "/execute/timer"),
                 "talkrequest": (EXECUTION_SVC, "/execute/talk"),
                 "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
@@ -4160,6 +4161,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _uc = {
                         "user": creds.user,
                         "is_admin": creds.is_admin,
+                        # "voice" when recognised by voice alone: handlers refuse
+                        # what a voice should not unlock (ha_client, chores).
+                        "identified_by": getattr(creds, "identified_by", None),
                         "api_key": creds.api_key,
                         "ha_url": creds.ha_url,
                         "ha_token": creds.ha_token,

@@ -104,8 +104,9 @@ As built (see "Bonus stars" below): stars are granted through geo's ledger
 (`POST /api/geo/stars`, reasons `bonus | achievement | game | chore | manual`)
 and mirrored to Skylight through execution
 (`POST /api/integrations/skylight/stars`). Everything is recorded in the
-ledger first, so a Skylight outage cannot lose an award. Creating Skylight
-chores and rewards from Jarvis is not built.
+ledger first, so a Skylight outage cannot lose an award. Jarvis adds, changes
+and removes Skylight chores (see "Managing chores"); creating rewards is not
+built.
 
 ## Progress
 
@@ -208,3 +209,42 @@ Implementation: `_skylight_chore_ids` in `services/execution/main.py` now
 returns `(series, date, "HH:MM" | None)` via a strict regex; the complete and
 uncomplete routes add `instance_time` only when the id carried one. Exact-body
 tests live in `services/execution/tests/test_skylight_proxy.py`.
+
+## Managing chores (add, change, remove)
+
+Parents run the Skylight chore chart from Jarvis, by chat or voice ("give Noah
+'feed the chickens' every day at 7am, 2 stars", "take trash off Gracie's
+chores") or from the **Guardian** page (each child's chores for today, with
+add and remove). The chores live in Skylight, so they show on the family's
+Skylight screen as well.
+
+**Who may:**
+
+| Action | Who |
+|---|---|
+| List and tick off their own chores | anyone |
+| Add a chore for anyone | admins, the father, the mother (also by voice alone) |
+| Change or remove a chore, tick off someone else's | admins, the father, the mother; **never from a voice alone** (`identified_by: "voice"`), because a voice can be imitated and chores will gate screen time |
+| See another member's chores (`?scope=<name>`) | admins, the father, the mother |
+
+**Skylight calls** (private API, all under `/api/frames/{frame}`; documented by
+`chrischall/skylight-mcp` `src/tools/chores.ts` and `members.ts`):
+
+| Call | Use |
+|---|---|
+| `GET /categories` | the members; a chore is assigned by its member's category id (no assignee field). Calendar-only categories are skipped |
+| `POST /chores` | a one-off chore for one person (one call per person): `summary`, `category_id`, `start`, `start_time`, `reward_points`, `emoji_icon`, `description` |
+| `POST /chores/create_multiple` | a repeating chore for one or more people: `category_ids`, `recurrence_set: ["RRULE:..."]`, `recurring_until` |
+| `PUT /chores/{id}` | change it; `apply_to` `one` or `all` |
+| `DELETE /chores/{id}?apply_to=one\|all` | remove that day of a repeating chore, or all of it; a one-off takes no `apply_to` |
+
+Repeats are written in plain words and turned into rules
+(`services/execution/skylight_chores.py`): daily, weekdays, weekends, weekly
+(the start day's weekday), days like "mon and wed", or an RRULE.
+
+**Where:** `services/execution/skylight_chores.py` (the calls),
+`services/execution/handlers/chores.py` (the assistant's `ChoreRequest`,
+`/execute/chores`), execution routes `GET /api/integrations/skylight/members`,
+`POST /api/integrations/skylight/chores`, `PATCH`/`DELETE
+/api/integrations/skylight/chores/{id}`, proxied by the gateway behind
+`_require_chore_manager`; the UI is `components/guardian/ChoresCard.tsx`.
