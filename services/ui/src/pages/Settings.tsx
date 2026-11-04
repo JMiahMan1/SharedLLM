@@ -467,7 +467,7 @@ const NotificationsRow = () => {
 
 /**
  * Opt-in auto drop-in. This is a per-device choice: only the device that
- * enables it opens its microphone and speaker when a family call starts.
+ * enables it answers a call to its owner by itself, microphone and speaker on.
  */
 const FamilyDropInSection = () => {
   const [enabled, setEnabled] = useState(false);
@@ -506,8 +506,8 @@ const FamilyDropInSection = () => {
         <div className="min-w-0">
           <p className="text-white text-sm font-medium">Auto drop-in on this device</p>
           <p className="text-xs text-slate-400 mt-0.5">
-            When a family call starts, this device joins with its microphone and speaker after a
-            short beep. Off by default; calls still appear in the drop-in banner.
+            When someone calls you, this device answers by itself after a short chime, like an
+            Alexa drop-in. Off by default: calls ring, and you answer or decline.
           </p>
         </div>
         <Toggle
@@ -520,7 +520,7 @@ const FamilyDropInSection = () => {
       </div>
       <p className="px-1 text-[11px] leading-relaxed text-slate-500">
         This is a per-device setting. The first time, the browser or phone may ask for microphone
-        permission. If auto-join is blocked, use the Drop in banner instead.
+        permission. If auto-answer is blocked, the call shows a Join banner instead.
       </p>
     </div>
   );

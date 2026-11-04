@@ -1008,6 +1008,10 @@ export interface ActiveCall {
   name: string;
   started_at: number;
   participants: CallParticipant[];
+  /** The call is ringing this person (for about a minute after it starts). */
+  ringing?: boolean;
+  /** Who started the call, when they rang the conversation. */
+  caller?: string;
 }
 
 export interface SmokeTestResult {

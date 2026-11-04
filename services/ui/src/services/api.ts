@@ -2466,6 +2466,16 @@ export const api = {
     return resp.data.calls;
   },
 
+  /** Ring the conversation's other members for a call you just started. */
+  async ringCall(room: string): Promise<void> {
+    await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`);
+  },
+
+  /** Stop a call ringing you, and let the caller know. */
+  async declineCall(room: string): Promise<void> {
+    await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/decline`);
+  },
+
   async getStars(userId?: string): Promise<StarsResponse> {
     const query = new URLSearchParams();
     withUserParam(query, userId);

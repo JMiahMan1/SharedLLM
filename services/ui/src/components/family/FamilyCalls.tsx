@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Phone, RefreshCw, Users } from 'lucide-react';
 import { api } from '../../services/api';
@@ -16,10 +17,26 @@ const REFRESH_MS = 15_000;
  * the family's rooms live, but the call itself is a peer-to-peer WebRTC call
  * signalled by the Jarvis gateway. A room token is only the shared name both
  * people join; no Nextcloud call is joined or opened in another tab.
+ *
+ * Calling rings the other members. A device with auto drop-in on (Settings)
+ * answers by itself, like an Alexa drop-in; any other gets an incoming call.
+ * ``?answer=<room>`` (the Answer button on the phone's call notice) joins
+ * that call as soon as the tab opens.
  */
 export default function FamilyCalls() {
   const { call, activeCalls, startCall } = useCall();
   const [starting, setStarting] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const answer = searchParams.get('answer');
+
+  useEffect(() => {
+    if (!answer) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete('answer');
+    setSearchParams(params, { replace: true });
+    const ringing = activeCalls.find((active) => active.token === answer);
+    void startCall(answer, ringing?.name || 'Family call');
+  }, [answer, activeCalls, searchParams, setSearchParams, startCall]);
   const {
     data: conversations = [],
     isLoading,
@@ -66,10 +83,11 @@ export default function FamilyCalls() {
             <Phone size={18} />
           </span>
           <div className="min-w-0">
-            <h2 className="font-semibold text-slate-100">Drop in on family</h2>
+            <h2 className="font-semibold text-slate-100">Call family</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
-              Start a drop-in call with the family group or one person. The call opens inside
-              Jarvis, and you can keep using the rest of the app while you talk.
+              Call the family group or one person. Phones with auto drop-in on answer by
+              themselves; everyone else gets a ringing call to answer. You can keep using the rest
+              of Jarvis while you talk.
             </p>
           </div>
         </div>
@@ -144,7 +162,7 @@ export default function FamilyCalls() {
                     ? `Show the ${conversation.display_name} call`
                     : active
                       ? `Join the ${conversation.display_name} call`
-                      : `Drop in on ${conversation.display_name}`
+                      : `Call ${conversation.display_name}`
                 }
                 className={`flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
@@ -153,7 +171,7 @@ export default function FamilyCalls() {
                 }`}
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Phone size={15} />}
-                {busy ? 'Starting…' : inThisCall ? 'Open' : active ? 'Join' : 'Drop in'}
+                {busy ? 'Calling…' : inThisCall ? 'Open' : active ? 'Join' : 'Call'}
               </button>
             </div>
           );
@@ -161,8 +179,9 @@ export default function FamilyCalls() {
       </div>
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
-        Drop-in calls use your microphone and optional camera, and nothing is recorded. Anyone in
-        the family can join while the call is live.
+        Calls use your microphone and optional camera, and nothing is recorded. Anyone in the
+        conversation can join while the call is live. Turn on auto drop-in for a device in
+        Settings → Family drop-in.
       </p>
     </section>
   );

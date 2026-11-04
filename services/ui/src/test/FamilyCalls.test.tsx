@@ -38,7 +38,7 @@ describe('family calls', () => {
     expect(within(calls).queryByText('Note to self')).not.toBeInTheDocument();
     expect(within(calls).queryByText(/microphone or speaker/i)).not.toBeInTheDocument();
 
-    await user.click(within(calls).getByRole('button', { name: 'Drop in on Family' }));
+    await user.click(within(calls).getByRole('button', { name: 'Call Family' }));
     await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-family', 'Family'));
   });
 
@@ -69,5 +69,15 @@ describe('family calls', () => {
 
     expect(await screen.findByText('Mom in the call')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Join the Family call' })).toHaveTextContent('Join');
+  });
+
+  it("answers the call from the phone notice's Answer link", async () => {
+    const startCall = vi.spyOn(callFallback, 'startCall').mockResolvedValue(undefined);
+    server.use(http.get('/api/communication/talk/conversations', () => ok({ conversations })));
+
+    renderWithProviders(<Family />, { route: '/family?tab=calls&answer=room-michele' });
+
+    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-michele', 'Family call'));
+    expect(startCall).toHaveBeenCalledTimes(1);
   });
 });
