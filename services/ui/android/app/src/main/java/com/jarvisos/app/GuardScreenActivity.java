@@ -57,9 +57,11 @@ public class GuardScreenActivity extends ComponentActivity {
     private final Runnable kioskTick = new Runnable() {
         @Override
         public void run() {
-            if (!kiosk) return;
-            if (!lockTaskWanted()) {
-                // A parent lifted the lock (or their unlock window opened): leave the kiosk.
+            if (!lockedMode) return;
+            if (kiosk ? !lockTaskWanted() : !GuardRules.stillLocked(GuardApi.isLocked(GuardScreenActivity.this),
+                    GuardApi.isUnlocked(GuardScreenActivity.this))) {
+                // A parent lifted the lock, gave more time, or their unlock
+                // window opened: the cover goes (and the kiosk with it).
                 finish();
                 return;
             }
@@ -71,6 +73,18 @@ public class GuardScreenActivity extends ComponentActivity {
     protected void onResume() {
         super.onResume();
         if (lockedMode && lockTaskWanted()) enterKiosk();
+        if (lockedMode) {
+            // Every phone, kiosk or not, watches for the lock lifting.
+            kioskCheck.removeCallbacks(kioskTick);
+            kioskCheck.postDelayed(kioskTick, KIOSK_CHECK_MS);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        // The watch runs again on resume; a kiosk keeps its own going.
+        if (!kiosk) kioskCheck.removeCallbacks(kioskTick);
+        super.onPause();
     }
 
     @Override

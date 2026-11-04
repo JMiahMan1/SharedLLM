@@ -32,6 +32,7 @@ import {
 import toast from 'react-hot-toast';
 import Modal from '../components/ui/Modal';
 import { api } from '../services/api';
+import type { ExecutionResponse } from '../types/api';
 import { saveNote } from '../lib/noteSave';
 import { useArrange } from '../components/notes/useArrange';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
@@ -965,10 +966,26 @@ export default function Notes() {
     const failed: string[] = [];
     let reason = '';
     void previousFor;
+    // One retry for a stalled Nextcloud; a retry that no longer finds the
+    // note means the first try moved it after all (the answer was lost).
+    const moveOnce = async (note: NoteSummary, destination: string, retry: boolean): Promise<ExecutionResponse> => {
+      try {
+        const res = await api.moveNote({ path: note.path, destination, storage: STORAGE, as_user: asUser });
+        if (res.status === 'SUCCESS' || !retry) return res;
+      } catch (err) {
+        if (!retry) throw err;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+      const again = await moveOnce(note, destination, false);
+      if (again.status !== 'SUCCESS' && /HTTP 404/.test(again.message || '')) {
+        return { ...again, status: 'SUCCESS', detail: { path: destination } };
+      }
+      return again;
+    };
     for (const note of notes) {
       try {
         const destination = destinationFor(note);
-        const res = await api.moveNote({ path: note.path, destination, storage: STORAGE, as_user: asUser });
+        const res = await moveOnce(note, destination, true);
         if (res.status !== 'SUCCESS') throw new Error(res.message || 'Could not move the note');
         moved.push({
           from: note.path,

@@ -6649,16 +6649,13 @@ async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
                               actions: list[dict] | None = None) -> None:
     """Tell people about a screen-time or family-safety event.
 
-    ``actions`` replaces the tap on ``url`` with buttons when given (a parent's
-    Approve / Disapprove); without them the notice keeps its view behaviour. A
-    notice that fails never fails the request.
+    ``actions`` adds buttons (a parent's Approve / Disapprove); a tap on the
+    notice itself still opens ``url``, where the same request can be answered.
+    A notice that fails never fails the request.
     """
     for user in users or []:
         try:
-            if actions:
-                payload = _notify.notice(user, "family_safety", title, body, actions=actions, tag=f"screen-time:{user}")
-            else:
-                payload = _notify.notice(user, "family_safety", title, body, url=url, tag=f"screen-time:{user}")
+            payload = _notify.notice(user, "family_safety", title, body, url=url, actions=actions, tag=f"screen-time:{user}")
             await _notify.send(payload)
         except Exception as exc:  # a missed notice never fails the request
             log.warning("[screen-time] notice to %s failed: %s", user, exc)
@@ -6692,7 +6689,13 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         for a in today.get("apps") or []
         if isinstance(a, dict) and a.get("package")
     }
-    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now, apps_ms)
+    granted_until = None
+    if body.get("granted_until"):
+        try:
+            granted_until = datetime.fromisoformat(str(body["granted_until"])).astimezone(now.tzinfo)
+        except ValueError:
+            granted_until = None
+    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now, apps_ms, granted_until)
     answer = {
         "status": "SUCCESS",
         "username": username,
@@ -7124,7 +7127,8 @@ async def screen_time_ask(request: Request):
             body.get("notify") or [],
             "More screen time?",
             f"{asked.get('username')} asks for {asked.get('minutes')} more minutes today{note}.",
-            "/fitness",
+            # The child's page, whose Overview answers it (Grant / Not today).
+            f"/family/member/{asked.get('username')}",
             actions=_decide_actions("more_time_decide", request_id, "grant") if request_id is not None else None,
         )
     return JSONResponse(status_code=status, content=body)

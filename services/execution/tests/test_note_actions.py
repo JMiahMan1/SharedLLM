@@ -693,6 +693,31 @@ async def test_move_sends_webdav_move_and_records_the_original_path(provider, mo
     assert written["notes"]["Notes/Archive/Old.md"]["previousPath"] == "Notes/Old.md"
 
 
+async def test_a_move_that_happened_is_reported_moved_even_when_nextcloud_then_stalls(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "MOVE":
+            return {"status_code": 201, "text": ""}
+        if method == "PROPFIND":
+            return {"status_code": 404, "text": ""}
+        # Reading the note, the index and writing it all stall.
+        raise TimeoutError("connect stalled")
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    monkeypatch.setattr(note_handler.asyncio, "sleep", _no_sleep, raising=False)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Old.md", destination="Notes/Archive/Old.md")
+    )
+
+    assert result.status == "SUCCESS"
+    assert result.detail["path"] == "Notes/Archive/Old.md"
+
+
+async def _no_sleep(*_args, **_kwargs):
+    return None
+
+
 async def test_move_never_overwrites_an_existing_note(provider, monkeypatch):
     import json as _json
 

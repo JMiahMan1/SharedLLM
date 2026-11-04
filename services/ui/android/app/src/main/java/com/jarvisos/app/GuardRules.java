@@ -197,6 +197,15 @@ public final class GuardRules {
         return !lockOverlayExempt(pkg, alwaysAllowed);
     }
 
+    /**
+     * Whether the plain locked cover should stay up: still locked by the
+     * server's status and not inside a parent's unlock window. False once a
+     * parent gives more time or lifts the lock, so the cover closes itself.
+     */
+    public static boolean stillLocked(boolean locked, boolean unlocked) {
+        return locked && !unlocked;
+    }
+
     /** Android's VPN dialogs; the one that manages a running VPN can disconnect the web filter. */
     static final String VPN_DIALOGS = "com.android.vpndialogs";
 

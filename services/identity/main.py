@@ -4590,6 +4590,29 @@ def _granted_minutes(session: Session, username: str, day: str) -> int:
     return sum(r.granted_minutes for r in rows)
 
 
+def _granted_until(session: Session, username: str, day: str) -> str | None:
+    """When the latest time a parent gave on ``day`` runs out (ISO, UTC), or
+    None: given minutes count from the moment they were given, so a grant at
+    bedtime or in school hours opens the phone for that long."""
+    rows = session.exec(
+        select(ScreenTimeRequest).where(
+            ScreenTimeRequest.username == username,
+            ScreenTimeRequest.day == day,
+            ScreenTimeRequest.status == "granted",
+        )
+    ).all()
+    ends = []
+    for r in rows:
+        try:
+            given = datetime.fromisoformat(str(r.decided_at))
+        except ValueError:
+            continue
+        if given.tzinfo is None:
+            given = given.replace(tzinfo=UTC)
+        ends.append(given + timedelta(minutes=r.granted_minutes or 0))
+    return max(ends).isoformat() if ends else None
+
+
 # An Android package name: dotted segments of letters, digits and underscores.
 _PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
 # A domain the web filter matches (and every name under it).
@@ -4846,6 +4869,7 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "username": subject.username,
         "rules": _screen_rules(session, subject.username),
         "bonus_min": _granted_minutes(session, subject.username, day) if day else 0,
+        "granted_until": _granted_until(session, subject.username, day) if day else None,
         # A grown member manages their own rules; a minor's are their parents'.
         "can_manage": _may_edit_screen_time(caller, subject),
         # Whether the caller sees the technical side (the gateway strips it

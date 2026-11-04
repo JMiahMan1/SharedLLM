@@ -396,11 +396,14 @@ def evaluate(
     bonus_min: int,
     now: datetime,
     apps_used_ms: dict[str, int] | None = None,
+    granted_until: datetime | None = None,
 ) -> dict[str, Any]:
     """The member's screen-time state right now.
 
     ``now`` must be timezone-aware in the household's zone; ``apps_used_ms``
-    is today's foreground time per package. Returns the limit,
+    is today's foreground time per package. ``granted_until`` is when the
+    latest time a parent gave runs out: until then bedtime and school hours
+    do not lock (the minutes also extend the day's limit). Returns the limit,
     use and remaining minutes (None when there is no limit), the active
     routine, and ``locked`` with a ``reason`` and an ``until`` (ISO) when the
     lock lifts on its own (the limit's lock lifts at midnight).
@@ -435,12 +438,15 @@ def evaluate(
         except ValueError:
             paused_until = None
     paused = bool(rules.get("paused")) or (paused_until is not None and now < paused_until)
+    # Time a parent gave (asked for or not) is time to use now, even at
+    # bedtime or in school hours; a parent's own pause still wins.
+    granted = granted_until if granted_until is not None and now < granted_until else None
 
     if paused:
         locked, reason, until = True, "paused", (paused_until if paused_until and now < paused_until else None)
-    elif bedtime:
+    elif bedtime and not granted:
         locked, reason, until = True, "bedtime", bedtime_until
-    elif school:
+    elif school and not granted:
         locked, reason, until = True, "school", school_until
     elif remaining == 0:
         locked, reason, until = True, "limit", midnight
@@ -448,11 +454,15 @@ def evaluate(
         locked, reason, until = False, None, None
     blocked_apps, app_minutes_left = apps_state(rules, apps_used_ms, now)
     lock_at, lock_reason = (None, None) if locked else next_lock(rules, now, remaining)
+    if granted is not None and not locked and (bedtime or school) and (lock_at is None or granted < lock_at):
+        # The given time runs out in the middle of bedtime or school hours.
+        lock_at, lock_reason = granted, "bedtime" if bedtime else "school"
 
     return {
         "limit_min": None if limit is None else int(limit),
         "used_min": used_min,
         "bonus_min": bonus,
+        "granted_until": granted.isoformat() if granted else None,
         "remaining_min": remaining,
         "bedtime_active": bedtime,
         "school_active": school,
