@@ -437,6 +437,9 @@ class NoteRequest(BaseRequest):
     meta: dict | None = None # meta_write: the shared notes index to store
     if_match: str | None = None # write: the ETag the note was opened at; a newer file is refused (412)
     if_none_match: bool = False # write without path: refuse (412) rather than overwrite a note already there
+    plain: bool = False # write: the note has no Jarvis header (made in Nextcloud Notes); keep it that way
+    paths: list[str] | None = None # sync_rag: just these notes
+    tags: list[str] | None = None # sync_rag: only notes carrying one of these #labels
     version: str | None = None # version_read / version_restore: a version id from ``versions``
     share_with: str | None = None # share_add: the Nextcloud user id to share with
     share_id: str | None = None # share_remove: the share's id from ``shares``

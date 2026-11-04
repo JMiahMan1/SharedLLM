@@ -33,6 +33,7 @@ import toast from 'react-hot-toast';
 import Modal from '../components/ui/Modal';
 import { api } from '../services/api';
 import { saveNote } from '../lib/noteSave';
+import { useArrange } from '../components/notes/useArrange';
 import RichNoteEditor, { type RichNoteEditorHandle } from '../components/notes/RichNoteEditor';
 import NoteHistory from '../components/notes/NoteHistory';
 import ReminderPanel, { type Place } from '../components/notes/ReminderPanel';
@@ -64,6 +65,8 @@ import {
   matchesNoteQuery,
   mergeLegacyMeta,
   noteBody,
+  hasStoredHeader,
+  arrangeNotes,
   noteDisplayBody,
   parseChecklist,
   placeReminderText,
@@ -113,6 +116,18 @@ interface DraftState {
   restoredAt?: number;
   /** An offline edit whose replay found the note changed elsewhere: open on the choice. */
   conflict?: boolean;
+  /** The note has no Jarvis header (written in Nextcloud Notes): saved back the same way. */
+  plain?: boolean;
+}
+
+/**
+ * The name a note is saved under: its title, or (untitled, as in Nextcloud
+ * Notes) its first line, without markdown marks.
+ */
+function effectiveTitle(draft: { title: string; content: string }): string {
+  const first = draft.content.split('\n').find((line) => line.trim()) ?? '';
+  const plain = first.replace(/^\s*(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|\d+\.\s+)/, '').replace(/[*_~`]/g, '').trim();
+  return draft.title.trim() || plain.slice(0, 60).trim() || 'Untitled note';
 }
 
 /** What a save came to: saved (with the new version), refused as a conflict, or failed. */
@@ -403,6 +418,15 @@ export default function Notes() {
     return sortNotesByIndex(filtered, index);
   }, [view, mainNotes, archivedNotes, trashedNotes, tagFilter, parsedQuery, contents, index]);
 
+  // Arranging: press and hold a card, drag it over another, let go. The new
+  // order goes in the shared index, so every device shows the same shelf.
+  // Only the whole shelf can be arranged (not a search or a label's notes).
+  const canArrange = view === 'notes' && !selectMode && !search.trim() && !tagFilter;
+  const { arranging, cardProps, swallowClick } = useArrange(canArrange, (from, to) => {
+    const shelf = visible.map((n) => n.path);
+    void persistIndex((current) => arrangeNotes(current, shelf, from, to));
+  });
+
   // Unsaved edits this device kept (lib/noteDrafts.ts). Re-read whenever the
   // editor closes, so a draft left behind by a failed save is offered at once.
   const [draftsVersion, bumpDrafts] = useReducer((n: number) => n + 1, 0);
@@ -443,6 +467,7 @@ export default function Notes() {
       pinned: Boolean(meta.pinned),
       etag,
       base: noteBody(text),
+      plain: !hasStoredHeader(text),
     });
     const cached = contents[note.path];
     if (typeof cached === 'string') {
@@ -588,7 +613,7 @@ export default function Notes() {
    * skips both checks; it backs the conflict prompt's "Overwrite".
    */
   const persistDraft = async (draft: DraftState, force = false): Promise<PersistResult> => {
-    const title = draft.title.trim() || draft.content.split('\n')[0].slice(0, 60).trim() || 'Untitled note';
+    const title = effectiveTitle(draft);
     // A different folder is a move; saving outside Notes/ would hide the note.
     const category = categoryFor(draft.folder);
     const previous = draft.path && draft.original ? { ...draft.original, path: draft.path } : undefined;
@@ -612,6 +637,7 @@ export default function Notes() {
         previous,
         asUser,
         ifMatch: force ? undefined : draft.etag,
+        plain: draft.plain,
       });
       if (saved.conflict) return { status: 'conflict' };
       const res = saved.response;
@@ -643,7 +669,7 @@ export default function Notes() {
         });
       }
       if (saved.leftOldCopy) toast.error('Saved under the new name, but the old copy is still there');
-      return { status: 'saved', path: savedPath, title, etag: saved.etag };
+      return { status: 'saved', path: savedPath, title: saved.title ?? title, etag: saved.etag };
     } catch (err) {
       if (isOfflineError(err)) return { status: 'failed', message: OFFLINE_MESSAGE, offline: true };
       return { status: 'failed', message: errorText(err, 'Save failed') };
@@ -935,8 +961,10 @@ export default function Notes() {
   ) => {
     if (!notes.length || bulkBusy) return;
     setBulkBusy(true);
-    const moved: Array<{ from: string; to: string; previousPath?: string | null; note: NoteSummary; backPrevious: string | null }> = [];
+    const moved: Array<{ from: string; to: string; note: NoteSummary; backPrevious: string | null }> = [];
     const failed: string[] = [];
+    let reason = '';
+    void previousFor;
     for (const note of notes) {
       try {
         const destination = destinationFor(note);
@@ -945,30 +973,21 @@ export default function Notes() {
         moved.push({
           from: note.path,
           to: (res.detail?.path as string | undefined) || destination,
-          previousPath: previousFor?.(note),
           note,
           backPrevious: undoPreviousFor(note.path),
         });
-      } catch {
+      } catch (err) {
         failed.push(note.title);
+        reason = reason || errorText(err, 'Could not move the note');
       }
     }
-    if (moved.length) {
-      await persistIndex((current) => {
-        let next = current;
-        for (const move of moved) {
-          const existing = indexEntry(next, move.from);
-          next = forgetIndexEntry(next, move.from);
-          const rest = { ...existing };
-          delete rest.previousPath;
-          next = setIndexEntry(next, move.to, move.previousPath ? { ...rest, previousPath: move.previousPath } : rest);
-        }
-        return next;
-      });
-    }
+    // Each move already updated the shared index on the server (where the
+    // note came from, its pin and colour): read it back rather than write a
+    // second copy over it, which met a locked file and showed an error.
+    if (moved.length) await queryClient.invalidateQueries({ queryKey: indexKey });
     setBulkBusy(false);
     exitSelection();
-    if (failed.length) toast.error(`Could not move ${failed.length} note${failed.length === 1 ? '' : 's'}: ${failed.join(', ')}`);
+    if (failed.length) toast.error(`Could not move ${failed.length} note${failed.length === 1 ? '' : 's'} (${failed.join(', ')}): ${reason}`);
     if (moved.length && done) {
       // Undo puts back only the notes that actually moved, each where it was.
       const back = new Map(moved.map((m) => [m.to, m]));
@@ -990,26 +1009,25 @@ export default function Notes() {
     setBulkBusy(true);
     const deleted: string[] = [];
     const failed: string[] = [];
+    let reason = '';
     for (const note of notes) {
       try {
         const res = await api.deleteNote(note.title, STORAGE, note.path, asUser);
         if (res.status !== 'SUCCESS') throw new Error(res.message || 'Delete failed');
         deleted.push(note.path);
-      } catch {
+      } catch (err) {
         failed.push(note.title);
+        reason = reason || errorText(err, 'Delete failed');
       }
     }
     if (deleted.length) {
       cancelReminders(deleted);
-      await persistIndex((current) => {
-        let next = current;
-        for (const path of deleted) next = forgetIndexEntry(next, path);
-        return next;
-      });
+      // The server forgot each note in the index as it deleted it.
+      await queryClient.invalidateQueries({ queryKey: indexKey });
     }
     setBulkBusy(false);
     exitSelection();
-    if (failed.length) toast.error(`Could not delete ${failed.length} note${failed.length === 1 ? '' : 's'}: ${failed.join(', ')}`);
+    if (failed.length) toast.error(`Could not delete ${failed.length} note${failed.length === 1 ? '' : 's'} (${failed.join(', ')}): ${reason}`);
     else if (deleted.length) toast.success(`Deleted ${deleted.length} note${deleted.length === 1 ? '' : 's'}`);
     void refresh();
   };
@@ -1106,21 +1124,33 @@ export default function Notes() {
   };
 
   const [syncing, setSyncing] = useState(false);
-  const syncRag = async () => {
+  const [teachOpen, setTeachOpen] = useState(false);
+  /**
+   * Teach Jarvis some notes: all of them, one folder, the notes with a
+   * #label, or chosen notes. Each one is indexed again, so a note that
+   * changed is re-learned rather than learned twice.
+   */
+  const syncRag = async (scope: { paths?: string[]; directories?: string[]; tags?: string[] } = {}, what = 'your notes') => {
     setSyncing(true);
+    setTeachOpen(false);
     try {
-      const res = await api.syncNotesRag({ storage: STORAGE });
+      const res = await api.syncNotesRag({ storage: STORAGE, ...scope });
       if (res.status !== 'SUCCESS') {
-        toast.error(res.message || 'RAG sync failed');
+        toast.error(res.message || 'Jarvis could not learn those notes');
         return;
       }
-      toast.success(res.message || 'Notes indexed into Jarvis memory');
-    } catch {
-      toast.error('RAG sync failed');
+      toast.success(`Jarvis learned ${what}. ${res.message || ''}`.trim());
+    } catch (err) {
+      toast.error(errorText(err, 'Jarvis could not learn those notes'));
     } finally {
       setSyncing(false);
     }
   };
+  // Folders inside Notes/ (the "groups" Nextcloud Notes calls categories).
+  const noteFolders = useMemo(
+    () => Array.from(new Set(mainNotes.map((n) => folderFromPath(n.path)).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [mainNotes],
+  );
 
   const openDraftKey = editing?.draft ? (editing.draft.draftKey ?? editing.draft.path) : undefined;
   const pendingDrafts = Object.entries(storedDrafts)
@@ -1178,15 +1208,44 @@ export default function Notes() {
               className="glass-input min-h-11 pl-8 pr-3 py-2 text-base sm:text-sm w-full sm:w-56"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => void syncRag()}
-            disabled={syncing}
-            className="glass-button min-h-11 px-3 py-2 text-xs disabled:opacity-60"
-            title="Index notes into Jarvis memory, so you can ask Jarvis about them"
-          >
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Teach Jarvis
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setTeachOpen((v) => !v)}
+              disabled={syncing}
+              aria-expanded={teachOpen}
+              data-testid="teach-jarvis"
+              className="glass-button min-h-11 px-3 py-2 text-xs disabled:opacity-60"
+              title="Index notes into Jarvis memory, so you can ask Jarvis about them"
+            >
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Teach Jarvis
+            </button>
+            {teachOpen && (
+              <div
+                role="menu"
+                data-testid="teach-menu"
+                className="absolute right-0 z-30 mt-2 max-h-80 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-white/10 bg-slate-900/98 p-2 shadow-xl"
+              >
+                <p className="px-2 pb-1 text-[11px] text-slate-400">What should Jarvis learn?</p>
+                <button type="button" role="menuitem" onClick={() => void syncRag({}, 'all your notes')} className="flex min-h-11 w-full items-center rounded-xl px-2 text-left text-sm text-slate-100 hover:bg-white/10">
+                  All notes
+                </button>
+                {noteFolders.length > 0 && <p className="px-2 pt-2 text-[10px] uppercase tracking-wider text-slate-500">A folder</p>}
+                {noteFolders.map((folder) => (
+                  <button key={folder} type="button" role="menuitem" onClick={() => void syncRag({ directories: [`Notes/${folder}`] }, `the ${folder} folder`)} className="flex min-h-11 w-full items-center rounded-xl px-2 text-left text-sm text-slate-100 hover:bg-white/10">
+                    📁 {folder}
+                  </button>
+                ))}
+                {tagChips.length > 0 && <p className="px-2 pt-2 text-[10px] uppercase tracking-wider text-slate-500">A label</p>}
+                {tagChips.map(({ tag }) => (
+                  <button key={tag} type="button" role="menuitem" onClick={() => void syncRag({ tags: [tag] }, `the notes labelled #${tag}`)} className="flex min-h-11 w-full items-center rounded-xl px-2 text-left text-sm text-slate-100 hover:bg-white/10">
+                    #{tag}
+                  </button>
+                ))}
+                <p className="px-2 pt-2 text-[11px] text-slate-500">To teach one note or a few, select them, or use Teach Jarvis in an open note.</p>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={toggleLayout}
@@ -1287,6 +1346,17 @@ export default function Notes() {
         )}
       </div>
 
+      {arranging && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed z-50 max-w-[60vw] -translate-x-1/2 -translate-y-full truncate rounded-xl border border-purple-400/50 bg-slate-900/95 px-3 py-2 text-sm text-slate-100 shadow-xl"
+          style={{ left: arranging.x, top: arranging.y - 12 }}
+          data-testid="arranging"
+        >
+          {arranging.title}
+        </div>
+      )}
+
       {selectMode && (
         <div
           data-testid="bulk-bar"
@@ -1361,6 +1431,21 @@ export default function Notes() {
               className="min-h-9 rounded-full px-3 text-[11px] text-emerald-300 hover:bg-white/10 disabled:opacity-50"
             >
               Restore
+            </button>
+          )}
+          {view !== 'trash' && (
+            <button
+              type="button"
+              disabled={!selectedNotes.length || syncing}
+              onClick={() => {
+                const chosen = selectedNotes;
+                exitSelection();
+                void syncRag({ paths: chosen.map((n) => n.path) }, `${chosen.length} note${chosen.length === 1 ? '' : 's'}`);
+              }}
+              data-testid="bulk-teach"
+              className="min-h-9 rounded-full px-3 text-[11px] text-sky-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              Teach Jarvis
             </button>
           )}
           {view === 'trash' && (
@@ -1467,9 +1552,13 @@ export default function Notes() {
                 data-testid="note-card"
                 className={`mb-4 break-inside-avoid rounded-2xl border p-4 transition-colors cursor-pointer relative group ${
                   selectMode && selected.has(note.path) ? 'border-purple-400/70 ring-2 ring-purple-500/40' : 'border-white/10 hover:border-purple-500/40'
-                }`}
+                } ${arranging?.path === note.path ? 'opacity-40' : ''} ${
+                  arranging?.over === note.path ? 'ring-2 ring-purple-400' : ''
+                } ${arranging ? 'select-none' : ''}`}
                 style={{ background: NOTE_COLOR_BG[color] }}
+                {...cardProps(note.path, note.title)}
                 onClick={() => {
+                  if (swallowClick()) return;
                   if (selectMode) {
                     toggleSelected(note.path);
                     return;
@@ -1712,6 +1801,7 @@ export default function Notes() {
                   : undefined
               }
               onPersist={persistDraft}
+              onTeach={(path, title) => void syncRag({ paths: [path] }, `“${title}”`)}
               onKeepBoth={keepBoth}
               onDone={finishEditing}
               onUseStored={() => reopenStored(editing.draft?.path, editing.draft?.draftKey ?? editing.draft?.path)}
@@ -1767,10 +1857,10 @@ function snapshotOf(draft: DraftState): string {
  * The note editor. Its draft lives here, so typing re-renders this sheet
  * only, not the page and every card behind it.
  *
- * Autosave: an open note that keeps its title and folder saves itself
- * AUTOSAVE_MS after typing pauses, in place and only over the version it was
- * opened at. A new note, or a rename or move, waits for Save or close (one
- * file per name, not one per keystroke). Every change the server does not
+ * Autosave: every note saves itself AUTOSAVE_MS after typing pauses, in place
+ * and only over the version it was opened at. A new note saves once it has
+ * something in it (under a free name, never over another note); a rename or
+ * move waits twice as long, so a new title is one move, not one per letter. Every change the server does not
  * have yet is also kept on this device (lib/noteDrafts.ts), so a closed app
  * loses nothing.
  */
@@ -1800,6 +1890,8 @@ const NoteEditor = forwardRef<
     placeWaiting?: boolean;
     /** Set (a place) or remove (null) the place reminder. */
     onSetPlaceReminder?: (place: Place | null, on?: 'arrive' | 'leave') => Promise<void>;
+    /** Teach Jarvis this (saved) note. */
+    onTeach?: (path: string, title: string) => void;
   }
 >(function NoteEditor(
   {
@@ -1817,6 +1909,7 @@ const NoteEditor = forwardRef<
     placeReminder,
     placeWaiting,
     onSetPlaceReminder,
+    onTeach,
   },
   handle,
 ) {
@@ -1856,7 +1949,7 @@ const NoteEditor = forwardRef<
     setRichKey((k) => k + 1);
   };
   const renaming = Boolean(
-    draft.original && (draft.title.trim() !== draft.original.title || categoryFor(draft.folder) !== draft.original.category),
+    draft.original && (effectiveTitle(draft) !== draft.original.title || categoryFor(draft.folder) !== draft.original.category),
   );
 
   // The stored file arrived after the sheet opened from the list's copy.
@@ -1906,6 +1999,8 @@ const NoteEditor = forwardRef<
           ...current,
           path: result.path,
           original: { title: result.title, category: categoryFor(d.folder) },
+          // The name was taken, so the note was saved as "Groceries 2": show that.
+          ...(d.title.trim() && result.title !== d.title.trim() && current.title.trim() === d.title.trim() ? { title: result.title } : {}),
         }));
         setConflict(false);
         setSaveState({ kind: 'saved' });
@@ -1923,18 +2018,22 @@ const NoteEditor = forwardRef<
     return run;
   }, []);
 
+  // Like Keep, every note saves itself once typing pauses: a new note as soon
+  // as it has something in it, a rename after a slightly longer pause (each
+  // rename is a file move, so not one per letter of a new title).
+  const blankDraft = !draft.title.trim() && !draft.content.trim();
   const canAutosave =
-    Boolean(draft.path) &&
-    !renaming &&
+    !blankDraft &&
     dirty &&
     !conflict &&
     saveState.kind !== 'saving' &&
     !((saveState.kind === 'error' || saveState.kind === 'offline') && saveState.snapshot === snapshot);
+  const autosaveDelay = draft.path && !renaming ? AUTOSAVE_MS : AUTOSAVE_MS * 2;
   useEffect(() => {
     if (!canAutosave) return;
-    const timer = window.setTimeout(() => void persist(draft), AUTOSAVE_MS);
+    const timer = window.setTimeout(() => void persist(draft), autosaveDelay);
     return () => window.clearTimeout(timer);
-  }, [canAutosave, draft, persist]);
+  }, [canAutosave, draft, persist, autosaveDelay]);
 
   // Keep what the server does not have on this device; forget it once saved.
   // A save that found no connection marks it queued, so the page replays it
@@ -2288,6 +2387,18 @@ const NoteEditor = forwardRef<
           >
             {saveState.kind === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
           </button>
+          {onTeach && draft.path && (
+            <button
+              type="button"
+              className="glass-button min-h-11 px-3 py-2 text-xs"
+              onClick={() => onTeach(draft.path!, draft.title || 'this note')}
+              disabled={dirty}
+              title={dirty ? 'Save first, then teach Jarvis this note' : 'Teach Jarvis this note'}
+              data-testid="note-teach"
+            >
+              <Sparkles size={14} /> Teach Jarvis
+            </button>
+          )}
           <button
             type="button"
             className="glass-button min-h-11 px-3 py-2 text-xs"

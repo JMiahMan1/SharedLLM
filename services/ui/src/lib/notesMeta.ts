@@ -112,6 +112,11 @@ export function noteBody(content: string): string {
   return text;
 }
 
+/** Whether a note carries the header Jarvis writes (``# Title`` then ``Category:``). */
+export function hasStoredHeader(content: string): boolean {
+  return STORED_HEADER.test(content);
+}
+
 /** A card preview: the note's text without its stored header. */
 export function notePreview(content: string, max = 220): string {
   const body = noteBody(content).trim();
@@ -265,6 +270,8 @@ export interface NotesIndexEntry {
   reminder?: NoteReminder;
   /** A place reminder ("when I get home"): geo's id, the place and the movement. */
   placeReminder?: NotePlaceReminder;
+  /** Where the person arranged the note on the shelf (smaller comes first). */
+  order?: number;
 }
 
 export interface NoteReminder {
@@ -319,6 +326,7 @@ export function parseNotesIndex(raw: unknown): NotesIndex | null {
     if (typeof source.pinned === 'boolean') clean.pinned = source.pinned;
     if (typeof source.color === 'string') clean.color = source.color;
     if (typeof source.previousPath === 'string') clean.previousPath = source.previousPath;
+    if (typeof source.order === 'number' && Number.isFinite(source.order)) clean.order = source.order;
     const reminder = source.reminder as Partial<NoteReminder> | undefined;
     if (
       reminder &&
@@ -359,7 +367,8 @@ export function setIndexEntry(index: NotesIndex, path: string, patch: NotesIndex
     (!next.color || next.color === 'default') &&
     !next.previousPath &&
     !next.reminder &&
-    !next.placeReminder
+    !next.placeReminder &&
+    next.order === undefined
   ) {
     delete notes[path];
   } else {
@@ -427,12 +436,43 @@ export function clearLegacyMeta(): void {
 }
 
 /** Sort by the shared index: pinned first, then backend order (modified desc). */
+/**
+ * The shelf as Keep shows it: pinned notes first; then notes not yet
+ * arranged (new ones, newest first, as the list comes), then the notes the
+ * person arranged, in their order.
+ */
 export function sortNotesByIndex<T extends { title: string; path: string }>(
   notes: T[],
   index: NotesIndex | undefined,
 ): T[] {
   const pinned = (n: T) => (indexEntry(index, n.path).pinned ? 1 : 0);
-  return [...notes].sort((a, b) => pinned(b) - pinned(a));
+  const order = (n: T) => indexEntry(index, n.path).order;
+  return [...notes].sort((a, b) => {
+    const byPin = pinned(b) - pinned(a);
+    if (byPin) return byPin;
+    const oa = order(a);
+    const ob = order(b);
+    if (oa === undefined || ob === undefined) return (oa === undefined ? 0 : 1) - (ob === undefined ? 0 : 1);
+    return oa - ob;
+  });
+}
+
+/**
+ * The index after the person dragged `from` onto `to` (it takes `to`'s
+ * place). Every note on the shelf gets its position, so the arrangement
+ * holds whatever is added later.
+ */
+export function arrangeNotes(index: NotesIndex, shelf: string[], from: string, to: string): NotesIndex {
+  const paths = shelf.filter((p) => p !== from);
+  const at = paths.indexOf(to);
+  if (at < 0 || from === to) return index;
+  const after = shelf.indexOf(from) < shelf.indexOf(to);
+  paths.splice(after ? at + 1 : at, 0, from);
+  let next = index;
+  paths.forEach((path, i) => {
+    next = setIndexEntry(next, path, { order: (i + 1) * 10 });
+  });
+  return next;
 }
 
 /**

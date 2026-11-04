@@ -1091,3 +1091,96 @@ async def test_a_rename_in_place_moves_the_file_so_its_attachments_stay(provider
     # A MOVE keeps the file (and its .attachments.<id> folder); nothing is deleted.
     assert ("MOVE", "http://nextcloud.test/Recipes/5-tacos.md") in calls
     assert not any(method == "DELETE" for method, _ in calls)
+
+
+async def test_archive_to_trash_keeps_where_the_note_first_lived(provider, monkeypatch):
+    import json as _json
+
+    import services.execution.http_client as http_client
+
+    existing = {"version": 1, "notes": {"Notes/Archive/Old.md": {"previousPath": "Notes/Work/Old.md"}}}
+    written: dict = {}
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "GET":
+            return {"status_code": 200, "text": _json.dumps(existing)}
+        if method == "MOVE":
+            return {"status_code": 201, "text": ""}
+        if method == "PUT":
+            written.update(_json.loads(data))
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(
+        request("move", path="Notes/Archive/Old.md", destination="Notes/Trash/Archive/Old.md")
+    )
+    assert result.status == "SUCCESS"
+    # Restore from the Trash still goes home, not back to the Archive.
+    assert written["notes"]["Notes/Trash/Archive/Old.md"]["previousPath"] == "Notes/Work/Old.md"
+
+
+async def test_a_briefly_locked_file_is_retried_not_reported(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    monkeypatch.setattr(note_handler, "_RETRY_DELAYS", (0, 0, 0))
+    moves = []
+
+    async def fake_request(method, url, data=None, headers=None, **kwargs):
+        if method == "MOVE":
+            moves.append(url)
+            # Nextcloud answers 423 Locked twice, then lets the move through.
+            return {"status_code": 423 if len(moves) < 3 else 201, "text": ""}
+        if method == "PUT":
+            return {"status_code": 204, "text": ""}
+        return {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    result = await note_handler.handle_note(request("move", path="Notes/A.md", destination="Notes/Archive/A.md"))
+    assert result.status == "SUCCESS" and len(moves) == 3
+
+
+async def test_a_note_made_in_nextcloud_notes_is_saved_back_without_a_jarvis_header(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    bodies = []
+
+    async def fake_request(method, url, data=None, **kwargs):
+        bodies.append(data.decode() if data else "")
+        return {"status_code": 204, "text": ""}
+
+    monkeypatch.setattr(http_client, "request", fake_request)
+    text = "Groceries\n\n  milk\n    eggs\n\n\nbread"
+    await note_handler.handle_note(request("write", title="Groceries", content=text, path="Notes/Groceries.md", plain=True))
+    assert bodies[-1] == text
+    # A Jarvis note keeps its header.
+    await note_handler.handle_note(request("write", title="Plan", content="body", path="Notes/Plan.md"))
+    assert bodies[-1].startswith("# Plan\nCategory: Notes\n\nbody")
+
+
+async def test_teaching_jarvis_one_note_a_label_or_everything_but_the_trash(provider, monkeypatch):
+    import services.execution.http_client as http_client
+
+    files = {
+        "Notes/Bins.md": "Take the #bins out on Tuesday",
+        "Notes/Work/Plan.md": "Quarter plan #work",
+        "Notes/Trash/Old.md": "Gone #bins",
+    }
+
+    async def fake_walk(_provider, _base):
+        return [{"path": p} for p in files]
+
+    async def fake_request(method, url, data=None, **kwargs):
+        path = url.removeprefix("http://nextcloud.test/")
+        return {"status_code": 200, "text": files[path]} if path in files else {"status_code": 404, "text": ""}
+
+    monkeypatch.setattr(note_handler, "_walk_webdav_dir", fake_walk)
+    monkeypatch.setattr(http_client, "request", fake_request)
+
+    async def taught(**kw):
+        res = await note_handler.handle_note(request("sync_rag", **kw))
+        return sorted(n["path"] for n in res.detail["synced"])
+
+    assert await taught() == ["Notes/Bins.md", "Notes/Work/Plan.md"]
+    assert await taught(paths=["Notes/Work/Plan.md"]) == ["Notes/Work/Plan.md"]
+    assert await taught(tags=["#Bins"]) == ["Notes/Bins.md"]

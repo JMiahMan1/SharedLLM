@@ -212,6 +212,7 @@
 [data-theme-scheme="light"] .bg-slate-900\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/90 { background-color: color-mix(in srgb, var(--ht-surface) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-900\/95 { background-color: color-mix(in srgb, var(--ht-surface) 95%, transparent) !important; }
+[data-theme-scheme="light"] .bg-slate-900\/98 { background-color: color-mix(in srgb, var(--ht-surface) 98%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950 { background-color: var(--ht-surface) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/20 { background-color: var(--site-card-bg) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/30 { background-color: var(--site-card-bg) !important; }

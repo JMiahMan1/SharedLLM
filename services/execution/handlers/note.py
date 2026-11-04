@@ -67,6 +67,40 @@ _LIST_PROPS = (
 _STORED_HEADER = re.compile(r"\A[ \t]*\n*# [^\n]*\n(?:[ \t]*\n)?Category: [^\n]*\n(?:[ \t]*\n)?")
 
 
+#: Answers Nextcloud gives while a file is briefly locked or the server is
+#: busy. A bulk archive writes the same index file several times in a row and
+#: met 423 Locked; a moment later the same request goes through.
+_RETRY_STATUSES = {423, 429, 502, 503, 504}
+_RETRY_DELAYS = (0.3, 0.8, 1.6)
+
+
+async def _dav(method: str, url: str, **kwargs) -> dict:
+    """One WebDAV request, retried briefly while the file is locked or the server is busy."""
+    from ..http_client import request as http_request
+
+    resp = await http_request(method, url, **kwargs)
+    for delay in _RETRY_DELAYS:
+        if resp["status_code"] not in _RETRY_STATUSES:
+            break
+        await asyncio.sleep(delay)
+        resp = await http_request(method, url, **kwargs)
+    return resp
+
+
+#: Inline #labels, read the way the Notes page and Nextcloud Notes read them.
+_TAG = re.compile(r"(?:^|(?<=[\s(]))#([^\W_][\w/-]{0,31})", re.UNICODE)
+
+
+def note_tags(content: str | None) -> set[str]:
+    """Every #label in a note, lowercased."""
+    return {m.group(1).lower() for m in _TAG.finditer(content or "")}
+
+
+def has_stored_header(content: str | None) -> bool:
+    """Whether a note was written by Jarvis with its ``# Title`` / ``Category:`` header."""
+    return bool(_STORED_HEADER.match(content or ""))
+
+
 def note_body(content: str | None) -> str:
     """A note's text without the stored header(s).
 
@@ -217,13 +251,12 @@ async def _read_meta(provider) -> dict | None:
 async def _write_meta(provider, meta: dict) -> tuple[bool, str]:
     import json
 
-    from ..http_client import request as http_request
 
     payload = json.dumps(meta, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(payload) > META_MAX_BYTES:
         return False, "The notes index is too large to store."
     await provider.ensure_directory("Notes")
-    resp = await http_request(
+    resp = await _dav(
         "PUT", _meta_url(provider),
         data=payload,
         auth=(provider.username, provider.password),
@@ -273,7 +306,10 @@ async def _index_after_move(provider, source: str, destination: str) -> None:
             return
         entry = dict(entry or {})
         if _in_archive_or_trash(destination):
-            entry["previousPath"] = source
+            # Archive to Trash (or back) keeps where the note first lived, so
+            # Restore still takes it home rather than back to the Archive.
+            if not (_in_archive_or_trash(source) and entry.get("previousPath")):
+                entry["previousPath"] = source
         else:
             entry.pop("previousPath", None)
         notes[destination] = entry
@@ -320,10 +356,9 @@ async def _unique_note_path(provider, directory: str, file_title: str) -> tuple[
 
 
 async def _move_note(provider, source: str, destination: str) -> tuple[bool, str]:
-    from ..http_client import request as http_request
 
     await provider.ensure_directory(destination.rsplit("/", 1)[0] or "Notes")
-    resp = await http_request(
+    resp = await _dav(
         "MOVE", provider.file_url(source),
         auth=(provider.username, provider.password),
         headers={
@@ -929,7 +964,9 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 file_title = provider.sanitize_filename(req.title or "untitled", "note")
                 url = provider.file_url(f"{category}/{file_title}.md")
             _forget_preview(url)
-            content = _with_header(req.title, category, req.content)
+            # A note written elsewhere (Nextcloud Notes, a phone) has no Jarvis
+            # header: it is saved back as it came, so it looks the same there.
+            content = note_body(req.content) if req.plain else _with_header(req.title, category, req.content)
             headers = {"Content-Type": "text/markdown; charset=utf-8"}
             # Only an in-place save can be checked: the version names the
             # file at ``path``. Nextcloud answers 412 when it has changed.
@@ -938,7 +975,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             # A new note asked not to replace one of the same name.
             elif req.if_none_match and not req.path:
                 headers["If-None-Match"] = "*"
-            resp = await http_request(
+            resp = await _dav(
                 "PUT", url, data=content.encode('utf-8'),
                 auth=(provider.username, provider.password), verify=False,
                 headers=headers,
@@ -1013,7 +1050,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             # delete is the second half of a rename: then they follow the
             # new copy, which links to the same files.
             text = await _note_text(provider, deleted_path)
-            resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
+            resp = await _dav("DELETE", url, auth=(provider.username, provider.password), verify=False)
             if resp["status_code"] in [200, 204]:
                 if req.attachments_to:
                     await _carry_attachments(provider, text, deleted_path, req.attachments_to.lstrip("/"))
@@ -1041,21 +1078,31 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             )
 
         elif action == "sync_rag":
-            directories = req.directories or DEFAULT_NOTES_DIRS
+            # What to teach: every note (the default), named notes (``paths``),
+            # the notes in some folders (``directories``) or the notes carrying
+            # a #label (``tags``). The Trash is never taught.
+            wanted_tags = {t.strip().lstrip("#").lower() for t in (req.tags or []) if t and t.strip()}
+            if req.paths:
+                candidates = [{"path": p.lstrip("/")} for p in req.paths if p and p.strip()]
+            else:
+                candidates = []
+                for base_dir in req.directories or DEFAULT_NOTES_DIRS:
+                    await provider.ensure_directory(base_dir)
+                    candidates.extend(await _walk_webdav_dir(provider, base_dir))
             synced = []
-            for base_dir in directories:
-                await provider.ensure_directory(base_dir)
-                notes = await _walk_webdav_dir(provider, base_dir)
-                for note in notes:
-                    note_path = note["path"]
-                    url = provider.file_url(note_path.lstrip("/"))
-                    resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
-                    if resp["status_code"] == 200:
-                        synced.append({
-                            "path": note_path,
-                            "content": resp["text"],
-                            "size": len(resp["text"]),
-                        })
+            seen: set[str] = set()
+            for note in candidates:
+                note_path = note["path"].lstrip("/")
+                if note_path in seen or note_path.startswith(TRASH_DIR + "/") or not note_path.endswith((".md", ".txt")):
+                    continue
+                seen.add(note_path)
+                url = provider.file_url(note_path)
+                resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+                if resp["status_code"] != 200:
+                    continue
+                if wanted_tags and not wanted_tags & note_tags(resp["text"]):
+                    continue
+                synced.append({"path": note_path, "content": resp["text"], "size": len(resp["text"])})
             return ExecutionResult(
                 status="SUCCESS",
                 message=f"Synced {len(synced)} notes for RAG indexing",
