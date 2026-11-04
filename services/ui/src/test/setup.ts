@@ -243,6 +243,8 @@ export const notesVersions: Record<string, number> = {};
 const noteEtag = (path?: string) => `"v${notesVersions[path ?? ''] ?? 1}"`;
 /** The hidden Notes/.jarvis-notes.json the fake Nextcloud holds. */
 let notesIndexFixture: { version: number; notes: Record<string, unknown> } = { version: 1, notes: {} };
+/** What the fake Nextcloud's index says now (moves update it, as the real server does). */
+export const notesIndexNow = () => notesIndexFixture;
 const NOTES_FIXTURE_BASE = notesFixtures.map((note) => ({ ...note }));
 
 const userThemePref = {  theme_id: 'aurora',
@@ -737,6 +739,22 @@ export const server = setupServer(
     notesMoveCalls.push(body);
     const note = notesFixtures.find((item) => item.path === body.path);
     if (note && body.destination) note.path = body.destination;
+    // As the real server does: the note's index entry follows it, recording
+    // where it came from when it goes into the Archive or the Trash.
+    if (body.path && body.destination) {
+      const shelved = (p: string) => p.startsWith('Notes/Archive/') || p.startsWith('Notes/Trash/');
+      const notes = { ...notesIndexFixture.notes };
+      const entry = { ...((notes[body.path] as Record<string, unknown> | undefined) ?? {}) };
+      delete notes[body.path];
+      if (shelved(body.destination)) {
+        if (!(shelved(body.path) && entry.previousPath)) entry.previousPath = body.path;
+        notes[body.destination] = entry;
+      } else {
+        delete entry.previousPath;
+        if (Object.keys(entry).length) notes[body.destination] = entry;
+      }
+      notesIndexFixture = { ...notesIndexFixture, notes };
+    }
     return HttpResponse.json({
       status: 'SUCCESS',
       message: 'Note moved.',

@@ -14,6 +14,7 @@ import {
   notesDuplicateCalls,
   notesEmptyTrashCalls,
   notesFixtures,
+  notesIndexNow,
   notesMetaWrites,
   notesMoveCalls,
   notesReadCalls,
@@ -285,10 +286,37 @@ describe('Notes (Keep-style)', () => {
       'Notes/Archive/Shared Checklist.md',
       'Notes/Archive/Trip ideas.md',
     ]);
-    await waitFor(() => {
-      expect(lastIndex('Notes/Archive/Shared Checklist.md')?.previousPath).toBe('Notes/Shared Checklist.md');
-      expect(lastIndex('Notes/Archive/Trip ideas.md')?.previousPath).toBe('Notes/Trip ideas.md');
-    });
+    // The server records where each came from; the page reads that back
+    // instead of writing a second copy of the index over it.
+    const index = notesIndexNow().notes as Record<string, { previousPath?: string }>;
+    expect(index['Notes/Archive/Shared Checklist.md']?.previousPath).toBe('Notes/Shared Checklist.md');
+    expect(index['Notes/Archive/Trip ideas.md']?.previousPath).toBe('Notes/Trip ideas.md');
+    expect(notesMetaWrites).toHaveLength(0);
+  });
+
+  it('teaches Jarvis just the selected notes, or picks what to learn from the menu', async () => {
+    const taught: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post('/api/communication/notes/sync_rag', async ({ request }) => {
+        taught.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ status: 'SUCCESS', message: 'Indexed', service: 'note_sync_rag' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await screen.findByText('Trip ideas');
+    await user.click(screen.getByTestId('select-notes'));
+    await user.click(screen.getByText('Trip ideas'));
+    await user.click(screen.getByText('Shared Checklist'));
+    await user.click(screen.getByTestId('bulk-teach'));
+    await waitFor(() => expect(taught).toHaveLength(1));
+    expect((taught[0].paths as string[]).sort()).toEqual(['Notes/Shared Checklist.md', 'Notes/Trip ideas.md']);
+
+    await user.click(screen.getByTestId('teach-jarvis'));
+    await user.click(within(screen.getByTestId('teach-menu')).getByRole('menuitem', { name: 'All notes' }));
+    await waitFor(() => expect(taught).toHaveLength(2));
+    expect(taught[1].paths).toBeUndefined();
   });
 
   it('moves a note to Notes/Trash and restores it to where it lived', async () => {

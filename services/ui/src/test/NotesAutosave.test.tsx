@@ -113,16 +113,33 @@ describe('Notes autosave and drafts', () => {
     await user.click(await screen.findByTestId('quick-capture'));
     await user.type(screen.getByLabelText('Note title'), 'Grocery run');
     await user.type(screen.getByLabelText('Note content'), 'milk');
-    // A new note never autosaves (one file per name, not per keystroke) …
-    expect(screen.getByTestId('note-save-status')).toHaveTextContent('Kept on this device until you save');
+    // Closing straight away saves it, as in Keep.
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
-    // … but closing the sheet saves it, as in Keep.
     await waitFor(() => expect(writes().length).toBe(1));
     expect(writes()[0]).toMatchObject({ title: 'Grocery run' });
     await waitFor(() => expect(screen.queryByLabelText('Note content')).not.toBeInTheDocument());
     expect(readNoteDrafts('me')).toEqual({});
   });
+
+  it('saves a new note by itself once typing pauses, never over another note', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Notes />);
+
+    await user.click(await screen.findByTestId('quick-capture'));
+    await user.type(screen.getByLabelText('Note title'), 'Grocery run');
+    await user.type(screen.getByLabelText('Note content'), 'milk');
+    expect(screen.getByTestId('note-save-status')).toHaveTextContent('Unsaved changes');
+
+    // No Save tap: the new note is written once the typing has paused.
+    await waitFor(() => expect(writes().length).toBe(1), { timeout: 6000 });
+    expect(writes()[0]).toMatchObject({ title: 'Grocery run', if_none_match: true });
+    await waitFor(() => expect(screen.getByTestId('note-save-status')).toHaveTextContent('Saved'));
+    // More typing saves the same file in place, not a second note.
+    await user.type(screen.getByLabelText('Note content'), ' and eggs');
+    await waitFor(() => expect(writes().length).toBe(2), { timeout: 6000 });
+    expect(writes()[1]).toMatchObject({ path: expect.stringContaining('Grocery run') });
+  }, 20000);
 
   it('closes an untouched note without writing anything', async () => {
     const user = userEvent.setup();

@@ -7192,6 +7192,10 @@ async def proxy_write_note(request: Request):
         # The version the editor opened; Nextcloud refuses the save (412) when
         # the note changed elsewhere since, instead of overwriting it.
         "if_match": body.get("if_match"),
+        # A note made in Nextcloud Notes is saved back without a Jarvis header.
+        "plain": bool(body.get("plain")),
+        # A new note (or a rename) never replaces a note already there.
+        "if_none_match": bool(body.get("if_none_match")),
     }
     return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
@@ -7391,6 +7395,9 @@ async def proxy_sync_notes_rag(request: Request):
         "action": "sync_rag",
         "storage": body.get("storage", "nextcloud"),
         "directories": body.get("directories"),
+        # One note, a few chosen ones, or the notes with a #label.
+        "paths": [str(p) for p in (body.get("paths") or [])][:500] or None,
+        "tags": [str(t) for t in (body.get("tags") or [])][:20] or None,
     }
     # The Recipes page teaches the family cookbook, indexed under the caller.
     if body.get("cookbook"):

@@ -2825,6 +2825,10 @@ export const api = {
     path?: string;
     as_user?: 'admin';
     if_match?: string;
+    /** The note has no Jarvis header (made in Nextcloud Notes): save it back without one. */
+    plain?: boolean;
+    /** A new name: refuse (conflict, exists) rather than replace a note already there. */
+    if_none_match?: boolean;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/write', payload, { timeout: 60_000 });
     return resp.data;
@@ -2969,8 +2973,11 @@ export const api = {
     return resp.data;
   },
 
-  async syncNotesRag(payload: { storage?: string; directories?: string[]; cookbook?: boolean } = {}): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/sync_rag', payload, { timeout: 60_000 });
+  /** Teach Jarvis notes: all of them, some folders, the notes with a #label (`tags`) or chosen ones (`paths`). */
+  async syncNotesRag(
+    payload: { storage?: string; directories?: string[]; paths?: string[]; tags?: string[]; cookbook?: boolean } = {},
+  ): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/sync_rag', payload, { timeout: 300_000 });
     return resp.data;
   },
 

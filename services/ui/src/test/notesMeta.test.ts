@@ -3,6 +3,8 @@ import {
   EMPTY_NOTES_INDEX,
   TRASH_PREFIX,
   archivedPathFor,
+  arrangeNotes,
+  hasStoredHeader,
   clearLegacyMeta,
   extractTags,
   forgetIndexEntry,
@@ -263,5 +265,38 @@ describe('notesMeta', () => {
     expect(() => writeNotesLayout('grid')).not.toThrow();
     get.mockRestore();
     set.mockRestore();
+  });
+});
+
+describe('arranging the shelf', () => {
+  const notes = ['A', 'B', 'C', 'D'].map((t) => ({ title: t, path: `Notes/${t}.md` }));
+  const paths = (list: { path: string }[]) => list.map((n) => n.path.slice(6, 7)).join('');
+
+  it('keeps pins first, new notes next, then the arranged order', () => {
+    let index = arrangeNotes(EMPTY_NOTES_INDEX, notes.map((n) => n.path), 'Notes/D.md', 'Notes/A.md');
+    expect(paths(sortNotesByIndex(notes, index))).toBe('DABC');
+    // A note arranged later comes after; a new one (no order yet) comes first.
+    const withNew = [...notes, { title: 'E', path: 'Notes/E.md' }];
+    expect(paths(sortNotesByIndex(withNew, index))).toBe('EDABC');
+    index = setIndexEntry(index, 'Notes/C.md', { pinned: true });
+    expect(paths(sortNotesByIndex(notes, index))).toBe('CDAB');
+  });
+
+  it('drops a card after the one it was dragged down onto', () => {
+    const index = arrangeNotes(EMPTY_NOTES_INDEX, notes.map((n) => n.path), 'Notes/A.md', 'Notes/C.md');
+    expect(paths(sortNotesByIndex(notes, index))).toBe('BCAD');
+  });
+
+  it('survives a reload of the index', () => {
+    const index = arrangeNotes(EMPTY_NOTES_INDEX, notes.map((n) => n.path), 'Notes/D.md', 'Notes/A.md');
+    expect(parseNotesIndex(JSON.parse(JSON.stringify(index)))).toEqual(index);
+  });
+});
+
+describe('the Jarvis header', () => {
+  it('is told apart from a note written in Nextcloud Notes', () => {
+    expect(hasStoredHeader('# Plan\nCategory: Notes\n\nbody')).toBe(true);
+    expect(hasStoredHeader('Plan\n\n  indented line')).toBe(false);
+    expect(hasStoredHeader('# Plan\n\nno category line')).toBe(false);
   });
 });

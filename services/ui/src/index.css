@@ -473,6 +473,12 @@ input[type="range"] {
 /* Keep-style note editor: checklist rows draw their own checkbox in the left
    gutter and leave the right gutter for the row's drag grip and delete button
    (an overlay in RichNoteEditor). */
+/* A note's own spacing (indents, runs of spaces) is part of it: shown as
+   written, and kept when a line is edited, instead of collapsed as HTML does. */
+.note-rich {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .note-rich [data-task] {
   position: relative;
   padding-left: 1.75rem;
