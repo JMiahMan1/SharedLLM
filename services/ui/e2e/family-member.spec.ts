@@ -34,7 +34,11 @@ const ROSTER = [
 
 function status(username: string, technical: boolean) {
   return {
-    username, day: day(), rules: { daily_limit_min: 120, bedtime_start: '21:00', bedtime_end: '07:00', app_limits: { 'com.roblox.client': 30 } },
+    username, day: day(), rules: {
+      daily_limit_min: 120, bedtime_start: '21:00', bedtime_end: '07:00', app_limits: { 'com.roblox.client': 30 },
+      earn: { steps_every: 1000, steps_min: 5, chore_min: 10, max_min: 60 }, chores_first: true,
+    },
+    earned_min: 30, banked_min: 15, chores_first: true, chores_left: 0,
     can_manage: true, technical, ...(technical ? { protected: true, app_approvals: {}, permission_approvals: {} } : {}),
     limit_min: 120, used_min: username === 'sam' ? 95 : 140, bonus_min: 0, remaining_min: username === 'sam' ? 25 : 0,
     bedtime_active: false, school_active: false, paused: false, locked: username !== 'sam', reason: username === 'sam' ? null : 'limit',
@@ -143,6 +147,10 @@ async function mockApi(page: Page, viewer: Viewer) {
     if (p === '/api/integrations/skylight/chores') {
       return json({ status: 'SUCCESS', chores: [{ id: '50', title: 'Feed the chickens', completed: false, assignees: ['Sam'], recurrence: 'RRULE:FREQ=DAILY' }] });
     }
+    // Ticked-off chores waiting on a parent's OK (docs/HEALTH_HUB.md, "Earning time and chores first").
+    if (p === '/api/screen-time/chore-checks') {
+      return json({ checks: [{ id: 4, username: 'sam', day: day(), chore_id: '51', title: 'Take out the trash', status: 'pending', created_at: new Date().toISOString() }] });
+    }
     if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) {
       // The server's rule: the father and admins only.
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);
@@ -190,6 +198,19 @@ test.describe('family member page', () => {
     await sectionButton('time').click();
     await expect(page.getByTestId('weekly-schedule')).toBeVisible();
     await expect(page.getByTestId('guardian-chores')).toContainText('Feed the chickens');
+    await expect(page.getByTestId('chore-checks')).toContainText('Take out the trash');
+    await expect(page.getByTestId('earn-time-controls')).toContainText('30 min earned today, 15 saved');
+    await expect(page.getByTestId('earn-steps_every')).toHaveValue('1000');
+    await expect(page.getByTestId('earn-chores-first')).toBeChecked();
+    await page.getByTestId('guardian-chores').screenshot({ path: info.outputPath('chores-card.png') });
+    await page.getByTestId('earn-time-controls').screenshot({ path: info.outputPath('earn-card.png') });
+    if (mobile) {
+      // 44px touch targets on the approval buttons and the earning fields.
+      for (const loc of [page.getByRole('button', { name: /was done right/ }), page.getByRole('button', { name: /redo/ }), page.getByTestId('earn-steps_every')]) {
+        const box = await loc.first().boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+    }
     await expect(page.getByTestId('member-heatmap-grid')).toBeVisible();
     await page.screenshot({ path: info.outputPath('time.png'), fullPage: true });
 

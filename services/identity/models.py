@@ -754,6 +754,10 @@ class ScreenRules(SQLModel, table=True):  # type: ignore
       - school_days: list of "mon".."sun" (default weekdays)
       - always_allowed: list of Android packages never locked
       - paused: bool; paused_until: ISO time the pause lifts
+      - earn: {steps_every, steps_min, exercise_every, exercise_min,
+        chore_min, max_min}: minutes earned a day (chores once a parent
+        approves); unused earned minutes carry over until the week ends
+      - chores_first: bool, locked until today's Skylight chores are done
     The evaluation lives in services/common/screen_time.py.
     """
     __table_args__ = {"extend_existing": True}
@@ -761,6 +765,26 @@ class ScreenRules(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
     updated_by: str | None = None
     updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
+class ChoreCheck(SQLModel, table=True):  # type: ignore
+    """A chore a child ticked off on the Skylight chart, waiting for a parent
+    to say it was done right (docs/HEALTH_HUB.md, "Earning time and chores first").
+
+    Created when the child's status first sees the chore ticked off; only an
+    approved check earns minutes. "Not done right" (declined) unticks it on
+    Skylight so it is back on the list. A new table, made by ``create_all``.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    day: str = Field(index=True)  # household-local YYYY-MM-DD
+    chore_id: str = Field(index=True)
+    title: str = ""
+    status: str = Field(default="pending", index=True)  # pending | approved | declined
+    decided_by: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    decided_at: str | None = None
 
 
 class ScreenTimeRequest(SQLModel, table=True):  # type: ignore

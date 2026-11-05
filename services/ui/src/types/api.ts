@@ -400,6 +400,41 @@ export interface ScreenRules {
   vpn_lockdown?: boolean;
   paused?: boolean;
   paused_until?: string;
+  /** Earned time: minutes for steps, exercise and parent-approved chores, capped a day. */
+  earn?: EarnRules;
+  /** Locked until today's chores are ticked off. */
+  chores_first?: boolean;
+}
+
+/** "Every steps_every steps earns steps_min minutes", and so on; any may be absent. */
+export interface EarnRules {
+  steps_every?: number;
+  steps_min?: number;
+  exercise_every?: number;
+  exercise_min?: number;
+  chore_min?: number;
+  max_min?: number;
+}
+
+/** What one source earned today: its count (null when it could not be read). */
+export interface EarnedPart {
+  count: number | null;
+  every: number;
+  minutes: number;
+  earned_min: number;
+}
+
+/** A ticked-off chore waiting for a parent to say it was done right. */
+export interface ChoreCheck {
+  id: number;
+  username: string;
+  day: string;
+  chore_id: string;
+  title: string;
+  status: 'pending' | 'approved' | 'declined';
+  decided_by?: string | null;
+  created_at: string;
+  decided_at?: string | null;
 }
 
 /** The live answer: time left and whether the phone should be locked now. */
@@ -424,15 +459,25 @@ export interface ScreenTimeStatus {
   school_active: boolean;
   paused: boolean;
   locked: boolean;
-  reason: 'paused' | 'bedtime' | 'school' | 'limit' | null;
+  reason: 'paused' | 'bedtime' | 'school' | 'chores' | 'limit' | null;
   until: string | null;
   resets_at: string;
+  /** Minutes earned today (steps, exercise, approved chores), after the day's cap. */
+  earned_min?: number;
+  earned?: { total_min: number; uncapped_min: number; max_min: number | null; parts: Partial<Record<'steps' | 'exercise' | 'chores', EarnedPart>> };
+  /** Earned minutes left over from earlier this week (they reset on Monday). */
+  banked_min?: number;
+  chores_first?: boolean;
+  /** Today's chores not yet ticked off (null when the chart could not be read). */
+  chores_left?: number | null;
+  /** Ticked-off chores waiting on a parent's OK. */
+  chores_waiting?: Array<{ id: number; title: string; day: string }>;
   /** Apps closed now: switched off, or past their own minutes. */
   blocked_apps?: string[];
   app_minutes_left?: Record<string, number>;
   /** The next lock on its own, for the phone's one-minute warning. */
   next_lock_at?: string | null;
-  next_lock_reason?: 'bedtime' | 'school' | 'limit' | null;
+  next_lock_reason?: 'bedtime' | 'school' | 'chores' | 'limit' | null;
   install_approval?: boolean;
   uninstall_apps?: string[];
   install_apps?: string[];

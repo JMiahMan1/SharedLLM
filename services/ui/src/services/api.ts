@@ -37,6 +37,7 @@ import type {
   ScreenRules,
   ScreenTimeStatus,
   ScreenTimeRequest,
+  ChoreCheck,
   GuardRequest,
   SpotifyStatus,
   RecommendationLane,
@@ -1103,6 +1104,18 @@ export const api = {
 
   async decideScreenTimeRequest(id: number, grant: boolean, minutes?: number): Promise<{ request: ScreenTimeRequest }> {
     const resp = await apiClient.post(`/api/screen-time/requests/${id}`, { grant, ...(minutes ? { minutes } : {}) });
+    return resp.data;
+  },
+
+  /** Ticked-off chores waiting on a parent: the caller's own and their children's. */
+  async getChoreChecks(status: 'pending' | 'approved' | 'declined' = 'pending'): Promise<{ checks: ChoreCheck[] }> {
+    const resp = await apiClient.get('/api/screen-time/chore-checks', { params: { status } });
+    return resp.data;
+  },
+
+  /** A parent says a chore was done right (it earns its minutes) or asks for a redo (it is unticked). */
+  async decideChoreCheck(id: number, approve: boolean): Promise<{ check: ChoreCheck; unticked?: boolean }> {
+    const resp = await apiClient.post(`/api/screen-time/chore-checks/${id}`, { approve });
     return resp.data;
   },
 

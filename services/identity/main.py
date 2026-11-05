@@ -44,6 +44,7 @@ from services.identity.models import (
     APIKey,
     AuditEvent,
     CapabilityInventory,
+    ChoreCheck,
     Device,
     DeviceAssignment,
     DeviceEvent,
@@ -1768,6 +1769,10 @@ def delete_user(username: str, request: Request, session: Session = Depends(get_
     if stale_voice:
         session.delete(stale_voice)
         session.commit()
+    # Nor chores waiting on a parent's OK.
+    for row in session.exec(select(ChoreCheck).where(ChoreCheck.username == user.username)).all():
+        session.delete(row)
+    session.commit()
     # Nor their weather place (where they live, possibly).
     stale_weather = session.get(UserWeatherSetting, user.username)
     if stale_weather:
@@ -4619,6 +4624,18 @@ _PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
 _DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\.?$")
 
 
+# Each earning setting's allowed range: steps per block, minutes of exercise
+# per block, and the minutes each earns; the daily cap.
+_EARN_LIMITS = {
+    "steps_every": (100, 50000),
+    "steps_min": (1, 240),
+    "exercise_every": (1, 240),
+    "exercise_min": (1, 240),
+    "chore_min": (1, 240),
+    "max_min": (1, 720),
+}
+
+
 def _clean_screen_rules(body: dict) -> dict:
     """Only known keys, in range; a bad value is a 422, never silently kept."""
     out: dict = {}
@@ -4664,6 +4681,31 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(body["kiosk_mode"], bool):
             raise HTTPException(status_code=422, detail="kiosk_mode must be true or false")
         out["kiosk_mode"] = body["kiosk_mode"]
+    # Earned time (docs/HEALTH_HUB.md, "Earning time and chores first"): minutes for steps,
+    # exercise and chores, with a daily cap; and "chores first", which locks
+    # the phone until today's chores are ticked off.
+    if body.get("earn") is not None:
+        earn = body["earn"]
+        if not isinstance(earn, dict) or any(k not in _EARN_LIMITS for k in earn):
+            raise HTTPException(status_code=422, detail=f"earn may only set {', '.join(_EARN_LIMITS)}")
+        clean_earn: dict = {}
+        for key, (low, high) in _EARN_LIMITS.items():
+            value = earn.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+                raise HTTPException(status_code=422, detail=f"earn.{key} must be a whole number from {low} to {high}")
+            clean_earn[key] = value
+        for every, minutes, what in (("steps_every", "steps_min", "steps"), ("exercise_every", "exercise_min", "exercise")):
+            if (every in clean_earn) != (minutes in clean_earn):
+                raise HTTPException(status_code=422, detail=f"earning for {what} needs both how much and how many minutes")
+        if clean_earn:
+            out["earn"] = clean_earn
+    if body.get("chores_first") is not None:
+        if not isinstance(body["chores_first"], bool):
+            raise HTTPException(status_code=422, detail="chores_first must be true or false")
+        if body["chores_first"]:
+            out["chores_first"] = True
     if body.get("app_limits") is not None:
         limits = body["app_limits"]
         if not isinstance(limits, dict) or any(
@@ -5019,6 +5061,117 @@ def give_screen_time_bonus(username: str, body: dict, session: Session = Depends
     session.commit()
     session.refresh(bonus)
     return {"request": _request_read(bonus), "notify": [subject.username]}
+
+
+# --- earned time: a parent says a ticked-off chore was done right ---------------
+
+
+def _chore_check_read(c: ChoreCheck) -> dict:
+    return {
+        "id": c.id, "username": c.username, "day": c.day, "chore_id": c.chore_id, "title": c.title,
+        "status": c.status, "decided_by": c.decided_by, "created_at": c.created_at, "decided_at": c.decided_at,
+    }
+
+
+def _bonus_by_day(session: Session, username: str, since: str) -> dict[str, int]:
+    rows = session.exec(
+        select(ScreenTimeRequest).where(
+            ScreenTimeRequest.username == username,
+            ScreenTimeRequest.day >= since,
+            ScreenTimeRequest.status == "granted",
+        )
+    ).all()
+    out: dict[str, int] = {}
+    for r in rows:
+        out[r.day] = out.get(r.day, 0) + (r.granted_minutes or 0)
+    return out
+
+
+@app.post("/api/internal/chore-checks/{username}/sync")
+def internal_sync_chore_checks(username: str, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: line up today's ticked-off chores with the checks waiting on a parent.
+
+    ``done`` is today's ticked-off chores ([{id, title}]), or null when the
+    chore chart could not be read (then nothing changes). A chore newly ticked
+    off, or ticked off again after "not done right", waits for a parent; one
+    unticked before a parent looked stops waiting. Answers with the week's
+    checks (from ``week_start``), the new ones and who to tell, and the time
+    parents gave each day of the week (for carrying earned time over).
+    """
+    subject = session.exec(select(User).where(User.username == username.strip().lower())).first()
+    day = str((body or {}).get("day") or "")
+    week_start = str((body or {}).get("week_start") or day)
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or not re.match(r"^\d{4}-\d{2}-\d{2}$", week_start):
+        raise HTTPException(status_code=422, detail="day and week_start must be YYYY-MM-DD")
+    if subject is None:
+        return {"checks": [], "new": [], "parents": [], "bonus_by_day": {}}
+    done = (body or {}).get("done")
+    new: list[ChoreCheck] = []
+    if isinstance(done, list):
+        today = session.exec(
+            select(ChoreCheck).where(ChoreCheck.username == subject.username, ChoreCheck.day == day)
+        ).all()
+        latest: dict[str, ChoreCheck] = {}
+        for c in sorted(today, key=lambda c: c.id or 0):
+            latest[c.chore_id] = c
+        ticked = {}
+        for item in done:
+            if isinstance(item, dict) and str(item.get("id") or "").strip():
+                ticked[str(item["id"]).strip()[:120]] = str(item.get("title") or "")[:200]
+        for chore_id, title in ticked.items():
+            have = latest.get(chore_id)
+            if have is None or have.status == "declined":
+                check = ChoreCheck(username=subject.username, day=day, chore_id=chore_id, title=title)
+                session.add(check)
+                new.append(check)
+        for chore_id, have in latest.items():
+            if chore_id not in ticked and have.status == "pending":
+                session.delete(have)
+        session.commit()
+        for check in new:
+            session.refresh(check)
+    week = session.exec(
+        select(ChoreCheck).where(ChoreCheck.username == subject.username, ChoreCheck.day >= week_start)
+    ).all()
+    week.sort(key=lambda c: (c.day, c.id or 0))
+    return {
+        "checks": [_chore_check_read(c) for c in week],
+        "new": [_chore_check_read(c) for c in new],
+        "parents": _parents_of(session, subject) if new else [],
+        "bonus_by_day": _bonus_by_day(session, subject.username, week_start),
+    }
+
+
+@app.get("/api/screen-time/chore-checks")
+def list_chore_checks(status: str = "pending", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Ticked-off chores waiting on a parent: the caller's own and those of the
+    children they manage, newest first."""
+    rows = session.exec(select(ChoreCheck).where(ChoreCheck.status == status)).all()
+    return {"checks": [_chore_check_read(c) for c in _visible_requests(session, caller, rows)]}
+
+
+@app.post("/api/screen-time/chore-checks/{check_id}")
+def decide_chore_check(check_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent says a chore was done right (it earns its minutes) or not (it
+    goes back on the list: the gateway unticks it on Skylight)."""
+    check = session.get(ChoreCheck, check_id)
+    if check is None:
+        raise HTTPException(status_code=404, detail="No such chore")
+    subject = _screen_subject(session, check.username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only a parent can answer")
+    if check.status != "pending":
+        raise HTTPException(status_code=409, detail="Already answered")
+    approve = (body or {}).get("approve")
+    if not isinstance(approve, bool):
+        raise HTTPException(status_code=422, detail="approve must be true or false")
+    check.status = "approved" if approve else "declined"
+    check.decided_by = caller.username
+    check.decided_at = datetime.now(UTC).isoformat()
+    session.add(check)
+    session.commit()
+    session.refresh(check)
+    return {"check": _chore_check_read(check), "notify": [check.username], "untick": not approve}
 
 
 # --- asking a parent first: new apps, permissions, blocked sites (Phase 11 step 5) ---

@@ -45,11 +45,13 @@ public final class LockWarning {
     }
 
     /**
-     * Bedtime and school start on the clock: once their time has come the
-     * phone is locked even before the next status arrives.
+     * Bedtime and school start on the clock, and so does "chores first" once
+     * the time a parent gave runs out: once their time has come the phone is
+     * locked even before the next status arrives.
      */
     public static boolean lockedByClock(long nowMs, long nextLockAtMs, String reason) {
-        return nextLockAtMs > 0 && nowMs >= nextLockAtMs && ("bedtime".equals(reason) || "school".equals(reason));
+        return nextLockAtMs > 0 && nowMs >= nextLockAtMs
+                && ("bedtime".equals(reason) || "school".equals(reason) || "chores".equals(reason));
     }
 
     static String text(String reason, String device) {
@@ -60,6 +62,8 @@ public final class LockWarning {
                 return "School time starts in one minute.";
             case "limit":
                 return "One minute of screen time left today.";
+            case "chores":
+                return "One minute left. Then it's chores first.";
             default:
                 return "Your " + device + " locks in one minute.";
         }

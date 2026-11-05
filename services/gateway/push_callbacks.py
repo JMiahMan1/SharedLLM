@@ -188,3 +188,20 @@ async def more_time_decide(request: Request, params: dict, reply: str | None) ->
     if status != 200:
         raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
     return body
+
+
+@push_callback("chore_check_decide")
+async def chore_check_decide(request: Request, params: dict, reply: str | None) -> dict:
+    """A parent taps "Done right" / "Redo it" on a ticked-off chore, through the
+    same path as ``POST /api/screen-time/chore-checks/{id}``, as the caller:
+    ``params`` is ``{"id", "approve"}``. Identity checks that the caller may answer."""
+    from services.gateway.main import decide_chore_check
+
+    try:
+        check_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="params.id is required") from None
+    status, body = await decide_chore_check(request, check_id, {"approve": bool(params.get("approve"))})
+    if status != 200:
+        raise HTTPException(status_code=status, detail=body.get("detail") or "Could not answer")
+    return body

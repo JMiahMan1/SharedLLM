@@ -17,12 +17,16 @@ let asked: string[] = [];
 let added: unknown[] = [];
 let removed: Array<{ id: string; applyTo: string | null }> = [];
 let listing: Record<string, unknown> = {};
+let checks: Array<Record<string, unknown>> = [];
+let decided: Array<{ id: string; body: unknown }> = [];
 
 beforeEach(() => {
   auth.user = { username: 'mom', is_admin: false, family_role: 'mother' };
   asked = [];
   added = [];
   removed = [];
+  checks = [];
+  decided = [];
   listing = {
     status: 'SUCCESS',
     chores: [
@@ -38,6 +42,14 @@ beforeEach(() => {
     http.post('*/api/integrations/skylight/chores', async ({ request }) => {
       added.push(await request.json());
       return HttpResponse.json({ status: 'SUCCESS' });
+    }),
+    http.get('*/api/screen-time/chore-checks', () => HttpResponse.json({ checks })),
+    http.post('*/api/screen-time/chore-checks/:id', async ({ params, request }) => {
+      const body = await request.json();
+      decided.push({ id: String(params.id), body });
+      const check = checks.find((c) => String(c.id) === String(params.id));
+      checks = checks.filter((c) => c !== check);
+      return HttpResponse.json({ check: { ...check, status: (body as { approve: boolean }).approve ? 'approved' : 'declined' } });
     }),
     http.delete('*/api/integrations/skylight/chores/:id', ({ params, request }) => {
       removed.push({ id: String(params.id), applyTo: new URL(request.url).searchParams.get('apply_to') });
@@ -93,5 +105,34 @@ describe('ChoresCard', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(container.querySelector('[data-testid="guardian-chores"]')).toBeNull();
     expect(asked).toEqual([]);
+  });
+
+  it('asks a parent whether ticked-off chores were done right', async () => {
+    const today = new Date();
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    checks = [
+      { id: 7, username: 'noah', day, chore_id: '51', title: 'Trash', status: 'pending' },
+      { id: 8, username: 'noah', day, chore_id: '52', title: 'Dishes', status: 'pending' },
+      { id: 9, username: 'gracie', day, chore_id: '60', title: 'Laundry', status: 'pending' },
+    ];
+    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    const box = await screen.findByTestId('chore-checks');
+    expect(screen.getAllByTestId('chore-check').map((li) => li.textContent)).toEqual([
+      expect.stringContaining('Trash'), expect.stringContaining('Dishes'),
+    ]); // only this child's
+    expect(screen.getByText('2 to check')).toBeInTheDocument();
+    expect(box).toHaveTextContent('Done right? Noah ticked these off');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trash was done right' }));
+    await waitFor(() => expect(decided).toEqual([{ id: '7', body: { approve: true } }]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Noah to redo Dishes' }));
+    await waitFor(() => expect(decided[1]).toEqual({ id: '8', body: { approve: false } }));
+    await waitFor(() => expect(screen.queryByTestId('chore-checks')).toBeNull());
+  });
+
+  it('shows no approvals box when nothing is waiting', async () => {
+    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    await screen.findByText('Feed the chickens');
+    expect(screen.queryByTestId('chore-checks')).toBeNull();
   });
 });

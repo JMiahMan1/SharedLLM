@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Plus, Star, Sun, Moon, Trash2, User, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
@@ -186,6 +186,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     </span>
   );
 
+  const queryClient = useQueryClient();
   const handleToggleComplete = async (chore: ChoreItem) => {
     if (!user?.username) return;
 
@@ -207,6 +208,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         // changes elsewhere. Dropping it before the refetch landed flicked the
         // checkbox back to its old state for a moment.
         await refetch();
+        // A chore ticked off can lift "chores first" on the phone and waits for a parent's OK.
+        void queryClient.invalidateQueries({ queryKey: ['screen-time'] });
+        void queryClient.invalidateQueries({ queryKey: ['chore-checks'] });
         setCompletedOverrides((prev) => {
           const next = { ...prev };
           delete next[chore.id];

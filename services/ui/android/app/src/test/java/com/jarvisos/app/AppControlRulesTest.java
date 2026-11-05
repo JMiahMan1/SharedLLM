@@ -127,4 +127,10 @@ public class AppControlRulesTest {
         assertFalse(LockWarning.lockedByClock(2000, 1000, "limit"));
         assertFalse(LockWarning.lockedByClock(500, 1000, "bedtime"));
     }
+
+    @Test
+    public void choresFirstReturnsOnTheClockWhenGivenTimeRunsOut() {
+        assertTrue(LockWarning.lockedByClock(2000, 1000, "chores"));
+        assertEquals("One minute left. Then it's chores first.", LockWarning.due(970, 1000 + 59_000, "chores", "phone").text);
+    }
 }

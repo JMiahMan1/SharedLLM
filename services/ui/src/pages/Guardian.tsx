@@ -17,6 +17,7 @@ import DevicePolicyCard from '../components/guardian/DevicePolicyCard';
 import ConcernsCard from '../components/member/ConcernsCard';
 import DevicesSection from '../components/member/sections/DevicesSection';
 import ScreenTimeControls from '../components/health/ScreenTimeControls';
+import EarnTimeControls from '../components/health/EarnTimeControls';
 import ScreenTimeCard from '../components/health/ScreenTimeCard';
 import AskForSiteCard from '../components/health/AskForSiteCard';
 import PhoneProtectionCard from '../components/health/PhoneProtectionCard';
@@ -171,6 +172,7 @@ function GuardianChildren() {
         </div>
         <RequestsCard username={child.username} name={name} />
         <ChoresCard username={child.username} name={name} />
+        <EarnTimeControls username={child.username} name={name} />
         <ConcernsCard username={child.username} name={name} />
         <GeofenceAlertsCard username={child.username} name={name} />
         <GuidanceCard username={child.username} name={name} />

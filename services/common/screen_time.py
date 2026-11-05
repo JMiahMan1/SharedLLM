@@ -24,7 +24,15 @@ Semantics follow Family Link and Qustodio:
   parents' answers through (``approvals`` from identity);
 - a parent's "allow for a while" for a blocked site lives in
   ``web_filter.allow_until`` ({domain: ISO}); ``active_allow`` is the list
-  the phone's filter honours now.
+  the phone's filter honours now;
+- earned time (``earn``): a parent sets how many minutes steps, exercise and
+  chores are worth, with a daily cap; a chore counts once a parent approves
+  it. Earned minutes extend the limit like bonus time and are spent only after
+  the day's own limit and bonus; what is left carries over to the next day
+  until the week ends (Monday, local midnight);
+- chores first (``chores_first``): while today's chores are not all ticked
+  off, the phone is locked (reason "chores"); time a parent gives still opens
+  it, and when the chore chart cannot be read the phone is not locked for it.
 """
 
 from __future__ import annotations
@@ -390,6 +398,109 @@ def weekly_report(usage_days: list[dict[str, Any]] | None, today: date) -> dict[
     }
 
 
+# What a parent can set in ``earn``: steps_every/steps_min ("every 1000 steps
+# earns 5 minutes"), exercise_every/exercise_min ("every 15 minutes of exercise
+# earns 10"), chore_min (each chore done) and max_min (the most a day can earn).
+EARN_KEYS = ("steps_every", "steps_min", "exercise_every", "exercise_min", "chore_min", "max_min")
+
+
+def earn_rules(rules: dict[str, Any] | None) -> dict[str, int]:
+    """The parent's earning rules, whole positive numbers only."""
+    raw = (rules or {}).get("earn")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key in EARN_KEYS:
+        value = raw.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            out[key] = value
+    return out
+
+
+def wants_progress(rules: dict[str, Any] | None) -> bool:
+    """Whether today's steps, exercise and chores matter to these rules."""
+    return bool(earn_rules(rules)) or bool((rules or {}).get("chores_first"))
+
+
+def _count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, int(value))
+
+
+def earned(rules: dict[str, Any] | None, progress: dict[str, Any] | None) -> dict[str, Any]:
+    """Minutes earned today from steps, exercise and chores, and what each gave.
+
+    ``progress`` holds today's ``steps``, ``exercise_min``, ``chores_done`` and
+    ``chores_left``; a missing or None count (the source could not be read)
+    earns nothing and is reported as None. Only whole blocks count: 1,999 steps
+    at "every 1000" is one block. The total is capped at ``max_min``.
+    """
+    earn = earn_rules(rules)
+    got = progress or {}
+    out: dict[str, Any] = {}
+
+    def part(name: str, count: int | None, every: int | None, minutes: int | None) -> int:
+        if not minutes:
+            return 0
+        gives = 0 if count is None else (count // every if every else count) * minutes
+        out[name] = {"count": count, "every": every or 1, "minutes": minutes, "earned_min": gives}
+        return gives
+
+    total = part("steps", _count(got.get("steps")), earn.get("steps_every"), earn.get("steps_min") if earn.get("steps_every") else None)
+    total += part("exercise", _count(got.get("exercise_min")), earn.get("exercise_every"), earn.get("exercise_min") if earn.get("exercise_every") else None)
+    total += part("chores", _count(got.get("chores_done")), None, earn.get("chore_min"))
+    cap = earn.get("max_min")
+    return {
+        "total_min": min(total, cap) if cap else total,
+        "uncapped_min": total,
+        "max_min": cap,
+        "parts": out,
+    }
+
+
+def limit_for(rules: dict[str, Any] | None, day: date) -> int | None:
+    """The day's limit: the weekly schedule's, else the weekend's, else the daily."""
+    rules = rules or {}
+    weekday = WEEKDAYS[day.weekday()]
+    limit = rules.get("daily_limit_min")
+    if weekday in ("sat", "sun") and rules.get("weekend_limit_min") is not None:
+        limit = rules.get("weekend_limit_min")
+    # The weekly schedule names a day's own limit, which wins over both.
+    if (rules.get("day_limits") or {}).get(weekday) is not None:
+        limit = rules["day_limits"][weekday]
+    return None if limit is None else int(limit)
+
+
+def week_start(day: date) -> date:
+    """The Monday that starts ``day``'s week; earned time resets then."""
+    return day - timedelta(days=day.weekday())
+
+
+def carried_over(rules: dict[str, Any] | None, past_days: list[dict[str, Any]] | None) -> int:
+    """Earned minutes left from earlier days this week.
+
+    ``past_days`` are this week's days before today: {day, used_min,
+    bonus_min, progress}. Each day spends its own limit and bonus first and
+    earned minutes (carried in, then that day's) only past them; a day with
+    no limit spends none. Today's rules are used for the earlier days.
+    """
+    bank = 0
+    for d in sorted(past_days or [], key=lambda d: str(d.get("day") or "")):
+        try:
+            day = date.fromisoformat(str(d.get("day")))
+        except ValueError:
+            continue
+        gained = earned(rules, d.get("progress"))["total_min"]
+        limit = limit_for(rules, day)
+        if limit is None:
+            bank += gained
+            continue
+        over = max(0, int(d.get("used_min") or 0) - limit - max(0, int(d.get("bonus_min") or 0)))
+        bank = bank + gained - min(bank + gained, over)
+    return bank
+
+
 def evaluate(
     rules: dict[str, Any] | None,
     used_ms: int,
@@ -397,29 +508,32 @@ def evaluate(
     now: datetime,
     apps_used_ms: dict[str, int] | None = None,
     granted_until: datetime | None = None,
+    progress: dict[str, Any] | None = None,
+    banked_min: int = 0,
 ) -> dict[str, Any]:
     """The member's screen-time state right now.
 
     ``now`` must be timezone-aware in the household's zone; ``apps_used_ms``
     is today's foreground time per package. ``granted_until`` is when the
     latest time a parent gave runs out: until then bedtime and school hours
-    do not lock (the minutes also extend the day's limit). Returns the limit,
+    do not lock (the minutes also extend the day's limit). ``progress`` is
+    today's steps, exercise and chores (see ``earned``); ``banked_min`` is
+    earned time left from earlier this week (``carried_over``). Returns the limit,
     use and remaining minutes (None when there is no limit), the active
     routine, and ``locked`` with a ``reason`` and an ``until`` (ISO) when the
     lock lifts on its own (the limit's lock lifts at midnight).
     """
     rules = rules or {}
     weekday = WEEKDAYS[now.weekday()]
-    weekend = weekday in ("sat", "sun")
-    limit = rules.get("daily_limit_min")
-    if weekend and rules.get("weekend_limit_min") is not None:
-        limit = rules.get("weekend_limit_min")
-    # The weekly schedule names a day's own limit, which wins over both.
-    if (rules.get("day_limits") or {}).get(weekday) is not None:
-        limit = rules["day_limits"][weekday]
+    limit = limit_for(rules, now.date())
     used_min = max(0, int(used_ms or 0)) // 60000
     bonus = max(0, int(bonus_min or 0))
-    remaining = None if limit is None else max(0, int(limit) + bonus - used_min)
+    earnings = earned(rules, progress)
+    earned_min = earnings["total_min"]
+    banked = max(0, int(banked_min or 0))
+    remaining = None if limit is None else max(0, int(limit) + bonus + banked + earned_min - used_min)
+    chores_first = bool(rules.get("chores_first"))
+    chores_left = _count((progress or {}).get("chores_left"))
     midnight = datetime.combine(now.date() + timedelta(days=1), time(0, 0), now.tzinfo)
 
     bedtime, bedtime_until = _window(now, parse_hhmm(rules.get("bedtime_start")), parse_hhmm(rules.get("bedtime_end")))
@@ -448,6 +562,9 @@ def evaluate(
         locked, reason, until = True, "bedtime", bedtime_until
     elif school and not granted:
         locked, reason, until = True, "school", school_until
+    elif chores_first and chores_left and not granted:
+        # Lifts when the last chore is ticked off, not at a set time.
+        locked, reason, until = True, "chores", None
     elif remaining == 0:
         locked, reason, until = True, "limit", midnight
     else:
@@ -457,11 +574,19 @@ def evaluate(
     if granted is not None and not locked and (bedtime or school) and (lock_at is None or granted < lock_at):
         # The given time runs out in the middle of bedtime or school hours.
         lock_at, lock_reason = granted, "bedtime" if bedtime else "school"
+    elif granted is not None and not locked and chores_first and chores_left and (lock_at is None or granted < lock_at):
+        # The given time runs out with chores still to do.
+        lock_at, lock_reason = granted, "chores"
 
     return {
         "limit_min": None if limit is None else int(limit),
         "used_min": used_min,
         "bonus_min": bonus,
+        "earned_min": earned_min,
+        "earned": earnings,
+        "banked_min": banked,
+        "chores_first": chores_first,
+        "chores_left": chores_left,
         "granted_until": granted.isoformat() if granted else None,
         "remaining_min": remaining,
         "bedtime_active": bedtime,
