@@ -493,10 +493,12 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "recipe are optional when the caller already resolved them."),
     ("ChoreRequest", SVC_EXECUTION, "POST", "/execute/chores", False,
      "Family chores on the Skylight chore chart: add a chore for someone (one day or repeating: "
-     "\"give Noah feed the chickens every day at 7am\"), remove or rename one, list a day's chores, "
-     "and mark one done or not done (\"I fed the dog\"). Adding, changing and removing are for parents.",
+     "\"give <child> feed the chickens every day at 7am\"), remove or rename one, list a day's chores, "
+     "and mark one done or not done (\"I fed the dog\"). Adding, changing and removing are for parents. "
+     "Parents also approve a ticked-off chore (it earns screen time) or send it back to redo.",
      "payload fields: action, title, assignee, assignees, date, time, repeat, until, stars, emoji, note, "
-     "chore_id, scope, new_title. action is add, list, remove, update, complete or uncomplete; date is "
+     "chore_id, scope, new_title. action is add, list, remove, update, complete, uncomplete, checks (what waits "
+     "for a parent's OK), approve or redo; date is "
      "YYYY-MM-DD, today or tomorrow; time like 7am; repeat is daily, weekdays, weekends, weekly, days like "
      "'mon and wed', or an RRULE; scope is one (just that day) or all (every day of a repeating chore)."),
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,

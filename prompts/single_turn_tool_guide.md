@@ -45,16 +45,19 @@ Plan a dinner into the family's week plan (`Recipes/Meal plan.md`) from a spoken
 
 ### ChoreRequest
 Family chores on the Skylight chore chart.
-- Fields: `tool`, `action`: `add`, `list`, `remove`, `update`, `complete` or `uncomplete`.
+- Fields: `tool`, `action`: `add`, `list`, `remove`, `update`, `complete`, `uncomplete`, `checks`, `approve` or `redo`.
 - `add`: `title`, `assignee` (or `assignees`), optional `date` (`today`, `tomorrow`, `YYYY-MM-DD`), `time` (`"7am"`), `repeat` (`daily`, `weekdays`, `weekends`, `weekly`, `"mon, wed"`), `until`, `stars`, `emoji`, `note`.
 - `remove` / `update` / `complete`: the chore's `title` (and `assignee` when two people share a name); `scope` `one` (just that day, the default) or `all` (every day of a repeating chore); `update` takes `new_title`, `time`, `repeat`, `stars`.
 - `list`: optional `assignee` and `date`.
 - Only parents add, change or remove chores, and never from a voice alone; anyone lists and ticks off their own. When more than one chore matches, the reply names them: ask which one.
+- Earned screen time: a chore a child ticked off waits for a parent's OK. `checks` lists what is waiting (optional `assignee`); `approve` ("<child> did the trash right") earns its minutes; `redo` ("<child> needs to redo the dishes") unticks it. Give the chore's `title` and the child as `assignee` as the parent said them; `scope` `all` answers every match ("approve all of <child>'s chores"). Only that child's parents can answer; a voice alone may, and the parents are told.
 - Examples:
-  - `{"tool": "ChoreRequest", "action": "add", "title": "Feed the chickens", "assignee": "Noah", "repeat": "daily", "time": "7am", "stars": 2}`
-  - `{"tool": "ChoreRequest", "action": "remove", "title": "Trash", "assignee": "Gracie", "scope": "all"}`
+  - `{"tool": "ChoreRequest", "action": "add", "title": "Feed the chickens", "assignee": "<child's name>", "repeat": "daily", "time": "7am", "stars": 2}`
+  - `{"tool": "ChoreRequest", "action": "remove", "title": "Trash", "assignee": "<child's name>", "scope": "all"}`
   - `{"tool": "ChoreRequest", "action": "complete", "title": "fed the dog"}`
   - `{"tool": "ChoreRequest", "action": "list"}`
+  - `{"tool": "ChoreRequest", "action": "approve", "title": "trash", "assignee": "<child's name as spoken>"}`
+  - `{"tool": "ChoreRequest", "action": "checks"}`
 
 ### WorkspaceCreateRequest
 Create a new isolated workspace environment.

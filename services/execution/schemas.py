@@ -505,10 +505,15 @@ class ChoreRequest(BaseRequest):
     ``uncomplete``. Adding, changing and removing are for parents; anyone can
     list and tick off their own. ``scope`` is ``one`` (just that day of a
     repeating chore, the default) or ``all`` (every day of it).
+
+    Earned screen time: ``checks`` lists ticked-off chores waiting for a
+    parent's OK, ``approve`` says one was done right (it earns its minutes)
+    and ``redo`` sends it back (unticked); ``scope: all`` answers every one
+    that matches.
     """
 
     user_context: UserContext
-    action: Literal["add", "list", "remove", "update", "complete", "uncomplete"] = "list"
+    action: Literal["add", "list", "remove", "update", "complete", "uncomplete", "checks", "approve", "redo"] = "list"
     title: str | None = None
     assignee: str | None = None
     assignees: list[str] | None = None

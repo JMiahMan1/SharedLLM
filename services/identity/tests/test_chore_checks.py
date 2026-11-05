@@ -136,3 +136,20 @@ def test_the_week_comes_back_with_each_days_given_time(family):
 def test_bad_days_are_refused(family):
     r = family("dad").post("/api/internal/chore-checks/kid/sync", json={"day": "today", "done": []})
     assert r.status_code == 422
+
+
+def test_the_assistant_lists_and_answers_as_the_parent_who_spoke(family):
+    client = family("dad")
+    check = sync(client, [{"id": "50", "title": "Trash"}])["new"][0]["id"]
+    seen = client.get("/api/internal/chore-checks", params={"viewer": "mom"}).json()["checks"]
+    assert [(c["id"], c["display_name"]) for c in seen] == [(check, "kid")]
+    assert client.get("/api/internal/chore-checks", params={"viewer": "sib"}).json()["checks"] == []
+    assert client.get("/api/internal/chore-checks", params={"viewer": "nobody"}).status_code == 404
+
+    refused = client.post(f"/api/internal/chore-checks/{check}/decide", json={"by": "kid", "approve": True})
+    assert refused.status_code == 403  # a child cannot approve their own, even through the assistant
+    ok = client.post(f"/api/internal/chore-checks/{check}/decide", json={"by": "mom", "approve": True}).json()
+    assert ok["check"]["status"] == "approved" and ok["check"]["decided_by"] == "mom"
+    assert set(ok["parents"]) == {"dad", "mom"} and ok["display_name"] == "kid"
+    again = client.post(f"/api/internal/chore-checks/{check}/decide", json={"by": "dad", "approve": False})
+    assert again.status_code == 409
