@@ -47,6 +47,7 @@ from services.common.podcast_recommendations import podcast_events, recommend_po
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
+    chore_answer_words,
     evaluate as evaluate_screen_time,
     wants_progress as screen_time_wants_progress,
     week_start as screen_time_week_start,
@@ -7327,13 +7328,8 @@ async def decide_chore_check(request: Request, check_id: int, payload: dict) -> 
                 params={"user": check.get("username") or ""},
             )
             body["unticked"] = bool(unticked and unticked.get("status") == "SUCCESS")
-        await _screen_time_notice(
-            body.get("notify") or [],
-            "Chore approved" if check.get("status") == "approved" else "Have another go",
-            f"\u201c{title}\u201d was done right. Nice work!" if check.get("status") == "approved"
-            else f"A parent asked you to redo \u201c{title}\u201d. It's back on your list.",
-            "/fitness",
-        )
+        heading, line = chore_answer_words(check.get("status") == "approved", title)
+        await _screen_time_notice(body.get("notify") or [], heading, line, "/fitness")
     return status, body
 
 

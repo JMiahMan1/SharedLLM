@@ -722,6 +722,15 @@ point.
         (Guardian page, member page → Time). **Redo it** unticks the chore on Skylight so it is
         back on the child's list, and the child is told. A chore unticked before a parent looked
         stops waiting; ticked off again after a redo, it waits again.
+      - **By voice or chat** (`ChoreRequest` actions `checks`, `approve`, `redo`): "what chores
+        need checking?", "<child> did the trash right", "<child> needs to redo the dishes",
+        "approve all of <child>'s chores" (`scope: all`). Children are matched by the login and
+        display names identity sends with each check, so no family's names are built in. Identity
+        applies the same rule as the app (only that child's parents; `POST
+        /api/internal/chore-checks/{id}/decide` with `by`). A voice alone may approve, since a
+        kitchen speaker is where a parent sees the chore done, but then the child's parents are
+        told it was approved by voice, so a misheard or imitated voice shows; the most it can earn
+        is the day's cap.
       - **Chores first** (`ScreenRules.chores_first`) locks the phone (reason `chores`) while any
         of today's chores is not ticked off; it lifts as soon as the last is ticked (a parent's
         OK is about the minutes, not the lock, so a parent who is busy does not keep the phone

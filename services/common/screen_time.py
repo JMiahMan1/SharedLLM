@@ -501,6 +501,14 @@ def carried_over(rules: dict[str, Any] | None, past_days: list[dict[str, Any]] |
     return bank
 
 
+def chore_answer_words(approved: bool, title: str | None) -> tuple[str, str]:
+    """What the child is told when a parent answers a ticked-off chore (title, body)."""
+    name = f"\u201c{title or 'your chore'}\u201d"
+    if approved:
+        return "Chore approved", f"{name} was done right. Nice work!"
+    return "Have another go", f"A parent asked you to redo {name}. It's back on your list."
+
+
 def evaluate(
     rules: dict[str, Any] | None,
     used_ms: int,

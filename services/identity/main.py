@@ -5150,10 +5150,8 @@ def list_chore_checks(status: str = "pending", session: Session = Depends(get_se
     return {"checks": [_chore_check_read(c) for c in _visible_requests(session, caller, rows)]}
 
 
-@app.post("/api/screen-time/chore-checks/{check_id}")
-def decide_chore_check(check_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent says a chore was done right (it earns its minutes) or not (it
-    goes back on the list: the gateway unticks it on Skylight)."""
+def _decide_chore_check(session: Session, check_id: int, caller: User, approve: object) -> dict:
+    """A parent's answer on a ticked-off chore; the app and the assistant both come here."""
     check = session.get(ChoreCheck, check_id)
     if check is None:
         raise HTTPException(status_code=404, detail="No such chore")
@@ -5162,7 +5160,6 @@ def decide_chore_check(check_id: int, body: dict, session: Session = Depends(get
         raise HTTPException(status_code=403, detail="Only a parent can answer")
     if check.status != "pending":
         raise HTTPException(status_code=409, detail="Already answered")
-    approve = (body or {}).get("approve")
     if not isinstance(approve, bool):
         raise HTTPException(status_code=422, detail="approve must be true or false")
     check.status = "approved" if approve else "declined"
@@ -5171,7 +5168,45 @@ def decide_chore_check(check_id: int, body: dict, session: Session = Depends(get
     session.add(check)
     session.commit()
     session.refresh(check)
-    return {"check": _chore_check_read(check), "notify": [check.username], "untick": not approve}
+    return {
+        "check": _chore_check_read(check), "notify": [check.username], "untick": not approve,
+        "display_name": subject.display_name or subject.username,
+        "parents": _parents_of(session, subject),
+    }
+
+
+@app.post("/api/screen-time/chore-checks/{check_id}")
+def decide_chore_check(check_id: int, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent says a chore was done right (it earns its minutes) or not (it
+    goes back on the list: the gateway unticks it on Skylight)."""
+    return _decide_chore_check(session, check_id, caller, (body or {}).get("approve"))
+
+
+def _internal_viewer(session: Session, username: str) -> User:
+    viewer = session.exec(select(User).where(User.username == (username or "").strip().lower())).first()
+    if viewer is None:
+        raise HTTPException(status_code=404, detail="No such member")
+    return viewer
+
+
+@app.get("/api/internal/chore-checks")
+def internal_list_chore_checks(viewer: str, status: str = "pending", session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal (the assistant): the checks ``viewer`` may answer or see, with
+    each child's display name so a spoken first name finds them."""
+    caller = _internal_viewer(session, viewer)
+    rows = session.exec(select(ChoreCheck).where(ChoreCheck.status == status)).all()
+    names = {u.username: (u.display_name or u.username) for u in session.exec(select(User)).all()}
+    return {"checks": [
+        {**_chore_check_read(c), "display_name": names.get(c.username, c.username)}
+        for c in _visible_requests(session, caller, rows)
+    ]}
+
+
+@app.post("/api/internal/chore-checks/{check_id}/decide")
+def internal_decide_chore_check(check_id: int, body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal (the assistant): ``by`` answers, under the same rule as the app."""
+    caller = _internal_viewer(session, str((body or {}).get("by") or ""))
+    return _decide_chore_check(session, check_id, caller, (body or {}).get("approve"))
 
 
 # --- asking a parent first: new apps, permissions, blocked sites (Phase 11 step 5) ---
