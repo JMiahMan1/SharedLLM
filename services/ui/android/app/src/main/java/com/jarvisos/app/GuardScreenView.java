@@ -93,7 +93,10 @@ final class GuardScreenView {
                     : appName + " asked for something your parents approve first. They have been asked; try again once one of them says yes.";
         } else {
             titleText = lockedTitle(context);
-            bodyText = "Calls, texts and Jarvis still work. You can ask a parent for more time, or message them,"
+            bodyText = "chores".equals(GuardApi.lockReason(context))
+                    ? "Tick off today's chores in Jarvis or on the chore chart and this unlocks. Calls, texts and"
+                    + " Jarvis still work, and you can ask a parent for more time from here."
+                    : "Calls, texts and Jarvis still work. You can ask a parent for more time, or message them,"
                     + " without leaving this screen. A parent can sign in below, or use their offline code, to lift it.";
         }
         TextView title = text(context, titleText, 24);
@@ -434,6 +437,8 @@ final class GuardScreenView {
                 return "It's school time";
             case "paused":
                 return "A parent paused this " + DeviceNoun.of(context);
+            case "chores":
+                return "Chores first";
             default:
                 return "That's today's screen time";
         }

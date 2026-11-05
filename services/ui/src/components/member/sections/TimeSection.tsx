@@ -3,6 +3,7 @@ import { Grid3x3 } from 'lucide-react';
 import MemberCard from '../MemberCard';
 import { HourHeatmap } from '../charts';
 import ScreenTimeControls from '../../health/ScreenTimeControls';
+import EarnTimeControls from '../../health/EarnTimeControls';
 import OfflineCodeSetting from '../../health/OfflineCodeSetting';
 import RequestsCard from '../../guardian/RequestsCard';
 import ChoresCard from '../../guardian/ChoresCard';
@@ -40,12 +41,13 @@ function HeatmapCard({ username }: { username: string }) {
   );
 }
 
-/** Time controls (Family Link's Controls tab): the weekly schedule and routines, their chores, the heatmap, requests answered, the offline code. */
+/** Time controls (Family Link's Controls tab): the weekly schedule and routines, their chores and earned time, the heatmap, requests answered, the offline code. */
 export default function TimeSection({ username, name }: { username: string; name: string }) {
   return (
     <>
       <ScreenTimeControls username={username} name={name} />
       <ChoresCard username={username} name={name} />
+      <EarnTimeControls username={username} name={name} />
       <HeatmapCard username={username} />
       <RequestsCard username={username} name={name} kinds={['time']} history />
       <OfflineCodeSetting />

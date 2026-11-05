@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Hourglass, Moon, School, Pause } from 'lucide-react';
+import { Hourglass, ListChecks, Moon, School, Pause } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { appName, duration } from '../../lib/phoneUsageFormat';
-import { lockedLine } from '../../lib/screenTimeText';
+import { earnedLine, howToEarn, lockedLine } from '../../lib/screenTimeText';
 
 /**
  * A member's own screen time (Phase 11 step 4): what is left today, or why the
@@ -58,14 +58,18 @@ export default function ScreenTimeCard() {
   const hasRules = Boolean(
     rules.daily_limit_min !== undefined || rules.bedtime_start || rules.school_start || status?.paused
       || Object.keys(rules.app_limits || {}).length > 0 || blockedApps.length > 0
-      || (week?.days_reported || 0) > 0,
+      || (week?.days_reported || 0) > 0 || Boolean(rules.earn) || Boolean(rules.chores_first),
   );
   if (!status || !hasRules) return null;
 
   const waiting = (pending?.requests || []).some((r) => r.username === me);
   const failed = ask.error || askApp.error;
   const askError = isAxiosError(failed) ? (failed.response?.data as { detail?: string })?.detail : null;
-  const Icon = status.reason === 'bedtime' ? Moon : status.reason === 'school' ? School : status.reason === 'paused' ? Pause : Hourglass;
+  const Icon = status.reason === 'bedtime' ? Moon : status.reason === 'school' ? School : status.reason === 'paused' ? Pause
+    : status.reason === 'chores' ? ListChecks : Hourglass;
+  const earnedText = earnedLine(status);
+  const ways = howToEarn(status);
+  const waitingChores = status.chores_waiting || [];
 
   return (
     <section className="glass-panel rounded-2xl p-4 sm:p-5" data-testid="screen-time-card">
@@ -83,6 +87,23 @@ export default function ScreenTimeCard() {
         </p>
       ) : (
         <p className="mt-2 text-sm text-slate-300">No daily limit today.</p>
+      )}
+
+      {(earnedText || (status.banked_min || 0) > 0 || ways.length > 0 || waitingChores.length > 0) && (
+        <div className="mt-2 space-y-1 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-3 text-xs text-slate-300" data-testid="screen-time-earned">
+          {earnedText && <p className="font-medium text-emerald-200">{earnedText}</p>}
+          {(status.banked_min || 0) > 0 && (
+            <p data-testid="screen-time-banked">
+              {status.banked_min} min saved from earlier this week (it starts fresh on Monday).
+            </p>
+          )}
+          {waitingChores.length > 0 && (
+            <p className="text-sky-200" data-testid="screen-time-chores-waiting">
+              Waiting for a parent's OK: {waitingChores.map((c) => c.title).join(', ')}.
+            </p>
+          )}
+          {ways.length > 0 && <p className="text-slate-400">Earn more: {ways.join('; ')}.</p>}
+        </div>
       )}
 
       {Object.keys(status.app_minutes_left || {}).length > 0 && (

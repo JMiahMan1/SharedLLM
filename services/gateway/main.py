@@ -14,7 +14,7 @@ import traceback
 import uuid
 import zipfile
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit
@@ -45,7 +45,13 @@ from services.common.guidance import guidance as _guidance
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
 from services.common.relay import until_either_ends
-from services.common.screen_time import evaluate as evaluate_screen_time, weekly_report as weekly_screen_time
+from services.common.screen_time import (
+    carried_over as carried_over_screen_time,
+    evaluate as evaluate_screen_time,
+    wants_progress as screen_time_wants_progress,
+    week_start as screen_time_week_start,
+    weekly_report as weekly_screen_time,
+)
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
@@ -6661,6 +6667,129 @@ async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
             log.warning("[screen-time] notice to %s failed: %s", user, exc)
 
 
+async def _internal_json(method: str, url: str, **kwargs: Any) -> Any:
+    """A JSON answer from another service, or None when it cannot give one."""
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.request(
+                method, url, headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0), **kwargs,
+            )
+            if resp.status != 200:
+                return None
+            return await resp.json(content_type=None)
+    except Exception as exc:  # a source that is away earns nothing, never fails the status
+        log.info("[screen-time] %s %s unavailable: %s", method, url, exc)
+        return None
+
+
+def _exercise_by_day(workouts: list[dict], tz: Any, since: date) -> dict[str, int]:
+    """Minutes of finished workouts per household-local day, from ``since``."""
+    out: dict[str, int] = {}
+    for w in workouts or []:
+        if not isinstance(w, dict) or w.get("status") == "in_progress":
+            continue
+        try:
+            day = datetime.fromtimestamp(float(w.get("start_time")), tz).date()
+            minutes = max(0, int(float(w.get("duration_seconds") or 0))) // 60
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if day >= since and minutes:
+            out[day.isoformat()] = out.get(day.isoformat(), 0) + minutes
+    return out
+
+
+# Today's chores per child, briefly: the phone and the parents' page each ask
+# every minute, and each read is a call to Skylight. Ticking a chore off or
+# a parent's answer clears it, so the lock follows at once.
+_CHORES_TTL_S = 30.0
+_chores_seen: dict[tuple[str, str], tuple[float, Any]] = {}
+
+
+def _forget_chores(username: str | None = None) -> None:
+    for key in [k for k in _chores_seen if username is None or k[0] == username]:
+        _chores_seen.pop(key, None)
+
+
+async def _todays_chores(username: str, day: str) -> Any:
+    seen = _chores_seen.get((username, day))
+    if seen and time.monotonic() - seen[0] < _CHORES_TTL_S:
+        return seen[1]
+    got = await _internal_json(
+        "GET", f"{EXECUTION_SVC}/api/integrations/skylight/chores", params={"user": username, "date": day},
+    )
+    if got is not None:
+        _chores_seen[(username, day)] = (time.monotonic(), got)
+    return got
+
+
+async def _earning_week(username: str, now: datetime) -> dict[str, Any]:
+    """This week's steps, exercise and chores for earned time and "chores first".
+
+    Today's ticked-off Skylight chores line up with the checks waiting on a
+    parent (identity), and the parents hear about each newly ticked-off one.
+    A chore earns only once approved. A source that cannot be read gives
+    None for its counts, so it neither earns nor locks.
+    """
+    today = now.date()
+    start = screen_time_week_start(today)
+    day = today.isoformat()
+    steps, workouts, chores = await asyncio.gather(
+        _internal_json("GET", f"{GEO_SVC}/steps", params={"user_id": username, "days": 7}),
+        _internal_json("GET", f"{GEO_SVC}/workouts", params={"user_id": username, "limit": 50}),
+        _todays_chores(username, day),
+    )
+    chore_list = (chores or {}).get("chores") if (chores or {}).get("status") == "SUCCESS" else None
+    done = None
+    left = None
+    if isinstance(chore_list, list):
+        items = [c for c in chore_list if isinstance(c, dict)]
+        done = [{"id": str(c.get("id")), "title": c.get("title") or ""} for c in items if c.get("completed") and c.get("id") is not None]
+        left = sum(1 for c in items if not c.get("completed"))
+    synced = await _internal_json(
+        "POST", f"{IDENTITY_SVC}/api/internal/chore-checks/{username}/sync",
+        json={"day": day, "week_start": start.isoformat(), "done": done},
+    ) or {}
+    for check in synced.get("new") or []:
+        await _screen_time_notice(
+            synced.get("parents") or [],
+            "Chore done?",
+            f"{username} ticked off \u201c{check.get('title') or 'a chore'}\u201d. Was it done right?",
+            f"/family/member/{username}",
+            actions=[
+                _notify.callback_action("Done right", "chore_check_decide", {"id": check.get("id"), "approve": True}),
+                _notify.callback_action("Redo it", "chore_check_decide", {"id": check.get("id"), "approve": False}),
+            ],
+        )
+    checks = [c for c in synced.get("checks") or [] if isinstance(c, dict)]
+    approved: dict[str, int] = {}
+    for c in checks:
+        if c.get("status") == "approved":
+            approved[str(c.get("day"))] = approved.get(str(c.get("day")), 0) + 1
+    daily_steps = (steps or {}).get("daily_steps") if isinstance((steps or {}).get("daily_steps"), dict) else None
+    exercise = _exercise_by_day((workouts or {}).get("workouts") or [], now.tzinfo, start) if workouts is not None else None
+
+    def progress(d: str) -> dict[str, Any]:
+        return {
+            "steps": None if daily_steps is None else int(daily_steps.get(d) or 0),
+            "exercise_min": None if exercise is None else exercise.get(d, 0),
+            # Only chores a parent approved earn; with no answer from identity, none do.
+            "chores_done": approved.get(d, 0) if synced else None,
+        }
+
+    today_progress = {**progress(day), "chores_left": left}
+    if daily_steps is not None and steps and steps.get("today") is not None:
+        today_progress["steps"] = int(steps.get("today") or 0)
+    return {
+        "start": start,
+        "today": today_progress,
+        "progress": progress,
+        "bonus_by_day": synced.get("bonus_by_day") or {},
+        "waiting": [c for c in checks if c.get("status") == "pending"],
+        "ticked": done,
+    }
+
+
 @app.get("/api/screen-time/{username}/status")
 async def screen_time_status(request: Request, username: str, device_key: str | None = None):
     """Time left today and whether the phone should be locked now, and why.
@@ -6695,7 +6824,39 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
             granted_until = datetime.fromisoformat(str(body["granted_until"])).astimezone(now.tzinfo)
         except ValueError:
             granted_until = None
-    state = evaluate_screen_time(body.get("rules"), used_ms, body.get("bonus_min") or 0, now, apps_ms, granted_until)
+    rules = body.get("rules") or {}
+    earning = await _earning_week(username, now) if screen_time_wants_progress(rules) else None
+    banked = 0
+    if earning:
+        past = []
+        for d in usage:
+            name = str(d.get("day") or "")
+            if earning["start"].isoformat() <= name < day:
+                past.append({
+                    "day": name,
+                    "used_min": max(0, int(d.get("millis") or 0)) // 60000,
+                    "bonus_min": int(earning["bonus_by_day"].get(name) or 0),
+                    "progress": earning["progress"](name),
+                })
+        # A day with no phone use reported still earned its steps and chores.
+        seen = {p["day"] for p in past}
+        cursor = earning["start"]
+        while cursor.isoformat() < day:
+            if cursor.isoformat() not in seen:
+                past.append({"day": cursor.isoformat(), "used_min": 0,
+                             "bonus_min": int(earning["bonus_by_day"].get(cursor.isoformat()) or 0),
+                             "progress": earning["progress"](cursor.isoformat())})
+            cursor += timedelta(days=1)
+        banked = carried_over_screen_time(rules, past)
+    state = evaluate_screen_time(
+        rules, used_ms, body.get("bonus_min") or 0, now, apps_ms, granted_until,
+        progress=earning["today"] if earning else None, banked_min=banked,
+    )
+    if earning:
+        # Ticked-off chores still waiting on a parent's OK (they earn once approved).
+        state["chores_waiting"] = [
+            {"id": c.get("id"), "title": c.get("title"), "day": c.get("day")} for c in earning["waiting"]
+        ]
     answer = {
         "status": "SUCCESS",
         "username": username,
@@ -7151,6 +7312,43 @@ async def decide_more_time(request: Request, request_id: int, payload: dict) -> 
     return status, body
 
 
+async def decide_chore_check(request: Request, check_id: int, payload: dict) -> tuple[int, dict]:
+    """A parent says a ticked-off chore was done right (it earns its minutes)
+    or not (it is unticked on Skylight, back on the list); the child hears.
+    Shared by the route and the notice's buttons (``chore_check_decide``)."""
+    status, body = await _identity_as_caller(request, "POST", f"/api/screen-time/chore-checks/{check_id}", json=payload)
+    if status == 200:
+        check = body.get("check") or {}
+        title = check.get("title") or "your chore"
+        _forget_chores(check.get("username"))
+        if body.get("untick") and check.get("chore_id"):
+            unticked = await _internal_json(
+                "POST", f"{EXECUTION_SVC}/api/integrations/skylight/chores/{check['chore_id']}/uncomplete",
+                params={"user": check.get("username") or ""},
+            )
+            body["unticked"] = bool(unticked and unticked.get("status") == "SUCCESS")
+        await _screen_time_notice(
+            body.get("notify") or [],
+            "Chore approved" if check.get("status") == "approved" else "Have another go",
+            f"\u201c{title}\u201d was done right. Nice work!" if check.get("status") == "approved"
+            else f"A parent asked you to redo \u201c{title}\u201d. It's back on your list.",
+            "/fitness",
+        )
+    return status, body
+
+
+@app.get("/api/screen-time/chore-checks")
+async def screen_time_chore_checks(request: Request, status: str = "pending"):
+    code, body = await _identity_as_caller(request, "GET", "/api/screen-time/chore-checks", params={"status": status})
+    return JSONResponse(status_code=code, content=body)
+
+
+@app.post("/api/screen-time/chore-checks/{check_id}")
+async def screen_time_chore_check_decide(request: Request, check_id: int):
+    status, body = await decide_chore_check(request, check_id, await request.json())
+    return JSONResponse(status_code=status, content=body)
+
+
 @app.post("/api/screen-time/requests/{request_id}")
 async def screen_time_decide(request: Request, request_id: int):
     status, body = await decide_more_time(request, request_id, await request.json())
@@ -7525,6 +7723,7 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
+    _forget_chores(creds.get("user") or None)  # the phone's "chores first" lock follows at once
     return await _proxy_json_response(resp)
 
 
@@ -7538,6 +7737,7 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
+    _forget_chores(creds.get("user") or None)  # the phone's "chores first" lock follows at once
     return await _proxy_json_response(resp)
 
 

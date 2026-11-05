@@ -34,4 +34,7 @@ export const CHORES_QUERY_PREFIX = ['skylight-chores'] as const;
 
 export function refreshChores(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: CHORES_QUERY_PREFIX });
+  // A chore ticked off can lift "chores first" and earn time (docs/HEALTH_HUB.md).
+  void queryClient.invalidateQueries({ queryKey: ['screen-time'] });
+  void queryClient.invalidateQueries({ queryKey: ['chore-checks'] });
 }

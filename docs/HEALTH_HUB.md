@@ -707,6 +707,34 @@ point.
       **4b (next): enforcement on the phone** - the Android app reads the status and locks
       everything but the always-allowed apps; this needs an Accessibility service and a device
       check, and pairs with tamper resistance below.
+- [x] **Earning time and chores first (built 2026-11-04).** A parent decides what a child's
+      effort is worth: "every 1,000 steps earns 5 min", "every 15 min of exercise earns 10 min",
+      "each approved chore earns 10 min", and the most a day can earn (`ScreenRules.earn`:
+      `steps_every`/`steps_min`, `exercise_every`/`exercise_min`, `chore_min`, `max_min`). Earned
+      minutes extend the day's limit like bonus time but are spent only after the day's own limit
+      and bonus; what is left **carries over day to day and starts fresh each Monday** (household
+      midnight). Steps come from geo's fused daily steps, exercise from finished workouts, chores
+      from the child's Skylight column.
+      - **A chore earns only once a parent says it was done right.** The status sees a chore
+        ticked off (in Jarvis or on the Skylight screen) and records a `ChoreCheck` (identity,
+        pending); both parents get a notice with **Done right** / **Redo it** buttons (push
+        callback `chore_check_decide`), and the same buttons sit in the child's chores card
+        (Guardian page, member page → Time). **Redo it** unticks the chore on Skylight so it is
+        back on the child's list, and the child is told. A chore unticked before a parent looked
+        stops waiting; ticked off again after a redo, it waits again.
+      - **Chores first** (`ScreenRules.chores_first`) locks the phone (reason `chores`) while any
+        of today's chores is not ticked off; it lifts as soon as the last is ticked (a parent's
+        OK is about the minutes, not the lock, so a parent who is busy does not keep the phone
+        locked). Calls, texts and Jarvis still work, so the child can tick chores off in Jarvis.
+        Pause, bedtime and school come first; time a parent gives opens it, and the phone warns a
+        minute before it returns. When the chore chart cannot be read the phone is not locked for it.
+      - The rule is `services/common/screen_time.py` (`earned`, `carried_over`, the `chores`
+        lock); the gateway's status gathers the week (`_earning_week`, today's chores cached
+        30 s and cleared on a tick or an answer) and returns `earned_min`, `earned` (per source),
+        `banked_min`, `chores_left` and `chores_waiting`. Routes: `GET /api/screen-time/chore-checks`,
+        `POST /api/screen-time/chore-checks/{id}` `{approve}`. Screens: `EarnTimeControls` (a
+        parent), `ChoresCard` (approvals), `ScreenTimeCard` (the child: earned today, saved from
+        earlier this week, chores waiting, how to earn more); the Android lock says "Chores first".
 - [x] **App control.** Block apps, per-app daily limits, install approvals, per-permission
       gating; Accessibility-service enforcement on the device with Family Link's one-minute
       grace warning before a block lands.
