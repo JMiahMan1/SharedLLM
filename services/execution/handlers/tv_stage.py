@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import os
 import re
@@ -69,6 +70,20 @@ CAST_WAKE_WAIT_S = 18.0
 #: Players that can actually show a video stream. Music Assistant wrappers and
 #: speakers cannot, and a TV with its own browser is better served by that.
 STREAM_PLATFORMS = {"dlna", "generic_tv", "bravia"}
+#: TVs whose Cast entity in HA is their own built-in receiver, not a dongle.
+BUILT_IN_CAST_PLATFORMS = {"android_tv", "google_tv"}
+#: Cast devices on another subnet never answer mDNS here (multicast does not
+#: cross routers), so they are found by unicast. Where to look, best first:
+#: the router monitor's own view (every LAN network and every device with an
+#: address, ``network:status``), then the /24s beside this host's, /24s where a
+#: Cast device was found before, and, as a hint only, Home Assistant's Cast
+#: "known hosts". Each candidate is asked who it is (``/setup/eureka_info``),
+#: which gives its name and Cast id.
+CAST_SWEEP_TTL_S = 600.0
+CAST_PORT_PROBE_S = 0.8
+CAST_INFO_TIMEOUT_S = 3.0
+#: How many /24s either side of this host's own are swept.
+CAST_NEIGHBOUR_NETS = int(os.getenv("CAST_NEIGHBOUR_NETS", "1"))
 TOKEN_DIR = Path(os.getenv("TV_STAGE_TOKEN_DIR", "/data/tv_stage"))
 
 #: Methods that run the real page on the screen, in preference order.
@@ -86,6 +101,7 @@ METHOD_LABELS = {
 }
 
 _cache: dict[str, Any] = {"at": 0.0, "key": "", "screens": []}
+_sweep_cache: dict[str, Any] = {"at": 0.0, "key": "", "devices": []}
 
 
 # --------------------------------------------------------------------------- names
@@ -146,6 +162,274 @@ async def discover_cast_devices(timeout: float = CAST_DISCOVERY_TIMEOUT_S) -> li
         return []
 
 
+def _uuid_key(value: str) -> str:
+    """Cast ids appear dashed (mDNS, eureka) and bare (HA identifiers)."""
+    return re.sub(r"[-{}\s]", "", (value or "").lower())
+
+
+def known_hosts_from_flow(flow: dict[str, Any]) -> list[str]:
+    """The ``known_hosts`` an HA Cast options form is pre-filled with (pure)."""
+    hosts: list[str] = []
+    for field in flow.get("data_schema") or []:
+        if field.get("name") != "known_hosts":
+            continue
+        for src in ((field.get("description") or {}).get("suggested_value"), field.get("default")):
+            if isinstance(src, list):
+                hosts.extend(str(h).strip() for h in src)
+    out: list[str] = []
+    for h in hosts:
+        with contextlib.suppress(ValueError):
+            if ipaddress.ip_address(h).version == 4 and h not in out:
+                out.append(h)
+    return out
+
+
+async def ha_cast_known_hosts(ha_url: str, ha_token: str) -> list[str]:
+    """Addresses HA's Cast integration was told about (devices on other subnets).
+
+    HA only shows them in the integration's options form, so the form is
+    opened, read and cancelled; nothing is saved.
+    """
+    if not (ha_url and ha_token):
+        return []
+    import aiohttp
+
+    hosts: list[str] = []
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    base = f"{ha_url.rstrip('/')}/api/config/config_entries/options/flow"
+    timeout = aiohttp.ClientTimeout(total=8)
+    for entry in await ha_client.get_config_entries(ha_url, ha_token, "cast"):
+        entry_id = entry.get("entry_id")
+        if not entry_id:
+            continue
+        flow_id = ""
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as client:
+                async with client.post(base, headers=headers, json={"handler": entry_id}) as resp:
+                    if resp.status >= 400:
+                        continue
+                    flow = await resp.json()
+                flow_id = str(flow.get("flow_id") or "")
+                hosts.extend(h for h in known_hosts_from_flow(flow) if h not in hosts)
+                if flow_id:
+                    async with client.delete(f"{base}/{flow_id}", headers=headers):
+                        flow_id = ""
+        except Exception as exc:
+            log.debug("[tv_stage] reading HA cast known hosts failed: %s", exc)
+    return hosts
+
+
+def cast_from_eureka(ip: str, info: dict[str, Any]) -> dict[str, Any] | None:
+    """A Cast device record from a device's own ``eureka_info`` answer (pure)."""
+    dev = info.get("device_info") or {}
+    uuid = str(info.get("ssdp_udn") or dev.get("ssdp_udn") or "")
+    name = str(info.get("name") or "")
+    if not (uuid or name):
+        return None
+    caps = dev.get("capabilities") or {}
+    display = caps.get("display_supported")
+    return {
+        "uuid": uuid,
+        "name": name,
+        "host": ip,
+        "port": 8009,
+        "model": str(dev.get("model_name") or ""),
+        "cast_type": "audio" if display is False else "cast",
+        "manufacturer": str(dev.get("manufacturer") or ""),
+        "found_by": "unicast",
+    }
+
+
+async def _port_open(ip: str, port: int = 8009) -> bool:
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), CAST_PORT_PROBE_S)
+    except Exception:
+        return False
+    writer.close()
+    return True
+
+
+async def _cast_info(ip: str) -> dict[str, Any] | None:
+    """Ask a Cast device who it is (https on newer firmware, http on older)."""
+    import aiohttp
+
+    timeout = aiohttp.ClientTimeout(total=CAST_INFO_TIMEOUT_S)
+    q = "params=name,device_info,ssdp_udn"
+    for url in (f"https://{ip}:8443/setup/eureka_info?{q}", f"http://{ip}:8008/setup/eureka_info?{q}"):
+        with contextlib.suppress(Exception):
+            async with aiohttp.ClientSession(timeout=timeout) as client, client.get(url, ssl=False) as resp:
+                if resp.status == 200:
+                    found = cast_from_eureka(ip, await resp.json(content_type=None))
+                    if found:
+                        return found
+    return None
+
+
+def _local_networks() -> set[ipaddress.IPv4Network]:
+    nets: set[ipaddress.IPv4Network] = set()
+    with contextlib.suppress(Exception):
+        ip = lan_host_for()
+        nets.add(ipaddress.ip_network(f"{ip}/24", strict=False))
+    return nets
+
+
+def neighbour_networks(nets: set[ipaddress.IPv4Network], span: int = 1) -> set[ipaddress.IPv4Network]:
+    """The private /24s beside each of ``nets`` (pure). 192.168.2.0/24 -> .1 and .3."""
+    out: set[ipaddress.IPv4Network] = set()
+    for net in nets:
+        a, b, c, _ = net.network_address.packed
+        for d in range(-span, span + 1):
+            if d and 0 <= c + d <= 255:
+                cand = ipaddress.ip_network(f"{a}.{b}.{c + d}.0/24")
+                if cand.is_private:
+                    out.add(cand)
+    return out - nets
+
+
+ROUTER_STATUS_KEY = "network:status"
+
+
+def router_view(status: dict[str, Any]) -> tuple[set[ipaddress.IPv4Network], list[str]]:
+    """LAN networks and device addresses from the router monitor's status (pure)."""
+    nets: set[ipaddress.IPv4Network] = set()
+    for n in status.get("networks") or []:
+        with contextlib.suppress(Exception):
+            net = ipaddress.ip_interface(str(n.get("cidr") or "")).network
+            if net.version == 4 and net.is_private and net.prefixlen >= 16:
+                nets.add(net)
+    ips: list[str] = []
+    for dev in (status.get("devices") or {}).values():
+        ip = str((dev or {}).get("ip") or "")
+        with contextlib.suppress(ValueError):
+            if ipaddress.ip_address(ip).version == 4 and ip not in ips:
+                ips.append(ip)
+    return nets, ips
+
+
+async def _router_status() -> dict[str, Any]:
+    """The router monitor's latest snapshot (control plane writes it to Redis)."""
+    with contextlib.suppress(Exception):
+        import json
+
+        import redis.asyncio as aioredis
+
+        from services.config import REDIS_URL
+
+        r = aioredis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            raw = await asyncio.wait_for(r.get(ROUTER_STATUS_KEY), 3)
+        finally:
+            await r.aclose()
+        data = json.loads(raw or "{}")
+        if data.get("configured") and data.get("connected", True):
+            return data
+    return {}
+
+
+_LEARNED_FILE = "cast_hosts.json"
+
+
+def _learned_hosts() -> list[str]:
+    with contextlib.suppress(Exception):
+        import json
+
+        data = json.loads((TOKEN_DIR / _LEARNED_FILE).read_text())
+        return [h for h in data if isinstance(h, str)]
+    return []
+
+
+def _remember_hosts(hosts: list[str]) -> None:
+    with contextlib.suppress(Exception):
+        import json
+
+        TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+        (TOKEN_DIR / _LEARNED_FILE).write_text(json.dumps(sorted(set(hosts))))
+
+
+async def discover_remote_cast_devices(ha_url: str, ha_token: str, *, force: bool = False) -> list[dict[str, Any]]:
+    """Cast devices on subnets mDNS cannot reach (our own discovery).
+
+    Sweeps the Cast port on the /24s beside this host's, on /24s where a Cast
+    device was found before, and on those of Home Assistant's Cast "known
+    hosts" when HA is configured. Works without HA; HA only adds hints.
+    """
+    key = f"{ha_url}|{bool(ha_token)}"
+    now = time.time()
+    if not force and _sweep_cache["key"] == key and now - float(_sweep_cache["at"]) < CAST_SWEEP_TTL_S:
+        return list(_sweep_cache["devices"])
+    hints: list[str] = []
+    with contextlib.suppress(Exception):
+        hints = await asyncio.wait_for(ha_cast_known_hosts(ha_url, ha_token), 10)
+    local = _local_networks()
+    router_nets, router_ips = router_view(await _router_status())
+    hosts = list(dict.fromkeys(hints + _learned_hosts()))
+    if router_ips:
+        # The router knows every device: ask those, no sweep needed.
+        hosts = list(dict.fromkeys(hosts + [ip for ip in router_ips
+                                            if not any(ipaddress.ip_address(ip) in n for n in local)]))
+        nets: set[ipaddress.IPv4Network] = set()
+    else:
+        nets = (router_nets | {ipaddress.ip_network(f"{h}/24", strict=False) for h in hosts}
+                | neighbour_networks(local, CAST_NEIGHBOUR_NETS)) - local
+    candidates: list[str] = []
+    sem0 = asyncio.Semaphore(128)
+
+    async def known(ip: str) -> str | None:
+        async with sem0:
+            return ip if await _port_open(ip) else None
+
+    candidates += [ip for ip in await asyncio.gather(*(known(h) for h in hosts)) if ip]
+    sem = asyncio.Semaphore(128)
+
+    async def probe(ip: str) -> str | None:
+        async with sem:
+            return ip if await _port_open(ip) else None
+
+    for net in nets:
+        if net.num_addresses > 1024:
+            continue
+        ips = [str(a) for a in net.hosts() if str(a) not in hosts]
+        candidates += [ip for ip in await asyncio.gather(*(probe(i) for i in ips)) if ip]
+    infos = await asyncio.gather(*(_cast_info(ip) for ip in candidates))
+    devices = [d for d in infos if d]
+    if devices:
+        _remember_hosts(_learned_hosts() + [d["host"] for d in devices])
+    log.info("[tv_stage] cast beyond mDNS: %d hint(s), %d subnet(s) swept, %d device(s)",
+             len(hosts), len(nets), len(devices))
+    _sweep_cache.update({"at": now, "key": key, "devices": devices})
+    return devices
+
+
+def merge_cast_devices(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One record per Cast device; the first group to report it wins (pure)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for d in group:
+            k = _uuid_key(d.get("uuid") or "") or f"host:{d.get('host')}"
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(d)
+    return out
+
+
+async def ha_cast_uuids(ha_url: str, ha_token: str) -> dict[str, str]:
+    """``{cast entity_id: Cast uuid}`` from HA's device registry."""
+    if not (ha_url and ha_token):
+        return {}
+    tpl = ("{% for e in integration_entities('cast') %}{% for i in device_attr(device_id(e), 'identifiers') or [] %}"
+           "{% if i[0] == 'cast' %}{{ e }}|{{ i[1] }};{% endif %}{% endfor %}{% endfor %}")
+    out: dict[str, str] = {}
+    with contextlib.suppress(Exception):
+        text = await ha_client._render_template(ha_url, ha_token, tpl) or ""
+        for part in text.split(";"):
+            eid, _, uid = part.strip().partition("|")
+            if eid and uid:
+                out[eid] = _uuid_key(uid)
+    return out
+
+
 def _methods_for(platform: str, *, has_cast: bool, companions: dict[str, Any], entity_id: str,
                  os_version: str = "") -> list[str]:
     methods: list[str] = []
@@ -174,13 +458,16 @@ def _screen_summary(screen: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str, Any]],
-                  ha_states: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+                  ha_states: list[dict[str, Any]] | None = None,
+                  cast_uuids: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Merge HA TVs and mDNS Cast devices into one list of physical screens.
 
     Pure (no I/O) so the merge rules are testable:
-    - an HA TV's ``cast_sibling`` is the same screen, not a second one;
-    - an mDNS Cast device whose name matches an HA screen (or its Cast
-      sibling's name) supplies that screen's Cast address;
+    - an Android/Google TV's ``cast_sibling`` is its built-in Cast receiver,
+      the same screen; any other TV's Cast sibling is a plugged-in Chromecast,
+      listed on its own *and* used to reach that TV;
+    - a discovered Cast device supplies a screen's Cast address, matched by
+      Cast id (``cast_uuids``: HA entity -> uuid) first, then by name;
     - a Cast device that is audio-only or a speaker group is not a screen;
     - a Cast device HA does not know about is still a screen.
     """
@@ -188,6 +475,9 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
         str(s.get("entity_id") or ""): str((s.get("attributes") or {}).get("friendly_name") or "")
         for s in ha_states or []
     }
+    cast_uuids = cast_uuids or {}
+    cast_by_uuid = {_uuid_key(cd.get("uuid") or ""): cd for cd in cast_devices if cd.get("uuid")}
+    entity_by_uuid = {u: e for e, u in cast_uuids.items() if u}
     cast_by_key: dict[str, dict[str, Any]] = {}
     for cd in cast_devices:
         if (cd.get("cast_type") or "cast") != "cast":
@@ -200,10 +490,12 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
     folded: set[str] = set()
 
     tvs = [d for d in ha_devices if (d.get("kind") == "tv")]
-    # Fold Cast siblings into their TV first so a TV's Cast entity is never listed twice.
+    # A TV with Cast built in shows up in HA twice (its own integration and
+    # Cast); that is one screen. A Chromecast plugged into a TV is a device of
+    # its own and stays listed.
     for d in tvs:
         sib = (d.get("companions") or {}).get("cast_sibling")
-        if sib and sib != d.get("entity_id"):
+        if sib and sib != d.get("entity_id") and d.get("platform") in BUILT_IN_CAST_PLATFORMS:
             folded.add(sib)
 
     for d in tvs:
@@ -217,8 +509,12 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
         candidate_names = [name]
         if cast_entity:
             candidate_names.append(names_by_entity.get(cast_entity, ""))
-        cast_dev = None
-        for cand in candidate_names:
+        # A TV's Music Assistant player is usually named for the Chromecast
+        # that drives it ("Master Bedroom TV" for the Samsung's dongle).
+        if companions.get("ma_sibling") and companions["ma_sibling"] != eid:
+            candidate_names.append(names_by_entity.get(companions["ma_sibling"], ""))
+        cast_dev = cast_by_uuid.get(cast_uuids.get(cast_entity, "")) if cast_entity else None
+        for cand in candidate_names if cast_dev is None else []:
             for key in _name_keys(cand):
                 if key in cast_by_key:
                     cast_dev = cast_by_key[key]
@@ -226,7 +522,8 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
             if cast_dev:
                 break
         if cast_dev and cast_dev.get("uuid"):
-            used_cast.add(cast_dev["uuid"])
+            used_cast.add(_uuid_key(cast_dev["uuid"]))
+            cast_entity = cast_entity or entity_by_uuid.get(_uuid_key(cast_dev["uuid"]), "")
         has_cast = bool(cast_dev or cast_entity)
         screens.append(
             _screen_summary(
@@ -237,6 +534,8 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
                     "entity_id": eid,
                     "state": str(d.get("state") or "unknown"),
                     "cast_entity": cast_entity or "",
+                    "cast_uuid": (cast_uuids.get(cast_entity, "") if cast_entity else "")
+                    or _uuid_key((cast_dev or {}).get("uuid") or ""),
                     "cast": cast_dev,
                     "companions": companions,
                     "methods": _methods_for(platform, has_cast=has_cast, companions=companions, entity_id=eid,
@@ -246,50 +545,86 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
             )
         )
 
+    # Every Cast device HA knows that discovery found with a screen is a
+    # screen of its own (a Chromecast plugged into a TV, a Google TV), even
+    # when HA's classifier did not list it.
+    listed = {sc["entity_id"] for sc in screens}
+    for ent, uid in cast_uuids.items():
+        cd = cast_by_uuid.get(uid)
+        if ent in listed or ent in folded or not cd or (cd.get("cast_type") or "cast") != "cast":
+            continue
+        used_cast.add(uid)
+        screens.append(
+            _screen_summary(
+                {
+                    "id": f"ha:{ent}",
+                    "name": names_by_entity.get(ent) or cd.get("name") or ent,
+                    "platform": "cast",
+                    "entity_id": ent,
+                    "state": "on",
+                    "cast_entity": ent,
+                    "cast_uuid": uid,
+                    "cast": cd,
+                    "companions": {},
+                    "methods": ["cast_web"],
+                    "source": "home_assistant+" + ("network" if cd.get("found_by") == "unicast" else "mdns"),
+                }
+            )
+        )
+
     seen_uuid: set[str] = set()
     for cd in cast_devices:
-        uid = cd.get("uuid") or ""
+        uid = _uuid_key(cd.get("uuid") or "")
         if (cd.get("cast_type") or "cast") != "cast" or not uid or uid in used_cast or uid in seen_uuid:
             continue
         seen_uuid.add(uid)
         screens.append(
             _screen_summary(
                 {
-                    "id": f"cast:{uid}",
+                    "id": f"cast:{cd.get('uuid')}",
                     "name": cd.get("name") or "Cast device",
                     "platform": "cast",
                     "entity_id": "",
                     "state": "on",
                     "cast_entity": "",
+                    "cast_uuid": uid,
                     "cast": cd,
                     "companions": {},
                     "methods": ["cast_web"],
-                    "source": "mdns",
+                    "source": "mdns" if cd.get("found_by") != "unicast" else "network",
                 }
             )
         )
 
-    # One entry per physical TV: a TV and its Music Assistant wrapper often
-    # share a Cast entity. Keep the real TV over the wrapper.
-    by_cast: dict[str, dict[str, Any]] = {}
+    # A Music Assistant wrapper around a Cast device is not another screen
+    # when the device (or the TV it drives) is already listed. Of several
+    # wrappers around one device with nothing else, keep one.
+    def cast_key(sc: dict[str, Any]) -> str:
+        return sc.get("cast_uuid") or _uuid_key((sc.get("cast") or {}).get("uuid") or "") or sc.get("cast_entity") or ""
+
+    real_cast = {cast_key(sc) for sc in screens if cast_key(sc) and sc["platform"] != "music_assistant"}
     unique: list[dict[str, Any]] = []
+    wrapped: set[str] = set()
     for sc in screens:
-        key = sc.get("cast_entity") or ""
-        if not key:
-            unique.append(sc)
-            continue
-        kept = by_cast.get(key)
-        if kept is None:
-            by_cast[key] = sc
-            unique.append(sc)
-        elif kept["platform"] == "music_assistant" and sc["platform"] != "music_assistant":
-            unique[unique.index(kept)] = sc
-            by_cast[key] = sc
+        key = cast_key(sc)
+        if key and sc["platform"] == "music_assistant":
+            if key in real_cast or key in wrapped:
+                continue
+            wrapped.add(key)
+        unique.append(sc)
     screens = [sc for sc in unique if sc["methods"]]
 
     order = {"web": 0, "video": 1, "none": 2}
     screens.sort(key=lambda s: (order.get(s["display"], 3), s["state"] in ("off", "unavailable"), s["name"].lower()))
     return screens
+
+
+async def _safe_remote_casts(ha_url: str, ha_token: str, *, force: bool = False) -> list[dict[str, Any]]:
+    try:
+        return await asyncio.wait_for(discover_remote_cast_devices(ha_url, ha_token, force=force), 20)
+    except Exception as exc:
+        log.debug("[tv_stage] cross-subnet cast discovery failed: %s", exc)
+        return []
 
 
 async def list_screens(ha_url: str, ha_token: str, *, refresh: bool = False) -> list[dict[str, Any]]:
@@ -302,13 +637,16 @@ async def list_screens(ha_url: str, ha_token: str, *, refresh: bool = False) -> 
     states: list[dict[str, Any]] = []
     ha_devices: list[dict[str, Any]] = []
     cast_task = asyncio.create_task(discover_cast_devices())
+    remote_task = asyncio.create_task(_safe_remote_casts(ha_url, ha_token))
+    uuids: dict[str, str] = {}
     if ha_url and ha_token:
         with contextlib.suppress(Exception):
             states = await ha_client.get_states(ha_url, ha_token) or []
         with contextlib.suppress(Exception):
             ha_devices = await classify_communication_devices(ha_url, ha_token, all_states=states)
-    cast_devices = await cast_task
-    screens = build_screens(ha_devices, cast_devices, states)
+        uuids = await ha_cast_uuids(ha_url, ha_token)
+    cast_devices = merge_cast_devices(await cast_task, await remote_task)
+    screens = build_screens(ha_devices, cast_devices, states, uuids)
     _cache.update({"at": now, "key": key, "screens": screens})
     return list(screens)
 
@@ -433,13 +771,24 @@ async def _find_cast_after_wake(screen: dict[str, Any], ha_url: str, ha_token: s
         st = await ha_client.get_state(ha_url, ha_token, cast_entity)
         names.append(str(((st or {}).get("attributes") or {}).get("friendly_name") or ""))
     keys = set().union(*[_name_keys(n) for n in names if n])
-    deadline = time.time() + CAST_WAKE_WAIT_S
-    while time.time() < deadline:
-        for cd in await discover_cast_devices(3.0):
+    want = screen.get("cast_uuid") or ""
+
+    def match(devices: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for cd in devices:
+            if want and _uuid_key(cd.get("uuid") or "") == want:
+                return cd
+        for cd in devices:
             if (cd.get("cast_type") or "cast") == "cast" and _name_keys(cd.get("name") or "") & keys:
                 return cd
-        await asyncio.sleep(1.0)
-    return None
+        return None
+
+    found = match(await _safe_remote_casts(ha_url, ha_token, force=True))
+    deadline = time.time() + CAST_WAKE_WAIT_S
+    while found is None and time.time() < deadline:
+        found = match(await discover_cast_devices(3.0))
+        if found is None:
+            await asyncio.sleep(1.0)
+    return found
 
 
 async def show_via_cast(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:

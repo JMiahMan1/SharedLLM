@@ -780,6 +780,25 @@ def _github_token() -> str:
     return token or os.getenv("GHCR_TOKEN", "") or os.getenv("GITHUB_TOKEN", "")
 
 
+#: A new image is not an "update available" until it has waited this long.
+#: CI pushes the image and the host's auto-deploy pulls it a few minutes later;
+#: reporting inside that window announces updates that are already landing.
+UPDATE_SETTLE_SECONDS = float(os.getenv("UPDATE_SETTLE_SECONDS", "600"))
+_update_first_seen: dict[tuple[str, str], float] = {}
+_registry_down = {"since": None}
+
+
+def settle_update(service: str, remote: str, now: float, first_seen: dict[tuple[str, str], float],
+                  settle_s: float = UPDATE_SETTLE_SECONDS) -> tuple[bool, float]:
+    """(is it reportable yet, seconds it has waited) for a newer remote image (pure)."""
+    key = (service, remote)
+    for k in [k for k in first_seen if k[0] == service and k != key]:
+        first_seen.pop(k, None)  # a newer push restarts the wait
+    since = first_seen.setdefault(key, now)
+    waited = now - since
+    return waited >= settle_s, waited
+
+
 @app.get("/api/admin/services/updates", dependencies=[Depends(verify_internal_secret)])
 def check_all_updates():
     """Whether each sharedllm container's registry has a newer image.
@@ -795,6 +814,7 @@ def check_all_updates():
     token = _github_token() or None
     remote_error = None
     updates = []
+    now = time.time()
     try:
         containers = client.containers.list(all=True)
     except Exception as e:
@@ -826,19 +846,30 @@ def check_all_updates():
             entry["remote_digest"] = remote
             if not local or not remote:
                 entry["check_error"] = "digest_unavailable"
+            elif remote not in local:
+                ready, waited = settle_update(svc_name, remote, now, _update_first_seen)
+                entry["has_update"] = ready
+                entry["settling"] = not ready
+                entry["waiting_s"] = round(waited)
             else:
-                entry["has_update"] = remote not in local
+                _update_first_seen.pop(next((k for k in _update_first_seen if k[0] == svc_name), ("", "")), None)
         except registry.RegistryUnreachable as e:
-            log.warning(f"[updates] registry unreachable: {e}")
+            if _registry_down["since"] is None:
+                log.warning(f"[updates] registry unreachable: {e}")
+                _registry_down["since"] = now
             remote_error = "registry_unreachable"
             entry["check_error"] = remote_error
         except Exception as e:
             log.warning(f"[updates] Failed to check {container.name}: {e}")
             entry["check_error"] = str(e)
 
+    if remote_error is None and _registry_down["since"] is not None:
+        log.info("[updates] registry reachable again")
+        _registry_down["since"] = None
     return {
         "checked": len(updates),
         "updates_available": sum(1 for u in updates if u["has_update"]),
+        "updates_settling": sum(1 for u in updates if u.get("settling")),
         "services": updates,
         "check_error": remote_error,
     }

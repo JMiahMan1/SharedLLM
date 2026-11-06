@@ -339,3 +339,43 @@ def test_a_fixed_lease_gives_its_address_when_not_in_the_active_list():
     assert rm.device_name("aa:00:00:00:00:07", s) == ("desktop", "192.168.2.43")
     # An active lease still wins.
     assert rm.device_name(SERVER, s)[1] == "192.168.2.205"
+
+
+def test_settings_unreadable_at_startup_recover_on_their_own(monkeypatch):
+    """Identity starting after the control plane must not look like "no router"."""
+    r = FakeRedis()
+    monkeypatch.setattr(rm, "internet_up", lambda: True)
+    monkeypatch.setattr(rm, "collect", lambda client, last_id: snap(0, server_bytes=0, busy=0, active=0))
+    monkeypatch.setattr(RouterClient, "verify_certificate", lambda self: "ab" * 32)
+    good = {"url": "https://192.168.2.1", "user": "jarvis", "password": "s3cret", "cert_sha256": "ab" * 32}
+    answers = iter([rm.SettingsUnavailable("ConnectionError"), good, rm.SettingsUnavailable("Identity answered 503")])
+
+    def load():
+        a = next(answers)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    m = rm.Monitor(r, load, lambda fp: None, notify=lambda n: True)
+    first = m.tick(now=0)
+    assert first["configured"] is True and first["connected"] is False and "retrying" in first["error"]
+    assert m.tick(now=60)["connected"] is True
+    # A later hiccup keeps using the last good login.
+    assert m.tick(now=120)["connected"] is True
+
+
+def test_load_config_tells_unavailable_from_unconfigured(monkeypatch):
+    from services.control_plane import network_routes as nr
+
+    class Resp:
+        def __init__(self, code, body):
+            self.status_code, self.body = code, body
+
+        def json(self):
+            return self.body
+
+    monkeypatch.setattr(nr.requests, "get", lambda *a, **k: Resp(503, {}))
+    with pytest.raises(rm.SettingsUnavailable):
+        nr.load_config()
+    monkeypatch.setattr(nr.requests, "get", lambda *a, **k: Resp(200, {"url": None, "user": None, "password": None}))
+    assert nr.load_config() == {"url": None, "user": None, "password": None}

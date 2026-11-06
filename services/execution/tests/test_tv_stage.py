@@ -228,18 +228,130 @@ def test_ffmpeg_command_writes_a_rolling_hls_playlist(tmp_path):
 
 # --------------------------------------------------------------------------- real-house cases
 
-def test_master_bedroom_samsung_orsay_with_chromecast_is_one_cast_screen():
+def test_master_bedroom_samsung_and_its_plugged_in_chromecast_are_both_listed():
     """A legacy Samsung with a Chromecast attached, plus that Chromecast's MA wrapper."""
     ha = [
         {**_ha_tv("media_player.master_bedroom_samsung", "Master Bedroom Samsung", "samsung",
                   cast_sibling="media_player.master_bedroom_tv", ma_sibling="media_player.master_bedroom_tv_2"),
          "os_version": "Samsung Orsay (Legacy)"},
+        _ha_tv("media_player.master_bedroom_tv", "Master Bedroom TV", "cast"),
         _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
                cast_sibling="media_player.master_bedroom_tv"),
     ]
-    screens = tv_stage.build_screens(ha, [])
-    assert [s["id"] for s in screens] == ["ha:media_player.master_bedroom_samsung"]
-    assert screens[0]["methods"] == ["cast_web"]  # no Orsay browser, no pointless video stream
+    cc = _cast("Master Bedroom TV", "16b032a3-f048-710f-0506-ad3136885e30", host="192.168.1.240")
+    uuids = {"media_player.master_bedroom_tv": "16b032a3f048710f0506ad3136885e30"}
+    screens = tv_stage.build_screens(ha, [cc], None, uuids)
+    by_id = {s["id"]: s for s in screens}
+    assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
+    for s in screens:  # either entry reaches the TV through the Chromecast, found on another subnet
+        assert s["methods"] == ["cast_web"]
+        assert s["cast"]["host"] == "192.168.1.240"
+
+
+def test_cast_device_is_matched_by_cast_id_before_name():
+    ha = [_ha_tv("media_player.den", "Den", "cast")]
+    wrong_name = _cast("Something Else", "AAAA-1", host="10.0.0.5")
+    screens = tv_stage.build_screens(ha, [wrong_name], None, {"media_player.den": "aaaa1"})
+    assert [s["id"] for s in screens] == ["ha:media_player.den"]
+    assert screens[0]["cast"]["host"] == "10.0.0.5"
+
+
+def test_built_in_cast_is_still_one_screen():
+    ha = [_ha_tv("media_player.gtv", "Den TV", "google_tv", cast_sibling="media_player.gtv_cast"),
+          _ha_tv("media_player.gtv_cast", "Den TV", "cast")]
+    assert [s["id"] for s in tv_stage.build_screens(ha, [])] == ["ha:media_player.gtv"]
+
+
+# --------------------------------------------------------------------------- cross-subnet cast discovery
+
+def test_neighbour_networks_cover_both_sides():
+    import ipaddress
+    nets = tv_stage.neighbour_networks({ipaddress.ip_network("192.168.2.0/24")})
+    assert {str(n) for n in nets} == {"192.168.1.0/24", "192.168.3.0/24"}
+
+
+def test_known_hosts_are_read_from_the_options_form():
+    flow = {"flow_id": "f", "data_schema": [
+        {"name": "known_hosts", "description": {"suggested_value": ["192.168.1.240", "bogus", "192.168.1.240"]}},
+        {"name": "uuid", "description": {"suggested_value": ["x"]}},
+    ]}
+    assert tv_stage.known_hosts_from_flow(flow) == ["192.168.1.240"]
+
+
+def test_eureka_answer_becomes_a_cast_device():
+    info = {"name": "Master Bedroom TV", "device_info": {
+        "ssdp_udn": "16b032a3-f048-710f-0506-ad3136885e30", "model_name": "Chromecast",
+        "manufacturer": "Google", "capabilities": {"display_supported": True}}}
+    dev = tv_stage.cast_from_eureka("192.168.1.240", info)
+    assert dev["name"] == "Master Bedroom TV" and dev["cast_type"] == "cast" and dev["host"] == "192.168.1.240"
+    speaker = tv_stage.cast_from_eureka("1.2.3.4", {"name": "Kitchen", "ssdp_udn": "u",
+                                                     "device_info": {"capabilities": {"display_supported": False}}})
+    assert speaker["cast_type"] == "audio"
+
+
+def test_mdns_and_unicast_results_merge_by_cast_id():
+    a = _cast("Office TV", "81df-ea8f", host="192.168.2.88")
+    b = {**_cast("Office TV", "81DFEA8F", host="192.168.2.88"), "found_by": "unicast"}
+    c = {**_cast("Bedroom", "16b0", host="192.168.1.240"), "found_by": "unicast"}
+    merged = tv_stage.merge_cast_devices([a], [b, c])
+    assert [d["host"] for d in merged] == ["192.168.2.88", "192.168.1.240"]
+
+
+def test_cross_subnet_discovery_works_without_home_assistant(monkeypatch, tmp_path):
+    import ipaddress
+    monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
+    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("192.168.2.0/24")})
+    tv_stage._sweep_cache.update({"at": 0.0, "key": "", "devices": []})
+
+    async def port_open(ip, port=8009):
+        return ip == "192.168.1.240"
+
+    async def info(ip):
+        return tv_stage.cast_from_eureka(ip, {"name": "Master Bedroom TV", "ssdp_udn": "16b0"})
+
+    async def no_router():
+        return {}
+
+    monkeypatch.setattr(tv_stage, "_port_open", port_open)
+    monkeypatch.setattr(tv_stage, "_cast_info", info)
+    monkeypatch.setattr(tv_stage, "_router_status", no_router)
+    found = asyncio.run(tv_stage.discover_remote_cast_devices("", "", force=True))
+    assert [d["host"] for d in found] == ["192.168.1.240"]
+    assert tv_stage._learned_hosts() == ["192.168.1.240"]
+
+
+def test_router_device_list_is_asked_instead_of_sweeping(monkeypatch, tmp_path):
+    import ipaddress
+    monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
+    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("192.168.2.0/24")})
+    tv_stage._sweep_cache.update({"at": 0.0, "key": "", "devices": []})
+    probed = []
+
+    async def port_open(ip, port=8009):
+        probed.append(ip)
+        return ip == "10.9.0.7"
+
+    async def info(ip):
+        return tv_stage.cast_from_eureka(ip, {"name": "Garage TV", "ssdp_udn": "g1"})
+
+    async def router():
+        return {"configured": True, "networks": [{"name": "lan", "cidr": "192.168.2.1/24"},
+                                                 {"name": "iot", "cidr": "10.9.0.1/24"}],
+                "devices": {"aa": {"name": "Garage TV", "ip": "10.9.0.7"}, "bb": {"name": "pc", "ip": "192.168.2.50"},
+                            "cc": {"name": "lamp", "ip": "10.9.0.8"}}}
+
+    monkeypatch.setattr(tv_stage, "_port_open", port_open)
+    monkeypatch.setattr(tv_stage, "_cast_info", info)
+    monkeypatch.setattr(tv_stage, "_router_status", router)
+    found = asyncio.run(tv_stage.discover_remote_cast_devices("", "", force=True))
+    assert [d["name"] for d in found] == ["Garage TV"]
+    assert sorted(probed) == ["10.9.0.7", "10.9.0.8"]  # only the router's devices, no sweep
+
+
+def test_router_view_reads_networks_and_addresses():
+    nets, ips = tv_stage.router_view({"networks": [{"cidr": "192.168.1.1/24"}, {"cidr": "bogus"}],
+                                      "devices": {"m": {"ip": "192.168.1.240"}, "n": {"ip": None}}})
+    assert {str(n) for n in nets} == {"192.168.1.0/24"} and ips == ["192.168.1.240"]
 
 
 def test_audio_only_players_are_not_offered_video():
@@ -307,3 +419,25 @@ def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
     res = asyncio.run(tv_stage.show_via_cast(screen, "http://h/tv/Z", "u", "t"))
     assert res["ok"] and shown["cast"]["host"] == "10.0.0.42"
     assert ("media_player", "turn_on", "media_player.bed_cast") in calls
+
+
+def test_live_house_shape_lists_samsung_and_chromecast_and_drops_the_wrapper():
+    """What HA really reports: no cast_sibling on the Samsung, Cast entities not classified."""
+    ha = [
+        {**_ha_tv("media_player.master_bedroom_samsung", "Master Bedroom Samsung", "samsung",
+                  ma_sibling="media_player.master_bedroom_tv_2", remote_sibling="remote.master_bedroom_samsung"),
+         "os_version": "Samsung Orsay (Legacy)"},
+        _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
+               ma_sibling="media_player.master_bedroom_tv_2"),
+    ]
+    states = [{"entity_id": "media_player.master_bedroom_tv", "attributes": {"friendly_name": "Master Bedroom TV"}},
+              {"entity_id": "media_player.master_bedroom_tv_2", "attributes": {"friendly_name": "Master Bedroom TV"}}]
+    cc = {**_cast("Master Bedroom TV", "16b032a3-f048-710f-0506-ad3136885e30", host="192.168.1.240"),
+          "found_by": "unicast"}
+    uuids = {"media_player.master_bedroom_tv": "16b032a3f048710f0506ad3136885e30"}
+    screens = tv_stage.build_screens(ha, [cc], states, uuids)
+    by_id = {s["id"]: s for s in screens}
+    assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
+    sam = by_id["ha:media_player.master_bedroom_samsung"]
+    assert sam["methods"] == ["cast_web"] and sam["cast_entity"] == "media_player.master_bedroom_tv"
+    assert by_id["ha:media_player.master_bedroom_tv"]["platform"] == "cast"
