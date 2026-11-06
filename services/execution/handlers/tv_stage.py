@@ -995,7 +995,12 @@ async def show_via_webos_direct(screen: dict[str, Any], url: str, ha_url: str, h
                                                f"about Jarvis, then cast again ({exc.__class__.__name__})."}
             raise
         _webos_remember(eid, host=host, client_key=client.client_key)
-        await client.request("system.launcher/launch", {"id": WEBOS_BROWSER_APP, "target": url})
+        # "open" takes the page; "launch" with a target opened the browser on its
+        # home page instead (seen on a 2020 LG), so it is only the fallback.
+        try:
+            await client.request("system.launcher/open", {"target": url})
+        except Exception:
+            await client.request("system.launcher/launch", {"id": WEBOS_BROWSER_APP, "contentTarget": url})
         verified = False
         for _ in range(8):
             await asyncio.sleep(1)
