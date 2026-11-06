@@ -87,13 +87,14 @@ CAST_NEIGHBOUR_NETS = int(os.getenv("CAST_NEIGHBOUR_NETS", "1"))
 TOKEN_DIR = Path(os.getenv("TV_STAGE_TOKEN_DIR", "/data/tv_stage"))
 
 #: Methods that run the real page on the screen, in preference order.
-WEB_METHODS = ("cast_web", "webos_browser", "samsung_browser", "android_link")
+WEB_METHODS = ("cast_web", "webos_direct", "webos_browser", "samsung_browser", "android_link")
 #: Methods that send the screen a rendered video of the page.
 VIDEO_METHODS = ("roku_stream", "media_stream")
 
 METHOD_LABELS = {
     "cast_web": "Google Cast (live page)",
-    "webos_browser": "LG web browser (live page)",
+    "webos_direct": "LG web browser (live page)",
+    "webos_browser": "LG web browser via Home Assistant (live page)",
     "samsung_browser": "Samsung web browser (live page)",
     "android_link": "Android TV browser (live page)",
     "roku_stream": "Live video of the game (Roku has no browser)",
@@ -489,7 +490,9 @@ def _methods_for(platform: str, *, has_cast: bool, companions: dict[str, Any], e
     if has_cast:
         methods.append("cast_web")
     if platform == "webos" and entity_id:
-        methods.append("webos_browser")
+        # Straight to the TV first: Home Assistant's link to an LG goes stale when
+        # the TV changes address (it kept one from three days and a subnet ago).
+        methods += ["webos_direct", "webos_browser"]
     # Pre-2016 (Orsay) Samsungs have no remote browser control at all.
     if platform == "samsung" and entity_id and "orsay" not in os_version.lower():
         methods.append("samsung_browser")
@@ -914,6 +917,122 @@ async def show_via_webos(screen: dict[str, Any], url: str, ha_url: str, ha_token
             "detail": "LG browser opened" + ("" if verified else " (TV did not report its source)")}
 
 
+# --------------------------------------------------------------------------- LG webOS, directly
+
+WEBOS_PORTS = (3001, 3000)
+#: How long a first pairing waits for someone to press "Allow" on the TV.
+WEBOS_PAIR_WAIT_S = 40
+_WEBOS_KEYS = "webos_keys.json"
+
+
+def _webos_store() -> dict[str, Any]:
+    with contextlib.suppress(Exception):
+        import json
+
+        return json.loads((TOKEN_DIR / _WEBOS_KEYS).read_text())
+    return {}
+
+
+def _webos_remember(entity_id: str, **fields: Any) -> None:
+    import json
+
+    data = _webos_store()
+    data[entity_id] = {**(data.get(entity_id) or {}), **{k: v for k, v in fields.items() if v}}
+    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = TOKEN_DIR / (_WEBOS_KEYS + ".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(TOKEN_DIR / _WEBOS_KEYS)
+
+
+def webos_host_candidates(screen: dict[str, Any], router_devices: Any, remembered: str = "",
+                          ha_ip: str = "") -> list[str]:
+    """Where the LG might be, best first: the router's device of the same name (it
+    follows the TV's own network name, so it survives a new address), the address
+    that worked last time, then whatever Home Assistant believes."""
+    items = router_devices.values() if isinstance(router_devices, dict) else (router_devices or [])
+    want = _name_keys(str(screen.get("name") or ""))
+    named = [str(d.get("ip")) for d in items
+             if isinstance(d, dict) and d.get("ip") and _name_keys(str(d.get("name") or "")) & want]
+    out: list[str] = []
+    for ip in [*named, remembered, ha_ip]:
+        if ip and ip not in out:
+            out.append(ip)
+    return out
+
+
+async def _webos_find_host(screen: dict[str, Any], ha_url: str, ha_token: str) -> str:
+    eid = screen.get("entity_id") or ""
+    status = await _router_status()
+    remembered = str((_webos_store().get(eid) or {}).get("host") or "")
+    ha_ip = await _entity_ip(ha_url, ha_token, eid, None) if eid else ""
+    for ip in webos_host_candidates(screen, status.get("devices") or {}, remembered, ha_ip):
+        for port in WEBOS_PORTS:
+            if await _port_open(ip, port):
+                return ip
+    return ""
+
+
+async def show_via_webos_direct(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:
+    """Open the LG's browser by talking to the TV itself (webOS's own API).
+
+    The first time, the TV asks to allow "Jarvis"; the key it grants is kept, so
+    later casts need nothing from anyone.
+    """
+    from aiowebostv import WebOsClient  # pyright: ignore[reportMissingImports]
+
+    eid = screen.get("entity_id") or ""
+    host = await _webos_find_host(screen, ha_url, ha_token)
+    if not host:
+        return {"ok": False, "detail": f"{screen.get('name') or 'The LG TV'} did not answer on the network. Is it on?"}
+    key = str((_webos_store().get(eid) or {}).get("client_key") or "") or None
+    client = WebOsClient(host, client_key=key, connect_timeout=5)
+    try:
+        try:
+            await asyncio.wait_for(client.connect(), WEBOS_PAIR_WAIT_S if key is None else 15)
+        except Exception as exc:
+            if key is None:
+                return {"ok": False, "detail": f"Press \"Allow\" on {screen.get('name') or 'the TV'} when it asks "
+                                               f"about Jarvis, then cast again ({exc.__class__.__name__})."}
+            raise
+        _webos_remember(eid, host=host, client_key=client.client_key)
+        await client.request("system.launcher/launch", {"id": WEBOS_BROWSER_APP, "target": url})
+        verified = False
+        for _ in range(8):
+            await asyncio.sleep(1)
+            with contextlib.suppress(Exception):
+                app = await client.get_current_app()
+                if "browser" in str(app or "").lower():
+                    verified = True
+                    break
+        return {"ok": True, "verified": verified,
+                "detail": "LG browser opened" + ("" if verified else " (the TV did not confirm the browser)")}
+    finally:
+        with contextlib.suppress(Exception):
+            await client.disconnect()
+
+
+async def _webos_close_direct(screen: dict[str, Any], ha_url: str, ha_token: str) -> bool:
+    from aiowebostv import WebOsClient  # pyright: ignore[reportMissingImports]
+
+    eid = screen.get("entity_id") or ""
+    stored = _webos_store().get(eid) or {}
+    if not stored.get("client_key"):
+        return False
+    host = await _webos_find_host(screen, ha_url, ha_token)
+    if not host:
+        return False
+    client = WebOsClient(host, client_key=stored["client_key"], connect_timeout=5)
+    try:
+        await asyncio.wait_for(client.connect(), 10)
+        await client.request("system.launcher/close", {"id": WEBOS_BROWSER_APP})
+        return True
+    except Exception:
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            await client.disconnect()
+
+
 def _samsung_show_sync(ip: str, url: str) -> None:
     from samsungtvws import SamsungTVWS  # pyright: ignore[reportMissingImports]
 
@@ -996,6 +1115,7 @@ async def show_via_media_stream(screen: dict[str, Any], url: str, ha_url: str, h
 
 _HANDLERS = {
     "cast_web": show_via_cast,
+    "webos_direct": show_via_webos_direct,
     "webos_browser": show_via_webos,
     "samsung_browser": show_via_samsung,
     "android_link": show_via_android_link,
@@ -1091,7 +1211,9 @@ async def stop(screen_id: str, ha_url: str, ha_token: str, *, url: str = "") -> 
             if await asyncio.to_thread(_cast_stop_sync, screen.get("cast"), host):
                 actions.append("cast_quit")
     eid = screen.get("entity_id") or ""
-    if eid and screen["platform"] == "webos":
+    if eid and screen["platform"] == "webos" and await _webos_close_direct(screen, ha_url, ha_token):
+        actions.append("webos_close_browser")
+    elif eid and screen["platform"] == "webos":
         res = await ha_client.call_service(ha_url, ha_token, "webostv", "command", eid,
                                            {"command": "system.launcher/close", "payload": {"id": WEBOS_BROWSER_APP}})
         if res.get("ok"):

@@ -1,6 +1,7 @@
 """TV stage: discovered screens, per-platform display, and the live stream guard."""
 import asyncio
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -59,7 +60,7 @@ def test_roku_gets_a_live_stream_and_is_labelled_video():
 def test_lg_and_samsung_use_their_own_browsers():
     ha = [_ha_tv("media_player.lg", "Living Room", "webos"), _ha_tv("media_player.sam", "Loft", "samsung")]
     by_name = {s["name"]: s for s in tv_stage.build_screens(ha, [])}
-    assert by_name["Living Room"]["methods"][0] == "webos_browser"
+    assert by_name["Living Room"]["methods"][:2] == ["webos_direct", "webos_browser"]
     assert by_name["Loft"]["methods"][0] == "samsung_browser"
     assert all(s["display"] == "web" for s in by_name.values())
 
@@ -154,6 +155,7 @@ def test_webos_launches_the_browser_at_the_page(monkeypatch):
     monkeypatch.setattr(tv_stage.ha_client, "get_state", get_state)
     monkeypatch.setattr(tv_stage.asyncio, "sleep", no_sleep)
     screen = tv_stage.build_screens([_ha_tv("media_player.lg", "LG", "webos")], [])[0]
+    assert screen["methods"] == ["webos_direct", "webos_browser"]
     res = asyncio.run(tv_stage.show_via_webos(screen, "http://h/tv/ZION", "u", "t"))
     assert res["ok"] and res["verified"]
     assert ("webostv", "command", "media_player.lg",
@@ -454,7 +456,7 @@ def test_the_owning_integration_decides_the_platform_not_the_name():
                  "media_player.living_room_tv": "webos"}
     screens = {s["id"]: s for s in tv_stage.build_screens(ha, [], platforms=platforms)}
     assert "ha:media_player.lg_webos_tv_un6955zuf_airplay" not in screens  # an AirPlay speaker shows no page
-    assert screens["ha:media_player.living_room_tv"]["methods"] == ["webos_browser"]
+    assert screens["ha:media_player.living_room_tv"]["methods"] == ["webos_direct", "webos_browser"]
     # A Roku reached through its Music Assistant entity keeps its stream (it goes to the Roku itself).
     roku = tv_stage.build_screens([_ha_tv("media_player.gracies_tv", "Gracies TV", "roku")], [],
                                   platforms={"media_player.gracies_tv": "music_assistant"})
@@ -498,3 +500,60 @@ def test_a_sleeping_lg_is_woken_then_shown(monkeypatch):
     res = asyncio.run(tv_stage.show_via_webos(screen, "http://h/tv/ZION", "u", "t"))
     assert res["ok"] and res["verified"]
     assert calls[0] == ("media_player", "turn_on", "media_player.lg") and ("webostv", "command", "media_player.lg") in calls
+
+
+
+def test_the_lg_is_found_by_its_network_name_even_after_its_address_changes():
+    # Home Assistant still had 192.168.2.160; the TV had moved to 192.168.4.156.
+    screen = {"name": "Living Room TV", "entity_id": "media_player.living_room_tv"}
+    router = {"8c:19:b5:22:1a:7c": {"name": "LivingRoomTv", "ip": "192.168.4.156"},
+              "10:a5:62:91:d8:15": {"name": "10:a5:62:91:d8:15", "ip": "192.168.4.215"}}
+    assert tv_stage.webos_host_candidates(screen, router, remembered="192.168.4.100", ha_ip="192.168.2.160") == [
+        "192.168.4.156", "192.168.4.100", "192.168.2.160"]
+
+
+class _FakeWebOs:
+    instances: ClassVar[list] = []
+
+    def __init__(self, host, client_key=None, connect_timeout=2):
+        self.host, self.client_key, self.requests = host, client_key, []
+        _FakeWebOs.instances.append(self)
+
+    async def connect(self):
+        self.client_key = self.client_key or "granted-key"
+
+    async def request(self, uri, payload=None):
+        self.requests.append((uri, payload))
+        return {}
+
+    async def get_current_app(self):
+        return "com.webos.app.browser"
+
+    async def disconnect(self):
+        return None
+
+
+def test_the_lg_browser_opens_directly_and_the_pairing_key_is_kept(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "aiowebostv", types.SimpleNamespace(WebOsClient=_FakeWebOs))
+    monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
+
+    async def host(*_a, **_k):
+        return "192.168.4.156"
+
+    async def no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(tv_stage, "_webos_find_host", host)
+    monkeypatch.setattr(tv_stage.asyncio, "sleep", no_sleep)
+    _FakeWebOs.instances.clear()
+    screen = tv_stage.build_screens([_ha_tv("media_player.living_room_tv", "Living Room TV", "webos")], [])[0]
+    res = asyncio.run(tv_stage.show_via_webos_direct(screen, "http://h/tv/ZION", "", ""))
+    assert res["ok"] and res["verified"]
+    assert _FakeWebOs.instances[0].requests[0] == (
+        "system.launcher/launch", {"id": "com.webos.app.browser", "target": "http://h/tv/ZION"})
+    # Next time it connects with the key the TV granted: no prompt.
+    asyncio.run(tv_stage.show_via_webos_direct(screen, "http://h/tv/ZION", "", ""))
+    assert _FakeWebOs.instances[1].client_key == "granted-key"
