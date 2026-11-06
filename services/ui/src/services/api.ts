@@ -9,7 +9,7 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { FreshPosition } from '../lib/freshPosition';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
-import type { ActiveCall, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
+import type { ActiveCall, ArcadeCastResult, ArcadeScreen, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
   SongJob,
   VoiceCheck,
@@ -3463,26 +3463,18 @@ export const api = {
     return resp.data;
   },
 
-  async getArcadeTvs(): Promise<{
+  async getArcadeTvs(refresh = false): Promise<{
     success: boolean;
-    tvs: Array<{ id: string; entity_id: string; name: string; platform: string; os_version?: string; state?: string; ip?: string; companions?: Record<string, string> }>;
-    platforms?: Array<{ id: string; platform: string; name: string; icon: string; description: string }>;
+    tvs: ArcadeScreen[];
+    home_assistant?: boolean;
+    error?: string;
   }> {
-    const resp = await apiClient.get('/api/arcade/tvs');
+    const resp = await apiClient.get('/api/arcade/tvs', { params: refresh ? { refresh: true } : undefined, timeout: 30000 });
     return resp.data;
   },
 
-  async castArcadeTv(payload: Record<string, unknown>): Promise<{
-    success: boolean;
-    room_code?: string;
-    entity_id?: string;
-    platform?: string;
-    tv_url?: string;
-    stage_url?: string;
-    tts_wav_url?: string;
-    actions?: string[];
-  }> {
-    const resp = await apiClient.post('/api/arcade/cast', payload);
+  async castArcadeTv(payload: { screen_id: string; room_code: string; method?: string; stop?: boolean }): Promise<ArcadeCastResult> {
+    const resp = await apiClient.post('/api/arcade/cast', payload, { timeout: 100000 });
     return resp.data;
   },
 
