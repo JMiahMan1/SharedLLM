@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, Play, Sparkles, Star, Trophy, Tv } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, PartyPopper, Play, Sparkles, Square, Star, Trophy, Tv } from 'lucide-react';
 import FamilyLeaderboard from './FamilyLeaderboard';
 import GamePlayer from './GamePlayer';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
-import type { FamilyGameCard, FamilyGameState, FamilyGamesResponse } from '../../types/api';
+import type { FamilyGameCard, FamilyGameState, FamilyGamesResponse, PartyRoomSummary } from '../../types/api';
 
 const FAMILY_KEY = ['family-games'];
 
@@ -200,6 +200,85 @@ function AdminRow({
       </div>
       {setState.isError && <p className="mt-1 text-[11px] text-rose-300">Could not change this game. Check the arcade admin token.</p>}
     </div>
+  );
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  lobby: 'In the lobby',
+  writing: 'Writing',
+  voting: 'Voting',
+  reveal: 'Reveal',
+  finished: 'Finished',
+};
+
+/** Admin: live party-game rooms, so one left running can be ended for everyone. */
+function PartyRoomsPanel() {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState('');
+  const rooms = useQuery({
+    queryKey: ['party-rooms'],
+    queryFn: () => api.getPartyRooms(),
+    refetchInterval: 10000,
+  });
+  const end = useMutation({
+    mutationFn: (code: string) => api.endPartyRoom(code),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['party-rooms'] }),
+  });
+  const list: PartyRoomSummary[] = rooms.data?.rooms ?? [];
+  if (rooms.isLoading || list.length === 0) return null;
+  return (
+    <section className="glass-panel rounded-2xl border border-white/5 p-4" data-testid="family-party-rooms">
+      <div className="flex min-h-11 items-center gap-2">
+        <PartyPopper size={16} className="text-amber-300" />
+        <span className="text-sm font-semibold text-slate-200">Live party rooms</span>
+        <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200">Admin</span>
+      </div>
+      <ul className="mt-2 space-y-2">
+        {list.map((room) => {
+          const asking = confirming === room.code;
+          return (
+            <li
+              key={room.code}
+              className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/5 p-3"
+              data-testid={`party-room-${room.code}`}
+            >
+              <span className="rounded-lg bg-amber-400/90 px-2 py-1 font-mono text-sm font-bold tracking-widest text-slate-900">
+                {room.code}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-100">
+                  {room.host_name}
+                  {room.player_count > 1 ? ` + ${room.player_count - 1}` : ''}
+                </p>
+                <p className="truncate text-[11px] text-slate-400">
+                  {PHASE_LABEL[room.phase] ?? room.phase}
+                  {room.round ? ` · Round ${room.round}/${room.total_rounds}` : ''}
+                  {room.stage_connected ? ' · On a TV' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={end.isPending}
+                onClick={() => {
+                  if (asking) {
+                    setConfirming('');
+                    end.mutate(room.code);
+                  } else {
+                    setConfirming(room.code);
+                  }
+                }}
+                className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border px-3 text-xs font-semibold transition ${
+                  asking ? 'border-rose-400/60 bg-rose-500/30 text-rose-50' : 'border-rose-400/30 bg-rose-500/10 text-rose-100'
+                }`}
+              >
+                <Square size={12} /> {asking ? 'Tap to confirm' : 'End game'}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {end.isError && <p className="mt-1 text-[11px] text-rose-300">Could not end that room. Check the arcade admin token.</p>}
+    </section>
   );
 }
 
@@ -452,6 +531,8 @@ export default function FamilyGames() {
       )}
 
       <FamilyLeaderboard games={data.games} onPlay={open} />
+
+      {data.is_admin && <PartyRoomsPanel />}
 
       {data.is_admin && <AdminPanel data={data} onPlay={open} />}
 

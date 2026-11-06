@@ -59,6 +59,16 @@ MEDIA_SERVER_PORT = int(os.getenv("MEDIA_SERVER_PORT", "8888"))
 CAST_DISCOVERY_TIMEOUT_S = 4.0
 CAST_CONNECT_TIMEOUT_S = 10.0
 SCREEN_CACHE_TTL_S = 30.0
+#: Whole show() call, every method included. The gateway gives a request 90 s;
+#: an honest "it didn't work" inside that beats a timeout with no reason.
+SHOW_BUDGET_S = 55.0
+#: Resolving an address must never fall through to a subnet scan here.
+IP_LOOKUP_TIMEOUT_S = 8.0
+#: A Chromecast woken through Home Assistant takes a while to answer mDNS.
+CAST_WAKE_WAIT_S = 18.0
+#: Players that can actually show a video stream. Music Assistant wrappers and
+#: speakers cannot, and a TV with its own browser is better served by that.
+STREAM_PLATFORMS = {"dlna", "generic_tv", "bravia"}
 TOKEN_DIR = Path(os.getenv("TV_STAGE_TOKEN_DIR", "/data/tv_stage"))
 
 #: Methods that run the real page on the screen, in preference order.
@@ -136,19 +146,21 @@ async def discover_cast_devices(timeout: float = CAST_DISCOVERY_TIMEOUT_S) -> li
         return []
 
 
-def _methods_for(platform: str, *, has_cast: bool, companions: dict[str, Any], entity_id: str) -> list[str]:
+def _methods_for(platform: str, *, has_cast: bool, companions: dict[str, Any], entity_id: str,
+                 os_version: str = "") -> list[str]:
     methods: list[str] = []
     if has_cast:
         methods.append("cast_web")
     if platform == "webos" and entity_id:
         methods.append("webos_browser")
-    if platform == "samsung" and entity_id:
+    # Pre-2016 (Orsay) Samsungs have no remote browser control at all.
+    if platform == "samsung" and entity_id and "orsay" not in os_version.lower():
         methods.append("samsung_browser")
     if platform == "android_tv" and companions.get("remote_sibling"):
         methods.append("android_link")
     if platform == "roku" and entity_id:
         methods.append("roku_stream")
-    elif entity_id and platform not in ("cast",):
+    elif entity_id and platform in STREAM_PLATFORMS and not methods:
         methods.append("media_stream")
     return methods
 
@@ -227,7 +239,8 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
                     "cast_entity": cast_entity or "",
                     "cast": cast_dev,
                     "companions": companions,
-                    "methods": _methods_for(platform, has_cast=has_cast, companions=companions, entity_id=eid),
+                    "methods": _methods_for(platform, has_cast=has_cast, companions=companions, entity_id=eid,
+                                            os_version=str(d.get("os_version") or "")),
                     "source": "home_assistant" + ("+mdns" if cast_dev else ""),
                 }
             )
@@ -255,6 +268,24 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
                 }
             )
         )
+
+    # One entry per physical TV: a TV and its Music Assistant wrapper often
+    # share a Cast entity. Keep the real TV over the wrapper.
+    by_cast: dict[str, dict[str, Any]] = {}
+    unique: list[dict[str, Any]] = []
+    for sc in screens:
+        key = sc.get("cast_entity") or ""
+        if not key:
+            unique.append(sc)
+            continue
+        kept = by_cast.get(key)
+        if kept is None:
+            by_cast[key] = sc
+            unique.append(sc)
+        elif kept["platform"] == "music_assistant" and sc["platform"] != "music_assistant":
+            unique[unique.index(kept)] = sc
+            by_cast[key] = sc
+    screens = [sc for sc in unique if sc["methods"]]
 
     order = {"web": 0, "video": 1, "none": 2}
     screens.sort(key=lambda s: (order.get(s["display"], 3), s["state"] in ("off", "unavailable"), s["name"].lower()))
@@ -334,7 +365,10 @@ async def _entity_ip(ha_url: str, ha_token: str, entity_id: str, device_type: st
     if not entity_id:
         return ""
     with contextlib.suppress(Exception):
-        found = await device_discovery.discover_device(entity_id, ha_url, ha_token, device_type=device_type)
+        found = await asyncio.wait_for(
+            device_discovery.discover_device(entity_id, ha_url, ha_token, device_type=device_type),
+            IP_LOOKUP_TIMEOUT_S,
+        )
         if found and found.get("ip"):
             return str(found["ip"])
     return ""
@@ -345,9 +379,9 @@ async def _wake(ha_url: str, ha_token: str, entity_id: str) -> None:
         return
     with contextlib.suppress(Exception):
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
-        if state and state.get("state") in ("off", "standby", "unavailable"):
+        if state and state.get("state") in ("off", "standby"):
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
-            await asyncio.sleep(4)
+            await asyncio.sleep(3)
 
 
 # --------------------------------------------------------------------------- methods
@@ -373,7 +407,7 @@ def _cast_show_sync(cast_dev: dict[str, Any] | None, host: str, url: str) -> tup
         deadline = time.time() + CAST_CONNECT_TIMEOUT_S
         while time.time() < deadline:
             if (cc.status and cc.status.app_id) == DASHCAST_APP_ID:
-                return True, f"DashCast running on {cc.name}"
+                return True, f"Showing on {cc.name or 'the TV'}"
             time.sleep(0.4)
         return False, "Cast device did not start the web receiver"
     finally:
@@ -382,13 +416,44 @@ def _cast_show_sync(cast_dev: dict[str, Any] | None, host: str, url: str) -> tup
                 cc.disconnect(timeout=2)
 
 
+async def _find_cast_after_wake(screen: dict[str, Any], ha_url: str, ha_token: str) -> dict[str, Any] | None:
+    """Wake a sleeping Cast device through Home Assistant and wait for it on mDNS.
+
+    ``media_player.turn_on`` on a Cast entity starts its idle screen, and over
+    HDMI-CEC that also switches the TV on and to its input. A Chromecast that
+    was asleep does not answer mDNS until then.
+    """
+    cast_entity = screen.get("cast_entity") or ""
+    if not (ha_url and ha_token and cast_entity):
+        return None
+    with contextlib.suppress(Exception):
+        await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", cast_entity)
+    names = [screen.get("name") or ""]
+    with contextlib.suppress(Exception):
+        st = await ha_client.get_state(ha_url, ha_token, cast_entity)
+        names.append(str(((st or {}).get("attributes") or {}).get("friendly_name") or ""))
+    keys = set().union(*[_name_keys(n) for n in names if n])
+    deadline = time.time() + CAST_WAKE_WAIT_S
+    while time.time() < deadline:
+        for cd in await discover_cast_devices(3.0):
+            if (cd.get("cast_type") or "cast") == "cast" and _name_keys(cd.get("name") or "") & keys:
+                return cd
+        await asyncio.sleep(1.0)
+    return None
+
+
 async def show_via_cast(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:
-    host = ""
-    if not (screen.get("cast") or {}).get("host") and screen.get("cast_entity"):
-        host = await _entity_ip(ha_url, ha_token, screen["cast_entity"], "cast")
-    if not screen.get("cast") and not host:
-        return {"ok": False, "detail": "No Cast address found (mDNS unavailable and HA knows no IP)"}
     await _wake(ha_url, ha_token, screen.get("entity_id") or "")
+    cast_dev = screen.get("cast")
+    host = ""
+    if not (cast_dev or {}).get("host"):
+        cast_dev = await _find_cast_after_wake(screen, ha_url, ha_token)
+    if not (cast_dev or {}).get("host") and screen.get("cast_entity"):
+        host = await _entity_ip(ha_url, ha_token, screen["cast_entity"], "cast")
+    if not (cast_dev or {}).get("host") and not host:
+        return {"ok": False, "detail": f"{screen.get('name') or 'The TV'}'s Chromecast did not come online. "
+                                       "Check it is powered and on the home Wi-Fi, then try again."}
+    screen = {**screen, "cast": cast_dev}
     try:
         ok, detail = await asyncio.wait_for(
             asyncio.to_thread(_cast_show_sync, screen.get("cast"), host, url), CAST_CONNECT_TIMEOUT_S * 3,
@@ -531,14 +596,21 @@ async def show(screen_id: str, url: str, ha_url: str, ha_token: str, *, method: 
         return {"success": False, "error": f"{screen['name']} cannot show a page", "attempts": [],
                 "screen": public_screen(screen)}
     attempts: list[dict[str, Any]] = []
+    deadline = time.time() + SHOW_BUDGET_S
     for m in methods:
+        left = deadline - time.time()
+        if left < 5:
+            attempts.append({"method": m, "ok": False, "detail": "Skipped: out of time"})
+            continue
         handler = _HANDLERS[m]
         try:
-            res = await handler(screen, page, ha_url, ha_token)
+            res = await asyncio.wait_for(handler(screen, page, ha_url, ha_token), left)
+        except TimeoutError:
+            res = {"ok": False, "detail": f"{METHOD_LABELS.get(m, m)} did not respond in time"}
         except Exception as exc:
             res = {"ok": False, "detail": f"{exc.__class__.__name__}: {exc}"}
         attempts.append({"method": m, **res})
-        log.info("[tv_stage] %s via %s -> %s (%s)", screen["name"], m, res.get("ok"), res.get("detail"))
+        log.warning("[tv_stage] %s via %s -> %s (%s)", screen["name"], m, res.get("ok"), res.get("detail"))
         if res.get("ok"):
             return {
                 "success": True,

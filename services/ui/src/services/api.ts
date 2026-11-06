@@ -9,7 +9,7 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { FreshPosition } from '../lib/freshPosition';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
-import type { ActiveCall, ArcadeCastResult, ArcadeScreen, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
+import type { ActiveCall, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
   SongJob,
   VoiceCheck,
@@ -3460,6 +3460,16 @@ export const api = {
       score,
       capture_id: captureId,
     });
+    return resp.data;
+  },
+
+  async getPartyRooms(): Promise<{ success: boolean; rooms: PartyRoomSummary[] }> {
+    const resp = await apiClient.get('/api/arcade/party/rooms');
+    return resp.data;
+  },
+
+  async endPartyRoom(code: string): Promise<{ success: boolean; ended?: string }> {
+    const resp = await apiClient.post(`/api/arcade/party/rooms/${encodeURIComponent(code)}/end`, {});
     return resp.data;
   },
 

@@ -4696,6 +4696,39 @@ async def proxy_family_game_state(slug: str, request: Request):
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
+@app.get("/api/arcade/party/rooms")
+async def proxy_party_rooms(request: Request):
+    """Admin: every live party-game room (to end one that was left running)."""
+    await _require_admin(request)
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/party/rooms", timeout=aiohttp.ClientTimeout(total=8.0))
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+
+
+@app.post("/api/arcade/party/rooms/{code}/end")
+async def proxy_party_room_end(code: str, request: Request):
+    """Admin: end a party-game room for everyone in it."""
+    await _require_admin(request)
+    if not re.fullmatch(r"[A-Za-z0-9]{1,8}", code):
+        raise HTTPException(status_code=422, detail="Invalid room code")
+    if not ARCADE_ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="ARCADE_ADMIN_TOKEN is not set on the gateway")
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{ALPACA_ARCADE_URL}/api/party/rooms/{code.upper()}/end",
+                json={},
+                headers={"X-Arcade-Token": ARCADE_ADMIN_TOKEN},
+                timeout=aiohttp.ClientTimeout(total=8.0),
+            )
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+
+
 def _arcade_initials(username: str) -> str:
     """The arcade callsign for a signed-in family member."""
     return re.sub(r"[^A-Za-z0-9]", "", username or "")[:3].upper() or "YOU"
