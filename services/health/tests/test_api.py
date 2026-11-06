@@ -218,8 +218,9 @@ class TestSleep:
         assert response.status_code == 422
 
     def test_device_replay_is_idempotent(self, client):
+        # A recent night: GET /sleep lists the last 14 days, so a fixed date ages out.
         payload = {
-            "night": "2026-10-21",
+            "night": (date.today() - timedelta(days=2)).isoformat(),
             "duration_minutes": 430,
             "source": "health_connect",
             "external_id": "hc-sleep-1",
@@ -244,8 +245,9 @@ class TestSleep:
         assert summary["sleep"]["last_night"]["source"] == "health_connect"
 
     def test_a_second_manual_log_for_the_same_night_replaces_it(self, client):
-        client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 300})
-        client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 450})
+        night = (date.today() - timedelta(days=2)).isoformat()  # inside GET /sleep's 14-day window
+        client.post("/sleep", json={"night": night, "duration_minutes": 300})
+        client.post("/sleep", json={"night": night, "duration_minutes": 450})
         sessions = client.get("/sleep").json()["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["duration_minutes"] == 450
