@@ -214,6 +214,57 @@ async def test_arcade_scoreboard_reads_each_family_member(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_arcade_scoreboard_carries_the_games_each_member_played(monkeypatch):
+    from services.gateway import main
+
+    class _Resp:
+        def __init__(self, status, payload):
+            self.status = status
+            self._payload = payload
+
+        async def json(self):
+            return self._payload
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            if url.endswith("/api/users/family-directory"):
+                return _Resp(200, [{"username": "jeremiah", "display_name": "Jeremiah"}])
+            if url.endswith("/api/players/JER"):
+                return _Resp(200, {"player": {
+                    "best_score": 4200, "games_scored": 1, "crowns": 1, "podiums": 1, "submits": 2, "total_games": 7,
+                    "per_game": [
+                        {"slug": "family-telly-swing", "title": "Telly Swing", "my_best": 4200, "my_rank": 1, "my_plays": 2},
+                        {"slug": "family-petal-swap", "title": "Petal Swap", "my_best": None, "my_rank": None, "my_plays": 0},
+                    ],
+                }})
+            return _Resp(404, {})
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(
+        main,
+        "_require_identity_from_request",
+        AsyncMock(return_value={"user": "jeremiah"}),
+    )
+    request = MagicMock()
+    request.headers = {}
+    request.query_params = {"collection": "family"}
+
+    payload = await main.proxy_arcade_scoreboard(request)
+
+    me = payload["players"][0]
+    # The family board's player card opens the family collection, not the arcade.
+    assert me["player_url"].endswith("/player/JER?collection=family")
+    # Only games actually played are carried, so the payload stays lean.
+    assert [g["slug"] for g in me["per_game"]] == ["family-telly-swing"]
+    assert me["per_game"][0]["my_best"] == 4200
+    assert me["per_game"][0]["my_rank"] == 1
+
+
+@pytest.mark.asyncio
 async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
     from services.gateway import main
 
