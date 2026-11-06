@@ -226,7 +226,7 @@ describe('FamilyGames', () => {
   it('shows a TV Stage cast link on multiplayer party games', async () => {
     m.getFamilyGames.mockResolvedValue({
       ...base,
-      games: [card('family-good-word', { title: 'Use Your Good Word', party: true, tv_path: '/tv', ages: '7+', players: '1-8' })],
+      games: [card('family-good-word', { title: 'Parable Party', party: true, tv_path: '/tv', ages: '7+', players: '1-8' })],
     });
     renderIt();
     const tvLink = await screen.findByTestId('family-tv-family-good-word');
@@ -236,7 +236,7 @@ describe('FamilyGames', () => {
   it('relays discovered screens and reports the real cast outcome back to the game', async () => {
     m.getFamilyGames.mockResolvedValue({
       ...base,
-      games: [card('family-good-word', { title: 'Use Your Good Word', party: true, tv_path: '/tv' })],
+      games: [card('family-good-word', { title: 'Parable Party', party: true, tv_path: '/tv' })],
     });
     const screenRow = {
       id: 'ha:media_player.living_room_lg',
@@ -250,7 +250,7 @@ describe('FamilyGames', () => {
     m.getTvs.mockResolvedValue({ success: true, tvs: [screenRow] });
     m.castTv.mockResolvedValue({ success: true, screen: screenRow, method: 'webos_browser', display: 'web', verified: true });
     renderIt();
-    fireEvent.click(await screen.findByRole('button', { name: 'Play Use Your Good Word' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Play Parable Party' }));
     await screen.findByTestId('family-player');
 
     const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
