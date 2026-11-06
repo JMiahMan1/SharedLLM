@@ -427,10 +427,12 @@ def _stage_client(seen, payload):
 
     class _Client:
         async def get(self, url, **kwargs):
+            assert kwargs.get("headers", {}).get("X-Internal-Secret") is not None
             seen.append(("GET", url, kwargs.get("params")))
             return _Resp()
 
         async def post(self, url, **kwargs):
+            assert kwargs.get("headers", {}).get("X-Internal-Secret") is not None
             seen.append(("POST", url, kwargs.get("json")))
             return _Resp()
 

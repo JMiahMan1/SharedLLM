@@ -4985,6 +4985,7 @@ async def proxy_arcade_tvs(request: Request, refresh: bool = False):
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/stage/screens",
                 params={"user_id": user, "refresh": "true" if refresh else "false"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=20.0),
             )
             data = await resp.json() if resp.status == 200 else {}
@@ -5015,6 +5016,7 @@ async def proxy_arcade_cast(request: Request):
                 f"{EXECUTION_SVC}/execute/stage/{action}",
                 json={"screen_id": screen_id, "url": stage_url, "method": str(body.get("method") or ""),
                       "user_id": user},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=90.0),
             )
             return await _proxy_json_response(resp)
