@@ -430,6 +430,59 @@ async def ha_cast_uuids(ha_url: str, ha_token: str) -> dict[str, str]:
     return out
 
 
+#: HA integration -> the platform name tv_stage uses. The integration that owns an
+#: entity is authoritative: a name can say "webOS" on a Music Assistant AirPlay
+#: player, which cannot open a browser (it took a cast that never showed).
+INTEGRATION_PLATFORMS = {
+    "webostv": "webos",
+    "samsungtv": "samsung",
+    "roku": "roku",
+    "androidtv_remote": "android_tv",
+    "androidtv": "android_tv",
+    "cast": "cast",
+    "music_assistant": "music_assistant",
+    "apple_tv": "apple_tv",
+    "dlna_dmr": "dlna",
+}
+
+
+async def ha_entity_platforms(ha_url: str, ha_token: str) -> dict[str, str]:
+    """``{media_player entity: platform}`` from the HA integration that owns each one."""
+    if not (ha_url and ha_token):
+        return {}
+    parts = "".join(
+        f"{{% for e in integration_entities('{integ}') %}}{{% if e.startswith('media_player.') %}}"
+        f"{{{{ e }}}}|{integ};{{% endif %}}{{% endfor %}}"
+        for integ in INTEGRATION_PLATFORMS
+    )
+    out: dict[str, str] = {}
+    with contextlib.suppress(Exception):
+        text = await ha_client._render_template(ha_url, ha_token, parts) or ""
+        for part in text.split(";"):
+            eid, _, integ = part.strip().partition("|")
+            if eid and integ in INTEGRATION_PLATFORMS:
+                out.setdefault(eid, INTEGRATION_PLATFORMS[integ])
+    return out
+
+
+#: Platforms reached through the TV's own browser, which a Music Assistant player cannot open.
+BROWSER_PLATFORMS = {"webos", "samsung", "android_tv", "google_tv"}
+
+
+def _owned_platform(guessed: str, owner: str | None) -> str:
+    """The platform to use, given the name-based guess and the integration that owns the entity.
+
+    A TV integration is authoritative. A Music Assistant player cannot open a TV
+    browser, so a browser guess for one is wrong; any other guess (a Roku, whose
+    stream goes to the Roku itself) stands.
+    """
+    if owner and owner != "music_assistant":
+        return owner
+    if owner == "music_assistant" and guessed in BROWSER_PLATFORMS:
+        return "music_assistant"
+    return guessed
+
+
 def _methods_for(platform: str, *, has_cast: bool, companions: dict[str, Any], entity_id: str,
                  os_version: str = "") -> list[str]:
     methods: list[str] = []
@@ -459,7 +512,8 @@ def _screen_summary(screen: dict[str, Any]) -> dict[str, Any]:
 
 def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str, Any]],
                   ha_states: list[dict[str, Any]] | None = None,
-                  cast_uuids: dict[str, str] | None = None) -> list[dict[str, Any]]:
+                  cast_uuids: dict[str, str] | None = None,
+                  platforms: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Merge HA TVs and mDNS Cast devices into one list of physical screens.
 
     Pure (no I/O) so the merge rules are testable:
@@ -469,8 +523,13 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
     - a discovered Cast device supplies a screen's Cast address, matched by
       Cast id (``cast_uuids``: HA entity -> uuid) first, then by name;
     - a Cast device that is audio-only or a speaker group is not a screen;
-    - a Cast device HA does not know about is still a screen.
+    - a Cast device HA does not know about is still a screen;
+    - an entity's platform is the integration that owns it (``platforms``),
+      not what its name suggests.
     """
+    ha_devices = [{**d, "platform": _owned_platform(str(d.get("platform") or ""),
+                                                    (platforms or {}).get(str(d.get("entity_id") or "")))}
+                  for d in ha_devices]
     names_by_entity = {
         str(s.get("entity_id") or ""): str((s.get("attributes") or {}).get("friendly_name") or "")
         for s in ha_states or []
@@ -640,14 +699,16 @@ async def list_screens(ha_url: str, ha_token: str, *, refresh: bool = False) -> 
     cast_task = asyncio.create_task(discover_cast_devices())
     remote_task = asyncio.create_task(_safe_remote_casts(ha_url, ha_token))
     uuids: dict[str, str] = {}
+    platforms: dict[str, str] = {}
     if ha_url and ha_token:
         with contextlib.suppress(Exception):
             states = await ha_client.get_states(ha_url, ha_token) or []
         with contextlib.suppress(Exception):
             ha_devices = await classify_communication_devices(ha_url, ha_token, all_states=states)
         uuids = await ha_cast_uuids(ha_url, ha_token)
+        platforms = await ha_entity_platforms(ha_url, ha_token)
     cast_devices = merge_cast_devices(await cast_task, await remote_task)
-    screens = build_screens(ha_devices, cast_devices, states, uuids)
+    screens = build_screens(ha_devices, cast_devices, states, uuids, platforms)
     _cache.update({"at": now, "key": key, "screens": screens})
     return list(screens)
 
@@ -813,9 +874,28 @@ async def show_via_cast(screen: dict[str, Any], url: str, ha_url: str, ha_token:
     return {"ok": ok, "verified": ok, "detail": detail}
 
 
+#: How long a woken LG gets to reconnect to Home Assistant.
+WEBOS_WAKE_WAIT_S = 15
+
+
 async def show_via_webos(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:
     eid = screen["entity_id"]
-    await _wake(ha_url, ha_token, eid)
+    # An LG that is off shows as "off" or "unavailable" in HA, and HA accepts a
+    # command to it without error while doing nothing, so wake it and wait for
+    # it to come back before saying the browser opened.
+    st = await ha_client.get_state(ha_url, ha_token, eid) or {}
+    if st.get("state") in ("off", "standby", "unavailable", "unknown", None):
+        with contextlib.suppress(Exception):
+            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", eid)
+        for _ in range(WEBOS_WAKE_WAIT_S):
+            await asyncio.sleep(1)
+            st = await ha_client.get_state(ha_url, ha_token, eid) or {}
+            if st.get("state") not in ("off", "standby", "unavailable", "unknown", None):
+                break
+        else:
+            return {"ok": False, "detail": f"{screen.get('name') or 'The LG TV'} is not connected to Home Assistant "
+                                           "(it is off or asleep). Turn it on with its remote, or turn on "
+                                           "\"Turn on via Wi-Fi\" in the TV's settings so it can be woken, then try again."}
     res = await ha_client.call_service(
         ha_url, ha_token, "webostv", "command", eid,
         {"command": "system.launcher/launch", "payload": {"id": WEBOS_BROWSER_APP, "target": url}},
