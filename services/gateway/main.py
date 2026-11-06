@@ -4964,6 +4964,108 @@ async def proxy_arcade_rate(slug: str, request: Request):
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
+@app.get("/api/arcade/tvs")
+async def proxy_arcade_tvs(request: Request):
+    """Discover household Smart TVs (Roku, LG webOS, Samsung Tizen, Chrome/Cast, Android TV) for party game casting."""
+    await _require_identity_from_request(request)
+    tvs: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    platforms: list[dict[str, Any]] = []
+
+    async with shared_http_client() as client:
+        try:
+            resp = await client.get(
+                f"{ALPACA_ARCADE_URL}/api/party/tvs",
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status == 200:
+                data = await resp.json()
+                platforms = list(data.get("platforms") or [])
+                for t in data.get("tvs") or []:
+                    eid = str(t.get("entity_id") or t.get("id") or "").strip()
+                    if eid and eid not in seen_ids:
+                        seen_ids.add(eid)
+                        tvs.append(t)
+        except Exception as exc:
+            log.debug("arcade tvs fetch from alpaca-arcade failed: %s", exc)
+
+        try:
+            exec_resp = await client.get(
+                f"{EXECUTION_SVC}/execute/timers/devices",
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if exec_resp.status == 200:
+                exec_data = await exec_resp.json()
+                for d in exec_data.get("devices") or []:
+                    if not isinstance(d, dict):
+                        continue
+                    eid = str(d.get("entity_id") or d.get("id") or "").strip()
+                    platform = str(d.get("platform") or "").lower()
+                    kind = str(d.get("kind") or "").lower()
+                    if not eid or eid in seen_ids:
+                        continue
+                    if kind == "tv" or platform in (
+                        "roku",
+                        "webos",
+                        "samsung",
+                        "android_tv",
+                        "cast",
+                        "bravia",
+                        "dlna",
+                        "generic_tv",
+                    ):
+                        seen_ids.add(eid)
+                        tvs.append(
+                            {
+                                "id": eid,
+                                "entity_id": eid,
+                                "name": str(d.get("name") or eid),
+                                "platform": platform or "generic_tv",
+                                "os_version": str(d.get("os_version") or platform.upper()),
+                                "state": str(d.get("state") or "unknown"),
+                                "ip": str(d.get("ip") or ""),
+                                "companions": d.get("companions") if isinstance(d.get("companions"), dict) else {},
+                            }
+                        )
+        except Exception as exc:
+            log.debug("arcade tvs fetch from execution service failed: %s", exc)
+
+    return {"success": True, "tvs": tvs, "platforms": platforms}
+
+
+@app.post("/api/arcade/cast")
+async def proxy_arcade_cast(request: Request):
+    """Cast a party game room and Alpaca TTS announcer to Roku, LG webOS, Samsung Tizen, Chrome/Cast, or Android TV."""
+    creds = await _require_identity_from_request(request)
+    creds_dict = creds if isinstance(creds, dict) else _identity_cred_dict(creds)
+    body = await request.json()
+    if not isinstance(body, dict):
+        body = {}
+
+    cast_payload = {
+        "room_code": str(body.get("room_code") or body.get("code") or "WORD"),
+        "entity_id": str(body.get("entity_id") or ""),
+        "platform": str(body.get("platform") or ""),
+        "tv_url": str(body.get("tv_url") or ""),
+        "arcade_base_url": str(body.get("arcade_base_url") or ALPACA_ARCADE_URL),
+        "voice": str(body.get("voice") or ""),
+        "roku_ip": str(body.get("roku_ip") or ""),
+        "companions": body.get("companions") if isinstance(body.get("companions"), dict) else {},
+        "ha_url": str(creds_dict.get("ha_url") or ""),
+        "ha_token": str(creds_dict.get("ha_token") or ""),
+    }
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{ALPACA_ARCADE_URL}/api/party/cast",
+                json=cast_payload,
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            return await _proxy_json_response(resp)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
+
+
 @app.get("/api/widgets/settings")
 async def proxy_get_widget_settings(request: Request):
     auth_header = request.headers.get("Authorization")

@@ -910,6 +910,9 @@ export interface FamilyGameCard extends Omit<ArcadeGameCard, 'top_score'> {
   art?: { from?: string; to?: string } | null;
   genre?: string;
   ages?: string;
+  players?: string;
+  party?: boolean;
+  tv_path?: string | null;
   how_to?: string[];
   model?: string;
   top_score?: { initials: string; score: number } | null;

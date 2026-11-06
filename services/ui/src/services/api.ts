@@ -3463,6 +3463,29 @@ export const api = {
     return resp.data;
   },
 
+  async getArcadeTvs(): Promise<{
+    success: boolean;
+    tvs: Array<{ id: string; entity_id: string; name: string; platform: string; os_version?: string; state?: string; ip?: string; companions?: Record<string, string> }>;
+    platforms?: Array<{ id: string; platform: string; name: string; icon: string; description: string }>;
+  }> {
+    const resp = await apiClient.get('/api/arcade/tvs');
+    return resp.data;
+  },
+
+  async castArcadeTv(payload: Record<string, unknown>): Promise<{
+    success: boolean;
+    room_code?: string;
+    entity_id?: string;
+    platform?: string;
+    tv_url?: string;
+    stage_url?: string;
+    tts_wav_url?: string;
+    actions?: string[];
+  }> {
+    const resp = await apiClient.post('/api/arcade/cast', payload);
+    return resp.data;
+  },
+
   async runSmokeTest(): Promise<SmokeTestResult> {
     const resp = await apiClient.post('/api/admin/tests/smoke');
     return resp.data;
