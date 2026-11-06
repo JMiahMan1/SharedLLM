@@ -224,3 +224,86 @@ def test_ffmpeg_command_writes_a_rolling_hls_playlist(tmp_path):
     assert cmd[0] == "ffmpeg" and "-shortest" in cmd
     assert cmd[-1] == str(tmp_path / "index.m3u8")
     assert "delete_segments+independent_segments+omit_endlist" in cmd
+
+
+# --------------------------------------------------------------------------- real-house cases
+
+def test_master_bedroom_samsung_orsay_with_chromecast_is_one_cast_screen():
+    """A legacy Samsung with a Chromecast attached, plus that Chromecast's MA wrapper."""
+    ha = [
+        {**_ha_tv("media_player.master_bedroom_samsung", "Master Bedroom Samsung", "samsung",
+                  cast_sibling="media_player.master_bedroom_tv", ma_sibling="media_player.master_bedroom_tv_2"),
+         "os_version": "Samsung Orsay (Legacy)"},
+        _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
+               cast_sibling="media_player.master_bedroom_tv"),
+    ]
+    screens = tv_stage.build_screens(ha, [])
+    assert [s["id"] for s in screens] == ["ha:media_player.master_bedroom_samsung"]
+    assert screens[0]["methods"] == ["cast_web"]  # no Orsay browser, no pointless video stream
+
+
+def test_audio_only_players_are_not_offered_video():
+    ha = [_ha_tv("media_player.a25_macbook", "[TV]Master", "music_assistant"),
+          _ha_tv("media_player.rv_tv", "RV TV", "speaker")]
+    assert tv_stage.build_screens(ha, []) == []
+
+
+def test_a_plain_dlna_tv_gets_the_video_stream():
+    screens = tv_stage.build_screens([_ha_tv("media_player.den_dlna", "Den", "dlna")], [])
+    assert screens[0]["methods"] == ["media_stream"] and screens[0]["display"] == "video"
+
+
+def test_show_stays_inside_its_time_budget(monkeypatch):
+    screen = tv_stage.build_screens(
+        [_ha_tv("media_player.atv", "ATV", "android_tv", cast_sibling="media_player.atv_cast", remote_sibling="remote.atv")],
+        [])[0]
+
+    async def fake_find(*a):
+        return screen
+
+    async def hangs(*a):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(tv_stage, "find_screen", fake_find)
+    monkeypatch.setattr(tv_stage, "SHOW_BUDGET_S", 0.3)
+    monkeypatch.setitem(tv_stage._HANDLERS, "cast_web", hangs)
+    monkeypatch.setitem(tv_stage._HANDLERS, "android_link", hangs)
+    out = asyncio.run(tv_stage.show("ha:media_player.atv", "http://h/tv/A", "u", "t"))
+    assert out["success"] is False
+    assert all(not a["ok"] for a in out["attempts"])
+
+
+def test_a_sleeping_chromecast_is_woken_and_found_again(monkeypatch):
+    screen = tv_stage.build_screens(
+        [_ha_tv("media_player.bed", "Master Bedroom Samsung", "samsung", cast_sibling="media_player.bed_cast")], [])[0]
+    calls = []
+
+    async def call_service(ha_url, ha_token, domain, service, entity_id="", data=None, **kw):
+        calls.append((domain, service, entity_id))
+        return {"ok": True}
+
+    async def get_state(ha_url, ha_token, eid):
+        return {"state": "on", "attributes": {"friendly_name": "Master Bedroom TV"}}
+
+    rounds = iter([[], [_cast("Master Bedroom TV", "u-9", host="10.0.0.42")]])
+
+    async def discover(timeout=3.0):
+        return next(rounds, [])
+
+    async def no_sleep(*a, **k):
+        return None
+
+    shown = {}
+
+    def fake_cast(cast_dev, host, url):
+        shown.update(cast=cast_dev, url=url)
+        return True, "Showing on Master Bedroom TV"
+
+    monkeypatch.setattr(tv_stage.ha_client, "call_service", call_service)
+    monkeypatch.setattr(tv_stage.ha_client, "get_state", get_state)
+    monkeypatch.setattr(tv_stage, "discover_cast_devices", discover)
+    monkeypatch.setattr(tv_stage.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(tv_stage, "_cast_show_sync", fake_cast)
+    res = asyncio.run(tv_stage.show_via_cast(screen, "http://h/tv/Z", "u", "t"))
+    assert res["ok"] and shown["cast"]["host"] == "10.0.0.42"
+    assert ("media_player", "turn_on", "media_player.bed_cast") in calls

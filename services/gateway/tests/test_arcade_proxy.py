@@ -498,3 +498,54 @@ async def test_arcade_cast_stop_and_missing_screen(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await main.proxy_arcade_cast(request)
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_and_end_party_rooms(monkeypatch):
+    from services.gateway import main
+
+    seen = []
+
+    class _Resp:
+        status = 200
+        content_type = "application/json"
+
+        async def json(self):
+            return {"success": True}
+
+        async def text(self):
+            return ""
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            seen.append(("GET", url, kwargs.get("headers")))
+            return _Resp()
+
+        async def post(self, url, **kwargs):
+            seen.append(("POST", url, kwargs.get("headers")))
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
+    await main.proxy_party_rooms(MagicMock())
+    await main.proxy_party_room_end("zion", MagicMock())
+    assert seen[0][:2] == ("GET", f"{main.ALPACA_ARCADE_URL}/api/party/rooms")
+    assert seen[1] == ("POST", f"{main.ALPACA_ARCADE_URL}/api/party/rooms/ZION/end", {"X-Arcade-Token": "tok"})
+
+
+@pytest.mark.asyncio
+async def test_party_room_end_requires_an_admin(monkeypatch):
+    from services.gateway import main
+
+    async def not_admin(request):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    monkeypatch.setattr(main, "_require_admin", not_admin)
+    with pytest.raises(HTTPException) as exc:
+        await main.proxy_party_room_end("ZION", MagicMock())
+    assert exc.value.status_code == 403

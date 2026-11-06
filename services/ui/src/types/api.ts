@@ -4264,3 +4264,15 @@ export interface ArcadeCastResult {
   error?: string;
   attempts?: Array<{ method: string; ok: boolean; detail?: string }>;
 }
+
+/** A live party-game room, as an admin sees it. */
+export interface PartyRoomSummary {
+  code: string;
+  host_name: string;
+  phase: 'lobby' | 'writing' | 'voting' | 'reveal' | 'finished' | string;
+  round: number;
+  total_rounds: number;
+  player_count: number;
+  players: string[];
+  stage_connected?: boolean;
+}

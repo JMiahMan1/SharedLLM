@@ -19,6 +19,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       submitArcadeScore: vi.fn(),
       getArcadeTvs: vi.fn(),
       castArcadeTv: vi.fn(),
+      getPartyRooms: vi.fn(),
+      endPartyRoom: vi.fn(),
     },
   };
 });
@@ -32,6 +34,8 @@ const m = {
   submit: vi.mocked(api.submitArcadeScore),
   getTvs: vi.mocked(api.getArcadeTvs),
   castTv: vi.mocked(api.castArcadeTv),
+  partyRooms: vi.mocked(api.getPartyRooms),
+  endRoom: vi.mocked(api.endPartyRoom),
 };
 
 function card(slug: string, overrides: Partial<FamilyGameCard> = {}): FamilyGameCard {
@@ -73,6 +77,7 @@ function renderIt() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  m.partyRooms.mockResolvedValue({ success: true, rooms: [] });
   m.scoreboard.mockResolvedValue({
     success: true,
     arcade_available: true,
@@ -267,5 +272,31 @@ describe('FamilyGames', () => {
         stop: false,
       }),
     );
+  });
+});
+
+describe('FamilyGames party rooms (admin)', () => {
+  it('lists live party rooms and ends one after a second tap', async () => {
+    m.getFamilyGames.mockResolvedValue({ ...base, is_admin: true, admin_token_configured: true });
+    m.partyRooms.mockResolvedValue({
+      success: true,
+      rooms: [{ code: 'ZION', host_name: 'Jeremiah', phase: 'voting', round: 2, total_rounds: 7, player_count: 3, players: [], stage_connected: true }],
+    });
+    m.endRoom.mockResolvedValue({ success: true, ended: 'ZION' });
+    renderIt();
+    const row = await screen.findByTestId('party-room-ZION');
+    expect(row).toHaveTextContent('Jeremiah + 2');
+    expect(row).toHaveTextContent('Voting · Round 2/7 · On a TV');
+    fireEvent.click(within(row).getByRole('button', { name: /End game/ }));
+    expect(m.endRoom).not.toHaveBeenCalled();
+    fireEvent.click(within(row).getByRole('button', { name: /Tap to confirm/ }));
+    await waitFor(() => expect(m.endRoom).toHaveBeenCalledWith('ZION'));
+  });
+
+  it('does not ask non-admins for party rooms', async () => {
+    m.getFamilyGames.mockResolvedValue({ ...base, is_admin: false });
+    renderIt();
+    await screen.findByTestId('family-shelf').catch(() => null);
+    expect(m.partyRooms).not.toHaveBeenCalled();
   });
 });
