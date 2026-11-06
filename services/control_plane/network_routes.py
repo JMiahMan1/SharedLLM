@@ -37,13 +37,23 @@ router = APIRouter(prefix="/api/network", dependencies=[Depends(_require_interna
 
 
 def load_config() -> dict[str, Any] | None:
-    """The router's URL, login and pinned certificate, from Identity."""
+    """The router's URL, login and pinned certificate, from Identity.
+
+    Returns None only when Identity says no router is set up. Any failure to
+    ask (Identity still starting, a bad reply) raises ``SettingsUnavailable``
+    so the monitor retries instead of deciding the router was never configured.
+    """
     try:
         resp = requests.get(f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/router", headers=_HEADERS, timeout=10)
-        return resp.json() if resp.status_code == 200 else None
-    except (requests.RequestException, ValueError) as e:
-        log.warning(f"[network] cannot read the router settings: {type(e).__name__}")
-        return None
+    except requests.RequestException as e:
+        raise rm.SettingsUnavailable(type(e).__name__) from e
+    if resp.status_code != 200:
+        raise rm.SettingsUnavailable(f"Identity answered {resp.status_code}")
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise rm.SettingsUnavailable("unreadable reply from Identity") from e
+    return data if isinstance(data, dict) else None
 
 
 def save_pin(fingerprint: str) -> None:

@@ -39,6 +39,12 @@ from services.control_plane.router_client import CertificateChanged, RouterClien
 
 log = logging.getLogger("control_plane.router_monitor")
 
+
+class SettingsUnavailable(Exception):
+    """The router settings could not be read right now (Identity down or
+    starting). Not the same as "no router configured": the monitor keeps its
+    last good login and tries again next check."""
+
 CHECK_SECONDS = int(os.getenv("ROUTER_CHECK_INTERVAL", "60"))
 NETWORK_URL = "/admin/network"
 
@@ -601,15 +607,30 @@ class Monitor:
             self.state = {}
 
     def _client(self) -> RouterClient | None:
-        cfg = self.load_config()
-        if not cfg or not cfg.get("url") or not cfg.get("user") or not cfg.get("password"):
+        try:
+            cfg = self.load_config()
+        except SettingsUnavailable as e:
+            self._note_settings(f"unavailable: {e}")
+            if self.client is not None:
+                return self.client  # keep watching with the last good login
+            raise
+        missing = [k for k in ("url", "user", "password") if not (cfg or {}).get(k)]
+        if missing:
+            self._note_settings("not configured (missing " + ", ".join(missing) + ")")
             self.client = None
             return None
+        self._note_settings("configured")
         key = (cfg["url"], cfg["user"], cfg["password"], cfg.get("cert_sha256"))
         if key != self.config_key:
             self.client, self.config_key, self.prev = RouterClient(cfg["url"], cfg["user"], cfg["password"],
                                                                    cfg.get("cert_sha256")), key, None
         return self.client
+
+    def _note_settings(self, state: str) -> None:
+        """Log when what the monitor knows about the router settings changes."""
+        if state != getattr(self, "_settings_state", None):
+            log.warning(f"[network] router settings {state}")
+            self._settings_state = state
 
     def _record(self, notices: list[dict[str, Any]], now: float) -> None:
         for n in notices:
@@ -628,7 +649,15 @@ class Monitor:
             # The internet is back: keep the outage for Admin > Network.
             self.r.lpush(OUTAGES_KEY, json.dumps({"start": was_down_since, "end": now}))
             self.r.ltrim(OUTAGES_KEY, 0, OUTAGES_MAX - 1)
-        client = self._client()
+        try:
+            client = self._client()
+        except SettingsUnavailable as e:
+            status = {**json.loads(self.r.get(STATUS_KEY) or "{}"), "configured": True, "connected": False,
+                      "error": f"Jarvis could not read the router settings ({e}); retrying",
+                      "internet": internet, "checked_at": now}
+            self._record(notices, now)
+            self._save(status)
+            return status
         if client is None:
             status = {"configured": False, "checked_at": now, "internet": internet}
             self._record(notices, now)

@@ -525,10 +525,11 @@ async def _discover_via_arp_scan(
         try:
             net = ipaddress.IPv4Network(local_subnet, strict=False)
             subnets = [local_subnet]
-            # Add adjacent subnet (e.g., if on 192.168.2.0/24, also scan 192.168.1.0/24)
-            adjacent = list(net.network_address.packed)
-            adjacent[2] = (adjacent[2] + 1) % 256
-            subnets.append(f"{adjacent[0]}.{adjacent[1]}.{adjacent[2]}.0/24")
+            # The /24s either side (on 192.168.2.0/24: 192.168.1.0/24 and 192.168.3.0/24).
+            base = list(net.network_address.packed)
+            for d in (-1, 1):
+                if 0 <= base[2] + d <= 255:
+                    subnets.append(f"{base[0]}.{base[1]}.{base[2] + d}.0/24")
         except Exception:
             subnets = [local_subnet]
         found_devices = []
