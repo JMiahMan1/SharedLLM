@@ -552,8 +552,7 @@ def test_the_lg_browser_opens_directly_and_the_pairing_key_is_kept(monkeypatch, 
     screen = tv_stage.build_screens([_ha_tv("media_player.living_room_tv", "Living Room TV", "webos")], [])[0]
     res = asyncio.run(tv_stage.show_via_webos_direct(screen, "http://h/tv/ZION", "", ""))
     assert res["ok"] and res["verified"]
-    assert _FakeWebOs.instances[0].requests[0] == (
-        "system.launcher/launch", {"id": "com.webos.app.browser", "target": "http://h/tv/ZION"})
+    assert _FakeWebOs.instances[0].requests[0] == ("system.launcher/open", {"target": "http://h/tv/ZION"})
     # Next time it connects with the key the TV granted: no prompt.
     asyncio.run(tv_stage.show_via_webos_direct(screen, "http://h/tv/ZION", "", ""))
     assert _FakeWebOs.instances[1].client_key == "granted-key"
