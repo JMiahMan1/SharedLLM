@@ -857,6 +857,17 @@ export interface ArcadeGameCard {
   featured?: boolean;
 }
 
+/** One game a player has scored on, with their best and where it ranks. */
+export interface ArcadePlayerGame {
+  slug: string;
+  title: string;
+  my_best: number;
+  my_rank: number | null;
+  my_plays: number;
+  top_score?: number | null;
+  top_initials?: string | null;
+}
+
 export interface ArcadeScoreboardPlayer {
   username: string;
   display_name: string;
@@ -871,6 +882,8 @@ export interface ArcadeScoreboardPlayer {
   submits: number;
   podiums: number;
   crowns: number;
+  /** The games this member has scored on, their best in each (family board). */
+  per_game?: ArcadePlayerGame[];
 }
 
 export interface ArcadeScoreboardResponse {

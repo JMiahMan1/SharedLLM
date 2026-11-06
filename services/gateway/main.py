@@ -4744,6 +4744,7 @@ async def proxy_arcade_scoreboard(request: Request):
                     "podiums": 0,
                     "crowns": 0,
                 }
+                per_game: list[dict] = []
                 try:
                     resp = await client.get(
                         f"{ALPACA_ARCADE_URL}/api/players/{initials}",
@@ -4755,15 +4756,34 @@ async def proxy_arcade_scoreboard(request: Request):
                         player = payload.get("player") or payload
                         for key in stats:
                             stats[key] = int(player.get(key) or 0)
+                        # Only the games this member has actually scored on: the
+                        # scoreboard already says who has not played yet.
+                        per_game = [
+                            {
+                                "slug": str(g.get("slug") or ""),
+                                "title": str(g.get("title") or g.get("slug") or ""),
+                                "my_best": int(g.get("my_best") or 0),
+                                "my_rank": g.get("my_rank"),
+                                "my_plays": int(g.get("my_plays") or 0),
+                                "top_score": g.get("top_score"),
+                                "top_initials": g.get("top_initials"),
+                            }
+                            for g in (player.get("per_game") or [])
+                            if isinstance(g, dict) and g.get("slug") and g.get("my_best") is not None
+                        ]
                 except (aiohttp.ClientError, ValueError, TypeError):
                     pass
+                player_url = f"{ALPACA_ARCADE_PUBLIC_URL}/player/{initials}"
+                if collection == "family":
+                    player_url += "?collection=family"
                 return {
                     "username": username,
                     "display_name": member.get("display_name") or username,
                     "avatar": member.get("avatar"),
                     "initials": initials,
-                    "player_url": f"{ALPACA_ARCADE_PUBLIC_URL}/player/{initials}",
+                    "player_url": player_url,
                     "you": username == me,
+                    "per_game": per_game,
                     **stats,
                 }
 

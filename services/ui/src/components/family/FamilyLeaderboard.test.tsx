@@ -107,4 +107,37 @@ describe('FamilyLeaderboard', () => {
     renderIt();
     expect(await screen.findByTestId('family-board-empty')).toHaveTextContent('No champions yet');
   });
+
+  it('shows which games a member played and their high score in each', async () => {
+    vi.mocked(api.getArcadeScoreboard).mockResolvedValue({
+      success: true,
+      arcade_available: true,
+      players: [
+        player('michele', {
+          crowns: 1,
+          podiums: 1,
+          games_scored: 2,
+          per_game: [
+            { slug: 'family-petal-swap', title: 'Petal Swap', my_best: 4200, my_rank: 1, my_plays: 3 },
+            { slug: 'family-telly-swing', title: 'Telly Swing', my_best: 150, my_rank: 2, my_plays: 1 },
+          ],
+        }),
+      ],
+    });
+    vi.mocked(api.getArcadeHighscores).mockResolvedValue({ success: true, arcade_available: true, players: [], games: [] });
+    renderIt();
+
+    // The per-game breakdown stays tucked away until a member is tapped.
+    expect(screen.queryByTestId('family-games-michele')).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /see michele's games/i }));
+
+    const panel = await screen.findByTestId('family-games-michele');
+    expect(panel).toHaveTextContent('Petal Swap');
+    expect(panel).toHaveTextContent('4,200');
+    const telly = within(panel).getByTestId('family-games-michele-family-telly-swing');
+    expect(telly).toHaveTextContent('Telly Swing');
+    expect(telly).toHaveTextContent('150');
+    expect(telly).toHaveTextContent('#2');
+  });
 });

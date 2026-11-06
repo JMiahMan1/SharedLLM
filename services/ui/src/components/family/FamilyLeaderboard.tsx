@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Crown, Medal, Play, Trophy } from 'lucide-react';
+import { Crown, Medal, Play, Trophy, X } from 'lucide-react';
 import UserAvatar from '../UserAvatar';
 import { api } from '../../services/api';
 import type { ArcadeScoreboardPlayer, FamilyGameCard } from '../../types/api';
@@ -34,7 +35,87 @@ function YouTag() {
   );
 }
 
-function Podium({ top }: { top: ArcadeScoreboardPlayer[] }) {
+/** A member's per-game record: every game they have played and their best in it. */
+function PlayerGames({
+  player,
+  games,
+  onClose,
+}: {
+  player: ArcadeScoreboardPlayer;
+  games: FamilyGameCard[];
+  onClose: () => void;
+}) {
+  const played = player.per_game ?? [];
+  const bySlug = new Map(games.map((g) => [g.slug, g]));
+  return (
+    <div
+      className="rounded-2xl border border-fuchsia-400/25 bg-slate-950/70 p-3"
+      data-testid={`family-games-${player.username}`}
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <Crown size={13} className="shrink-0 text-amber-300" />
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-100">
+          {player.display_name}&rsquo;s games
+        </span>
+        <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-500">
+          {played.length} played
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={`Hide ${player.display_name}'s games`}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition active:scale-90"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      {played.length === 0 ? (
+        <p className="px-1 text-[11px] text-slate-400">
+          Hasn&rsquo;t played yet &mdash; pick a game and set a first score.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {played.map((row) => {
+            const game = bySlug.get(row.slug);
+            return (
+              <li
+                key={row.slug}
+                className="flex items-center gap-2 rounded-xl bg-white/[0.05] px-2 py-1.5"
+                data-testid={`family-games-${player.username}-${row.slug}`}
+              >
+                <span className="text-lg" aria-hidden>
+                  {game?.emoji || '🎮'}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-100">
+                  {game?.title ?? row.title}
+                </span>
+                {row.my_rank === 1 && (
+                  <span title="Leads this game" aria-label="Leads this game">
+                    👑
+                  </span>
+                )}
+                <span className="font-mono text-xs font-bold text-amber-200">{row.my_best.toLocaleString()}</span>
+                <span className="w-16 shrink-0 text-right text-[10px] text-slate-400">
+                  {row.my_rank ? `#${row.my_rank}` : '-'} · {row.my_plays} {row.my_plays === 1 ? 'play' : 'plays'}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Podium({
+  top,
+  selected,
+  onSelect,
+}: {
+  top: ArcadeScoreboardPlayer[];
+  selected: string | null;
+  onSelect: (player: ArcadeScoreboardPlayer) => void;
+}) {
   return (
     <div className="mt-4 grid grid-cols-3 items-end gap-2" data-testid="family-podium">
       {PODIUM.map(({ place, height, ring, block, medal, avatar }) => {
@@ -42,7 +123,13 @@ function Podium({ top }: { top: ArcadeScoreboardPlayer[] }) {
         if (!player) return <div key={place} />;
         return (
           <div key={place} className="flex min-w-0 flex-col items-center" data-testid={`family-podium-${place}`}>
-            <div className="relative">
+            <button
+              type="button"
+              onClick={() => onSelect(player)}
+              aria-pressed={selected === player.username}
+              aria-label={`See ${player.display_name}'s games`}
+              className="relative rounded-full transition active:scale-95"
+            >
               {place === 1 && (
                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-2xl drop-shadow" aria-hidden>
                   👑
@@ -58,7 +145,7 @@ function Podium({ top }: { top: ArcadeScoreboardPlayer[] }) {
               <span className="absolute -bottom-1 -right-1 text-xl" aria-hidden>
                 {medal}
               </span>
-            </div>
+            </button>
             <div className="mt-2 max-w-full truncate text-sm font-bold text-slate-100">{player.display_name}</div>
             {player.you && (
               <div className="mt-0.5">
@@ -85,38 +172,65 @@ function Podium({ top }: { top: ArcadeScoreboardPlayer[] }) {
   );
 }
 
-function PlayerRow({ player, rank }: { player: ArcadeScoreboardPlayer; rank: number }) {
+function PlayerRow({
+  player,
+  rank,
+  selected,
+  onSelect,
+  games,
+  onClose,
+}: {
+  player: ArcadeScoreboardPlayer;
+  rank: number;
+  selected: boolean;
+  onSelect: (player: ArcadeScoreboardPlayer) => void;
+  games: FamilyGameCard[];
+  onClose: () => void;
+}) {
   const played = player.games_scored > 0;
   return (
     <li
-      className={`flex min-h-14 items-center gap-3 rounded-2xl border px-3 py-2 ${
+      className={`overflow-hidden rounded-2xl border ${
         player.you ? 'border-fuchsia-400/40 bg-fuchsia-500/10' : 'border-white/5 bg-white/[0.04]'
       }`}
       data-testid={`family-rank-${player.username}`}
     >
-      <span className="w-5 shrink-0 text-center text-sm font-black text-slate-400">{rank}</span>
-      <UserAvatar username={player.username} avatar={player.avatar} name={player.display_name} size={36} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-slate-100">{player.display_name}</span>
-          {player.you && <YouTag />}
+      <button
+        type="button"
+        onClick={() => onSelect(player)}
+        aria-pressed={selected}
+        aria-label={`See ${player.display_name}'s games`}
+        className="flex min-h-14 w-full items-center gap-3 px-3 py-2 text-left transition active:scale-[0.99]"
+      >
+        <span className="w-5 shrink-0 text-center text-sm font-black text-slate-400">{rank}</span>
+        <UserAvatar username={player.username} avatar={player.avatar} name={player.display_name} size={36} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-slate-100">{player.display_name}</span>
+            {player.you && <YouTag />}
+          </span>
+          <span className="mt-0.5 block text-[11px] text-slate-400">
+            {played ? (
+              <>
+                👑 {player.crowns} · 🏅 {player.podiums} · {player.games_scored}{' '}
+                {player.games_scored === 1 ? 'game' : 'games'}
+              </>
+            ) : (
+              "Hasn't played yet"
+            )}
+          </span>
         </span>
-        <span className="mt-0.5 block text-[11px] text-slate-400">
-          {played ? (
-            <>
-              👑 {player.crowns} · 🏅 {player.podiums} · {player.games_scored}{' '}
-              {player.games_scored === 1 ? 'game' : 'games'}
-            </>
-          ) : (
-            "Hasn't played yet"
-          )}
-        </span>
-      </span>
-      {played && (
-        <span className="shrink-0 text-right">
-          <span className="block font-mono text-sm font-bold text-amber-200">{player.best_score.toLocaleString()}</span>
-          <span className="text-[9px] uppercase tracking-wide text-slate-500">top score</span>
-        </span>
+        {played && (
+          <span className="shrink-0 text-right">
+            <span className="block font-mono text-sm font-bold text-amber-200">{player.best_score.toLocaleString()}</span>
+            <span className="text-[9px] uppercase tracking-wide text-slate-500">top score</span>
+          </span>
+        )}
+      </button>
+      {selected && (
+        <div className="px-2 pb-2">
+          <PlayerGames player={player} games={games} onClose={onClose} />
+        </div>
       )}
     </li>
   );
@@ -178,8 +292,8 @@ function ChampionCard({ champion, onPlay }: { champion: Champion; onPlay: () => 
 /**
  * The Family Games leaderboard: a podium for the leaders, everyone else in
  * order (including who has not played yet, to invite them in), and each
- * game's current champion with a button to go and beat the record. Players
- * are the signed-in Jarvis family accounts; scores are saved under them.
+ * game's current champion with a button to go and beat the record. Tap any
+ * player to see every game they have played and their high score in each.
  */
 export default function FamilyLeaderboard({
   games,
@@ -188,6 +302,7 @@ export default function FamilyLeaderboard({
   games: FamilyGameCard[];
   onPlay: (game: FamilyGameCard) => void;
 }) {
+  const [selected, setSelected] = useState<string | null>(null);
   const { data: board } = useQuery({
     queryKey: ['arcade-scoreboard', 'family'],
     queryFn: () => api.getArcadeScoreboard('family'),
@@ -221,6 +336,10 @@ export default function FamilyLeaderboard({
   const anyScores = players.some((p) => p.games_scored > 0);
   const podium = anyScores ? players.filter((p) => p.games_scored > 0).slice(0, 3) : [];
   const rest = players.filter((p) => !podium.includes(p));
+  const toggle = (player: ArcadeScoreboardPlayer) =>
+    setSelected((current) => (current === player.username ? null : player.username));
+  const selectedPlayer = selected ? players.find((p) => p.username === selected) : undefined;
+  const selectedInPodium = podium.some((p) => p.username === selected);
 
   return (
     <section
@@ -237,12 +356,12 @@ export default function FamilyLeaderboard({
         </span>
         <div className="min-w-0">
           <h2 className="text-base font-black tracking-tight text-white">Family Leaderboard</h2>
-          <p className="text-[11px] text-slate-400">Lead the most games to take the crown.</p>
+          <p className="text-[11px] text-slate-400">Lead the most games to take the crown. Tap a player to see their games.</p>
         </div>
       </div>
 
       {anyScores ? (
-        <Podium top={podium} />
+        <Podium top={podium} selected={selected} onSelect={toggle} />
       ) : (
         <div className="relative mt-4 rounded-2xl border border-dashed border-white/15 p-4 text-center" data-testid="family-board-empty">
           <div className="text-3xl" aria-hidden>
@@ -253,10 +372,24 @@ export default function FamilyLeaderboard({
         </div>
       )}
 
+      {selectedPlayer && selectedInPodium && (
+        <div className="relative mt-3">
+          <PlayerGames player={selectedPlayer} games={games} onClose={() => setSelected(null)} />
+        </div>
+      )}
+
       {rest.length > 0 && (
         <ol className="relative mt-3 space-y-2" start={podium.length + 1}>
           {rest.map((player, index) => (
-            <PlayerRow key={player.username} player={player} rank={podium.length + index + 1} />
+            <PlayerRow
+              key={player.username}
+              player={player}
+              rank={podium.length + index + 1}
+              selected={selected === player.username}
+              onSelect={toggle}
+              games={games}
+              onClose={() => setSelected(null)}
+            />
           ))}
         </ol>
       )}
