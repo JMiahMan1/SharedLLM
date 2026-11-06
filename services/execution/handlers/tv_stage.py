@@ -974,9 +974,15 @@ async def _webos_find_host(screen: dict[str, Any], ha_url: str, ha_token: str) -
 
 
 async def _webos_live_state(screens: list[dict[str, Any]]) -> None:
-    """An LG we talk to directly is "on" when it answers, whatever Home Assistant's stale link says."""
+    """A TV we talk to directly (an LG, a Samsung) is "on" when it answers, whatever Home Assistant's stale link says."""
     store = _webos_store()
+    samsungs = _samsung_hosts()
     for sc in screens:
+        if sc.get("platform") == "samsung" and sc.get("state") in ("unavailable", "unknown"):
+            host = samsungs.get(sc.get("entity_id") or "", "")
+            if host and await _samsung_name_at(host):
+                sc["state"] = "on"
+            continue
         if sc.get("platform") != "webos" or sc.get("state") not in ("unavailable", "unknown", "off"):
             continue
         host = str((store.get(sc.get("entity_id") or "") or {}).get("host") or "")
@@ -1050,11 +1056,75 @@ async def _webos_close_direct(screen: dict[str, Any], ha_url: str, ha_token: str
             await client.disconnect()
 
 
-def _samsung_show_sync(ip: str, url: str) -> None:
+_SAMSUNG_HOSTS = "samsung_hosts.json"
+
+
+def _samsung_hosts() -> dict[str, str]:
+    with contextlib.suppress(Exception):
+        import json
+
+        return dict(json.loads((TOKEN_DIR / _SAMSUNG_HOSTS).read_text()))
+    return {}
+
+
+def _samsung_remember(entity_id: str, host: str) -> None:
+    import json
+
+    data = _samsung_hosts()
+    data[entity_id] = host
+    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = TOKEN_DIR / (_SAMSUNG_HOSTS + ".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(TOKEN_DIR / _SAMSUNG_HOSTS)
+
+
+async def _samsung_name_at(ip: str) -> str:
+    """The TV's own name from its open info endpoint (port 8001), or "" if no Samsung answers there."""
+    import aiohttp
+
+    with contextlib.suppress(Exception):
+        async with aiohttp.ClientSession() as client, client.get(
+            f"http://{ip}:8001/api/v2/", timeout=aiohttp.ClientTimeout(total=2.5)
+        ) as resp:
+            data = await resp.json(content_type=None)
+            return str(((data or {}).get("device") or {}).get("name") or "")
+    return ""
+
+
+async def _samsung_find_host(screen: dict[str, Any], ha_url: str, ha_token: str) -> str:
+    """Where the Samsung is now: the address that worked last time, Home Assistant's, or a
+    router device whose own Samsung name matches the screen (Home Assistant's link goes
+    stale when the TV changes address)."""
+    eid = screen.get("entity_id") or ""
+    want = _name_keys(str(screen.get("name") or ""))
+    tried: list[str] = []
+    for ip in [_samsung_hosts().get(eid, ""), await _entity_ip(ha_url, ha_token, eid, "samsung") if eid else ""]:
+        if ip and ip not in tried:
+            tried.append(ip)
+            if _name_keys(await _samsung_name_at(ip)) & want:
+                return ip
+    status = await _router_status()
+    devices = status.get("devices") or {}
+    items = devices.values() if isinstance(devices, dict) else devices
+    ips = [str(d.get("ip")) for d in items if isinstance(d, dict) and d.get("ip") and str(d.get("ip")) not in tried]
+    names = await asyncio.gather(*(_samsung_name_at(ip) for ip in ips))
+    for ip, name in zip(ips, names, strict=True):
+        if name and _name_keys(name) & want:
+            return ip
+    return ""
+
+
+def _samsung_show_sync(ip: str, url: str, entity_id: str = "") -> None:
     from samsungtvws import SamsungTVWS  # pyright: ignore[reportMissingImports]
 
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-    token_file = str(TOKEN_DIR / f"samsung_{re.sub(r'[^0-9A-Za-z.]', '_', ip)}.token")
+    # Keyed by the TV, not its address: a new address must not mean asking to "Allow" again.
+    key = entity_id or ip
+    token_file = str(TOKEN_DIR / f"samsung_{re.sub(r'[^0-9A-Za-z.]', '_', key)}.token")
+    legacy = TOKEN_DIR / f"samsung_{re.sub(r'[^0-9A-Za-z.]', '_', ip)}.token"
+    if entity_id and not Path(token_file).exists() and legacy.exists():
+        with contextlib.suppress(Exception):
+            Path(token_file).write_text(legacy.read_text())
     tv = SamsungTVWS(host=ip, port=8002, token_file=token_file, name="Jarvis", timeout=30)
     try:
         tv.open_browser(url)
@@ -1065,12 +1135,13 @@ def _samsung_show_sync(ip: str, url: str) -> None:
 
 async def show_via_samsung(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:
     eid = screen["entity_id"]
-    ip = await _entity_ip(ha_url, ha_token, eid, "samsung")
-    if not ip:
-        return {"ok": False, "detail": "Samsung TV IP not found"}
     await _wake(ha_url, ha_token, eid)
+    ip = await _samsung_find_host(screen, ha_url, ha_token)
+    if not ip:
+        return {"ok": False, "detail": f"{screen.get('name') or 'The Samsung TV'} did not answer on the network. Is it on?"}
+    _samsung_remember(eid, ip)
     try:
-        await asyncio.wait_for(asyncio.to_thread(_samsung_show_sync, ip, url), 40)
+        await asyncio.wait_for(asyncio.to_thread(_samsung_show_sync, ip, url, eid), 40)
     except Exception as exc:
         return {"ok": False, "detail": f"Samsung browser launch failed (allow 'Jarvis' on the TV the first time): {exc}"}
     return {"ok": True, "verified": False, "detail": "Samsung browser opened"}
