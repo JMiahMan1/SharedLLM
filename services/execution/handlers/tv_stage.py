@@ -540,7 +540,8 @@ def build_screens(ha_devices: list[dict[str, Any]], cast_devices: list[dict[str,
                     "companions": companions,
                     "methods": _methods_for(platform, has_cast=has_cast, companions=companions, entity_id=eid,
                                             os_version=str(d.get("os_version") or "")),
-                    "source": "home_assistant" + ("+mdns" if cast_dev else ""),
+                    "source": "home_assistant" + (("+network" if cast_dev.get("found_by") == "unicast" else "+mdns")
+                                                  if cast_dev else ""),
                 }
             )
         )
