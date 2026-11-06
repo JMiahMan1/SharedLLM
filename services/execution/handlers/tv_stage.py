@@ -712,6 +712,7 @@ async def list_screens(ha_url: str, ha_token: str, *, refresh: bool = False) -> 
         platforms = await ha_entity_platforms(ha_url, ha_token)
     cast_devices = merge_cast_devices(await cast_task, await remote_task)
     screens = build_screens(ha_devices, cast_devices, states, uuids, platforms)
+    await _webos_live_state(screens)
     _cache.update({"at": now, "key": key, "screens": screens})
     return list(screens)
 
@@ -970,6 +971,17 @@ async def _webos_find_host(screen: dict[str, Any], ha_url: str, ha_token: str) -
             if await _port_open(ip, port):
                 return ip
     return ""
+
+
+async def _webos_live_state(screens: list[dict[str, Any]]) -> None:
+    """An LG we talk to directly is "on" when it answers, whatever Home Assistant's stale link says."""
+    store = _webos_store()
+    for sc in screens:
+        if sc.get("platform") != "webos" or sc.get("state") not in ("unavailable", "unknown", "off"):
+            continue
+        host = str((store.get(sc.get("entity_id") or "") or {}).get("host") or "")
+        if host and await _port_open(host, WEBOS_PORTS[0]):
+            sc["state"] = "on"
 
 
 async def show_via_webos_direct(screen: dict[str, Any], url: str, ha_url: str, ha_token: str) -> dict[str, Any]:

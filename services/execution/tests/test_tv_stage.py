@@ -556,3 +556,18 @@ def test_the_lg_browser_opens_directly_and_the_pairing_key_is_kept(monkeypatch, 
     # Next time it connects with the key the TV granted: no prompt.
     asyncio.run(tv_stage.show_via_webos_direct(screen, "http://h/tv/ZION", "", ""))
     assert _FakeWebOs.instances[1].client_key == "granted-key"
+
+
+
+def test_an_lg_that_answers_directly_is_listed_as_on(monkeypatch, tmp_path):
+    monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
+    tv_stage._webos_remember("media_player.living_room_tv", host="192.168.4.156", client_key="k")
+
+    async def port_open(ip, port=8009):
+        return ip == "192.168.4.156"
+
+    monkeypatch.setattr(tv_stage, "_port_open", port_open)
+    screens = [{"platform": "webos", "state": "unavailable", "entity_id": "media_player.living_room_tv"},
+               {"platform": "webos", "state": "unavailable", "entity_id": "media_player.other_lg"}]
+    asyncio.run(tv_stage._webos_live_state(screens))
+    assert [s["state"] for s in screens] == ["on", "unavailable"]
