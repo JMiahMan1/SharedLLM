@@ -17,6 +17,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       getArcadeScoreboard: vi.fn(),
       getArcadeHighscores: vi.fn(),
       submitArcadeScore: vi.fn(),
+      getArcadeTvs: vi.fn(),
+      castArcadeTv: vi.fn(),
     },
   };
 });
@@ -28,6 +30,8 @@ const m = {
   scoreboard: vi.mocked(api.getArcadeScoreboard),
   highscores: vi.mocked(api.getArcadeHighscores),
   submit: vi.mocked(api.submitArcadeScore),
+  getTvs: vi.mocked(api.getArcadeTvs),
+  castTv: vi.mocked(api.castArcadeTv),
 };
 
 function card(slug: string, overrides: Partial<FamilyGameCard> = {}): FamilyGameCard {
@@ -212,5 +216,54 @@ describe('FamilyGames', () => {
     expect(hrefs('prefetch')).toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
     unmount();
     expect(hrefs('prefetch')).not.toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
+  });
+
+  it('shows a TV Stage cast link on multiplayer party games', async () => {
+    m.getFamilyGames.mockResolvedValue({
+      ...base,
+      games: [card('family-good-word', { title: 'Use Your Good Word', party: true, tv_path: '/tv', ages: '7+', players: '1-8' })],
+    });
+    renderIt();
+    const tvLink = await screen.findByTestId('family-tv-family-good-word');
+    expect(tvLink).toHaveAttribute('href', 'https://games.sumemail.com/tv');
+  });
+
+  it('relays Smart TV discovery and casting across Roku, LG, Samsung, Chrome, and Android TV', async () => {
+    m.getFamilyGames.mockResolvedValue({
+      ...base,
+      games: [card('family-good-word', { title: 'Use Your Good Word', party: true, tv_path: '/tv' })],
+    });
+    m.getTvs.mockResolvedValue({
+      success: true,
+      tvs: [{ id: 'media_player.living_room_lg', entity_id: 'media_player.living_room_lg', name: 'Living Room LG', platform: 'webos' }],
+    });
+    m.castTv.mockResolvedValue({
+      success: true,
+      room_code: 'ZION',
+      platform: 'webos',
+      tv_url: 'https://games.sumemail.com/tv/ZION',
+    });
+    renderIt();
+    fireEvent.click(await screen.findByRole('button', { name: 'Play Use Your Good Word' }));
+    await screen.findByTestId('family-player');
+
+    const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
+      window.dispatchEvent(new MessageEvent('message', { data, origin }));
+    relay({ source: 'arcade-relay', slug: 'family-good-word', type: 'list-tvs' });
+    await waitFor(() => expect(m.getTvs).toHaveBeenCalledTimes(1));
+
+    relay({
+      source: 'arcade-relay',
+      slug: 'family-good-word',
+      type: 'cast',
+      payload: { room_code: 'ZION', platform: 'webos', entity_id: 'media_player.living_room_lg' },
+    });
+    await waitFor(() =>
+      expect(m.castTv).toHaveBeenCalledWith({
+        room_code: 'ZION',
+        platform: 'webos',
+        entity_id: 'media_player.living_room_lg',
+      }),
+    );
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, Play, Sparkles, Star, Trophy } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, Play, Sparkles, Star, Trophy, Tv } from 'lucide-react';
 import FamilyLeaderboard from './FamilyLeaderboard';
 import GamePlayer from './GamePlayer';
 import { api } from '../../services/api';
@@ -72,8 +72,9 @@ function VoteStars({ game }: { game: FamilyGameCard }) {
 }
 
 /** A big, friendly shelf card: the whole art panel is the Play button. */
-function ShelfCard({ game, onPlay }: { game: FamilyGameCard; onPlay: () => void }) {
+function ShelfCard({ game, playBase, onPlay }: { game: FamilyGameCard; playBase?: string; onPlay: () => void }) {
   const top = game.top_score;
+  const tvHref = game.party && playBase ? `${playBase.replace(/\/$/, '')}${game.tv_path || '/tv'}` : null;
   return (
     <article
       className="glass-panel flex flex-col overflow-hidden rounded-3xl border border-white/5"
@@ -92,12 +93,25 @@ function ShelfCard({ game, onPlay }: { game: FamilyGameCard; onPlay: () => void 
         </span>
         {game.ages && (
           <span className="absolute left-3 top-3 rounded-full bg-black/25 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur">
-            Ages {game.ages}
+            Ages {game.ages}{game.players ? ` · ${game.players}P` : ''}
           </span>
         )}
       </button>
       <div className="flex flex-1 flex-col gap-1.5 p-4">
-        <h3 className="text-base font-bold leading-tight text-slate-100">{game.title}</h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-base font-bold leading-tight text-slate-100">{game.title}</h3>
+          {tvHref && (
+            <a
+              href={tvHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid={`family-tv-${game.slug}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition hover:bg-amber-400/25"
+            >
+              <Tv size={12} /> TV Stage
+            </a>
+          )}
+        </div>
         {game.tagline && <p className="text-xs text-slate-400">{game.tagline}</p>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
           <RatingSummary game={game} />
@@ -294,7 +308,34 @@ export default function FamilyGames() {
       frameRef.current?.contentWindow?.postMessage({ source: 'arcade-host', slug: playing.slug, ...message }, origin);
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin) return;
-      const message = event.data as { source?: string; slug?: string; score?: unknown; capture_id?: unknown } | null;
+      const message = event.data as {
+        source?: string;
+        type?: string;
+        slug?: string;
+        score?: unknown;
+        capture_id?: unknown;
+        payload?: Record<string, unknown> | null;
+      } | null;
+      if (message?.source === 'arcade-relay' && message.slug === playing.slug) {
+        if (message.type === 'list-tvs') {
+          void api
+            .getArcadeTvs()
+            .then((res) => reply({ type: 'tvs', tvs: res?.tvs ?? [], platforms: res?.platforms ?? [] }))
+            .catch(() => reply({ type: 'tvs', tvs: [] }));
+        } else if (message.type === 'cast') {
+          void api
+            .castArcadeTv(message.payload ?? {})
+            .then((res) =>
+              reply({
+                type: 'cast-status',
+                status: 'ok',
+                message: `📺 Cast Room ${res?.room_code ?? ''} to ${(res?.platform ?? 'TV').toUpperCase()} (${res?.tv_url ?? ''})`,
+              }),
+            )
+            .catch(() => reply({ type: 'cast-status', status: 'error', message: '⚠️ Could not reach Smart TV.' }));
+        }
+        return;
+      }
       if (message?.source !== 'arcade-score' || message.slug !== playing.slug) return;
       if (typeof message.score !== 'number' || !Number.isFinite(message.score)) return;
       if (typeof message.capture_id !== 'string' || !message.capture_id) return;
@@ -403,7 +444,7 @@ export default function FamilyGames() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="family-shelf">
           {data.games.map((game) => (
-            <ShelfCard key={game.slug} game={game} onPlay={() => open(game)} />
+            <ShelfCard key={game.slug} game={game} playBase={data.play_base} onPlay={() => open(game)} />
           ))}
         </div>
       )}
