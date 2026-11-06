@@ -571,3 +571,27 @@ def test_an_lg_that_answers_directly_is_listed_as_on(monkeypatch, tmp_path):
                {"platform": "webos", "state": "unavailable", "entity_id": "media_player.other_lg"}]
     asyncio.run(tv_stage._webos_live_state(screens))
     assert [s["state"] for s in screens] == ["on", "unavailable"]
+
+
+
+def test_a_samsung_is_found_by_its_own_name_after_its_address_changes(monkeypatch, tmp_path):
+    monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
+
+    async def name_at(ip):
+        return {"192.168.4.114": "[TV] Loft Samsung Q900", "192.168.4.50": "[TV] Other"}.get(ip, "")
+
+    async def no_ip(*_a, **_k):
+        return "192.168.2.77"  # Home Assistant's stale address: nothing answers there
+
+    async def router():
+        return {"devices": {"a": {"name": "LoftTV", "ip": "192.168.4.114"}, "b": {"name": "x", "ip": "192.168.4.50"}}}
+
+    monkeypatch.setattr(tv_stage, "_samsung_name_at", name_at)
+    monkeypatch.setattr(tv_stage, "_entity_ip", no_ip)
+    monkeypatch.setattr(tv_stage, "_router_status", router)
+    screen = {"name": "[TV] Loft Samsung Q900", "entity_id": "media_player.tv_loft_samsung_q900_2"}
+    assert asyncio.run(tv_stage._samsung_find_host(screen, "u", "t")) == "192.168.4.114"
+    tv_stage._samsung_remember(screen["entity_id"], "192.168.4.114")
+    screens = [{"platform": "samsung", "state": "unavailable", "entity_id": screen["entity_id"]}]
+    asyncio.run(tv_stage._webos_live_state(screens))
+    assert screens[0]["state"] == "on"
