@@ -4238,3 +4238,29 @@ export interface DriverReport {
     events: DrivingEventCounts;
   }>;
 }
+
+/** A household screen that can show a party game's live TV stage. */
+export interface ArcadeScreen {
+  id: string;
+  name: string;
+  platform: string;
+  state: string;
+  /** "web": the live page runs on the TV; "video": a live video of it (e.g. Roku). */
+  display: 'web' | 'video' | 'none';
+  methods: string[];
+  method_labels: string[];
+  source?: string;
+}
+
+export interface ArcadeCastResult {
+  success: boolean;
+  screen?: ArcadeScreen;
+  method?: string;
+  method_label?: string;
+  display?: 'web' | 'video';
+  verified?: boolean;
+  detail?: string;
+  url?: string;
+  error?: string;
+  attempts?: Array<{ method: string; ok: boolean; detail?: string }>;
+}

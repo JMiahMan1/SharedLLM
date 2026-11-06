@@ -228,21 +228,22 @@ describe('FamilyGames', () => {
     expect(tvLink).toHaveAttribute('href', 'https://games.sumemail.com/tv');
   });
 
-  it('relays Smart TV discovery and casting across Roku, LG, Samsung, Chrome, and Android TV', async () => {
+  it('relays discovered screens and reports the real cast outcome back to the game', async () => {
     m.getFamilyGames.mockResolvedValue({
       ...base,
       games: [card('family-good-word', { title: 'Use Your Good Word', party: true, tv_path: '/tv' })],
     });
-    m.getTvs.mockResolvedValue({
-      success: true,
-      tvs: [{ id: 'media_player.living_room_lg', entity_id: 'media_player.living_room_lg', name: 'Living Room LG', platform: 'webos' }],
-    });
-    m.castTv.mockResolvedValue({
-      success: true,
-      room_code: 'ZION',
+    const screenRow = {
+      id: 'ha:media_player.living_room_lg',
+      name: 'Living Room LG',
       platform: 'webos',
-      tv_url: 'https://games.sumemail.com/tv/ZION',
-    });
+      state: 'on',
+      display: 'web' as const,
+      methods: ['webos_browser'],
+      method_labels: ['LG web browser (live page)'],
+    };
+    m.getTvs.mockResolvedValue({ success: true, tvs: [screenRow] });
+    m.castTv.mockResolvedValue({ success: true, screen: screenRow, method: 'webos_browser', display: 'web', verified: true });
     renderIt();
     fireEvent.click(await screen.findByRole('button', { name: 'Play Use Your Good Word' }));
     await screen.findByTestId('family-player');
@@ -250,19 +251,20 @@ describe('FamilyGames', () => {
     const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
       window.dispatchEvent(new MessageEvent('message', { data, origin }));
     relay({ source: 'arcade-relay', slug: 'family-good-word', type: 'list-tvs' });
-    await waitFor(() => expect(m.getTvs).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(m.getTvs).toHaveBeenCalledWith(false));
 
     relay({
       source: 'arcade-relay',
       slug: 'family-good-word',
       type: 'cast',
-      payload: { room_code: 'ZION', platform: 'webos', entity_id: 'media_player.living_room_lg' },
+      payload: { room_code: 'ZION', screen_id: 'ha:media_player.living_room_lg' },
     });
     await waitFor(() =>
       expect(m.castTv).toHaveBeenCalledWith({
+        screen_id: 'ha:media_player.living_room_lg',
         room_code: 'ZION',
-        platform: 'webos',
-        entity_id: 'media_player.living_room_lg',
+        method: undefined,
+        stop: false,
       }),
     );
   });

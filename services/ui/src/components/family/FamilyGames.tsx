@@ -319,20 +319,22 @@ export default function FamilyGames() {
       if (message?.source === 'arcade-relay' && message.slug === playing.slug) {
         if (message.type === 'list-tvs') {
           void api
-            .getArcadeTvs()
-            .then((res) => reply({ type: 'tvs', tvs: res?.tvs ?? [], platforms: res?.platforms ?? [] }))
-            .catch(() => reply({ type: 'tvs', tvs: [] }));
+            .getArcadeTvs(Boolean(message.payload?.refresh))
+            .then((res) => reply({ type: 'tvs', tvs: res?.tvs ?? [], available: res?.success !== false }))
+            .catch(() => reply({ type: 'tvs', tvs: [], available: false }));
         } else if (message.type === 'cast') {
+          const payload = message.payload ?? {};
           void api
-            .castArcadeTv(message.payload ?? {})
-            .then((res) =>
-              reply({
-                type: 'cast-status',
-                status: 'ok',
-                message: `📺 Cast Room ${res?.room_code ?? ''} to ${(res?.platform ?? 'TV').toUpperCase()} (${res?.tv_url ?? ''})`,
-              }),
-            )
-            .catch(() => reply({ type: 'cast-status', status: 'error', message: '⚠️ Could not reach Smart TV.' }));
+            .castArcadeTv({
+              screen_id: String(payload.screen_id ?? ''),
+              room_code: String(payload.room_code ?? ''),
+              method: payload.method ? String(payload.method) : undefined,
+              stop: Boolean(payload.stop),
+            })
+            .then((res) => reply({ type: 'cast-status', status: res?.success ? 'ok' : 'error', result: res }))
+            .catch(() =>
+              reply({ type: 'cast-status', status: 'error', result: { success: false, error: 'Jarvis could not reach the TV service.' } }),
+            );
         }
         return;
       }

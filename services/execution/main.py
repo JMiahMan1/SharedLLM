@@ -735,6 +735,17 @@ def create_media_server_app():
 
         raise HTTPException(status_code=404, detail="Media not found")
 
+    @media_app.get("/stage/{sid}/{name}")
+    async def serve_stage_stream(sid: str, name: str):  # pyright: ignore[reportUnusedFunction]
+        """Live TV-stage HLS (``stage_stream``). The random stream id is the credential."""
+        from services.execution import stage_stream
+
+        found = stage_stream.resolve_file(sid, name)
+        if found is None:
+            raise HTTPException(status_code=404, detail="Stream not found")
+        path, media_type = found
+        return FileResponse(path=str(path), media_type=media_type, headers={"Cache-Control": "no-cache"})
+
     return media_app
 
 
@@ -1144,6 +1155,65 @@ async def execute_ai_capabilities():
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):
     return await timer.get_active_timers(user_id=user_id)
+
+
+async def _stage_ha_creds(user_id: str | None) -> tuple[str, str]:
+    """HA credentials for the TV stage: the caller's, else the household default.
+
+    Same resolution as ``/execute/timers/devices``: the screens are the
+    household's, and a guest on a phone has no HA account of their own.
+    """
+    creds: dict[str, Any] | None = None
+    if user_id:
+        with suppress(Exception):
+            creds = await resolve_internal_user(rag_user=str(user_id))
+    if not creds or not creds.get("ha_url") or not creds.get("ha_token"):
+        with suppress(Exception):
+            creds = await resolve_internal_user(user_id=1) or creds
+    ha_url = (creds or {}).get("ha_url") or os.environ.get("HA_URL", "")
+    ha_token = (creds or {}).get("ha_token") or os.environ.get("HA_TOKEN", "")
+    return str(ha_url or ""), str(ha_token or "")
+
+
+@app.get("/execute/stage/screens")
+async def list_stage_screens(user_id: str | None = None, refresh: bool = False):
+    """Every household screen that can show a live web page (party game TV stage)."""
+    from services.execution.handlers import tv_stage
+
+    ha_url, ha_token = await _stage_ha_creds(user_id)
+    screens = await tv_stage.list_screens(ha_url, ha_token, refresh=refresh)
+    return {
+        "status": "SUCCESS",
+        "screens": [tv_stage.public_screen(s) for s in screens],
+        "home_assistant": bool(ha_url and ha_token),
+    }
+
+
+@app.post("/execute/stage/show")
+async def show_stage(payload: dict[str, Any]):
+    """Put a live web page on a screen: ``{"screen_id", "url", "method"?, "user_id"?}``."""
+    from services.execution.handlers import tv_stage
+
+    screen_id = str(payload.get("screen_id") or payload.get("entity_id") or "").strip()
+    url = str(payload.get("url") or "").strip()
+    if not screen_id:
+        raise HTTPException(status_code=400, detail="screen_id is required")
+    try:
+        tv_stage.validate_page_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ha_url, ha_token = await _stage_ha_creds(payload.get("user_id"))
+    return await tv_stage.show(screen_id, url, ha_url, ha_token, method=str(payload.get("method") or ""))
+
+
+@app.post("/execute/stage/stop")
+async def stop_stage(payload: dict[str, Any]):
+    """Take the stage off a screen and stop any live stream rendered for it."""
+    from services.execution.handlers import tv_stage
+
+    screen_id = str(payload.get("screen_id") or payload.get("entity_id") or "").strip()
+    ha_url, ha_token = await _stage_ha_creds(payload.get("user_id"))
+    return await tv_stage.stop(screen_id, ha_url, ha_token, url=str(payload.get("url") or ""))
 
 
 @app.get("/execute/timers/devices")

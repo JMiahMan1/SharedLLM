@@ -409,3 +409,90 @@ async def test_benchmark_games_show_only_once_published_to_the_family(monkeypatc
 
     assert [g["slug"] for g in payload["games"]] == ["published"]
     assert all(g["slug"] != "benchmark-only" for g in payload["featured"])
+
+
+# ---------------------------------------------------------------- party game TV stage
+
+
+def _stage_client(seen, payload):
+    class _Resp:
+        status = 200
+        content_type = "application/json"
+
+        async def json(self):
+            return payload
+
+        async def text(self):
+            return ""
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            seen.append(("GET", url, kwargs.get("params")))
+            return _Resp()
+
+        async def post(self, url, **kwargs):
+            seen.append(("POST", url, kwargs.get("json")))
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    return fake_client
+
+
+@pytest.mark.asyncio
+async def test_arcade_tvs_come_from_execution_discovery_for_the_caller(monkeypatch):
+    from services.gateway import main
+
+    seen = []
+    screens = [{"id": "ha:media_player.den", "name": "Den TV", "display": "web"}]
+    monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"screens": screens, "home_assistant": True}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+
+    out = await main.proxy_arcade_tvs(MagicMock(), refresh=True)
+
+    assert out == {"success": True, "tvs": screens, "home_assistant": True}
+    assert seen == [("GET", f"{main.EXECUTION_SVC}/execute/stage/screens", {"user_id": "jeremiah", "refresh": "true"})]
+
+
+@pytest.mark.asyncio
+async def test_arcade_cast_sends_only_the_arcades_own_stage_page(monkeypatch):
+    from services.gateway import main
+
+    seen = []
+    monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"success": True}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+    request = MagicMock()
+    request.json = AsyncMock(return_value={
+        "screen_id": "ha:media_player.den", "room_code": "zi-on", "url": "http://evil.example/", "ha_token": "x",
+    })
+
+    await main.proxy_arcade_cast(request)
+
+    _method, url, body = seen[0]
+    assert url == f"{main.EXECUTION_SVC}/execute/stage/show"
+    assert body == {
+        "screen_id": "ha:media_player.den",
+        "url": f"{main.ALPACA_ARCADE_PUBLIC_URL.rstrip('/')}/tv/ZION",
+        "method": "",
+        "user_id": "jeremiah",
+    }
+
+
+@pytest.mark.asyncio
+async def test_arcade_cast_stop_and_missing_screen(monkeypatch):
+    from services.gateway import main
+
+    seen = []
+    monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"success": True}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"screen_id": "cast:abc", "room_code": "ZION", "stop": True})
+    await main.proxy_arcade_cast(request)
+    assert seen[0][1] == f"{main.EXECUTION_SVC}/execute/stage/stop"
+
+    request.json = AsyncMock(return_value={"room_code": "ZION"})
+    with pytest.raises(HTTPException) as exc:
+        await main.proxy_arcade_cast(request)
+    assert exc.value.status_code == 400
