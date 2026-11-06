@@ -441,3 +441,60 @@ def test_live_house_shape_lists_samsung_and_chromecast_and_drops_the_wrapper():
     sam = by_id["ha:media_player.master_bedroom_samsung"]
     assert sam["methods"] == ["cast_web"] and sam["cast_entity"] == "media_player.master_bedroom_tv"
     assert by_id["ha:media_player.master_bedroom_tv"]["platform"] == "cast"
+
+
+
+def test_the_owning_integration_decides_the_platform_not_the_name():
+    # Reported: the LG would not cast. Its Music Assistant AirPlay player is named
+    # "[LG] webOS TV ..." and was treated as the LG; the real webOS entity
+    # ("Living Room TV") was treated as a generic TV.
+    ha = [_ha_tv("media_player.lg_webos_tv_un6955zuf_airplay", "[LG] webOS TV UN6955ZUF (AirPlay)", "webos"),
+          _ha_tv("media_player.living_room_tv", "Living Room TV", "generic_tv")]
+    platforms = {"media_player.lg_webos_tv_un6955zuf_airplay": "music_assistant",
+                 "media_player.living_room_tv": "webos"}
+    screens = {s["id"]: s for s in tv_stage.build_screens(ha, [], platforms=platforms)}
+    assert "ha:media_player.lg_webos_tv_un6955zuf_airplay" not in screens  # an AirPlay speaker shows no page
+    assert screens["ha:media_player.living_room_tv"]["methods"] == ["webos_browser"]
+    # A Roku reached through its Music Assistant entity keeps its stream (it goes to the Roku itself).
+    roku = tv_stage.build_screens([_ha_tv("media_player.gracies_tv", "Gracies TV", "roku")], [],
+                                  platforms={"media_player.gracies_tv": "music_assistant"})
+    assert roku and roku[0]["methods"] == ["roku_stream"]
+
+
+def _webos_fakes(monkeypatch, states):
+    calls = []
+
+    async def call_service(ha_url, ha_token, domain, service, entity_id="", data=None, **kw):
+        calls.append((domain, service, entity_id))
+        return {"ok": True}
+
+    seq = iter(states)
+
+    async def get_state(ha_url, ha_token, eid):
+        return next(seq, states[-1])
+
+    async def no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(tv_stage.ha_client, "call_service", call_service)
+    monkeypatch.setattr(tv_stage.ha_client, "get_state", get_state)
+    monkeypatch.setattr(tv_stage.asyncio, "sleep", no_sleep)
+    return calls
+
+
+def test_an_unreachable_lg_is_reported_not_claimed_as_opened(monkeypatch):
+    calls = _webos_fakes(monkeypatch, [{"state": "unavailable", "attributes": {}}])
+    screen = tv_stage.build_screens([_ha_tv("media_player.lg", "Living Room TV", "webos")], [])[0]
+    res = asyncio.run(tv_stage.show_via_webos(screen, "http://h/tv/ZION", "u", "t"))
+    assert not res["ok"] and "not connected" in res["detail"]
+    assert ("media_player", "turn_on", "media_player.lg") in calls  # it tried to wake it
+    assert not any(c[0] == "webostv" for c in calls)  # and sent nothing into the void
+
+
+def test_a_sleeping_lg_is_woken_then_shown(monkeypatch):
+    calls = _webos_fakes(monkeypatch, [{"state": "off"}, {"state": "off"},
+                                       {"state": "on", "attributes": {"source": "Web Browser"}}])
+    screen = tv_stage.build_screens([_ha_tv("media_player.lg", "Living Room TV", "webos")], [])[0]
+    res = asyncio.run(tv_stage.show_via_webos(screen, "http://h/tv/ZION", "u", "t"))
+    assert res["ok"] and res["verified"]
+    assert calls[0] == ("media_player", "turn_on", "media_player.lg") and ("webostv", "command", "media_player.lg") in calls
