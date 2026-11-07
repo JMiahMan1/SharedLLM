@@ -19,6 +19,7 @@ import ChapterReader from '../components/bible/ChapterReader';
 import ParallelReader from '../components/bible/ParallelReader';
 import FocusReader from '../components/bible/FocusReader';
 import { pageStyle, toneOf } from '../components/bible/readingPage';
+import { anchorAt, measureVerses, scrollTopFor } from '../components/bible/verseAnchor';
 import { useSwipe } from '../lib/useSwipe';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import VerseActionSheet from '../components/bible/VerseActionSheet';
@@ -75,6 +76,41 @@ function chapterRef(position: BiblePosition): string {
 }
 
 /**
+ * How far below the reader's top edge counts as "the top of the page". The
+ * sticky passage bar floats over the text, so a verse hidden behind it is not
+ * where the reader's eye rests; this inset is roughly that bar's height.
+ */
+const READER_TOP_INSET = 56;
+
+/** How long a scroll must settle before the verse under the top edge is saved. */
+const SCROLL_SETTLE_MS = 700;
+
+/** The verse a reference names ("John 3:16" -> 16), or null for a whole chapter. */
+function verseIn(ref: string | null): number | null {
+  const match = ref?.match(/:(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+/** The nearest ancestor that scrolls, so the reader's verse can be measured against it. */
+function scrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const { overflowY } = window.getComputedStyle(node);
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** Scroll at once, even under a `scroll-behavior: smooth` container, so a resume lands rather than drifts. */
+function jumpTo(container: HTMLElement, top: number) {
+  const previous = container.style.scrollBehavior;
+  container.style.scrollBehavior = 'auto';
+  container.scrollTop = Math.max(0, top);
+  container.style.scrollBehavior = previous;
+}
+
+/**
  * The reading surface: passage box, chapter controls, search results and the
  * per-verse actions.
  *
@@ -85,6 +121,7 @@ function chapterRef(position: BiblePosition): string {
  */
 function BibleReaderPane({
   state,
+  resumePositionRef,
   requestedRef,
   onOpenRef,
   onRequestRef,
@@ -98,6 +135,12 @@ function BibleReaderPane({
   books,
 }: {
   state: BibleStateResponse;
+  /**
+   * The verse last under the reader's eye, carried across tab switches (which
+   * remount this pane) so Read resumes at the verse, not the chapter's first
+   * line. The pane both reads it to land and writes it as the reader scrolls.
+   */
+  resumePositionRef: { current: BiblePosition | null };
   requestedRef: string | null;
   onOpenRef: (ref: string) => void;
   onRequestRef: (ref: string) => void;
@@ -111,6 +154,9 @@ function BibleReaderPane({
   books: BibleBookInfo[];
 }) {
   const { trigger } = useHaptics();
+  // The verse to land on is applied by the restore effect below (which reads the
+  // resume ref inside the effect, where a ref is allowed). The initial position
+  // only decides which chapter loads, and the saved chapter is the right one.
   const [position, setPosition] = useState<BiblePosition>(
     requestedRef ? { book: 'Gen', chapter: 1, verse: 1 } : state.position ?? { book: 'Gen', chapter: 1, verse: 1 }
   );
@@ -125,6 +171,11 @@ function BibleReaderPane({
   // whole screen.
   const isPhone = useMediaQuery(PHONE_QUERY);
   const [scrolledDown, setScrolledDown] = useState(false);
+  // The reading surface, so the verse under the top edge can be measured against
+  // the page that actually scrolls it (the shell's `<main>`), and the verse last
+  // written to the server, so a settled scroll is not saved twice.
+  const surfaceRef = useRef<HTMLElement>(null);
+  const lastSavedVerse = useRef<number | null>(null);
   useEffect(() => {
     if (!isPhone) return undefined;
     let last = 0;
@@ -236,6 +287,83 @@ function BibleReaderPane({
   const displayPosition: BiblePosition = shownChapter && !shownChapter.whole_book
     ? { book: shownChapter.book, chapter: shownChapter.chapter_start, verse: position.verse }
     : position;
+
+  // Landing on a chapter puts the reader back where they were: a reference that
+  // names a verse (a linked passage, a search hit, a cross-reference) lands on
+  // that verse; otherwise the saved place in this chapter, or the top of it.
+  const restoreKey = shownChapter && !shownChapter.whole_book
+    ? `${shownChapter.book} ${shownChapter.chapter_start} ${requestedRef ?? ''}`
+    : null;
+  const restoredKey = useRef<string | null>(null);
+  useEffect(() => {
+    // Wait for the words themselves: the reader shows a loading skeleton while a
+    // chapter is in flight, and a skeleton has no verses to measure or land on.
+    if (!passage || !restoreKey || parallel || isFetching) return undefined;
+    if (restoredKey.current === restoreKey) return undefined;
+    const container = scrollParent(surfaceRef.current);
+    if (!container) {
+      restoredKey.current = restoreKey;
+      return undefined;
+    }
+    const shown = shownChapter!;
+    const linked = verseIn(requestedRef);
+    const resume = resumePositionRef.current;
+    const sameChapter = Boolean(
+      resume && resume.book === shown.book && resume.chapter === shown.chapter_start
+    );
+    const verse = linked ?? (sameChapter ? resume!.verse : 1);
+    resumePositionRef.current = { book: shown.book, chapter: shown.chapter_start, verse };
+    lastSavedVerse.current = verse;
+    // A frame for the chapter to lay out before its verses can be measured.
+    const frame = requestAnimationFrame(() => {
+      const boxes = measureVerses(container);
+      if (!boxes.length) return;
+      const top = verse > 1 ? scrollTopFor(boxes, { chapter: shown.chapter_start, verse, fraction: 0 }) : 0;
+      if (top !== null) jumpTo(container, (top ?? 0) - (verse > 1 ? READER_TOP_INSET : 0));
+      restoredKey.current = restoreKey;
+    });
+    return () => cancelAnimationFrame(frame);
+    // `resumePositionRef` is a ref: it is read inside, not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [passage, restoreKey, requestedRef, parallel, isFetching]);
+
+  // As the reader scrolls, the verse under the top edge becomes the place the
+  // next open resumes from. Saved only after the scroll settles, so flicking
+  // through a chapter is a stream of writes no more than it is of reads.
+  useEffect(() => {
+    if (!shownChapter || shownChapter.whole_book || parallel) return undefined;
+    const container = scrollParent(surfaceRef.current);
+    if (!container) return undefined;
+    let timer = 0;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const anchor = anchorAt(measureVerses(container), container.scrollTop + READER_TOP_INSET);
+        if (!anchor) return;
+        resumePositionRef.current = { book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse };
+        if (anchor.chapter !== shownChapter.chapter_start) return;
+        if (anchor.verse === lastSavedVerse.current) return;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          if (anchor.verse === lastSavedVerse.current) return;
+          lastSavedVerse.current = anchor.verse;
+          void api.putBibleState({ book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse });
+        }, SCROLL_SETTLE_MS);
+      });
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.clearTimeout(timer);
+      cancelAnimationFrame(frame);
+      container.removeEventListener('scroll', onScroll);
+    };
+    // `resumePositionRef` is a ref (written as the reader scrolls, never a
+    // dependency), so scrolling does not re-subscribe the listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownChapter, parallel]);
+
   useEffect(() => {
     if (!passage || !shownChapter || shownChapter.whole_book) return;
     // Only a chapter the reader stays on is recorded. Paging through eighteen
@@ -246,7 +374,7 @@ function BibleReaderPane({
       void api.putBibleState({
         book: shownChapter.book,
         chapter: shownChapter.chapter_start,
-        verse: position.verse,
+        verse: resumePositionRef.current?.verse ?? position.verse,
       });
       void api.recordBibleEvent(
         'chapter_complete',
@@ -263,8 +391,8 @@ function BibleReaderPane({
         .catch(() => undefined);
     }, CHAPTER_DWELL_MS);
     return () => window.clearTimeout(timer);
-    // `position.verse` is intentionally not a dependency: it changes on every
-    // verse tap, and the chapter is what this records.
+    // `resumePositionRef` is a ref (read at fire time, not a dependency), and
+    // the chapter -- not the verse -- is what this effect keys on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passage, shownChapter?.book, shownChapter?.chapter_start]);
 
@@ -442,6 +570,7 @@ function BibleReaderPane({
       ) : (
         <div className={notesAlongside ? 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-4 lg:items-start' : ''}>
           <section
+            ref={surfaceRef}
             className="rounded-3xl px-4 pb-8 pt-8 shadow-lg sm:px-10 sm:pt-12 md:px-16"
             style={pageStyle(preferences.page)}
             data-testid="bible-page-surface"
@@ -650,6 +779,9 @@ export default function Bible() {
     return TAB_IDS.includes(asked as Tab) ? (asked as Tab) : 'read';
   });
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
+  // Where Read was last left: the verse under the reader's eye, kept across tab
+  // switches (which unmount and remount the pane) so returning lands on it.
+  const resumePosition = useRef<BiblePosition | null>(null);
 
   const {
     data: stateData,
@@ -746,6 +878,14 @@ export default function Bible() {
 
   const refreshMarks = () => queryClient.invalidateQueries({ queryKey: ['bible-marks'] });
 
+  // Seeded once from the server's saved place; after that the pane owns it, so a
+  // background refetch of the state never yanks the reader back to an older verse.
+  useEffect(() => {
+    if (resumePosition.current === null && stateData?.position) {
+      resumePosition.current = stateData.position;
+    }
+  }, [stateData]);
+
   return (
     <div className="mx-auto max-w-4xl space-y-4 px-1 pb-28 sm:space-y-5 sm:px-0" data-testid="bible-page">
       {/* A slim section bar in the Bible App's manner: the reader is the page,
@@ -832,6 +972,7 @@ export default function Bible() {
             <BibleReaderPane
               key={stateData.username}
               state={stateData}
+              resumePositionRef={resumePosition}
               requestedRef={requestedRef}
               onOpenRef={openRef}
               onRequestRef={requestRef}

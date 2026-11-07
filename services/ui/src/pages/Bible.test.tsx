@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -1109,5 +1109,113 @@ describe('commentary alongside the text', () => {
     expect(await screen.findByTestId('bible-notes-alongside')).toHaveTextContent(
       'A study Bible has to be added in Admin > Bible.',
     );
+  });
+});
+
+describe('resuming where the reader left off', () => {
+  // happy-dom has no layout, so give every verse a 100px row and let the shell's
+  // <main> be the scroll container the reader actually scrolls.
+  const ROW = 100;
+  let original: typeof Element.prototype.getBoundingClientRect;
+
+  const box = (top: number, height: number): DOMRect =>
+    ({ top, height, width: 400, left: 0, right: 400, bottom: top + height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+
+  const renderScrolled = (entry = '/bible') => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[entry]}>
+          <main data-testid="bible-scroll" style={{ overflowY: 'auto', height: '800px' }}>
+            <Bible />
+          </main>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  };
+
+  const scroller = () => screen.getByTestId('bible-scroll');
+
+  // Two frames: the reader's resume runs in a requestAnimationFrame callback, and
+  // a test that scrolls before it lands would have its own scroll thrown away.
+  const settle = () =>
+    new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+  beforeEach(() => {
+    original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const el = this as HTMLElement;
+      if (el.dataset.testid === 'bible-scroll') return box(0, 800);
+      if (!el.dataset.verseKey) return original.call(this);
+      const pane = el.closest('[data-testid="bible-scroll"]') as HTMLElement | null;
+      if (!pane) return original.call(this);
+      const index = Array.from(pane.querySelectorAll('[data-verse-key]')).indexOf(el);
+      return box(index * ROW - pane.scrollTop, ROW);
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = original;
+  });
+
+  it('opens the chapter where the reader last was, not at its first line', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 3 } }));
+    renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    // Verse 3 sits at content 200; the reader's top edge is 56px down the page.
+    await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
+  });
+
+  it('lands on the verse a reference names even over the saved place', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 3 } }));
+    renderScrolled('/bible?ref=Ps%2023:2');
+
+    await screen.findByTestId('bible-chapter-heading');
+    await waitFor(() => expect(scroller().scrollTop).toBe(100 - 56));
+  });
+
+  it('opens another chapter at its top rather than the verse saved in this one', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 3 } }));
+    renderScrolled('/bible?ref=John%203');
+
+    await waitFor(() => expect(screen.getByTestId('bible-chapter-heading')).toHaveTextContent('John 3'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller().scrollTop).toBe(0);
+  });
+
+  it('saves the verse under the top edge once a scroll settles', async () => {
+    renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    await settle();
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+
+    await waitFor(
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      { timeout: 1500 },
+    );
+  });
+
+  it('comes back to the verse after stepping away to another tab', async () => {
+    renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    await settle();
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+    await waitFor(
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      { timeout: 1500 },
+    );
+
+    fireEvent.click(screen.getByTestId('bible-tab-today'));
+    await screen.findByTestId('bible-today');
+    fireEvent.click(screen.getByTestId('bible-tab-read'));
+
+    await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
   });
 });
