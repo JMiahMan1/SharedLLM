@@ -194,6 +194,27 @@ describe('FamilyGames', () => {
     expect(m.submit).toHaveBeenCalledWith('family-cloud-hop', 420, 'family-cloud-hop:r1');
   });
 
+  it('takes the insets the SystemBars plugin injects, where env() reads 0', async () => {
+    // Android: Capacitor's SystemBars (insetsHandling: 'css') writes the real
+    // values as CSS variables because env(safe-area-inset-*) is unreliable
+    // there. jsdom never computes env(), so this is the Android case exactly.
+    document.documentElement.style.setProperty('--safe-area-inset-top', '28px');
+    document.documentElement.style.setProperty('--safe-area-inset-bottom', '34px');
+    try {
+      m.getFamilyGames.mockResolvedValue(base);
+      renderIt();
+      fireEvent.click(await screen.findByRole('button', { name: 'Play cloud hop' }));
+      const frame = (await screen.findByTestId('family-player-frame')) as HTMLIFrameElement;
+      const safe = new URL(frame.src).searchParams.get('safe')?.split(',').map(Number) ?? [];
+      expect(safe).toHaveLength(4);
+      expect(safe[0]).toBeGreaterThanOrEqual(28);
+      expect(safe[2]).toBeGreaterThanOrEqual(34);
+    } finally {
+      document.documentElement.style.removeProperty('--safe-area-inset-top');
+      document.documentElement.style.removeProperty('--safe-area-inset-bottom');
+    }
+  });
+
   it('opens edge to edge and closes from the game\'s own Exit', async () => {
     m.getFamilyGames.mockResolvedValue(base);
     renderIt();

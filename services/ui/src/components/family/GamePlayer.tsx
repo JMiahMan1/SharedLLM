@@ -12,7 +12,16 @@ interface GamePlayerProps {
   art?: { from?: string; to?: string } | null;
 }
 
-/** The phone's notch / home-bar insets in CSS px, measured once. */
+/**
+ * The phone's notch / home-bar insets in CSS px, measured once.
+ *
+ * On Android the WebView draws edge to edge but `env(safe-area-inset-*)` is
+ * not reliable there (the Capacitor SystemBars plugin says as much), so with
+ * `insetsHandling: 'css'` it injects the correct values as
+ * `--safe-area-inset-*` CSS variables instead. Read both and keep the larger
+ * per side: the variables carry Android, `env()` carries iOS (where they are
+ * absent), and a side neither knows stays 0.
+ */
 function measureSafeArea(): string {
   const probe = document.createElement('div');
   probe.style.cssText =
@@ -20,10 +29,18 @@ function measureSafeArea(): string {
     'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
   document.body.appendChild(probe);
   const style = getComputedStyle(probe);
-  const sides = [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].map(
+  const env = [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].map(
     (v) => Math.round(parseFloat(v) || 0),
   );
   probe.remove();
+  const root = getComputedStyle(document.documentElement);
+  const injected = (name: string): number => Math.round(parseFloat(root.getPropertyValue(name)) || 0);
+  const sides = [
+    Math.max(env[0], injected('--safe-area-inset-top')),
+    Math.max(env[1], injected('--safe-area-inset-right')),
+    Math.max(env[2], injected('--safe-area-inset-bottom')),
+    Math.max(env[3], injected('--safe-area-inset-left')),
+  ];
   return sides.join(',');
 }
 
