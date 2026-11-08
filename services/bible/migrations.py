@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 
 #: ``(table, column, ddl type, default literal)``. Only additive changes belong
 #: here; anything that would rewrite imported text belongs in a re-import.
+#: A default literal of ``NULL`` means the column is added without a default
+#: and stays nullable (for columns whose "no value" is SQL NULL).
 COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("studynote", "edition_code", "TEXT", "''"),
     ("userbiblestate", "default_edition", "TEXT", "''"),
@@ -51,6 +53,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("userbiblestate", "devotional_work", "TEXT", "''"),
     ("userbiblestate", "layout", "TEXT", "'flow'"),
     ("userbiblestate", "last_verse_fraction", "REAL", "0"),
+    ("planenrollment", "group_id", "INTEGER", "NULL"),
 )
 
 
@@ -77,6 +80,16 @@ def apply(engine: Engine) -> dict:
         columns = _existing_columns(engine, table)
         inspected.append(table)
         if column in columns:
+            continue
+        if default == "NULL":
+            # A nullable column: no default, no NOT NULL. SQL NULL is the
+            # "not set" marker for this one.
+            with engine.begin() as connection:
+                connection.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+                )
+            applied.append(f"{table}.{column}")
+            log.info("[Bible] added column %s.%s (nullable)", table, column)
             continue
         with engine.begin() as connection:
             connection.execute(

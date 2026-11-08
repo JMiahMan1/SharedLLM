@@ -5,12 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BibleToday from './BibleToday';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
+vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'sam' } }) }));
 
 const apiMock = vi.hoisted(() => ({
   getBibleDaily: vi.fn(),
   getBiblePlans: vi.fn(),
   getBibleVerseContext: vi.fn(),
   getBibleDevotionalWorks: vi.fn(),
+  listBiblePlanGroups: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -19,6 +21,7 @@ vi.mock('../../services/api', async (importOriginal) => ({
 
 beforeEach(() => {
   apiMock.getBibleDevotionalWorks.mockResolvedValue({ works: [] });
+  apiMock.listBiblePlanGroups.mockResolvedValue({ groups: [] });
 });
 
 describe('Today tab', () => {

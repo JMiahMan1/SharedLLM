@@ -6,6 +6,7 @@ import BiblePlans from './BiblePlans';
 import type { BiblePlanEnrollment } from '../../types/api';
 
 vi.mock('../../hooks/useHaptics', () => ({ useHaptics: () => ({ trigger: vi.fn() }) }));
+vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { username: 'sam' } }) }));
 
 const apiMock = vi.hoisted(() => ({
   getBiblePlans: vi.fn(),
@@ -18,6 +19,15 @@ const apiMock = vi.hoisted(() => ({
   stopBiblePlan: vi.fn(),
   getBiblePlanReflections: vi.fn(),
   saveBiblePlanReflection: vi.fn(),
+  listBiblePlanGroups: vi.fn(),
+  getBiblePlanGroup: vi.fn(),
+  joinBiblePlanGroup: vi.fn(),
+  declineBiblePlanGroup: vi.fn(),
+  createBiblePlanGroup: vi.fn(),
+  nudgeBiblePlanGroup: vi.fn(),
+  leaveBiblePlanGroup: vi.fn(),
+  deleteBiblePlanGroup: vi.fn(),
+  getFamilyDirectory: vi.fn(),
 }));
 
 vi.mock('../../services/api', async (importOriginal) => ({
@@ -50,6 +60,11 @@ beforeEach(() => {
   apiMock.getBiblePlans.mockResolvedValue({ catalogue: CATALOGUE, mine: [JOHN] });
   apiMock.getBiblePlanFamily.mockResolvedValue({ plan_id: 'john-21', members: [] });
   apiMock.getBiblePlanReflections.mockResolvedValue({ reflections: [] });
+  apiMock.listBiblePlanGroups.mockResolvedValue({ groups: [] });
+  apiMock.getFamilyDirectory.mockResolvedValue([
+    { username: 'sam', display_name: 'Sam', nextcloud_user: null, avatar: null },
+    { username: 'gracie', display_name: 'Gracie', nextcloud_user: null, avatar: null },
+  ]);
 });
 
 describe('Bible reading plans', () => {
@@ -132,5 +147,69 @@ describe('reading along', () => {
     renderIt();
     await screen.findByTestId('bible-plan-complete-john-21');
     expect(screen.queryByLabelText('What stood out to you today?')).toBeNull();
+  });
+});
+
+describe('reading together', () => {
+  it('lets the invitee join a group', async () => {
+    const user = userEvent.setup();
+    apiMock.listBiblePlanGroups.mockResolvedValue({
+      groups: [{ id: 7, plan_id: 'john-21', plan_name: 'John in 21 Days', name: 'NT before Christmas', started_on: '2026-11-01', created_by: 'mic', status: 'invited', joined_at: null, is_creator: false }],
+    });
+    apiMock.joinBiblePlanGroup.mockResolvedValue({ group: { id: 7 } });
+    renderIt();
+    expect(await screen.findByTestId('bible-group-invite-7')).toHaveTextContent('mic invited you to read together');
+    await user.click(screen.getByTestId('bible-group-join-7'));
+    expect(apiMock.joinBiblePlanGroup).toHaveBeenCalledWith(7);
+  });
+
+  it('lets the invitee decline a group', async () => {
+    const user = userEvent.setup();
+    apiMock.listBiblePlanGroups.mockResolvedValue({
+      groups: [{ id: 7, plan_id: 'john-21', plan_name: 'John in 21 Days', name: '', started_on: '2026-11-01', created_by: 'mic', status: 'invited', joined_at: null, is_creator: false }],
+    });
+    apiMock.declineBiblePlanGroup.mockResolvedValue({ id: 7, status: 'declined' });
+    renderIt();
+    await user.click(await screen.findByTestId('bible-group-decline-7'));
+    expect(apiMock.declineBiblePlanGroup).toHaveBeenCalledWith(7);
+  });
+
+  it('creates a group and invites picked family members', async () => {
+    const user = userEvent.setup();
+    apiMock.createBiblePlanGroup.mockResolvedValue({ group: { id: 9 }, invited: ['gracie'], notified: 1 });
+    renderIt();
+    await user.click(await screen.findByTestId('bible-plan-together-john-21'));
+    expect(await screen.findByTestId('bible-group-dialog')).toBeInTheDocument();
+    await user.click(screen.getByTestId('bible-group-pick-gracie'));
+    await user.type(screen.getByTestId('bible-group-name'), 'NT before Christmas');
+    await user.click(screen.getByTestId('bible-group-create'));
+    expect(apiMock.createBiblePlanGroup).toHaveBeenCalledWith('john-21', {
+      name: 'NT before Christmas',
+      members: ['gracie'],
+      started_on: expect.any(String),
+    });
+  });
+
+  it('shows the board, nudges one member and reminds the whole group', async () => {
+    const user = userEvent.setup();
+    apiMock.listBiblePlanGroups.mockResolvedValue({
+      groups: [{ id: 7, plan_id: 'john-21', plan_name: 'John in 21 Days', name: 'NT before Christmas', started_on: '2026-11-01', created_by: 'sam', status: 'joined', joined_at: '2026-11-01', is_creator: true }],
+    });
+    apiMock.getBiblePlanGroup.mockResolvedValue({
+      id: 7, plan_id: 'john-21', plan_name: 'John in 21 Days', name: 'NT before Christmas',
+      started_on: '2026-11-01', created_by: 'sam', is_creator: true, my_status: 'joined', today: '2026-11-08',
+      members: [
+        { username: 'sam', status: 'joined', completed: 2, percent: 10, behind: 2, finished: false, current_day: 5, read_today: true, started_on: '2026-11-01' },
+        { username: 'gracie', status: 'joined', completed: 0, percent: 0, behind: 5, finished: false, current_day: 6, read_today: false, started_on: '2026-11-01' },
+      ],
+      counts: { total: 2, joined: 2, invited: 0, declined: 0, finished: 0, read_today: 1 },
+    });
+    apiMock.nudgeBiblePlanGroup.mockResolvedValue({ nudged: ['gracie'], skipped: [] });
+    renderIt();
+    expect(await screen.findByTestId('bible-group-7')).toHaveTextContent('1 of 2 read today');
+    await user.click(screen.getByTestId('bible-group-nudge-gracie'));
+    expect(apiMock.nudgeBiblePlanGroup).toHaveBeenCalledWith(7, 'gracie');
+    await user.click(screen.getByTestId('bible-group-nudge-all-7'));
+    expect(apiMock.nudgeBiblePlanGroup).toHaveBeenCalledWith(7);
   });
 });

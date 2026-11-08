@@ -108,8 +108,12 @@ async def send_many(users, make, **kw) -> int:
     return sent
 
 
-async def family(*, client=None, identity: str | None = None, secret: str | None = None) -> list[str]:
-    """Every family member's username but the system account: who "everyone" is."""
+async def family_or_none(*, client=None, identity: str | None = None, secret: str | None = None) -> list[str] | None:
+    """The family list, or None when identity cannot tell.
+
+    Callers that must never act on an empty guess (inviting nobody) use this;
+    most callers use ``family``, which degrades to an empty list instead.
+    """
     if identity is None or secret is None:
         from services import config
 
@@ -125,8 +129,14 @@ async def family(*, client=None, identity: str | None = None, secret: str | None
             users = await resp.json(content_type=None) if resp.status == 200 else None
     except Exception as e:
         log.warning("Listing the family failed: %s", e)
-        return []
+        return None
     if not isinstance(users, list):
-        return []
+        return None
     return sorted(str(u["username"]) for u in users
                   if isinstance(u, dict) and u.get("username") and not u.get("is_system_default"))
+
+
+async def family(*, client=None, identity: str | None = None, secret: str | None = None) -> list[str]:
+    """Every family member's username but the system account: who "everyone" is."""
+    users = await family_or_none(client=client, identity=identity, secret=secret)
+    return users or []

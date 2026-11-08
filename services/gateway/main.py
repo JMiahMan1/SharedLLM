@@ -14480,6 +14480,85 @@ async def proxy_bible_plans(request: Request):
     return await _bible_json("GET", "/plans", label="Failed to read reading plans", params={"username": username})
 
 
+@app.get("/api/bible/plans/groups")
+async def proxy_bible_plan_groups(request: Request):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", "/plans/groups", label="Failed to read your reading groups", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/{plan_id}/groups")
+async def proxy_bible_plan_group_create(request: Request, plan_id: str):
+    username = await _bible_caller(request)
+    body = await request.json() or {}
+    return await _bible_json(
+        "POST",
+        f"/plans/{plan_id}/groups",
+        label="Failed to create the reading group",
+        params={"username": username},
+        json={
+            "name": str(body.get("name") or ""),
+            "members": [str(m) for m in (body.get("members") or []) if str(m).strip()],
+            "started_on": body.get("started_on"),
+        },
+    )
+
+
+@app.get("/api/bible/plans/groups/{group_id}")
+async def proxy_bible_plan_group(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "GET", f"/plans/groups/{group_id}", label="Failed to read the reading group", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/groups/{group_id}/join")
+async def proxy_bible_plan_group_join(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/groups/{group_id}/join", label="Failed to join the group", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/groups/{group_id}/decline")
+async def proxy_bible_plan_group_decline(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/groups/{group_id}/decline", label="Failed to decline the invitation", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/groups/{group_id}/leave")
+async def proxy_bible_plan_group_leave(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "POST", f"/plans/groups/{group_id}/leave", label="Failed to leave the group", params={"username": username}
+    )
+
+
+@app.delete("/api/bible/plans/groups/{group_id}")
+async def proxy_bible_plan_group_delete(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    return await _bible_json(
+        "DELETE", f"/plans/groups/{group_id}", label="Failed to end the group", params={"username": username}
+    )
+
+
+@app.post("/api/bible/plans/groups/{group_id}/nudge")
+async def proxy_bible_plan_group_nudge(request: Request, group_id: int):
+    username = await _bible_caller(request)
+    body = await request.json() or {}
+    payload = {"username": body.get("username")} if body.get("username") else {}
+    return await _bible_json(
+        "POST",
+        f"/plans/groups/{group_id}/nudge",
+        label="Failed to send the nudge",
+        params={"username": username},
+        json=payload,
+    )
+
+
 @app.get("/api/bible/plans/{plan_id}")
 async def proxy_bible_plan(request: Request, plan_id: str):
     username = await _bible_caller(request)

@@ -492,6 +492,45 @@ class PlanEnrollment(SQLModel, table=True):
     completed_days: str = Field(default="")
     finished_on: str = Field(default="")
     active: bool = Field(default=True)
+    #: Set when this enrollment belongs to a shared plan group (see PlanGroup).
+    #: The reader keeps their own ``started_on``; the group board shows pace,
+    #: so joining or leaving a group never rewrites anyone's history.
+    group_id: int | None = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PlanGroup(SQLModel, table=True):
+    """A reading plan being done together, e.g. "the whole family, NT in 90 days".
+
+    The plan is data; this row is the group around it. ``started_on`` is the
+    common start the creator chose (everyone reads the same day from that date);
+    a reader's own enrollment keeps its own ``started_on``, which is what makes
+    the group pace view non-destructive.
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    plan_id: str = Field(index=True)
+    name: str = Field(default="")
+    created_by: str = Field(index=True)
+    started_on: str = Field(default="")  # YYYY-MM-DD
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PlanGroupMember(SQLModel, table=True):
+    """One person's membership in a plan group.
+
+    ``status`` is ``invited`` (asked, not yet answered), ``joined`` (accepted)
+    or ``declined`` (said no; kept so the inviter can see the answer).
+    """
+
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    group_id: int = Field(index=True)
+    username: str = Field(index=True)
+    status: str = Field(default="joined")
+    invited_by: str | None = None
+    joined_at: str | None = None  # YYYY-MM-DD
     created_at: datetime = Field(default_factory=utcnow)
 
 

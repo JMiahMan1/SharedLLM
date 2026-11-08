@@ -74,6 +74,8 @@ from services.bible.models import (
     ImportRun,
     MemoryVerse,
     PlanEnrollment,
+    PlanGroup,
+    PlanGroupMember,
     PlanReflection,
     ReadingEvent,
     StudyNote,
@@ -84,6 +86,7 @@ from services.bible.models import (
 from services.bible.providers import ProviderError, ProviderUnavailable
 from services.bible.refs import ReferenceError, format_reference, parse_reference
 from services.common.secrets import secret_matches
+from services.common.notify import notice as _notice, send as _notify_send, view_action as _view_action, family_or_none as _family_or_none
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import (
     BIBLE_DATABASE_URL,
@@ -1788,6 +1791,378 @@ async def memory_recall(
         "level_before": was,
         "newly_earned": badges["newly_earned"],
     }
+
+
+# shared plan groups
+
+
+class PlanGroupCreate(BaseModel):
+    """Create a reading group; the plan and its days stay data, this is the people."""
+
+    name: str = ""
+    members: list[str] = Field(default_factory=list)
+    started_on: str | None = None
+
+
+class PlanNudge(BaseModel):
+    """Which member to nudge; the caller chooses, or nudges everyone who has not read today."""
+
+    username: str | None = None
+
+
+def _group_or_404(session: Session, group_id: int) -> PlanGroup:
+    group = session.get(PlanGroup, group_id)
+    if group is None:
+        raise HTTPException(404, "That reading group does not exist.")
+    return group
+
+
+def _membership(session: Session, group_id: int, username: str) -> PlanGroupMember | None:
+    return session.exec(
+        select(PlanGroupMember).where(
+            PlanGroupMember.group_id == group_id, PlanGroupMember.username == username
+        )
+    ).first()
+
+
+def _joined_enrollment(session: Session, plan_id: str, group_id: int, username: str) -> PlanEnrollment | None:
+    """The enrollment a group member reads in this plan: the group-linked one, else the solo one."""
+    linked = session.exec(
+        select(PlanEnrollment).where(
+            PlanEnrollment.username == username,
+            PlanEnrollment.plan_id == plan_id,
+            PlanEnrollment.group_id == group_id,
+            PlanEnrollment.active == True,  # noqa: E712
+        )
+    ).first()
+    if linked is not None:
+        return linked
+    return _active_plan(session, username, plan_id)
+
+
+def _board_payload(session: Session, group: PlanGroup, caller: str) -> dict:
+    today = date.today().isoformat()
+    plan = _plan_or_404(group.plan_id)
+    members = session.exec(
+        select(PlanGroupMember).where(PlanGroupMember.group_id == group.id).order_by(PlanGroupMember.id)
+    ).all()
+    rows = []
+    for member in members:
+        entry = {
+            "username": member.username,
+            "status": member.status,
+            "completed": 0,
+            "percent": 0,
+            "behind": 0,
+            "finished": False,
+            "current_day": None,
+            "read_today": False,
+            "started_on": None,
+        }
+        if member.status == "joined":
+            enrollment = _joined_enrollment(session, group.plan_id, group.id, member.username)
+            started_on = enrollment.started_on if enrollment is not None else group.started_on
+            done = _plan_days(enrollment) if enrollment is not None else []
+            state = plans.progress(group.plan_id, started_on, done)
+            entry.update(
+                completed=state["completed"],
+                percent=state["percent"],
+                behind=state["behind"],
+                finished=state["finished"],
+                current_day=state["current_day"],
+                read_today=reminders.read_today(session, member.username, today),
+                started_on=started_on,
+            )
+        rows.append(entry)
+    my = _membership(session, group.id, caller)
+    joined = sum(1 for m in members if m.status == "joined")
+    return {
+        "id": group.id,
+        "plan_id": group.plan_id,
+        "plan_name": plan["name"],
+        "name": group.name,
+        "started_on": group.started_on,
+        "created_by": group.created_by,
+        "is_creator": group.created_by == caller,
+        "my_status": my.status if my else None,
+        "today": today,
+        "members": rows,
+        "counts": {
+            "total": len(members),
+            "joined": joined,
+            "invited": sum(1 for m in members if m.status == "invited"),
+            "declined": sum(1 for m in members if m.status == "declined"),
+            "finished": sum(1 for r in rows if r["finished"]),
+            "read_today": sum(1 for r in rows if r["read_today"]),
+        },
+    }
+
+
+def _group_list_payload(session: Session, caller: str) -> list[dict]:
+    memberships = session.exec(
+        select(PlanGroupMember).where(
+            PlanGroupMember.username == caller, PlanGroupMember.status.in_(("invited", "joined"))
+        )
+    ).all()
+    out = []
+    for membership in memberships:
+        group = session.get(PlanGroup, membership.group_id)
+        if group is None:
+            continue
+        try:
+            plan = plans.find(group.plan_id)
+            plan_name = plan["name"]
+        except plans.PlanError:
+            plan_name = group.plan_id
+        out.append(
+            {
+                "id": group.id,
+                "plan_id": group.plan_id,
+                "plan_name": plan_name,
+                "name": group.name,
+                "started_on": group.started_on,
+                "created_by": group.created_by,
+                "status": membership.status,
+                "joined_at": membership.joined_at,
+                "is_creator": group.created_by == caller,
+            }
+        )
+    out.sort(key=lambda g: (g["status"] != "invited", g["id"]))
+    return out
+
+
+async def _send_group_notice(
+    target: str, *, title: str, body: str, url: str, kind: str, tag: str, once: str
+) -> bool:
+    return await _notify_send(
+        _notice(target, "bible", title, body, url=url, kind=kind, tag=tag, once=once,
+                actions=[_view_action(url, "Open")]),
+        telemetry=TELEMETRY_SVC_URL,
+        secret=INTERNAL_SECRET,
+    )
+
+
+@app.post("/plans/{plan_id}/groups")
+async def create_plan_group(
+    plan_id: str,
+    payload: PlanGroupCreate,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Start a plan together: create the group, enroll the caller, invite the rest."""
+    _plan_or_404(plan_id)
+    started = (payload.started_on or date.today().isoformat()).strip()
+    try:
+        date.fromisoformat(started)
+    except ValueError as exc:
+        raise HTTPException(422, "started_on must be a date, YYYY-MM-DD.") from exc
+    name = payload.name.strip()[:80]
+    invited = []
+    seen: set[str] = set()
+    for raw in payload.members:
+        member = str(raw).strip()
+        if member and member != username and member not in seen:
+            seen.add(member)
+            invited.append(member)
+    if invited:
+        family = await _family_or_none()
+        if family is None:
+            raise HTTPException(503, "The family directory cannot be read right now; nobody was invited.")
+        unknown = [m for m in invited if m not in family]
+        if unknown:
+            raise HTTPException(422, f"Not household members: {', '.join(sorted(unknown))}")
+    group = PlanGroup(plan_id=plan_id, name=name, created_by=username, started_on=started)
+    session.add(group)
+    session.flush()
+    today = date.today().isoformat()
+    session.add(
+        PlanGroupMember(group_id=group.id, username=username, status="joined", invited_by=username, joined_at=today)
+    )
+    for member in invited:
+        session.add(PlanGroupMember(group_id=group.id, username=member, status="invited", invited_by=username))
+    # The caller is reading with the group: link any plan already under way, else start one.
+    enrollment = _active_plan(session, username, plan_id)
+    if enrollment is None:
+        session.add(
+            PlanEnrollment(username=username, plan_id=plan_id, started_on=started, group_id=group.id)
+        )
+    else:
+        enrollment.group_id = group.id
+        session.add(enrollment)
+    session.commit()
+    session.refresh(group)
+    plan = plans.find(plan_id)
+    group_label = name or plan["name"]
+    sent = 0
+    for member in invited:
+        if await _send_group_notice(
+            member,
+            title=f"{username} invited you to read together",
+            body=f"{group_label}: {plan['name']}",
+            url="/bible?tab=plans",
+            kind="bible_group_invite",
+            tag=f"bible:group-invite:{group.id}",
+            once=f"bible-group-invite:{group.id}:{member}",
+        ):
+            sent += 1
+    return {"group": _board_payload(session, group, username), "invited": invited, "notified": sent}
+
+
+@app.get("/plans/groups")
+def list_plan_groups(username: str = Query(...), session: Session = Depends(get_session)):
+    """The caller's reading groups: the ones they joined and the ones they were invited to."""
+    return {"groups": _group_list_payload(session, username)}
+
+
+@app.get("/plans/groups/{group_id}")
+def plan_group_board(group_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """The group's progress board. Members only; an invite is enough to look."""
+    group = _group_or_404(session, group_id)
+    membership = _membership(session, group.id, username)
+    if membership is None or membership.status == "declined":
+        raise HTTPException(404, "You are not a member of this reading group.")
+    return _board_payload(session, group, username)
+
+
+@app.post("/plans/groups/{group_id}/join")
+def join_plan_group(group_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Accept an invitation; the common start date comes with the group."""
+    group = _group_or_404(session, group_id)
+    membership = _membership(session, group.id, username)
+    if membership is None:
+        raise HTTPException(404, "You were not invited to this reading group.")
+    today = date.today().isoformat()
+    membership.status = "joined"
+    membership.joined_at = membership.joined_at or today
+    session.add(membership)
+    enrollment = _active_plan(session, username, group.plan_id)
+    if enrollment is None:
+        session.add(
+            PlanEnrollment(username=username, plan_id=group.plan_id, started_on=group.started_on, group_id=group.id)
+        )
+    else:
+        enrollment.group_id = group.id
+        session.add(enrollment)
+    session.commit()
+    session.refresh(group)
+    return _board_payload(session, group, username)
+
+
+@app.post("/plans/groups/{group_id}/decline")
+def decline_plan_group(group_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Decline an invitation. The group carries on without you."""
+    group = _group_or_404(session, group_id)
+    membership = _membership(session, group.id, username)
+    if membership is None:
+        raise HTTPException(404, "You were not invited to this reading group.")
+    membership.status = "declined"
+    session.add(membership)
+    session.commit()
+    return {"id": group.id, "status": "declined"}
+
+
+@app.post("/plans/groups/{group_id}/leave")
+def leave_plan_group(group_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Leave the group. What you have read stays yours; the plan just continues solo."""
+    group = _group_or_404(session, group_id)
+    membership = _membership(session, group.id, username)
+    if membership is None:
+        raise HTTPException(404, "You are not a member of this reading group.")
+    session.delete(membership)
+    for enrollment in session.exec(
+        select(PlanEnrollment).where(
+            PlanEnrollment.username == username,
+            PlanEnrollment.group_id == group.id,
+        )
+    ).all():
+        enrollment.group_id = None
+        session.add(enrollment)
+    session.commit()
+    return {"left": group.id}
+
+
+@app.delete("/plans/groups/{group_id}")
+def delete_plan_group(group_id: int, username: str = Query(...), session: Session = Depends(get_session)):
+    """Dissolve a group (its creator only). Everyone's reading stays their own."""
+    group = _group_or_404(session, group_id)
+    if group.created_by != username:
+        raise HTTPException(403, "Only the group's creator can delete it.")
+    for enrollment in session.exec(
+        select(PlanEnrollment).where(PlanEnrollment.group_id == group.id)
+    ).all():
+        enrollment.group_id = None
+        session.add(enrollment)
+    for member in session.exec(
+        select(PlanGroupMember).where(PlanGroupMember.group_id == group.id)
+    ).all():
+        session.delete(member)
+    session.delete(group)
+    session.commit()
+    return {"deleted": group_id}
+
+
+@app.post("/plans/groups/{group_id}/nudge")
+async def nudge_plan_group(
+    group_id: int,
+    payload: PlanNudge,
+    username: str = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Ask a member (or everyone behind) to pick up today's reading. Members only.
+
+    Anyone who has already finished, already read today, or asked to be left
+    alone is skipped; one nudge per person per group per day, however many
+    members tap the button.
+    """
+    group = _group_or_404(session, group_id)
+    caller = _membership(session, group.id, username)
+    if caller is None or caller.status != "joined":
+        raise HTTPException(404, "You are not a member of this reading group.")
+    members = list(
+        session.exec(
+            select(PlanGroupMember).where(PlanGroupMember.group_id == group.id, PlanGroupMember.status == "joined")
+        ).all()
+    )
+    today = date.today().isoformat()
+    if payload.username:
+        wanted = payload.username.strip()
+        members = [m for m in members if m.username == wanted]
+        if not members:
+            raise HTTPException(404, "That person has not joined this reading group.")
+    plan = plans.find(group.plan_id)
+    nudged: list[str] = []
+    skipped: list[dict] = []
+    for member in members:
+        if member.username == username:
+            skipped.append({"username": member.username, "reason": "that is you"})
+            continue
+        enrollment = _joined_enrollment(session, group.plan_id, group.id, member.username)
+        done = _plan_days(enrollment) if enrollment is not None else []
+        started_on = enrollment.started_on if enrollment is not None else group.started_on
+        state = plans.progress(group.plan_id, started_on, done)
+        if state["finished"]:
+            skipped.append({"username": member.username, "reason": "finished"})
+            continue
+        if reminders.read_today(session, member.username, today):
+            skipped.append({"username": member.username, "reason": "already read today"})
+            continue
+        day = state["current_day"]
+        refs = ", ".join(r["ref"] for r in plans.day_readings(group.plan_id, day)) if day else plan["name"]
+        group_label = group.name or plan["name"]
+        if await _send_group_notice(
+            member.username,
+            title=f"{username} read {group_label}; your turn?",
+            body=f"Day {day}: {refs}" if day else plan["name"],
+            url="/bible?tab=plans",
+            kind="bible_encourage",
+            tag=f"bible:group-encourage:{group.id}:{today}:{member.username}",
+            once=f"bible-encourage:{group.id}:{today}:{member.username}",
+        ):
+            nudged.append(member.username)
+        else:
+            skipped.append({"username": member.username, "reason": "notification not accepted"})
+    return {"nudged": nudged, "skipped": skipped}
+
 
 
 # reading plans

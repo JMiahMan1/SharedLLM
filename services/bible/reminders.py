@@ -23,7 +23,7 @@ from services.common import notify
 
 from . import plans
 from .metrics import OPEN_KINDS, READING_KINDS
-from .models import MemoryVerse, PlanEnrollment, ReadingEvent, UserBibleState
+from .models import MemoryVerse, PlanEnrollment, PlanGroup, PlanGroupMember, ReadingEvent, UserBibleState
 
 log = logging.getLogger(__name__)
 
@@ -62,9 +62,26 @@ def message_for(session: Session, username: str, today: str) -> dict:
         day = state["current_day"]
         if day and not state["finished"]:
             refs = ", ".join(r["ref"] for r in plans.day_readings(row.plan_id, day))
+            body = f"Day {day}: {refs}"
+            if row.group_id:
+                try:
+                    member_of = session.exec(
+                        select(PlanGroupMember).where(
+                            PlanGroupMember.group_id == row.group_id,
+                            PlanGroupMember.status == "joined",
+                        )
+                    ).all()
+                    group = session.get(PlanGroup, row.group_id)
+                    if group is not None and member_of:
+                        read = sum(1 for m in member_of if read_today(session, m.username, today))
+                        label = group.name or plans.find(row.plan_id)["name"]
+                        body += f" · {read} of {len(member_of)} in {label} have read today"
+                except Exception as exc:
+                    # The group line is decoration; a plan day without it still goes out.
+                    log.warning("[Bible] group line for %s failed: %s", username, exc)
             return {
                 "title": f"Today in {plans.find(row.plan_id)['name']}",
-                "body": f"Day {day}: {refs}",
+                "body": body,
                 "data": {"url": f"/bible?ref={quote(refs.split(',')[0].strip())}"},
             }
     due = sum(
