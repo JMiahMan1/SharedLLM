@@ -73,6 +73,19 @@ describe('NotificationPreferencesPanel', () => {
     expect(await screen.findByRole('switch', { name: 'System alerts' })).toBeInTheDocument();
   });
 
+  it('locks the switches a parent controls', async () => {
+    server.use(
+      http.get('/api/users/me/notification-preferences', () =>
+        HttpResponse.json({ preferences: { chat: false }, locked: ['family_presence'] })),
+    );
+    renderWithProviders(<NotificationPreferencesPanel />);
+    const presence = await screen.findByRole('switch', { name: 'Arrivals and departures' });
+    await waitFor(() => expect(presence).toBeDisabled());
+    expect(screen.getByText('A parent controls this notification')).toBeInTheDocument();
+    // Unlocked switches stay usable even while another is locked.
+    expect(screen.getByRole('switch', { name: 'Family chat' })).not.toBeDisabled();
+  });
+
   it('hides system alerts from family members', async () => {
     server.use(
       http.get('/api/users/me', () =>

@@ -758,6 +758,9 @@ class ScreenRules(SQLModel, table=True):  # type: ignore
         chore_min, max_min}: minutes earned a day (chores once a parent
         approves); unused earned minutes carry over until the week ends
       - chores_first: bool, locked until today's Skylight chores are done
+      - notification_toggle_allowed: list of notice categories the minor may
+        switch off for themselves (a parent allow-list); absent means none, and
+        the safety categories (``family_safety``) can never be allowed
     The evaluation lives in services/common/screen_time.py.
     """
     __table_args__ = {"extend_existing": True}

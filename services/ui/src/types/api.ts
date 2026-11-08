@@ -390,6 +390,8 @@ export interface ScreenRules {
   photo_scan?: boolean;
   /** Place arrival / departure geofence alerts per zone. */
   geofence_alerts?: Record<string, { arrive?: boolean; depart?: boolean }>;
+  /** Notice categories a minor may switch off themselves (a parent allow-list). */
+  notification_toggle_allowed?: string[];
   /** System update policy configuration (MDM). */
   os_update_policy?: OsUpdatePolicy;
   /** Household Wi-Fi network configurations provisioned to devices. */
@@ -3282,6 +3284,60 @@ export interface BiblePlanDetail {
   blurb: string;
   days: { day: number; readings: BiblePlanReading[]; done: boolean }[];
   enrollment: BiblePlanEnrollment | null;
+}
+
+export interface BiblePlanGroupSummary {
+  id: number;
+  plan_id: string;
+  plan_name: string;
+  name: string;
+  started_on: string;
+  created_by: string;
+  /** My status in the group: invited, joined, or declined. */
+  status: 'invited' | 'joined' | 'declined';
+  joined_at: string | null;
+  is_creator: boolean;
+}
+
+export interface BiblePlanGroupMemberRow {
+  username: string;
+  status: 'invited' | 'joined' | 'declined';
+  completed: number;
+  percent: number;
+  behind: number;
+  finished: boolean;
+  current_day: number | null;
+  read_today: boolean;
+  started_on: string;
+}
+
+export interface BiblePlanGroupBoard {
+  id: number;
+  plan_id: string;
+  plan_name: string;
+  name: string;
+  started_on: string;
+  created_by: string;
+  is_creator: boolean;
+  my_status: 'invited' | 'joined' | 'declined';
+  today: string;
+  members: BiblePlanGroupMemberRow[];
+  counts: {
+    total: number;
+    joined: number;
+    invited: number;
+    declined: number;
+    finished: number;
+    read_today: number;
+  };
+}
+
+export interface BiblePlanGroupCreatePayload {
+  name?: string;
+  /** Usernames to invite (the caller is joined automatically and is excluded). */
+  members: string[];
+  /** Shared start date; pass today's date when the group starts now. */
+  started_on?: string;
 }
 
 export interface BibleActivitySummary {

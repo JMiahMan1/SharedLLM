@@ -4814,6 +4814,24 @@ def _clean_screen_rules(body: dict) -> dict:
                 "depart": bool(cfg.get("depart", False)),
             }
         out["geofence_alerts"] = clean_ga
+    # Notice categories a minor may switch off for themselves (a parent
+    # allow-list; the safety notices are never allowed).
+    if body.get("notification_toggle_allowed") is not None:
+        raw = body["notification_toggle_allowed"]
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=422, detail="notification_toggle_allowed must be a list of notice category ids")
+        allowed: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                raise HTTPException(status_code=422, detail="notification_toggle_allowed must be notice category ids")
+            c = item.strip()
+            if c not in push.CATEGORIES:
+                raise HTTPException(status_code=422, detail=f"Unknown notification category: {c}")
+            if c in push.MINOR_NEVER_TOGGLE or c in push.ADMIN_ONLY:
+                raise HTTPException(status_code=422, detail=f"{c} cannot be switched off by a minor")
+            if c not in allowed:
+                allowed.append(c)
+        out["notification_toggle_allowed"] = allowed[:32]
     # Batch (8): OS-update policy, Wi-Fi networks, CA certs, and VPN lockdown
     if body.get("os_update_policy") is not None:
         oup = body["os_update_policy"]

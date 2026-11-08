@@ -15,7 +15,8 @@ from collections.abc import Callable
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from services.identity.models import UnifiedPushRegistration, User, UserNotificationPreference
+from services.identity import roles
+from services.identity.models import ScreenRules, UnifiedPushRegistration, User, UserNotificationPreference
 
 #: Notice categories people can switch off. The web and Android settings
 #: screens carry their own labels for these (notificationCategories.ts,
@@ -26,6 +27,11 @@ CATEGORIES = (
 )
 #: Categories only admins receive.
 ADMIN_ONLY = frozenset({"admin"})
+
+#: Categories a minor can never switch off, even with a parent's blessing:
+#: the safety notices. A parent may allow a minor to switch off any other
+#: category with the screen-time rule ``notification_toggle_allowed``.
+MINOR_NEVER_TOGGLE = frozenset({"family_safety"})
 
 UP_TOPIC_PREFIX = "up"
 #: Registrations one device may hold (each is one app).
@@ -61,21 +67,72 @@ def _stored(session: Session, username: str) -> tuple[UserNotificationPreference
     return row, data if isinstance(data, dict) else {}
 
 
+def _minor_toggle_allowed(session: Session, user: User) -> list[str]:
+    """The categories the parent lets this minor switch off.
+
+    Stored as the screen-time rule ``notification_toggle_allowed``: a list of
+    category ids. Absent or empty means the minor may not switch off any
+    notification for themselves. Unknown ids and the safety categories are
+    dropped, so a bad row cannot loosen anything.
+    """
+    row = session.get(ScreenRules, user.username)
+    try:
+        data = json.loads(row.data) if row and row.data else {}
+    except (TypeError, ValueError):
+        data = {}
+    allowed = data.get("notification_toggle_allowed") if isinstance(data, dict) else None
+    if not isinstance(allowed, list):
+        return []
+    visible = set(visible_categories(user))
+    out: list[str] = []
+    for item in allowed:
+        if not isinstance(item, str):
+            continue
+        c = item.strip()
+        if c in visible and c not in MINOR_NEVER_TOGGLE and c not in out:
+            out.append(c)
+    return out
+
+
+def locked_categories(session: Session, user: User) -> list[str]:
+    """The categories this minor may not switch off (reported to the UI as locked)."""
+    if (user.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        return []
+    allowed = set(_minor_toggle_allowed(session, user))
+    return [c for c in visible_categories(user) if c not in allowed]
+
+
 def effective_preferences(session: Session, user: User) -> dict[str, bool]:
-    """Every category with its on/off state: absent is on, ``admin`` only for admins."""
+    """Every category with its on/off state: absent is on, ``admin`` only for admins.
+
+    A minor's locked categories read as on, whatever their stored row says:
+    only a parent unlocks them, and one is unlocked by naming it in
+    ``notification_toggle_allowed``.
+    """
     _, data = _stored(session, user.username)
     visible = set(visible_categories(user))
-    return {c: c in visible and bool(data.get(c, True)) for c in CATEGORIES}
+    prefs = {c: c in visible and bool(data.get(c, True)) for c in CATEGORIES}
+    for c in locked_categories(session, user):
+        prefs[c] = True
+    return prefs
 
 
 def apply_preferences(session: Session, user: User, changes: dict) -> None:
-    """Switch some categories on or off; 422 for an unknown one or a non-bool."""
+    """Switch some categories on or off; 422 for an unknown one or a non-bool.
+
+    Changes to categories a minor may not switch off are ignored, not refused:
+    the settings page sends the whole map, and one switch it owns must not fail
+    the switches it shares with the minor's parent.
+    """
     visible = set(visible_categories(user))
     for key, value in changes.items():
         if key not in visible:
             raise HTTPException(status_code=422, detail=f"Unknown category: {key}")
         if not isinstance(value, bool):
             raise HTTPException(status_code=422, detail=f"{key} must be true or false")
+    locked = set(locked_categories(session, user))
+    if locked:
+        changes = {k: v for k, v in changes.items() if not (k in locked and not v)}
     row, data = _stored(session, user.username)
     if row is None:
         row = UserNotificationPreference(username=user.username)
@@ -87,7 +144,11 @@ def apply_preferences(session: Session, user: User, changes: dict) -> None:
 
 def _user_view(session: Session, user: User) -> dict:
     prefs = effective_preferences(session, user)
-    return {"status": "SUCCESS", "preferences": {c: prefs[c] for c in visible_categories(user)}}
+    return {
+        "status": "SUCCESS",
+        "preferences": {c: prefs[c] for c in visible_categories(user)},
+        "locked": locked_categories(session, user),
+    }
 
 
 def _user_or_404(session: Session, username: str) -> User:
@@ -192,6 +253,7 @@ def build_router(
             "username": user.username,
             "is_admin": bool(user.is_admin),
             "preferences": effective_preferences(session, user),
+            "locked": locked_categories(session, user),
         }
 
     @router.put("/api/internal/push/preferences")
@@ -205,7 +267,11 @@ def build_router(
         per-person presence alerts setting over to family_presence)."""
         user = _user_or_404(session, username)
         apply_preferences(session, user, body)
-        return {"username": user.username, "preferences": effective_preferences(session, user)}
+        return {
+            "username": user.username,
+            "preferences": effective_preferences(session, user),
+            "locked": locked_categories(session, user),
+        }
 
     @router.get("/api/internal/push/admins")
     def internal_push_admins(

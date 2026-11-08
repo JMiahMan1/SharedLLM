@@ -8,6 +8,7 @@ import { MiniMapCard } from './OverviewSection';
 import { geoZonesQueryKey, zonePlaces } from '../../../lib/wanderQueries';
 import { localDay } from '../../../lib/healthHub';
 import GeofenceAlertsCard from '../../guardian/GeofenceAlertsCard';
+import NotificationLockCard from '../../guardian/NotificationLockCard';
 import DayHistoryCard from '../DayHistoryCard';
 import DriverReportCard from '../DriverReportCard';
 import type { Trip, TripLocation } from '../../../types/api';
@@ -85,6 +86,7 @@ export default function LocationSection({ username, name }: { username: string; 
       <TripsCard username={username} name={name} />
       <PlacesCard />
       <GeofenceAlertsCard username={username} name={name} />
+      <NotificationLockCard username={username} name={name} />
     </>
   );
 }

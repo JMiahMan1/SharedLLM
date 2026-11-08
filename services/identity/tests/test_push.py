@@ -18,6 +18,8 @@ def session_fixture():
     with Session(engine) as session:
         session.add(User(username="michele", display_name="Michele", is_admin=False))
         session.add(User(username="jeremiah", display_name="Jeremiah", is_admin=True))
+        session.add(User(username="mom", display_name="Mom", family_role="mother"))
+        session.add(User(username="gracie", display_name="Gracie", family_role="teen", mother_username="mom"))
         session.commit()
         yield session
 
@@ -178,3 +180,64 @@ def test_internal_put_switches_one_persons_category(as_user):
                       json={"nonsense": False}).status_code == 422
     assert client.put("/api/internal/push/preferences", params={"username": "nobody"},
                       json={"family_presence": False}).status_code == 404
+
+
+def test_a_minor_cannot_switch_off_a_notice_their_parent_has_not_allowed(as_user):
+    client = as_user("gracie")
+    body = client.get("/api/users/me/notification-preferences").json()
+    assert set(body["locked"]) == set(push.CATEGORIES) - {"admin"}
+    resp = client.put("/api/users/me/notification-preferences",
+                      json={"family_presence": False, "chat": False})
+    assert resp.status_code == 200
+    assert resp.json()["preferences"]["family_presence"] is True
+    assert resp.json()["preferences"]["chat"] is True
+
+
+def test_a_parents_allow_list_unlocks_only_the_named_categories(as_user):
+    client = as_user("gracie")
+    # Default (no rule): even the harmless switch is locked.
+    resp = client.get("/api/users/me/notification-preferences").json()
+    assert "family_presence" in resp["locked"]
+    # A parent allows the arrivals switch for the teen.
+    parent = as_user("mom")
+    put = parent.put("/api/screen-time/gracie/rules",
+                     json={"notification_toggle_allowed": ["family_presence"]})
+    assert put.status_code == 200
+    assert put.json()["rules"]["notification_toggle_allowed"] == ["family_presence"]
+    client = as_user("gracie")  # the fixture rebinds the caller globally per client
+    resp = client.get("/api/users/me/notification-preferences").json()
+    assert "family_presence" not in resp["locked"]
+    assert "chat" in resp["locked"]
+    resp = client.put("/api/users/me/notification-preferences", json={"family_presence": False})
+    assert resp.json()["preferences"]["family_presence"] is False
+    # Switching the other one off is still refused (ignored, not errored).
+    resp = client.put("/api/users/me/notification-preferences", json={"chat": False})
+    assert resp.json()["preferences"]["chat"] is True
+
+
+def test_family_safety_can_never_be_allowed_for_a_minor(as_user):
+    parent = as_user("mom")
+    assert parent.put("/api/screen-time/gracie/rules",
+                      json={"notification_toggle_allowed": ["family_safety"]}).status_code == 422
+    assert parent.put("/api/screen-time/gracie/rules",
+                      json={"notification_toggle_allowed": ["admin"]}).status_code == 422
+    assert parent.put("/api/screen-time/gracie/rules",
+                      json={"notification_toggle_allowed": ["nonsense"]}).status_code == 422
+
+
+def test_grown_ups_are_not_locked(as_user):
+    body = as_user("michele").get("/api/users/me/notification-preferences").json()
+    assert body["locked"] == []
+
+
+def test_unknown_ids_in_a_stored_allow_list_are_dropped(as_user, session):
+    """A row written outside the validator cannot loosen a lock: unknown and
+    safety categories are dropped when the allow-list is read."""
+    from services.identity.models import ScreenRules
+
+    session.add(ScreenRules(username="gracie", data='{"notification_toggle_allowed": ["family_presence", "family_safety", "nope"]}'))
+    session.commit()
+    body = as_user("gracie").get("/api/users/me/notification-preferences").json()
+    assert body["locked"] == [c for c in body["locked"] if c != "family_presence"]
+    assert "family_presence" not in body["locked"]
+    assert "family_safety" in body["locked"]

@@ -234,6 +234,9 @@ import type {
   BibleLeaderboard,
   BibleMemoryOverview,
   BiblePlanDetail,
+  BiblePlanGroupBoard,
+  BiblePlanGroupCreatePayload,
+  BiblePlanGroupSummary,
   BibleStudyDepth,
   BibleStudyStreamEvent,
   BiblePlanEnrollment,
@@ -1793,14 +1796,14 @@ export const api = {
 
   // Family arrival / departure notices for the signed-in user (on by default).
   /** Which notice categories reach the signed-in person (docs/PUSH.md); absent means on. */
-  async getNotificationPreferences(): Promise<NotificationPreferences> {
+  async getNotificationPreferences(): Promise<NotificationPreferencesState> {
     const resp = await apiClient.get('/api/users/me/notification-preferences');
-    return booleanMap(resp.data?.preferences ?? resp.data);
+    return preferencesState(resp.data);
   },
 
-  async setNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferences> {
+  async setNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferencesState> {
     const resp = await apiClient.put('/api/users/me/notification-preferences', preferences);
-    return booleanMap(resp.data?.preferences ?? resp.data);
+    return preferencesState(resp.data);
   },
 
   /** Apps on the caller's phones that use Jarvis as their UnifiedPush distributor. */
@@ -5164,6 +5167,55 @@ export const api = {
     return resp.data;
   },
 
+  /** Create a reading group for a plan and invite people to do it together. */
+  async createBiblePlanGroup(
+    planId: string,
+    payload: BiblePlanGroupCreatePayload,
+  ): Promise<{ group: BiblePlanGroupBoard; invited: string[]; notified: number }> {
+    const resp = await apiClient.post(`/api/bible/plans/${planId}/groups`, payload);
+    return resp.data;
+  },
+
+  /** My reading groups: the ones I joined and the ones I was invited to. */
+  async listBiblePlanGroups(): Promise<{ groups: BiblePlanGroupSummary[] }> {
+    const resp = await apiClient.get('/api/bible/plans/groups');
+    return resp.data;
+  },
+
+  /** The shared board for one reading group (invitees can look too). */
+  async getBiblePlanGroup(groupId: number): Promise<BiblePlanGroupBoard> {
+    const resp = await apiClient.get(`/api/bible/plans/groups/${groupId}`);
+    return resp.data;
+  },
+
+  async joinBiblePlanGroup(groupId: number): Promise<{ group: BiblePlanGroupBoard }> {
+    const resp = await apiClient.post(`/api/bible/plans/groups/${groupId}/join`);
+    return resp.data;
+  },
+
+  async declineBiblePlanGroup(groupId: number): Promise<{ status: string }> {
+    const resp = await apiClient.post(`/api/bible/plans/groups/${groupId}/decline`);
+    return resp.data;
+  },
+
+  /** Leave the group; my reading plan and progress are kept. */
+  async leaveBiblePlanGroup(groupId: number): Promise<{ status: string }> {
+    const resp = await apiClient.post(`/api/bible/plans/groups/${groupId}/leave`);
+    return resp.data;
+  },
+
+  /** End the group (creator only); everyone keeps their own plan. */
+  async deleteBiblePlanGroup(groupId: number): Promise<{ status: string }> {
+    const resp = await apiClient.delete(`/api/bible/plans/groups/${groupId}`);
+    return resp.data;
+  },
+
+  /** Nudge the members who haven't read today. */
+  async nudgeBiblePlanGroup(groupId: number, username?: string): Promise<{ nudged: string[]; skipped: { username: string; reason: string }[] }> {
+    const resp = await apiClient.post(`/api/bible/plans/groups/${groupId}/nudge`, username ? { username } : {});
+    return resp.data;
+  },
+
   async getBibleActivitySummary(userId: string): Promise<BibleActivitySummary> {
     const resp = await apiClient.get('/api/bible/activity/summary', { params: { user_id: userId } });
     return resp.data;
@@ -5601,6 +5653,26 @@ function booleanMap(value: unknown): NotificationPreferences {
     if (typeof on === 'boolean') out[key] = on;
   }
   return out;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === 'string');
+}
+
+export interface NotificationPreferencesState {
+  /** Every category's on/off state (docs/PUSH.md); absent means on. */
+  preferences: NotificationPreferences;
+  /** The categories a minor may not switch off (their parents' call). Empty for grown-ups. */
+  locked: string[];
+}
+
+export function preferencesState(value: unknown): NotificationPreferencesState {
+  const obj = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  return {
+    preferences: booleanMap(obj.preferences ?? obj),
+    locked: stringList(obj.locked),
+  };
 }
 
 export interface RavenLearningItem {
