@@ -197,31 +197,23 @@ public class CrashDetectorTest {
     }
 
     @Test
-    public void threeSustainedSamplesAreAnImpact() {
+    public void sustainedSofterJoltIsNeverAnImpact() {
+        // A bag dropped in the footwell reads like this; it must not siren.
         drive(10_000);
         accel(10_500, 26);
         accel(10_520, 27);
-        assertFalse(detector.isPending());
         accel(10_540, 26);
-        assertTrue(detector.isPending());
-    }
-
-    @Test
-    public void twoSustainedSamplesAreNot() {
-        drive(10_000);
-        accel(10_500, 26);
-        accel(10_520, 27);
-        accel(10_540, 5);
-        accel(10_560, 26);
+        accel(10_560, 28);
+        accel(10_580, 25);
         assertFalse(detector.isPending());
     }
 
     @Test
-    public void sustainedSamplesSpreadPastAHundredMsAreNot() {
+    public void sustainedSofterJoltSpreadOverTimeIsNot() {
         drive(10_000);
         accel(10_500, 26);
         accel(10_560, 27);
-        accel(10_620, 26);  // the first is 120 ms back
+        accel(10_620, 26);
         assertFalse(detector.isPending());
     }
 
@@ -334,7 +326,7 @@ public class CrashDetectorTest {
     public void aSoftImpactWithNoFixAfterItIsNot() {
         drive(10_000);
         for (long t = 10_500; t <= 10_560; t += 20) accel(t, 27);  // ~2.7 g held: a jolt, not a 4 g hit
-        assertTrue(detector.isPending());
+        assertFalse(detector.isPending());
         assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
         assertFalse(detector.isPending());
     }

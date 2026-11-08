@@ -25,12 +25,13 @@ import org.json.JSONObject;
  */
 final class CrashDetector {
     static final double GRAVITY = 9.81;
-    /** About 4 g beyond gravity in one sample: an impact on its own. */
+    /**
+     * About 4 g beyond gravity in one sample: an impact on its own. There is
+     * deliberately no softer path (a 2.5 g jolt held for a few samples reads
+     * just like a bag dropped in the footwell or a deep pothole), because
+     * every false alarm costs a full-screen siren.
+     */
     static final double SPIKE_MPS2 = 39.0;
-    /** About 2.5 g beyond gravity, held for {@link #SUSTAIN_SAMPLES} samples. */
-    static final double SUSTAINED_MPS2 = 25.0;
-    static final int SUSTAIN_SAMPLES = 3;
-    static final long SUSTAIN_WINDOW_MS = 100L;
     /** About 16 mph, the same speed {@link MotionModeSelector} takes for a vehicle. */
     static final double ARM_MIN_MPS = 7.0;
     static final long ARM_RECENT_MS = 10_000L;
@@ -129,9 +130,6 @@ final class CrashDetector {
     // Trusted speeds of the last ARM_RECENT_MS, oldest first: {time, speed}.
     private final ArrayDeque<double[]> recentSpeeds = new ArrayDeque<>();
 
-    // The current run of samples at SUSTAINED_MPS2 or more: their times, oldest first.
-    private final ArrayDeque<Long> strongRun = new ArrayDeque<>();
-
     // The candidate being confirmed, if any.
     private long impactAt = -1L;
     private double peakMps2;
@@ -155,7 +153,6 @@ final class CrashDetector {
         if (!driving) {
             // Speeds from before a break in driving say nothing about the next drive.
             recentSpeeds.clear();
-            strongRun.clear();
         }
     }
 
@@ -183,16 +180,7 @@ final class CrashDetector {
             if (beyond > peakMps2) peakMps2 = beyond;
             return null;
         }
-        boolean strong = beyond >= SUSTAINED_MPS2;
-        if (!strong) {
-            strongRun.clear();
-        } else {
-            strongRun.addLast(timeMs);
-            while (!strongRun.isEmpty() && timeMs - strongRun.peekFirst() > SUSTAIN_WINDOW_MS) {
-                strongRun.removeFirst();
-            }
-        }
-        boolean impact = beyond >= SPIKE_MPS2 || (strong && strongRun.size() >= SUSTAIN_SAMPLES);
+        boolean impact = beyond >= SPIKE_MPS2;
         if (!impact || !armed(timeMs)) return null;
         impactAt = timeMs;
         peakMps2 = beyond;
@@ -200,7 +188,6 @@ final class CrashDetector {
         stopAt = -1L;
         holdFixes = 0;
         fixSinceImpact = false;
-        strongRun.clear();
         return null;
     }
 

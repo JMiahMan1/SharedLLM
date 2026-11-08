@@ -172,9 +172,34 @@ final class CrashAlert {
             // Once sending has begun the family may already know; the button
             // is gone from that notification, so this is only a late tap.
             if (!PHASE_COUNTDOWN.equals(prefs(app).getString(KEY_PHASE, null))) return;
+            reportFalseAlarm(app);
             clear(app);
         }
         Log.i(TAG, "crash cancelled: the person is OK");
+    }
+
+    /**
+     * The phone can tell the app's own activity feed this was a false alarm,
+     * so a family can see the pattern (and, if alarms keep firing, have them
+     * turned down). Nothing about where the person is goes anywhere; the
+     * entry lands in the same feed the app already uses.
+     */
+    private static void reportFalseAlarm(Context app) {
+        try {
+            JSONObject crash = new JSONObject(prefs(app).getString(KEY_CRASH, "{}"));
+            JSONObject detail = new JSONObject();
+            detail.put("at", crash.optLong("detected_at", System.currentTimeMillis()));
+            detail.put("peak_g", crash.optDouble("peak_g", 0));
+            detail.put("speed_before_mph", crash.optDouble("speed_before_mph", 0));
+            JSONObject body = new JSONObject();
+            body.put("feature", "safety");
+            body.put("event", "crash_false_alarm");
+            body.put("item", "");
+            body.put("detail", detail);
+            ActivityOutbox.add(app, body);
+        } catch (Exception e) {
+            Log.w(TAG, "false alarm not recorded", e);
+        }
     }
 
     private static void clear(Context app) {
