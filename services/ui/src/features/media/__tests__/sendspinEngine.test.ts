@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SendspinPlayer } from '@sendspin/sendspin-js';
 import { missingSendspinInternals, resumeSendspinAudio, sendspinSocket } from '../engine/sendspinInternals';
-import { SendspinAudioOutput } from '../engine/sendspinEngine';
+import { SendspinAudioOutput, correctionModeFor } from '../engine/sendspinEngine';
 import { FakeWebSocket } from '../../../test/fakes/FakeWebSocket';
 
 describe('sendspin internals', () => {
@@ -83,5 +83,21 @@ describe('SendspinAudioOutput', () => {
     expect(resume).toHaveBeenCalled();
     out.dispose();
     out.unlock(null);
+  });
+});
+
+describe('correctionModeFor', () => {
+  it('plays alone for clean audio (no pitch-shifting rate changes)', () => {
+    expect(correctionModeFor(null)).toBe('quality-local');
+    expect(correctionModeFor({ player_id: 'web', synced_to: null, group_members: [] })).toBe('quality-local');
+    expect(correctionModeFor({ player_id: 'web', group_members: ['web'] })).toBe('quality-local');
+  });
+
+  it('keeps strict sync while following another speaker', () => {
+    expect(correctionModeFor({ player_id: 'web', synced_to: 'media_player.living_room_tv' })).toBe('sync');
+  });
+
+  it('keeps strict sync while leading a group', () => {
+    expect(correctionModeFor({ player_id: 'web', group_members: ['web', 'sonos_kitchen'] })).toBe('sync');
   });
 });

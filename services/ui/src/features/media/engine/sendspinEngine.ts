@@ -1,4 +1,22 @@
+import type { CorrectionMode } from '@sendspin/sendspin-js';
 import { resumeSendspinAudio } from './sendspinInternals';
+
+/**
+ * How Sendspin corrects drift on this device's web player.
+ *
+ * Playing alone, "quality-local" never changes playback rate, so a phone's
+ * jittery Wi-Fi/cell link can't cause the pitch wobble the default "sync"
+ * mode does. Grouped with other speakers (TVs, Sonos, ...), staying in step
+ * matters more, so it goes back to "sync". `info` is MA's player record for
+ * this web player (`players/get` or a `player_updated` event).
+ */
+export function correctionModeFor(info: Record<string, unknown> | null | undefined): CorrectionMode {
+  if (!info) return 'quality-local';
+  const syncedTo = info.synced_to;
+  const members = Array.isArray(info.group_members) ? info.group_members : [];
+  const grouped = (typeof syncedTo === 'string' && syncedTo !== '') || members.length > 1;
+  return grouped ? 'sync' : 'quality-local';
+}
 
 /**
  * The web player's audio output: exactly one `<audio>` element at a time

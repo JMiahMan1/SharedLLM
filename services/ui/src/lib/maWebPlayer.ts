@@ -23,7 +23,7 @@ import { parseMaPlayerList, type MaPlayerListEntry } from './deviceLabels';
 import { extractMaImage } from './maImage';
 import toast from 'react-hot-toast';
 import { MaRpc, eventIsForPlayer } from '../features/media/engine/maRpc';
-import { SendspinAudioOutput } from '../features/media/engine/sendspinEngine';
+import { SendspinAudioOutput, correctionModeFor } from '../features/media/engine/sendspinEngine';
 import { sendspinSocket } from '../features/media/engine/sendspinInternals';
 
 /**
@@ -210,10 +210,22 @@ export function useMAWebPlayer() {
     setStateLocal(s => ({ ...s, error: msg }));
   }, []);
 
+  /** Strict sync while grouped with other speakers, clean audio alone. */
+  const applyCorrectionMode = useCallback((info: Record<string, unknown> | null | undefined) => {
+    const player = playerRef.current;
+    if (!player) return;
+    const mode = correctionModeFor(info);
+    if (player.correctionMode === mode) return;
+    try { player.setCorrectionMode(mode); } catch { /* best-effort */ }
+  }, []);
+
   // MA JSON-RPC events for this player (queue_updated, player_updated).
   const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>, objectId?: string) => {
     // Only this player's events; strict ids (BUG-52).
     if (!eventIsForPlayer(eventType, data ?? {}, playerIdRef.current, objectId)) return;
+
+    // Joined to or left a group: follow it with the drift-correction mode.
+    if (eventType === 'player_updated') applyCorrectionMode(data);
 
     setStateLocal(prev => {
       const next = { ...prev };
@@ -280,7 +292,7 @@ export function useMAWebPlayer() {
 
       return next;
     });
-  }, []);
+  }, [applyCorrectionMode]);
 
   // Send a JSON-RPC command on this player's control connection and wait for
   // MA's answer, so its errors reach the person (BUG-53).
@@ -346,6 +358,8 @@ export function useMAWebPlayer() {
         playerId: pid,
         clientName: clientName(),
         webSocket: sendspinWs,
+        // Alone until MA says otherwise; see correctionModeFor.
+        correctionMode: correctionModeFor(null),
         onStateChange: (newState) => {
           const server = (newState as unknown as {
             serverState?: { metadata?: { title?: string; artist?: string; image?: unknown; duration?: number }; position?: number };
@@ -394,7 +408,11 @@ export function useMAWebPlayer() {
       const readyBy = Date.now() + PLAYER_READY_TIMEOUT_MS;
       while (Date.now() < readyBy) {
         const info = await sendJsonRpc('players/get', { player_id: pid }).catch(() => null) as { available?: boolean } | null;
-        if (info?.available) break;
+        if (info?.available) {
+          // Reconnecting into a group it was already part of.
+          applyCorrectionMode(info as Record<string, unknown>);
+          break;
+        }
         await new Promise((r) => setTimeout(r, PLAYER_READY_POLL_MS));
       }
 
@@ -416,7 +434,7 @@ export function useMAWebPlayer() {
       console.warn('[MAWebPlayer] connect failed:', msg);
       throw new Error(msg, { cause: err });
     }
-  }, [teardown, setError, handleMaEvent, handleConnectionLost, sendJsonRpc]);
+  }, [teardown, setError, handleMaEvent, handleConnectionLost, sendJsonRpc, applyCorrectionMode]);
 
   /** Connect once, sharing the attempt with anyone who asks meanwhile. */
   const initPlayer = useCallback((): Promise<boolean> => {
