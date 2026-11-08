@@ -1218,4 +1218,41 @@ describe('resuming where the reader left off', () => {
 
     await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
   });
+
+  it('does not drag the reader back to a verse link on a tab switch', async () => {
+    renderScrolled('/bible?ref=Ps%2023:2');
+
+    await screen.findByTestId('bible-chapter-heading');
+    // The linked verse lands first, then the reader reads on to verse 3.
+    await waitFor(() => expect(scroller().scrollTop).toBe(100 - 56));
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+    await waitFor(
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      { timeout: 1500 },
+    );
+
+    fireEvent.click(screen.getByTestId('bible-tab-today'));
+    await screen.findByTestId('bible-today');
+    fireEvent.click(screen.getByTestId('bible-tab-read'));
+
+    // Back at verse 3: the tab switch must not re-apply the link's verse.
+    await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
+  });
+
+  it('writes the verse of the chapter on screen, not the one saved elsewhere', async () => {
+    // No scroll container here (just as in parallel split view, which never
+    // tracks the scroll), so the saved place is not for this chapter and must
+    // not be written against it.
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 3 } }));
+    renderPage('/bible?ref=John%203');
+
+    await screen.findByTestId('bible-chapter-heading');
+    await waitFor(
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 1 }),
+      { timeout: 3500 },
+    );
+    expect(mocked.putBibleState).not.toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 3 });
+  });
 });

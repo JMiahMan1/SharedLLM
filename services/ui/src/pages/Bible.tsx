@@ -122,6 +122,7 @@ function jumpTo(container: HTMLElement, top: number) {
 function BibleReaderPane({
   state,
   resumePositionRef,
+  honoredVerseRef,
   requestedRef,
   onOpenRef,
   onRequestRef,
@@ -141,6 +142,12 @@ function BibleReaderPane({
    * line. The pane both reads it to land and writes it as the reader scrolls.
    */
   resumePositionRef: { current: BiblePosition | null };
+  /**
+   * The requested reference whose named verse has already been landed on. Kept
+   * by the parent so a remount (a tab switch) resumes the reader's scrolled
+   * place rather than jumping back to the link they arrived by.
+   */
+  honoredVerseRef: { current: string | null };
   requestedRef: string | null;
   onOpenRef: (ref: string) => void;
   onRequestRef: (ref: string) => void;
@@ -306,12 +313,17 @@ function BibleReaderPane({
       return undefined;
     }
     const shown = shownChapter!;
-    const linked = verseIn(requestedRef);
+    // A reference's named verse is honored once, then the reader's own
+    // scrolling is the truth: otherwise a tab switch would drag them back to
+    // the link they arrived by instead of the verse they read on from.
+    const linkIsNew = Boolean(requestedRef && requestedRef !== honoredVerseRef.current);
+    const linked = linkIsNew ? verseIn(requestedRef) : null;
     const resume = resumePositionRef.current;
     const sameChapter = Boolean(
       resume && resume.book === shown.book && resume.chapter === shown.chapter_start
     );
     const verse = linked ?? (sameChapter ? resume!.verse : 1);
+    if (linked !== null) honoredVerseRef.current = requestedRef;
     resumePositionRef.current = { book: shown.book, chapter: shown.chapter_start, verse };
     lastSavedVerse.current = verse;
     // A frame for the chapter to lay out before its verses can be measured.
@@ -371,10 +383,16 @@ function BibleReaderPane({
     // stalled the Bible service for twenty seconds, and logged every chapter
     // flicked past as read.
     const timer = window.setTimeout(() => {
+      // The verse under the reader's eye, but only when it belongs to this
+      // chapter: in parallel split view the scroll is not tracked, so a resume
+      // left over from another chapter must not be written against this one.
+      const resume = resumePositionRef.current;
+      const inThisChapter =
+        resume && resume.book === shownChapter.book && resume.chapter === shownChapter.chapter_start;
       void api.putBibleState({
         book: shownChapter.book,
         chapter: shownChapter.chapter_start,
-        verse: resumePositionRef.current?.verse ?? position.verse,
+        verse: inThisChapter ? resume!.verse : 1,
       });
       void api.recordBibleEvent(
         'chapter_complete',
@@ -782,6 +800,9 @@ export default function Bible() {
   // Where Read was last left: the verse under the reader's eye, kept across tab
   // switches (which unmount and remount the pane) so returning lands on it.
   const resumePosition = useRef<BiblePosition | null>(null);
+  // The reference whose named verse has already been honored, so a return to
+  // Read resumes where the reader scrolled instead of re-jumping to the link.
+  const honoredVerse = useRef<string | null>(null);
 
   const {
     data: stateData,
@@ -973,6 +994,7 @@ export default function Bible() {
               key={stateData.username}
               state={stateData}
               resumePositionRef={resumePosition}
+              honoredVerseRef={honoredVerse}
               requestedRef={requestedRef}
               onOpenRef={openRef}
               onRequestRef={requestRef}
