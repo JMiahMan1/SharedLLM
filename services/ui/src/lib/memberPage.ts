@@ -171,7 +171,7 @@ export function memberState(status: ScreenTimeStatus | undefined, today: UsageDa
 export function nextRoutineLine(status: ScreenTimeStatus | undefined, now = Date.now()): string | null {
   if (!status?.next_lock_at || !status.next_lock_reason) return null;
   const minutes = Math.max(0, Math.round((new Date(status.next_lock_at).getTime() - now) / 60000));
-  const what = { bedtime: 'Bedtime', school: 'School time', limit: "Today's time runs out" }[status.next_lock_reason];
+  const what = { bedtime: 'Bedtime', school: 'School time', chores: 'Chores', limit: "Today's time runs out" }[status.next_lock_reason];
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   const span = h ? `${h} h${m ? ` ${m} min` : ''}` : `${m} min`;

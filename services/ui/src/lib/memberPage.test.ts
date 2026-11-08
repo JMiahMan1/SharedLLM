@@ -39,6 +39,7 @@ describe('the family member page arithmetic', () => {
   it('says when the next routine starts', () => {
     const now = Date.parse('2026-10-24T18:50:00Z');
     expect(nextRoutineLine({ next_lock_at: '2026-10-24T21:00:00Z', next_lock_reason: 'bedtime' } as ScreenTimeStatus, now)).toBe('Bedtime in 2 h 10 min');
+    expect(nextRoutineLine({ next_lock_at: '2026-10-24T21:00:00Z', next_lock_reason: 'chores' } as ScreenTimeStatus, now)).toBe('Chores in 2 h 10 min');
     expect(nextRoutineLine({ next_lock_at: '2026-10-24T19:15:00Z', next_lock_reason: 'limit' } as ScreenTimeStatus, now)).toBe("Today's time runs out in 25 min");
     expect(nextRoutineLine({ next_lock_at: null } as ScreenTimeStatus, now)).toBeNull();
   });
