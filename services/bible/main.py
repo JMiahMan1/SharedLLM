@@ -68,6 +68,7 @@ from services.bible.corpus import CorpusError
 from services.bible.devotionals import registry as devotional_registry
 from services.bible.models import (
     AchievementEarned,
+    BibleVerse,
     Devotional,
     GameScore,
     ImportRun,
@@ -1147,6 +1148,8 @@ class StatePayload(BaseModel):
     book: str | None = None
     chapter: int | None = Field(default=None, ge=1)
     verse: int | None = Field(default=None, ge=1)
+    # How far into the verse the reader's top edge was when they stopped (0..1).
+    verse_fraction: float | None = Field(default=None, ge=0, le=1)
     default_version: str | None = None
     default_edition: str | None = None
     favorite_version: str | None = None
@@ -1175,7 +1178,12 @@ def get_state(username: str = Query(...), session: Session = Depends(get_session
 def _state_position(state: UserBibleState) -> dict | None:
     if not state.last_book:
         return None
-    return {"book": state.last_book, "chapter": state.last_chapter, "verse": state.last_verse}
+    return {
+        "book": state.last_book,
+        "chapter": state.last_chapter,
+        "verse": state.last_verse,
+        "fraction": state.last_verse_fraction,
+    }
 
 
 def _default_preferences(session: Session) -> dict:
@@ -1245,7 +1253,33 @@ def put_state(
             )
         state.last_book = osis
         state.last_chapter = payload.chapter or 1
-        state.last_verse = payload.verse or 1
+        verse = payload.verse or 1
+        # An out-of-range verse number (John 3:30) is a stale save, not a real
+        # place, and only the imported corpus can say how far a chapter runs --
+        # versification is per-translation. Clamp silently against what is
+        # actually installed: refusing would throw away saves fired while the
+        # bill of a chapter settles, and clamping cannot invent verses the text
+        # does not have. With nothing installed there is nothing to clamp
+        # against, so the request passes through untouched.
+        version = payload.default_version or state.default_version or corpus.default_version_code(session)
+        if version:
+            max_verse = session.exec(
+                select(func.max(BibleVerse.verse)).where(
+                    BibleVerse.version_code == version,
+                    BibleVerse.osis == osis,
+                    BibleVerse.chapter == state.last_chapter,
+                )
+            ).one()
+            if max_verse:
+                verse = min(verse, int(max_verse))
+        state.last_verse = verse
+        # Where inside the verse the reader stopped. An explicit offset wins; an
+        # explicit verse with no offset starts at that verse's top, so moving with
+        # a chapter or a link does not inherit the offset from the last place.
+        if payload.verse_fraction is not None:
+            state.last_verse_fraction = min(1.0, max(0.0, payload.verse_fraction))
+        elif payload.verse is not None:
+            state.last_verse_fraction = 0.0
     if payload.default_version is not None:
         state.default_version = _require_version(session, payload.default_version)
     if payload.default_edition is not None:

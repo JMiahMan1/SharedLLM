@@ -19,6 +19,7 @@ interface ReferenceBarProps {
   versions: BibleVersionInfo[];
   /** Study Bibles installed for the chosen translation; more than one is normal. */
   editions?: BibleEditionInfo[];
+  /** Now reading - the book, chapter and the verse the reader is on. */
   position: BiblePosition;
   preferences: BiblePreferences;
   /** Text the reader typed, kept here so a failed parse does not lose it. */
@@ -110,7 +111,7 @@ export default function ReferenceBar({
   const textIndex = Math.max(0, TEXT_STEPS.indexOf(preferences.font_scale));
   const comparing = Boolean(preferences.compare_version);
   const comparableVersions = versions.filter((v) => v.installed && v.code !== preferences.default_version);
-  const passageLabel = `${book?.name ?? position.book} ${position.chapter}`;
+  const passageLabel = `${book?.name ?? position.book} ${position.chapter}:${position.verse}`;
   const versionLabel = (preferences.default_version || '').toUpperCase() || 'Version';
   const layout = preferences.layout ?? 'flow';
 

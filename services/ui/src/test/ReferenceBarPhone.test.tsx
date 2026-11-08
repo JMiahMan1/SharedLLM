@@ -90,7 +90,7 @@ describe('the reference bar on a phone', () => {
     renderBar();
 
     expect(screen.getByTestId('bible-phone-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('bible-browse-open')).toHaveTextContent('John 3');
+    expect(screen.getByTestId('bible-browse-open')).toHaveTextContent('John 3:1');
     expect(screen.getByTestId('bible-version-open')).toBeInTheDocument();
     // The controls are not merely hidden -- they are not in the document
     // until their panel opens, so nothing can be tabbed to or found twice.

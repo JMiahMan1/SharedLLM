@@ -179,11 +179,22 @@ def test_state_starts_at_defaults(loaded_client: TestClient):
 
 
 def test_state_remembers_where_the_reader_stopped(loaded_client: TestClient):
+    # The test corpus carries three verses per Genesis chapter, so 3 is a real place.
     loaded_client.put(
-        "/state", params={"username": "sam"}, json={"book": "John", "chapter": 3, "verse": 16}
+        "/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 3}
     )
     body = loaded_client.get("/state", params={"username": "sam"}).json()
-    assert body["position"] == {"book": "John", "chapter": 3, "verse": 16}
+    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0}
+
+
+def test_state_remembers_how_far_into_the_verse_the_reader_stopped(loaded_client: TestClient):
+    loaded_client.put(
+        "/state",
+        params={"username": "sam"},
+        json={"book": "Gen", "chapter": 1, "verse": 3, "verse_fraction": 0.44},
+    )
+    body = loaded_client.get("/state", params={"username": "sam"}).json()
+    assert body["position"]["fraction"] == 0.44
 
 
 def test_state_stores_typographic_preferences(loaded_client: TestClient):
@@ -265,6 +276,26 @@ def test_state_rejects_a_chapter_beyond_the_book(loaded_client: TestClient):
     )
     assert response.status_code == 400
     assert "21 chapters" in response.json()["detail"]
+
+
+def test_state_clamps_a_verse_beyond_the_chapter(loaded_client: TestClient):
+    # The test corpus carries a single verse per chapter outside Genesis, so an
+    # impossible verse number settles on the chapter's real end instead of a
+    # place that is not there.
+    loaded_client.put(
+        "/state", params={"username": "sam"}, json={"book": "John", "chapter": 3, "verse": 30}
+    )
+    body = loaded_client.get("/state", params={"username": "sam"}).json()
+    assert body["position"] == {"book": "John", "chapter": 3, "verse": 1, "fraction": 0.0}
+
+
+def test_state_clamps_against_the_longest_installed_chapter(loaded_client: TestClient):
+    # The mini corpus carries three verses per Genesis chapter.
+    loaded_client.put(
+        "/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 99}
+    )
+    body = loaded_client.get("/state", params={"username": "sam"}).json()
+    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0}
 
 
 def test_state_rejects_an_unimported_default_version(loaded_client: TestClient):

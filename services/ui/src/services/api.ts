@@ -5025,7 +5025,9 @@ export const api = {
     return withOfflineCopy('state', async () => (await apiClient.get('/api/bible/state')).data);
   },
 
-  async putBibleState(payload: Partial<BiblePosition> & Partial<BiblePreferences>): Promise<BibleStateResponse> {
+  async putBibleState(
+    payload: Partial<BiblePosition> & Partial<BiblePreferences> & { verse_fraction?: number },
+  ): Promise<BibleStateResponse> {
     const resp = await apiClient.put('/api/bible/state', payload);
     return resp.data;
   },

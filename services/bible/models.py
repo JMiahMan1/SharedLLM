@@ -167,6 +167,9 @@ class UserBibleState(SQLModel, table=True):
     last_book: str = Field(default="")
     last_chapter: int = Field(default=1)
     last_verse: int = Field(default=1)
+    # How far into the verse the reader's top edge was when they stopped (0 to 1),
+    # so returning lands exactly where they were rather than at the verse's top.
+    last_verse_fraction: float = Field(default=0.0)
     last_open_day: str = Field(default="")
     last_read_at: datetime | None = None
     default_version: str = Field(default="")

@@ -50,6 +50,7 @@ COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("importedbook", "cadence", "TEXT", "'day'"),
     ("userbiblestate", "devotional_work", "TEXT", "''"),
     ("userbiblestate", "layout", "TEXT", "'flow'"),
+    ("userbiblestate", "last_verse_fraction", "REAL", "0"),
 )
 
 

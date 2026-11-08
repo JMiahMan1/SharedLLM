@@ -3016,6 +3016,8 @@ export interface BiblePosition {
   verse: number;
   /** "John 3", present where the server names the saved chapter. */
   reference?: string;
+  /** How far into the verse the reader's top edge stopped (0 to 1); present in state responses. */
+  fraction?: number;
 }
 
 export interface BiblePreferences {

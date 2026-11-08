@@ -81,7 +81,7 @@ const BOOKS: BibleBookInfo[] = [
 
 const STATE = (overrides: Partial<BibleStateResponse> = {}): BibleStateResponse => ({
   username: 'tester',
-  position: { book: 'Ps', chapter: 23, verse: 1 },
+  position: { book: 'Ps', chapter: 23, verse: 1, fraction: 0 },
   preferences: {
     default_version: 'kjv',
     default_edition: '',
@@ -162,7 +162,7 @@ const DAILY = (overrides: Partial<BibleDailyResponse> = {}): BibleDailyResponse 
   },
   sources: [],
   streaks: { read_streak_current: 4, read_streak_longest: 11, open_streak_current: 6, days_read: 30, chapters_read: 122 },
-  position: { book: 'Ps', chapter: 23, verse: 1 },
+  position: { book: 'Ps', chapter: 23, verse: 1, fraction: 0 },
   ...overrides,
 });
 
@@ -185,7 +185,7 @@ const STATS = (): BibleStats => ({
   marks: 3,
   highlights: 2,
   bookmarks: 1,
-  position: { book: 'Ps', chapter: 23, verse: 1 },
+  position: { book: 'Ps', chapter: 23, verse: 1, fraction: 0 },
   last_read_at: '2026-10-03T06:00:00',
   window: {},
 });
@@ -349,7 +349,7 @@ describe('Bible page', () => {
 
     await screen.findByTestId('bible-chapter-heading');
     await waitFor(() =>
-      expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 1 })
+      expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'John', chapter: 3, verse: 1 }))
     );
     expect(mocked.recordBibleEvent).toHaveBeenCalledWith('chapter_complete', 'John 3');
   });
@@ -1194,7 +1194,7 @@ describe('resuming where the reader left off', () => {
     fireEvent.scroll(scrollerEl);
 
     await waitFor(
-      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 })),
       { timeout: 1500 },
     );
   });
@@ -1208,7 +1208,7 @@ describe('resuming where the reader left off', () => {
     scrollerEl.scrollTop = 200;
     fireEvent.scroll(scrollerEl);
     await waitFor(
-      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 })),
       { timeout: 1500 },
     );
 
@@ -1216,7 +1216,9 @@ describe('resuming where the reader left off', () => {
     await screen.findByTestId('bible-today');
     fireEvent.click(screen.getByTestId('bible-tab-read'));
 
-    await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
+    // Back at exactly where the reader stopped: restoring the saved fraction
+    // (0.56 into the verse) lands on scrollTop 200, not the verse's top edge.
+    await waitFor(() => expect(scroller().scrollTop).toBe(200));
   });
 
   it('does not drag the reader back to a verse link on a tab switch', async () => {
@@ -1229,7 +1231,7 @@ describe('resuming where the reader left off', () => {
     scrollerEl.scrollTop = 200;
     fireEvent.scroll(scrollerEl);
     await waitFor(
-      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'Ps', chapter: 23, verse: 3 }),
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 })),
       { timeout: 1500 },
     );
 
@@ -1237,8 +1239,99 @@ describe('resuming where the reader left off', () => {
     await screen.findByTestId('bible-today');
     fireEvent.click(screen.getByTestId('bible-tab-read'));
 
-    // Back at verse 3: the tab switch must not re-apply the link's verse.
-    await waitFor(() => expect(scroller().scrollTop).toBe(200 - 56));
+    // Back at exactly where the reader stopped (not verse 2 from the link, not the verse's top edge).
+    await waitFor(() => expect(scroller().scrollTop).toBe(200));
+  });
+
+  it('lands back on the named verse when the same reference is tapped again', async () => {
+    mocked.getBibleState.mockResolvedValue(STATE({ position: { book: 'Ps', chapter: 23, verse: 3 } }));
+    mocked.searchBible.mockResolvedValue({
+      version: 'kjv',
+      query: 'shepherd',
+      results: [
+        {
+          osis: 'Ps',
+          book_name: 'Psalms',
+          chapter: 23,
+          verse: 2,
+          reference: 'Ps 23:2',
+          text: 'He maketh me to lie down in green pastures.',
+        },
+      ],
+      count: 1,
+    });
+    renderScrolled('/bible?ref=Ps%2023:2');
+
+    // The link lands on verse 2, the reader reads on to verse 3 and it is saved.
+    await screen.findByTestId('bible-chapter-heading');
+    await waitFor(() => expect(scroller().scrollTop).toBe(100 - 56));
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+    await waitFor(
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 })),
+      { timeout: 1500 },
+    );
+
+    // A fresh search brings up the same reference and the reader taps it again.
+    await openPanel('bible-browse-open');
+    fireEvent.change(screen.getByTestId('bible-ref-input'), { target: { value: 'shepherd' } });
+    fireEvent.click(screen.getByTestId('bible-ref-go'));
+    const results = await screen.findByTestId('bible-search-results');
+    await waitFor(() => expect(results).toHaveTextContent('Ps 23:2'));
+    fireEvent.click(within(results).getByText('Ps 23:2'));
+
+    // Tapping it must take the reader back to the named verse, not leave them parked
+    // at verse 3 with the link on screen doing nothing.
+    await waitFor(() => expect(scroller().scrollTop).toBe(100 - 56));
+  });
+
+  it('opens the chapter exactly where the reader stopped, partway through the verse', async () => {
+    mocked.getBibleState.mockResolvedValue(
+      STATE({ position: { book: 'Ps', chapter: 23, verse: 3, fraction: 0.44 } }),
+    );
+    renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    // Verse 3 occupies 200..300; the reader's top edge stopped 0.44 into it (244). The 56px inset pulls back to 188.
+    await waitFor(() => expect(scroller().scrollTop).toBe(200 + 44 - 56));
+  });
+
+  it('saves the place when the reader leaves before the scroll settles', async () => {
+    const { unmount } = renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    await settle();
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+    await settle();
+
+    unmount();
+
+    expect(mocked.putBibleState).toHaveBeenCalledWith(
+      expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 }),
+    );
+  });
+
+  it('saves the place when the document is hidden, even before the scroll settles', async () => {
+    renderScrolled();
+
+    await screen.findByTestId('bible-chapter-heading');
+    await settle();
+    const scrollerEl = scroller();
+    scrollerEl.scrollTop = 200;
+    fireEvent.scroll(scrollerEl);
+    await settle();
+
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: originalVisibility });
+
+    expect(mocked.putBibleState).toHaveBeenCalledWith(
+      expect.objectContaining({ book: 'Ps', chapter: 23, verse: 3 }),
+    );
   });
 
   it('writes the verse of the chapter on screen, not the one saved elsewhere', async () => {
@@ -1250,9 +1343,9 @@ describe('resuming where the reader left off', () => {
 
     await screen.findByTestId('bible-chapter-heading');
     await waitFor(
-      () => expect(mocked.putBibleState).toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 1 }),
+      () => expect(mocked.putBibleState).toHaveBeenCalledWith(expect.objectContaining({ book: 'John', chapter: 3, verse: 1 })),
       { timeout: 3500 },
     );
-    expect(mocked.putBibleState).not.toHaveBeenCalledWith({ book: 'John', chapter: 3, verse: 3 });
+    expect(mocked.putBibleState).not.toHaveBeenCalledWith(expect.objectContaining({ book: 'John', chapter: 3, verse: 3 }));
   });
 });

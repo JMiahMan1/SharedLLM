@@ -122,8 +122,9 @@ function jumpTo(container: HTMLElement, top: number) {
 function BibleReaderPane({
   state,
   resumePositionRef,
-  honoredVerseRef,
+  honoredSeqRef,
   requestedRef,
+  requestedSeq,
   onOpenRef,
   onRequestRef,
   marks,
@@ -143,12 +144,15 @@ function BibleReaderPane({
    */
   resumePositionRef: { current: BiblePosition | null };
   /**
-   * The requested reference whose named verse has already been landed on. Kept
-   * by the parent so a remount (a tab switch) resumes the reader's scrolled
-   * place rather than jumping back to the link they arrived by.
+   * The identity of the arrival whose named verse has already been landed on.
+   * Kept by the parent so a remount (a tab switch) resumes the reader's
+   * scrolled place rather than jumping back to the link they arrived by.
+   * Numbered, so asking for the same reference again is a new arrival.
    */
-  honoredVerseRef: { current: string | null };
+  honoredSeqRef: { current: number | null };
   requestedRef: string | null;
+  /** Count of explicit requests (search hits, cross-reference taps, Go). */
+  requestedSeq: number;
   onOpenRef: (ref: string) => void;
   onRequestRef: (ref: string) => void;
   marks: BibleMark[];
@@ -167,6 +171,14 @@ function BibleReaderPane({
   const [position, setPosition] = useState<BiblePosition>(
     requestedRef ? { book: 'Gen', chapter: 1, verse: 1 } : state.position ?? { book: 'Gen', chapter: 1, verse: 1 }
   );
+  // The verse under the reader's eye, keyed by the chapter it belongs to, so the
+  // passage pill reads "Psalms 23:3" and follows the page instead of freezing
+  // wherever the restore happened to land. A turned page falls back to verse 1
+  // until the scroll (or the restore) catches up.
+  const [tracked, setTracked] = useState<{ key: string; verse: number } | null>(() => {
+    const seed = requestedRef ? { book: 'Gen', chapter: 1, verse: 1 } : state.position ?? { book: 'Gen', chapter: 1, verse: 1 };
+    return { key: `${seed.book} ${seed.chapter}`, verse: seed.verse };
+  });
   const [input, setInput] = useState(requestedRef ?? chapterRef(position));
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [activeVerse, setActiveVerse] = useState<BibleVerse | null>(null);
@@ -291,15 +303,21 @@ function BibleReaderPane({
       ),
     [studyData],
   );
-  const displayPosition: BiblePosition = shownChapter && !shownChapter.whole_book
-    ? { book: shownChapter.book, chapter: shownChapter.chapter_start, verse: position.verse }
+  const shownKey =
+    shownChapter && !shownChapter.whole_book ? `${shownChapter.book} ${shownChapter.chapter_start}` : null;
+  const trackedVerse = shownKey && tracked?.key === shownKey ? tracked.verse : 1;
+  const displayPosition: BiblePosition = shownKey && shownChapter
+    ? { book: shownChapter.book, chapter: shownChapter.chapter_start, verse: trackedVerse }
     : position;
 
   // Landing on a chapter puts the reader back where they were: a reference that
   // names a verse (a linked passage, a search hit, a cross-reference) lands on
   // that verse; otherwise the saved place in this chapter, or the top of it.
+  // The request counter is part of the key: without it, asking for the same
+  // reference again produces the same key and React never re-runs the effect,
+  // so a second tap on a search hit did nothing.
   const restoreKey = shownChapter && !shownChapter.whole_book
-    ? `${shownChapter.book} ${shownChapter.chapter_start} ${requestedRef ?? ''}`
+    ? `${shownChapter.book} ${shownChapter.chapter_start} ${requestedRef ?? ''} @${requestedSeq}`
     : null;
   const restoredKey = useRef<string | null>(null);
   useEffect(() => {
@@ -313,31 +331,55 @@ function BibleReaderPane({
       return undefined;
     }
     const shown = shownChapter!;
-    // A reference's named verse is honored once, then the reader's own
+    // A tap that names a verse is honored once, then the reader's own
     // scrolling is the truth: otherwise a tab switch would drag them back to
-    // the link they arrived by instead of the verse they read on from.
-    const linkIsNew = Boolean(requestedRef && requestedRef !== honoredVerseRef.current);
-    const linked = linkIsNew ? verseIn(requestedRef) : null;
+    // the link they arrived by instead of the verse they read on from. Each
+    // openRef bump is a fresh arrival that names its verse again.
+    const linkIsNew = Boolean(requestedRef && honoredSeqRef.current !== requestedSeq);
+    const linked = linkIsNew ? verseIn(requestedRef!) : null;
     const resume = resumePositionRef.current;
     const sameChapter = Boolean(
       resume && resume.book === shown.book && resume.chapter === shown.chapter_start
     );
     const verse = linked ?? (sameChapter ? resume!.verse : 1);
-    if (linked !== null) honoredVerseRef.current = requestedRef;
-    resumePositionRef.current = { book: shown.book, chapter: shown.chapter_start, verse };
+    const fraction = linked ? 0 : sameChapter ? (resume!.fraction ?? 0) : 0;
+    if (linked !== null) honoredSeqRef.current = requestedSeq;
+    setTracked({ key: `${shown.book} ${shown.chapter_start}`, verse });
+    resumePositionRef.current = { book: shown.book, chapter: shown.chapter_start, verse, fraction };
     lastSavedVerse.current = verse;
     // A frame for the chapter to lay out before its verses can be measured.
     const frame = requestAnimationFrame(() => {
       const boxes = measureVerses(container);
       if (!boxes.length) return;
-      const top = verse > 1 ? scrollTopFor(boxes, { chapter: shown.chapter_start, verse, fraction: 0 }) : 0;
-      if (top !== null) jumpTo(container, (top ?? 0) - (verse > 1 ? READER_TOP_INSET : 0));
+      // The fraction was measured at the reading line (below the sticky passage
+      // bar), so the content offset that reproduces it sits READER_TOP_INSET
+      // above where the bar starts. jumpTo clamps at 0 for verse 1.
+      const top = scrollTopFor(boxes, { chapter: shown.chapter_start, verse, fraction });
+      if (top !== null) jumpTo(container, top - READER_TOP_INSET);
       restoredKey.current = restoreKey;
     });
     return () => cancelAnimationFrame(frame);
     // `resumePositionRef` is a ref: it is read inside, not a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [passage, restoreKey, requestedRef, parallel, isFetching]);
+  }, [passage, restoreKey, requestedRef, requestedSeq, parallel, isFetching]);
+
+  // Saving now rather than after the settle delay: the scroll debounce writes
+  // once the reader pauses, so flicking away (back to another Jarvis page, back
+  // to another app) before that would drop the place. This is the same PUT
+  // /state the debounce makes; it only fires when a fresher position is
+  // pending. Fires before React's cleanup; never updates lastSavedVerse, the
+  // debounce owns that.
+  const flush = () => {
+    const resume = resumePositionRef.current;
+    if (!resume?.book || !resume.chapter || !resume.verse) return;
+    if (resume.verse === lastSavedVerse.current) return;
+    void api.putBibleState({
+      book: resume.book,
+      chapter: resume.chapter,
+      verse: resume.verse,
+      verse_fraction: resume.fraction ?? 0,
+    });
+  };
 
   // As the reader scrolls, the verse under the top edge becomes the place the
   // next open resumes from. Saved only after the scroll settles, so flicking
@@ -348,20 +390,25 @@ function BibleReaderPane({
     if (!container) return undefined;
     let timer = 0;
     let frame = 0;
+    const key = `${shownChapter.book} ${shownChapter.chapter_start}`;
     const onScroll = () => {
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         const anchor = anchorAt(measureVerses(container), container.scrollTop + READER_TOP_INSET);
         if (!anchor) return;
-        resumePositionRef.current = { book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse };
+        resumePositionRef.current = { book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse, fraction: anchor.fraction };
         if (anchor.chapter !== shownChapter.chapter_start) return;
         if (anchor.verse === lastSavedVerse.current) return;
+        setTracked((prev) => {
+          if (prev?.key === key && prev.verse === anchor.verse) return prev;
+          return { key, verse: anchor.verse };
+        });
         window.clearTimeout(timer);
         timer = window.setTimeout(() => {
           if (anchor.verse === lastSavedVerse.current) return;
           lastSavedVerse.current = anchor.verse;
-          void api.putBibleState({ book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse });
+          void api.putBibleState({ book: shownChapter.book, chapter: anchor.chapter, verse: anchor.verse, verse_fraction: anchor.fraction });
         }, SCROLL_SETTLE_MS);
       });
     };
@@ -370,11 +417,24 @@ function BibleReaderPane({
       window.clearTimeout(timer);
       cancelAnimationFrame(frame);
       container.removeEventListener('scroll', onScroll);
+      flush();
     };
     // `resumePositionRef` is a ref (written as the reader scrolls, never a
     // dependency), so scrolling does not re-subscribe the listener.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownChapter, parallel]);
+
+  // Away from the reading: another Jarvis page unmounts this pane, and another
+  // app hides the document. Either way the place must be written now, not
+  // after the settle the reader may never give us.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!passage || !shownChapter || shownChapter.whole_book) return;
@@ -393,6 +453,7 @@ function BibleReaderPane({
         book: shownChapter.book,
         chapter: shownChapter.chapter_start,
         verse: inThisChapter ? resume!.verse : 1,
+        verse_fraction: inThisChapter ? resume!.fraction ?? 0 : 0,
       });
       void api.recordBibleEvent(
         'chapter_complete',
@@ -796,13 +857,22 @@ export default function Bible() {
     if (asked === 'devotional') return 'today';
     return TAB_IDS.includes(asked as Tab) ? (asked as Tab) : 'read';
   });
+  // A counter for every explicit request to open a reference. Scroll tracking
+  // and chapter turns reach the pane through requestRef without bumping this,
+  // so the reader's own scrolling is never overruled by a remount. Requests
+  // made by tapping something (a search hit, a cross-reference, the Go button)
+  // come through openRef, and the bump is what lets tapping the same link
+  // twice land on its verse each time instead of the first tap's scrolled place.
+  const [requestedSeq, setRequestedSeq] = useState(0);
   const [requestedRef, setRequestedRef] = useState<string | null>(searchParams.get('ref'));
   // Where Read was last left: the verse under the reader's eye, kept across tab
   // switches (which unmount and remount the pane) so returning lands on it.
   const resumePosition = useRef<BiblePosition | null>(null);
-  // The reference whose named verse has already been honored, so a return to
-  // Read resumes where the reader scrolled instead of re-jumping to the link.
-  const honoredVerse = useRef<string | null>(null);
+  // The identity (the openRef counter) of the requested reference whose named
+  // verse has already been honored, so a return to Read resumes where the
+  // reader scrolled instead of re-jumping to the link. Numbered requests, so
+  // tapping the same reference again counts as a new arrival.
+  const honoredSeq = useRef<number | null>(null);
 
   const {
     data: stateData,
@@ -877,6 +947,7 @@ export default function Bible() {
       void trigger('light');
       setSearchParams({ ref });
       setRequestedRef(ref);
+      setRequestedSeq((seq) => seq + 1);
       setTab('read');
     },
     [setSearchParams, trigger]
@@ -994,7 +1065,8 @@ export default function Bible() {
               key={stateData.username}
               state={stateData}
               resumePositionRef={resumePosition}
-              honoredVerseRef={honoredVerse}
+              requestedSeq={requestedSeq}
+              honoredSeqRef={honoredSeq}
               requestedRef={requestedRef}
               onOpenRef={openRef}
               onRequestRef={requestRef}
