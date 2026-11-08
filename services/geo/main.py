@@ -1080,6 +1080,9 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     child_info = (await _guardian_children_cached()).get(person)
     if child_info and child_info.get("display_name"):
         name = child_info["display_name"]
+    # People sharing this drive do not need a per-person notice for the
+    # arrival or departure they just experienced themselves.
+    co_travelers = await _co_travelers(r, person)
     if kind == "arrived":
         title, body = f"{name} arrived at {zone['name']}", ""
     else:
@@ -1105,7 +1108,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
             child_label = child_info.get("display_name") or name
             geo_title = f"{child_label} arrived at {zone['name']}" if kind == "arrived" else f"{child_label} left {zone['name']}"
             for parent in child_info.get("parents") or []:
-                if parent == person:
+                if parent == person or parent in co_travelers:
                     continue
                 notified_parents.add(parent)
                 await _send_notice(notify.notice(
@@ -1118,7 +1121,7 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     place = await _place_alert(r, zone["entity_id"])
     chosen = set(place.get("notify") or []) if place.get("important") else set()
     for viewer in await _alert_recipients(r):
-        if viewer == person or viewer in notified_parents or not await _viewer_may_see(viewer, person):
+        if viewer == person or viewer in notified_parents or viewer in co_travelers or not await _viewer_may_see(viewer, person):
             continue
         if place.get("important") and (not chosen or viewer in chosen):
             await _send_notice(notify.notice(
@@ -2314,10 +2317,6 @@ def group_shared_trips(trips: list[dict]) -> list[dict]:
         if t1.get("shared_manually"):
             t1["is_shared"] = bool(t1.get("shared_with"))
             continue
-        t1_start = float(t1.get("start_time", 0))
-        t1_end = float(t1.get("end_time", t1_start))
-        t1_s_loc = t1.get("start_location") or {}
-        t1_e_loc = t1.get("end_location") or {}
         shared_with = []
 
         for j in range(n):
@@ -2327,32 +2326,7 @@ def group_shared_trips(trips: list[dict]) -> list[dict]:
             if t1.get("user_id") == t2.get("user_id"):
                 continue
 
-            t2_start = float(t2.get("start_time", 0))
-            t2_end = float(t2.get("end_time", t2_start))
-            t2_s_loc = t2.get("start_location") or {}
-            t2_e_loc = t2.get("end_location") or {}
-
-            time_close = abs(t1_start - t2_start) <= 900 and abs(t1_end - t2_end) <= 900
-            if not time_close:
-                overlap = max(0.0, min(t1_end, t2_end) - max(t1_start, t2_start))
-                dur = max(60.0, min(t1_end - t1_start, t2_end - t2_start))
-                time_close = (overlap / dur) >= 0.4
-
-            if not time_close:
-                continue
-
-            s_dist = _haversine_distance(
-                t1_s_loc.get("latitude", 0), t1_s_loc.get("longitude", 0),
-                t2_s_loc.get("latitude", 0), t2_s_loc.get("longitude", 0),
-            )
-            e_dist = _haversine_distance(
-                t1_e_loc.get("latitude", 0), t1_e_loc.get("longitude", 0),
-                t2_e_loc.get("latitude", 0), t2_e_loc.get("longitude", 0),
-            )
-            same_s_name = bool(t1_s_loc.get("name") and t1_s_loc.get("name") == t2_s_loc.get("name") and not str(t1_s_loc.get("name", "")).startswith("Location ("))
-            same_e_name = bool(t1_e_loc.get("name") and t1_e_loc.get("name") == t2_e_loc.get("name") and not str(t1_e_loc.get("name", "")).startswith("Location ("))
-
-            if (s_dist <= 800 or same_s_name) and (e_dist <= 800 or same_e_name):
+            if _trips_related(t1, t2):
                 shared_with.append({
                     "user_id": t2.get("user_id"),
                     "user_name": t2.get("user_name") or t2.get("user_id", "").title(),
@@ -2370,6 +2344,132 @@ def group_shared_trips(trips: list[dict]) -> list[dict]:
             t1["shared_with"] = []
 
     return trips
+
+
+# How far back a finished trip may reach and still count as "the trip we just
+# made" when presence notices fire (they fire minutes after the stop).
+RECENT_TRIP_WINDOW_S = 2 * 60 * 60
+
+
+def _trip_end(t: dict) -> float:
+    return float(t.get("end_time") or t.get("last_moving_time") or t.get("last_point_time") or t.get("start_time") or 0)
+
+
+def _trips_related(t1: dict, t2: dict) -> bool:
+    """Whether two trips are one drive: the pairwise criteria
+    ``group_shared_trips`` uses (start together, end together -- or mostly
+    overlapping -- and the same route)."""
+    t1_start = float(t1.get("start_time", 0))
+    t1_end = _trip_end(t1) or t1_start
+    t2_start = float(t2.get("start_time", 0))
+    t2_end = _trip_end(t2) or t2_start
+    t1_s_loc = t1.get("start_location") or {}
+    t1_e_loc = t1.get("end_location") or {}
+    t2_s_loc = t2.get("start_location") or {}
+    t2_e_loc = t2.get("end_location") or {}
+
+    time_close = abs(t1_start - t2_start) <= 900 and abs(t1_end - t2_end) <= 900
+    if not time_close:
+        overlap = max(0.0, min(t1_end, t2_end) - max(t1_start, t2_start))
+        dur = max(60.0, min(t1_end - t1_start, t2_end - t2_start))
+        time_close = (overlap / dur) >= 0.4
+
+    if not time_close:
+        return False
+
+    s_dist = _haversine_distance(
+        t1_s_loc.get("latitude", 0), t1_s_loc.get("longitude", 0),
+        t2_s_loc.get("latitude", 0), t2_s_loc.get("longitude", 0),
+    )
+    e_dist = _haversine_distance(
+        t1_e_loc.get("latitude", 0), t1_e_loc.get("longitude", 0),
+        t2_e_loc.get("latitude", 0), t2_e_loc.get("longitude", 0),
+    )
+    same_s_name = bool(t1_s_loc.get("name") and t1_s_loc.get("name") == t2_s_loc.get("name") and not str(t1_s_loc.get("name", "")).startswith("Location ("))
+    same_e_name = bool(t1_e_loc.get("name") and t1_e_loc.get("name") == t2_e_loc.get("name") and not str(t1_e_loc.get("name", "")).startswith("Location ("))
+
+    return (s_dist <= 800 or same_s_name) and (e_dist <= 800 or same_e_name)
+
+
+def _trip_shared_ids(trip: dict) -> set[str]:
+    return {str(s.get("user_id") or "") for s in (trip.get("shared_with") or []) if isinstance(s, dict)}
+
+
+async def _trip_being_made(r, username: str) -> dict | None:
+    """The trip ``username`` is on right now, or the one they finished within
+    the last two hours (presence notices fire minutes after the stop)."""
+    raw = await r.get(f"geo:active_trip:{username}")
+    if raw:
+        try:
+            trip = json.loads(raw)
+            trip.setdefault("end_time", _trip_end(trip))
+            return trip
+        except ValueError:
+            pass
+    since = time.time() - RECENT_TRIP_WINDOW_S
+    try:
+        ids = await r.zrevrangebyscore(f"geo:trips:user:{username}", "+inf", since, start=0, num=1)
+    except Exception:
+        return None
+    for tid in ids or []:
+        raw = await r.get(f"geo:trip:{tid}")
+        if raw:
+            with contextlib.suppress(ValueError):
+                return json.loads(raw)
+    return None
+
+
+async def _co_travelers(r, person: str) -> set[str]:
+    """Everyone on the same trip as ``person`` right now (or who finished the
+    same drive within the last two hours), plus riders named on that trip.
+    Used to skip per-person arrival notices for people sharing the drive."""
+    mine = await _trip_being_made(r, person)
+    if mine is None:
+        return set()
+    co = {u for u in _trip_shared_ids(mine) if u and u != person}
+
+    # People who are on an active trip alongside this person's.
+    try:
+        keys = await r.keys("geo:active_trip:*")
+    except Exception:
+        keys = []
+    for key in keys or []:
+        if isinstance(key, bytes):
+            key = key.decode()
+        other = key.split("geo:active_trip:")[-1]
+        if other == person or other in co:
+            continue
+        raw = await r.get(key)
+        if not raw:
+            continue
+        try:
+            theirs = json.loads(raw)
+        except ValueError:
+            continue
+        theirs.setdefault("end_time", _trip_end(theirs))
+        if _trips_related(mine, theirs) or person in _trip_shared_ids(theirs):
+            co.add(other)
+
+    # People whose drive already finalized inside the window.
+    since = time.time() - RECENT_TRIP_WINDOW_S
+    try:
+        ids = await r.zrevrangebyscore("geo:trips:all", "+inf", since, start=0, num=200)
+    except Exception:
+        ids = []
+    for tid in ids or []:
+        raw = await r.get(f"geo:trip:{tid}")
+        if not raw:
+            continue
+        try:
+            trip = json.loads(raw)
+        except ValueError:
+            continue
+        other = str(trip.get("user_id") or "")
+        if not other or other == person or other in co:
+            continue
+        if _trips_related(mine, trip):
+            co.add(other)
+    return co
 
 
 # Address keys Nominatim uses for named places / businesses (not streets).

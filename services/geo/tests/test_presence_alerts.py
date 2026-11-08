@@ -1,4 +1,5 @@
 """Arrival / departure notices from HA zones, with an ETA home on departure."""
+import json
 import time
 
 import pytest
@@ -11,7 +12,7 @@ WORK = {"entity_id": "zone.work", "name": "Work", "latitude": 33.30, "longitude"
 
 class R:
     def __init__(self):
-        self.kv, self.h = {}, {}
+        self.kv, self.h, self.z = {}, {}, {}
 
     async def get(self, k):
         return self.kv.get(k)
@@ -35,7 +36,28 @@ class R:
         self.h.get(k, {}).pop(f, None)
 
     async def zrevrange(self, k, a, b):
-        return []
+        items = sorted(self.z.get(k, {}).items(), key=lambda kv: kv[1], reverse=True)
+        members = [m for m, _ in items]
+        return members[a:b + 1]
+
+    async def zadd(self, k, mapping):
+        zs = self.z.setdefault(k, {})
+        zs.update({m: float(s) for m, s in mapping.items()})
+        return len(mapping)
+
+    async def zrevrangebyscore(self, k, maxv, minv, start=None, num=None):
+        maxf = float(maxv)
+        minf = float(minv)
+        items = [(m, s) for m, s in self.z.get(k, {}).items() if minf <= s <= maxf]
+        items.sort(key=lambda kv: kv[1], reverse=True)
+        members = [m for m, _ in items]
+        if start is not None and num is not None:
+            members = members[start:start + num]
+        return members
+
+    async def keys(self, pattern):
+        import fnmatch
+        return [k for k in self.kv if fnmatch.fnmatchcase(k, pattern)]
 
 
 class _Sent(list):
@@ -368,3 +390,65 @@ async def test_a_phone_that_goes_quiet_after_arriving_is_counted_by_the_later_lo
     world.clear()
     assert await geo._presence_transition(r, "michele", 33.1668, -111.5646, t + 900) == []
     assert world == []
+
+
+def _active_trip(user, start):
+    return json.dumps({
+        "id": f"trip_{user}_{int(start)}",
+        "user_id": user,
+        "user_name": user.title(),
+        "start_time": start,
+        "last_moving_time": start + 600,
+        "last_point_time": start + 600,
+        "start_location": {"name": "Work", "latitude": 33.30, "longitude": -111.80},
+        "end_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
+        "distance_miles": 14.2,
+        "status": "in_progress",
+        "vehicle_name": None,
+    })
+
+
+async def _drive_home_arrive(r, person, t):
+    await geo._presence_transition(r, person, 33.25, -111.70, t)             # away, silent
+    await geo._presence_transition(r, person, 33.1668, -111.5646, t + 600)   # home
+    await geo._presence_transition(r, person, 33.1668, -111.5646, t + 750)   # still home
+
+
+@pytest.mark.asyncio
+async def test_a_shared_drive_does_not_notify_each_traveler(world):
+    """Two people on the same drive home: nobody gets an arrival notice for
+    the person they rode with."""
+    r = R()
+    t = time.time()
+    for user in ("jeremiah", "michele"):
+        r.kv[f"geo:active_trip:{user}"] = _active_trip(user, t - 1800)
+    await _drive_home_arrive(r, "jeremiah", t)
+    assert world == []
+
+
+@pytest.mark.asyncio
+async def test_a_solo_drive_still_notifies_the_family(world):
+    r = R()
+    t = time.time()
+    r.kv["geo:active_trip:jeremiah"] = _active_trip("jeremiah", t - 1800)   # michele not driving
+    await _drive_home_arrive(r, "jeremiah", t)
+    assert ("michele", "Jeremiah arrived at Home", "") in world
+
+
+@pytest.mark.asyncio
+async def test_a_shared_drive_whose_trip_already_finalized_still_suppresses(world):
+    r = R()
+    t = time.time()
+    mine = json.loads(_active_trip("jeremiah", t - 1800))
+    theirs = json.loads(_active_trip("michele", t - 1790))
+    for trip in (mine, theirs):
+        trip.pop("last_moving_time")
+        trip.pop("last_point_time")
+        trip["end_time"] = trip["start_time"] + 600
+        trip["status"] = "completed"
+    for trip in (mine, theirs):
+        r.kv[f"geo:trip:{trip['id']}"] = json.dumps(trip)
+        await r.zadd(f"geo:trips:user:{trip['user_id']}", {trip["id"]: trip["start_time"]})
+        await r.zadd("geo:trips:all", {trip["id"]: trip["start_time"]})
+    await _drive_home_arrive(r, "jeremiah", t)
+    assert ("michele", "Jeremiah arrived at Home", "") not in world
