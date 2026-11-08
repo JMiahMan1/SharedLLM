@@ -10,6 +10,8 @@ import type { ScreenRules } from '../../types/api';
 interface NotificationLockCardProps {
   username: string;
   name: string;
+  /** Override when the same card renders more than once on a page (e.g. per device). */
+  testId?: string;
 }
 
 /**
@@ -19,7 +21,7 @@ interface NotificationLockCardProps {
  * (SOS, low battery, school arrivals) are locked beyond reach: they cannot
  * be allowed here at all.
  */
-export default function NotificationLockCard({ username, name }: NotificationLockCardProps) {
+export default function NotificationLockCard({ username, name, testId = 'guardian-notification-locks-card' }: NotificationLockCardProps) {
   const queryClient = useQueryClient();
 
   const { data: status, isLoading: statusLoading } = useQuery(statusQuery(username));
@@ -61,7 +63,7 @@ export default function NotificationLockCard({ username, name }: NotificationLoc
       title="Notice settings"
       icon={Bell}
       tone="text-sky-300"
-      testId="guardian-notification-locks-card"
+      testId={testId}
       isLoading={statusLoading}
     >
       <div className="space-y-3 text-xs">

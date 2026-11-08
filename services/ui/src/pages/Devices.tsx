@@ -20,6 +20,7 @@ import {
 } from '../lib/deviceKind';
 import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
+import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -880,22 +881,28 @@ function DeviceCard({
   device,
   members = [],
   isAdmin = true,
+  minorOwners,
   onRefresh,
   onOpenDetails,
 }: {
   device: MdmDevice;
   members?: MdmMember[];
   isAdmin?: boolean;
+  /** Minor owners of this family (username → display name), so a child's phone shows their notice settings. */
+  minorOwners?: Map<string, string>;
   onRefresh: () => void;
   onOpenDetails: (device: MdmDevice) => void;
 }) {
   const [showApps, setShowApps] = useState(false);
+  const [showNotices, setShowNotices] = useState(false);
   const esphome = isEsphomeDevice(device);
   // The gateway refuses update/wipe for a key nothing owns (422) and the
   // screen-time routes need a real owner, so a device with no owner can only be
   // inspected - the owner-scoped actions are hidden rather than left to fail.
   const owner = device.owner_username ?? '';
   const hasOwner = Boolean(owner);
+  const ownedByMinor = Boolean(isAdmin && owner && minorOwners?.has(owner));
+  const minorName = (owner && minorOwners?.get(owner)) || owner;
   const noun = deviceNoun(device.kind);
   const Icon = KIND_ICON[(device.kind || '').toLowerCase()] ?? (esphome ? Cpu : Smartphone);
   const guard = device.capabilities?.guard;
@@ -1103,6 +1110,12 @@ function DeviceCard({
                   className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
                   App control
                 </button>
+                {ownedByMinor && (
+                  <button type="button" onClick={() => setShowNotices((v) => !v)} aria-expanded={showNotices}
+                    className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-notices-toggle-${device.device_key}`}>
+                    <Bell size={14} /> Notice settings
+                  </button>
+                )}
               </>
             )}
             <button
@@ -1133,6 +1146,11 @@ function DeviceCard({
             )}
           </div>
           {hasOwner && showApps && <AppControls owner={owner} />}
+          {ownedByMinor && showNotices && (
+            <div className="space-y-2 border-t border-white/5 pt-2" data-testid={`mdm-notice-settings-${device.device_key}`}>
+              <NotificationLockCard username={owner} name={minorName} testId={`mdm-notice-settings-card-${device.device_key}`} />
+            </div>
+          )}
           {!hasOwner && (
             <p className="text-[11px] text-amber-200/90" data-testid={`mdm-no-owner-${device.device_key}`}>
               Assign an owner above to push updates, lock or wipe this {noun}.
@@ -1340,6 +1358,7 @@ export default function Devices() {
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
   const myDevices = useQuery({ queryKey: ['my-companion-devices'], queryFn: () => api.getCompanionDevices(), enabled: !isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
+  const family = useQuery({ queryKey: ['family-roster'], queryFn: () => api.getFamily(), enabled: isAdmin, retry: false, staleTime: 10 * 60 * 1000 });
 
   if (!isAdmin) {
     return (
@@ -1395,6 +1414,12 @@ export default function Devices() {
 
   const refused = isAxiosError(inventory.error) && inventory.error.response?.status === 403;
   const members = inventory.data?.members ?? [];
+  // Minors in the family (username → display name): their devices show the
+  // parent-side notice settings next to App control.
+  const minorOwners = new Map<string, string>();
+  for (const m of family.data ?? []) {
+    if (m.is_minor) minorOwners.set(m.username, m.display_name || m.username);
+  }
 
   return (
     <div className={PAGE}>
@@ -1425,6 +1450,7 @@ export default function Devices() {
               device={d}
               members={members}
               isAdmin={true}
+              minorOwners={minorOwners}
               onRefresh={() => queryClient.invalidateQueries({ queryKey: ['mdm-devices'] })}
               onOpenDetails={(dev) => setDetailDevice(dev)}
             />
