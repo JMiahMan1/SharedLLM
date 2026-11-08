@@ -2,8 +2,8 @@ package com.jarvisos.app;
 
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.GradientDrawable;
 import android.graphics.PorterDuff;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -201,7 +201,7 @@ final class GuardScreenView {
         // code for when there is no connection.
         LinearLayout parentCard = panel(context, SHEET, 20, STROKE);
         parentCard.setPadding(dp(context, 18), dp(context, 16), dp(context, 18), dp(context, 18));
-        TextView parentLabel = smallCapsLabel(context, "PARENT UNLOCK");
+        LinearLayout parentLabel = smallCapsLabel(context, "PARENT UNLOCK");
         parentCard.addView(parentLabel);
 
         EditText user = field(context, "Parent's username");
@@ -596,7 +596,7 @@ final class GuardScreenView {
         View left = new View(context);
         left.setBackgroundColor(0xFF1E293B);
         row.addView(left, new LinearLayout.LayoutParams(0, dp(context, 1), 1f));
-        TextView value = smallCapsLabel(context, label);
+        LinearLayout value = smallCapsLabel(context, label);
         value.setPadding(dp(context, 10), 0, dp(context, 10), 0);
         row.addView(value);
         View right = new View(context);
