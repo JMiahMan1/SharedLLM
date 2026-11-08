@@ -25,8 +25,9 @@ import android.widget.TextView;
  * layout files) so the Accessibility cover ({@link GuardScreenActivity}) and
  * the full-screen lock overlay ({@link GuardOverlay}) show exactly the same
  * thing. The look follows the Family Link family of screens: one clear
- * reason, one clear next step for the child, and the parents' way in at the
- * bottom, painted dark with one accent colour per reason.
+ * reason, one clear next step for the child, and the parents' way in - as a
+ * quiet text action beside the child's buttons, and as the parent card itself
+ * at the bottom of the screen.
  *
  * Tamper mode: "A parent needs to sign in" with a parent's own Jarvis login,
  * checked by the server (only this child's parents, five tries then a wait).
@@ -53,24 +54,31 @@ final class GuardScreenView {
         void onOpenJarvis();
     }
 
-    // The Family Link palette: one deep navy canvas, one soft stroke, one
-    // accent per reason for the lock.
-    private static final int BG_TOP = 0xFF060B14;
-    private static final int BG_BOTTOM = 0xFF0D1B2E;
-    private static final int SHEET = 0xFF121C2E;
-    private static final int FIELD = 0xFF131E30;
-    private static final int STROKE = 0xFF22304A;
-    private static final int TEXT_PRIMARY = 0xFFF3F6FC;
-    private static final int TEXT_SECONDARY = 0xFFA9B4C7;
-    private static final int TEXT_FAINT = 0xFF5B6B82;
-    private static final int ERROR = 0xFFF87171;
+    // The Family Link palette: a calm mint-white canvas, one teal brand, soft
+    // tonal surfaces, dark ink, and one accent per reason for the lock.
+    private static final int BG_TOP = 0xFFF5FBF7;
+    private static final int BG_BOTTOM = 0xFFECF5EF;
+    private static final int CARD = 0xFFFFFFFF;
+    private static final int FIELD = 0xFFFFFFFF;
+    private static final int STROKE = 0xFFE2EDE6;
+    private static final int FIELD_STROKE = 0xFFD8E6DC;
+    private static final int TEXT_PRIMARY = 0xFF1B2B22;
+    private static final int TEXT_SECONDARY = 0xFF44584D;
+    private static final int TEXT_FAINT = 0xFF71867B;
+    private static final int ERROR = 0xFFBA1A1A;
 
-    private static final int AMBER = 0xFFFBBF24;
-    private static final int VIOLET = 0xFFA78BFA;
-    private static final int SKY = 0xFF38BDF8;
-    private static final int SLATE = 0xFF94A3B8;
-    private static final int GREEN = 0xFF34D399;
-    private static final int RED = 0xFFF87171;
+    private static final int TEAL = 0xFF0B6E4F;
+    private static final int TONAL = 0xFFDCEFDE;
+    private static final int ON_TONAL = 0xFF0B4C36;
+    private static final int RING_OUT = 0xFFE2F2E9;
+    private static final int RING_IN = 0xFFCFE9DA;
+
+    private static final int AMBER = 0xFF0B6E4F;   // the day's time is the default reason
+    private static final int VIOLET = 0xFF5B3BC4;
+    private static final int SKY = 0xFF0369A1;
+    private static final int SLATE = 0xFF475569;
+    private static final int GREEN = 0xFF059669;
+    private static final int RED = 0xFFBA1A1A;
 
     private GuardScreenView() {}
 
@@ -155,52 +163,60 @@ final class GuardScreenView {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(context, 26), dp(context, 34), dp(context, 26), dp(context, 30));
+        root.setPadding(dp(context, 24), dp(context, 30), dp(context, 24), dp(context, 28));
         // Swallow touches so nothing behind the lock is used (the overlay has no
         // activity to take input for it).
         root.setClickable(true);
 
-        // The hero: one tinted icon in a soft ring, the reason at a glance.
+        // The hero: one big layered illustration with the reason at a glance.
         root.addView(hero(context, iconRes, accent));
         TextView title = title(context, titleText);
         root.addView(title);
         TextView body = text(context, bodyText, 15, TEXT_SECONDARY);
         body.setMaxWidth(dp(context, 540));
-        body.setPadding(dp(context, 6), dp(context, 10), dp(context, 6), dp(context, 18));
+        body.setLineSpacing(dp(context, 2), 1.06f);
+        body.setGravity(Gravity.CENTER);
+        body.setPadding(dp(context, 4), dp(context, 10), dp(context, 4), dp(context, 20));
         root.addView(body);
 
         // The sheets are painted over the lock; the lock itself is never taken
         // down for them, so a child always has a way back.
         Sheet sheet = new Sheet(context);
 
-        // The child's one clear next step, then a way to talk to a parent in
-        // every mode: a blocked app or a denied install is exactly when a
-        // child needs to talk to one.
+        // The two big pill buttons for the child: the one clear next step, and
+        // the way to talk to a parent in every mode.
         if (appOff && pkg != null && !pkg.isEmpty()) {
-            Button askApp = primaryButton(context, accent, "Ask a parent to unblock");
-            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, sheet, pkg, appName, accent)));
+            Button askApp = primaryButton(context, TEAL, "Ask a parent to unblock");
+            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, sheet, pkg, appName, TEAL)));
             addFullWidth(root, askApp, 0);
         } else if (!tamper && !install && !permission && !bypass) {
-            Button ask = primaryButton(context, accent, "Ask for more time");
-            ask.setOnClickListener(v -> sheet.show(askCard(context, sheet, accent)));
+            Button ask = primaryButton(context, TEAL, "Ask for more time");
+            ask.setOnClickListener(v -> sheet.show(askCard(context, sheet, TEAL)));
             addFullWidth(root, ask, 0);
         }
-        Button message = ghostButton(context, "Message a parent");
-        message.setOnClickListener(v -> sheet.show(messageCard(context, sheet, SKY)));
+        Button message = tonalButton(context, "Message a parent");
+        message.setOnClickListener(v -> sheet.show(messageCard(context, sheet, TEAL)));
         addFullWidth(root, message, 12);
+
+        // A parent can't miss the way in from here either: this slides the
+        // screen down to the parent card and focuses it.
+        Button parentAction = textButton(context, "A parent can unlock");
+        addFullWidth(root, parentAction, 4);
+
         if (locked) {
             Button jarvis = textButton(context, "Open Jarvis");
             jarvis.setOnClickListener(v -> host.onOpenJarvis());
-            addFullWidth(root, jarvis, 4);
+            addFullWidth(root, jarvis, 0);
         }
 
         // A quiet marker for the adults' part of the screen.
-        root.addView(divider(context, "PARENTS", 22));
+        root.addView(divider(context, "PARENTS", 18));
 
         // A parent's own Jarvis login, checked by the server, and an offline
         // code for when there is no connection.
-        LinearLayout parentCard = panel(context, SHEET, 20, STROKE);
-        parentCard.setPadding(dp(context, 18), dp(context, 16), dp(context, 18), dp(context, 18));
+        LinearLayout parentCard = panel(context, CARD, 20, STROKE);
+        parentCard.setPadding(dp(context, 18), dp(context, 16), dp(context, 18), dp(context, 16));
+        parentCard.setElevation(dp(context, 1));
         LinearLayout parentLabel = smallCapsLabel(context, "PARENT UNLOCK");
         parentCard.addView(parentLabel);
 
@@ -245,7 +261,7 @@ final class GuardScreenView {
         error.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
 
         Handler main = new Handler(Looper.getMainLooper());
-        Button unlock = primaryButton(context, accent, "Parent unlock");
+        Button unlock = primaryButton(context, TEAL, "Parent unlock");
         unlock.setOnClickListener(v -> {
             unlock.setEnabled(false);
             unlock.setText("Checking…");
@@ -301,7 +317,7 @@ final class GuardScreenView {
         });
         addFullWidth(parentCard, useCode, 10);
         parentCard.addView(error);
-        addFullWidth(root, parentCard, 18);
+        addFullWidth(root, parentCard, 16);
 
         // The sheet sits inside the same view, over the lock, so the allowed
         // flows paint over the lock window instead of replacing it.
@@ -311,6 +327,12 @@ final class GuardScreenView {
         scroller.setBackground(new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM, new int[]{BG_TOP, BG_BOTTOM}));
         scroller.setClickable(true);
+        // "A parent can unlock" scrolls straight to the parent card and puts the
+        // cursor in the username field, so the way in is always one tap away.
+        parentAction.setOnClickListener(v -> {
+            scroller.fullScroll(View.FOCUS_DOWN);
+            user.requestFocus();
+        });
         scroller.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -335,7 +357,7 @@ final class GuardScreenView {
         Sheet(Context context) {
             this.context = context;
             layer = new FrameLayout(context);
-            layer.setBackgroundColor(0xD9000000);
+            layer.setBackgroundColor(0x66000000);
             layer.setClickable(true);
             layer.setVisibility(View.GONE);
         }
@@ -397,7 +419,7 @@ final class GuardScreenView {
 
         TextView status = statusLine(context);
         card.addView(status);
-        Button send = primaryButton(context, accent, "Send request");
+        Button send = primaryButton(context, TEAL, "Send request");
         send.setOnClickListener(v -> {
             send.setEnabled(false);
             send.setText("Sending…");
@@ -410,7 +432,7 @@ final class GuardScreenView {
                     send.setEnabled(true);
                     send.setText("Send request");
                     if (problem == null) {
-                        sheet.show(confirmation(context, sheet, accent, "Asked!",
+                        sheet.show(confirmation(context, sheet, TEAL, "Asked!",
                                 "A parent will answer soon."));
                     } else {
                         status.setTextColor(ERROR);
@@ -441,7 +463,7 @@ final class GuardScreenView {
 
         TextView status = statusLine(context);
         card.addView(status);
-        Button send = primaryButton(context, accent, "Ask a parent");
+        Button send = primaryButton(context, TEAL, "Ask a parent");
         send.setOnClickListener(v -> {
             send.setEnabled(false);
             send.setText("Asking…");
@@ -454,7 +476,7 @@ final class GuardScreenView {
                     send.setEnabled(true);
                     send.setText("Ask a parent");
                     if (problem == null) {
-                        sheet.show(confirmation(context, sheet, accent, "Asked!",
+                        sheet.show(confirmation(context, sheet, TEAL, "Asked!",
                                 "A parent will answer soon."));
                     } else {
                         status.setTextColor(ERROR);
@@ -485,7 +507,7 @@ final class GuardScreenView {
 
         TextView status = statusLine(context);
         card.addView(status);
-        Button send = primaryButton(context, accent, "Send");
+        Button send = primaryButton(context, TEAL, "Send");
         send.setOnClickListener(v -> {
             String text = message.getText().toString().trim();
             if (text.isEmpty()) {
@@ -504,7 +526,7 @@ final class GuardScreenView {
                     send.setText("Send");
                     if (problem == null) {
                         message.setText("");
-                        sheet.show(confirmation(context, sheet, accent, "Sent!",
+                        sheet.show(confirmation(context, sheet, TEAL, "Sent!",
                                 "A parent will see it in the family chat."));
                     } else {
                         status.setTextColor(ERROR);
@@ -524,7 +546,8 @@ final class GuardScreenView {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER);
         panel.setPadding(dp(context, 26), dp(context, 26), dp(context, 26), dp(context, 22));
-        panel.setBackground(rounded(context, SHEET, 24, STROKE, 1));
+        panel.setBackground(rounded(context, CARD, 24, STROKE, 1));
+        panel.setElevation(dp(context, 2));
 
         panel.addView(iconBadge(context, R.drawable.mi_check, accent, 92));
 
@@ -535,7 +558,7 @@ final class GuardScreenView {
         TextView sub = text(context, subText, 14, TEXT_SECONDARY);
         sub.setPadding(0, 0, 0, dp(context, 16));
         panel.addView(sub);
-        Button back = primaryButton(context, accent, "Back to the lock");
+        Button back = primaryButton(context, TEAL, "Back to the lock");
         back.setOnClickListener(v -> sheet.hide());
         addFullWidth(panel, back, 0);
         return panel;
@@ -546,14 +569,15 @@ final class GuardScreenView {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(context, 22), dp(context, 10), dp(context, 22), dp(context, 18));
-        card.setBackground(rounded(context, SHEET, 24, STROKE, 1));
+        card.setBackground(rounded(context, CARD, 24, STROKE, 1));
+        card.setElevation(dp(context, 2));
         grabber(card, context);
         return card;
     }
 
     private static void grabber(LinearLayout card, Context context) {
         View bar = new View(context);
-        bar.setBackground(rounded(context, 0xFF2B3A55, 2, 0, 0));
+        bar.setBackground(rounded(context, 0xFFC9D6CC, 2, 0, 0));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 40), dp(context, 4));
         lp.gravity = Gravity.CENTER_HORIZONTAL;
         lp.bottomMargin = dp(context, 14);
@@ -594,24 +618,50 @@ final class GuardScreenView {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(context, topMarginDp), 0, dp(context, 12));
         View left = new View(context);
-        left.setBackgroundColor(0xFF1E293B);
+        left.setBackgroundColor(0xFFDCE7DE);
         row.addView(left, new LinearLayout.LayoutParams(0, dp(context, 1), 1f));
         LinearLayout value = smallCapsLabel(context, label);
         value.setPadding(dp(context, 10), 0, dp(context, 10), 0);
         row.addView(value);
         View right = new View(context);
-        right.setBackgroundColor(0xFF1E293B);
+        right.setBackgroundColor(0xFFDCE7DE);
         row.addView(right, new LinearLayout.LayoutParams(0, dp(context, 1), 1f));
         return row;
     }
 
     private static LinearLayout hero(Context context, int iconRes, int accent) {
-        FrameLayout badge = iconBadge(context, iconRes, accent, 128);
         LinearLayout wrap = new LinearLayout(context);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setGravity(Gravity.CENTER);
-        wrap.setPadding(0, dp(context, 2), 0, dp(context, 18));
-        wrap.addView(badge);
+        wrap.setPadding(0, dp(context, 0), 0, dp(context, 16));
+        FrameLayout outer = new FrameLayout(context);
+        GradientDrawable outerCircle = new GradientDrawable();
+        outerCircle.setShape(GradientDrawable.OVAL);
+        outerCircle.setColor(RING_OUT);
+        outer.setBackground(outerCircle);
+        int outerSize = dp(context, 180);
+        outer.setMinimumWidth(outerSize);
+        outer.setMinimumHeight(outerSize);
+        FrameLayout inner = new FrameLayout(context);
+        GradientDrawable innerCircle = new GradientDrawable();
+        innerCircle.setShape(GradientDrawable.OVAL);
+        innerCircle.setColor(RING_IN);
+        inner.setBackground(innerCircle);
+        int innerSize = dp(context, 124);
+        inner.setMinimumWidth(innerSize);
+        inner.setMinimumHeight(innerSize);
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(iconRes);
+        icon.setColorFilter(accent, PorterDuff.Mode.SRC_IN);
+        int iconSize = dp(context, 72);
+        FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER);
+        inner.addView(icon, iconLp);
+        FrameLayout.LayoutParams innerLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER);
+        int ring = dp(context, 26);
+        innerLp.setMargins(ring, ring, ring, ring);
+        outer.addView(inner, innerLp);
+        wrap.addView(outer);
         return wrap;
     }
 
@@ -619,7 +669,7 @@ final class GuardScreenView {
         FrameLayout badge = new FrameLayout(context);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(withAlpha(accent, 0.14f));
+        circle.setColor(withAlpha(accent, 0.12f));
         badge.setBackground(circle);
         int size = dp(context, sizeDp);
         // The badges are added without layout params (LinearLayout parents
@@ -644,7 +694,7 @@ final class GuardScreenView {
         field.setTextColor(TEXT_PRIMARY);
         field.setHintTextColor(TEXT_FAINT);
         field.setPadding(dp(context, 14), dp(context, 13), dp(context, 14), dp(context, 13));
-        field.setBackground(rounded(context, FIELD, 12, STROKE, 1));
+        field.setBackground(rounded(context, FIELD, 14, FIELD_STROKE, 1));
         field.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return field;
@@ -656,11 +706,25 @@ final class GuardScreenView {
         button.setTextSize(16);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(0xFF0B1220);
-        button.setBackground(rounded(context, accent, 16, 0, 0));
-        button.setMinHeight(dp(context, 56));
+        button.setTextColor(0xFFFFFFFF);
+        button.setBackground(rounded(context, accent, 999, 0, 0));
+        button.setMinHeight(dp(context, 54));
         button.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 56)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 54)));
+        return button;
+    }
+
+    private static Button tonalButton(Context context, String label) {
+        Button button = new Button(context);
+        button.setText(label);
+        button.setTextSize(16);
+        button.setAllCaps(false);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(ON_TONAL);
+        button.setBackground(rounded(context, TONAL, 999, 0, 0));
+        button.setMinHeight(dp(context, 54));
+        button.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 54)));
         return button;
     }
 
@@ -673,11 +737,12 @@ final class GuardScreenView {
         button.setText(label);
         button.setTextSize(15);
         button.setAllCaps(false);
-        button.setTextColor(0xFFC7D0DE);
-        button.setBackground(rounded(context, 0x00000000, 16, STROKE, 1));
-        button.setMinHeight(dp(context, 52));
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(TEAL);
+        button.setBackground(rounded(context, 0x00000000, 999, TEAL, 1));
+        button.setMinHeight(dp(context, 50));
         button.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 52)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 50)));
         if (sheet != null) {
             button.setOnClickListener(v -> sheet.hide());
         }
@@ -689,7 +754,8 @@ final class GuardScreenView {
         button.setText(label);
         button.setTextSize(14);
         button.setAllCaps(false);
-        button.setTextColor(TEXT_SECONDARY);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(TEAL);
         button.setBackgroundColor(Color.TRANSPARENT);
         button.setMinHeight(dp(context, 44));
         button.setLayoutParams(new LinearLayout.LayoutParams(
@@ -713,11 +779,11 @@ final class GuardScreenView {
 
     private static void styleChip(Button button, boolean selected, int accent) {
         if (selected) {
-            button.setBackground(rounded(button.getContext(), accent, 999, 0, 0));
-            button.setTextColor(0xFF0B1220);
+            button.setBackground(rounded(button.getContext(), TEAL, 999, 0, 0));
+            button.setTextColor(0xFFFFFFFF);
             button.setTypeface(Typeface.DEFAULT_BOLD);
         } else {
-            button.setBackground(rounded(button.getContext(), FIELD, 999, STROKE, 1));
+            button.setBackground(rounded(button.getContext(), FIELD, 999, FIELD_STROKE, 1));
             button.setTextColor(TEXT_SECONDARY);
             button.setTypeface(Typeface.DEFAULT);
         }
@@ -727,7 +793,8 @@ final class GuardScreenView {
         TextView toggle = new TextView(context);
         toggle.setText(label);
         toggle.setTextSize(13);
-        toggle.setTextColor(TEXT_SECONDARY);
+        toggle.setTypeface(Typeface.DEFAULT_BOLD);
+        toggle.setTextColor(TEAL);
         toggle.setGravity(Gravity.CENTER);
         toggle.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
         toggle.setClickable(true);
@@ -742,7 +809,7 @@ final class GuardScreenView {
         view.setTypeface(Typeface.DEFAULT_BOLD);
         view.setTextColor(TEXT_PRIMARY);
         view.setGravity(Gravity.CENTER);
-        view.setPadding(0, dp(context, 2), 0, 0);
+        view.setPadding(0, dp(context, 4), 0, 0);
         return view;
     }
 
