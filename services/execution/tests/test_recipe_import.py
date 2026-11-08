@@ -46,6 +46,7 @@ class _Resp:
         self.status = status
         self.url = url
         self._body = text.encode("utf-8")
+        self.headers = {"Content-Encoding": "identity"}
 
     def get_encoding(self) -> str:
         return "utf-8"
@@ -551,3 +552,235 @@ def test_reads_the_stated_nutrition_and_leaves_out_what_is_not_a_number():
     )
     assert recipe["nutrition"] == {"calories": 350.0, "protein_g": 25.0, "fat_g": 12.5, "sodium_mg": 640.0}
     assert recipe_import.parse_recipe({"name": "Soup"}, "https://example.com/soup")["nutrition"] is None
+
+
+# --- harder-to-read pages (wp-rocket shells, CDATA, escaped blocks) --------
+
+
+RECIPE_JSON = json.dumps({"@context": "https://schema.org", "@type": "Recipe",
+                          "name": "Rocket Soup", "recipeIngredient": ["1 cup water"]})
+
+
+def test_the_charset_suffix_on_the_tag_does_not_hide_the_recipe():
+    page = f'<script type="application/ld+json; charset=UTF-8">{RECIPE_JSON}</script>'
+    recipe = recipe_import.extract_recipe(page, "https://example.com/soup")
+    assert recipe is not None
+    assert recipe["title"] == "Rocket Soup"
+
+
+def test_a_cdata_wrapped_block_is_read():
+    page = f'<script type="application/ld+json"><![CDATA[{RECIPE_JSON}]]></script>'
+    recipe = recipe_import.extract_recipe(page, "https://example.com/soup")
+    assert recipe is not None
+    assert recipe["title"] == "Rocket Soup"
+
+
+def test_an_html_escaped_block_is_read():
+    escaped = (
+        RECIPE_JSON.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("{", "&#123;").replace("}", "&#125;")
+    )
+    page = f'<script type="application/ld+json">{escaped}</script>'
+    recipe = recipe_import.extract_recipe(page, "https://example.com/soup")
+    assert recipe is not None
+    assert recipe["title"] == "Rocket Soup"
+
+
+def test_a_recipe_block_in_a_differently_typed_script_is_found():
+    page = f'<script id="recipe-data" type="application/json">{RECIPE_JSON}</script>'
+    recipe = recipe_import.extract_recipe(page, "https://example.com/soup")
+    assert recipe is not None
+    assert recipe["title"] == "Rocket Soup"
+
+
+def test_schema_org_mentioning_scripts_that_are_not_json_are_ignored():
+    page = '<script>var schemaOrgNote = "this site uses schema.org Recipe markup";</script>'
+    assert recipe_import.extract_recipe(page, "https://example.com/soup") is None
+
+
+class _SequenceSession:
+    """One fake session that answers each URL differently, wp-rocket style."""
+
+    def __init__(self, by_url):
+        self.by_url = by_url
+        self.requests: list[str] = []
+
+    def get(self, url, **kwargs):
+        self.requests.append(url)
+        resp = self.by_url.get(url)
+        if resp is None:
+            raise aiohttp.ClientError(f"unexpected URL {url}")
+        return resp
+
+
+async def test_a_rocket_shell_triggers_one_bypass_fetch(monkeypatch):
+    shell = _Resp("<html><body>wp-rocket lazy shell, nothing here</body></html>")
+    full = _Resp(PAGE, url="https://example.com/recipes/lemonade?nowprocket=1")
+    session = _SequenceSession(by_url={
+        "https://example.com/recipes/lemonade": shell,
+        "https://example.com/recipes/lemonade?nowprocket=1": full,
+    })
+
+    async def fake_get_session(host):
+        return session
+
+    monkeypatch.setattr(recipe_import, "get_session", fake_get_session)
+    result = await recipe_import.handle_recipe(_request())
+
+    assert result.status == "SUCCESS"
+    assert result.detail["recipe"]["title"] == "Best Lemonade"
+    assert session.requests == [
+        "https://example.com/recipes/lemonade",
+        "https://example.com/recipes/lemonade?nowprocket=1",
+    ]
+
+
+def test_nowprocket_appends_to_existing_query():
+    assert recipe_import._nowprocket_url("https://x.com/r?a=1") == "https://x.com/r?a=1&nowprocket=1"
+    assert recipe_import._nowprocket_url("https://x.com/r") == "https://x.com/r?nowprocket=1"
+    assert recipe_import._nowprocket_url("https://x.com/r?nowprocket=1") == "https://x.com/r?nowprocket=1"
+    assert recipe_import._nowprocket_url("https://x.com/r#frag") == "https://x.com/r?nowprocket=1"
+
+
+async def test_a_rocket_shell_with_no_bypass_page_still_fails_plainly(monkeypatch):
+    shell = _Resp("<html><body>still the shell</body></html>")
+    session = _SequenceSession(by_url={
+        "https://example.com/recipes/lemonade": shell,
+        "https://example.com/recipes/lemonade?nowprocket=1": _Resp("still nothing", url="https://example.com/recipes/lemonade?nowprocket=1"),
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1": _wp_json_resp([]),
+        "https://example.com/wp-json/wp/v2/pages?slug=lemonade&_fields=title,content&per_page=1": _wp_json_resp([]),
+    })
+
+    async def fake_get_session(host):
+        return session
+
+    monkeypatch.setattr(recipe_import, "get_session", fake_get_session)
+    result = await recipe_import.handle_recipe(_request())
+
+    assert result.status == "FAILURE"
+    assert "does not publish recipe data" in result.message
+    assert session.requests == [
+        "https://example.com/recipes/lemonade",
+        "https://example.com/recipes/lemonade?nowprocket=1",
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1",
+        "https://example.com/wp-json/wp/v2/pages?slug=lemonade&_fields=title,content&per_page=1",
+    ]
+
+
+WPRM_CARD = """
+<div class="wprm-recipe-template-simple wprm-recipe-container wprm-recipe recipe a-servings="4">
+<h2 class="wprm-recipe-name wprm-block-text-none" id="wprm-recipe-1">Cheesecake Factory Cajun Salmon Recipe</h2>
+<div class="wprm-recipe-image wprm-block-image"><img src="https://example.com/wp-content/salmon.jpg" alt="salmon" /></div>
+<span class="wprm-recipe-details wprm-recipe-details-minutes wprm-recipe-prep_time wprm-recipe-prep_time-minutes">25</span>
+<span class="wprm-recipe-details wprm-recipe-details-minutes wprm-recipe-cook_time wprm-recipe-cook_time-minutes">45</span>
+<span class="wprm-recipe-details wprm-recipe-details-hours wprm-recipe-total_time wprm-recipe-total_time-hours">1</span>
+<span class="wprm-recipe-details wprm-recipe-details-minutes wprm-recipe-total_time wprm-recipe-total_time-minutes">10</span>
+<ul class="wprm-recipe-ingredients">
+<li class="wprm-recipe-ingredient"><span class="wprm-recipe-ingredient-amount">1.5</span> <span class="wprm-recipe-ingredient-unit">pounds</span> <span class="wprm-recipe-ingredient-name">salmon fillets</span> <span class="wprm-recipe-ingredient-notes">skin on</span></li>
+<li class="wprm-recipe-ingredient"><span class="wprm-recipe-ingredient-amount">2</span> <span class="wprm-recipe-ingredient-unit">tablespoons</span> <span class="wprm-recipe-ingredient-name">cajun seasoning</span></li>
+</ul>
+<div class="wprm-recipe-instruction-text"><span style="display: block;"><strong>Season the salmon.</strong> Rub the fillets with cajun seasoning on all sides.</span></div>
+<div class="wprm-recipe-instruction-text"><span style="display: block;"><strong>Cook it.</strong> Sear skin-side down for 5 minutes, flip, and finish in the oven.</span></div>
+</div>
+"""
+
+
+class _JsonResp(_Resp):
+    """A _Resp carrying a JSON body, for wp-json answers."""
+
+    async def json(self, content_type=None):
+        return json.loads(self._body.decode("utf-8"))
+
+
+def _wp_json_resp(rows):
+    return _JsonResp(json.dumps(rows), url="https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1")
+
+
+def test_the_wprm_card_decodes_into_a_recipe():
+    recipe = recipe_import._wprm_parts(WPRM_CARD, "https://example.com/recipes/lemonade")
+    assert recipe is not None
+    assert recipe["title"] == "Cheesecake Factory Cajun Salmon Recipe"
+    assert recipe["ingredients"] == [
+        "1.5 pounds salmon fillets, skin on",
+        "2 tablespoons cajun seasoning",
+    ]
+    assert recipe["instructions"] == [
+        "Season the salmon. Rub the fillets with cajun seasoning on all sides.",
+        "Cook it. Sear skin-side down for 5 minutes, flip, and finish in the oven.",
+    ]
+    assert recipe["prep_minutes"] == 25
+    assert recipe["cook_minutes"] == 45
+    assert recipe["total_minutes"] == 70
+    assert recipe["yield"] == "4 servings"
+    assert recipe["image"] == "https://example.com/wp-content/salmon.jpg"
+    assert recipe["site"] == "example.com"
+    assert recipe["source_url"] == "https://example.com/recipes/lemonade"
+
+
+def test_the_wprm_parser_ignores_a_page_without_a_card():
+    assert recipe_import._wprm_parts("<html><body>no card here</body></html>", "https://example.com/x") is None
+
+
+async def test_a_rocket_shell_is_answered_by_wp_json(monkeypatch):
+    shell = _Resp("<html><body>wp-rocket shell</body></html>")
+    wp_json = _wp_json_resp([{"title": {"rendered": "Cajun Salmon (Copycat Recipe)"}, "content": {"rendered": WPRM_CARD}}])
+    session = _SequenceSession(by_url={
+        "https://example.com/recipes/lemonade": shell,
+        "https://example.com/recipes/lemonade?nowprocket=1": _Resp("still the shell", url="https://example.com/recipes/lemonade?nowprocket=1"),
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1": wp_json,
+    })
+
+    async def fake_get_session(host):
+        return session
+
+    monkeypatch.setattr(recipe_import, "get_session", fake_get_session)
+    result = await recipe_import.handle_recipe(_request())
+
+    assert result.status == "SUCCESS"
+    assert result.detail["recipe"]["title"] == "Cheesecake Factory Cajun Salmon Recipe"
+    assert session.requests == [
+        "https://example.com/recipes/lemonade",
+        "https://example.com/recipes/lemonade?nowprocket=1",
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1",
+    ]
+
+
+async def test_wp_json_falls_back_to_pages_when_no_post_matches(monkeypatch):
+    shell = _Resp("<html><body>shell</body></html>")
+    wp_json = _wp_json_resp([{"title": {"rendered": "Cajun Salmon (Copycat Recipe)"}, "content": {"rendered": WPRM_CARD}}])
+    session = _SequenceSession(by_url={
+        "https://example.com/recipes/lemonade": shell,
+        "https://example.com/recipes/lemonade?nowprocket=1": _Resp("still shell", url="https://example.com/recipes/lemonade?nowprocket=1"),
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1": _wp_json_resp([]),
+        "https://example.com/wp-json/wp/v2/pages?slug=lemonade&_fields=title,content&per_page=1": wp_json,
+    })
+
+    async def fake_get_session(host):
+        return session
+
+    monkeypatch.setattr(recipe_import, "get_session", fake_get_session)
+    result = await recipe_import.handle_recipe(_request())
+
+    assert result.status == "SUCCESS"
+    assert result.detail["recipe"]["title"] == "Cheesecake Factory Cajun Salmon Recipe"
+    assert session.requests[-1] == "https://example.com/wp-json/wp/v2/pages?slug=lemonade&_fields=title,content&per_page=1"
+
+
+async def test_wp_json_without_a_recipe_card_fails_plainly(monkeypatch):
+    shell = _Resp("<html><body>shell</body></html>")
+    no_card = _wp_json_resp([{"title": {"rendered": "A blog post"}, "content": {"rendered": "<p>just words</p>"}}])
+    session = _SequenceSession(by_url={
+        "https://example.com/recipes/lemonade": shell,
+        "https://example.com/recipes/lemonade?nowprocket=1": _Resp("still shell", url="https://example.com/recipes/lemonade?nowprocket=1"),
+        "https://example.com/wp-json/wp/v2/posts?slug=lemonade&_fields=title,content&per_page=1": no_card,
+    })
+
+    async def fake_get_session(host):
+        return session
+
+    monkeypatch.setattr(recipe_import, "get_session", fake_get_session)
+    result = await recipe_import.handle_recipe(_request())
+
+    assert result.status == "FAILURE"
+    assert "does not publish recipe data" in result.message

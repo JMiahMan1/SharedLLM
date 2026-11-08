@@ -15,7 +15,7 @@ import logging
 import re
 from collections import OrderedDict
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
 
 import aiohttp
 
@@ -30,9 +30,10 @@ log = logging.getLogger("execution.recipe_import")
 
 _URL_RE = re.compile(r"^https?://", re.I)
 _LD_JSON_RE = re.compile(
-    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    r'<script[^>]+type\s*=\s*["\']application/ld\+json[^"\']*["\'][^>]*>(.*?)</script>',
     re.I | re.S,
 )
+_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.I | re.S)
 _DURATION_RE = re.compile(
     r"^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?)?$",
     re.I,
@@ -247,18 +248,248 @@ def parse_recipe(recipe: dict, source_url: str) -> dict:
     }
 
 
+def _ldjson_candidates(page: str) -> list[str]:
+    """Every block on the page that might carry a schema.org Recipe.
+
+    ld+json blocks first, then any other script whose body mentions a Recipe:
+    some sites ship their recipe data in a differently-typed script tag.
+    """
+    candidates = list(_LD_JSON_RE.findall(page))
+    for block in _SCRIPT_RE.findall(page):
+        inner = block.strip()
+        if inner and ("Recipe" in inner or "schema.org" in inner) and inner not in candidates:
+            candidates.append(block)
+    return candidates
+
+
+def _parse_json_ld(block: str):
+    """One candidate block as JSON, or ``None`` - ld+json is often CDATA-wrapped
+    or HTML-escaped by template engines."""
+    text = block.strip()
+    if "<![CDATA[" in text:
+        text = text.replace("<![CDATA[", "").replace("]]>", "").strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        return json.loads(html.unescape(text))
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def extract_recipe(page: str, source_url: str) -> dict | None:
     """The first readable Recipe on the page, or None."""
-    for block in _LD_JSON_RE.findall(page):
-        try:
-            data = json.loads(block)
-        except (json.JSONDecodeError, ValueError):
+    for block in _ldjson_candidates(page):
+        data = _parse_json_ld(block)
+        if data is None:
             continue
         found = _find_recipe(data)
         if found:
             recipe = parse_recipe(found, source_url)
             if recipe["title"]:
                 return recipe
+    return None
+
+
+class _HttpStatus(Exception):
+    """The page answered with a non-200 status."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(str(status))
+        self.status = status
+
+
+async def _fetch_page(session, url: str) -> tuple[str, str]:
+    """Fetch a page and decode it; raises ``_HttpStatus``/aiohttp errors."""
+    # Ask for a fresh page, not whatever the CDN cached: Cloudflare/BigScoots
+    # serve whatever variant the edge cached for this URL - usually the real
+    # page, sometimes stale wp-rocket "shells" with no content. Revalidation
+    # headers make the edge fetch from origin (deterministic full page).
+    async with session.get(
+        url,
+        headers={
+            "User-Agent": _UA,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Encoding": "identity",
+            # The CDN serves stale/variant pages for plain requests; a
+            # revalidated fetch gets the origin's real page every time.
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+        timeout=_TIMEOUT,
+    ) as resp:
+        if resp.status != 200:
+            raise _HttpStatus(resp.status)
+        raw = await resp.content.read(_MAX_BYTES)
+        content_encoding = (resp.headers.get("Content-Encoding") or "").lower()
+        if "br" in content_encoding:
+            try:
+                import brotli  # optional; only when the server insisted on br
+
+                raw = brotli.decompress(raw)
+            except Exception:
+                log.warning(f"[recipe_import] could not decode br body for {url}")
+        encoding = resp.get_encoding() or "utf-8"
+        return raw.decode(encoding, errors="replace"), str(resp.url)
+
+
+def _nowprocket_url(url: str) -> str:
+    """The same URL with wp-rocket's cache-bypass parameter appended."""
+    parts = urlsplit(url)
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    if any(key == "nowprocket" for key, _ in params):
+        return url
+    params.append(("nowprocket", "1"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), ""))
+
+
+# --- WordPress REST fallback --------------------------------------------------
+# Optimization plugins can serve non-browser clients a content-free shell (or a
+# cache-variant lottery) while the ordinary page renders fine for people. The
+# REST API of the same site is one lever page caches do not cover: the post's
+# rendered content carries the recipe card (WP Recipe Maker) as HTML classes
+# instead of JSON-LD, so it is read with regexes, not json.
+
+def _strip_tags(text: str) -> str:
+    """Flatten HTML to plain text: tags out, entities decoded, whitespace collapsed."""
+    flat = re.sub(r"<[^>]+>", " ", text)
+    flat = html.unescape(flat).replace("\xa0", " ")
+    return re.sub(r"\s+", " ", flat).strip()
+
+
+def _slug_from_url(url: str) -> str:
+    """The page's slug (its last path segment), for /wp-json/wp/v2/{posts,pages}."""
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    slug = path.rsplit("/", 1)[-1] if "/" in path else path
+    for suffix in (".html", ".php"):
+        if slug.lower().endswith(suffix):
+            slug = slug[: -len(suffix)]
+    return slug
+
+
+def _wprm_span(chunk: str, kind: str) -> str:
+    match = re.search(
+        r'class="[^"]*wprm-recipe-ingredient-' + re.escape(kind) + r'[^"]*"[^>]*>(.*?)</span>',
+        chunk,
+        re.S | re.I,
+    )
+    return _strip_tags(match.group(1)) if match else ""
+
+
+def _wprm_parts(content: str, source_url: str, source_title: str = "") -> dict | None:
+    """Normalize a WP Recipe Maker card out of rendered post/page content."""
+    if "wprm-recipe" not in content:
+        return None
+
+    def wprm_part(kind: str) -> int | None:
+        match = re.search(
+            r'wprm-recipe-' + re.escape(kind) + r'"[^>]*>\s*(\d+)', content, re.S | re.I
+        )
+        return int(match.group(1)) if match else None
+
+    name_match = re.search(
+        r'<h[1-6][^>]*class="[^"]*wprm-recipe-name[^"]*"[^>]*>(.*?)</h[1-6]>', content, re.S | re.I
+    )
+    title = _strip_tags(name_match.group(1)) if name_match else _strip_tags(source_title)
+
+    ingredients = []
+    for li in re.findall(r'<li[^>]*wprm-recipe-ingredient[^>]*>(.*?)</li>', content, re.S | re.I):
+        amount = _wprm_span(li, "amount")
+        unit = _wprm_span(li, "unit")
+        name = _wprm_span(li, "name")
+        notes = _wprm_span(li, "notes")
+        joined = " ".join(part for part in (amount, unit, name) if part).strip()
+        if not joined:
+            continue  # an empty placeholder row in the card
+        if notes:
+            joined = f"{joined}, {notes}"
+        ingredients.append(joined)
+
+    steps = []
+    for block in re.findall(
+        r'class="[^"]*wprm-recipe-instruction-text[^"]*"[^>]*>(.*?)</div>', content, re.S | re.I
+    ):
+        step = _strip_tags(block)
+        if step:
+            steps.append(step)
+
+    if not ingredients or not steps:
+        return None
+
+    prep = wprm_part("prep_time-minutes")
+    cook = wprm_part("cook_time-minutes")
+    hours = wprm_part("total_time-hours") or 0
+    total = wprm_part("total_time-minutes")
+    total = (hours * 60 + total) if total is not None else None
+
+    image_match = None
+    image_at = content.find("wprm-recipe-image")
+    if image_at != -1:
+        image_match = re.search(r'src="(https?://[^"]+)"', content[image_at:])
+
+    servings = re.search(r'a-servings="(\d+)"', content)
+
+    site = urlparse(source_url).netloc
+    return {
+        "title": title,
+        "description": "",
+        "ingredients": ingredients,
+        "instructions": steps,
+        "prep_minutes": prep,
+        "cook_minutes": cook,
+        "total_minutes": total,
+        "yield": f"{servings.group(1)} servings" if servings else "",
+        "image": image_match.group(1) if image_match else None,
+        "source_url": source_url,
+        "site": site,
+        "nutrition": None,
+    }
+
+
+async def _wp_rest_recipe(session, url: str) -> dict | None:
+    """The recipe from the site's own REST API, or ``None`` when it cannot answer.
+
+    Page caches cover the page but not the API, so this is the retry that
+    actually reaches WordPress when the page comes back as an empty shell.
+    """
+    parts = urlsplit(url)
+    slug = _slug_from_url(url)
+    if not slug:
+        return None
+    base = f"{parts.scheme}://{parts.netloc}"
+    for endpoint in ("posts", "pages"):
+        api = f"{base}/wp-json/wp/v2/{endpoint}?slug={quote(slug)}&_fields=title,content&per_page=1"
+        try:
+            async with session.get(
+                api,
+                headers={
+                    "User-Agent": _UA,
+                    "Accept": "application/json",
+                    "Accept-Encoding": "identity",
+                },
+                timeout=_TIMEOUT,
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                rows = await resp.json(content_type=None)
+        except Exception as exc:
+            log.warning(f"[recipe_import] wp-json {endpoint} read failed for {api}: {type(exc).__name__}: {exc}")
+            continue
+        if not isinstance(rows, list) or not rows:
+            continue
+        row = rows[0]
+        if not isinstance(row, dict):
+            continue
+        rendered = html.unescape(str((row.get("content") or {}).get("rendered") or ""))
+        title_html = str((row.get("title") or {}).get("rendered") or "")
+        recipe = _wprm_parts(rendered, url, title_html)
+        if recipe is not None:
+            log.warning(f"[recipe_import] recipe found via wp-json for {url}")
+            return recipe
+        log.warning(f"[recipe_import] wp-json {endpoint} had no WP Recipe Maker card for {url}")
+        return None  # the REST answered; the page simply is not a WP recipe
     return None
 
 
@@ -640,20 +871,13 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
 
     try:
         session = await get_session(host_of(url))
-        async with session.get(
-            url,
-            headers={"User-Agent": _UA, "Accept": "text/html,application/xhtml+xml"},
-            timeout=_TIMEOUT,
-        ) as resp:
-            if resp.status != 200:
-                return ExecutionResult.fail(
-                    f"That page answered HTTP {resp.status}; recipes usually live "
-                    "at a normal web address.",
-                    service="recipe_import",
-                )
-            raw = await resp.content.read(_MAX_BYTES)
-            encoding = resp.get_encoding() or "utf-8"
-            final_url = str(resp.url)
+        page, final_url = await _fetch_page(session, url)
+    except _HttpStatus as exc:
+        return ExecutionResult.fail(
+            f"That page answered HTTP {exc.status}; recipes usually live "
+            "at a normal web address.",
+            service="recipe_import",
+        )
     except aiohttp.ClientError as exc:
         log.warning(f"[recipe_import] fetch failed for {url}: {type(exc).__name__}: {exc}")
         return ExecutionResult.fail(
@@ -666,7 +890,24 @@ async def handle_recipe(req: RecipeRequest) -> ExecutionResult:
             "That page could not be read right now.", service="recipe_import"
         )
 
-    recipe = extract_recipe(raw.decode(encoding, errors="replace"), final_url)
+    recipe = extract_recipe(page, final_url)
+    if recipe is None:
+        # Cache/optimization plugins (wp-rocket and friends) serve
+        # content-free shells to non-browser clients; wp-rocket's documented
+        # bypass parameter asks for the real page. Ask once; other sites ignore it.
+        bypass = _nowprocket_url(url)
+        if bypass != url:
+            log.warning(f"[recipe_import] no recipe found at {url}; retrying via {bypass}")
+            try:
+                page, final_url = await _fetch_page(session, bypass)
+                recipe = extract_recipe(page, final_url)
+            except Exception as exc:
+                log.warning(f"[recipe_import] bypass read failed for {bypass}: {type(exc).__name__}: {exc}")
+    if recipe is None:
+        # Cache/optimization plugins (wp-rocket and friends) serve
+        # content-free shells to non-browser clients; the site's REST API is
+        # not covered by page caches and carries the recipe as rendered HTML.
+        recipe = await _wp_rest_recipe(session, url)
     if not recipe:
         return ExecutionResult.fail(
             "That page does not publish recipe data Jarvis can read - try a "
