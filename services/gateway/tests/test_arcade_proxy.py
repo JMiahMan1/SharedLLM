@@ -549,3 +549,58 @@ async def test_party_room_end_requires_an_admin(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await main.proxy_party_room_end("ZION", MagicMock())
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_arcade_live_lists_rooms_for_any_signed_in_member(monkeypatch):
+    from services.gateway import main
+
+    seen = {}
+
+    class _Resp:
+        status = 200
+
+        async def json(self):
+            return {"success": True, "rooms": [
+                {"game": "family-jubilee", "code": "DOVE", "status": "playing", "players": ["Mum"]},
+                {"game": "family-checkers"},  # no code: dropped
+            ]}
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            seen["url"] = url
+            return _Resp()
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "noah"}))
+
+    out = await main.proxy_arcade_live(MagicMock())
+
+    assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/rooms/live"
+    assert out["success"] is True
+    assert [r["code"] for r in out["rooms"]] == ["DOVE"]
+
+
+@pytest.mark.asyncio
+async def test_arcade_live_reports_an_unreachable_arcade(monkeypatch):
+    from services.gateway import main
+    import aiohttp
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            raise aiohttp.ClientError("down")
+
+    @asynccontextmanager
+    async def fake_client():
+        yield _Client()
+
+    monkeypatch.setattr(main, "shared_http_client", fake_client)
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "noah"}))
+
+    out = await main.proxy_arcade_live(MagicMock())
+
+    assert out == {"success": False, "arcade_available": False, "rooms": []}

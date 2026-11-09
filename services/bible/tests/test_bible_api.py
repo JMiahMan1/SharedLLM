@@ -184,7 +184,7 @@ def test_state_remembers_where_the_reader_stopped(loaded_client: TestClient):
         "/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 3}
     )
     body = loaded_client.get("/state", params={"username": "sam"}).json()
-    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0}
+    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0, "label": "Genesis 1"}
 
 
 def test_state_remembers_how_far_into_the_verse_the_reader_stopped(loaded_client: TestClient):
@@ -286,7 +286,7 @@ def test_state_clamps_a_verse_beyond_the_chapter(loaded_client: TestClient):
         "/state", params={"username": "sam"}, json={"book": "John", "chapter": 3, "verse": 30}
     )
     body = loaded_client.get("/state", params={"username": "sam"}).json()
-    assert body["position"] == {"book": "John", "chapter": 3, "verse": 1, "fraction": 0.0}
+    assert body["position"] == {"book": "John", "chapter": 3, "verse": 1, "fraction": 0.0, "label": "John 3"}
 
 
 def test_state_clamps_against_the_longest_installed_chapter(loaded_client: TestClient):
@@ -295,7 +295,7 @@ def test_state_clamps_against_the_longest_installed_chapter(loaded_client: TestC
         "/state", params={"username": "sam"}, json={"book": "Gen", "chapter": 1, "verse": 99}
     )
     body = loaded_client.get("/state", params={"username": "sam"}).json()
-    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0}
+    assert body["position"] == {"book": "Gen", "chapter": 1, "verse": 3, "fraction": 0.0, "label": "Genesis 1"}
 
 
 def test_state_rejects_an_unimported_default_version(loaded_client: TestClient):

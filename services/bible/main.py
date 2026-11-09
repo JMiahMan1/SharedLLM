@@ -1181,11 +1181,17 @@ def get_state(username: str = Query(...), session: Session = Depends(get_session
 def _state_position(state: UserBibleState) -> dict | None:
     if not state.last_book:
         return None
+    try:
+        name = book_table.book(state.last_book)["name"]
+    except (KeyError, ValueError, TypeError):
+        name = state.last_book
     return {
         "book": state.last_book,
         "chapter": state.last_chapter,
         "verse": state.last_verse,
         "fraction": state.last_verse_fraction,
+        # "John 3", for places that show where reading left off (the widget).
+        "label": f"{name} {state.last_chapter}" if state.last_chapter else name,
     }
 
 

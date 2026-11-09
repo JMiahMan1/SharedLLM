@@ -2444,6 +2444,8 @@ async def execute_entity_search(req: EntitySearchRequest):
             "state": current_state,
             "domain": eid.split(".")[0] if "." in eid else "",
             "device_class": device_class,
+            # The unit a sensor reads in (°F, %, kWh), for widgets and cards.
+            "unit_of_measurement": attrs.get("unit_of_measurement", ""),
             "area_id": area,
             "app_id": attrs.get("app_id", ""),
             "source": attrs.get("source", ""),

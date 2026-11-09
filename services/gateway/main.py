@@ -4696,6 +4696,26 @@ async def proxy_family_game_state(slug: str, request: Request):
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
+@app.get("/api/arcade/live")
+async def proxy_arcade_live(request: Request):
+    """Multiplayer games with someone playing right now, across the arcade
+    (Jubilee, Checkers, Parable Party): game, room code, first names and
+    whether there is a seat. Any signed-in member: it is what the family's
+    home-screen Games widget shows as "playing now"."""
+    await _require_identity_from_request(request)
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/rooms/live", timeout=aiohttp.ClientTimeout(total=6.0))
+            if resp.status != 200:
+                return {"success": False, "arcade_available": True, "rooms": []}
+            body = await resp.json()
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
+        log.warning("arcade: live rooms fetch failed: %s", exc)
+        return {"success": False, "arcade_available": False, "rooms": []}
+    rooms = [r for r in (body.get("rooms") or []) if isinstance(r, dict) and r.get("code")]
+    return {"success": True, "arcade_available": True, "rooms": rooms}
+
+
 @app.get("/api/arcade/party/rooms")
 async def proxy_party_rooms(request: Request):
     """Admin: every live party-game room (to end one that was left running)."""
