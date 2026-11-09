@@ -55,6 +55,12 @@ public final class HealthTodayFormat {
     }
 
     /** "7h 05m" for a duration in minutes. */
+    /** value as a percent of goal, 0..100 (0 when there is no goal). */
+    public static int percent(int value, int goal) {
+        if (goal <= 0 || value <= 0) return 0;
+        return (int) Math.min(100, Math.round(value * 100.0 / goal));
+    }
+
     public static String hoursMinutes(int minutes) {
         if (minutes < 60) return minutes + "m";
         return (minutes / 60) + "h " + String.format(Locale.US, "%02d", minutes % 60) + "m";

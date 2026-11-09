@@ -1,17 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  One chosen note. Checklist rows are individual TextViews so each box can
-  carry its own tap target; a note without checkboxes falls back to the body
-  text. Fixed rows rather than a list adapter because Home screen widgets
-  cannot scroll a ListView.
+  One note on the home screen: a checklist ticks off right here; any other
+  note shows its first lines and opens to edit. Filled by SingleNoteWidget.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/single_note_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_bg"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="@dimen/wg_pad">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -19,127 +18,261 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
+        <ImageView
+            android:id="@+id/single_note_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_note"
+            android:tint="#863BFF" />
+
         <TextView
             android:id="@+id/single_note_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
-            android:letterSpacing="0.04"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
             android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
             android:text="NOTE"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
 
         <ImageView
             android:id="@+id/single_note_configure"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:layout_marginEnd="10dp"
-            android:contentDescription="@string/single_note_widget_configure_description"
-            android:src="@android:drawable/ic_menu_edit" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_settings"
+            android:tint="#94A3B8"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Choose a note" />
 
         <ImageView
             android:id="@+id/single_note_refresh"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:contentDescription="@string/single_note_widget_refresh_description"
-            android:src="@android:drawable/ic_popup_sync" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/single_note_body"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:ellipsize="end"
-        android:lineSpacingExtra="2dp"
-        android:maxLines="6"
-        android:textColor="#E2E8F0"
-        android:textSize="12sp"
-        android:visibility="gone" />
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="vertical">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginTop="6dp">
 
-        <TextView
+        <LinearLayout
             android:id="@+id/note_row_1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:visibility="gone">
 
-        <TextView
+            <ImageView
+                android:id="@+id/note_check_1"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/note_text_1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/note_row_2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:visibility="gone">
 
-        <TextView
+            <ImageView
+                android:id="@+id/note_check_2"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/note_text_2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/note_row_3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:visibility="gone">
 
-        <TextView
+            <ImageView
+                android:id="@+id/note_check_3"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/note_text_3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/note_row_4"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:visibility="gone">
 
-        <TextView
+            <ImageView
+                android:id="@+id/note_check_4"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/note_text_4"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/note_row_5"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/note_check_5"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/note_text_5"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/single_note_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:visibility="gone" />
+            android:maxLines="6"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#F1F5F9"
+            android:textSize="13sp"
+            android:layout_marginTop="6dp"
+                android:lineSpacingMultiplier="1.1"
+                android:visibility="gone" />
     </LinearLayout>
 
     <TextView
         android:id="@+id/single_note_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
         android:ellipsize="end"
         android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
         android:textColor="#64748B"
         android:textSize="10sp"
-        android:visibility="gone" />
+        android:layout_marginTop="4dp"
+            android:visibility="gone" />
 </LinearLayout>

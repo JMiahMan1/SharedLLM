@@ -42,6 +42,14 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // The web app's theme packs, bundled so native surfaces (widgets, the lock
+    // screen) paint the user's Jarvis theme before the web app first mirrors it.
+    // One source of truth: src/themes/packs, copied at build time.
+    sourceSets {
+        main {
+            assets.srcDirs += layout.buildDirectory.dir("generated/themePackAssets").get().asFile
+        }
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -124,3 +132,11 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+def themePackAssets = layout.buildDirectory.dir("generated/themePackAssets/theme_packs")
+tasks.register('copyThemePacks', Copy) {
+    from file('../../src/themes/packs')
+    include '*.pack.json'
+    into themePackAssets
+}
+preBuild.dependsOn 'copyThemePacks'

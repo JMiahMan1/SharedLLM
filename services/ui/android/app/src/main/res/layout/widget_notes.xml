@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Recent notes. The four rows are fixed views rather than a list adapter:
-  Home screen widgets cannot use ListView outside a collection, and four
-  titles plus previews is the part a person actually reads at a glance.
+  Notes: the four most recent notes (title and first line), each opening that
+  note; + starts a new one. Filled by NotesWidget.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/notes_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_bg"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="@dimen/wg_pad">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -18,158 +18,303 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
+        <ImageView
+            android:id="@+id/notes_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_note"
+            android:tint="#863BFF" />
+
         <TextView
+            android:id="@+id/notes_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
-            android:letterSpacing="0.08"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
             android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
             android:text="NOTES"
             android:textColor="#94A3B8"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
 
         <ImageView
             android:id="@+id/notes_add"
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:layout_marginEnd="10dp"
-            android:contentDescription="@string/notes_widget_add_description"
-            android:src="@android:drawable/ic_input_add" />
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/wg_circle"
+            android:contentDescription="New note"
+            android:padding="5dp"
+            android:src="@drawable/mi_add" />
 
         <ImageView
             android:id="@+id/notes_refresh"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:contentDescription="@string/notes_widget_refresh_description"
-            android:src="@android:drawable/ic_popup_sync" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/notes_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:ellipsize="end"
-        android:maxLines="3"
-        android:textColor="#64748B"
-        android:textSize="11sp"
-        android:visibility="gone" />
-
-    <LinearLayout
-        android:id="@+id/notes_row_1"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/notes_row_1_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/notes_row_1_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#94A3B8"
-            android:textSize="10sp" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
     </LinearLayout>
 
     <LinearLayout
-        android:id="@+id/notes_row_2"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="vertical"
-        android:visibility="gone">
+        android:layout_marginTop="4dp">
+
+        <LinearLayout
+            android:id="@+id/notes_row_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp">
+
+            <ImageView
+                android:id="@+id/notes_row_1_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_note"
+                android:tint="#94A3B8" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/notes_row_1_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/notes_row_1_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/notes_row_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp">
+
+            <ImageView
+                android:id="@+id/notes_row_2_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_note"
+                android:tint="#94A3B8" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/notes_row_2_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/notes_row_2_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/notes_row_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp">
+
+            <ImageView
+                android:id="@+id/notes_row_3_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_note"
+                android:tint="#94A3B8" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/notes_row_3_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/notes_row_3_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/notes_row_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp">
+
+            <ImageView
+                android:id="@+id/notes_row_4_icon"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_note"
+                android:tint="#94A3B8" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/notes_row_4_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/notes_row_4_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/notes_row_2_title"
+            android:id="@+id/notes_empty"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/notes_row_2_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
+            android:maxLines="2"
+            android:includeFontPadding="false"
+            android:text=""
             android:textColor="#94A3B8"
-            android:textSize="10sp" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/notes_row_3"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/notes_row_3_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#E2E8F0"
             android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/notes_row_3_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#94A3B8"
-            android:textSize="10sp" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/notes_row_4"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/notes_row_4_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#E2E8F0"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/notes_row_4_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="#94A3B8"
-            android:textSize="10sp" />
+            android:layout_marginTop="10dp"
+                android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>

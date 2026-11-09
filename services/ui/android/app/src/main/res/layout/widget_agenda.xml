@@ -1,0 +1,528 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Agenda: what's next on your calendars (today first, then the week), each
+  with its time and calendar color. Filled by AgendaWidget.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ag_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/ag_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_event"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/ag_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="AGENDA"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <TextView
+            android:id="@+id/ag_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:layout_marginStart="8dp" />
+
+        <ImageView
+            android:id="@+id/ag_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginTop="2dp">
+
+        <LinearLayout
+            android:id="@+id/ag_e1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="7dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ag_e1_when"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e1_day"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ag_e1_stripe"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:importantForAccessibility="no"
+                android:background="@drawable/wg_pill" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/ag_e1_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e1_sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ag_e2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="7dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ag_e2_when"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e2_day"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ag_e2_stripe"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:importantForAccessibility="no"
+                android:background="@drawable/wg_pill" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/ag_e2_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e2_sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ag_e3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="7dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ag_e3_when"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e3_day"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ag_e3_stripe"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:importantForAccessibility="no"
+                android:background="@drawable/wg_pill" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/ag_e3_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e3_sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ag_e4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="7dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ag_e4_when"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e4_day"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ag_e4_stripe"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:importantForAccessibility="no"
+                android:background="@drawable/wg_pill" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/ag_e4_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e4_sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ag_e5"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="34dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="7dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/ag_e5_when"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e5_day"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ag_e5_stripe"
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:importantForAccessibility="no"
+                android:background="@drawable/wg_pill" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <TextView
+                    android:id="@+id/ag_e5_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/ag_e5_sub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/ag_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="12sp"
+            android:layout_marginTop="10dp"
+                android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

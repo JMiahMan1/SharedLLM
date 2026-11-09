@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chores: today's chores from the family chore chart, ticked or not, with the
+  stars each earns and a bar of the day. Filled by ChoresWidget.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ch_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/ch_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_chore"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/ch_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="CHORES"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <TextView
+            android:id="@+id/ch_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:layout_marginStart="8dp" />
+
+        <ImageView
+            android:id="@+id/ch_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/ch_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="5dp"
+        android:indeterminateOnly="false"
+        android:max="100"
+        android:progress="0"
+        android:progressDrawable="@drawable/wg_bar"
+        android:layout_marginTop="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginTop="4dp">
+
+        <LinearLayout
+            android:id="@+id/ch_c1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ch_c1_check"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check_box_blank"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/ch_c1_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="15sp"
+                android:layout_marginStart="8dp" />
+
+            <TextView
+                android:id="@+id/ch_c1_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:id="@+id/ch_c1_reward"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ch_c2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ch_c2_check"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check_box_blank"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/ch_c2_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="15sp"
+                android:layout_marginStart="8dp" />
+
+            <TextView
+                android:id="@+id/ch_c2_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:id="@+id/ch_c2_reward"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ch_c3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ch_c3_check"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check_box_blank"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/ch_c3_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="15sp"
+                android:layout_marginStart="8dp" />
+
+            <TextView
+                android:id="@+id/ch_c3_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:id="@+id/ch_c3_reward"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ch_c4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ch_c4_check"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check_box_blank"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/ch_c4_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="15sp"
+                android:layout_marginStart="8dp" />
+
+            <TextView
+                android:id="@+id/ch_c4_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:id="@+id/ch_c4_reward"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ch_c5"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/ch_c5_check"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check_box_blank"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/ch_c5_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="15sp"
+                android:layout_marginStart="8dp" />
+
+            <TextView
+                android:id="@+id/ch_c5_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:layout_marginStart="6dp" />
+
+            <TextView
+                android:id="@+id/ch_c5_reward"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/ch_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="12sp"
+            android:layout_marginTop="10dp"
+                android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

@@ -279,6 +279,7 @@ export function applySiteTheme(themeId: string): string {
     onAccent: theme.tokens.onAccent,
     accentAlt: theme.tokens.accentAlt ?? theme.tokens.accent,
     scheme,
+    tokens: JSON.stringify({ ...theme.tokens, scheme }),
   }).catch(() => undefined);
   return theme.id;
 }

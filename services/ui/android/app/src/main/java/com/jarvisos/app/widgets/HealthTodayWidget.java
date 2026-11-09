@@ -4,7 +4,6 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
-import android.view.View;
 import android.widget.RemoteViews;
 import com.jarvisos.app.R;
 import org.json.JSONObject;
@@ -41,10 +40,21 @@ public class HealthTodayWidget extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_health_today);
         views.setOnClickPendingIntent(R.id.ht_root, WidgetUpdater.openPathPendingIntent(context, "/fitness", 6800));
         views.setOnClickPendingIntent(R.id.ht_refresh, WidgetUpdater.refreshPendingIntent(context));
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.ht_root, R.id.ht_icon, R.id.ht_title, R.id.ht_refresh, st.fourth);
+        st.stat(views, R.id.ht_steps_tile, R.id.ht_steps_icon, R.id.ht_steps_label, R.id.ht_steps_value,
+                R.id.ht_steps_caption, st.accent, false);
+        st.stat(views, R.id.ht_ready_tile, R.id.ht_ready_icon, R.id.ht_ready_label, R.id.ht_ready_value,
+                R.id.ht_ready_caption, st.third, false);
+        st.stat(views, R.id.ht_sleep_tile, R.id.ht_sleep_icon, R.id.ht_sleep_label, R.id.ht_sleep_value,
+                R.id.ht_sleep_caption, st.second, false);
+        st.stat(views, R.id.ht_water_tile, R.id.ht_water_icon, R.id.ht_water_label, R.id.ht_water_value,
+                R.id.ht_water_caption, st.fourth, false);
+        st.progress(views, R.id.ht_steps_bar, 100, 0, st.progress);
+        st.progress(views, R.id.ht_water_bar, 100, 0, st.fourth);
 
         if (WidgetApi.apiKey(context) == null) {
-            views.setViewVisibility(R.id.ht_status, View.VISIBLE);
-            views.setTextViewText(R.id.ht_status, "Sign in to Jarvis OS");
+            st.status(views, R.id.ht_status, "Sign in to Jarvis OS");
             return views;
         }
 
@@ -69,12 +79,21 @@ public class HealthTodayWidget extends AppWidgetProvider {
         tile(views, R.id.ht_sleep_value, R.id.ht_sleep_caption, HealthTodayFormat.sleep(summary));
         tile(views, R.id.ht_water_value, R.id.ht_water_caption, HealthTodayFormat.water(summary));
 
-        if (summary == null && steps == null) {
-            views.setViewVisibility(R.id.ht_status, View.VISIBLE);
-            views.setTextViewText(R.id.ht_status, problem != null ? problem : "Offline");
-        } else {
-            views.setViewVisibility(R.id.ht_status, View.GONE);
+        if (steps != null) {
+            int goal = steps.optInt("goal", 0);
+            st.progress(views, R.id.ht_steps_bar, 100, HealthTodayFormat.percent(steps.optInt("today", 0), goal), st.progress);
         }
+        JSONObject water = summary == null ? null : summary.optJSONObject("water");
+        if (water != null && !water.isNull("goal_ml")) {
+            st.progress(views, R.id.ht_water_bar, 100,
+                    HealthTodayFormat.percent((int) water.optDouble("ml", 0), (int) water.optDouble("goal_ml", 0)), st.fourth);
+        }
+        JSONObject ready = summary == null ? null : summary.optJSONObject("readiness");
+        if (ready != null && !ready.isNull("score")) {
+            int score = ready.optInt("score");
+            if (score >= 70) st.tileTint(views, R.id.ht_ready_tile, st.third);
+        }
+        st.status(views, R.id.ht_status, summary == null && steps == null ? (problem != null ? problem : "Offline") : null);
         return views;
     }
 }

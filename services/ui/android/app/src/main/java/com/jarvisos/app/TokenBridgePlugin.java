@@ -59,6 +59,8 @@ public class TokenBridgePlugin extends Plugin {
     public static final String KEY_THEME_ON_ACCENT = "jarvis_theme_on_accent";
     public static final String KEY_THEME_ACCENT_ALT = "jarvis_theme_accent_alt";
     public static final String KEY_THEME_SCHEME = "jarvis_theme_scheme";
+    /** The active theme's full token set (JSON), so native surfaces use every token. */
+    public static final String KEY_THEME_TOKENS = "jarvis_theme_tokens";
 
 
     public static SharedPreferences prefs(Context context) {
@@ -244,6 +246,7 @@ public class TokenBridgePlugin extends Plugin {
 
     @PluginMethod
     public void setTheme(PluginCall call) {
+        String before = JarvisTheme.resolve(getContext()).signature();
         SharedPreferences.Editor ed = prefs(getContext()).edit();
         putOrRemove(ed, KEY_THEME_ID, call.getString("themeId"));
         putOrRemove(ed, KEY_THEME_BG, call.getString("bg"));
@@ -255,7 +258,12 @@ public class TokenBridgePlugin extends Plugin {
         putOrRemove(ed, KEY_THEME_ON_ACCENT, call.getString("onAccent"));
         putOrRemove(ed, KEY_THEME_ACCENT_ALT, call.getString("accentAlt"));
         putOrRemove(ed, KEY_THEME_SCHEME, call.getString("scheme"));
-        ed.apply();
+        putOrRemove(ed, KEY_THEME_TOKENS, call.getString("tokens"));
+        ed.commit();
+        // The home-screen widgets paint with the same theme: repaint them when it changed.
+        if (!before.equals(JarvisTheme.resolve(getContext()).signature())) {
+            com.jarvisos.app.widgets.WidgetUpdater.requestAll(getContext());
+        }
         call.resolve();
     }
 

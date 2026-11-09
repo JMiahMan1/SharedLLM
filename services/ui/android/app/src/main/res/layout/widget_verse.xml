@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Verse of the Day: today's verse in a reading face, its reference in the theme
+  accent, the devotional line and the reading streak. Filled by VerseWidget;
+  a tap opens the Bible on Today.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/verse_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_bg"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="@dimen/wg_pad">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -13,67 +19,143 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
+        <ImageView
+            android:id="@+id/verse_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_book"
+            android:tint="#863BFF" />
+
         <TextView
+            android:id="@+id/verse_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
-            android:letterSpacing="0.08"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
             android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
             android:text="VERSE OF THE DAY"
             android:textColor="#94A3B8"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
 
-        <TextView
-            android:id="@+id/verse_streak"
+        <LinearLayout
+            android:id="@+id/verse_chip"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="6dp"
-            android:text=""
-            android:textColor="#FDBA74"
-            android:textSize="10sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:background="@drawable/wg_pill"
+                android:paddingStart="8dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp">
+
+            <ImageView
+                android:id="@+id/verse_chip_icon"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_flame"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/verse_streak"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="4dp" />
+        </LinearLayout>
 
         <ImageView
             android:id="@+id/verse_refresh"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:contentDescription="@string/verse_widget_refresh_description"
-            android:src="@android:drawable/ic_popup_sync" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/verse_reference"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:text=""
-        android:textColor="#FCD34D"
-        android:textSize="11sp"
-        android:textStyle="bold" />
 
     <TextView
         android:id="@+id/verse_text"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:ellipsize="end"
         android:fontFamily="serif"
-        android:maxLines="4"
-        android:text=""
+        android:maxLines="6"
+        android:includeFontPadding="false"
+        android:text="-"
         android:textColor="#F1F5F9"
-        android:textSize="13sp" />
+        android:textSize="16sp"
+        android:layout_marginTop="10dp"
+            android:lineSpacingMultiplier="1.15"
+            android:singleLine="false" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/verse_reference"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#863BFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/verse_sub"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
         android:text=""
-        android:textColor="#64748B"
-        android:textSize="10sp" />
+        android:textColor="#94A3B8"
+        android:textSize="11sp"
+        android:layout_marginTop="2dp" />
+
+    <TextView
+        android:id="@+id/verse_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
 </LinearLayout>

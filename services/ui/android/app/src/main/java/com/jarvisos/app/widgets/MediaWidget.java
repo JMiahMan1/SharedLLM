@@ -25,9 +25,20 @@ public class MediaWidget extends AppWidgetProvider {
 
     static RemoteViews build(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_media);
-        views.setOnClickPendingIntent(R.id.media_root, WidgetUpdater.openAppPendingIntent(context));
+        views.setOnClickPendingIntent(R.id.media_root, WidgetUpdater.openPathPendingIntent(context, "/media", 7130));
         views.setOnClickPendingIntent(R.id.media_refresh, WidgetUpdater.refreshPendingIntent(context));
-
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.media_root, R.id.media_icon, R.id.media_header, R.id.media_refresh, st.accent);
+        st.text(views, R.id.media_title, st.text);
+        st.text(views, R.id.media_artist, st.muted);
+        st.tile(views, R.id.media_art, true);
+        st.icon(views, R.id.media_art, st.accent);
+        st.fill(views, R.id.media_prev, R.drawable.wg_circle, st.tile);
+        st.fill(views, R.id.media_next, R.drawable.wg_circle, st.tile);
+        st.fill(views, R.id.media_play, R.drawable.wg_circle, st.accent);
+        st.icon(views, R.id.media_prev, st.text);
+        st.icon(views, R.id.media_next, st.text);
+        st.icon(views, R.id.media_play, st.onAccent);
         try {
             if (WidgetApi.apiKey(context) == null) {
                 views.setTextViewText(R.id.media_title, "Sign in");
@@ -36,13 +47,14 @@ public class MediaWidget extends AppWidgetProvider {
             }
             JSONObject status = WidgetApi.mediaStatus(context);
             MediaStatus.Lines lines = MediaStatus.fromJson(status);
-            views.setTextViewText(R.id.media_title, DeviceButtonWidget.truncate(lines.title, 28));
-            views.setTextViewText(R.id.media_artist, DeviceButtonWidget.truncate(lines.subtitle, 28));
-            views.setTextViewText(R.id.media_play, lines.playing ? "⏸" : "▶");
+            views.setTextViewText(R.id.media_title, lines.title);
+            views.setTextViewText(R.id.media_artist, lines.subtitle);
+            views.setImageViewResource(R.id.media_play, lines.playing ? R.drawable.mi_pause : R.drawable.mi_play);
+            if (lines.playing) st.text(views, R.id.media_artist, st.accent);
             bindTransport(context, views, lines);
         } catch (Exception e) {
-            views.setTextViewText(R.id.media_title, "-");
-            views.setTextViewText(R.id.media_artist, e.getMessage() != null ? e.getMessage() : "offline");
+            views.setTextViewText(R.id.media_title, "Nothing playing");
+            st.status(views, R.id.media_status, e.getMessage() != null ? e.getMessage() : "Offline");
             // Keep the buttons tappable but with no target; a press reports that
             // there is nothing active rather than silently doing nothing.
             bindTransport(context, views, MediaStatus.fromJson(null));

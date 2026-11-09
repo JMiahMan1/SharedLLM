@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Screen time. A child sees their own day: time left as a ring, what locks
+  next (bedtime, school) and chores that earn more. A parent sees each child:
+  time left, locked or paused, and a bar of the day. Filled by ScreenTimeWidget.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/stw_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/stw_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_hourglass"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/stw_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="SCREEN TIME"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <ImageView
+            android:id="@+id/stw_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/stw_self"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp">
+
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+
+            <ProgressBar
+                android:id="@+id/stw_ring"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_ring" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:layout_gravity="center">
+
+                <TextView
+                    android:id="@+id/stw_left"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-black"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="-"
+                    android:textColor="#F1F5F9"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/stw_left_caption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="left"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="14dp">
+
+            <TextView
+                android:id="@+id/stw_headline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="2"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/stw_line1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="11sp"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/stw_line2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="11sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/stw_family"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="2dp"
+            android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/stw_kid_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/stw_kid_1_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/stw_kid_1_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/stw_kid_1_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+
+            <ProgressBar
+                android:id="@+id/stw_kid_1_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_bar"
+                android:layout_marginTop="5dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/stw_kid_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/stw_kid_2_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/stw_kid_2_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/stw_kid_2_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+
+            <ProgressBar
+                android:id="@+id/stw_kid_2_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_bar"
+                android:layout_marginTop="5dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/stw_kid_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp"
+                android:background="@drawable/wg_tile"
+                android:paddingStart="10dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp"
+                android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/stw_kid_3_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/stw_kid_3_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/stw_kid_3_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+
+            <ProgressBar
+                android:id="@+id/stw_kid_3_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_bar"
+                android:layout_marginTop="5dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/stw_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
+</LinearLayout>

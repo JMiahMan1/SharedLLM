@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, PartyPopper, Play, Sparkles, Square, Star, Trophy, Tv } from 'lucide-react';
 import FamilyLeaderboard from './FamilyLeaderboard';
 import GameArtwork from './GameArtwork';
@@ -362,6 +363,10 @@ function AdminPanel({ data, onPlay }: { data: FamilyGamesResponse; onPlay: (game
  */
 export default function FamilyGames() {
   const [playing, setPlaying] = useState<FamilyGameCard | null>(null);
+  // A room to drop straight into ("?play=family-jubilee&room=DOVE", from the
+  // home-screen widget's "playing now").
+  const [launchRoom, setLaunchRoom] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const submitted = useRef(new Set<string>());
   const queryClient = useQueryClient();
@@ -479,11 +484,30 @@ export default function FamilyGames() {
     return () => links.forEach((link) => link.remove());
   }, [playBase, warmSlugs]);
 
-  const open = (game: FamilyGameCard) => {
+  const open = (game: FamilyGameCard, room = '') => {
     submitted.current.clear();
     submitScore.reset();
+    setLaunchRoom(room);
     setPlaying(game);
   };
+
+  // "?play=<slug>[&room=<code>]" opens that game once the shelf has loaded
+  // (a widget tap or a shared link), then leaves the URL clean so Back and a
+  // reload do not reopen it.
+  const wanted = searchParams.get('play') ?? '';
+  const wantedRoom = (searchParams.get('room') ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  useEffect(() => {
+    if (!wanted || !data) return;
+    const shelf = [...(data.games ?? []), ...(data.review ?? []), ...(data.unpublished ?? [])];
+    const game = shelf.find((g) => g.slug === wanted);
+    if (game) open(game, wantedRoom);
+    const next = new URLSearchParams(searchParams);
+    next.delete('play');
+    next.delete('room');
+    setSearchParams(next, { replace: true });
+    // open is stable enough for a one-shot launch; re-running on its identity would reopen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, wantedRoom, data]);
 
   if (isLoading) {
     return (
@@ -561,9 +585,12 @@ export default function FamilyGames() {
           title={playing.title}
           emoji={playing.emoji}
           art={playing.art}
-          src={`${data.play_base}/play/${playing.slug}?embed=1&player=${encodeURIComponent(me?.initials ?? 'YOU')}&name=${encodeURIComponent(me?.display_name ?? '')}`}
+          src={`${data.play_base}/play/${playing.slug}?embed=1&player=${encodeURIComponent(me?.initials ?? 'YOU')}&name=${encodeURIComponent(me?.display_name ?? '')}${launchRoom ? `&room=${launchRoom}#room=${launchRoom}` : ''}`}
           frameRef={frameRef}
-          onClose={() => setPlaying(null)}
+          onClose={() => {
+            setPlaying(null);
+            setLaunchRoom('');
+          }}
         />
       )}
     </div>

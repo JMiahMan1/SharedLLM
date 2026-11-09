@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solid base for Android 12+ runtime tint (WidgetStyle). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:radius="@dimen/wg_inner_radius" />
+</shape>

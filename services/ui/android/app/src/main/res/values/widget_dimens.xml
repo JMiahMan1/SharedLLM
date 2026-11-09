@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Jarvis widget chrome (Android 12+ uses the launcher's own corner radius). -->
+    <dimen name="wg_radius">22dp</dimen>
+    <dimen name="wg_inner_radius">14dp</dimen>
+    <dimen name="wg_pad">14dp</dimen>
+</resources>

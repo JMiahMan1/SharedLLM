@@ -1,7 +1,6 @@
 package com.jarvisos.app;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
@@ -55,10 +54,6 @@ final class GuardScreenView {
         void onOpenJarvis();
     }
 
-    private static final int VIOLET = 0xFF7C3AED;
-    private static final int SKY = 0xFF0284C7;
-    private static final int GREEN = 0xFF10B981;
-    private static final int RED = 0xFFEF4444;
 
     /**
      * Active Jarvis theme palette resolved from TokenBridge prefs or the
@@ -85,9 +80,16 @@ final class GuardScreenView {
         final int ringIn;
         final int dividerLine;
         final int grabberBar;
+        /** The theme's accentAlt, ring2 and ring3, for the lock reasons. */
+        final int alt;
+        final int second;
+        final int third;
 
         Palette(String themeId, int bg, int surface, int text, int textMuted,
-                int border, int accent, int onAccent, boolean dark) {
+                int border, int accent, int onAccent, boolean dark, int alt, int second, int third) {
+            this.alt = alt;
+            this.second = second;
+            this.third = third;
             this.themeId = themeId;
             this.dark = dark;
             this.bgTop = blend(bg, accent, dark ? 0.10f : 0.05f);
@@ -99,7 +101,7 @@ final class GuardScreenView {
             this.textPrimary = text;
             this.textSecondary = textMuted;
             this.textFaint = withAlpha(textMuted, 0.78f);
-            this.error = dark ? 0xFFF87171 : 0xFFBA1A1A;
+            this.error = accent;
             this.brand = accent;
             this.onBrand = onAccent;
             this.tonal = blend(surface, accent, dark ? 0.24f : 0.14f);
@@ -111,68 +113,15 @@ final class GuardScreenView {
         }
 
         static Palette resolve(Context context) {
-            SharedPreferences p = TokenBridgePlugin.prefs(context);
-            String id = GuardApi.themeId(context);
-            if (id == null || id.isEmpty()) id = "aurora";
-            int bg, surface, text, textMuted, border, accent, onAccent;
-            boolean dark;
-            switch (id) {
-                case "bloom":
-                    bg = 0xFF0F172A; surface = 0xFF1E293B; text = 0xFFF1F5F9; textMuted = 0xFFE7C6D6;
-                    border = 0xFFC36786; accent = 0xFFE06A9A; onAccent = 0xFF1B0B14; dark = true;
-                    break;
-                case "iron":
-                    bg = 0xFF121417; surface = 0xFF1C2026; text = 0xFFE8EAED; textMuted = 0xFF8B95A5;
-                    border = 0xFF2A3038; accent = 0xFFC9A227; onAccent = 0xFF121417; dark = true;
-                    break;
-                case "tron":
-                    bg = 0xFF05070B; surface = 0xFF0B1016; text = 0xFFE7FBFF; textMuted = 0xFF7A9AAA;
-                    border = 0xFF0E3A45; accent = 0xFF00E5FF; onAccent = 0xFF05070B; dark = true;
-                    break;
-                case "neon":
-                    bg = 0xFF0A0A0F; surface = 0xFF15151F; text = 0xFFF5F5FA; textMuted = 0xFF7A7A99;
-                    border = 0xFF2A2A3A; accent = 0xFFFF2E97; onAccent = 0xFF0A0A0F; dark = true;
-                    break;
-                case "clean-athletic":
-                    bg = 0xFFF6F6F4; surface = 0xFFFFFFFF; text = 0xFF111111; textMuted = 0xFF6B7280;
-                    border = 0xFFE5E7EB; accent = 0xFFFF5A1F; onAccent = 0xFFFFFFFF; dark = false;
-                    break;
-                case "aurora":
-                default:
-                    bg = 0xFF0F172A; surface = 0xFF1E293B; text = 0xFFF1F5F9; textMuted = 0xFF94A3B8;
-                    border = 0xFF334755; accent = 0xFF863BFF; onAccent = 0xFFF8FAFC; dark = true;
-                    break;
-            }
-            String mirroredId = p.getString(TokenBridgePlugin.KEY_THEME_ID, "");
-            if (mirroredId != null && !mirroredId.isEmpty() && mirroredId.equals(id)) {
-                bg = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_BG, null), bg);
-                surface = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_SURFACE, null), surface);
-                text = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_TEXT, null), text);
-                textMuted = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_TEXT_MUTED, null), textMuted);
-                border = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_BORDER, null), border);
-                accent = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_ACCENT, null), accent);
-                onAccent = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_ON_ACCENT, null), onAccent);
-                String scheme = p.getString(TokenBridgePlugin.KEY_THEME_SCHEME, null);
-                if (scheme != null && !scheme.isEmpty()) {
-                    dark = "dark".equalsIgnoreCase(scheme);
-                }
-            }
-            return new Palette(id, bg, surface, text, textMuted, border, accent, onAccent, dark);
+            JarvisTheme t = JarvisTheme.resolve(context);
+            return new Palette(t.id, t.bg, t.surface, t.text, t.textMuted, t.border, t.accent, t.onAccent, t.dark,
+                    t.accentAlt, t.ring2, t.ring3);
         }
     }
 
     static String themeSignature(Context context) {
         Palette p = Palette.resolve(context);
         return p.themeId + ":" + Integer.toHexString(p.brand) + ":" + Integer.toHexString(p.bgBottom);
-    }
-
-    private static int parseHex(String hex, int fallback) {
-        if (hex == null || hex.trim().isEmpty()) return fallback;
-        try {
-            return Color.parseColor(hex.trim());
-        } catch (Exception e) {
-            return fallback;
-        }
     }
 
     private static int blend(int c1, int c2, float ratio) {
@@ -204,7 +153,7 @@ final class GuardScreenView {
         String titleText;
         String bodyText;
         if (tamper) {
-            accent = RED;
+            accent = pal.brand;
             iconRes = R.drawable.mi_shield;
             titleText = "A parent needs to sign in";
             bodyText = "Removing Jarvis or switching off its protection needs one of your parents' logins.";
@@ -214,19 +163,19 @@ final class GuardScreenView {
             titleText = "That app is off for now";
             bodyText = "Your parents turned this app off, or its time is used up for today. Everything else still works.";
         } else if (install) {
-            accent = SKY;
+            accent = pal.alt;
             iconRes = R.drawable.mi_download;
             titleText = denied ? "A parent said no to " + appName : appName + " needs a parent's OK";
             bodyText = denied
                     ? "This app stays closed. Everything else still works."
                     : "New apps open once one of your parents says yes. They have been asked.";
         } else if (bypass) {
-            accent = RED;
+            accent = pal.brand;
             iconRes = R.drawable.mi_warning;
             titleText = appName + " is off while the web filter is on";
             bodyText = "It gets around the filter your parents set up, so it stays closed. Other browsers and apps still work.";
         } else if (permission) {
-            accent = VIOLET;
+            accent = pal.second;
             iconRes = R.drawable.mi_shield;
             titleText = "Ask a parent first";
             bodyText = denied
@@ -236,19 +185,19 @@ final class GuardScreenView {
             String reason = GuardApi.lockReason(context);
             switch (reason) {
                 case "bedtime":
-                    accent = VIOLET;
+                    accent = pal.second;
                     iconRes = R.drawable.mi_dark_mode;
                     break;
                 case "school":
-                    accent = SKY;
+                    accent = pal.alt;
                     iconRes = R.drawable.mi_school;
                     break;
                 case "paused":
                     accent = pal.brand;
-                    iconRes = R.drawable.mi_pause;
+                    iconRes = R.drawable.mi_pause_shield;
                     break;
                 case "chores":
-                    accent = GREEN;
+                    accent = pal.third;
                     iconRes = R.drawable.mi_chore;
                     break;
                 default:

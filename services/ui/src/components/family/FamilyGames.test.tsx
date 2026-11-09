@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import FamilyGames from './FamilyGames';
 import { api } from '../../services/api';
 import type { FamilyGameCard, FamilyGamesResponse } from '../../types/api';
@@ -66,12 +67,14 @@ const base: FamilyGamesResponse = {
   unpublished: [],
 };
 
-function renderIt() {
+function renderIt(url = '/family?tab=games') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <FamilyGames />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[url]}>
+      <QueryClientProvider client={queryClient}>
+        <FamilyGames />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -101,6 +104,14 @@ beforeEach(() => {
 });
 
 describe('FamilyGames', () => {
+  it('opens a game straight into a room from a link (the home-screen widget)', async () => {
+    m.getFamilyGames.mockResolvedValue(base);
+    renderIt('/family?tab=games&play=family-cloud-hop&room=dove');
+    const frame = await screen.findByTestId('family-player-frame');
+    expect(frame.getAttribute('src')).toContain('/play/family-cloud-hop?embed=1');
+    expect(frame.getAttribute('src')).toContain('room=DOVE');
+  });
+
   it('shows players the shelf with no admin controls', async () => {
     m.getFamilyGames.mockResolvedValue(base);
     renderIt();

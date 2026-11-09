@@ -1,46 +1,136 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Metric: one sensor's value, big, with its unit and name. Filled by
+  MetricWidget (the entity is chosen in the app).
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/metric_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_bg"
-    android:gravity="center_vertical"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="@dimen/wg_pad">
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/metric_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_sensors"
+            android:tint="#863BFF" />
+
         <TextView
-            android:id="@+id/metric_label"
+            android:id="@+id/metric_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Metric"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="METRIC"
             android:textColor="#94A3B8"
-            android:textSize="12sp" />
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
         <ImageView
             android:id="@+id/metric_refresh"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:contentDescription="Refresh"
-            android:src="@android:drawable/ic_popup_sync" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
     </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="bottom|start"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/metric_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-black"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="-"
+            android:textColor="#F1F5F9"
+            android:textSize="34sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/metric_unit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginStart="4dp"
+                android:layout_marginBottom="4dp" />
+    </LinearLayout>
+
     <TextView
-        android:id="@+id/metric_value"
+        android:id="@+id/metric_label"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="-"
-        android:textColor="#F8FAFC"
-        android:textSize="28sp"
-        android:textStyle="bold" />
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#F1F5F9"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:layout_marginTop="2dp" />
+
     <TextView
         android:id="@+id/metric_sub"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
         android:text=""
-        android:textColor="#64748B"
-        android:textSize="11sp" />
+        android:textColor="#94A3B8"
+        android:textSize="11sp"
+        android:layout_marginTop="2dp" />
+
+    <TextView
+        android:id="@+id/metric_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
 </LinearLayout>

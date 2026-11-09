@@ -24,8 +24,14 @@
     <string name="health_connect_privacy">Jarvis OS reads from Health Connect only what you allow: sleep sessions, resting heart rate, heart rate variability, weight, and walks, runs and rides (with their distance).\n\nIt only reads; it never writes to Health Connect. Steps are not read, because Jarvis already counts them on this phone.\n\nWhat it reads goes to your own household Jarvis server and nowhere else: sleep and measurements to your Health page, workouts to Fitness. Each reading keeps the label health_connect so you can tell it from what you logged by hand. Your family sees it only if you share that part of Health with them.\n\nTo stop, open Jarvis → Health → Health → Health Connect → Disconnect, or remove Jarvis\'s access in Health Connect. Readings already imported stay on your server until you delete them there.</string>
     <string name="health_today_widget_description">Today\'s steps, readiness, sleep and water from your Health page</string>
     <string name="health_today_refresh_description">Refresh health today</string>
-    <string name="games_widget_description">Your Family Games: games played, best score and #1 spots</string>
+    <string name="games_widget_description">Family Games: play now, join games in progress, high scores and your stats</string>
     <string name="games_widget_refresh_description">Refresh Family Games</string>
-    <string name="bible_widget_description">Your Bible: reading streak, today\'s quiz and memory verses to review</string>
+    <string name="bible_widget_description">Bible: today\'s verse, continue reading, today\'s plan, quiz and memory verses</string>
     <string name="bible_widget_refresh_description">Refresh Bible</string>
+    <string name="screen_time_widget_description">Time left today, bedtime and locks for you or each child</string>
+    <string name="weather_widget_description">Now, today\'s high and low, and the next hours</string>
+    <string name="agenda_widget_description">What\'s next on your calendars</string>
+    <string name="chores_widget_description">Today\'s chores and the stars they earn</string>
+    <string name="family_widget_description">Who\'s home and unread family chat</string>
+    <string name="timers_widget_description">Running timers counting down, and your next alarm</string>
 </resources>

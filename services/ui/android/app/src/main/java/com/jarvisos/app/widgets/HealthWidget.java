@@ -4,8 +4,6 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.ColorStateList;
-import android.graphics.Color;
 import android.os.Build;
 import android.view.View;
 import android.widget.RemoteViews;
@@ -27,8 +25,6 @@ import org.json.JSONObject;
  */
 public class HealthWidget extends AppWidgetProvider {
 
-    private static final String DEFAULT_ACCENT = "#863BFF";
-    private static final String DEFAULT_TEXT = "#F1F5F9";
 
     @Override
     public void onUpdate(Context context, AppWidgetManager mgr, int[] ids) {
@@ -44,122 +40,110 @@ public class HealthWidget extends AppWidgetProvider {
         }
     }
 
-    /** Theme colors + goal published by the app when the user picks a theme. */
-    private static JSONObject healthConfig(Context context) {
-        JSONObject empty = new JSONObject();
-        try {
-            JSONObject resp = WidgetApi.get(context, "/api/widgets/settings");
-            JSONArray widgets = resp.optJSONArray("widgets");
-            if (widgets == null) return empty;
-            for (int i = 0; i < widgets.length(); i++) {
-                JSONObject w = widgets.getJSONObject(i);
-                if (!"health_activity".equals(w.optString("widget_key"))) continue;
-                JSONObject cfg = w.optJSONObject("config");
-                return cfg != null ? cfg : empty;
-            }
-        } catch (Exception e) {
-            // fall through to defaults
-        }
-        return empty;
-    }
-
-    private static int color(String hex, int fallback) {
-        if (hex == null || hex.isEmpty()) return fallback;
-        try {
-            return Color.parseColor(hex);
-        } catch (Exception e) {
-            return fallback;
-        }
-    }
+    private static final int[] SPARK_IDS = {
+        R.id.health_spark_1, R.id.health_spark_2, R.id.health_spark_3, R.id.health_spark_4,
+        R.id.health_spark_5, R.id.health_spark_6, R.id.health_spark_7
+    };
+    private static final int[] SPARK_DAY_IDS = {
+        R.id.health_spark_day_1, R.id.health_spark_day_2, R.id.health_spark_day_3, R.id.health_spark_day_4,
+        R.id.health_spark_day_5, R.id.health_spark_day_6, R.id.health_spark_day_7
+    };
+    private static final int SPARK_MAX_DP = 34;
 
     static RemoteViews build(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_health);
-        views.setOnClickPendingIntent(R.id.health_root, WidgetUpdater.openAppPendingIntent(context));
+        views.setOnClickPendingIntent(R.id.health_root, WidgetUpdater.openPathPendingIntent(context, "/fitness", 6810));
         views.setOnClickPendingIntent(R.id.health_refresh, WidgetUpdater.refreshPendingIntent(context));
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.health_root, R.id.health_icon, R.id.health_title, R.id.health_refresh, st.accent);
+        st.text(views, R.id.health_steps, st.text);
+        st.text(views, R.id.health_ring_caption, st.muted);
+        st.text(views, R.id.health_goal, st.text);
+        st.text(views, R.id.health_sub, st.muted);
+        st.progress(views, R.id.health_ring, 100, 0, st.progress);
+        for (int i = 0; i < SPARK_IDS.length; i++) {
+            st.fill(views, SPARK_IDS[i], R.drawable.wg_pill, st.track);
+            st.text(views, SPARK_DAY_IDS[i], st.faint);
+        }
 
-        int accent = color(DEFAULT_ACCENT, Color.parseColor(DEFAULT_ACCENT));
-        int textColor = Color.parseColor(DEFAULT_TEXT);
-        // Until a ring has something to say it is hidden rather than drawn
-        // empty, which would read as "you are at 0% of your goal".
-        views.setViewVisibility(R.id.health_ring, View.GONE);
-
+        if (WidgetApi.apiKey(context) == null) {
+            st.status(views, R.id.health_status, "Sign in to Jarvis OS");
+            return views;
+        }
         try {
-            if (WidgetApi.apiKey(context) == null) {
-                views.setTextViewText(R.id.health_steps, "-");
-                views.setTextViewText(R.id.health_goal, "Sign in to Jarvis OS");
-                return views;
-            }
-
-            JSONObject cfg = healthConfig(context);
-            accent = color(cfg.optString("themeAccent"), accent);
-            textColor = color(cfg.optString("themeAccentText"), textColor);
-            views.setTextColor(R.id.health_steps, textColor);
-            // Reflective call: setProgressTintList only exists on API 31+, and
-            // RemoteViews ignores unknown methods instead of crashing.
-            views.setInt(R.id.health_progress, "setProgressTintList", accent);
-
-            // 7-day window so the widget can show a real average alongside today.
             JSONObject steps = WidgetApi.get(context, "/api/geo/steps?days=7");
             JSONObject daily = steps.optJSONObject("daily_steps");
-            int days = daily == null ? 0 : daily.length();
-            if (days == 0) {
-                // Through HealthRingCalc, so "never recorded" and "no goal" stay
-                // the distinct states they are rather than collapsing into one
-                // caption on one path and not the other.
-                HealthRingCalc.Ring ring =
-                    HealthRingCalc.build(0, steps.optInt("goal", 0), "-", false);
-                views.setTextViewText(R.id.health_steps, "-");
-                views.setTextViewText(R.id.health_goal, ring.caption);
-                views.setTextViewText(R.id.health_sub, "Open the app to start tracking");
-                views.setProgressBar(R.id.health_progress, 100, 0, false);
-                return views;
-            }
-
             int today = steps.optInt("today", 0);
             int goal = steps.optInt("goal", 0);
-            int total = 0;
-            for (int i = 0; i < daily.length(); i++) {
-                total += daily.optInt(String.valueOf(daily.names().get(i)), 0);
+            NumberFormat fmt = NumberFormat.getIntegerInstance(java.util.Locale.US);
+            if (daily == null || daily.length() == 0) {
+                views.setTextViewText(R.id.health_steps, "-");
+                views.setTextViewText(R.id.health_goal, "No steps yet");
+                views.setTextViewText(R.id.health_sub, "Open Jarvis to start tracking");
+                return views;
             }
-            int avg = total / days;
-
-            NumberFormat fmt = NumberFormat.getIntegerInstance();
+            java.util.List<String> days = new java.util.ArrayList<>();
+            JSONArray names = daily.names();
+            for (int i = 0; names != null && i < names.length(); i++) days.add(names.getString(i));
+            java.util.Collections.sort(days);
+            if (days.size() > 7) days = days.subList(days.size() - 7, days.size());
+            int total = 0;
+            int max = Math.max(goal, 1);
+            for (String d : days) {
+                int n = daily.optInt(d, 0);
+                total += n;
+                max = Math.max(max, n);
+            }
+            int avg = total / days.size();
             views.setTextViewText(R.id.health_steps, fmt.format(today));
-            views.setTextViewText(
-                R.id.health_sub,
-                fmt.format(avg) + " avg over " + days + (days == 1 ? " day" : " days")
-            );
-
-            // The ring and the bar come from one calculation, so they can never
-            // disagree about what today's number means.
-            HealthRingCalc.Ring ring = HealthRingCalc.build(today, goal, fmt.format(today), true);
-            views.setTextViewText(R.id.health_goal, ring.caption);
-            if (ring.percent < 0) {
-                views.setViewVisibility(R.id.health_ring, View.GONE);
-                views.setProgressBar(R.id.health_progress, 100, 0, false);
+            if (goal > 0) {
+                int pct = HealthTodayFormat.percent(today, goal);
+                boolean done = today >= goal;
+                views.setTextViewText(R.id.health_goal, done ? "Goal reached!" : pct + "% of " + fmt.format(goal));
+                st.text(views, R.id.health_goal, done ? st.third : st.text);
+                st.progress(views, R.id.health_ring, 100, pct, done ? st.third : st.progress);
             } else {
-                views.setViewVisibility(R.id.health_ring, View.VISIBLE);
-                views.setProgressBar(R.id.health_ring, 100, ring.percent, false);
-                // setColorStateList, not setInt: the method takes a
-                // ColorStateList and an int argument would be ignored.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    views.setColorStateList(
-                        R.id.health_ring,
-                        "setProgressTintList",
-                        ColorStateList.valueOf(accent)
-                    );
+                views.setTextViewText(R.id.health_goal, "steps today");
+            }
+            views.setTextViewText(R.id.health_sub, "Avg " + fmt.format(avg) + " a day · " + days.size()
+                    + (days.size() == 1 ? " day" : " days"));
+            // The chart: one bar per day, today's in the accent (heights need Android 12+).
+            int offset = SPARK_IDS.length - days.size();
+            for (int i = 0; i < SPARK_IDS.length; i++) {
+                int di = i - offset;
+                if (di < 0) {
+                    views.setViewVisibility(SPARK_IDS[i], View.INVISIBLE);
+                    continue;
                 }
-                views.setProgressBar(R.id.health_progress, 100, ring.percent, false);
+                String day = days.get(di);
+                int n = daily.optInt(day, 0);
+                boolean isToday = di == days.size() - 1;
+                boolean hitGoal = goal > 0 && n >= goal;
+                st.fill(views, SPARK_IDS[i], R.drawable.wg_pill,
+                        isToday ? st.progress : hitGoal ? com.jarvisos.app.JarvisTheme.withAlpha(st.third, 0.8f) : com.jarvisos.app.JarvisTheme.withAlpha(st.text, 0.28f));
+                views.setTextViewText(SPARK_DAY_IDS[i], dayInitial(day));
+                if (isToday) st.text(views, SPARK_DAY_IDS[i], st.text);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    float h = Math.max(4f, SPARK_MAX_DP * n / (float) max);
+                    views.setViewLayoutHeight(SPARK_IDS[i], h, android.util.TypedValue.COMPLEX_UNIT_DIP);
+                }
             }
         } catch (Exception ex) {
             views.setTextViewText(R.id.health_steps, "-");
-            views.setTextViewText(R.id.health_goal, "Unavailable");
-            views.setTextViewText(
-                R.id.health_sub,
-                ex.getMessage() != null ? ex.getMessage() : "offline"
-            );
-            views.setViewVisibility(R.id.health_ring, View.GONE);
+            st.status(views, R.id.health_status, ex.getMessage() != null ? ex.getMessage() : "Offline");
         }
         return views;
+    }
+
+    /** "2026-11-08" → "S" (the weekday's initial). */
+    static String dayInitial(String isoDay) {
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            java.util.Date d = f.parse(isoDay);
+            if (d == null) return "";
+            return new java.text.SimpleDateFormat("EEEEE", java.util.Locale.US).format(d);
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

@@ -203,6 +203,78 @@
         </receiver>
 
         <receiver
+            android:name=".widgets.ScreenTimeWidget"
+            android:exported="true"
+            android:label="Screen Time">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/screen_time_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.WeatherWidget"
+            android:exported="true"
+            android:label="Weather">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/weather_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.AgendaWidget"
+            android:exported="true"
+            android:label="Agenda">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/agenda_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.ChoresWidget"
+            android:exported="true"
+            android:label="Chores">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/chores_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.FamilyWidget"
+            android:exported="true"
+            android:label="Family">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/family_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.TimersWidget"
+            android:exported="true"
+            android:label="Timers">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/timers_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".widgets.VerseWidget"
             android:exported="true"
             android:label="Verse of the Day">

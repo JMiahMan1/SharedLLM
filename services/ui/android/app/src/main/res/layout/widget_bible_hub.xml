@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bible hub: today's verse, continue reading where you left off, today's plan
+  reading, and your streak, quiz and memory verses. Filled by BibleWidget
+  (the full size; the compact size is widget_bible).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bh_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/bh_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_book"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/bh_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="BIBLE"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <LinearLayout
+            android:id="@+id/bh_chip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:background="@drawable/wg_pill"
+                android:paddingStart="8dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/bh_chip_icon"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_flame"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/bh_streak"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="4dp" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/bh_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/bh_verse_tile"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:layout_marginTop="10dp"
+            android:background="@drawable/wg_tile"
+            android:padding="11dp">
+
+        <TextView
+            android:id="@+id/bh_verse"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="serif"
+            android:maxLines="3"
+            android:includeFontPadding="false"
+            android:text="-"
+            android:textColor="#F1F5F9"
+            android:textSize="14sp"
+            android:lineSpacingMultiplier="1.12" />
+
+        <TextView
+            android:id="@+id/bh_reference"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#863BFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginTop="5dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="fill_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp"
+            android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/bh_read_tile"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:background="@drawable/wg_tile"
+                android:padding="10dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/bh_read_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_bookmark"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/bh_read_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="CONTINUE"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/bh_read_value"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="5dp" />
+
+            <TextView
+                android:id="@+id/bh_read_caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/bh_plan_tile"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/wg_tile"
+                android:padding="10dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/bh_plan_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_event"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/bh_plan_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="TODAY'S PLAN"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/bh_plan_value"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="5dp" />
+
+            <TextView
+                android:id="@+id/bh_plan_caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:id="@+id/bh_quiz_tile"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:background="@drawable/wg_tile"
+                android:paddingStart="9dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="7dp">
+
+            <ImageView
+                android:id="@+id/bh_quiz_icon"
+                android:layout_width="13dp"
+                android:layout_height="13dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_check"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/bh_quiz_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginStart="5dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/bh_due_tile"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingStart="9dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="7dp">
+
+            <ImageView
+                android:id="@+id/bh_due_icon"
+                android:layout_width="13dp"
+                android:layout_height="13dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_star"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/bh_due_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginStart="5dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/bh_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
+</LinearLayout>

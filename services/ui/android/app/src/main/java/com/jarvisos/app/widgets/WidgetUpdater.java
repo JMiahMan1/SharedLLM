@@ -48,6 +48,12 @@ public final class WidgetUpdater {
         request(context, VerseWidget.class);
         request(context, GamesWidget.class);
         request(context, BibleWidget.class);
+        request(context, ScreenTimeWidget.class);
+        request(context, WeatherWidget.class);
+        request(context, AgendaWidget.class);
+        request(context, ChoresWidget.class);
+        request(context, FamilyWidget.class);
+        request(context, TimersWidget.class);
         request(context, NotesWidget.class);
         request(context, SingleNoteWidget.class);
     }
@@ -259,6 +265,78 @@ public final class WidgetUpdater {
         if (ids == null || ids.length == 0) return;
         onBackground(() -> {
             RemoteViews views = BibleWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushScreenTime(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ScreenTimeWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = ScreenTimeWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushWeather(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, WeatherWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = WeatherWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushAgenda(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, AgendaWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = AgendaWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushChores(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ChoresWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = ChoresWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushFamily(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, FamilyWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = FamilyWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    public static void pushTimers(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, TimersWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = TimersWidget.build(context);
             onMain(() -> {
                 for (int id : ids) mgr.updateAppWidget(id, views);
             });

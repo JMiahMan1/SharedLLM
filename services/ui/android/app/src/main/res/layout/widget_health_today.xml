@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Health today: four tiles from the Health page's own reads (steps from geo,
-  readiness, sleep and water from the health summary). Values are filled by
-  HealthTodayWidget through HealthTodayFormat; a dash means "no reading", never
-  zero. No calories, so a child's home screen never shows one.
+  Health today: steps, readiness, last night's sleep and water from the Health
+  page's own reads. A dash means "no reading", never zero. No calories, so a
+  child's home screen never shows one. Filled by HealthTodayWidget.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/ht_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_card_bg"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="@dimen/wg_pad">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -19,195 +19,377 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
+        <ImageView
+            android:id="@+id/ht_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_favorite"
+            android:tint="#863BFF" />
+
         <TextView
+            android:id="@+id/ht_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:letterSpacing="0.08"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
             android:text="HEALTH TODAY"
             android:textColor="#94A3B8"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
 
         <ImageView
             android:id="@+id/ht_refresh"
             android:layout_width="16dp"
             android:layout_height="16dp"
-            android:contentDescription="@string/health_today_refresh_description"
-            android:src="@android:drawable/ic_popup_sync" />
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
     </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:baselineAligned="false"
-        android:orientation="horizontal">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="fill_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="10dp"
+            android:baselineAligned="false">
 
         <LinearLayout
+            android:id="@+id/ht_steps_tile"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:background="@drawable/wg_tile"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="10dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:letterSpacing="0.08"
-                android:text="STEPS"
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/ht_steps_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_steps"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/ht_steps_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="STEPS"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/ht_steps_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text="-"
-                android:textColor="#F8FAFC"
+                android:textColor="#F1F5F9"
                 android:textSize="20sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:layout_marginTop="6dp" />
 
             <TextView
                 android:id="@+id/ht_steps_caption"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text=""
-                android:textColor="#64748B"
-                android:textSize="10sp" />
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="3dp" />
+
+            <ProgressBar
+                android:id="@+id/ht_steps_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_bar"
+                android:layout_marginTop="6dp" />
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/ht_ready_tile"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_marginStart="8dp"
+            android:background="@drawable/wg_tile"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="10dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:letterSpacing="0.08"
-                android:text="READINESS"
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/ht_ready_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_bolt"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/ht_ready_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="READY"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/ht_ready_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text="-"
-                android:textColor="#F8FAFC"
+                android:textColor="#F1F5F9"
                 android:textSize="20sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:layout_marginTop="6dp" />
 
             <TextView
                 android:id="@+id/ht_ready_caption"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text=""
-                android:textColor="#64748B"
-                android:textSize="10sp" />
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="3dp" />
         </LinearLayout>
 
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:baselineAligned="false"
-        android:orientation="horizontal">
-
         <LinearLayout
+            android:id="@+id/ht_sleep_tile"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_marginStart="8dp"
+            android:background="@drawable/wg_tile"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="10dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:letterSpacing="0.08"
-                android:text="SLEEP"
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/ht_sleep_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_bed"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/ht_sleep_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="SLEEP"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/ht_sleep_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text="-"
-                android:textColor="#F8FAFC"
+                android:textColor="#F1F5F9"
                 android:textSize="20sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:layout_marginTop="6dp" />
 
             <TextView
                 android:id="@+id/ht_sleep_caption"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text=""
-                android:textColor="#64748B"
-                android:textSize="10sp" />
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="3dp" />
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/ht_water_tile"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_marginStart="8dp"
+            android:background="@drawable/wg_tile"
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:padding="10dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:letterSpacing="0.08"
-                android:text="WATER"
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/ht_water_icon"
+                    android:layout_width="13dp"
+                    android:layout_height="13dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_drop"
+                    android:tint="#94A3B8" />
+
+                <TextView
+                    android:id="@+id/ht_water_label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:letterSpacing="0.1"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text="WATER"
+                    android:textColor="#94A3B8"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:layout_marginStart="5dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/ht_water_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-black"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text="-"
-                android:textColor="#F8FAFC"
+                android:textColor="#F1F5F9"
                 android:textSize="20sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:layout_marginTop="6dp" />
 
             <TextView
                 android:id="@+id/ht_water_caption"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
                 android:text=""
-                android:textColor="#64748B"
-                android:textSize="10sp" />
-        </LinearLayout>
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="3dp" />
 
+            <ProgressBar
+                android:id="@+id/ht_water_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:indeterminateOnly="false"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/wg_bar"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
     </LinearLayout>
 
     <TextView
         android:id="@+id/ht_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
         android:text=""
         android:textColor="#94A3B8"
         android:textSize="10sp"
-        android:visibility="gone" />
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
 </LinearLayout>

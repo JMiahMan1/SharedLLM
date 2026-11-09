@@ -24,6 +24,12 @@ public class SingleNoteWidget extends AppWidgetProvider {
     private static final int[] ROW_IDS = {
         R.id.note_row_1, R.id.note_row_2, R.id.note_row_3, R.id.note_row_4, R.id.note_row_5
     };
+    private static final int[] CHECK_IDS = {
+        R.id.note_check_1, R.id.note_check_2, R.id.note_check_3, R.id.note_check_4, R.id.note_check_5
+    };
+    private static final int[] TEXT_IDS = {
+        R.id.note_text_1, R.id.note_text_2, R.id.note_text_3, R.id.note_text_4, R.id.note_text_5
+    };
 
     @Override
     public void onUpdate(Context context, AppWidgetManager mgr, int[] ids) {
@@ -48,6 +54,13 @@ public class SingleNoteWidget extends AppWidgetProvider {
 
     static RemoteViews build(Context context, int appWidgetId) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_single_note);
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.single_note_root, R.id.single_note_icon, R.id.single_note_title,
+                R.id.single_note_refresh, st.fourth);
+        st.icon(views, R.id.single_note_configure, st.faint);
+        st.text(views, R.id.single_note_title, st.text);
+        st.text(views, R.id.single_note_body, st.text);
+        st.text(views, R.id.single_note_hint, st.faint);
         views.setOnClickPendingIntent(R.id.single_note_refresh, WidgetUpdater.refreshPendingIntent(context));
         views.setOnClickPendingIntent(R.id.single_note_configure,
             WidgetUpdater.configureSingleNotePendingIntent(context, appWidgetId));
@@ -59,7 +72,7 @@ public class SingleNoteWidget extends AppWidgetProvider {
 
         SingleNoteConfig config = SingleNoteConfig.load(context, appWidgetId);
         if (config == null) {
-            views.setTextViewText(R.id.single_note_title, "Choose a note");
+            views.setTextViewText(R.id.single_note_title, "CHOOSE A NOTE");
             views.setTextViewText(R.id.single_note_body, "Tap to pick a note for this widget.");
             views.setViewVisibility(R.id.single_note_body, android.view.View.VISIBLE);
             views.setOnClickPendingIntent(R.id.single_note_root,
@@ -67,7 +80,7 @@ public class SingleNoteWidget extends AppWidgetProvider {
             return views;
         }
 
-        views.setTextViewText(R.id.single_note_title, config.title.isEmpty() ? "Note" : config.title);
+        views.setTextViewText(R.id.single_note_title, (config.title.isEmpty() ? "Note" : config.title).toUpperCase(java.util.Locale.ROOT));
         views.setOnClickPendingIntent(R.id.single_note_root,
             WidgetUpdater.openSingleNotePendingIntent(context, appWidgetId, config.path));
 
@@ -105,8 +118,13 @@ public class SingleNoteWidget extends AppWidgetProvider {
                 if (row >= items.size()) break;
                 NoteChecklist.Item item = items.get(row);
                 views.setViewVisibility(ROW_IDS[row], android.view.View.VISIBLE);
-                views.setTextViewText(ROW_IDS[row], (item.done ? "\u2611 " : "\u2610 ") + item.text);
-                views.setTextColor(ROW_IDS[row], item.done ? 0xFF64748B : 0xFFE2E8F0);
+                views.setTextViewText(TEXT_IDS[row], item.text);
+                views.setImageViewResource(CHECK_IDS[row], item.done ? R.drawable.mi_check_box : R.drawable.mi_check_box_blank);
+                st.icon(views, CHECK_IDS[row], item.done ? st.third : st.muted);
+                st.text(views, TEXT_IDS[row], item.done ? st.faint : st.text);
+                views.setInt(TEXT_IDS[row], "setPaintFlags", item.done
+                        ? (android.graphics.Paint.STRIKE_THRU_TEXT_FLAG | android.graphics.Paint.ANTI_ALIAS_FLAG)
+                        : android.graphics.Paint.ANTI_ALIAS_FLAG);
                 views.setOnClickPendingIntent(ROW_IDS[row],
                     WidgetUpdater.noteCheckOffPendingIntent(context, appWidgetId, config.path, config.title, item.text));
             }

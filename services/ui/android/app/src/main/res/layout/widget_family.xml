@@ -1,0 +1,489 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Family: who's home and who's out (only people who share their location with
+  you), and unread family chat. Filled by FamilyWidget.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/fm_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/fm_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_home"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/fm_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="FAMILY"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <LinearLayout
+            android:id="@+id/fm_chat_chip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:background="@drawable/wg_pill"
+                android:paddingStart="8dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="9dp"
+                android:paddingBottom="3dp"
+                android:layout_marginStart="8dp"
+                android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/fm_chat_icon"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter"
+                android:src="@drawable/mi_chat"
+                android:tint="#94A3B8" />
+
+            <TextView
+                android:id="@+id/fm_chat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginStart="4dp" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/fm_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="fill_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="10dp"
+            android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/fm_p1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p1_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p1_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p1_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/fm_p2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p2_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p2_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p2_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/fm_p3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p3_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p3_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p3_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/fm_row2"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="fill_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp"
+            android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/fm_p4"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p4_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p4_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p4_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/fm_p5"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p5_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p5_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p5_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/fm_p6"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingTop="8dp"
+                android:paddingBottom="7dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/fm_p6_initial"
+                    android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/wg_circle" />
+
+            <TextView
+                android:id="@+id/fm_p6_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/fm_p6_place"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="9sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/fm_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
+</LinearLayout>

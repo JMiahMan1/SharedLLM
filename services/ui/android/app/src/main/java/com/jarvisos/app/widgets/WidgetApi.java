@@ -207,6 +207,8 @@ public final class WidgetApi {
             }
             String text = sb.toString().trim();
             if (text.isEmpty()) return new JSONObject();
+            // A bare list (the timers) comes back as {"items": [...]}.
+            if (text.startsWith("[")) return new JSONObject().put("items", new JSONArray(text));
             JSONObject json = new JSONObject(text);
             // Surface execution FAILURE payloads (e.g. HA not configured) instead of empty results
             String status = json.optString("status", "");
@@ -219,6 +221,30 @@ public final class WidgetApi {
         } finally {
             conn.disconnect();
         }
+    }
+
+    /**
+     * A failed read in words a person can act on, for a widget's status line
+     * (never the raw "HTTP 400: {...}" body).
+     */
+    public static String problem(Exception e) {
+        String m = e == null || e.getMessage() == null ? "" : e.getMessage();
+        if (m.startsWith("HTTP 401")) return "Sign in to Jarvis again";
+        if (m.startsWith("HTTP 403")) return "Not available for this account";
+        if (m.startsWith("HTTP 404")) return "Not set up yet";
+        if (m.startsWith("HTTP 400")) {
+            int at = m.indexOf("\"detail\":\"");
+            if (at >= 0) {
+                int end = m.indexOf('"', at + 10);
+                if (end > at + 10) return m.substring(at + 10, end);
+            }
+            return "Not set up yet";
+        }
+        if (m.startsWith("HTTP 5")) return "Jarvis is busy, try again soon";
+        if (m.contains("timeout") || m.contains("Unable to resolve") || m.contains("failed to connect")
+                || m.contains("ECONNREFUSED")) return "Offline";
+        if (m.equals("Not signed in")) return "Sign in to Jarvis OS";
+        return m.isEmpty() ? "Offline" : m;
     }
 
     public static JSONObject post(Context context, String path, JSONObject body) throws Exception {

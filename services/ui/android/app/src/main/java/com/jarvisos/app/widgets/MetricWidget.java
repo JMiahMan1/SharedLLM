@@ -31,36 +31,47 @@ public class MetricWidget extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_metric);
         views.setOnClickPendingIntent(R.id.metric_root, WidgetUpdater.openAppPendingIntent(context));
         views.setOnClickPendingIntent(R.id.metric_refresh, WidgetUpdater.refreshPendingIntent(context));
-
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.metric_root, R.id.metric_icon, R.id.metric_title, R.id.metric_refresh, st.accent);
+        st.text(views, R.id.metric_value, st.text);
+        st.text(views, R.id.metric_unit, st.muted);
+        st.text(views, R.id.metric_label, st.text);
+        st.text(views, R.id.metric_sub, st.muted);
         String entityId = WidgetApi.prefs(context).getString(PREF_ENTITY, "sensor.garage_door_internal_temperature");
         String label = WidgetApi.prefs(context).getString(PREF_LABEL, "Garage Temp");
         if (entityId == null || entityId.isEmpty()) entityId = "sensor.garage_door_internal_temperature";
         if (label == null || label.isEmpty()) label = "Metric";
-        views.setTextViewText(R.id.metric_label, label);
-
+        views.setTextViewText(R.id.metric_title, label.toUpperCase(java.util.Locale.ROOT));
         try {
             if (WidgetApi.apiKey(context) == null) {
                 views.setTextViewText(R.id.metric_value, "-");
-                views.setTextViewText(R.id.metric_sub, "Sign in to Jarvis OS");
+                st.status(views, R.id.metric_status, "Sign in to Jarvis OS");
                 return views;
             }
-            java.util.List<String> ids = java.util.Collections.singletonList(entityId);
-            JSONObject states = WidgetApi.entityStates(context, ids);
+            JSONObject states = WidgetApi.entityStates(context, java.util.Collections.singletonList(entityId));
             JSONObject e = states.optJSONObject(entityId);
             if (e == null) {
                 views.setTextViewText(R.id.metric_value, "-");
-                views.setTextViewText(R.id.metric_sub, entityId);
-            } else {
-                String state = e.optString("state", "?");
-                JSONObject attrs = e.optJSONObject("attributes");
-                String unit = attrs != null ? attrs.optString("unit_of_measurement", "") : "";
-                views.setTextViewText(R.id.metric_value, state + (unit.isEmpty() ? "" : " " + unit));
-                String friendly = WidgetApi.friendlyName(e);
-                views.setTextViewText(R.id.metric_sub, friendly);
+                views.setTextViewText(R.id.metric_label, entityId);
+                views.setTextViewText(R.id.metric_sub, "Not found in Home Assistant");
+                return views;
+            }
+            String state = EntityNames.text(e, "state");
+            JSONObject attrs = e.optJSONObject("attributes");
+            String unit = EntityStates.field(e, attrs, "unit_of_measurement");
+            String deviceClass = EntityStates.field(e, attrs, "device_class");
+            views.setTextViewText(R.id.metric_value, EntityStates.number(state));
+            views.setTextViewText(R.id.metric_unit, unit);
+            views.setTextViewText(R.id.metric_label, WidgetApi.friendlyName(e));
+            views.setTextViewText(R.id.metric_sub, EntityStates.updated(e));
+            views.setImageViewResource(R.id.metric_icon, EntityStates.sensorIcon(deviceClass, unit));
+            if ("unavailable".equalsIgnoreCase(state) || "unknown".equalsIgnoreCase(state)) {
+                views.setTextViewText(R.id.metric_value, "-");
+                views.setTextViewText(R.id.metric_sub, "Unavailable");
             }
         } catch (Exception ex) {
             views.setTextViewText(R.id.metric_value, "-");
-            views.setTextViewText(R.id.metric_sub, ex.getMessage() != null ? ex.getMessage() : "offline");
+            st.status(views, R.id.metric_status, ex.getMessage() != null ? ex.getMessage() : "Offline");
         }
         return views;
     }

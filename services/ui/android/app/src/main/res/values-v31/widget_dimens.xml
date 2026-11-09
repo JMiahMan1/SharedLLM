@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="wg_radius">@android:dimen/system_app_widget_background_radius</dimen>
+    <dimen name="wg_inner_radius">@android:dimen/system_app_widget_inner_radius</dimen>
+    <dimen name="wg_pad">14dp</dimen>
+</resources>

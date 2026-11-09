@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget card for a light Jarvis theme before Android 12 (no runtime tint). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#F7FFFFFF" />
+    <corners android:radius="@dimen/wg_radius" />
+</shape>

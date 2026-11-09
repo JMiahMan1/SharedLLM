@@ -35,10 +35,14 @@ public class NotesWidget extends AppWidgetProvider {
 
     static RemoteViews build(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_notes);
-        views.setOnClickPendingIntent(R.id.notes_root, WidgetUpdater.openAppPendingIntent(context));
+        views.setOnClickPendingIntent(R.id.notes_root, WidgetUpdater.openPathPendingIntent(context, "/notes", 6002));
         views.setOnClickPendingIntent(R.id.notes_add, WidgetUpdater.composeNotePendingIntent(context));
         views.setOnClickPendingIntent(R.id.notes_refresh, WidgetUpdater.refreshPendingIntent(context));
-
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.notes_root, R.id.notes_icon, R.id.notes_title, R.id.notes_refresh, st.fourth);
+        st.fill(views, R.id.notes_add, R.drawable.wg_circle, st.accent);
+        st.icon(views, R.id.notes_add, st.onAccent);
+        st.text(views, R.id.notes_empty, st.muted);
         List<NotesLines.Line> lines = null;
         String empty = null;
         if (WidgetApi.apiKey(context) == null) {
@@ -50,37 +54,43 @@ public class NotesWidget extends AppWidgetProvider {
                 body.put("previews", true);
                 JSONObject reply = WidgetApi.post(context, "/api/communication/notes/list", body);
                 lines = NotesLines.recent(reply.optJSONObject("detail"), ROWS);
-                if (lines.isEmpty()) empty = "No notes yet";
+                if (lines.isEmpty()) {
+                    empty = "No notes yet. Tap + to write one.";
+                    lines = null;
+                }
             } catch (Exception ex) {
                 String message = ex.getMessage() != null ? ex.getMessage() : "offline";
                 empty = NotesLines.oneLine(message, 80);
             }
         }
-
-        if (lines == null) {
-            views.setViewVisibility(R.id.notes_empty, android.view.View.VISIBLE);
-            views.setTextViewText(R.id.notes_empty, empty);
-            for (int row = 1; row <= ROWS; row++) {
-                views.setViewVisibility(rowId(row), android.view.View.GONE);
-            }
-            return views;
-        }
-
-        views.setViewVisibility(R.id.notes_empty, android.view.View.GONE);
         for (int row = 1; row <= ROWS; row++) {
-            NotesLines.Line line = row <= lines.size() ? lines.get(row - 1) : null;
+            NotesLines.Line line = lines != null && row <= lines.size() ? lines.get(row - 1) : null;
             int container = rowId(row);
             if (line == null) {
                 views.setViewVisibility(container, android.view.View.GONE);
                 continue;
             }
             views.setViewVisibility(container, android.view.View.VISIBLE);
+            st.tile(views, container, false);
+            st.icon(views, iconId(row), st.fourth);
+            st.text(views, titleId(row), st.text);
+            st.text(views, bodyId(row), st.muted);
             views.setTextViewText(titleId(row), line.title);
             views.setTextViewText(bodyId(row), line.body);
-            views.setOnClickPendingIntent(container,
-                WidgetUpdater.openNotePendingIntent(context, line.path, row));
+            views.setOnClickPendingIntent(container, WidgetUpdater.openNotePendingIntent(context, line.path, row));
         }
+        views.setViewVisibility(R.id.notes_empty, lines == null ? android.view.View.VISIBLE : android.view.View.GONE);
+        views.setTextViewText(R.id.notes_empty, empty == null ? "" : empty);
         return views;
+    }
+
+    private static int iconId(int row) {
+        switch (row) {
+            case 1: return R.id.notes_row_1_icon;
+            case 2: return R.id.notes_row_2_icon;
+            case 3: return R.id.notes_row_3_icon;
+            default: return R.id.notes_row_4_icon;
+        }
     }
 
     private static int rowId(int row) {

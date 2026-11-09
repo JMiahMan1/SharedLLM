@@ -32,6 +32,8 @@ export interface TokenBridgePluginInterface {
     onAccent: string;
     accentAlt?: string;
     scheme?: string;
+    /** The theme's full token set as JSON, so native surfaces use every token. */
+    tokens?: string;
   }): Promise<void>;
 }
 

@@ -33,21 +33,6 @@ public class ActionButtonWidget extends AppWidgetProvider {
         super.onDeleted(context, appWidgetIds);
     }
 
-    /**
-     * Chip colour configured on the card. The tint belongs to the tile, not to
-     * the icon: the icon now takes the leftover height, so a colour behind it
-     * would paint a slab over most of the card.
-     */
-    private static int tileDrawable(int iconBg) {
-        if (iconBg == 0) return R.drawable.widget_transparent_bg;
-        if (iconBg == 0x331E293B) return R.drawable.widget_tile_slate;
-        if (iconBg == 0x660F172A) return R.drawable.widget_tile_navy;
-        if (iconBg == 0x4D4ADE80) return R.drawable.widget_tile_green;
-        if (iconBg == 0x4D863BFF) return R.drawable.widget_tile_purple;
-        if (iconBg == 0x4D38BDF8) return R.drawable.widget_tile_sky;
-        return R.drawable.widget_card_bg;
-    }
-
     /** State line collapses when empty so it never reserves a blank band. */
     private static void setState(RemoteViews views, String text, int color) {
         String value = text == null ? "" : text.trim();
@@ -65,41 +50,41 @@ public class ActionButtonWidget extends AppWidgetProvider {
 
     static RemoteViews build(Context context, int appWidgetId) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_action_button);
+        WidgetStyle st = WidgetStyle.of(context);
         ActionButtonConfig cfg = ActionButtonConfig.load(context, appWidgetId);
+        paintCard(views, st, cfg == null ? 0 : cfg.iconBg);
+        st.text(views, R.id.action_label, st.text);
         if (cfg == null) {
-            setLabel(views, "Configure", "Tap to set up");
-            setState(views, "Tap to set up", 0xFF94A3B8);
+            setLabel(views, "Set up", "Tap to choose a device");
+            setState(views, "Tap to choose", st.muted);
             views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes("settings"));
-            views.setInt(R.id.action_root, "setBackgroundResource", R.drawable.widget_card_bg);
+            paintButton(views, st, false);
             views.setOnClickPendingIntent(R.id.action_root,
                 WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
             return views;
         }
-
         views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(cfg.icon));
-        // "None" means a fully transparent tile; a chip colour keeps the dark card.
-        views.setInt(R.id.action_root, "setBackgroundResource", tileDrawable(cfg.iconBg));
-        final String label = DeviceButtonWidget.truncate(cfg.displayLabel(null), 18);
+        final String label = cfg.displayLabel(null);
         setLabel(views, label, "");
-        setState(views, "", 0xFF94A3B8);
-
+        setState(views, "", st.muted);
+        paintButton(views, st, false);
         try {
             if (WidgetApi.apiKey(context) == null) {
-                setState(views, "Sign in", 0xFF94A3B8);
+                setState(views, "Sign in", st.muted);
                 setLabel(views, label, "Sign in");
                 views.setOnClickPendingIntent(R.id.action_root, WidgetUpdater.openAppPendingIntent(context));
                 return views;
             }
-            List<String> ids = java.util.Collections.singletonList(cfg.entityId);
-            JSONObject states = WidgetApi.entityStates(context, ids);
+            JSONObject states = WidgetApi.entityStates(context, java.util.Collections.singletonList(cfg.entityId));
             JSONObject e = states.optJSONObject(cfg.entityId);
-            String state = e != null ? e.optString("state", "") : "";
-            setState(views, state,
-                WidgetApi.isActiveState(state) ? 0xFF4ADE80 : 0xFF94A3B8);
-            setLabel(views, label, state);
-
-            String resolvedState = e != null ? e.optString("state", "off") : "off";
-            String service = WidgetApi.resolveService(cfg.service, cfg.domain(), resolvedState);
+            String state = e != null ? EntityNames.text(e, "state") : "";
+            boolean on = EntityStates.active(state);
+            String shown = e == null ? "Not found" : EntityStates.pretty(cfg.domain(), state);
+            setState(views, shown, on ? st.accent : st.muted);
+            setLabel(views, label, shown);
+            paintButton(views, st, on);
+            String resolvedState = e != null ? EntityNames.text(e, "state") : "off";
+            String service = WidgetApi.resolveService(cfg.service, cfg.domain(), resolvedState.isEmpty() ? "off" : resolvedState);
             android.app.PendingIntent pi;
             boolean wouldOpenGarage = cfg.entityId.toLowerCase().contains("garage")
                 && ("turn_on".equals(service) || "open_cover".equals(service))
@@ -111,13 +96,27 @@ public class ActionButtonWidget extends AppWidgetProvider {
             }
             views.setOnClickPendingIntent(R.id.action_root, pi);
         } catch (Exception ex) {
-            String message = ex.getMessage() != null
-                ? DeviceButtonWidget.truncate(ex.getMessage(), 20) : "offline";
-            setState(views, message, 0xFFF87171);
+            String message = ex.getMessage() != null ? DeviceButtonWidget.truncate(ex.getMessage(), 20) : "Offline";
+            setState(views, message, st.accent);
             setLabel(views, label, message);
             views.setOnClickPendingIntent(R.id.action_root,
                 WidgetUpdater.actionPendingIntent(context, appWidgetId, cfg.entityId, cfg.service));
         }
         return views;
+    }
+
+    /**
+     * The card: the theme surface, or the background the person picked when
+     * configuring (kept for the transparent and colored choices).
+     */
+    /** The card is the user's Jarvis theme, like every other widget. */
+    private static void paintCard(RemoteViews views, WidgetStyle st, int iconBg) {
+        st.card(views, R.id.action_root);
+    }
+
+    /** The round button: accent-filled while on, a quiet tile while off. */
+    private static void paintButton(RemoteViews views, WidgetStyle st, boolean on) {
+        st.fill(views, R.id.action_icon, R.drawable.wg_circle, on ? st.accent : st.tile);
+        st.icon(views, R.id.action_icon, on ? st.onAccent : st.text);
     }
 }

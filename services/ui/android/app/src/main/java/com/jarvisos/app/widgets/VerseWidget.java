@@ -26,15 +26,22 @@ public class VerseWidget extends AppWidgetProvider {
 
     static RemoteViews build(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_verse);
-        views.setOnClickPendingIntent(R.id.verse_root, WidgetUpdater.openAppPendingIntent(context));
+        views.setOnClickPendingIntent(R.id.verse_root, WidgetUpdater.openPathPendingIntent(context, "/bible?tab=today", 7120));
         views.setOnClickPendingIntent(R.id.verse_refresh, WidgetUpdater.refreshPendingIntent(context));
-
+        WidgetStyle st = WidgetStyle.of(context);
+        st.header(views, R.id.verse_root, R.id.verse_icon, R.id.verse_title, R.id.verse_refresh, st.accent);
+        st.text(views, R.id.verse_text, st.text);
+        st.text(views, R.id.verse_reference, st.accent);
+        st.text(views, R.id.verse_sub, st.muted);
+        st.fill(views, R.id.verse_chip, R.drawable.wg_pill, com.jarvisos.app.JarvisTheme.withAlpha(st.fourth, 0.18f));
+        st.icon(views, R.id.verse_chip_icon, st.fourth);
+        st.text(views, R.id.verse_streak, st.text);
+        views.setViewVisibility(R.id.verse_chip, android.view.View.GONE);
         if (WidgetApi.apiKey(context) == null) {
             views.setTextViewText(R.id.verse_text, "-");
-            views.setTextViewText(R.id.verse_sub, "Sign in to Jarvis OS");
+            st.status(views, R.id.verse_status, "Sign in to Jarvis OS");
             return views;
         }
-
         VerseDaily.Lines lines;
         try {
             JSONObject daily = WidgetApi.get(context, "/api/bible/daily");
@@ -46,11 +53,15 @@ public class VerseWidget extends AppWidgetProvider {
                 : VerseDaily.oneLine(message);
             lines = new VerseDaily.Lines("", "-", sub, "", message);
         }
-
         views.setTextViewText(R.id.verse_reference, lines.reference);
         views.setTextViewText(R.id.verse_text, lines.text);
-        views.setTextViewText(R.id.verse_streak, lines.streak);
         views.setTextViewText(R.id.verse_sub, lines.sub);
+        // The streak rides in a chip: "6" with a flame, only while there is one.
+        String n = lines.streak.replaceAll("[^0-9].*$", "");
+        if (!n.isEmpty()) {
+            views.setViewVisibility(R.id.verse_chip, android.view.View.VISIBLE);
+            views.setTextViewText(R.id.verse_streak, n + (n.equals("1") ? " day" : " days"));
+        }
         return views;
     }
 }

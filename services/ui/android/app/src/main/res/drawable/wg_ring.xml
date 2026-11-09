@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Progress ring for widgets: the track and the arc are white and tinted in code
+  (WidgetStyle.progress) on Android 12+. useLevel makes the arc follow the
+  progress instead of always drawing the whole circle.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="ring" android:innerRadiusRatio="2.6" android:thicknessRatio="11" android:useLevel="false">
+            <solid android:color="#33FFFFFF" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <rotate android:fromDegrees="-90" android:toDegrees="-90" android:pivotX="50%" android:pivotY="50%">
+            <shape android:shape="ring" android:innerRadiusRatio="2.6" android:thicknessRatio="11" android:useLevel="true">
+                <solid android:color="#FF863BFF" />
+            </shape>
+        </rotate>
+    </item>
+</layer-list>

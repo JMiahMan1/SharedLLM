@@ -1,0 +1,610 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Family Games hub: games being played right now (tap Join), quick-launch
+  buttons for your games, the family's high scores and your own card. Filled
+  by GamesWidget (the full size; the compact size is widget_games).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/gh_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wg_card"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="@dimen/wg_pad">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/gh_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_gamepad"
+            android:tint="#863BFF" />
+
+        <TextView
+            android:id="@+id/gh_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="FAMILY GAMES"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginStart="7dp" />
+
+        <TextView
+            android:id="@+id/gh_me"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/gh_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_refresh"
+            android:tint="#64748B"
+            android:layout_marginStart="8dp"
+            android:contentDescription="Refresh" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/gh_live_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.12"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text="PLAYING NOW"
+        android:textColor="#94A3B8"
+        android:textSize="9sp"
+        android:textStyle="bold"
+        android:layout_marginTop="10dp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/gh_live_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp"
+            android:background="@drawable/wg_tile"
+            android:paddingStart="10dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="7dp"
+            android:visibility="gone">
+
+        <TextView
+            android:id="@+id/gh_live_1_emoji"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#F1F5F9"
+            android:textSize="20sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="10dp">
+
+            <TextView
+                android:id="@+id/gh_live_1_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/gh_live_1_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/gh_live_1_join"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="Join"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:background="@drawable/wg_pill"
+                android:paddingStart="12dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp"
+                android:layout_marginStart="8dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/gh_live_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp"
+            android:background="@drawable/wg_tile"
+            android:paddingStart="10dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="7dp"
+            android:visibility="gone">
+
+        <TextView
+            android:id="@+id/gh_live_2_emoji"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text=""
+            android:textColor="#F1F5F9"
+            android:textSize="20sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="10dp">
+
+            <TextView
+                android:id="@+id/gh_live_2_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/gh_live_2_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/gh_live_2_join"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:includeFontPadding="false"
+            android:text="Join"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:background="@drawable/wg_pill"
+                android:paddingStart="12dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp"
+                android:layout_marginStart="8dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/gh_play_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.12"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text="PLAY"
+        android:textColor="#94A3B8"
+        android:textSize="9sp"
+        android:textStyle="bold"
+        android:layout_marginTop="10dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="fill_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="5dp"
+            android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/gh_game_1"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:background="@drawable/wg_tile"
+                android:padding="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_game_1_emoji"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/gh_game_1_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginTop="3dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/gh_game_2"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:padding="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_game_2_emoji"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/gh_game_2_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginTop="3dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/gh_game_3"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:padding="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_game_3_emoji"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/gh_game_3_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginTop="3dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/gh_game_4"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:padding="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_game_4_emoji"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/gh_game_4_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginTop="3dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/gh_lead_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.12"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text="HIGH SCORES"
+        android:textColor="#94A3B8"
+        android:textSize="9sp"
+        android:textStyle="bold"
+        android:layout_marginTop="10dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginTop="5dp"
+            android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/gh_lead_1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="@drawable/wg_tile"
+                android:paddingStart="9dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_lead_1_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/gh_lead_1_score"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/gh_lead_2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingStart="9dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_lead_2_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/gh_lead_2_score"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/gh_lead_3"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/wg_tile"
+                android:paddingStart="9dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="6dp"
+                android:visibility="invisible">
+
+            <TextView
+                android:id="@+id/gh_lead_3_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#F1F5F9"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/gh_lead_3_score"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:includeFontPadding="false"
+                android:text=""
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/gh_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:singleLine="true"
+        android:includeFontPadding="false"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:layout_marginTop="6dp"
+            android:visibility="gone" />
+</LinearLayout>
