@@ -761,6 +761,8 @@ class ScreenRules(SQLModel, table=True):  # type: ignore
       - notification_toggle_allowed: list of notice categories the minor may
         switch off for themselves (a parent allow-list); absent means none, and
         the safety categories (``family_safety``) can never be allowed
+      - notification_disabled: list of notice categories a parent has disabled
+        (switched off) for the minor; safety categories can never be disabled
     The evaluation lives in services/common/screen_time.py.
     """
     __table_args__ = {"extend_existing": True}

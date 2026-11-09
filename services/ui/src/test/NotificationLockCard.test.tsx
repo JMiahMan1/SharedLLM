@@ -64,4 +64,45 @@ describe('NotificationLockCard', () => {
     await waitFor(() => expect(savedRules).not.toBeNull());
     expect(savedRules!.notification_toggle_allowed).toEqual(['bible']);
   });
+
+  it('lets a parent disable and re-enable specific notification categories for a non-adult account', async () => {
+    let savedRules: Record<string, unknown> | null = null;
+
+    server.use(
+      http.get('/api/screen-time/kid/status', () =>
+        HttpResponse.json({
+          username: 'kid',
+          day: '2026-11-08',
+          rules: {
+            notification_toggle_allowed: ['raven'],
+            notification_disabled: ['jobs'],
+          },
+        }),
+      ),
+      http.put('/api/screen-time/kid/rules', async ({ request }) => {
+        savedRules = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ status: 'SUCCESS', rules: savedRules });
+      }),
+    );
+
+    renderWithProviders(<NotificationLockCard username="kid" name="Emma" />);
+
+    // Raven starts enabled; disabling it adds it to notification_disabled and removes it from notification_toggle_allowed.
+    const disableRaven = await screen.findByRole('button', { name: 'Disable Raven missions for Emma' });
+    expect(disableRaven).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(disableRaven);
+
+    await waitFor(() => expect(savedRules).not.toBeNull());
+    expect(savedRules!.notification_disabled).toEqual(['jobs', 'raven']);
+    expect(savedRules!.notification_toggle_allowed).toEqual([]);
+
+    // Finished jobs starts disabled; clicking Enable removes it from notification_disabled.
+    const enableJobs = screen.getByRole('button', { name: 'Enable Finished jobs for Emma' });
+    expect(enableJobs).toHaveAttribute('aria-pressed', 'false');
+    savedRules = null;
+    fireEvent.click(enableJobs);
+
+    await waitFor(() => expect(savedRules).not.toBeNull());
+    expect(savedRules!.notification_disabled).toEqual([]);
+  });
 });

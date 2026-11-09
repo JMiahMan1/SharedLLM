@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useHaptics } from '../../hooks/useHaptics';
+import GameArtwork from './GameArtwork';
 
 interface GamePlayerProps {
+  slug?: string;
   title: string;
   /** Play page URL without the safe-area parameter; the player adds it. */
   src: string;
@@ -56,7 +58,7 @@ function measureSafeArea(): string {
  * through the native layer, and the page behind is locked so a swipe in the
  * game can never scroll it.
  */
-export default function GamePlayer({ title, src, frameRef, onClose, emoji, art }: GamePlayerProps) {
+export default function GamePlayer({ slug, title, src, frameRef, onClose, emoji, art }: GamePlayerProps) {
   const { trigger } = useHaptics();
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -146,17 +148,24 @@ export default function GamePlayer({ title, src, frameRef, onClose, emoji, art }
         allowFullScreen
       />
       <div
-        className={`absolute inset-0 flex flex-col items-center justify-center gap-3 transition-opacity duration-300 ${
+        className={`absolute inset-0 flex flex-col items-center justify-center gap-4 transition-opacity duration-300 ${
           ready ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
-        style={{ backgroundImage: `linear-gradient(160deg, ${from}, ${to})` }}
+        style={{ backgroundImage: `radial-gradient(circle at 50% 35%, rgba(255,255,255,0.18), transparent 60%), linear-gradient(160deg, ${from}, ${to})` }}
         data-testid="family-player-splash"
         aria-hidden={ready}
       >
-        <span className="animate-bounce text-7xl drop-shadow-lg">{emoji || '🎮'}</span>
+        <GameArtwork
+          slug={slug || title}
+          emoji={emoji || '🎮'}
+          art={art}
+          variant="splash"
+          className="h-36 w-36 rounded-3xl border border-white/25 shadow-2xl"
+        />
         <span className="text-2xl font-black tracking-tight text-white drop-shadow">{title}</span>
-        <span className="mt-2 h-1.5 w-24 overflow-hidden rounded-full bg-white/30">
-          <span className="block h-full w-1/2 animate-pulse rounded-full bg-white/90" />
+        <span className="text-xs font-medium uppercase tracking-widest text-white/75">Loading arcade cabinet…</span>
+        <span className="mt-1 h-2 w-32 overflow-hidden rounded-full bg-black/30 p-0.5">
+          <span className="block h-full w-1/2 animate-pulse rounded-full bg-white/95" />
         </span>
         {/* While loading the game's own ✕ is not there yet. */}
         <button
@@ -166,7 +175,7 @@ export default function GamePlayer({ title, src, frameRef, onClose, emoji, art }
             else closeRef.current();
           }}
           aria-label="Close game"
-          className="absolute left-[calc(10px+env(safe-area-inset-left))] top-[calc(8px+env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-2xl bg-black/25 text-xl text-white backdrop-blur"
+          className="absolute left-[calc(10px+env(safe-area-inset-left))] top-[calc(8px+env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-2xl border border-white/20 bg-black/35 text-xl text-white backdrop-blur"
           data-testid="family-player-close"
         >
           ✕

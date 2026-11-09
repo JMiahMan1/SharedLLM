@@ -52,26 +52,33 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
       empty={list.length === 0 ? `Nothing of concern found on ${name}'s ${device}.` : null}
       aside={concerns.data && concerns.data.concerns.length > limit ? `${limit} of ${concerns.data.concerns.length}` : undefined}
     >
-      <ul className="space-y-2">
+      <ul className="space-y-2.5">
         {list.map((c, i) => {
           const level = LEVEL[c.level] || LEVEL.medium;
           const Icon = level.icon;
           const dismissed = c.review?.verdict === 'dismissed';
           return (
-            <li key={`${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3 text-xs space-y-1 ${level.style}`} data-testid="concern">
-              <p className="flex items-center gap-1.5 font-semibold">
-                <Icon size={13} /> {c.label} · {level.word}
-                {c.at && <span className="ml-auto font-normal text-[10px] opacity-70">{relativeTime(c.at)}</span>}
-              </p>
-              <p className="opacity-90">
+            <li key={`${c.category}-${c.at}-${i}`} className={`rounded-xl border p-3.5 text-xs space-y-2 ${level.style}`} data-testid="concern">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 font-semibold">
+                  <Icon size={14} className="shrink-0" /> {c.label} · {level.word}
+                </p>
+                {c.at && <span className="rounded-full bg-black/20 px-2 py-0.5 font-normal text-[10px] opacity-80">{relativeTime(c.at)}</span>}
+              </div>
+              <p className="rounded-lg bg-black/20 px-2.5 py-2 leading-relaxed opacity-95">
                 In {whereText(c.feature, c.action)}: “{c.excerpt}”
               </p>
-              {c.review?.reason && <p className="opacity-80">{dismissed ? 'Probably fine: ' : ''}{c.review.reason}</p>}
-              {starters.get(c.category) && (
-                <p className="text-slate-200">
-                  <span className="font-semibold">What to say: </span>
-                  {starters.get(c.category)}
+              {c.review?.reason && (
+                <p className="text-[11px] leading-relaxed opacity-85">
+                  {dismissed ? <span className="font-semibold text-emerald-300">Probably fine: </span> : ''}
+                  {c.review.reason}
                 </p>
+              )}
+              {starters.get(c.category) && (
+                <div className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-slate-200">
+                  <span className="font-semibold text-sky-200">What to say: </span>
+                  {starters.get(c.category)}
+                </div>
               )}
             </li>
           );

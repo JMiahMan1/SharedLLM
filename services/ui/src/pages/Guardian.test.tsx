@@ -121,6 +121,19 @@ describe('The family guardian page (a parent)', () => {
     expect(await screen.findByTestId('guardian-screen')).toBeInTheDocument();
   });
 
+  it('filters guardian sections by domain and shows child status bar', async () => {
+    wrap(<Guardian />);
+    expect(await screen.findByTestId('guardian-child-status')).toHaveTextContent('45 min remaining today');
+    expect(screen.getByTestId('guardian-domain-nav')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Heart & Faith' }));
+    expect(screen.getByTestId('guidance-bullying')).toBeInTheDocument();
+    expect(screen.queryByTestId('screen-time-controls')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All areas' }));
+    expect(await screen.findByTestId('screen-time-controls')).toBeInTheDocument();
+  });
+
   it('keeps the old /guardian?child= links working', async () => {
     wrap(<Guardian />, '/guardian?child=sam');
     expect(await screen.findByTestId('where')).toHaveTextContent('/family/member/sam');

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Crown, Medal, Play, Trophy, X } from 'lucide-react';
 import UserAvatar from '../UserAvatar';
+import GameArtwork from './GameArtwork';
 import { api } from '../../services/api';
 import type { ArcadeScoreboardPlayer, FamilyGameCard } from '../../types/api';
 
@@ -64,9 +65,9 @@ function PlayerGames({
           type="button"
           onClick={onClose}
           aria-label={`Hide ${player.display_name}'s games`}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition active:scale-90"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-90"
         >
-          <X size={14} />
+          <X size={15} />
         </button>
       </div>
       {played.length === 0 ? (
@@ -245,23 +246,25 @@ interface Champion {
 
 function ChampionCard({ champion, onPlay }: { champion: Champion; onPlay: () => void }) {
   const { game, player } = champion;
-  const from = game.art?.from || '#7c5cff';
-  const to = game.art?.to || '#ff7ab6';
   return (
     <div
-      className="flex w-44 shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60"
+      className="group flex w-48 shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900/75 shadow-md transition-all hover:border-amber-400/30"
       data-testid={`family-champion-${game.slug}`}
     >
-      <div
-        className="flex h-16 items-center justify-between px-3"
-        style={{ backgroundImage: `linear-gradient(135deg, ${from}, ${to})` }}
-      >
-        <span className="text-3xl drop-shadow" aria-hidden>
-          {game.emoji || '🎮'}
+      <div className="relative flex h-20 items-center justify-between overflow-hidden px-3">
+        <GameArtwork
+          slug={game.slug}
+          emoji={game.emoji || '🎮'}
+          category={game.genre}
+          art={game.art}
+          variant="banner"
+          className="absolute inset-0 h-full w-full"
+        />
+        <span className="relative z-20 ml-auto max-w-[65%] truncate rounded-lg bg-black/45 px-2 py-0.5 text-right text-xs font-bold text-white backdrop-blur-sm">
+          {game.title}
         </span>
-        <span className="truncate pl-2 text-right text-xs font-bold text-white drop-shadow">{game.title}</span>
       </div>
-      <div className="flex flex-1 flex-col gap-2 p-3">
+      <div className="flex flex-1 flex-col gap-2.5 p-3">
         <div className="flex items-center gap-2">
           {player ? (
             <UserAvatar username={player.username} avatar={player.avatar} name={player.display_name} size={28} />
@@ -280,7 +283,7 @@ function ChampionCard({ champion, onPlay }: { champion: Champion; onPlay: () => 
         <button
           type="button"
           onClick={onPlay}
-          className="mt-auto inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-white/10 text-xs font-bold text-white transition active:scale-95"
+          className="mt-auto inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/10 text-xs font-bold text-white transition hover:bg-white/15 active:scale-95"
         >
           <Play size={13} fill="currentColor" /> {player?.you ? 'Beat your record' : 'Beat it'}
         </button>

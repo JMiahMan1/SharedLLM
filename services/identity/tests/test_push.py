@@ -241,3 +241,36 @@ def test_unknown_ids_in_a_stored_allow_list_are_dropped(as_user, session):
     assert body["locked"] == [c for c in body["locked"] if c != "family_presence"]
     assert "family_presence" not in body["locked"]
     assert "family_safety" in body["locked"]
+
+
+def test_a_parent_can_disable_and_enable_notifications_for_a_minor(as_user):
+    parent = as_user("mom")
+    put = parent.put(
+        "/api/screen-time/gracie/rules",
+        json={"notification_disabled": ["raven", "jobs"], "notification_toggle_allowed": ["bible"]},
+    )
+    assert put.status_code == 200
+    assert put.json()["rules"]["notification_disabled"] == ["raven", "jobs"]
+    assert put.json()["rules"]["notification_toggle_allowed"] == ["bible"]
+
+    # Safety and admin categories cannot be disabled for a minor.
+    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["family_safety"]}).status_code == 422
+    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["admin"]}).status_code == 422
+    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["nonsense"]}).status_code == 422
+
+    # For the minor, disabled categories are off and locked; unlocked categories can be toggled; others are locked on.
+    client = as_user("gracie")
+    resp = client.get("/api/users/me/notification-preferences").json()
+    assert resp["preferences"]["raven"] is False
+    assert resp["preferences"]["jobs"] is False
+    assert resp["preferences"]["chat"] is True
+    assert resp["preferences"]["bible"] is True
+    assert "raven" in resp["locked"]
+    assert "jobs" in resp["locked"]
+    assert "bible" not in resp["locked"]
+
+    # The minor cannot turn a parent-disabled category back on, but can switch off an allowed category.
+    resp = client.put("/api/users/me/notification-preferences", json={"raven": True, "bible": False}).json()
+    assert resp["preferences"]["raven"] is False
+    assert resp["preferences"]["bible"] is False
+

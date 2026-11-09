@@ -59,32 +59,39 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
   const failed = [decideGuard.error, decideTime.error].find(Boolean);
   const failure = isAxiosError(failed) ? (failed.response?.data as { detail?: string })?.detail || 'That did not save.' : failed ? 'That did not save.' : null;
   const busy = decideGuard.isPending || decideTime.isPending;
-  const yes = 'glass-button min-h-11 px-3 text-xs';
-  const no = 'min-h-11 px-3 text-xs text-slate-400';
+  const yes = 'glass-button min-h-11 rounded-xl px-3.5 text-xs font-semibold text-sky-100 border-sky-400/30 bg-sky-500/15 hover:bg-sky-500/25';
+  const no = 'min-h-11 rounded-xl border border-white/10 bg-white/5 px-3.5 text-xs font-medium text-slate-300 hover:bg-white/10 hover:text-white transition-colors';
 
   return (
     <MemberCard
       title={history ? 'Request history' : `${name} is asking`}
       icon={history ? History : Inbox}
+      tone={history ? 'text-slate-300' : 'text-sky-300'}
       testId={history ? 'request-history' : 'open-requests'}
+      aside={!history && rows.length > 0 ? `${rows.length} waiting` : undefined}
       isLoading={(wantsTime && time.isLoading) || (wantsGuard && guard.isLoading)}
       error={time.isError || guard.isError ? `${name}'s requests could not be loaded.` : null}
       empty={rows.length === 0 ? (history ? 'No answered requests yet.' : 'Nothing waiting for an answer.') : null}
     >
-      <ul className={`space-y-2 ${history ? 'max-h-72 overflow-y-auto' : ''}`}>
+      <ul className={`space-y-2.5 ${history ? 'max-h-72 overflow-y-auto pr-1' : ''}`}>
         {rows.map((row) =>
           history ? (
-            <li key={`${row.kind}-${row.id}`} className="flex items-start justify-between gap-2 text-xs">
-              <span className="min-w-0 text-slate-200">{historyLine(row)}</span>
-              <span className="shrink-0 text-[10px] text-slate-500">{relativeTime(row.at)}</span>
+            <li key={`${row.kind}-${row.id}`} className="flex items-start justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2.5 text-xs">
+              <span className="min-w-0 leading-relaxed text-slate-200">{historyLine(row)}</span>
+              <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{relativeTime(row.at)}</span>
             </li>
           ) : (
-            <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-sky-400/30 bg-sky-400/5 p-3 space-y-2" data-testid={`request-${row.kind}-${row.id}`}>
-              <p className="text-xs text-slate-200">
-                {row.kind === 'time' ? `Asks for ${(row.request as ScreenTimeRequest).minutes} more minutes` : requestLine(row.request as GuardRequest)}
-                {row.request.note ? `: “${row.request.note}”` : ''}
-              </p>
-              <div className="flex flex-wrap gap-2">
+            <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-sky-400/30 bg-gradient-to-br from-sky-500/10 to-sky-400/[0.03] p-3.5 space-y-3" data-testid={`request-${row.kind}-${row.id}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium leading-relaxed text-slate-100">
+                  {row.kind === 'time' ? `Asks for ${(row.request as ScreenTimeRequest).minutes} more minutes` : requestLine(row.request as GuardRequest)}
+                  {row.request.note ? `: “${row.request.note}”` : ''}
+                </p>
+                <span className="shrink-0 rounded-full border border-sky-400/20 bg-sky-400/10 px-2 py-0.5 text-[10px] font-medium text-sky-200">
+                  {relativeTime(row.at)}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 {row.kind === 'time' ? (
                   <>
                     <button type="button" className={yes} disabled={busy} onClick={() => decideTime.mutate({ id: row.id, grant: true })}>Grant</button>

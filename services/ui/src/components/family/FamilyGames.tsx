@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, Eye, EyeOff, FlaskConical, PartyPopper, Play, Sparkles, Square, Star, Trophy, Tv } from 'lucide-react';
 import FamilyLeaderboard from './FamilyLeaderboard';
+import GameArtwork from './GameArtwork';
 import GamePlayer from './GamePlayer';
 import { api } from '../../services/api';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -14,12 +15,6 @@ const STATE_BADGE: Record<FamilyGameState, { label: string; className: string }>
   published: { label: 'Published', className: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' },
   unpublished: { label: 'Unpublished', className: 'border-slate-400/30 bg-slate-400/10 text-slate-300' },
 };
-
-function artStyle(game: FamilyGameCard): React.CSSProperties {
-  const from = game.art?.from || '#7c5cff';
-  const to = game.art?.to || '#ff7ab6';
-  return { backgroundImage: `linear-gradient(135deg, ${from}, ${to})` };
-}
 
 function RatingSummary({ game }: { game: FamilyGameCard }) {
   const rating = game.rating ?? { count: 0, average: 0 };
@@ -45,7 +40,7 @@ function VoteStars({ game }: { game: FamilyGameCard }) {
     },
   });
   return (
-    <div className="flex items-center gap-0.5" role="group" aria-label={`Rate ${game.title}`} data-testid={`family-vote-${game.slug}`}>
+    <div className="flex flex-wrap items-center gap-0.5 pt-1" role="group" aria-label={`Rate ${game.title}`} data-testid={`family-vote-${game.slug}`}>
       {[1, 2, 3, 4, 5].map((stars) => (
         <button
           key={stars}
@@ -54,7 +49,7 @@ function VoteStars({ game }: { game: FamilyGameCard }) {
           aria-pressed={chosen === stars}
           disabled={rate.isPending}
           onClick={() => rate.mutate(stars)}
-          className="flex h-11 w-9 items-center justify-center rounded-lg transition active:scale-90 disabled:opacity-50"
+          className="flex h-11 w-10 items-center justify-center rounded-xl transition hover:bg-white/5 active:scale-90 disabled:opacity-50"
         >
           <Star
             size={20}
@@ -64,7 +59,7 @@ function VoteStars({ game }: { game: FamilyGameCard }) {
         </button>
       ))}
       <span className="ml-1 text-[11px]" aria-live="polite">
-        {rate.isSuccess && <span className="text-emerald-300">Thanks!</span>}
+        {rate.isSuccess && <span className="font-medium text-emerald-300">Thanks!</span>}
         {rate.isError && <span className="text-rose-300">Could not save</span>}
       </span>
     </div>
@@ -77,47 +72,59 @@ function ShelfCard({ game, playBase, onPlay }: { game: FamilyGameCard; playBase?
   const tvHref = game.party && playBase ? `${playBase.replace(/\/$/, '')}${game.tv_path || '/tv'}` : null;
   return (
     <article
-      className="glass-panel flex flex-col overflow-hidden rounded-3xl border border-white/5"
+      className="group glass-panel flex flex-col overflow-hidden rounded-3xl border border-white/10 transition-all hover:border-white/20 hover:shadow-xl"
       data-testid={`family-game-${game.slug}`}
     >
       <button
         type="button"
         onClick={onPlay}
         aria-label={`Play ${game.title}`}
-        className="relative flex h-36 items-center justify-center text-6xl transition active:scale-[0.98]"
-        style={artStyle(game)}
+        className="relative flex h-40 w-full items-center justify-center overflow-hidden text-left transition active:scale-[0.99]"
       >
-        <span className="drop-shadow-lg" aria-hidden>{game.emoji || '🎮'}</span>
-        <span className="absolute bottom-3 right-3 inline-flex h-11 items-center gap-1.5 rounded-full bg-white/90 px-4 text-sm font-bold text-slate-900 shadow-lg">
+        <GameArtwork
+          slug={game.slug}
+          emoji={game.emoji || '🎮'}
+          category={game.genre}
+          art={game.art}
+          className="h-full w-full"
+        />
+        <span className="absolute bottom-3 right-3 z-20 inline-flex h-11 items-center gap-1.5 rounded-full bg-white/95 px-4 text-sm font-bold text-slate-900 shadow-lg transition-transform group-hover:scale-105">
           <Play size={15} fill="currentColor" /> Play
         </span>
         {game.ages && (
-          <span className="absolute left-3 top-3 rounded-full bg-black/25 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur">
+          <span className="absolute left-3 top-3 z-20 rounded-full border border-white/20 bg-black/40 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-md">
             Ages {game.ages}{game.players ? ` · ${game.players}P` : ''}
           </span>
         )}
+        {game.genre && (
+          <span className="absolute bottom-3 left-3 z-20 rounded-full border border-white/15 bg-black/35 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-slate-100 backdrop-blur-md">
+            {game.genre}
+          </span>
+        )}
       </button>
-      <div className="flex flex-1 flex-col gap-1.5 p-4">
+      <div className="flex flex-1 flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-base font-bold leading-tight text-slate-100">{game.title}</h3>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-base font-bold leading-tight text-white">{game.title}</h3>
+            {game.tagline && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400">{game.tagline}</p>}
+          </div>
           {tvHref && (
             <a
               href={tvHref}
               target="_blank"
               rel="noopener noreferrer"
               data-testid={`family-tv-${game.slug}`}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition hover:bg-amber-400/25"
+              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/25"
             >
-              <Tv size={12} /> TV Stage
+              <Tv size={13} /> TV Stage
             </a>
           )}
         </div>
-        {game.tagline && <p className="text-xs text-slate-400">{game.tagline}</p>}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-white/5 pt-2.5 text-[11px] text-slate-300">
           <RatingSummary game={game} />
-          {game.genre && <span className="capitalize">{game.genre}</span>}
+          {game.genre && <span className="capitalize text-slate-400">{game.genre}</span>}
           {top && typeof top.score === 'number' && (
-            <span className="inline-flex items-center gap-1">
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-200">
               <Trophy size={11} /> {top.initials} {top.score.toLocaleString()}
             </span>
           )}
@@ -156,11 +163,16 @@ function AdminRow({
     </button>
   );
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-3" data-testid={`family-admin-${game.slug}`}>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5 space-y-2" data-testid={`family-admin-${game.slug}`}>
       <div className="flex items-start gap-3">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl" style={artStyle(game)} aria-hidden>
-          {game.emoji || '🎮'}
-        </span>
+        <GameArtwork
+          slug={game.slug}
+          emoji={game.emoji || '🎮'}
+          category={game.genre}
+          art={game.art}
+          variant="thumb"
+          className="h-12 w-12 text-2xl"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="truncate font-semibold text-slate-100">{game.title}</span>
@@ -501,21 +513,28 @@ export default function FamilyGames() {
 
   return (
     <div className="space-y-4" data-testid="family-games">
-      <div className="glass-panel rounded-2xl border border-white/5 p-4">
-        <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-pink-300" />
-          <h2 className="text-sm font-semibold text-slate-200">Family Games</h2>
-          <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">
-            {data.games.length} {data.games.length === 1 ? 'game' : 'games'}
-          </span>
+      <div className="glass-panel relative overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5">
+        <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-pink-500/10 blur-3xl" aria-hidden />
+        <div className="relative flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pink-400/30 bg-pink-500/15 text-pink-300">
+            <Sparkles size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-base font-bold text-white">Family Games</h2>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                {data.games.length} {data.games.length === 1 ? 'game' : 'games'}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
+              Made for phones, tablets, and desktops. Only the games the family rates best make the shelf. Rate a game after you play it.
+            </p>
+          </div>
         </div>
-        <p className="mt-1 text-xs text-slate-400">
-          Made for phones. Only the games the family rates best make the shelf. Rate a game after you play it.
-        </p>
       </div>
 
       {data.games.length === 0 ? (
-        <div className="glass-panel rounded-2xl border border-white/5 p-4" data-testid="family-games-empty">
+        <div className="glass-panel rounded-2xl border border-white/10 p-5 text-center" data-testid="family-games-empty">
           <p className="text-xs text-slate-400">
             {data.is_admin
               ? 'Nothing on the shelf yet. Test the games below, vote, and publish the ones the family will love.'
@@ -523,7 +542,7 @@ export default function FamilyGames() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="family-shelf">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3" data-testid="family-shelf">
           {data.games.map((game) => (
             <ShelfCard key={game.slug} game={game} playBase={data.play_base} onPlay={() => open(game)} />
           ))}
@@ -538,6 +557,7 @@ export default function FamilyGames() {
 
       {playing && (
         <GamePlayer
+          slug={playing.slug}
           title={playing.title}
           emoji={playing.emoji}
           art={playing.art}

@@ -105,21 +105,21 @@ export default function Family() {
         <div className="space-y-4" data-testid="family-games-tab">
           <FamilyGames />
           <ArcadeGames />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {BIBLE_GAMES.map(({ icon: Icon, name, detail, to }) => (
               <Link
                 key={name}
                 to={to}
-                className="glass-panel flex items-start gap-3 rounded-2xl border border-white/5 p-4 hover:border-purple-400/40"
+                className="glass-panel group flex min-h-14 items-start gap-3.5 rounded-2xl border border-white/10 p-4 transition-all hover:border-purple-400/40 hover:bg-white/[0.04]"
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/15 text-purple-200">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-purple-400/30 bg-gradient-to-br from-purple-500/20 to-indigo-500/10 text-purple-200">
                   <Icon size={18} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block font-semibold text-slate-100">{name}</span>
-                  <span className="mt-1 block text-xs text-slate-400">{detail}</span>
+                  <span className="block font-bold text-white">{name}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-slate-400">{detail}</span>
                 </span>
-                <ChevronRight size={16} className="mt-1 shrink-0 text-slate-500" />
+                <ChevronRight size={16} className="mt-1 shrink-0 text-slate-500 transition-transform group-hover:translate-x-0.5 group-hover:text-purple-200" />
               </Link>
             ))}
           </div>

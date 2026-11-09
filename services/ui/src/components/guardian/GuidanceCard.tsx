@@ -21,28 +21,41 @@ export default function GuidanceCard({ username, name }: { username: string; nam
   const [sharing, setSharing] = useState(false);
 
   return (
-    <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="guardian-guidance">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-        <HandHeart size={16} className="text-rose-300" /> Praying for {name}
-      </h2>
+    <section className="glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3.5" data-testid="guardian-guidance">
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] pb-2.5">
+        <h2 className="flex items-center gap-2.5 text-sm font-semibold tracking-tight text-white">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-400/10">
+            <HandHeart size={16} className="text-rose-300" />
+          </span>
+          <span>Praying for {name}</span>
+        </h2>
+      </div>
       {isLoading ? (
-        <div className="h-20 skeleton rounded-xl" aria-hidden />
+        <div className="h-24 skeleton rounded-xl" aria-hidden />
       ) : isError || !data ? (
-        <p className="text-xs text-amber-300">Guidance could not be loaded.</p>
+        <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-300">Guidance could not be loaded.</p>
+      ) : data.prompts.length === 0 ? (
+        <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400">
+          No specific prayer prompts for {name} this week.
+        </p>
       ) : (
         <ul className="space-y-3">
           {data.prompts.map((p) => (
-            <li key={p.signal} className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-1.5" data-testid={`guidance-${p.signal}`}>
+            <li key={p.signal} className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2.5" data-testid={`guidance-${p.signal}`}>
               <p className="text-xs font-semibold text-white">{p.title}</p>
-              <p className="text-xs text-slate-300">{p.prayer}</p>
-              <p className="text-[11px] italic text-amber-200/90">“{p.verse}” - {p.ref}</p>
-              <p className="text-[11px] text-slate-400">Try: “{p.starter}”</p>
+              <p className="text-xs leading-relaxed text-slate-300">{p.prayer}</p>
+              <blockquote className="rounded-r-lg border-l-2 border-amber-400/50 bg-amber-400/[0.06] px-3 py-1.5 text-[11px] italic text-amber-200/95">
+                “{p.verse}” - <span className="not-italic font-medium text-amber-300/90">{p.ref}</span>
+              </blockquote>
+              <p className="rounded-lg bg-white/[0.04] px-2.5 py-2 text-[11px] text-slate-300">
+                <span className="font-semibold text-slate-200">Try:</span> “{p.starter}”
+              </p>
               <button
                 type="button"
                 onClick={() => setDraft({ prompt: p, text: p.starter })}
-                className="glass-button min-h-11 px-3 text-[11px] font-semibold flex items-center gap-1.5"
+                className="glass-button min-h-11 px-3.5 text-xs font-semibold inline-flex items-center gap-1.5"
               >
-                <PenLine size={12} /> Write {name} a note
+                <PenLine size={13} /> Write {name} a note
               </button>
             </li>
           ))}
@@ -50,21 +63,21 @@ export default function GuidanceCard({ username, name }: { username: string; nam
       )}
 
       {draft && (
-        <div className="space-y-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3" data-testid="guidance-draft">
-          <label className="block text-[11px] text-slate-400">
+        <div className="space-y-2.5 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3.5" data-testid="guidance-draft">
+          <label className="block text-xs text-slate-300">
             Your note to {name} (say it your way; it is only sent when you send it)
             <textarea
               rows={4}
               value={draft.text}
               onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+              className="mt-1.5 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 focus:border-sky-400/50 focus:outline-none"
             />
           </label>
-          <div className="flex gap-2">
-            <button type="button" disabled={!draft.text.trim()} onClick={() => setSharing(true)} className="glass-button min-h-11 px-3 text-xs font-semibold disabled:opacity-50">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={!draft.text.trim()} onClick={() => setSharing(true)} className="glass-button min-h-11 px-3.5 text-xs font-semibold disabled:opacity-50">
               Send in chat…
             </button>
-            <button type="button" onClick={() => setDraft(null)} className="min-h-11 px-3 text-xs text-slate-400 hover:text-white">
+            <button type="button" onClick={() => setDraft(null)} className="min-h-11 rounded-xl px-3.5 text-xs text-slate-400 hover:bg-white/5 hover:text-white">
               Discard
             </button>
           </div>

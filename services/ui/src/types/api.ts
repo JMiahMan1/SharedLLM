@@ -392,6 +392,8 @@ export interface ScreenRules {
   geofence_alerts?: Record<string, { arrive?: boolean; depart?: boolean }>;
   /** Notice categories a minor may switch off themselves (a parent allow-list). */
   notification_toggle_allowed?: string[];
+  /** Notice categories a parent has disabled (switched off) for a minor. */
+  notification_disabled?: string[];
   /** System update policy configuration (MDM). */
   os_update_policy?: OsUpdatePolicy;
   /** Household Wi-Fi network configurations provisioned to devices. */

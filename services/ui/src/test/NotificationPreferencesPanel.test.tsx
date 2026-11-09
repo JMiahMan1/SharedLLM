@@ -73,15 +73,25 @@ describe('NotificationPreferencesPanel', () => {
     expect(await screen.findByRole('switch', { name: 'System alerts' })).toBeInTheDocument();
   });
 
-  it('locks the switches a parent controls', async () => {
+  it('locks the switches a parent controls (both always-on and parent-disabled)', async () => {
     server.use(
       http.get('/api/users/me/notification-preferences', () =>
-        HttpResponse.json({ preferences: { chat: false }, locked: ['family_presence'] })),
+        HttpResponse.json({
+          preferences: { chat: false, raven: false, family_presence: true },
+          locked: ['family_presence', 'raven'],
+        }),
+      ),
     );
     renderWithProviders(<NotificationPreferencesPanel />);
     const presence = await screen.findByRole('switch', { name: 'Arrivals and departures' });
     await waitFor(() => expect(presence).toBeDisabled());
-    expect(screen.getByText('A parent controls this notification')).toBeInTheDocument();
+    expect(presence).toHaveAttribute('aria-checked', 'true');
+
+    const raven = screen.getByRole('switch', { name: 'Raven missions' });
+    expect(raven).toBeDisabled();
+    expect(raven).toHaveAttribute('aria-checked', 'false');
+
+    expect(screen.getAllByText('A parent controls this notification').length).toBeGreaterThanOrEqual(2);
     // Unlocked switches stay usable even while another is locked.
     expect(screen.getByRole('switch', { name: 'Family chat' })).not.toBeDisabled();
   });

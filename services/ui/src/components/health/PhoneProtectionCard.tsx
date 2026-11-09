@@ -58,42 +58,49 @@ export default function PhoneProtectionCard() {
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
 
   return (
-    <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="phone-protection-card">
-      <div className="flex items-center gap-2">
-        {allOn ? <ShieldCheck size={16} className="text-emerald-300" /> : <ShieldAlert size={16} className="text-amber-300" />}
-        <h3 className="text-sm font-semibold text-white">Phone protection</h3>
+    <section className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3" data-testid="phone-protection-card">
+      <div className="flex items-center justify-between gap-2 border-b border-white/5 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${allOn ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-amber-400/30 bg-amber-400/10 text-amber-300'}`}>
+            {allOn ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
+          </div>
+          <h3 className="text-sm font-semibold text-white">Phone protection</h3>
+        </div>
+        <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${allOn ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-amber-400/30 bg-amber-400/10 text-amber-200'}`}>
+          {allOn ? 'Active' : 'Setup needed'}
+        </span>
       </div>
       {allOn ? (
-        <p className="text-xs text-slate-300" data-testid="phone-protection-on">
+        <p className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-3 text-xs leading-relaxed text-slate-200" data-testid="phone-protection-on">
           Jarvis is protected on this phone{guard.deviceOwner ? ' (device owner)' : ''}. Removing it or switching this off needs a parent.
           {filterWanted && (guard.webFilterActive ? ' The web filter is on.' : ' The web filter starts within a minute.')}
         </p>
       ) : (
         <>
           <p className="text-xs text-slate-300">A parent sets this up once, on this phone:</p>
-          <ol className="list-decimal pl-5 space-y-2 text-xs text-slate-300">
-            <li>
+          <ol className="list-decimal pl-5 space-y-2.5 text-xs text-slate-300">
+            <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
               Device protection{' '}
               {guard.adminActive ? (
-                <span className="text-emerald-300">is on.</span>
+                <span className="font-medium text-emerald-300">is on.</span>
               ) : (
-                <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void Guard.enableAdmin()}>
+                <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={() => void Guard.enableAdmin()}>
                   Turn on
                 </button>
               )}
             </li>
-            <li>
+            <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
               Screen guard{' '}
               {guard.guardEnabled ? (
-                <span className="text-emerald-300">is on.</span>
+                <span className="font-medium text-emerald-300">is on.</span>
               ) : (
                 <>
-                  <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void Guard.openGuardSettings()}>
+                  <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={() => void Guard.openGuardSettings()}>
                     Open Accessibility
                   </button>
-                  <span className="block mt-1 text-slate-400">
+                  <span className="block mt-1.5 leading-relaxed text-slate-400">
                     Choose <b>Jarvis screen guard</b> and switch it on. If Android says it is a restricted setting,{' '}
-                    <button type="button" className="underline" onClick={() => void Guard.openAppInfo()}>
+                    <button type="button" className="min-h-11 px-1 underline text-sky-300" onClick={() => void Guard.openAppInfo()}>
                       open App info
                     </button>
                     , tap ⋮, then <b>Allow restricted settings</b>, and try again.
@@ -101,55 +108,55 @@ export default function PhoneProtectionCard() {
                 </>
               )}
             </li>
-            <li data-testid="phone-protection-usage">
+            <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5" data-testid="phone-protection-usage">
               Usage access{' '}
               {access?.usage ? (
-                <span className="text-emerald-300">is on.</span>
+                <span className="font-medium text-emerald-300">is on.</span>
               ) : (
                 <>
-                  <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void PhoneUsage.openSettings()}>
+                  <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={() => void PhoneUsage.openSettings()}>
                     Turn on
                   </button>
-                  <span className="block mt-1 text-slate-400">
+                  <span className="block mt-1.5 leading-relaxed text-slate-400">
                     Choose <b>Jarvis</b> and allow usage access. Screen time, app limits and the apps a parent sees all come from it.
                   </span>
                 </>
               )}
             </li>
-            <li data-testid="phone-protection-notifications">
+            <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5" data-testid="phone-protection-notifications">
               Notification access{' '}
               {access?.notifications ? (
-                <span className="text-emerald-300">is on.</span>
+                <span className="font-medium text-emerald-300">is on.</span>
               ) : (
                 <>
-                  <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void MediaSession.openSettings()}>
+                  <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={() => void MediaSession.openSettings()}>
                     Turn on
                   </button>
-                  <span className="block mt-1 text-slate-400">Choose <b>Jarvis</b>. Music, videos and chat apps are reported with it.</span>
+                  <span className="block mt-1.5 leading-relaxed text-slate-400">Choose <b>Jarvis</b>. Music, videos and chat apps are reported with it.</span>
                 </>
               )}
             </li>
-            <li data-testid="phone-protection-comms">
+            <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5" data-testid="phone-protection-comms">
               Calls and messages{' '}
               {access?.calls && access?.sms ? (
-                <span className="text-emerald-300">are allowed.</span>
+                <span className="font-medium text-emerald-300">are allowed.</span>
               ) : (
-                <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={askComms}>
+                <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={askComms}>
                   Allow
                 </button>
               )}
             </li>
             {filterWanted && (
-              <li>
+              <li className="rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
                 Web filter{' '}
                 {guard.webFilterAllowed ? (
-                  <span className="text-emerald-300">is allowed.</span>
+                  <span className="font-medium text-emerald-300">is allowed.</span>
                 ) : (
                   <>
-                    <button type="button" className="glass-button ml-1 px-3 py-1.5 min-h-11" onClick={() => void Guard.allowWebFilter()}>
+                    <button type="button" className="glass-button ml-1 rounded-xl px-3 py-1.5 min-h-11 font-medium" onClick={() => void Guard.allowWebFilter()}>
                       Allow
                     </button>
-                    <span className="block mt-1 text-slate-400">
+                    <span className="block mt-1.5 leading-relaxed text-slate-400">
                       Android asks once whether Jarvis may filter websites (it shows as a VPN). Tap <b>OK</b>.
                     </span>
                   </>
@@ -160,18 +167,18 @@ export default function PhoneProtectionCard() {
         </>
       )}
       {!guard.deviceOwner && (
-        <div className="space-y-1 rounded-xl border border-white/10 bg-black/20 p-3" data-testid="phone-protection-device-owner">
-          <p className="text-xs text-slate-300">
+        <div className="space-y-1.5 rounded-xl border border-white/10 bg-black/25 p-3.5" data-testid="phone-protection-device-owner">
+          <p className="text-xs leading-relaxed text-slate-300">
             For a real lock (and to make Jarvis impossible to uninstall), set this phone up as a{' '}
             <b>device owner</b>. On a computer with <code>adb</code>, run this once:
           </p>
           <code
-            className="block break-words rounded-lg bg-black/40 px-2 py-1 font-mono text-[11px] text-emerald-200"
+            className="block break-words rounded-lg bg-black/40 px-2.5 py-1.5 font-mono text-[11px] text-emerald-200"
             data-testid="phone-protection-device-owner-command"
           >
             adb shell dpm set-device-owner com.jarvisos.app/.GuardAdminReceiver
           </code>
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] leading-relaxed text-slate-400">
             This only works on a phone with <b>no accounts signed in</b> (a freshly factory-reset phone). Android refuses it
             otherwise, so remove every account or factory reset the phone, run the command before signing in, then sign in to Jarvis.
           </p>

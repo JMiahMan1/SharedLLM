@@ -47,7 +47,7 @@ function halfDone(draft: Draft): string | null {
   return null;
 }
 
-const box = 'min-h-11 w-16 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 text-sm text-slate-100';
+const box = 'min-h-11 w-20 shrink-0 rounded-xl border border-white/10 bg-white/5 px-2.5 text-center text-sm font-medium text-slate-100 focus:border-emerald-400/50 focus:outline-none';
 
 export default function EarnTimeControls({ username, name }: { username: string; name: string }) {
   const queryClient = useQueryClient();
@@ -80,9 +80,9 @@ export default function EarnTimeControls({ username, name }: { username: string;
     );
 
   const row = (label: string, body: ReactNode) => (
-    <div>
-      <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">{label}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-2">{body}</div>
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">{body}</div>
     </div>
   );
 
@@ -103,15 +103,17 @@ export default function EarnTimeControls({ username, name }: { username: string;
     >
       {draft && status && (
         <div className="space-y-3 text-sm text-slate-200">
-          <p className="text-xs text-slate-400">
+          <p className="text-xs leading-relaxed text-slate-400">
             Minutes earned add to today's limit. A chore counts once you say it was done right. Unused minutes carry over
             until Monday. Leave a line blank to switch it off.
           </p>
-          {row('Steps', <>{num('steps_every', 'Steps for each block', 50000, 100)}<span>steps earns</span>{num('steps_min', 'Minutes each block of steps earns', 240)}<span>min</span></>)}
-          {row('Exercise', <>{num('exercise_every', 'Minutes of exercise for each block', 240)}<span>min exercise earns</span>{num('exercise_min', 'Minutes each block of exercise earns', 240)}<span>min</span></>)}
-          {row('Chores', <><span>Each approved one earns</span>{num('chore_min', 'Minutes each approved chore earns', 240)}<span>min</span></>)}
-          {row('Most a day', <><span>Earn up to</span>{num('max_min', 'Most minutes a day can earn', 720)}<span>min a day</span></>)}
-          <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {row('Steps', <>{num('steps_every', 'Steps for each block', 50000, 100)}<span>steps earns</span>{num('steps_min', 'Minutes each block of steps earns', 240)}<span>min</span></>)}
+            {row('Exercise', <>{num('exercise_every', 'Minutes of exercise for each block', 240)}<span>min exercise earns</span>{num('exercise_min', 'Minutes each block of exercise earns', 240)}<span>min</span></>)}
+            {row('Chores', <><span>Each approved one earns</span>{num('chore_min', 'Minutes each approved chore earns', 240)}<span>min</span></>)}
+            {row('Most a day', <><span>Earn up to</span>{num('max_min', 'Most minutes a day can earn', 720)}<span>min a day</span></>)}
+          </div>
+          <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3.5 transition-colors hover:border-white/20">
             <input
               type="checkbox"
               checked={draft.choresFirst}
@@ -120,23 +122,25 @@ export default function EarnTimeControls({ username, name }: { username: string;
               data-testid="earn-chores-first"
             />
             <span>
-              <span className="block font-medium">Chores first</span>
-              <span className="block text-xs text-slate-400">
+              <span className="block text-xs font-semibold text-white">Chores first</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
                 Their {status.device_kinds?.includes('tablet') && !status.device_kinds?.includes('phone') ? 'tablet' : 'phone'} stays
                 locked until today's chores are ticked off. Calls, texts and Jarvis still work, and time you give still opens it.
               </span>
             </span>
           </label>
-          <button
-            type="button"
-            disabled={save.isPending || !edited || Boolean(problem)}
-            onClick={() => save.mutate(rulesFrom(draft, status.rules))}
-            className="glass-button min-h-11 px-3 text-xs font-semibold disabled:opacity-50"
-            data-testid="earn-save"
-          >
-            Save earning
-          </button>
-          {(problem || failure) && <p className="text-xs text-amber-300" role="alert">{problem || failure}</p>}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            {(problem || failure) ? <p className="text-xs text-amber-300" role="alert">{problem || failure}</p> : <span />}
+            <button
+              type="button"
+              disabled={save.isPending || !edited || Boolean(problem)}
+              onClick={() => save.mutate(rulesFrom(draft, status.rules))}
+              className="glass-button min-h-11 rounded-xl px-4 text-xs font-semibold disabled:opacity-50"
+              data-testid="earn-save"
+            >
+              Save earning
+            </button>
+          </div>
         </div>
       )}
     </MemberCard>

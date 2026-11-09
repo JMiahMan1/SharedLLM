@@ -4,6 +4,7 @@ import { ExternalLink, Gamepad2, Play, Star, Trophy } from 'lucide-react';
 import Modal from '../ui/Modal';
 import ArcadeHighscores from './ArcadeHighscores';
 import ArcadeScoreboard from './ArcadeScoreboard';
+import GameArtwork from './GameArtwork';
 import { api } from '../../services/api';
 import type { ArcadeGameCard, ArcadeGamesResponse, ArcadeSort } from '../../types/api';
 
@@ -25,10 +26,17 @@ function playsLabel(n: number | undefined): string {
   return n === 1 ? '1 play' : `${n} plays`;
 }
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  arcade: '👾',
+  classic: '🕹️',
+  puzzle: '🧩',
+  action: '⚡',
+  strategy: '♟️',
+};
+
 function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: string; onPlay: () => void }) {
   const rating = game.rating ?? { count: 0, average: 0 };
   const queryClient = useQueryClient();
-  const [hovered, setHovered] = useState(0);
   const [selected, setSelected] = useState(0);
   const rate = useMutation({
     mutationFn: (stars: number) => api.rateArcadeGame(game.slug, stars),
@@ -37,77 +45,96 @@ function GameCard({ game, playBase, onPlay }: { game: ArcadeGameCard; playBase: 
       void queryClient.invalidateQueries({ queryKey: ['arcade-games'] });
     },
   });
-  const highlighted = hovered || selected;
+  const highlighted = selected || Math.round(rating.average || 0);
+  const emoji = CATEGORY_EMOJI[(game.category || '').toLowerCase()] || '🕹️';
 
   return (
-    <div className="glass-panel p-4 rounded-2xl border border-white/5 flex flex-col gap-2" data-testid={`arcade-game-${game.slug}`}>
-      <div className="flex items-start gap-2">
-        <span className="min-w-0 truncate font-semibold text-slate-100 leading-tight">{game.title}</span>
-        {game.kind === 'code' && (
-          <span className="shrink-0 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-sky-200">
-            Desktop
-          </span>
-        )}
-        {game.featured && (
-          <span className="ml-auto shrink-0 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-200">
-            Featured
-          </span>
-        )}
+    <div
+      className="group glass-panel flex flex-col overflow-hidden rounded-2xl border border-white/10 transition-all hover:border-purple-400/30 hover:shadow-lg"
+      data-testid={`arcade-game-${game.slug}`}
+    >
+      <div className="relative h-28 w-full overflow-hidden">
+        <GameArtwork
+          slug={game.slug}
+          emoji={emoji}
+          category={game.category}
+          variant="banner"
+          className="h-full w-full"
+        />
+        <div className="absolute left-3 right-3 top-2.5 z-20 flex items-center justify-between gap-2">
+          {game.category ? (
+            <span className="rounded-full border border-white/20 bg-black/45 px-2.5 py-0.5 text-[10px] font-semibold capitalize text-slate-100 backdrop-blur-md">
+              {game.category}
+            </span>
+          ) : <span />}
+          <div className="flex items-center gap-1.5">
+            {game.kind === 'code' && (
+              <span className="rounded-full border border-sky-400/40 bg-sky-950/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200 backdrop-blur-md">
+                Desktop
+              </span>
+            )}
+            {game.featured && (
+              <span className="rounded-full border border-amber-400/50 bg-amber-950/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200 backdrop-blur-md">
+                Featured
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-        {game.category && (
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 capitalize">{game.category}</span>
-        )}
-        <span className="inline-flex items-center gap-1" data-testid={`arcade-rating-${game.slug}`}>
-          <Star size={11} className={rating.count ? 'text-amber-300' : 'text-slate-500'} />
-          {rating.count ? `${rating.average.toFixed(1)} (${rating.count})` : 'No votes'}
-        </span>
-        <span>{playsLabel(game.plays)}</span>
-        {typeof game.top_score === 'number' && (
-          <span className="inline-flex items-center gap-1">
-            <Trophy size={11} className="text-slate-400" /> best {game.top_score}
+
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <span className="min-w-0 truncate text-sm font-bold leading-tight text-white">{game.title}</span>
+          {typeof game.top_score === 'number' && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-200">
+              <Trophy size={10} /> best {game.top_score}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+          <span className="inline-flex items-center gap-1" data-testid={`arcade-rating-${game.slug}`}>
+            <Star size={11} className={rating.count ? 'text-amber-300' : 'text-slate-500'} fill={rating.count ? 'currentColor' : 'none'} />
+            {rating.count ? `${rating.average.toFixed(1)} (${rating.count})` : 'No votes'}
           </span>
-        )}
+          <span>{playsLabel(game.plays)}</span>
+        </div>
+        <div
+          className="flex flex-wrap items-center gap-0.5 border-t border-white/5 pt-1.5"
+          data-testid={`arcade-rate-${game.slug}`}
+        >
+          {[1, 2, 3, 4, 5].map((stars) => (
+            <button
+              key={stars}
+              type="button"
+              aria-label={`Rate ${game.title} ${stars} stars`}
+              title={`${stars} ${stars === 1 ? 'star' : 'stars'}`}
+              disabled={rate.isPending}
+              onClick={() => rate.mutate(stars)}
+              className="flex h-11 w-9 items-center justify-center rounded-xl transition-colors hover:bg-white/10 active:scale-90 disabled:opacity-50"
+            >
+              <Star
+                size={16}
+                className={stars <= highlighted ? 'text-amber-300' : 'text-slate-500'}
+                fill={stars <= highlighted ? 'currentColor' : 'none'}
+              />
+            </button>
+          ))}
+          {rate.isSuccess && <span className="ml-1 text-[11px] font-medium text-emerald-300">Thanks!</span>}
+          {rate.isError && <span className="ml-1 text-[11px] text-rose-300">Could not save</span>}
+        </div>
+        <a
+          href={`${playBase}/play/${game.slug}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => {
+            event.preventDefault();
+            onPlay();
+          }}
+          className="glass-button mt-auto inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border-purple-400/40 bg-purple-500/15 px-3 text-sm font-semibold text-purple-100 hover:bg-purple-500/25"
+        >
+          <Play size={14} fill="currentColor" /> Play
+        </a>
       </div>
-      <div
-        className="flex items-center gap-1"
-        data-testid={`arcade-rate-${game.slug}`}
-        onMouseLeave={() => setHovered(0)}
-      >
-        {[1, 2, 3, 4, 5].map((stars) => (
-          <button
-            key={stars}
-            type="button"
-            aria-label={`Rate ${game.title} ${stars} stars`}
-            title={`${stars} ${stars === 1 ? 'star' : 'stars'}`}
-            disabled={rate.isPending}
-            onMouseEnter={() => setHovered(stars)}
-            onFocus={() => setHovered(stars)}
-            onClick={() => rate.mutate(stars)}
-            className="rounded p-0.5 transition-colors hover:bg-white/10 disabled:opacity-50"
-          >
-            <Star
-              size={13}
-              className={stars <= highlighted ? 'text-amber-300' : 'text-slate-500'}
-              fill={stars <= highlighted ? 'currentColor' : 'none'}
-            />
-          </button>
-        ))}
-        {rate.isSuccess && <span className="ml-1 text-[10px] text-emerald-300">Thanks!</span>}
-        {rate.isError && <span className="ml-1 text-[10px] text-rose-300">Could not save</span>}
-      </div>
-      <a
-        href={`${playBase}/play/${game.slug}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(event) => {
-          event.preventDefault();
-          onPlay();
-        }}
-        className="glass-button mt-auto min-h-11 px-3 text-sm justify-center text-purple-200 border-purple-400/40"
-      >
-        <Play size={14} /> Play
-      </a>
     </div>
   );
 }
@@ -213,34 +240,43 @@ export default function ArcadeGames() {
 
   return (
     <div className="space-y-4" data-testid="arcade-shelf">
-      <div className="glass-panel p-4 rounded-2xl border border-white/5">
-        <div className="flex items-center gap-2">
-          <Gamepad2 size={16} className="text-purple-300" />
-          <h2 className="text-sm font-semibold text-slate-200">Arcade</h2>
-          <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">
-            {data.count} {data.count === 1 ? 'game' : 'games'}
-          </span>
-        </div>
-        <p className="text-xs text-slate-400 mt-1">
-          Games the family made in Alpaca. {sourceLabel ? `${sourceLabel}.` : ''} Desktop games open in the live
-          sandbox and can be played here too.
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-1" role="group" aria-label="Sort games">
-          {SORTS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={sort === option.id}
-              onClick={() => setSort(option.id)}
-              className={`min-h-9 rounded-lg border px-2.5 text-[11px] transition ${
-                sort === option.id
-                  ? 'border-purple-400/50 bg-purple-500/15 text-purple-100'
-                  : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
+      <div className="glass-panel relative overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5">
+        <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-purple-500/10 blur-3xl" aria-hidden />
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-purple-400/30 bg-purple-500/15 text-purple-300">
+              <Gamepad2 size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-bold text-white">Arcade</h2>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                  {data.count} {data.count === 1 ? 'game' : 'games'}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
+                Games the family made in Alpaca. {sourceLabel ? `${sourceLabel}.` : ''} Desktop games open in the live
+                sandbox and can be played here too.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Sort games">
+            {SORTS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={sort === option.id}
+                onClick={() => setSort(option.id)}
+                className={`min-h-11 rounded-xl border px-3 text-xs font-semibold transition ${
+                  sort === option.id
+                    ? 'border-purple-400/50 bg-purple-500/20 text-purple-100'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -248,15 +284,15 @@ export default function ArcadeGames() {
       <ArcadeHighscores />
 
       {data.count === 0 ? (
-        <div className="glass-panel p-4 rounded-2xl border border-white/5" data-testid="arcade-empty">
+        <div className="glass-panel rounded-2xl border border-white/10 p-5 text-center" data-testid="arcade-empty">
           <p className="text-xs text-slate-400">No games published yet. Make one with Jarvis and it lands here.</p>
         </div>
       ) : (
         <>
           {data.featured.length > 0 && (
-            <div>
-              <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Featured</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="arcade-featured">
+            <div className="space-y-2.5">
+              <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-400">Featured</h3>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3" data-testid="arcade-featured">
                 {data.featured.map((game) => (
                   <GameCard
                     key={`featured-${game.slug}`}
@@ -269,9 +305,9 @@ export default function ArcadeGames() {
             </div>
           )}
           {data.games.length > data.featured.length && (
-            <div>
-              <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">All games</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2.5">
+              <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-400">All games</h3>
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
                 {data.games.map((game) => (
                   <GameCard
                     key={game.slug}

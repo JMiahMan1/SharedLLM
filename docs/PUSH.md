@@ -249,26 +249,32 @@ Telemetry reads every category through identity's
 ### What a teen can and cannot turn off
 
 A minor (`family_role` of `child` or `teen`) does not own their switches
-outright. A parent chooses, per child, which categories the child may switch
-off; every category not on that list is locked on for the child and a PUT
-that asks to turn one off is silently ignored (the whole map is accepted, so
-the switches they do own work normally). The parent sets the list in
-Guardian/member pages' notification card; it lives in the child's
-`ScreenRules` under `notification_toggle_allowed` (a JSON list of category
-ids). `family_safety` is never allowed on (it stays locked for every minor,
-whatever the stored list says), and `admin` remains admin-only for everyone.
-An unreadable or corrupt stored rule can only lock more, never less.
+outright. A parent chooses, per child, which categories are enabled or
+disabled (`notification_disabled`, a JSON list of category ids switched off by
+the parent) and which enabled categories the child may switch off for
+themselves (`notification_toggle_allowed`, a JSON list of category ids). Every
+category not in `notification_toggle_allowed` is locked for the child (on by
+default, or off when listed in `notification_disabled`), and a PUT from the
+child that tries to change a locked category is silently ignored (the whole map
+is accepted, so the switches they do own work normally). The parent sets both
+lists in Guardian / Devices' notification card; they live in the child's
+`ScreenRules`. `family_safety` can never be disabled or unlocked (it stays
+locked on for every minor, whatever the stored lists say), and `admin` remains
+admin-only for everyone. An unreadable or corrupt stored rule can only lock
+more, never less.
 
 The GET answers carry `locked`: the category ids this person may not switch
-off (empty for grown-ups). The web client renders a locked switch disabled
+(empty for grown-ups). The web client renders a locked switch disabled
 with a lock note. `GET /api/internal/push/preferences` carries `locked` too,
-but telemetry never sees an unlocked minor as off: identity stores the lock
-inside the effective map it answers telemetry, and it reads that map fresh.
+and identity computes the effective map (`effective_preferences`) with
+parent-disabled categories forced `False` and locked-on categories forced
+`True`.
 Android's channel list is not gated (channels exist for every category; the
 web settings page is the shared control surface). Code:
 `services/identity/push.py` (`locked_categories`, `MINOR_NEVER_TOGGLE`,
-`_minor_toggle_allowed`), `services/identity/main.py` (`notification_toggle_allowed`
-validation in `_clean_screen_rules`).
+`_minor_disabled`, `_minor_toggle_allowed`), `services/identity/main.py`
+(`notification_disabled` and `notification_toggle_allowed` validation in
+`_clean_screen_rules`).
 
 Identity also creates the person's topic on first use:
 `GET /api/internal/push/topic?username=` (`user.push_topic`). Deleting a

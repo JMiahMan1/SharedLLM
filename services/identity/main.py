@@ -4832,6 +4832,24 @@ def _clean_screen_rules(body: dict) -> dict:
             if c not in allowed:
                 allowed.append(c)
         out["notification_toggle_allowed"] = allowed[:32]
+    # Notice categories a parent has disabled (switched off) for a minor
+    # (safety notices are never allowed to be disabled).
+    if body.get("notification_disabled") is not None:
+        raw_dis = body["notification_disabled"]
+        if not isinstance(raw_dis, list):
+            raise HTTPException(status_code=422, detail="notification_disabled must be a list of notice category ids")
+        disabled: list[str] = []
+        for item in raw_dis:
+            if not isinstance(item, str):
+                raise HTTPException(status_code=422, detail="notification_disabled must be notice category ids")
+            c = item.strip()
+            if c not in push.CATEGORIES:
+                raise HTTPException(status_code=422, detail=f"Unknown notification category: {c}")
+            if c in push.MINOR_NEVER_TOGGLE or c in push.ADMIN_ONLY:
+                raise HTTPException(status_code=422, detail=f"{c} cannot be disabled for a minor")
+            if c not in disabled:
+                disabled.append(c)
+        out["notification_disabled"] = disabled[:32]
     # Batch (8): OS-update policy, Wi-Fi networks, CA certs, and VPN lockdown
     if body.get("os_update_policy") is not None:
         oup = body["os_update_policy"]

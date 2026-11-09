@@ -179,22 +179,24 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
     >
       <div className="space-y-4 text-xs">
         {/* OS System Update Policy */}
-        <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3">
-          <div className="flex items-center gap-2">
-            <Cpu size={15} className="text-sky-400" />
+        <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/10">
+              <Cpu size={15} className="text-sky-300" />
+            </span>
             <div>
               <p className="font-semibold text-white">System Update Policy</p>
-              <p className="text-[11px] text-slate-400">Controls how Android OS system updates are installed on {name}&apos;s device.</p>
+              <p className="text-[11px] leading-relaxed text-slate-400">Controls how Android OS system updates are installed on {name}&apos;s device.</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <div>
               <label htmlFor="os-update-policy-select" className="mb-1 block text-slate-400">Update Policy</label>
               <select
                 id="os-update-policy-select"
                 value={draft.policyType}
                 onChange={(e) => setDraft({ ...draft, policyType: e.target.value as OsUpdatePolicyType })}
-                className="w-full rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs text-white"
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-xs text-white"
                 data-testid="os-update-policy-select"
               >
                 <option value="default">Default (System / User decision)</option>
@@ -212,7 +214,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                     type="time"
                     value={draft.windowStart}
                     onChange={(e) => setDraft({ ...draft, windowStart: e.target.value })}
-                    className="w-full rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white"
+                    className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-2.5 text-xs text-white"
                     data-testid="os-update-window-start"
                   />
                 </div>
@@ -223,7 +225,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                     type="time"
                     value={draft.windowEnd}
                     onChange={(e) => setDraft({ ...draft, windowEnd: e.target.value })}
-                    className="w-full rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white"
+                    className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-2.5 text-xs text-white"
                     data-testid="os-update-window-end"
                   />
                 </div>
@@ -233,10 +235,10 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
         </div>
 
         {/* VPN Lockdown */}
-        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3">
-          <div className="space-y-0.5">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="min-w-0 space-y-0.5">
             <p className="font-semibold text-white">Always-on VPN Lockdown</p>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] leading-relaxed text-slate-400">
               Blocks all device internet traffic if the Jarvis web filter VPN is disconnected.
             </p>
           </div>
@@ -244,10 +246,10 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
             type="button"
             onClick={() => setDraft({ ...draft, vpnLockdown: !draft.vpnLockdown })}
             data-testid="toggle-vpn-lockdown"
-            className={`min-h-8 shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+            className={`min-h-11 shrink-0 rounded-xl px-3.5 text-xs font-semibold transition-colors ${
               draft.vpnLockdown
-                ? 'border border-sky-500/40 bg-sky-500/20 text-sky-300'
-                : 'border border-white/10 bg-black/20 text-slate-400'
+                ? 'border border-sky-500/40 bg-sky-500/20 text-sky-200'
+                : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'
             }`}
           >
             {draft.vpnLockdown ? 'Lockdown On' : 'Off'}
@@ -255,37 +257,39 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
         </div>
 
         {/* Wi-Fi Provisioning */}
-        <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3">
-          <div className="flex items-center gap-2">
-            <Wifi size={15} className="text-emerald-400" />
+        <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10">
+              <Wifi size={15} className="text-emerald-300" />
+            </span>
             <div>
               <p className="font-semibold text-white">Provisioned Wi-Fi Networks</p>
-              <p className="text-[11px] text-slate-400">Automatically configures trusted family Wi-Fi networks on device.</p>
+              <p className="text-[11px] leading-relaxed text-slate-400">Automatically configures trusted family Wi-Fi networks on device.</p>
             </div>
           </div>
           {draft.wifiNetworks.length > 0 && (
-            <ul className="divide-y divide-white/5" data-testid="wifi-network-list">
+            <ul className="divide-y divide-white/5 rounded-xl border border-white/5 bg-black/20 px-3" data-testid="wifi-network-list">
               {draft.wifiNetworks.map((net) => (
-                <li key={net.ssid} className="flex items-center justify-between py-1.5">
-                  <div>
+                <li key={net.ssid} className="flex items-center justify-between gap-2 py-1.5">
+                  <div className="min-w-0">
                     <span className="font-medium text-white">{net.ssid}</span>
                     <span className="ml-2 text-[10px] text-slate-400">({net.security || 'wpa2'}{net.hidden ? ', hidden' : ''})</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleRemoveWifi(net.ssid)}
-                    className="p-1 text-slate-400 hover:text-red-400"
+                    className="-mr-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/10 hover:text-red-400"
                     title="Remove network"
                     data-testid={`remove-wifi-${net.ssid}`}
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={14} />
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-4">
-            <div className="sm:col-span-2">
+          <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
+            <div>
               <label htmlFor="new-wifi-ssid" className="sr-only">SSID</label>
               <input
                 id="new-wifi-ssid"
@@ -293,7 +297,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 placeholder="Wi-Fi SSID"
                 value={newSsid}
                 onChange={(e) => setNewSsid(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white"
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
                 data-testid="input-wifi-ssid"
               />
             </div>
@@ -305,17 +309,17 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 placeholder="Password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white"
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
                 data-testid="input-wifi-password"
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 sm:col-span-2">
               <label htmlFor="new-wifi-security" className="sr-only">Security</label>
               <select
                 id="new-wifi-security"
                 value={newSecurity}
                 onChange={(e) => setNewSecurity(e.target.value as 'open' | 'wpa2' | 'wpa3' | 'wep')}
-                className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                className="min-h-11 flex-1 rounded-xl border border-white/10 bg-slate-900 px-3 text-xs text-white"
                 data-testid="select-wifi-security"
               >
                 <option value="wpa2">WPA2</option>
@@ -326,44 +330,46 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
               <button
                 type="button"
                 onClick={handleAddWifi}
-                className="glass-button flex items-center justify-center rounded-lg px-2.5 py-1 text-xs text-white"
+                className="glass-button flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-semibold text-white"
                 title="Add Wi-Fi"
                 data-testid="btn-add-wifi"
               >
-                <Plus size={14} />
+                <Plus size={14} /> Add Wi-Fi
               </button>
             </div>
           </div>
         </div>
 
         {/* CA Root Certificates */}
-        <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-3">
-          <div className="flex items-center gap-2">
-            <Shield size={15} className="text-amber-400" />
+        <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10">
+              <Shield size={15} className="text-amber-300" />
+            </span>
             <div>
               <p className="font-semibold text-white">Trusted CA Certificates</p>
-              <p className="text-[11px] text-slate-400">Installs trusted root CA certificates into the device trust store.</p>
+              <p className="text-[11px] leading-relaxed text-slate-400">Installs trusted root CA certificates into the device trust store.</p>
             </div>
           </div>
           {draft.caCerts.length > 0 && (
-            <ul className="divide-y divide-white/5" data-testid="ca-cert-list">
+            <ul className="divide-y divide-white/5 rounded-xl border border-white/5 bg-black/20 px-3" data-testid="ca-cert-list">
               {draft.caCerts.map((cert) => (
-                <li key={cert.alias} className="flex items-center justify-between py-1.5">
-                  <span className="font-medium text-white">{cert.alias}</span>
+                <li key={cert.alias} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="truncate font-medium text-white">{cert.alias}</span>
                   <button
                     type="button"
                     onClick={() => handleRemoveCaCert(cert.alias)}
-                    className="p-1 text-slate-400 hover:text-red-400"
+                    className="-mr-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/10 hover:text-red-400"
                     title="Remove certificate"
                     data-testid={`remove-cert-${cert.alias}`}
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={14} />
                   </button>
                 </li>
               ))}
             </ul>
           )}
-          <div className="space-y-2 pt-2">
+          <div className="space-y-2 pt-1">
             <div>
               <label htmlFor="new-cert-alias" className="sr-only">Certificate Alias</label>
               <input
@@ -372,7 +378,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 placeholder="Certificate Alias (e.g. JarvisHomeCA)"
                 value={newCertAlias}
                 onChange={(e) => setNewCertAlias(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white"
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
                 data-testid="input-cert-alias"
               />
             </div>
@@ -384,14 +390,14 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 placeholder="-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----"
                 value={newCertPem}
                 onChange={(e) => setNewCertPem(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 font-mono text-[11px] text-white"
+                className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] text-white"
                 data-testid="input-cert-pem"
               />
             </div>
             <button
               type="button"
               onClick={handleAddCaCert}
-              className="glass-button flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-white"
+              className="glass-button inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold text-white"
               data-testid="btn-add-cert"
             >
               <Plus size={14} /> Add Certificate
@@ -400,12 +406,12 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
         </div>
 
         {/* Save button */}
-        <div className="flex justify-end pt-2">
+        <div className="flex justify-end pt-1">
           <button
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
-            className="glass-button min-h-9 rounded-xl bg-sky-500/20 px-4 py-2 font-medium text-sky-200 hover:bg-sky-500/30"
+            className="glass-button min-h-11 rounded-xl border border-sky-400/40 bg-sky-500/20 px-5 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-50"
             data-testid="save-device-policies"
           >
             {saveMutation.isPending ? 'Saving…' : 'Save Policies'}

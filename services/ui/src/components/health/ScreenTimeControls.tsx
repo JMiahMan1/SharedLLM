@@ -64,7 +64,7 @@ function rulesFrom(draft: Draft, current: ScreenRules): ScreenRules {
   };
 }
 
-const input = 'mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100';
+const input = 'mt-1.5 min-h-11 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 focus:border-amber-400/50 focus:outline-none';
 
 export default function ScreenTimeControls({ username, name }: { username: string; name: string }) {
   const queryClient = useQueryClient();
@@ -85,7 +85,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
   const preview = draft && status ? rulesFrom(draft, status.rules) : undefined;
   const field = (key: 'daily' | 'weekend' | 'bedtimeStart' | 'bedtimeEnd' | 'schoolStart' | 'schoolEnd', label: string, type: 'number' | 'time') =>
     draft && (
-      <label className="block text-[11px] text-slate-400">
+      <label className="block rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-medium text-slate-300">
         {label}
         <input
           type={type}
@@ -113,70 +113,76 @@ export default function ScreenTimeControls({ username, name }: { username: strin
     >
       {draft && status && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {field('daily', 'Every day (min)', 'number')}
             {field('weekend', 'Weekends (min)', 'number')}
           </div>
-          <table className="w-full text-xs" data-testid="weekly-schedule">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
-                <th className="py-1 font-normal">Day</th>
-                <th className="py-1 font-normal">Limit (min)</th>
-                <th className="py-1 font-normal">School</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {WEEKDAYS.map((d) => {
-                const effective = limitFor(preview, d);
-                const school = draft.school.includes(d);
-                return (
-                  <tr key={d} data-testid={`schedule-${d}`}>
-                    <th scope="row" className="py-1.5 pr-2 text-left font-normal text-slate-200">{WEEKDAY_LABELS[d]}</th>
-                    <td className="py-1.5 pr-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={1440}
-                        inputMode="numeric"
-                        aria-label={`${WEEKDAY_LABELS[d]} limit in minutes`}
-                        placeholder={effective === null ? 'no limit' : `${effective} (${duration(effective * 60000)})`}
-                        value={draft.days[d] ?? ''}
-                        onChange={(e) => setDraft({ ...draft, days: { ...draft.days, [d]: e.target.value } })}
-                        className="min-h-11 w-full rounded-lg border border-white/10 bg-white/5 px-2 text-sm text-slate-100"
-                      />
-                    </td>
-                    <td className="py-1.5">
-                      <button
-                        type="button"
-                        aria-pressed={school}
-                        aria-label={`${WEEKDAY_LABELS[d]} is a school day`}
-                        onClick={() => setDraft({ ...draft, school: school ? draft.school.filter((x) => x !== d) : [...draft.school, d] })}
-                        className={`min-h-11 min-w-14 rounded-lg border px-2 text-[11px] ${school ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-400'}`}
-                      >
-                        {school ? 'Yes' : 'No'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/[0.02] p-2.5 sm:p-3.5">
+            <table className="w-full text-xs" data-testid="weekly-schedule">
+              <thead>
+                <tr className="border-b border-white/10 text-left text-[10px] uppercase tracking-wider text-slate-400">
+                  <th className="pb-2 font-semibold">Day</th>
+                  <th className="pb-2 font-semibold">Limit (min)</th>
+                  <th className="pb-2 text-right font-semibold sm:text-left">School</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {WEEKDAYS.map((d) => {
+                  const effective = limitFor(preview, d);
+                  const school = draft.school.includes(d);
+                  return (
+                    <tr key={d} data-testid={`schedule-${d}`}>
+                      <th scope="row" className="py-2 pr-2 text-left font-medium text-slate-200">{WEEKDAY_LABELS[d]}</th>
+                      <td className="py-2 pr-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          inputMode="numeric"
+                          aria-label={`${WEEKDAY_LABELS[d]} limit in minutes`}
+                          placeholder={effective === null ? 'no limit' : `${effective} (${duration(effective * 60000)})`}
+                          value={draft.days[d] ?? ''}
+                          onChange={(e) => setDraft({ ...draft, days: { ...draft.days, [d]: e.target.value } })}
+                          className="min-h-11 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-400/50 focus:outline-none"
+                        />
+                      </td>
+                      <td className="py-2 text-right sm:text-left">
+                        <button
+                          type="button"
+                          aria-pressed={school}
+                          aria-label={`${WEEKDAY_LABELS[d]} is a school day`}
+                          onClick={() => setDraft({ ...draft, school: school ? draft.school.filter((x) => x !== d) : [...draft.school, d] })}
+                          className={`min-h-11 min-w-16 rounded-xl border px-3 text-xs font-semibold transition-colors ${
+                            school ? 'border-sky-400/40 bg-sky-400/15 text-sky-100' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {school ? 'Yes' : 'No'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             {field('bedtimeStart', 'Bedtime starts', 'time')}
             {field('bedtimeEnd', 'Bedtime ends', 'time')}
             {field('schoolStart', 'School starts', 'time')}
             {field('schoolEnd', 'School ends', 'time')}
           </div>
-          <button
-            type="button"
-            disabled={save.isPending || !edited}
-            onClick={() => save.mutate(rulesFrom(draft, status.rules))}
-            className="glass-button min-h-11 px-3 text-xs font-semibold disabled:opacity-50"
-            data-testid="screen-time-save"
-          >
-            Save schedule
-          </button>
-          {failure && <p className="text-xs text-amber-300">{failure}</p>}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            {failure ? <p className="text-xs text-amber-300">{failure}</p> : <span />}
+            <button
+              type="button"
+              disabled={save.isPending || !edited}
+              onClick={() => save.mutate(rulesFrom(draft, status.rules))}
+              className="glass-button min-h-11 rounded-xl px-4 text-xs font-semibold disabled:opacity-50"
+              data-testid="screen-time-save"
+            >
+              Save schedule
+            </button>
+          </div>
         </div>
       )}
     </MemberCard>

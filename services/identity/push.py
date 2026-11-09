@@ -22,7 +22,7 @@ from services.identity.models import ScreenRules, UnifiedPushRegistration, User,
 #: screens carry their own labels for these (notificationCategories.ts,
 #: PushCategories.java).
 CATEGORIES = (
-    "chat", "family_presence", "family_safety", "leave_by", "calendar", "timers", "bible",
+    "chat", "call", "family_presence", "family_safety", "leave_by", "calendar", "timers", "bible",
     "reports", "home", "weather", "jobs", "raven", "app_updates", "health", "admin",
 )
 #: Categories only admins receive.
@@ -67,13 +67,38 @@ def _stored(session: Session, username: str) -> tuple[UserNotificationPreference
     return row, data if isinstance(data, dict) else {}
 
 
+def _minor_disabled(session: Session, user: User) -> list[str]:
+    """The categories a parent has disabled (switched off) for this minor.
+
+    Stored as the screen-time rule ``notification_disabled``: a list of
+    category ids. Unknown ids and the safety categories are dropped.
+    """
+    row = session.get(ScreenRules, user.username)
+    try:
+        data = json.loads(row.data) if row and row.data else {}
+    except (TypeError, ValueError):
+        data = {}
+    disabled = data.get("notification_disabled") if isinstance(data, dict) else None
+    if not isinstance(disabled, list):
+        return []
+    visible = set(visible_categories(user))
+    out: list[str] = []
+    for item in disabled:
+        if not isinstance(item, str):
+            continue
+        c = item.strip()
+        if c in visible and c not in MINOR_NEVER_TOGGLE and c not in out:
+            out.append(c)
+    return out
+
+
 def _minor_toggle_allowed(session: Session, user: User) -> list[str]:
     """The categories the parent lets this minor switch off.
 
     Stored as the screen-time rule ``notification_toggle_allowed``: a list of
     category ids. Absent or empty means the minor may not switch off any
-    notification for themselves. Unknown ids and the safety categories are
-    dropped, so a bad row cannot loosen anything.
+    notification for themselves. Unknown ids, disabled categories and the safety
+    categories are dropped, so a bad row cannot loosen anything.
     """
     row = session.get(ScreenRules, user.username)
     try:
@@ -84,12 +109,13 @@ def _minor_toggle_allowed(session: Session, user: User) -> list[str]:
     if not isinstance(allowed, list):
         return []
     visible = set(visible_categories(user))
+    disabled = set(_minor_disabled(session, user))
     out: list[str] = []
     for item in allowed:
         if not isinstance(item, str):
             continue
         c = item.strip()
-        if c in visible and c not in MINOR_NEVER_TOGGLE and c not in out:
+        if c in visible and c not in MINOR_NEVER_TOGGLE and c not in disabled and c not in out:
             out.append(c)
     return out
 
@@ -105,22 +131,23 @@ def locked_categories(session: Session, user: User) -> list[str]:
 def effective_preferences(session: Session, user: User) -> dict[str, bool]:
     """Every category with its on/off state: absent is on, ``admin`` only for admins.
 
-    A minor's locked categories read as on, whatever their stored row says:
-    only a parent unlocks them, and one is unlocked by naming it in
-    ``notification_toggle_allowed``.
+    A minor's locked categories read as on unless a parent disabled them in
+    ``notification_disabled``: only a parent unlocks them, and one is unlocked
+    by naming it in ``notification_toggle_allowed``.
     """
     _, data = _stored(session, user.username)
     visible = set(visible_categories(user))
     prefs = {c: c in visible and bool(data.get(c, True)) for c in CATEGORIES}
+    disabled = set(_minor_disabled(session, user)) if (user.family_role or "other") in roles.MINOR_FAMILY_ROLES else set()
     for c in locked_categories(session, user):
-        prefs[c] = True
+        prefs[c] = c not in disabled
     return prefs
 
 
 def apply_preferences(session: Session, user: User, changes: dict) -> None:
     """Switch some categories on or off; 422 for an unknown one or a non-bool.
 
-    Changes to categories a minor may not switch off are ignored, not refused:
+    Changes to categories a minor may not switch are ignored, not refused:
     the settings page sends the whole map, and one switch it owns must not fail
     the switches it shares with the minor's parent.
     """
@@ -132,7 +159,11 @@ def apply_preferences(session: Session, user: User, changes: dict) -> None:
             raise HTTPException(status_code=422, detail=f"{key} must be true or false")
     locked = set(locked_categories(session, user))
     if locked:
-        changes = {k: v for k, v in changes.items() if not (k in locked and not v)}
+        disabled = set(_minor_disabled(session, user))
+        changes = {
+            k: v for k, v in changes.items()
+            if not (k in locked and ((k in disabled and v) or (k not in disabled and not v)))
+        }
     row, data = _stored(session, user.username)
     if row is None:
         row = UserNotificationPreference(username=user.username)

@@ -27,22 +27,25 @@ interface MemberCardProps {
 export default function MemberCard({ title, icon: Icon, tone = 'text-sky-300', testId, aside, wide, isLoading, error, empty, children }: MemberCardProps) {
   return (
     <section
-      className={`glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-3 ${wide ? 'lg:col-span-2' : ''}`}
+      className={`glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3.5 ${wide ? 'md:col-span-2 lg:col-span-2' : ''}`}
       data-testid={testId}
       aria-label={title}
     >
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-white">
-          <Icon size={16} className={`shrink-0 ${tone}`} /> <span className="truncate">{title}</span>
+      <div className="flex items-center justify-between gap-2.5 border-b border-white/[0.06] pb-2.5">
+        <h3 className="flex min-w-0 items-center gap-2.5 text-sm font-semibold tracking-tight text-white">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+            <Icon size={16} className={`shrink-0 ${tone}`} />
+          </span>
+          <span className="truncate">{title}</span>
         </h3>
-        {aside && <div className="shrink-0 text-[11px] text-slate-400">{aside}</div>}
+        {aside && <div className="shrink-0 text-[11px] font-medium text-slate-300">{aside}</div>}
       </div>
       {isLoading ? (
         <div className="h-24 skeleton rounded-xl" aria-hidden data-testid={`${testId}-loading`} />
       ) : error ? (
-        <p className="text-xs text-amber-300" data-testid={`${testId}-error`}>{error}</p>
+        <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-300" data-testid={`${testId}-error`}>{error}</p>
       ) : empty ? (
-        <p className="text-xs text-slate-400" data-testid={`${testId}-empty`}>{empty}</p>
+        <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400" data-testid={`${testId}-empty`}>{empty}</p>
       ) : (
         children
       )}

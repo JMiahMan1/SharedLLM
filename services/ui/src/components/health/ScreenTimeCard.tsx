@@ -70,28 +70,47 @@ export default function ScreenTimeCard() {
   const earnedText = earnedLine(status);
   const ways = howToEarn(status);
   const waitingChores = status.chores_waiting || [];
+  const totalToday = status.limit_min !== null && status.limit_min !== undefined ? status.limit_min + (status.bonus_min || 0) + (status.earned_min || 0) : null;
+  const pctLeft = totalToday && status.remaining_min !== null ? Math.max(0, Math.min(100, Math.round((status.remaining_min / Math.max(1, totalToday)) * 100))) : null;
 
   return (
-    <section className="glass-panel rounded-2xl p-4 sm:p-5" data-testid="screen-time-card">
-      <div className="flex items-center gap-2">
-        <Icon size={16} className={status.locked ? 'text-amber-300' : 'text-emerald-300'} />
-        <h3 className="text-sm font-semibold text-white">Screen time</h3>
+    <section className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3" data-testid="screen-time-card">
+      <div className="flex items-center justify-between gap-2 border-b border-white/5 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${status.locked ? 'border-amber-400/30 bg-amber-400/10 text-amber-300' : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'}`}>
+            <Icon size={16} />
+          </div>
+          <h3 className="text-sm font-semibold text-white">Screen time</h3>
+        </div>
+        <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${status.locked ? 'border-amber-400/30 bg-amber-400/10 text-amber-200' : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'}`}>
+          {status.locked ? 'Locked' : 'Unlocked'}
+        </span>
       </div>
 
       {status.locked ? (
-        <p className="mt-2 text-sm text-slate-200" data-testid="screen-time-locked">{lockedLine(status)}</p>
+        <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-sm text-slate-200" data-testid="screen-time-locked">{lockedLine(status)}</p>
       ) : status.remaining_min !== null ? (
-        <p className="mt-2 text-sm text-slate-200" data-testid="screen-time-left">
-          <span className="font-semibold text-emerald-300">{duration(status.remaining_min * 60000)}</span> left today
-          {status.bonus_min > 0 && <span className="text-slate-400"> (with {status.bonus_min} bonus minutes)</span>}
-        </p>
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2">
+          <p className="text-sm text-slate-200" data-testid="screen-time-left">
+            <span className="text-base font-bold text-emerald-300">{duration(status.remaining_min * 60000)}</span> left today
+            {status.bonus_min > 0 && <span className="text-slate-400"> (with {status.bonus_min} bonus minutes)</span>}
+          </p>
+          {pctLeft !== null && (
+            <div className="h-2 w-full overflow-hidden rounded-full bg-white/10" aria-hidden>
+              <div
+                className={`h-full rounded-full transition-all ${pctLeft <= 15 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                style={{ width: `${pctLeft}%` }}
+              />
+            </div>
+          )}
+        </div>
       ) : (
-        <p className="mt-2 text-sm text-slate-300">No daily limit today.</p>
+        <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">No daily limit today.</p>
       )}
 
       {(earnedText || (status.banked_min || 0) > 0 || ways.length > 0 || waitingChores.length > 0) && (
-        <div className="mt-2 space-y-1 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-3 text-xs text-slate-300" data-testid="screen-time-earned">
-          {earnedText && <p className="font-medium text-emerald-200">{earnedText}</p>}
+        <div className="space-y-1.5 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-3.5 text-xs text-slate-300" data-testid="screen-time-earned">
+          {earnedText && <p className="font-semibold text-emerald-200">{earnedText}</p>}
           {(status.banked_min || 0) > 0 && (
             <p data-testid="screen-time-banked">
               {status.banked_min} min saved from earlier this week (it starts fresh on Monday).
@@ -107,29 +126,30 @@ export default function ScreenTimeCard() {
       )}
 
       {Object.keys(status.app_minutes_left || {}).length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-xs text-slate-300" data-testid="screen-time-apps">
+        <ul className="space-y-1 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300" data-testid="screen-time-apps">
           {Object.entries(status.app_minutes_left || {}).map(([pkg, left]) => (
-            <li key={pkg}>
-              {appName(pkg)}: {left > 0 ? `${duration(left * 60000)} left today` : 'used up for today'}
+            <li key={pkg} className="flex items-center justify-between gap-2">
+              <span className="font-medium text-slate-200">{appName(pkg)}: </span>
+              <span className={left > 0 ? 'text-emerald-300' : 'text-amber-300'}>{left > 0 ? `${duration(left * 60000)} left today` : 'used up for today'}</span>
             </li>
           ))}
         </ul>
       )}
 
       {blockedApps.length > 0 && (
-        <ul className="mt-2 space-y-1.5 text-xs text-slate-300" data-testid="screen-time-blocked-apps">
+        <ul className="space-y-2 text-xs text-slate-300" data-testid="screen-time-blocked-apps">
           {blockedApps.map((pkg) => (
-            <li key={pkg} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
-              <span>{appName(pkg)} is off right now</span>
+            <li key={pkg} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+              <span className="font-medium text-slate-200">{appName(pkg)} is off right now</span>
               {askedApps[pkg] ? (
-                <span className="text-sky-300" data-testid={`asked-unblock-${pkg}`}>Asked a parent</span>
+                <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-2.5 py-1 text-sky-300" data-testid={`asked-unblock-${pkg}`}>Asked a parent</span>
               ) : (
                 <button
                   type="button"
                   disabled={askApp.isPending}
                   onClick={() => askApp.mutate(pkg)}
                   data-testid={`ask-unblock-${pkg}`}
-                  className="glass-button px-2.5 py-1 text-xs min-h-9"
+                  className="glass-button min-h-11 rounded-xl px-3 text-xs font-medium"
                 >
                   Ask a parent
                 </button>
@@ -140,8 +160,8 @@ export default function ScreenTimeCard() {
       )}
 
       {week && week.days_reported > 0 && (
-        <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 space-y-1.5 text-xs text-slate-300" data-testid="screen-time-week">
-          <p className="font-medium text-slate-100">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3.5 space-y-2 text-xs text-slate-300" data-testid="screen-time-week">
+          <p className="font-semibold text-slate-100">
             This week: {duration(week.daily_avg_min * 60000)} a day ({duration(week.total_min * 60000)} across {week.days_reported} {week.days_reported === 1 ? 'day' : 'days'})
           </p>
           {week.top_apps.length > 0 && (
@@ -152,7 +172,7 @@ export default function ScreenTimeCard() {
           {week.days.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-0.5" data-testid="screen-time-week-days">
               {week.days.map((d) => (
-                <span key={d.day} className="rounded-lg bg-white/5 px-2 py-0.5 text-[11px] text-slate-300">
+                <span key={d.day} className="rounded-lg border border-white/5 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300">
                   {d.day.slice(5)}: {duration(d.minutes * 60000)}
                 </span>
               ))}
@@ -162,16 +182,18 @@ export default function ScreenTimeCard() {
       )}
 
       {(rules.bedtime_start || rules.school_start) && !status.locked && (
-        <p className="mt-1 text-xs text-slate-400">
+        <p className="text-xs text-slate-400">
           {rules.bedtime_start ? `Bedtime ${rules.bedtime_start}-${rules.bedtime_end}. ` : ''}
           {rules.school_start ? `School ${rules.school_start}-${rules.school_end}.` : ''}
         </p>
       )}
 
       {status.reason !== 'paused' && (
-        <div className="mt-3 space-y-2">
+        <div className="space-y-2.5 border-t border-white/5 pt-3">
           {waiting ? (
-            <p className="text-xs text-sky-300" data-testid="screen-time-waiting">You asked for more time. A parent will answer soon.</p>
+            <p className="rounded-xl border border-sky-400/20 bg-sky-400/10 p-3 text-xs text-sky-200" data-testid="screen-time-waiting">
+              You asked for more time. A parent will answer soon.
+            </p>
           ) : (
             <>
               <input
@@ -180,16 +202,16 @@ export default function ScreenTimeCard() {
                 maxLength={200}
                 placeholder="What is it for? (optional)"
                 aria-label="What is the extra time for?"
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500"
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-emerald-400/50 focus:outline-none"
               />
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {ASK_OPTIONS.map((minutes) => (
                   <button
                     key={minutes}
                     type="button"
                     disabled={ask.isPending}
                     onClick={() => ask.mutate(minutes)}
-                    className="glass-button px-3 py-1.5 text-xs min-h-11"
+                    className="glass-button min-h-11 rounded-xl px-2.5 py-1.5 text-xs font-medium"
                   >
                     Ask for {minutes} min
                   </button>

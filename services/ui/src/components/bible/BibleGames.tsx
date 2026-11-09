@@ -128,16 +128,22 @@ function GameLobby({
       )}
 
       {dailyInfo && (
-        <section className="rounded-2xl p-5 border border-amber-400/30 bg-gradient-to-br from-amber-500/20 via-orange-500/10 to-slate-900">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-400/20 text-amber-200">
-              <Crown size={22} />
+        <section className="relative overflow-hidden rounded-3xl border border-amber-400/35 bg-gradient-to-br from-amber-500/25 via-orange-500/15 to-slate-900 p-5 sm:p-6 shadow-lg">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-amber-400/15 blur-3xl" aria-hidden />
+          <div className="relative flex items-start gap-3.5">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-amber-300/30 bg-amber-400/20 text-amber-200 shadow-inner">
+              <Crown size={24} />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-lg font-bold text-white">{dailyInfo.name}</h2>
-              <p className="text-sm text-slate-300 leading-relaxed">{dailyInfo.blurb}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-extrabold text-white sm:text-xl">{dailyInfo.name}</h2>
+                <span className="rounded-full border border-amber-300/30 bg-amber-400/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-100">
+                  Daily Challenge
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-slate-200 leading-relaxed">{dailyInfo.blurb}</p>
               {played && (
-                <p className="mt-1 text-sm text-amber-200" data-testid="bible-daily-played">
+                <p className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-amber-400/25 bg-black/25 px-3 py-1 text-xs font-medium text-amber-200" data-testid="bible-daily-played">
                   You scored {played.correct}/{played.total} today. Play again for practice.
                 </p>
               )}
@@ -148,7 +154,7 @@ function GameLobby({
             onClick={() => onStart('daily')}
             disabled={loading !== null}
             data-testid="bible-game-start-daily"
-            className="mt-4 w-full min-h-12 rounded-xl bg-amber-500 text-slate-950 font-semibold flex items-center justify-center gap-2 hover:bg-amber-400 disabled:opacity-60"
+            className="relative mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 font-bold text-slate-950 shadow-md transition hover:from-amber-300 hover:to-amber-400 disabled:opacity-60"
           >
             {loading === 'daily' ? <Loader2 size={16} className="animate-spin" /> : <Gamepad2 size={16} />}
             {played ? 'Practise today’s quiz' : 'Play today’s quiz'}
@@ -195,7 +201,7 @@ function GameLobby({
         <AttemptReview attemptId={reviewing.id} mine={reviewing.mine} page={page} onClose={() => setReviewing(null)} />
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {others.map((m) => (
           <ModeCard key={m.mode} info={m} loading={loading === m.mode} disabled={loading !== null} onStart={() => onStart(m.mode)} />
         ))}
@@ -212,22 +218,22 @@ function ModeCard({ info, loading, disabled, onStart }: { info: BibleGameInfo; l
       onClick={onStart}
       disabled={disabled}
       data-testid={`bible-game-start-${info.mode}`}
-      className="glass-panel rounded-2xl p-4 border border-white/10 text-left hover:border-purple-400/40 transition-colors disabled:opacity-60 min-h-11"
+      className="group glass-panel flex min-h-14 flex-col justify-between rounded-2xl border border-white/10 p-4 text-left transition-all hover:border-purple-400/40 hover:bg-white/[0.04] disabled:opacity-60"
     >
-      <span className="flex items-center gap-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/15 text-purple-200">
-          {loading ? <Loader2 size={17} className="animate-spin" /> : <Icon size={17} />}
+      <span className="flex w-full items-center gap-2.5">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-purple-400/25 bg-purple-500/15 text-purple-200 transition-transform group-hover:scale-105">
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <Icon size={18} />}
         </span>
-        <span className="font-semibold text-white">{info.name}</span>
+        <span className="font-bold text-white">{info.name}</span>
         {info.seconds ? (
-          <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-400">
+          <span className="ml-auto flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-300">
             <Timer size={12} /> {info.seconds}s
           </span>
         ) : (
-          <span className="ml-auto text-[11px] text-slate-500">{info.count} questions</span>
+          <span className="ml-auto rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">{info.count} questions</span>
         )}
       </span>
-      <span className="mt-2 block text-sm text-slate-400 leading-relaxed">{info.blurb}</span>
+      <span className="mt-2.5 block text-xs leading-relaxed text-slate-400">{info.blurb}</span>
     </button>
   );
 }

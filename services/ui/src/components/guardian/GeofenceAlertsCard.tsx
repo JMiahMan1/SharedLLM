@@ -74,13 +74,15 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
     >
       <div className="space-y-4 text-xs">
         {/* Bark-style photo & video safety scanning toggle */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Camera size={15} className="text-emerald-400" />
-              <div>
-                <p className="font-semibold text-white">Photo & Video Safety Scan</p>
-                <p className="text-[11px] text-slate-400">
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10">
+                <Camera size={15} className="text-emerald-300" />
+              </span>
+              <div className="min-w-0 space-y-1">
+                <p className="font-semibold text-white">Photo &amp; Video Safety Scan</p>
+                <p className="text-[11px] leading-relaxed text-slate-400">
                   Scans new photos locally using household AI for safety concerns without uploading private photos.
                 </p>
                 {/* The setting is kept, but no phone sends photos yet: saying
@@ -95,10 +97,10 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
               onClick={togglePhotoScan}
               disabled={saveMutation.isPending}
               data-testid="toggle-photo-scan"
-              className={`min-h-8 shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+              className={`min-h-11 shrink-0 rounded-xl px-3.5 text-xs font-semibold transition-colors ${
                 photoScanEnabled
-                  ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300'
-                  : 'border border-white/10 bg-black/20 text-slate-400'
+                  ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-200'
+                  : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'
               }`}
             >
               {photoScanEnabled ? 'On' : 'Off'}
@@ -107,18 +109,18 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
         </div>
 
         {/* Places geofence arrival & departure alerts */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 font-semibold text-slate-300">
-            <Navigation size={13} className="text-sky-400" />
-            <span>Place Arrival & Departure Alerts for {name}</span>
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+            <Navigation size={13} className="text-sky-300" />
+            <span>Place Arrival &amp; Departure Alerts for {name}</span>
           </div>
 
           {places.length === 0 ? (
-            <p className="rounded-xl border border-white/10 bg-black/20 p-3 text-slate-400">
+            <p className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-400">
               No places configured in Home Assistant yet (e.g. Home, School).
             </p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {places.map((place) => {
                 const cfg = geofenceAlerts[place.id] || {};
                 const arriveOn = Boolean(cfg.arrive);
@@ -127,21 +129,21 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                 return (
                   <div
                     key={place.id}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-2.5"
+                    className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3"
                     data-testid={`geofence-row-${place.id}`}
                   >
-                    <div className="min-w-0 pr-2">
-                      <p className="font-semibold text-white truncate">{place.name}</p>
-                      <p className="text-[10px] text-slate-400">{place.id}</p>
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className="truncate font-semibold text-white">{place.name}</p>
+                      <p className="truncate text-[10px] text-slate-400">{place.id}</p>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={() => toggleGeofence(place.id, 'arrive')}
                         disabled={saveMutation.isPending}
                         data-testid={`geofence-arrive-${place.id}`}
-                        className={`min-h-7 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+                        className={`min-h-11 rounded-xl px-3 text-xs font-semibold transition-colors ${
                           arriveOn
                             ? 'border border-emerald-400/40 bg-emerald-400/20 text-emerald-200'
                             : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'
@@ -155,7 +157,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                         onClick={() => toggleGeofence(place.id, 'depart')}
                         disabled={saveMutation.isPending}
                         data-testid={`geofence-depart-${place.id}`}
-                        className={`min-h-7 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+                        className={`min-h-11 rounded-xl px-3 text-xs font-semibold transition-colors ${
                           departOn
                             ? 'border border-sky-400/40 bg-sky-400/20 text-sky-200'
                             : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'

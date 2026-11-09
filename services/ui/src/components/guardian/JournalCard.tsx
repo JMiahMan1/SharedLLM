@@ -27,53 +27,80 @@ export default function JournalCard({ username, name }: { username: string; name
   const remove = useMutation({ mutationFn: (id: number) => api.deleteGuardianJournal(username, id), onSuccess: refresh });
 
   return (
-    <section className="glass-panel rounded-2xl p-4 sm:p-5 space-y-3" data-testid="guardian-journal">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-        <BookHeart size={16} className="text-violet-300" /> Talk journal
-      </h2>
-      <div className="space-y-2">
+    <section className="glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3.5" data-testid="guardian-journal">
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] pb-2.5">
+        <h2 className="flex items-center gap-2.5 text-sm font-semibold tracking-tight text-white">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-400/10">
+            <BookHeart size={16} className="text-violet-300" />
+          </span>
+          <span>Talk journal</span>
+        </h2>
+        {data?.notes && data.notes.length > 0 && (
+          <span className="text-[11px] font-medium text-slate-400">
+            {data.notes.length} {data.notes.length === 1 ? 'note' : 'notes'}
+          </span>
+        )}
+      </div>
+      <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3">
         <textarea
-          rows={2}
+          rows={3}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={`What did you and ${name} talk or pray about?`}
           aria-label="New journal note"
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+          className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-violet-400/50 focus:outline-none"
         />
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-[11px] text-slate-400">
-            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
-            Share with {name}'s other parent
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={shared}
+              onChange={(e) => setShared(e.target.checked)}
+              className="h-4 w-4 shrink-0 rounded accent-violet-400"
+            />
+            <span>Share with {name}&apos;s other parent</span>
           </label>
           <button
             type="button"
             disabled={!text.trim() || add.isPending}
             onClick={() => add.mutate()}
-            className="glass-button ml-auto min-h-11 px-3 text-xs font-semibold disabled:opacity-50"
+            className="glass-button ml-auto min-h-11 px-4 text-xs font-semibold disabled:opacity-50"
           >
             Save
           </button>
         </div>
       </div>
       {isLoading ? (
-        <div className="h-12 skeleton rounded-xl" aria-hidden />
+        <div className="h-16 skeleton rounded-xl" aria-hidden />
       ) : isError ? (
-        <p className="text-xs text-amber-300">The journal could not be loaded.</p>
+        <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-300">The journal could not be loaded.</p>
       ) : (data?.notes.length ?? 0) === 0 ? (
-        <p className="text-xs text-slate-500">No notes yet.</p>
+        <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400">No notes yet.</p>
       ) : (
-        <ul className="divide-y divide-white/5">
+        <ul className="space-y-2">
           {data!.notes.map((n) => (
-            <li key={n.id} className="flex items-start gap-2 py-2 text-xs" data-testid={`journal-${n.id}`}>
-              <span className="min-w-0 flex-1">
-                <span className="block whitespace-pre-wrap text-slate-200">{n.text}</span>
-                <span className="block text-[10px] text-slate-500">
-                  {new Date(n.created_at).toLocaleDateString()} · {n.author === me ? 'you' : n.author}{n.shared ? ' · shared' : ''}
+            <li key={n.id} className="flex items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs" data-testid={`journal-${n.id}`}>
+              <span className="min-w-0 flex-1 space-y-1">
+                <span className="block whitespace-pre-wrap leading-relaxed text-slate-200">{n.text}</span>
+                <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                  <span>{new Date(n.created_at).toLocaleDateString()}</span>
+                  <span>·</span>
+                  <span className="font-medium text-slate-300">{n.author === me ? 'you' : n.author}</span>
+                  {n.shared && (
+                    <span className="rounded-full border border-violet-400/30 bg-violet-400/10 px-2 py-0.5 text-[10px] font-medium text-violet-200">
+                      shared
+                    </span>
+                  )}
                 </span>
               </span>
               {n.author === me && (
-                <button type="button" aria-label="Delete note" onClick={() => remove.mutate(n.id)} className="min-h-11 min-w-11 flex items-center justify-center text-slate-500 hover:text-red-300">
-                  <Trash2 size={13} />
+                <button
+                  type="button"
+                  aria-label="Delete note"
+                  onClick={() => remove.mutate(n.id)}
+                  className="-mr-1 -mt-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/10 hover:text-red-300"
+                >
+                  <Trash2 size={14} />
                 </button>
               )}
             </li>
