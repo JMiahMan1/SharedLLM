@@ -111,7 +111,8 @@ async def test_leaving_work_tells_the_family_with_an_eta_home(world):
     r = R()
     t = time.time()
     assert await geo._presence_transition(r, "jeremiah", 33.30, -111.80, t) == []   # first sighting: silent
-    events = await geo._presence_transition(r, "jeremiah", 33.25, -111.70, t + 60)
+    assert await geo._presence_transition(r, "jeremiah", 33.25, -111.70, t + 60) == []   # leaving...
+    events = await geo._presence_transition(r, "jeremiah", 33.24, -111.68, t + 60 + geo.DEPART_DWELL_S)
     assert [e["kind"] for e in events] == ["departed"]
     assert world == [("michele", "Jeremiah left Work", "Home in about 22 min by road.")]  # not kate, not himself
 
@@ -146,6 +147,7 @@ async def test_a_vague_fix_at_the_edge_is_not_a_departure(world):
     assert world == []
     # The same spot, precisely: gone
     await geo._presence_transition(r, "michele", 33.16832, -111.5646, t + 60, acc=8.0)
+    await geo._presence_transition(r, "michele", 33.16832, -111.5646, t + 60 + geo.DEPART_DWELL_S, acc=8.0)
     assert ("jeremiah", "Michele left Home", "") in world
 
 
@@ -166,6 +168,7 @@ async def test_a_zone_drawn_tighter_than_a_phone_can_resolve_does_not_flap(world
         assert world == []
         # A kilometre away, though, is a real departure.
         await geo._presence_transition(r, "jeremiah", 33.1757, -111.5646, t + 120, acc=10.0)
+        await geo._presence_transition(r, "jeremiah", 33.1800, -111.5646, t + 120 + geo.DEPART_DWELL_S, acc=10.0)
         assert ("michele", "Jeremiah left Home", "") in world
     finally:
         geo._zone_cache.update({"at": time.time(), "zones": [HOME, WORK]})
@@ -186,6 +189,7 @@ async def test_a_tight_home_zone_does_not_flap_on_a_bad_fix(world):
     assert world == []
     # 500 m out is a real departure, however tight the zone was drawn
     await geo._presence_transition(r, "michele", 33.171191, -111.5646, t + 60, acc=76.0)
+    await geo._presence_transition(r, "michele", 33.171191, -111.5646, t + 60 + geo.DEPART_DWELL_S, acc=76.0)
     assert ("jeremiah", "Michele left Home", "") in world
 
 
@@ -230,8 +234,11 @@ async def test_the_old_switch_moves_to_the_family_presence_preference_once(monke
 async def test_the_same_notice_is_not_repeated_within_minutes(world):
     r = R()
     t = time.time()
-    for i, (lat, lon) in enumerate([(33.30, -111.80), (33.25, -111.70), (33.30, -111.80), (33.25, -111.70)]):
-        await geo._presence_transition(r, "jeremiah", lat, lon, t + i * 60)
+    # Leave work, come back, leave again inside ten minutes: one notice.
+    for dt, (lat, lon) in [(0, (33.30, -111.80)), (60, (33.25, -111.70)), (260, (33.25, -111.70)),
+                           (320, (33.30, -111.80)), (450, (33.30, -111.80)),
+                           (500, (33.25, -111.70)), (700, (33.25, -111.70))]:
+        await geo._presence_transition(r, "jeremiah", lat, lon, t + dt)
     departures = [s for s in world if s[1] == "Jeremiah left Work"]
     assert len(departures) == 1
 
@@ -280,6 +287,7 @@ async def test_an_important_place_is_family_safety_for_everyone_when_none_chosen
     t = time.time()
     await geo._presence_transition(r, "jeremiah", 33.30, -111.80, t)
     await geo._presence_transition(r, "jeremiah", 33.25, -111.70, t + 60)
+    await geo._presence_transition(r, "jeremiah", 33.25, -111.70, t + 60 + geo.DEPART_DWELL_S)
     assert [(n["user"], n["category"]) for n in world.payloads] == [("michele", "family_safety")]
 
 
@@ -314,6 +322,7 @@ async def test_child_geofence_arrival_and_departure_alerts(world, monkeypatch):
     world.payloads.clear()
     world.clear()
     await geo._presence_transition(r, "noah", 33.25, -111.70, t + 320)
+    await geo._presence_transition(r, "noah", 33.25, -111.70, t + 320 + geo.DEPART_DWELL_S)
     by_user = {n["user"]: n for n in world.payloads}
     assert "jeremiah" in by_user and "michele" in by_user
     assert by_user["jeremiah"]["category"] == "family_safety"
@@ -452,3 +461,34 @@ async def test_a_shared_drive_whose_trip_already_finalized_still_suppresses(worl
         await r.zadd("geo:trips:all", {trip["id"]: trip["start_time"]})
     await _drive_home_arrive(r, "jeremiah", t)
     assert ("michele", "Jeremiah arrived at Home", "") not in world
+
+
+@pytest.mark.asyncio
+async def test_a_phantom_trip_while_the_phone_sits_at_home_says_nothing(world):
+    """Noah's phone, on the nightstand overnight, "drove" 1 km east in 48 s
+    (the fused provider extrapolating, accuracy growing 40 -> 93 m) and was
+    back home 2.5 minutes later; it did that 27 times in one night, and each
+    told the family he had left. Leaving now takes staying out."""
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "noah", 33.1667, -111.5646, t)                       # home
+    for i, (lon, acc) in enumerate([(-111.5621, 40.0), (-111.5594, 52.0), (-111.5569, 64.0), (-111.5547, 93.0)]):
+        assert await geo._presence_transition(r, "noah", 33.1647, lon, t + 16 * (i + 1), acc=acc, speed=20.0) == []
+    # Back home 2.5 minutes on: it never left.
+    assert await geo._presence_transition(r, "noah", 33.1667, -111.5646, t + 150, acc=15.0) == []
+    # Even a later stray fix outside starts afresh rather than counting the old one.
+    assert await geo._presence_transition(r, "noah", 33.1647, -111.5621, t + 400, acc=20.0) == []
+    assert world == []
+
+
+@pytest.mark.asyncio
+async def test_a_phantom_followed_by_silence_is_still_not_a_departure(world):
+    """05:29 the phone "drove" 1 km out, then sent nothing for 2.5 minutes and
+    came back home. The silence is not proof of a trip; only a fix still
+    outside after the dwell is."""
+    r = R()
+    t = time.time()
+    await geo._presence_transition(r, "noah", 33.1667, -111.5646, t)                       # home
+    await geo._presence_transition(r, "noah", 33.1625, -111.5547, t + 48, acc=93.0, speed=17.0)
+    assert await geo._presence_transition(r, "noah", 33.1666, -111.5643, t + 200, acc=15.0) == []
+    assert world == []

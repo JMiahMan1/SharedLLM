@@ -108,6 +108,7 @@ async def test_someone_elses_arrival_and_the_wrong_event_do_not_ring_it(world):
     await geo._presence_transition(r, "jeremiah", 33.1668, -111.5646, t + 600, speed=0.0, activity="still")
     assert _reminders(world) == []
     await geo._presence_transition(r, "jeremiah", *AWAY, t + 1200)
+    await geo._presence_transition(r, "jeremiah", *AWAY, t + 1200 + geo.DEPART_DWELL_S)   # still gone
     assert [n["body"] for n in _reminders(world)] == ["Left Home"]
 
 

@@ -844,6 +844,14 @@ PRESENCE_REPEAT_S = 600
 #: first fix inside: driving past a saved place puts one fix inside it, and
 #: that used to tell the family they had arrived.
 ARRIVE_DWELL_S = 120.0
+#: A departure counts once every fix for this long has been outside. Phones
+#: at rest produce short phantom trips: indoor GPS reflections parked 200 m
+#: off with a 10-20 m accuracy claim, or the fused provider extrapolating a
+#: stale motion estimate ("driving" 1 km east in 48 s, accuracy growing from
+#: 40 to 93 m) before snapping home. In production one phone sitting at home
+#: overnight made 27 of these, each back inside within 2.5 minutes, and each
+#: told the family "Noah left Home". A real departure keeps going.
+DEPART_DWELL_S = 180.0
 #: Faster than this (m/s, about 9 mph) and the person is still travelling.
 ARRIVE_MAX_SPEED_MPS = 4.0
 #: What the phone reports when its owner has plainly stopped.
@@ -912,7 +920,13 @@ async def _presence_transition(
 
     Leaving takes a fix outside the zone by more than the margin or the fix's
     own uncertainty, whichever is larger: an indoor network fix 90 m off at
-    the edge of home is not a departure.
+    the edge of home is not a departure. And it takes staying out: the first
+    fix outside only starts a pending departure, which counts when a later
+    fix is still outside DEPART_DWELL_S on. Any fix back inside cancels it
+    quietly, so a phone's phantom trip while it sits on the nightstand says
+    nothing. There is no timer for it: a phantom is often followed by minutes
+    of silence, and a timer would read that silence as "still out" (a real
+    trip keeps sending fixes).
 
     Arriving takes staying: the first fix inside a place only starts a pending
     arrival, which counts once the person is still there ARRIVE_DWELL_S later
@@ -950,6 +964,14 @@ async def _presence_transition(
         await r.set(key, json.dumps({"zone": new, "t": ts}))
         return []
     by_id = {z["entity_id"]: z for z in usable}
+    if current and current in by_id:
+        leaving_since = state.get("leaving_since")
+        if leaving_since is None:
+            await r.set(key, json.dumps({"zone": current, "t": ts, "leaving_since": ts}))
+            return []
+        if ts - float(leaving_since) < DEPART_DWELL_S:
+            await r.set(key, json.dumps({"zone": current, "t": ts, "leaving_since": float(leaving_since)}))
+            return []
     events = []
     if current and current in by_id:
         events.append({"kind": "departed", "zone": by_id[current]})
