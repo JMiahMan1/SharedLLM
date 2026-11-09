@@ -75,7 +75,11 @@ public class BibleWidget extends AppWidgetProvider {
         RemoteViews full = buildFull(context, d);
         WidgetFit fit = WidgetFit.of(full)
                 .at(100, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, true))
-                .at(100, 150, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false))
+                .at(100, 150, compact, v -> {
+                    WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false).apply(v);
+                    // "verses to review" is three lines in a narrow tile.
+                    if (d.due != null && d.due.optInt("count", 0) > 0) v.setTextViewText(R.id.bw_due_caption, "to review");
+                })
                 .at(250, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, false, true))
                 .at(250, 150, compact)
                 .at(240, 230, full);

@@ -63,4 +63,13 @@ public class StatsWidgetFormatTest {
         assertEquals("all caught up", StatsWidgetFormat.due(new JSONObject().put("count", 0)).caption);
         assertEquals("-", StatsWidgetFormat.due(null).value);
     }
+
+    @Test
+    public void narrowCaptionKeepsShortWordsAndReplacesLongOnes() {
+        assertEquals("games played", StatsWidgetFormat.narrowCaption("games played", "best score"));
+        assertEquals("Cloud Hop", StatsWidgetFormat.narrowCaption("Cloud Hop", "best score"));
+        assertEquals("best score", StatsWidgetFormat.narrowCaption("Jubilee!", "best score"));
+        assertEquals("best score", StatsWidgetFormat.narrowCaption("Checkers", "best score"));
+        assertEquals("best score", StatsWidgetFormat.narrowCaption(null, "best score"));
+    }
 }

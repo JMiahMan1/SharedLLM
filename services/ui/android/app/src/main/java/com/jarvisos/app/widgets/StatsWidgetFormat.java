@@ -82,6 +82,19 @@ public final class StatsWidgetFormat {
         return new Tile("0", "#1 spots");
     }
 
+    /**
+     * A caption for a narrow tile, where it wraps to two lines: a word longer
+     * than 7 letters ("Jubilee!") would break mid-word, so it gives way to
+     * {@code fallback}, which must wrap cleanly.
+     */
+    public static String narrowCaption(String caption, String fallback) {
+        if (caption == null) return fallback;
+        for (String word : caption.trim().split("\\s+")) {
+            if (word.length() > 7) return fallback;
+        }
+        return caption;
+    }
+
     // --- Bible (the signed-in reader's own streak, quiz and verses) ---
 
     public static Tile streak(JSONObject streaks) {

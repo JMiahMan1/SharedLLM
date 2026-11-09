@@ -79,10 +79,21 @@ public class GamesWidget extends AppWidgetProvider {
     static RemoteViews build(Context context) {
         Data d = fetch(context);
         RemoteViews compact = buildCompact(context, d);
+        // Narrow tiles wrap captions; the best game's title may be one long word.
+        StatsWidgetFormat.Tile best = StatsWidgetFormat.best(d.me());
+        String bestNarrow = StatsWidgetFormat.narrowCaption(best.caption, "best score");
+        WidgetFit.Tweak narrowBest = v -> {
+            v.setTextViewText(R.id.gw_best_caption, bestNarrow);
+            v.setContentDescription(R.id.gw_best_tile, "Best score " + best.value
+                    + (best.caption.isEmpty() ? "" : ", " + best.caption));
+        };
         RemoteViews full = buildFull(context, d, 1);
         WidgetFit fit = WidgetFit.of(full)
                 .at(100, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, true))
-                .at(100, 150, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false))
+                .at(100, 150, compact, v -> {
+                    WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false).apply(v);
+                    narrowBest.apply(v);
+                })
                 .at(250, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, false, true))
                 .at(250, 150, compact)
                 .at(240, 230, full);
