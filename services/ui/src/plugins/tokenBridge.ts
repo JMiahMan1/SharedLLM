@@ -21,6 +21,18 @@ export interface TokenBridgePluginInterface {
   setLastLocation(options: { latitude: number; longitude: number }): Promise<void>;
   setHome(options: { latitude: number; longitude: number }): Promise<void>;
   refreshWidgets(): Promise<void>;
+  setTheme(options: {
+    themeId: string;
+    bg: string;
+    surface: string;
+    text: string;
+    textMuted: string;
+    border: string;
+    accent: string;
+    onAccent: string;
+    accentAlt?: string;
+    scheme?: string;
+  }): Promise<void>;
 }
 
 const webFallback: TokenBridgePluginInterface = {
@@ -31,6 +43,7 @@ const webFallback: TokenBridgePluginInterface = {
   setLastLocation: async () => undefined,
   setHome: async () => undefined,
   refreshWidgets: async () => undefined,
+  setTheme: async () => undefined,
 };
 
 const TokenBridge = registerPlugin<TokenBridgePluginInterface>('TokenBridge', {

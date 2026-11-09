@@ -34,6 +34,18 @@ final class DeviceOwnerGuard {
         return dpm != null && dpm.isDeviceOwnerApp(context.getPackageName());
     }
 
+    /** Whether this app has active Device Admin or Device Owner privileges (can call lockNow). */
+    static boolean canLockNow(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        if (dpm == null) return false;
+        if (dpm.isDeviceOwnerApp(context.getPackageName())) return true;
+        try {
+            return dpm.isAdminActive(new ComponentName(context, GuardAdminReceiver.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /**
      * Re-applies the device-owner enforcement: the uninstall block while the
      * phone is a protected child's, the user restrictions, always-on VPN when

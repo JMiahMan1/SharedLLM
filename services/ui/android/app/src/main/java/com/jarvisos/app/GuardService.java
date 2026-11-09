@@ -92,6 +92,16 @@ public class GuardService extends AccessibilityService {
      */
     private volatile boolean hardLocked = false;
     /**
+     * True only after the child explicitly tapped "Open Jarvis" on the lock
+     * screen, and reset as soon as they leave Jarvis or a new lock arrives.
+     * That way, locking a device while Jarvis is already open still shows the
+     * lock screen immediately.
+     */
+    private static volatile boolean jarvisAllowedFromLock = false;
+    /** When "Open Jarvis" was tapped: the locked app can stay focused for a moment while Jarvis starts. */
+    private static volatile long jarvisAllowedAt = 0L;
+    private static final long JARVIS_LAUNCH_GRACE_MS = 3000L;
+    /**
      * A second user or guest was seen on this protected phone (reported once
      * per guard run): that user has no Jarvis and no guard, so it is a way out.
      */
@@ -148,9 +158,19 @@ public class GuardService extends AccessibilityService {
         // and put Android's own lock screen up once when a screen-time lock
         // starts (the Accessibility cover below is then the way back in).
         DeviceOwnerGuard.enforce(this, awaitingApproval, GuardNotices.userApps(this));
-        boolean hard = hardLockWanted();
-        if (hard && !hardLocked) DeviceOwnerGuard.lockNow(this);
-        hardLocked = hard;
+        boolean nowLocked = GuardApi.isProtected(this) && GuardApi.isLocked(this) && !GuardApi.isUnlocked(this);
+        if (nowLocked && !hardLocked) {
+            if (DeviceOwnerGuard.canLockNow(this)) {
+                DeviceOwnerGuard.lockNow(this);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                try {
+                    performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
+                } catch (Exception ignored) {
+                    // Fallback to full-screen overlay only.
+                }
+            }
+        }
+        hardLocked = nowLocked;
         // Layer 2: a remote wipe a parent queued (Phase 12 MDM) erases the
         // phone. Only a device owner may, so the pure decision gates it.
         if (DeviceOwnerRules.shouldWipe(DeviceOwnerGuard.isOwner(this), GuardApi.wipeRequested(this))) {
@@ -178,6 +198,21 @@ public class GuardService extends AccessibilityService {
         GuardService s = instance;
         if (s == null || s.refresher == null) return;
         s.refresher.execute(s::tick);
+    }
+
+    /** Called when a new lock or pause arrives so the lock screen immediately covers Jarvis too. */
+    static void onFreshLock() {
+        jarvisAllowedFromLock = false;
+        GuardService s = instance;
+        if (s != null) {
+            s.hardLocked = false;
+        }
+    }
+
+    /** Called when the user explicitly taps "Open Jarvis" on the lock screen. */
+    static void allowJarvisFromLock() {
+        jarvisAllowedAt = System.currentTimeMillis();
+        jarvisAllowedFromLock = true;
     }
 
     @Override
@@ -352,8 +387,16 @@ public class GuardService extends AccessibilityService {
      * thread, where the Accessibility window list and the overlay live.
      */
     private void syncLockOverlay() {
+        String front = frontAppPackage();
+        if (!GuardRules.OWN_PACKAGE.equals(front) && !front.isEmpty()
+                && System.currentTimeMillis() - jarvisAllowedAt > JARVIS_LAUNCH_GRACE_MS) {
+            jarvisAllowedFromLock = false;
+        }
+        String effectiveFront = (GuardRules.OWN_PACKAGE.equals(front) && !jarvisAllowedFromLock)
+                ? "com.jarvisos.app.locked"
+                : front;
         boolean wanted = GuardRules.lockOverlay(DeviceOwnerGuard.isOwner(this), GuardApi.isProtected(this),
-                GuardApi.isLocked(this), GuardApi.isUnlocked(this), frontAppPackage(), GuardApi.alwaysAllowed(this));
+                GuardApi.isLocked(this), GuardApi.isUnlocked(this), effectiveFront, GuardApi.alwaysAllowed(this));
         if (wanted) {
             if (lockOverlay == null) lockOverlay = new GuardOverlay(this);
             lockOverlay.show();

@@ -48,6 +48,17 @@ public class TokenBridgePlugin extends Plugin {
     public static final String KEY_PUSH_SINCE = "push_since";
     /** The outbox long poll's cursor while the push stream is unavailable (PushFallback). */
     public static final String KEY_POLL_CURSOR = "push_poll_cursor";
+    /** Mirrored Jarvis site theme tokens so native views (GuardScreenView) match the user's theme. */
+    public static final String KEY_THEME_ID = "jarvis_theme_id";
+    public static final String KEY_THEME_BG = "jarvis_theme_bg";
+    public static final String KEY_THEME_SURFACE = "jarvis_theme_surface";
+    public static final String KEY_THEME_TEXT = "jarvis_theme_text";
+    public static final String KEY_THEME_TEXT_MUTED = "jarvis_theme_text_muted";
+    public static final String KEY_THEME_BORDER = "jarvis_theme_border";
+    public static final String KEY_THEME_ACCENT = "jarvis_theme_accent";
+    public static final String KEY_THEME_ON_ACCENT = "jarvis_theme_on_accent";
+    public static final String KEY_THEME_ACCENT_ALT = "jarvis_theme_accent_alt";
+    public static final String KEY_THEME_SCHEME = "jarvis_theme_scheme";
 
 
     public static SharedPreferences prefs(Context context) {
@@ -229,5 +240,29 @@ public class TokenBridgePlugin extends Plugin {
     public void refreshWidgets(PluginCall call) {
         com.jarvisos.app.widgets.WidgetUpdater.requestAll(getContext());
         call.resolve();
+    }
+
+    @PluginMethod
+    public void setTheme(PluginCall call) {
+        SharedPreferences.Editor ed = prefs(getContext()).edit();
+        putOrRemove(ed, KEY_THEME_ID, call.getString("themeId"));
+        putOrRemove(ed, KEY_THEME_BG, call.getString("bg"));
+        putOrRemove(ed, KEY_THEME_SURFACE, call.getString("surface"));
+        putOrRemove(ed, KEY_THEME_TEXT, call.getString("text"));
+        putOrRemove(ed, KEY_THEME_TEXT_MUTED, call.getString("textMuted"));
+        putOrRemove(ed, KEY_THEME_BORDER, call.getString("border"));
+        putOrRemove(ed, KEY_THEME_ACCENT, call.getString("accent"));
+        putOrRemove(ed, KEY_THEME_ON_ACCENT, call.getString("onAccent"));
+        putOrRemove(ed, KEY_THEME_ACCENT_ALT, call.getString("accentAlt"));
+        putOrRemove(ed, KEY_THEME_SCHEME, call.getString("scheme"));
+        ed.apply();
+        call.resolve();
+    }
+
+    private static void putOrRemove(SharedPreferences.Editor ed, String key, String val) {
+        if (val != null) {
+            if (val.isEmpty()) ed.remove(key);
+            else ed.putString(key, val);
+        }
     }
 }

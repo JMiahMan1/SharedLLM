@@ -33,8 +33,9 @@ final class GuardOverlay {
     private final AccessibilityService service;
     private final WindowManager windows;
     private View view;
-    /** The lock reason the screen was built for, so it is rebuilt only when that changes. */
+    /** The lock reason and theme signature the screen was built for, so it is rebuilt when either changes. */
     private String reason;
+    private String themeSig;
     private boolean shown;
 
     GuardOverlay(AccessibilityService service) {
@@ -48,14 +49,15 @@ final class GuardOverlay {
     }
 
     /**
-     * Cover the screen with the lock, or rebuild it when the reason changed
+     * Cover the screen with the lock, or rebuild it when the reason or theme changed
      * (bedtime becoming the day's limit, say). Safe to call on every window
      * change: it does nothing when the same lock is already up.
      */
     void show() {
         if (windows == null) return;
         String now = GuardApi.lockReason(service);
-        if (shown && now.equals(reason)) return;
+        String sig = GuardScreenView.themeSignature(service);
+        if (shown && now.equals(reason) && sig.equals(themeSig)) return;
         hide();
         View built = GuardScreenView.build(service, GuardScreenActivity.MODE_LOCKED, "", false, host);
         if (built == null) return;
@@ -84,6 +86,7 @@ final class GuardOverlay {
             view = built;
             shown = true;
             reason = now;
+            themeSig = sig;
         } catch (Exception ignored) {
             // Not an Accessibility service any more, or the platform refused:
             // nothing else to do; the guard tries again at the next window change.
@@ -126,6 +129,7 @@ final class GuardOverlay {
      * over the lock, so the lock itself never goes away for them.
      */
     private void openInJarvis(String path) {
+        GuardService.allowJarvisFromLock();
         hide();
         service.startActivity(new Intent(service, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)

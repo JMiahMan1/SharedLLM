@@ -155,6 +155,7 @@ public class GuardScreenActivity extends ComponentActivity {
                         // Jarvis is always allowed; the lock comes back when the
                         // child leaves it. Asking for more time and messaging a
                         // parent stay on this screen, painted over the lock.
+                        GuardService.allowJarvisFromLock();
                         startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/"));

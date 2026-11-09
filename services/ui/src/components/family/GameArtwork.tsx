@@ -181,7 +181,55 @@ function SceneSvg({ slug, category }: { slug: string; category?: string }) {
     );
   }
 
-  if (slug.includes('good-word') || slug.includes('jubilee')) {
+  if (slug.includes('jubilee')) {
+    return (
+      <svg viewBox="0 0 320 160" className="h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        {/* Monopoly-style Jubilee board perspective corner & property deeds */}
+        <g transform="translate(160 88) rotate(-14)">
+          <rect x="-135" y="-58" width="270" height="118" rx="10" fill="#fef3c7" fillOpacity="0.16" stroke="#fde68a" strokeOpacity="0.45" strokeWidth="2" />
+          {/* Board corner tile (JUBILEE +200) */}
+          <rect x="-131" y="-54" width="54" height="54" rx="6" fill="#fbbf24" fillOpacity="0.35" stroke="#fef08a" strokeOpacity="0.6" strokeWidth="1.5" />
+          <text x="-104" y="-22" textAnchor="middle" fill="#fef3c7" fontSize="9" fontWeight="900" letterSpacing="0.5">+200</text>
+          {/* Property tiles with color bands & miniature houses */}
+          <g transform="translate(-73 -54)">
+            <rect width="38" height="54" rx="4" fill="#fffbeb" fillOpacity="0.22" stroke="#fde68a" strokeOpacity="0.4" />
+            <rect width="38" height="12" rx="3" fill="#ef4444" fillOpacity="0.85" />
+            <rect x="6" y="16" width="7" height="6" rx="1" fill="#22c55e" />
+            <rect x="16" y="16" width="7" height="6" rx="1" fill="#22c55e" />
+          </g>
+          <g transform="translate(-31 -54)">
+            <rect width="38" height="54" rx="4" fill="#fffbeb" fillOpacity="0.22" stroke="#fde68a" strokeOpacity="0.4" />
+            <rect width="38" height="12" rx="3" fill="#eab308" fillOpacity="0.85" />
+            <rect x="13" y="15" width="12" height="8" rx="1.5" fill="#dc2626" stroke="#fef08a" strokeWidth="0.8" />
+          </g>
+          <g transform="translate(11 -54)">
+            <rect width="38" height="54" rx="4" fill="#fffbeb" fillOpacity="0.22" stroke="#fde68a" strokeOpacity="0.4" />
+            <rect width="38" height="12" rx="3" fill="#22c55e" fillOpacity="0.85" />
+          </g>
+          <g transform="translate(53 -54)">
+            <rect width="38" height="54" rx="4" fill="#fffbeb" fillOpacity="0.22" stroke="#fde68a" strokeOpacity="0.4" />
+            <rect width="38" height="12" rx="3" fill="#3b82f6" fillOpacity="0.85" />
+          </g>
+        </g>
+        {/* Tumbling 3D dice */}
+        <g transform="translate(54 44) rotate(-18)">
+          <rect x="-16" y="-16" width="32" height="32" rx="7" fill="#fffbeb" fillOpacity="0.9" stroke="#f59e0b" strokeWidth="2" />
+          <circle cx="-7" cy="-7" r="2.6" fill="#451a03" />
+          <circle cx="0" cy="0" r="2.6" fill="#451a03" />
+          <circle cx="7" cy="7" r="2.6" fill="#451a03" />
+        </g>
+        <g transform="translate(262 108) rotate(16)">
+          <rect x="-15" y="-15" width="30" height="30" rx="7" fill="#fffbeb" fillOpacity="0.88" stroke="#f59e0b" strokeWidth="2" />
+          <circle cx="-6" cy="-6" r="2.4" fill="#dc2626" />
+          <circle cx="6" cy="-6" r="2.4" fill="#451a03" />
+          <circle cx="-6" cy="6" r="2.4" fill="#451a03" />
+          <circle cx="6" cy="6" r="2.4" fill="#dc2626" />
+        </g>
+      </svg>
+    );
+  }
+
+  if (slug.includes('good-word')) {
     return (
       <svg viewBox="0 0 320 160" className="h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <polygon points="40,0 110,160 0,160" fill="#fde047" fillOpacity="0.12" />

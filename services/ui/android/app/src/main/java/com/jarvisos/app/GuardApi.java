@@ -28,6 +28,8 @@ final class GuardApi {
 
     static final String KEY_STATUS = "guard_status";
     static final String KEY_UNLOCKED_UNTIL = "guard_unlocked_until";
+    static final String KEY_LAST_PAUSED_AT = "guard_last_paused_at";
+    static final String KEY_SERVER_THEME_ID = "guard_server_theme_id";
     /** The parents' offline-code verifiers, from the last online parent unlock. */
     static final String KEY_OFFLINE_CODES = "guard_offline_codes";
     static final String KEY_OFFLINE_FAILS = "guard_offline_fails";
@@ -62,13 +64,50 @@ final class GuardApi {
         try {
             String body = request(context, "GET", statusPath(p, user), null);
             if (body == null) return false;
-            new JSONObject(body); // only remember an answer that parses
-            p.edit().putString(KEY_STATUS, body).apply();
+            JSONObject prev = lastStatus(context);
+            JSONObject next = new JSONObject(body); // only remember an answer that parses
+            boolean wasPaused = prev.optBoolean("locked", false) && "paused".equals(prev.optString("reason", ""));
+            boolean nowPaused = next.optBoolean("locked", false) && "paused".equals(next.optString("reason", ""));
+            JSONObject rules = next.optJSONObject("rules");
+            String pausedAt = rules != null ? rules.optString("paused_at", "") : "";
+            String lastPausedAt = p.getString(KEY_LAST_PAUSED_AT, "");
+            boolean freshPause = nowPaused && (!wasPaused || (!pausedAt.isEmpty() && !pausedAt.equals(lastPausedAt)));
+            SharedPreferences.Editor ed = p.edit().putString(KEY_STATUS, body);
+            if (!pausedAt.isEmpty()) {
+                ed.putString(KEY_LAST_PAUSED_AT, pausedAt);
+            }
+            String serverTheme = next.optString("theme_id", "");
+            if (!serverTheme.isEmpty() && !"null".equals(serverTheme)) {
+                ed.putString(KEY_SERVER_THEME_ID, serverTheme);
+            }
+            if (freshPause) {
+                // A parent's explicit pause/lock overrides any remaining 10-minute unlock window
+                ed.remove(KEY_UNLOCKED_UNTIL);
+                GuardService.onFreshLock();
+            }
+            ed.apply();
             showQueuedNotices(context);
             return true;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Clear any active parent-unlock window so a new lock takes effect immediately. */
+    static void clearUnlock(Context context) {
+        prefs(context).edit().remove(KEY_UNLOCKED_UNTIL).apply();
+        GuardService.onFreshLock();
+    }
+
+    /** The user's selected Jarvis theme id from TokenBridge or the server's status. */
+    static String themeId(Context context) {
+        SharedPreferences p = prefs(context);
+        String mirrored = p.getString(TokenBridgePlugin.KEY_THEME_ID, "");
+        if (mirrored != null && !mirrored.isEmpty()) return mirrored;
+        String fromStatus = p.getString(KEY_SERVER_THEME_ID, "");
+        if (fromStatus != null && !fromStatus.isEmpty()) return fromStatus;
+        String inJson = lastStatus(context).optString("theme_id", "");
+        return inJson == null || "null".equals(inJson) ? "" : inJson;
     }
 
     /**

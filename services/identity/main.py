@@ -4510,16 +4510,18 @@ def may_view_technical_data(viewer: User | None, subject: User | None) -> bool:
     (devices, app versions, guard and permission states, sync times; the
     family member page, docs/FAMILY_MEMBER_PAGE.md).
 
-    Narrower than :func:`may_view_raw_data`: of the people who may see a
-    child's data, only an admin and the father see the technical side. The
-    mother sees every personal detail and every control, without it. A member
-    always sees their own.
+    Narrower than :func:`may_view_raw_data`: the mother sees every personal
+    detail of her children's and the father's data, while the device and
+    configuration side stays with the father and admins. A member always sees
+    their own.
     """
     if viewer is None or subject is None:
         return False
     if viewer.username == subject.username:
         return True
-    return may_view_raw_data(viewer, subject) and (bool(viewer.is_admin) or viewer.family_role == "father")
+    if viewer.is_admin or viewer.family_role == "father":
+        return may_view_raw_data(viewer, subject)
+    return False
 
 
 # --- screen time: budgets, routines, more-time requests (Phase 11 step 4) ---
@@ -4538,13 +4540,26 @@ def _may_manage_screen_time(viewer: User | None, subject: User | None) -> bool:
     )
 
 
+def _is_household_parent_of_minor(viewer: User | None, subject: User | None) -> bool:
+    """The parents own every child's device: an admin, the father or any mother
+    may lock or unlock a minor's phone or tablet, linked mother or not. Grown
+    members' devices stay their own."""
+    return (
+        viewer is not None
+        and subject is not None
+        and (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES
+        and (bool(viewer.is_admin) or viewer.family_role in ("father", "mother"))
+    )
+
+
 def _may_edit_screen_time(viewer: User | None, subject: User | None) -> bool:
     """Who may change a member's screen-time rules: a minor's parents, or a
-    grown member themselves. A grown member's own phone is theirs to manage
-    (they may clear their rules and turn monitoring off); they may not touch
-    anyone else's, and a minor still may not touch their own."""
-    if subject is not None and (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
-        return viewer is not None and viewer.username == subject.username
+    grown member themselves (to clear or turn off their own rules after
+    coming of age)."""
+    if viewer is None or subject is None:
+        return False
+    if (subject.family_role or "other") not in roles.MINOR_FAMILY_ROLES:
+        return viewer.username == subject.username
     return _may_manage_screen_time(viewer, subject)
 
 
@@ -4943,6 +4958,11 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
     subject = _screen_subject(session, username)
     if caller.username != subject.username and not may_view_raw_data(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
+    theme_row = session.get(UserThemeSetting, subject.username)
+    try:
+        theme_data = json.loads(theme_row.data) if theme_row and theme_row.data else {}
+    except (ValueError, TypeError):
+        theme_data = {}
     return {
         "username": subject.username,
         "rules": _screen_rules(session, subject.username),
@@ -4950,8 +4970,7 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "granted_until": _granted_until(session, subject.username, day) if day else None,
         # A grown member manages their own rules; a minor's are their parents'.
         "can_manage": _may_edit_screen_time(caller, subject),
-        # Whether the caller sees the technical side (the gateway strips it
-        # for the mother; docs/FAMILY_MEMBER_PAGE.md).
+        # Whether the caller sees the technical side (the page's Devices section).
         "technical": may_view_technical_data(caller, subject),
         # Whether the caller may see calls, texts and message notifications
         # (the parents only; the Calls & messages tab shows for them).
@@ -4959,6 +4978,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         # A minor's phone keeps Jarvis protected (no uninstall, no switching
         # the guard off) whether or not any time rules are set.
         "protected": (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES,
+        # The subject's selected Jarvis site theme so the lock screen matches it.
+        "theme_id": (theme_data.get("theme_id") or "clean-athletic"),
         # The parents' answers on new apps and permissions, for the phone's guard.
         "approvals": _guard_approvals(session, subject.username),
         # What the member carries, so the page says "tablet" for a tablet.
@@ -4973,7 +4994,7 @@ def put_screen_rules(username: str, body: dict, session: Session = Depends(get_s
         raise HTTPException(status_code=403, detail="Only a parent can set a minor's screen time")
     rules = _clean_screen_rules(body or {})
     current = _screen_rules(session, subject.username)
-    for key in ("paused", "paused_until", "app_allow_until"):  # a pause or temporary app unblock survives a rules edit
+    for key in ("paused", "paused_until", "paused_at", "app_allow_until"):  # a pause or temporary app unblock survives a rules edit
         if key in current and key not in rules:
             rules[key] = current[key]
     _save_screen_rules(session, subject.username, rules, caller.username)
@@ -4986,13 +5007,14 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
     """Lock the phone now: ``{"until": ISO}`` for a while, ``{}`` until lifted,
     ``{"resume": true}`` to lift it."""
     subject = _screen_subject(session, username)
-    if not _may_edit_screen_time(caller, subject):
+    if not (_may_edit_screen_time(caller, subject) or _is_household_parent_of_minor(caller, subject)):
         raise HTTPException(
             status_code=403, detail=f"Only a parent can pause a minor's {_device_word(session, subject.username)}"
         )
     rules = _screen_rules(session, subject.username)
     rules.pop("paused", None)
     rules.pop("paused_until", None)
+    rules.pop("paused_at", None)
     if not (body or {}).get("resume"):
         until = (body or {}).get("until")
         if until:
@@ -5003,6 +5025,7 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
             rules["paused_until"] = str(until)
         else:
             rules["paused"] = True
+        rules["paused_at"] = datetime.now(UTC).isoformat()
     _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
     # "device" names it in the gateway's paused notice ("Tablet paused").
@@ -5586,12 +5609,21 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
         parent
         and parent.password_hash
         and verify_password(password, parent.password_hash)
-        and _may_manage_screen_time(parent, caller)
+        and (_may_manage_screen_time(parent, caller) or _is_household_parent_of_minor(parent, caller))
     )
     if not ok:
         recent.append(now)
         raise HTTPException(status_code=401, detail="That is not one of your parents' logins.")
     _UNLOCK_FAILURES.pop(caller.username, None)
+    # If the device was paused by a parent, signing in on the lock screen also
+    # lifts the manual pause so the device does not immediately re-pause.
+    caller_rules = _screen_rules(session, caller.username)
+    if caller_rules.get("paused") or caller_rules.get("paused_until"):
+        caller_rules.pop("paused", None)
+        caller_rules.pop("paused_until", None)
+        caller_rules.pop("paused_at", None)
+        _save_screen_rules(session, caller.username, caller_rules, parent.username)
+        session.commit()
     until = datetime.now(UTC) + timedelta(minutes=PARENT_UNLOCK_MINUTES)
     parents = _parents_of(session, caller)
     # Only after a real parent login: the phone keeps these to check an

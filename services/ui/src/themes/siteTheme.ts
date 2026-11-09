@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
 import { api } from '../services/api';
 import { storageGet, storageSet } from '../lib/storage';
 import SystemBars, { cssColorToHex } from '../plugins/systemBars';
+import TokenBridge from '../plugins/tokenBridge';
 import { themeRegistry } from './registry';
 import { themeToCssVars, resolveScheme, type HealthThemeCssVars, type ThemePack, type ThemeScheme, type ThemeMotif } from './types';
 
@@ -267,6 +268,18 @@ export function applySiteTheme(themeId: string): string {
   applyVarsToRoot(siteThemeCssVars(theme.tokens), scheme);
   document.documentElement.setAttribute('data-theme-id', theme.id);
   setActiveThemeId(theme.id);
+  TokenBridge.setTheme({
+    themeId: theme.id,
+    bg: theme.tokens.bg,
+    surface: theme.tokens.surface,
+    text: theme.tokens.text,
+    textMuted: theme.tokens.textMuted,
+    border: theme.tokens.border,
+    accent: theme.tokens.accent,
+    onAccent: theme.tokens.onAccent,
+    accentAlt: theme.tokens.accentAlt ?? theme.tokens.accent,
+    scheme,
+  }).catch(() => undefined);
   return theme.id;
 }
 

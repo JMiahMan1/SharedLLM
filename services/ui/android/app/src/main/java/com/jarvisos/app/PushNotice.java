@@ -176,6 +176,13 @@ final class PushNotice {
         return "family_safety".equals(category) && tag.startsWith("screen-time:");
     }
 
+    /** True when this screen-time notice announces that a device was just paused/locked. */
+    boolean isPauseNotice() {
+        if (!isScreenTime()) return false;
+        String lower = title.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("paused") && !lower.contains("unpaused");
+    }
+
     /** An alarm or phone-targeted timer that should ring on the Android alarm stream. */
     boolean isAlarmRing() {
         return "timers".equals(category) && ("alarm".equals(kind) || ringPhone || priority >= 5);

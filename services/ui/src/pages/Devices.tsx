@@ -1352,7 +1352,7 @@ function AuditLogPanel() {
 
 export default function Devices() {
   const user = useAuth().user;
-  const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.username === 'default');
+  const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.family_role === 'mother' || user?.username === 'default');
   const queryClient = useQueryClient();
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });

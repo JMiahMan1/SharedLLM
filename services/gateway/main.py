@@ -6982,7 +6982,8 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # Whether this viewer sees calls, texts and message notifications (the
         # parents; the Calls & messages tab and Overview's card show for them).
         "comms": bool(body.get("comms")),
-        "protected": bool(body.get("protected")),
+        "protected": bool(body.get("protected") or state.get("locked")),
+        "theme_id": body.get("theme_id") or "clean-athletic",
         # What the member carries (["tablet"], ["phone", "tablet"]), so the
         # page names it right; not technical.
         "device_kinds": list(body.get("device_kinds") or []),

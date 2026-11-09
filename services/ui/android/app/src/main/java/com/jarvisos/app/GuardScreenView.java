@@ -1,6 +1,7 @@
 package com.jarvisos.app;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.GradientDrawable;
@@ -54,31 +55,133 @@ final class GuardScreenView {
         void onOpenJarvis();
     }
 
-    // The Family Link palette: a calm mint-white canvas, one teal brand, soft
-    // tonal surfaces, dark ink, and one accent per reason for the lock.
-    private static final int BG_TOP = 0xFFF5FBF7;
-    private static final int BG_BOTTOM = 0xFFECF5EF;
-    private static final int CARD = 0xFFFFFFFF;
-    private static final int FIELD = 0xFFFFFFFF;
-    private static final int STROKE = 0xFFE2EDE6;
-    private static final int FIELD_STROKE = 0xFFD8E6DC;
-    private static final int TEXT_PRIMARY = 0xFF1B2B22;
-    private static final int TEXT_SECONDARY = 0xFF44584D;
-    private static final int TEXT_FAINT = 0xFF71867B;
-    private static final int ERROR = 0xFFBA1A1A;
+    private static final int VIOLET = 0xFF7C3AED;
+    private static final int SKY = 0xFF0284C7;
+    private static final int GREEN = 0xFF10B981;
+    private static final int RED = 0xFFEF4444;
 
-    private static final int TEAL = 0xFF0B6E4F;
-    private static final int TONAL = 0xFFDCEFDE;
-    private static final int ON_TONAL = 0xFF0B4C36;
-    private static final int RING_OUT = 0xFFE2F2E9;
-    private static final int RING_IN = 0xFFCFE9DA;
+    /**
+     * Active Jarvis theme palette resolved from TokenBridge prefs or the
+     * server's status theme_id (matching jarvis-default.pack.json).
+     */
+    static final class Palette {
+        final String themeId;
+        final boolean dark;
+        final int bgTop;
+        final int bgBottom;
+        final int card;
+        final int field;
+        final int stroke;
+        final int fieldStroke;
+        final int textPrimary;
+        final int textSecondary;
+        final int textFaint;
+        final int error;
+        final int brand;
+        final int onBrand;
+        final int tonal;
+        final int onTonal;
+        final int ringOut;
+        final int ringIn;
+        final int dividerLine;
+        final int grabberBar;
 
-    private static final int AMBER = 0xFF0B6E4F;   // the day's time is the default reason
-    private static final int VIOLET = 0xFF5B3BC4;
-    private static final int SKY = 0xFF0369A1;
-    private static final int SLATE = 0xFF475569;
-    private static final int GREEN = 0xFF059669;
-    private static final int RED = 0xFFBA1A1A;
+        Palette(String themeId, int bg, int surface, int text, int textMuted,
+                int border, int accent, int onAccent, boolean dark) {
+            this.themeId = themeId;
+            this.dark = dark;
+            this.bgTop = blend(bg, accent, dark ? 0.10f : 0.05f);
+            this.bgBottom = bg;
+            this.card = surface;
+            this.field = blend(bg, surface, 0.55f);
+            this.stroke = border;
+            this.fieldStroke = border;
+            this.textPrimary = text;
+            this.textSecondary = textMuted;
+            this.textFaint = withAlpha(textMuted, 0.78f);
+            this.error = dark ? 0xFFF87171 : 0xFFBA1A1A;
+            this.brand = accent;
+            this.onBrand = onAccent;
+            this.tonal = blend(surface, accent, dark ? 0.24f : 0.14f);
+            this.onTonal = dark ? text : blend(text, accent, 0.35f);
+            this.ringOut = blend(bg, accent, dark ? 0.16f : 0.10f);
+            this.ringIn = blend(bg, accent, dark ? 0.28f : 0.18f);
+            this.dividerLine = withAlpha(border, 0.85f);
+            this.grabberBar = withAlpha(textMuted, 0.45f);
+        }
+
+        static Palette resolve(Context context) {
+            SharedPreferences p = TokenBridgePlugin.prefs(context);
+            String id = GuardApi.themeId(context);
+            if (id == null || id.isEmpty()) id = "aurora";
+            int bg, surface, text, textMuted, border, accent, onAccent;
+            boolean dark;
+            switch (id) {
+                case "bloom":
+                    bg = 0xFF0F172A; surface = 0xFF1E293B; text = 0xFFF1F5F9; textMuted = 0xFFE7C6D6;
+                    border = 0xFFC36786; accent = 0xFFE06A9A; onAccent = 0xFF1B0B14; dark = true;
+                    break;
+                case "iron":
+                    bg = 0xFF121417; surface = 0xFF1C2026; text = 0xFFE8EAED; textMuted = 0xFF8B95A5;
+                    border = 0xFF2A3038; accent = 0xFFC9A227; onAccent = 0xFF121417; dark = true;
+                    break;
+                case "tron":
+                    bg = 0xFF05070B; surface = 0xFF0B1016; text = 0xFFE7FBFF; textMuted = 0xFF7A9AAA;
+                    border = 0xFF0E3A45; accent = 0xFF00E5FF; onAccent = 0xFF05070B; dark = true;
+                    break;
+                case "neon":
+                    bg = 0xFF0A0A0F; surface = 0xFF15151F; text = 0xFFF5F5FA; textMuted = 0xFF7A7A99;
+                    border = 0xFF2A2A3A; accent = 0xFFFF2E97; onAccent = 0xFF0A0A0F; dark = true;
+                    break;
+                case "clean-athletic":
+                    bg = 0xFFF6F6F4; surface = 0xFFFFFFFF; text = 0xFF111111; textMuted = 0xFF6B7280;
+                    border = 0xFFE5E7EB; accent = 0xFFFF5A1F; onAccent = 0xFFFFFFFF; dark = false;
+                    break;
+                case "aurora":
+                default:
+                    bg = 0xFF0F172A; surface = 0xFF1E293B; text = 0xFFF1F5F9; textMuted = 0xFF94A3B8;
+                    border = 0xFF334755; accent = 0xFF863BFF; onAccent = 0xFFF8FAFC; dark = true;
+                    break;
+            }
+            String mirroredId = p.getString(TokenBridgePlugin.KEY_THEME_ID, "");
+            if (mirroredId != null && !mirroredId.isEmpty() && mirroredId.equals(id)) {
+                bg = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_BG, null), bg);
+                surface = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_SURFACE, null), surface);
+                text = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_TEXT, null), text);
+                textMuted = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_TEXT_MUTED, null), textMuted);
+                border = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_BORDER, null), border);
+                accent = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_ACCENT, null), accent);
+                onAccent = parseHex(p.getString(TokenBridgePlugin.KEY_THEME_ON_ACCENT, null), onAccent);
+                String scheme = p.getString(TokenBridgePlugin.KEY_THEME_SCHEME, null);
+                if (scheme != null && !scheme.isEmpty()) {
+                    dark = "dark".equalsIgnoreCase(scheme);
+                }
+            }
+            return new Palette(id, bg, surface, text, textMuted, border, accent, onAccent, dark);
+        }
+    }
+
+    static String themeSignature(Context context) {
+        Palette p = Palette.resolve(context);
+        return p.themeId + ":" + Integer.toHexString(p.brand) + ":" + Integer.toHexString(p.bgBottom);
+    }
+
+    private static int parseHex(String hex, int fallback) {
+        if (hex == null || hex.trim().isEmpty()) return fallback;
+        try {
+            return Color.parseColor(hex.trim());
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private static int blend(int c1, int c2, float ratio) {
+        float inv = 1f - ratio;
+        int r = Math.round(Color.red(c1) * inv + Color.red(c2) * ratio);
+        int g = Math.round(Color.green(c1) * inv + Color.green(c2) * ratio);
+        int b = Math.round(Color.blue(c1) * inv + Color.blue(c2) * ratio);
+        return Color.argb(255, Math.min(255, Math.max(0, r)), Math.min(255, Math.max(0, g)), Math.min(255, Math.max(0, b)));
+    }
 
     private GuardScreenView() {}
 
@@ -87,6 +190,7 @@ final class GuardScreenView {
     }
 
     static View build(Context context, String mode, String pkg, String app, boolean denied, Host host) {
+        Palette pal = Palette.resolve(context);
         boolean tamper = GuardScreenActivity.MODE_TAMPER.equals(mode);
         boolean appOff = GuardScreenActivity.MODE_APP.equals(mode);
         boolean install = GuardScreenActivity.MODE_INSTALL.equals(mode);
@@ -105,7 +209,7 @@ final class GuardScreenView {
             titleText = "A parent needs to sign in";
             bodyText = "Removing Jarvis or switching off its protection needs one of your parents' logins.";
         } else if (appOff) {
-            accent = AMBER;
+            accent = pal.brand;
             iconRes = R.drawable.mi_hourglass;
             titleText = "That app is off for now";
             bodyText = "Your parents turned this app off, or its time is used up for today. Everything else still works.";
@@ -140,7 +244,7 @@ final class GuardScreenView {
                     iconRes = R.drawable.mi_school;
                     break;
                 case "paused":
-                    accent = SLATE;
+                    accent = pal.brand;
                     iconRes = R.drawable.mi_pause;
                     break;
                 case "chores":
@@ -148,7 +252,7 @@ final class GuardScreenView {
                     iconRes = R.drawable.mi_chore;
                     break;
                 default:
-                    accent = AMBER;
+                    accent = pal.brand;
                     iconRes = R.drawable.mi_hourglass;
                     break;
             }
@@ -169,10 +273,10 @@ final class GuardScreenView {
         root.setClickable(true);
 
         // The hero: one big layered illustration with the reason at a glance.
-        root.addView(hero(context, iconRes, accent));
-        TextView title = title(context, titleText);
+        root.addView(hero(context, pal, iconRes, accent));
+        TextView title = title(context, pal, titleText);
         root.addView(title);
-        TextView body = text(context, bodyText, 15, TEXT_SECONDARY);
+        TextView body = text(context, bodyText, 15, pal.textSecondary);
         body.setMaxWidth(dp(context, 540));
         body.setLineSpacing(dp(context, 2), 1.06f);
         body.setGravity(Gravity.CENTER);
@@ -186,46 +290,46 @@ final class GuardScreenView {
         // The two big pill buttons for the child: the one clear next step, and
         // the way to talk to a parent in every mode.
         if (appOff && pkg != null && !pkg.isEmpty()) {
-            Button askApp = primaryButton(context, TEAL, "Ask a parent to unblock");
-            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, sheet, pkg, appName, TEAL)));
+            Button askApp = primaryButton(context, pal, "Ask a parent to unblock");
+            askApp.setOnClickListener(v -> sheet.show(askAppCard(context, pal, sheet, pkg, appName, pal.brand)));
             addFullWidth(root, askApp, 0);
         } else if (!tamper && !install && !permission && !bypass) {
-            Button ask = primaryButton(context, TEAL, "Ask for more time");
-            ask.setOnClickListener(v -> sheet.show(askCard(context, sheet, TEAL)));
+            Button ask = primaryButton(context, pal, "Ask for more time");
+            ask.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
             addFullWidth(root, ask, 0);
         }
-        Button message = tonalButton(context, "Message a parent");
-        message.setOnClickListener(v -> sheet.show(messageCard(context, sheet, TEAL)));
+        Button message = tonalButton(context, pal, "Message a parent");
+        message.setOnClickListener(v -> sheet.show(messageCard(context, pal, sheet, pal.brand)));
         addFullWidth(root, message, 12);
 
         // A parent can't miss the way in from here either: this slides the
         // screen down to the parent card and focuses it.
-        Button parentAction = textButton(context, "A parent can unlock");
+        Button parentAction = textButton(context, pal, "A parent can unlock");
         addFullWidth(root, parentAction, 4);
 
         if (locked) {
-            Button jarvis = textButton(context, "Open Jarvis");
+            Button jarvis = textButton(context, pal, "Open Jarvis");
             jarvis.setOnClickListener(v -> host.onOpenJarvis());
             addFullWidth(root, jarvis, 0);
         }
 
         // A quiet marker for the adults' part of the screen.
-        root.addView(divider(context, "PARENTS", 18));
+        root.addView(divider(context, pal, "PARENTS", 18));
 
         // A parent's own Jarvis login, checked by the server, and an offline
         // code for when there is no connection.
-        LinearLayout parentCard = panel(context, CARD, 20, STROKE);
+        LinearLayout parentCard = panel(context, pal.card, 20, pal.stroke);
         parentCard.setPadding(dp(context, 18), dp(context, 16), dp(context, 18), dp(context, 16));
         parentCard.setElevation(dp(context, 1));
-        LinearLayout parentLabel = smallCapsLabel(context, "PARENT UNLOCK");
+        LinearLayout parentLabel = smallCapsLabel(context, pal, "PARENT UNLOCK");
         parentCard.addView(parentLabel);
 
-        EditText user = field(context, "Parent's username");
+        EditText user = field(context, pal, "Parent's username");
         user.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
         user.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         addFullWidth(parentCard, user, 10);
 
-        EditText pass = field(context, "Parent's password");
+        EditText pass = field(context, pal, "Parent's password");
         pass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         pass.setImeOptions(EditorInfo.IME_ACTION_DONE);
         pass.setPadding(dp(context, 14), dp(context, 13), dp(context, 56), dp(context, 13));
@@ -234,7 +338,7 @@ final class GuardScreenView {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         passLp.topMargin = dp(context, 10);
         passWrap.addView(pass, passLp);
-        TextView showHide = smallToggle(context, "Show");
+        TextView showHide = smallToggle(context, pal, "Show");
         FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.END | Gravity.CENTER_VERTICAL);
@@ -256,12 +360,12 @@ final class GuardScreenView {
         });
         parentCard.addView(passWrap);
 
-        TextView error = text(context, "", 13, ERROR);
+        TextView error = text(context, "", 13, pal.error);
         error.setGravity(Gravity.START);
         error.setPadding(dp(context, 2), dp(context, 8), dp(context, 2), 0);
 
         Handler main = new Handler(Looper.getMainLooper());
-        Button unlock = primaryButton(context, TEAL, "Parent unlock");
+        Button unlock = primaryButton(context, pal, "Parent unlock");
         unlock.setOnClickListener(v -> {
             unlock.setEnabled(false);
             unlock.setText("Checking…");
@@ -291,12 +395,12 @@ final class GuardScreenView {
         addFullWidth(parentCard, unlock, 14);
 
         // No connection: a parent's offline code works instead of their login.
-        parentCard.addView(divider(context, "OR USE A CODE", 14));
-        EditText offline = field(context, "Parent's offline code");
+        parentCard.addView(divider(context, pal, "OR USE A CODE", 14));
+        EditText offline = field(context, pal, "Parent's offline code");
         offline.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         offline.setPadding(dp(context, 14), dp(context, 13), dp(context, 14), dp(context, 13));
         addFullWidth(parentCard, offline, 10);
-        Button useCode = ghostButton(context, "Use offline code");
+        Button useCode = ghostButton(context, pal, "Use offline code");
         useCode.setOnClickListener(v -> {
             useCode.setEnabled(false);
             useCode.setText("Checking…");
@@ -325,7 +429,7 @@ final class GuardScreenView {
         scroller.setFillViewport(true);
         scroller.setVerticalScrollBarEnabled(false);
         scroller.setBackground(new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{BG_TOP, BG_BOTTOM}));
+                GradientDrawable.Orientation.TOP_BOTTOM, new int[]{pal.bgTop, pal.bgBottom}));
         scroller.setClickable(true);
         // "A parent can unlock" scrolls straight to the parent card and puts the
         // cursor in the username field, so the way in is always one tap away.
@@ -337,7 +441,7 @@ final class GuardScreenView {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         FrameLayout frame = new FrameLayout(context);
-        frame.setBackgroundColor(BG_TOP);
+        frame.setBackgroundColor(pal.bgTop);
         frame.addView(scroller, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         frame.addView(sheet.layer, new FrameLayout.LayoutParams(
@@ -379,12 +483,12 @@ final class GuardScreenView {
     }
 
     /** "Ask for more time": how many minutes and why, sent for a parent to answer. */
-    private static View askCard(Context context, Sheet sheet, int accent) {
+    private static View askCard(Context context, Palette pal, Sheet sheet, int accent) {
         int[] minutes = {30};
-        LinearLayout card = sheetPanel(context);
+        LinearLayout card = sheetPanel(context, pal);
 
-        card.addView(cardHeader(context, R.drawable.mi_hourglass, accent, "Ask for more time"));
-        TextView hint = text(context, "Your parents get a notification and can allow it for today.", 13, TEXT_SECONDARY);
+        card.addView(cardHeader(context, pal, R.drawable.mi_hourglass, accent, "Ask for more time"));
+        TextView hint = text(context, "Your parents get a notification and can allow it for today.", 13, pal.textSecondary);
         hint.setGravity(Gravity.START);
         hint.setPadding(dp(context, 2), 0, dp(context, 2), dp(context, 4));
         card.addView(hint);
@@ -397,11 +501,11 @@ final class GuardScreenView {
         Button[] buttons = new Button[options.length];
         for (int i = 0; i < options.length; i++) {
             final int option = options[i];
-            Button choice = chip(context, labels[i], option == minutes[0], accent);
+            Button choice = chip(context, pal, labels[i], option == minutes[0], accent);
             choice.setOnClickListener(v -> {
                 minutes[0] = option;
                 for (int j = 0; j < buttons.length; j++) {
-                    styleChip(buttons[j], options[j] == minutes[0], accent);
+                    styleChip(buttons[j], pal, options[j] == minutes[0], accent);
                 }
             });
             buttons[i] = choice;
@@ -412,18 +516,18 @@ final class GuardScreenView {
         choicesLp.setMargins(0, dp(context, 10), 0, dp(context, 10));
         card.addView(choices, choicesLp);
 
-        EditText note = field(context, "Why? (optional)");
+        EditText note = field(context, pal, "Why? (optional)");
         note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         note.setMinLines(2);
         addFullWidth(card, note, 0);
 
-        TextView status = statusLine(context);
+        TextView status = statusLine(context, pal);
         card.addView(status);
-        Button send = primaryButton(context, TEAL, "Send request");
+        Button send = primaryButton(context, pal, "Send request");
         send.setOnClickListener(v -> {
             send.setEnabled(false);
             send.setText("Sending…");
-            status.setTextColor(TEXT_SECONDARY);
+            status.setTextColor(pal.textSecondary);
             status.setText("Asking…");
             String why = note.getText().toString().trim();
             new Thread(() -> {
@@ -432,42 +536,42 @@ final class GuardScreenView {
                     send.setEnabled(true);
                     send.setText("Send request");
                     if (problem == null) {
-                        sheet.show(confirmation(context, sheet, TEAL, "Asked!",
+                        sheet.show(confirmation(context, pal, sheet, pal.brand, "Asked!",
                                 "A parent will answer soon."));
                     } else {
-                        status.setTextColor(ERROR);
+                        status.setTextColor(pal.error);
                         status.setText(problem);
                     }
                 });
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
         return card;
     }
 
     /** "Ask a parent to unblock": asks a parent to allow a blocked or time-limited app. */
-    private static View askAppCard(Context context, Sheet sheet, String pkg, String appName, int accent) {
-        LinearLayout card = sheetPanel(context);
+    private static View askAppCard(Context context, Palette pal, Sheet sheet, String pkg, String appName, int accent) {
+        LinearLayout card = sheetPanel(context, pal);
 
-        card.addView(cardHeader(context, R.drawable.mi_lock_open, accent, "Ask to use " + appName));
-        TextView hint = text(context, "Your parents can allow it for an hour or for good.", 13, TEXT_SECONDARY);
+        card.addView(cardHeader(context, pal, R.drawable.mi_lock_open, accent, "Ask to use " + appName));
+        TextView hint = text(context, "Your parents can allow it for an hour or for good.", 13, pal.textSecondary);
         hint.setGravity(Gravity.START);
         hint.setPadding(dp(context, 2), 0, dp(context, 2), dp(context, 10));
         card.addView(hint);
 
-        EditText note = field(context, "Why? (optional)");
+        EditText note = field(context, pal, "Why? (optional)");
         note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         note.setMinLines(2);
         addFullWidth(card, note, 0);
 
-        TextView status = statusLine(context);
+        TextView status = statusLine(context, pal);
         card.addView(status);
-        Button send = primaryButton(context, TEAL, "Ask a parent");
+        Button send = primaryButton(context, pal, "Ask a parent");
         send.setOnClickListener(v -> {
             send.setEnabled(false);
             send.setText("Asking…");
-            status.setTextColor(TEXT_SECONDARY);
+            status.setTextColor(pal.textSecondary);
             status.setText("Asking…");
             String why = note.getText().toString().trim();
             new Thread(() -> {
@@ -476,48 +580,48 @@ final class GuardScreenView {
                     send.setEnabled(true);
                     send.setText("Ask a parent");
                     if (problem == null) {
-                        sheet.show(confirmation(context, sheet, TEAL, "Asked!",
+                        sheet.show(confirmation(context, pal, sheet, pal.brand, "Asked!",
                                 "A parent will answer soon."));
                     } else {
-                        status.setTextColor(ERROR);
+                        status.setTextColor(pal.error);
                         status.setText(problem);
                     }
                 });
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
         return card;
     }
 
     /** "Message a parent": a short chat message to them, sent from the lock. */
-    private static View messageCard(Context context, Sheet sheet, int accent) {
-        LinearLayout card = sheetPanel(context);
+    private static View messageCard(Context context, Palette pal, Sheet sheet, int accent) {
+        LinearLayout card = sheetPanel(context, pal);
 
-        card.addView(cardHeader(context, R.drawable.mi_chat, accent, "Message a parent"));
-        TextView hint = text(context, "It goes to your parents in the family chat.", 13, TEXT_SECONDARY);
+        card.addView(cardHeader(context, pal, R.drawable.mi_chat, accent, "Message a parent"));
+        TextView hint = text(context, "It goes to your parents in the family chat.", 13, pal.textSecondary);
         hint.setGravity(Gravity.START);
         hint.setPadding(dp(context, 2), 0, dp(context, 2), dp(context, 10));
         card.addView(hint);
 
-        EditText message = field(context, "Type a message");
+        EditText message = field(context, pal, "Type a message");
         message.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(2);
         addFullWidth(card, message, 0);
 
-        TextView status = statusLine(context);
+        TextView status = statusLine(context, pal);
         card.addView(status);
-        Button send = primaryButton(context, TEAL, "Send");
+        Button send = primaryButton(context, pal, "Send");
         send.setOnClickListener(v -> {
             String text = message.getText().toString().trim();
             if (text.isEmpty()) {
-                status.setTextColor(ERROR);
+                status.setTextColor(pal.error);
                 status.setText("Type a message first.");
                 return;
             }
             send.setEnabled(false);
             send.setText("Sending…");
-            status.setTextColor(TEXT_SECONDARY);
+            status.setTextColor(pal.textSecondary);
             status.setText("Sending…");
             new Thread(() -> {
                 String problem = GuardApi.messageParents(context, text);
@@ -526,71 +630,71 @@ final class GuardScreenView {
                     send.setText("Send");
                     if (problem == null) {
                         message.setText("");
-                        sheet.show(confirmation(context, sheet, TEAL, "Sent!",
+                        sheet.show(confirmation(context, pal, sheet, pal.brand, "Sent!",
                                 "A parent will see it in the family chat."));
                     } else {
-                        status.setTextColor(ERROR);
+                        status.setTextColor(pal.error);
                         status.setText(problem);
                     }
                 });
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
         return card;
     }
 
     /** What a sent ask or message turns into: one big tick, one line, one way back. */
-    private static View confirmation(Context context, Sheet sheet, int accent, String titleText, String subText) {
+    private static View confirmation(Context context, Palette pal, Sheet sheet, int accent, String titleText, String subText) {
         LinearLayout panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER);
         panel.setPadding(dp(context, 26), dp(context, 26), dp(context, 26), dp(context, 22));
-        panel.setBackground(rounded(context, CARD, 24, STROKE, 1));
+        panel.setBackground(rounded(context, pal.card, 24, pal.stroke, 1));
         panel.setElevation(dp(context, 2));
 
         panel.addView(iconBadge(context, R.drawable.mi_check, accent, 92));
 
-        TextView title = text(context, titleText, 21, TEXT_PRIMARY);
+        TextView title = text(context, titleText, 21, pal.textPrimary);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setPadding(0, dp(context, 16), 0, dp(context, 4));
         panel.addView(title);
-        TextView sub = text(context, subText, 14, TEXT_SECONDARY);
+        TextView sub = text(context, subText, 14, pal.textSecondary);
         sub.setPadding(0, 0, 0, dp(context, 16));
         panel.addView(sub);
-        Button back = primaryButton(context, TEAL, "Back to the lock");
+        Button back = primaryButton(context, pal, "Back to the lock");
         back.setOnClickListener(v -> sheet.hide());
         addFullWidth(panel, back, 0);
         return panel;
     }
 
     /** The bottom-sheet panel the ask and message cards live in. */
-    private static LinearLayout sheetPanel(Context context) {
+    private static LinearLayout sheetPanel(Context context, Palette pal) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(context, 22), dp(context, 10), dp(context, 22), dp(context, 18));
-        card.setBackground(rounded(context, CARD, 24, STROKE, 1));
+        card.setBackground(rounded(context, pal.card, 24, pal.stroke, 1));
         card.setElevation(dp(context, 2));
-        grabber(card, context);
+        grabber(card, context, pal);
         return card;
     }
 
-    private static void grabber(LinearLayout card, Context context) {
+    private static void grabber(LinearLayout card, Context context, Palette pal) {
         View bar = new View(context);
-        bar.setBackground(rounded(context, 0xFFC9D6CC, 2, 0, 0));
+        bar.setBackground(rounded(context, pal.grabberBar, 2, 0, 0));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(context, 40), dp(context, 4));
         lp.gravity = Gravity.CENTER_HORIZONTAL;
         lp.bottomMargin = dp(context, 14);
         card.addView(bar, lp);
     }
 
-    private static LinearLayout cardHeader(Context context, int iconRes, int accent, String title) {
+    private static LinearLayout cardHeader(Context context, Palette pal, int iconRes, int accent, String title) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(context, 2), dp(context, 2), dp(context, 2), dp(context, 12));
         row.addView(iconBadge(context, iconRes, accent, 36));
-        TextView text = text(context, title, 19, TEXT_PRIMARY);
+        TextView text = text(context, title, 19, pal.textPrimary);
         text.setGravity(Gravity.START);
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setPadding(dp(context, 12), 0, 0, 0);
@@ -598,11 +702,11 @@ final class GuardScreenView {
         return row;
     }
 
-    private static LinearLayout smallCapsLabel(Context context, String value) {
+    private static LinearLayout smallCapsLabel(Context context, Palette pal, String value) {
         TextView label = new TextView(context);
         label.setText(value);
         label.setTextSize(11);
-        label.setTextColor(TEXT_FAINT);
+        label.setTextColor(pal.textFaint);
         label.setLetterSpacing(0.18f);
         label.setPadding(dp(context, 2), 0, dp(context, 2), dp(context, 2));
         LinearLayout row = new LinearLayout(context);
@@ -612,24 +716,24 @@ final class GuardScreenView {
         return row;
     }
 
-    private static View divider(Context context, String label, int topMarginDp) {
+    private static View divider(Context context, Palette pal, String label, int topMarginDp) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(context, topMarginDp), 0, dp(context, 12));
         View left = new View(context);
-        left.setBackgroundColor(0xFFDCE7DE);
+        left.setBackgroundColor(pal.dividerLine);
         row.addView(left, new LinearLayout.LayoutParams(0, dp(context, 1), 1f));
-        LinearLayout value = smallCapsLabel(context, label);
+        LinearLayout value = smallCapsLabel(context, pal, label);
         value.setPadding(dp(context, 10), 0, dp(context, 10), 0);
         row.addView(value);
         View right = new View(context);
-        right.setBackgroundColor(0xFFDCE7DE);
+        right.setBackgroundColor(pal.dividerLine);
         row.addView(right, new LinearLayout.LayoutParams(0, dp(context, 1), 1f));
         return row;
     }
 
-    private static LinearLayout hero(Context context, int iconRes, int accent) {
+    private static LinearLayout hero(Context context, Palette pal, int iconRes, int accent) {
         LinearLayout wrap = new LinearLayout(context);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setGravity(Gravity.CENTER);
@@ -637,23 +741,25 @@ final class GuardScreenView {
         FrameLayout outer = new FrameLayout(context);
         GradientDrawable outerCircle = new GradientDrawable();
         outerCircle.setShape(GradientDrawable.OVAL);
-        outerCircle.setColor(RING_OUT);
+        outerCircle.setColor(pal.ringOut);
+        outerCircle.setStroke(dp(context, 1), withAlpha(accent, 0.22f));
         outer.setBackground(outerCircle);
-        int outerSize = dp(context, 180);
+        int outerSize = dp(context, 172);
         outer.setMinimumWidth(outerSize);
         outer.setMinimumHeight(outerSize);
         FrameLayout inner = new FrameLayout(context);
         GradientDrawable innerCircle = new GradientDrawable();
         innerCircle.setShape(GradientDrawable.OVAL);
-        innerCircle.setColor(RING_IN);
+        innerCircle.setColor(pal.ringIn);
+        innerCircle.setStroke(dp(context, 1.5f), withAlpha(accent, 0.35f));
         inner.setBackground(innerCircle);
-        int innerSize = dp(context, 124);
+        int innerSize = dp(context, 120);
         inner.setMinimumWidth(innerSize);
         inner.setMinimumHeight(innerSize);
         ImageView icon = new ImageView(context);
         icon.setImageResource(iconRes);
         icon.setColorFilter(accent, PorterDuff.Mode.SRC_IN);
-        int iconSize = dp(context, 72);
+        int iconSize = dp(context, 64);
         FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER);
         inner.addView(icon, iconLp);
         FrameLayout.LayoutParams innerLp = new FrameLayout.LayoutParams(
@@ -669,7 +775,7 @@ final class GuardScreenView {
         FrameLayout badge = new FrameLayout(context);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(withAlpha(accent, 0.12f));
+        circle.setColor(withAlpha(accent, 0.16f));
         badge.setBackground(circle);
         int size = dp(context, sizeDp);
         // The badges are added without layout params (LinearLayout parents
@@ -687,59 +793,59 @@ final class GuardScreenView {
         return badge;
     }
 
-    private static EditText field(Context context, String hint) {
+    private static EditText field(Context context, Palette pal, String hint) {
         EditText field = new EditText(context);
         field.setHint(hint);
         field.setTextSize(16);
-        field.setTextColor(TEXT_PRIMARY);
-        field.setHintTextColor(TEXT_FAINT);
+        field.setTextColor(pal.textPrimary);
+        field.setHintTextColor(pal.textFaint);
         field.setPadding(dp(context, 14), dp(context, 13), dp(context, 14), dp(context, 13));
-        field.setBackground(rounded(context, FIELD, 14, FIELD_STROKE, 1));
+        field.setBackground(rounded(context, pal.field, 14, pal.fieldStroke, 1));
         field.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return field;
     }
 
-    private static Button primaryButton(Context context, int accent, String label) {
+    private static Button primaryButton(Context context, Palette pal, String label) {
         Button button = new Button(context);
         button.setText(label);
         button.setTextSize(16);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(0xFFFFFFFF);
-        button.setBackground(rounded(context, accent, 999, 0, 0));
+        button.setTextColor(pal.onBrand);
+        button.setBackground(rounded(context, pal.brand, 999, 0, 0));
         button.setMinHeight(dp(context, 54));
         button.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 54)));
         return button;
     }
 
-    private static Button tonalButton(Context context, String label) {
+    private static Button tonalButton(Context context, Palette pal, String label) {
         Button button = new Button(context);
         button.setText(label);
         button.setTextSize(16);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(ON_TONAL);
-        button.setBackground(rounded(context, TONAL, 999, 0, 0));
+        button.setTextColor(pal.onTonal);
+        button.setBackground(rounded(context, pal.tonal, 999, 0, 0));
         button.setMinHeight(dp(context, 54));
         button.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 54)));
         return button;
     }
 
-    private static Button ghostButton(Context context, String label) {
-        return ghostButton(context, null, label);
+    private static Button ghostButton(Context context, Palette pal, String label) {
+        return ghostButton(context, pal, null, label);
     }
 
-    private static Button ghostButton(Context context, Sheet sheet, String label) {
+    private static Button ghostButton(Context context, Palette pal, Sheet sheet, String label) {
         Button button = new Button(context);
         button.setText(label);
         button.setTextSize(15);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(TEAL);
-        button.setBackground(rounded(context, 0x00000000, 999, TEAL, 1));
+        button.setTextColor(pal.brand);
+        button.setBackground(rounded(context, 0x00000000, 999, pal.brand, 1));
         button.setMinHeight(dp(context, 50));
         button.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 50)));
@@ -749,13 +855,13 @@ final class GuardScreenView {
         return button;
     }
 
-    private static Button textButton(Context context, String label) {
+    private static Button textButton(Context context, Palette pal, String label) {
         Button button = new Button(context);
         button.setText(label);
         button.setTextSize(14);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(TEAL);
+        button.setTextColor(pal.brand);
         button.setBackgroundColor(Color.TRANSPARENT);
         button.setMinHeight(dp(context, 44));
         button.setLayoutParams(new LinearLayout.LayoutParams(
@@ -763,7 +869,7 @@ final class GuardScreenView {
         return button;
     }
 
-    private static Button chip(Context context, String label, boolean selected, int accent) {
+    private static Button chip(Context context, Palette pal, String label, boolean selected, int accent) {
         Button button = new Button(context);
         button.setText(label);
         button.setTextSize(14);
@@ -773,28 +879,28 @@ final class GuardScreenView {
                 0, dp(context, 44), 1f);
         lp.setMargins(dp(context, 4), 0, dp(context, 4), 0);
         button.setLayoutParams(lp);
-        styleChip(button, selected, accent);
+        styleChip(button, pal, selected, accent);
         return button;
     }
 
-    private static void styleChip(Button button, boolean selected, int accent) {
+    private static void styleChip(Button button, Palette pal, boolean selected, int accent) {
         if (selected) {
-            button.setBackground(rounded(button.getContext(), TEAL, 999, 0, 0));
-            button.setTextColor(0xFFFFFFFF);
+            button.setBackground(rounded(button.getContext(), pal.brand, 999, 0, 0));
+            button.setTextColor(pal.onBrand);
             button.setTypeface(Typeface.DEFAULT_BOLD);
         } else {
-            button.setBackground(rounded(button.getContext(), FIELD, 999, FIELD_STROKE, 1));
-            button.setTextColor(TEXT_SECONDARY);
+            button.setBackground(rounded(button.getContext(), pal.field, 999, pal.fieldStroke, 1));
+            button.setTextColor(pal.textSecondary);
             button.setTypeface(Typeface.DEFAULT);
         }
     }
 
-    private static TextView smallToggle(Context context, String label) {
+    private static TextView smallToggle(Context context, Palette pal, String label) {
         TextView toggle = new TextView(context);
         toggle.setText(label);
         toggle.setTextSize(13);
         toggle.setTypeface(Typeface.DEFAULT_BOLD);
-        toggle.setTextColor(TEAL);
+        toggle.setTextColor(pal.brand);
         toggle.setGravity(Gravity.CENTER);
         toggle.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
         toggle.setClickable(true);
@@ -802,19 +908,19 @@ final class GuardScreenView {
         return toggle;
     }
 
-    private static TextView title(Context context, String value) {
+    private static TextView title(Context context, Palette pal, String value) {
         TextView view = new TextView(context);
         view.setText(value);
         view.setTextSize(26);
         view.setTypeface(Typeface.DEFAULT_BOLD);
-        view.setTextColor(TEXT_PRIMARY);
+        view.setTextColor(pal.textPrimary);
         view.setGravity(Gravity.CENTER);
         view.setPadding(0, dp(context, 4), 0, 0);
         return view;
     }
 
-    private static TextView statusLine(Context context) {
-        TextView view = text(context, "", 13, TEXT_FAINT);
+    private static TextView statusLine(Context context, Palette pal) {
+        TextView view = text(context, "", 13, pal.textFaint);
         view.setGravity(Gravity.START);
         view.setPadding(dp(context, 2), dp(context, 10), dp(context, 2), 0);
         return view;

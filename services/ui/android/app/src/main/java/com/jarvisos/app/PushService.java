@@ -350,6 +350,9 @@ public class PushService extends Service {
             PushNotifier.show(this, notice);
             if (notice.isScreenTime()) {
                 // A parent's lock or unlock takes effect at once, not within the minute.
+                if (notice.isPauseNotice()) {
+                    GuardApi.clearUnlock(this);
+                }
                 GuardService.refreshNow();
             }
         } catch (Exception e) {
