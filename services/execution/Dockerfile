@@ -46,7 +46,9 @@ RUN set -eux; \
     # Pinned: the unauthenticated "latest release" API call is rate-limited on
     # shared CI runners and failed builds (403).
     GH_VERSION="v2.63.2"; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/${GH_VERSION}/gh_${GH_VERSION#v}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
+    # GitHub's release downloads answer 504 now and then on CI: retry, don't fail the build.
+    curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
+      "https://github.com/cli/cli/releases/download/${GH_VERSION}/gh_${GH_VERSION#v}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
     tar -xzf /tmp/gh.tar.gz -C /tmp; \
     mv "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}"; \
@@ -77,7 +79,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir camoufox
 ENV XDG_CACHE_HOME=/home/sharedllm/.cache
 # Build camoufox browser cache at build time, then make it world-writable so uid 1000 can create files at runtime
-RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && python -m camoufox sync && python -m camoufox fetch && chmod -R a+rwX /home/sharedllm/.cache/camoufox
+# camoufox downloads its browser and fingerprint model from GitHub releases,
+# which time out (504) now and then on CI: try a few times before failing.
+RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && \
+    for attempt in 1 2 3 4 5; do \
+      python -m camoufox sync && python -m camoufox fetch && break; \
+      if [ "$attempt" = 5 ]; then exit 1; fi; \
+      echo "camoufox download failed (attempt $attempt), retrying"; sleep $((attempt * 15)); \
+    done && \
+    chmod -R a+rwX /home/sharedllm/.cache/camoufox
 # NOTE: /etc/resolv.conf is bind-mounted read-only by the buildkit daemon, so it
 # cannot be modified at build time. A custom resolv.conf (services/execution/
 # resolv.conf) is bind-mounted over it at runtime via docker-compose so .local
