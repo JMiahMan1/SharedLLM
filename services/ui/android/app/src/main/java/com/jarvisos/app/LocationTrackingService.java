@@ -858,11 +858,25 @@ public class LocationTrackingService extends Service {
         if (todaySteps >= 0 && now - todayStepsAt <= STEPS_FRESH_MS && fixDay.equals(todayStepsDay)) {
             body.put("daily_steps", todaySteps);
         }
+        // Which device this is: someone signed in on a phone and a tablet
+        // uploads from both, and only one may say where they are.
+        body.put("device_id", PushGateway.deviceId(this));
+        body.put("device_name", deviceName());
         body.put("user_id", userId != null ? userId : username);
         if (userId != null) {
             body.put("username", username);
         }
         return body;
+    }
+
+    /** "Google Pixel 10": the device's maker and model, for people to read. */
+    static String deviceName() {
+        String maker = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
+        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+        if (!maker.isEmpty() && !model.toLowerCase(java.util.Locale.ROOT).startsWith(maker.toLowerCase(java.util.Locale.ROOT))) {
+            model = Character.toUpperCase(maker.charAt(0)) + maker.substring(1) + " " + model;
+        }
+        return model.isEmpty() ? "Android" : model;
     }
 
     /**

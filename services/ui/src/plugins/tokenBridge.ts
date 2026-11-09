@@ -19,6 +19,8 @@ export interface TokenBridgePluginInterface {
    */
   setDeviceKey(options: { deviceKey: string }): Promise<void>;
   setLastLocation(options: { latitude: number; longitude: number }): Promise<void>;
+  /** This install's id and model, shared with the background location service. */
+  getDeviceId(): Promise<{ deviceId: string | null; deviceName?: string }>;
   setHome(options: { latitude: number; longitude: number }): Promise<void>;
   refreshWidgets(): Promise<void>;
   setTheme(options: {
@@ -43,6 +45,7 @@ const webFallback: TokenBridgePluginInterface = {
   setIdentity: async () => undefined,
   setDeviceKey: async () => undefined,
   setLastLocation: async () => undefined,
+  getDeviceId: async () => ({ deviceId: null }),
   setHome: async () => undefined,
   refreshWidgets: async () => undefined,
   setTheme: async () => undefined,

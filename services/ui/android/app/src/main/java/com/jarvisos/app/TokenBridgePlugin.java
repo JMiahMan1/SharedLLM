@@ -207,6 +207,18 @@ public class TokenBridgePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * This install's id and model, so the web layer's location uploads name the
+     * same device as the background service's (one phone, not two).
+     */
+    @PluginMethod
+    public void getDeviceId(PluginCall call) {
+        com.getcapacitor.JSObject out = new com.getcapacitor.JSObject();
+        out.put("deviceId", PushGateway.deviceId(getContext()));
+        out.put("deviceName", LocationTrackingService.deviceName());
+        call.resolve(out);
+    }
+
     @PluginMethod
     public void setLastLocation(PluginCall call) {
         Double lat = call.getDouble("latitude");

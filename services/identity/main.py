@@ -7193,6 +7193,12 @@ class LocationUpdate(BaseModel):
     #: What the phone says the person is doing (its activity recognition):
     #: driving, cycling, walking, still or unknown. Newer app builds only.
     activity: str | None = None
+    #: Which device sent it: a random id made once per install, and the
+    #: device's model for people to read. Someone signed in on a phone and a
+    #: tablet uploads from both; only one may say where they are
+    #: (location_devices). Newer app builds only.
+    device_id: str | None = None
+    device_name: str | None = None
 
 
 async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
@@ -7325,6 +7331,9 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
             payload["daily_steps"] = location.daily_steps
         if location.activity:
             payload["activity"] = location.activity
+        if location.device_id:
+            from services.identity.location_devices import device_key
+            payload["device"] = device_key(location.device_id)[:12]
         async with get_client_insecure() as client, client.post(
             f"{geo_url}/people/{clean_user}/record",
             headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
@@ -7367,6 +7376,9 @@ async def update_user_location(
     """
     _require_internal_secret(x_internal_secret)
     import time
+
+    from services.identity import location_devices
+    device = location_devices.device_key(location.device_id)
     location_data = {
         "latitude": location.latitude,
         "longitude": location.longitude,
@@ -7379,10 +7391,31 @@ async def update_user_location(
         # Shown on the family cards: "Driving" when the phone knows, rather
         # than a speed a network fix cannot give.
         "activity": location.activity if location.activity in PHONE_ACTIVITIES else None,
+        "device": (location.device_name or "")[:80] or None,
     }
     low_battery = None
     with Session(engine) as session:
         person = _resolve_location_user_key(session, user_id)
+        # One person, several devices: only the lead device says where they
+        # are. A tablet left at home must not keep "bringing them home".
+        dev_key = f"user_location_devices:{person}"
+        dev_row = session.exec(select(GlobalSetting).where(GlobalSetting.key == dev_key)).first()
+        try:
+            devices = json.loads(dev_row.value) if dev_row else {}
+        except (TypeError, ValueError):
+            devices = {}
+        counts = location_devices.accept(
+            devices, device, location.device_name, location.latitude, location.longitude,
+            location.accuracy, location.timestamp or time.time(), time.time())
+        if dev_row:
+            dev_row.value = json.dumps(devices)
+        else:
+            session.add(GlobalSetting(key=dev_key, value=json.dumps(devices),
+                                      description=f"Devices sending locations for {person}"))
+        if not counts:
+            session.commit()
+            log.info(f"[location] Fix from {person}'s other device ({device[:8]}) noted, not counted")
+            return {"status": "SUCCESS", "message": "Noted from a device that is not the lead", "counted": False}
         key = f"user_location:{person}"
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         try:
@@ -7395,6 +7428,7 @@ async def update_user_location(
         # Home Assistant stay with the newer fix.
         held = float((previous or {}).get("timestamp") or 0)
         if location.timestamp and held and location.timestamp < held:
+            session.commit()
             background.add_task(_forward_location_to_geo, user_id, location)
             return {"status": "SUCCESS", "message": "Older fix added to the history"}
         announce, location_data[battery_alerts.SENT_FIELD] = battery_alerts.step(

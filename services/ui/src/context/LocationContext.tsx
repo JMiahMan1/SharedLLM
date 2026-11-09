@@ -6,6 +6,7 @@ import { storageGet, storageSet } from '../lib/storage';
 import { getServerOrigin } from '../lib/serverUrl';
 import StepCounter from '../plugins/stepCounter';
 import TokenBridge from '../plugins/tokenBridge';
+import { locationDevice } from '../lib/locationDevice';
 import {
   classifyLocationFailure,
   classifyStepFailure,
@@ -594,6 +595,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         timestamp: (fixTs ?? Date.now()) / 1000,
         user_id: user,
       };
+      // Which device: only one of a person's devices may say where they are.
+      try {
+        const device = await locationDevice();
+        payload.device_id = device.deviceId;
+        payload.device_name = device.deviceName;
+      } catch (err) {
+        logSensor('location', 'device id unavailable', err);
+      }
       // Attach hardware pedometer reading when present (real sensor data only)
       if (sensorsRef.current.steps.enabled && dailyStepsRef.current !== null) {
         payload.daily_steps = dailyStepsRef.current;

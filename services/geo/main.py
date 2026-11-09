@@ -792,6 +792,7 @@ async def record_point(
     battery: int | None = None,
     timestamp: float | None = None,
     activity: str | None = None,
+    device: str | None = None,
 ):
     r = await get_redis()
     if not r:
@@ -812,6 +813,7 @@ async def record_point(
         "brg": bearing if bearing is not None else 0.0,
         "bat": battery,
         **({"act": activity} if activity else {}),
+        **({"dev": device[:12]} if device else {}),
     }
     encoded = json.dumps(point)
     for k in {f"geo:history:{entity_id.lower()}", f"geo:history:{clean_id}"}:
@@ -1549,6 +1551,9 @@ class LocationUpdate(BaseModel):
     daily_steps: int | None = None  # hardware pedometer cumulative count (TYPE_STEP_COUNTER)
     #: The phone's activity recognition: driving, cycling, walking, still, unknown.
     activity: str | None = None
+    #: Which device sent it (a short install id), kept on the breadcrumb so a
+    #: person's fixes can be told apart when more than one device reports.
+    device: str | None = None
 
 
 @app.post("/people/{entity_id:path}/see")
@@ -1584,6 +1589,7 @@ async def post_see(
         battery=update.battery,
         timestamp=update.timestamp,
         activity=update.activity,
+        device=update.device,
     )
 
     dev_id = entity_id.split(".")[-1]
@@ -1639,6 +1645,7 @@ async def post_record(
         battery=update.battery,
         timestamp=update.timestamp,
         activity=update.activity,
+        device=update.device,
     )
     return {"status": "ok", "entity_id": entity_id}
 
