@@ -51,6 +51,22 @@ public class HealthWidget extends AppWidgetProvider {
     private static final int SPARK_MAX_DP = 34;
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        WidgetFit.Tweak ringOnly = v -> v.setViewVisibility(R.id.health_side, View.GONE);
+        WidgetFit.Tweak smallRing = v -> {
+            WidgetFit.sizeDp(v, R.id.health_ring, 66, 66);
+            v.setTextViewTextSize(R.id.health_steps, android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+            v.setViewVisibility(R.id.health_ring_caption, View.GONE);
+        };
+        return WidgetFit.of(base).fallback(ringOnly)
+                .at(100, 100, base, v -> { ringOnly.apply(v); smallRing.apply(v); })
+                .at(100, 150, base, ringOnly)
+                .at(240, 100, base, smallRing)
+                .at(240, 150, base)
+                .build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_health);
         views.setOnClickPendingIntent(R.id.health_root, WidgetUpdater.openPathPendingIntent(context, "/fitness", 6810));
         views.setOnClickPendingIntent(R.id.health_refresh, WidgetUpdater.refreshPendingIntent(context));

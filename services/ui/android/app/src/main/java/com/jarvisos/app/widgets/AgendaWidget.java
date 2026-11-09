@@ -43,6 +43,11 @@ public class AgendaWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        return WidgetFit.of(base).rows(base, 100, ROW, 48, 41).build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_agenda);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.ag_root, R.id.ag_icon, R.id.ag_title, R.id.ag_refresh, st.accent);

@@ -48,7 +48,65 @@ public class FamilyWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_family);
+        Data d = fetch(context);
+        RemoteViews wide = paint(context, R.layout.widget_family, d);
+        RemoteViews narrow = paint(context, R.layout.widget_family_narrow, d);
+        // One row of people when the widget is short (the busiest first: home).
+        WidgetFit.Tweak oneRow = v -> v.setViewVisibility(R.id.fm_row2, View.GONE);
+        return WidgetFit.of(wide)
+                .at(100, 100, narrow, oneRow)
+                .at(100, 150, narrow)
+                .at(240, 100, wide, oneRow)
+                .at(240, 150, wide)
+                .build();
+    }
+
+    /** Who's where and unread chat, read once for every size. */
+    static final class Data {
+        boolean signedIn;
+        final List<JSONObject> people = new ArrayList<>();
+        int unread;
+        String problem;
+    }
+
+    static Data fetch(Context context) {
+        Data d = new Data();
+        d.signedIn = WidgetApi.apiKey(context) != null;
+        if (!d.signedIn) return d;
+        try {
+            JSONObject geo = WidgetApi.get(context, "/api/geo/people");
+            JSONArray features = geo.optJSONArray("features");
+            for (int i = 0; features != null && i < features.length(); i++) {
+                JSONObject f = features.optJSONObject(i);
+                JSONObject props = f == null ? null : f.optJSONObject("properties");
+                if (props != null) d.people.add(props);
+            }
+            // Home first, then everyone out, each by name.
+            java.util.Collections.sort(d.people, (a, b) -> {
+                boolean ha = "home".equals(EntityNames.text(a, "state"));
+                boolean hb = "home".equals(EntityNames.text(b, "state"));
+                if (ha != hb) return ha ? -1 : 1;
+                return EntityNames.text(a, "friendly_name").compareToIgnoreCase(EntityNames.text(b, "friendly_name"));
+            });
+        } catch (Exception e) {
+            d.problem = WidgetApi.problem(e);
+        }
+        try {
+            JSONObject talk = WidgetApi.get(context, "/api/communication/talk/conversations");
+            JSONObject detail = talk.optJSONObject("detail");
+            JSONArray convs = detail == null ? null : detail.optJSONArray("conversations");
+            for (int i = 0; convs != null && i < convs.length(); i++) {
+                JSONObject c = convs.optJSONObject(i);
+                if (c != null) d.unread += c.optInt("unread_messages", 0);
+            }
+        } catch (Exception ignored) {
+            // Chat off for this account: no chip.
+        }
+        return d;
+    }
+
+    static RemoteViews paint(Context context, int layout, Data d) {
+        RemoteViews views = new RemoteViews(context.getPackageName(), layout);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.fm_root, R.id.fm_icon, R.id.fm_title, R.id.fm_refresh, st.accent);
         views.setOnClickPendingIntent(R.id.fm_root, WidgetUpdater.openPathPendingIntent(context, "/wander", 7250));
@@ -57,30 +115,11 @@ public class FamilyWidget extends AppWidgetProvider {
         st.fill(views, R.id.fm_chat_chip, R.drawable.wg_pill, st.accent);
         st.icon(views, R.id.fm_chat_icon, st.onAccent);
         st.text(views, R.id.fm_chat, st.onAccent);
-        if (WidgetApi.apiKey(context) == null) {
+        if (!d.signedIn) {
             st.status(views, R.id.fm_status, "Sign in to Jarvis OS");
             return views;
         }
-        String problem = null;
-        List<JSONObject> people = new ArrayList<>();
-        try {
-            JSONObject geo = WidgetApi.get(context, "/api/geo/people");
-            JSONArray features = geo.optJSONArray("features");
-            for (int i = 0; features != null && i < features.length(); i++) {
-                JSONObject f = features.optJSONObject(i);
-                JSONObject props = f == null ? null : f.optJSONObject("properties");
-                if (props != null) people.add(props);
-            }
-            // Home first, then everyone out, each by name.
-            java.util.Collections.sort(people, (a, b) -> {
-                boolean ha = "home".equals(EntityNames.text(a, "state"));
-                boolean hb = "home".equals(EntityNames.text(b, "state"));
-                if (ha != hb) return ha ? -1 : 1;
-                return EntityNames.text(a, "friendly_name").compareToIgnoreCase(EntityNames.text(b, "friendly_name"));
-            });
-        } catch (Exception e) {
-            problem = WidgetApi.problem(e);
-        }
+        List<JSONObject> people = d.people;
         int home = 0;
         for (int i = 0; i < P.length; i++) {
             if (i >= people.size()) {
@@ -99,28 +138,17 @@ public class FamilyWidget extends AppWidgetProvider {
             st.text(views, INITIAL[i], isHome ? st.onAccent : st.text);
             views.setTextViewText(NAME[i], name.contains(" ") ? name.substring(0, name.indexOf(' ')) : name);
             views.setTextViewText(PLACE[i], place(state));
+            views.setContentDescription(P[i], name + ": " + place(state));
             st.text(views, NAME[i], st.text);
             st.text(views, PLACE[i], isHome ? st.accent : st.muted);
         }
         views.setViewVisibility(R.id.fm_row2, people.size() > 3 ? View.VISIBLE : View.GONE);
         if (!people.isEmpty()) views.setTextViewText(R.id.fm_title, "FAMILY · " + home + " HOME");
-        // Unread family chat.
-        try {
-            JSONObject talk = WidgetApi.get(context, "/api/communication/talk/conversations");
-            JSONObject detail = talk.optJSONObject("detail");
-            JSONArray convs = detail == null ? null : detail.optJSONArray("conversations");
-            int unread = 0;
-            for (int i = 0; convs != null && i < convs.length(); i++) {
-                JSONObject c = convs.optJSONObject(i);
-                if (c != null) unread += c.optInt("unread_messages", 0);
-            }
-            if (unread > 0) {
-                views.setViewVisibility(R.id.fm_chat_chip, View.VISIBLE);
-                views.setTextViewText(R.id.fm_chat, unread > 99 ? "99+" : String.valueOf(unread));
-            }
-        } catch (Exception ignored) {
-            // Chat off for this account: no chip.
+        if (d.unread > 0) {
+            views.setViewVisibility(R.id.fm_chat_chip, View.VISIBLE);
+            views.setTextViewText(R.id.fm_chat, d.unread > 99 ? "99+" : String.valueOf(d.unread));
         }
+        String problem = d.problem;
         if (people.isEmpty() && problem == null) problem = "No one is sharing their location with you";
         st.status(views, R.id.fm_status, people.isEmpty() ? problem : null);
         return views;

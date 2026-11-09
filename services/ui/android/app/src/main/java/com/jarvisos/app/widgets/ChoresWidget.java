@@ -41,6 +41,11 @@ public class ChoresWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        return WidgetFit.of(base).rows(base, 100, ROW, 63, 31).build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_chores);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.ch_root, R.id.ch_icon, R.id.ch_title, R.id.ch_refresh, st.accent);

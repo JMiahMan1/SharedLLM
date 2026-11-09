@@ -47,6 +47,28 @@ public class ScreenTimeWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        return WidgetFit.of(base)
+                .at(100, 100, base, v -> fit(v, 100))
+                .at(100, 150, base, v -> fit(v, 150))
+                .at(100, 226, base, v -> fit(v, 226))
+                .build();
+    }
+
+    /** A widget {@code h} dp tall: a smaller ring when short, and only the children's rows that fit. */
+    private static void fit(RemoteViews v, float h) {
+        if (h < 150) {
+            WidgetFit.sizeDp(v, R.id.stw_ring, 62, 62);
+            v.setTextViewTextSize(R.id.stw_left, android.util.TypedValue.COMPLEX_UNIT_SP, 13);
+            v.setViewVisibility(R.id.stw_left_caption, View.GONE);
+            v.setInt(R.id.stw_headline, "setMaxLines", 1);
+            v.setViewVisibility(R.id.stw_line2, View.GONE);
+        }
+        int rows = WidgetFit.rowsFor(h, 52, 58, KID.length);
+        for (int i = rows; i < KID.length; i++) v.setViewVisibility(KID[i], View.GONE);
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_screen_time);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.stw_root, R.id.stw_icon, R.id.stw_title, R.id.stw_refresh, st.accent);

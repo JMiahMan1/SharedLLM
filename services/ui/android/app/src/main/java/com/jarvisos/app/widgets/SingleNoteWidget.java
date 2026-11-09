@@ -53,6 +53,21 @@ public class SingleNoteWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context, int appWidgetId) {
+        RemoteViews base = buildBase(context, appWidgetId);
+        WidgetFit fit = WidgetFit.of(base);
+        // Checklist rows that fit; a plain note gets as many lines as fit.
+        for (int n = 1; n <= ROWS; n++) {
+            final int keep = n;
+            float h = n == 1 ? 0 : 68 + n * 32;
+            fit.at(100, h, base, v -> {
+                for (int i = keep; i < ROWS; i++) v.setViewVisibility(ROW_IDS[i], android.view.View.GONE);
+                v.setInt(R.id.single_note_body, "setMaxLines", Math.max(2, keep + 1));
+            });
+        }
+        return fit.build();
+    }
+
+    static RemoteViews buildBase(Context context, int appWidgetId) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_single_note);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.single_note_root, R.id.single_note_icon, R.id.single_note_title,

@@ -57,6 +57,23 @@ public class WeatherWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        // The hourly strip needs height; the big icon needs width.
+        WidgetFit.Tweak noHours = v -> v.setViewVisibility(R.id.wx_hours, View.GONE);
+        WidgetFit.Tweak narrow = v -> {
+            v.setViewVisibility(R.id.wx_now_icon, View.GONE);
+            v.setTextViewTextSize(R.id.wx_temp, android.util.TypedValue.COMPLEX_UNIT_SP, 32);
+            v.setViewLayoutMargin(R.id.wx_temp, RemoteViews.MARGIN_START, 0, android.util.TypedValue.COMPLEX_UNIT_DIP);
+        };
+        return WidgetFit.of(base)
+                .at(100, 100, base, v -> { noHours.apply(v); narrow.apply(v); })
+                .at(100, 190, base, narrow)
+                .at(240, 100, base, noHours)
+                .at(240, 190, base)
+                .build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_weather);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.wx_root, R.id.wx_icon, R.id.wx_title, R.id.wx_refresh, st.accent);

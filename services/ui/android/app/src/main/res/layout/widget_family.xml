@@ -106,13 +106,13 @@
         <LinearLayout
             android:id="@+id/fm_p1"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -127,52 +127,57 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p1_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p1_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p1_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p1_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/fm_p2"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:layout_marginStart="6dp"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -187,52 +192,57 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p2_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p2_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p2_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p2_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/fm_p3"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:layout_marginStart="6dp"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -247,39 +257,44 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p3_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p3_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p3_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p3_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
@@ -296,13 +311,13 @@
         <LinearLayout
             android:id="@+id/fm_p4"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -317,52 +332,57 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p4_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p4_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p4_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p4_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/fm_p5"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:layout_marginStart="6dp"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -377,52 +397,57 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p5_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p5_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p5_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p5_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/fm_p6"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:layout_marginStart="6dp"
             android:background="@drawable/wg_tile"
-                android:paddingTop="8dp"
-                android:paddingBottom="7dp"
+                android:paddingStart="7dp"
+                android:paddingEnd="6dp"
                 android:visibility="invisible">
 
             <TextView
@@ -437,39 +462,44 @@
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_width="34dp"
-                    android:layout_height="34dp"
+                android:layout_width="30dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/wg_circle" />
 
-            <TextView
-                android:id="@+id/fm_p6_name"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#F1F5F9"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginTop="4dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="7dp">
 
-            <TextView
-                android:id="@+id/fm_p6_place"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:gravity="center"
-                android:maxLines="1"
-                android:singleLine="true"
-                android:includeFontPadding="false"
-                android:text=""
-                android:textColor="#94A3B8"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp" />
+                <TextView
+                    android:id="@+id/fm_p6_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#F1F5F9"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/fm_p6_place"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:includeFontPadding="false"
+                    android:text=""
+                    android:textColor="#94A3B8"
+                    android:textSize="10sp"
+                    android:layout_marginTop="1dp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 

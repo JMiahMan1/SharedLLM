@@ -37,7 +37,45 @@ public class HealthTodayWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_health_today);
+        Data d = fetch(context);
+        RemoteViews grid = paint(context, R.layout.widget_health_today_grid, d);
+        RemoteViews row = paint(context, R.layout.widget_health_today, d);
+        return WidgetFit.of(grid)
+                .at(150, 100, row)
+                .at(150, 150, grid)
+                .at(380, 100, row)
+                .build();
+    }
+
+    /** Both reads, once for every size. */
+    static final class Data {
+        boolean signedIn;
+        JSONObject summary;
+        JSONObject steps;
+        String problem;
+    }
+
+    static Data fetch(Context context) {
+        Data d = new Data();
+        d.signedIn = WidgetApi.apiKey(context) != null;
+        if (!d.signedIn) return d;
+        // Two independent reads: one failing leaves the other's tiles honest
+        // ("Unavailable") instead of blanking the whole widget.
+        try {
+            d.summary = WidgetApi.get(context, "/api/health/summary");
+        } catch (Exception e) {
+            d.problem = e.getMessage();
+        }
+        try {
+            d.steps = WidgetApi.activityToday(context);
+        } catch (Exception e) {
+            if (d.problem == null) d.problem = e.getMessage();
+        }
+        return d;
+    }
+
+    static RemoteViews paint(Context context, int layout, Data d) {
+        RemoteViews views = new RemoteViews(context.getPackageName(), layout);
         views.setOnClickPendingIntent(R.id.ht_root, WidgetUpdater.openPathPendingIntent(context, "/fitness", 6800));
         views.setOnClickPendingIntent(R.id.ht_refresh, WidgetUpdater.refreshPendingIntent(context));
         WidgetStyle st = WidgetStyle.of(context);
@@ -53,26 +91,13 @@ public class HealthTodayWidget extends AppWidgetProvider {
         st.progress(views, R.id.ht_steps_bar, 100, 0, st.progress);
         st.progress(views, R.id.ht_water_bar, 100, 0, st.fourth);
 
-        if (WidgetApi.apiKey(context) == null) {
+        if (!d.signedIn) {
             st.status(views, R.id.ht_status, "Sign in to Jarvis OS");
             return views;
         }
-
-        // Two independent reads: one failing leaves the other's tiles honest
-        // ("Unavailable") instead of blanking the whole widget.
-        JSONObject summary = null;
-        JSONObject steps = null;
-        String problem = null;
-        try {
-            summary = WidgetApi.get(context, "/api/health/summary");
-        } catch (Exception e) {
-            problem = e.getMessage();
-        }
-        try {
-            steps = WidgetApi.activityToday(context);
-        } catch (Exception e) {
-            if (problem == null) problem = e.getMessage();
-        }
+        JSONObject summary = d.summary;
+        JSONObject steps = d.steps;
+        String problem = d.problem;
 
         tile(views, R.id.ht_steps_value, R.id.ht_steps_caption, HealthTodayFormat.steps(steps));
         tile(views, R.id.ht_ready_value, R.id.ht_ready_caption, HealthTodayFormat.readiness(summary));

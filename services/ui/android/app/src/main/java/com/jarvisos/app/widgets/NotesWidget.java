@@ -33,7 +33,14 @@ public class NotesWidget extends AppWidgetProvider {
         }
     }
 
+    private static final int[] ROW_IDS = {R.id.notes_row_1, R.id.notes_row_2, R.id.notes_row_3, R.id.notes_row_4};
+
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        return WidgetFit.of(base).rows(base, 100, ROW_IDS, 58, 50).build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_notes);
         views.setOnClickPendingIntent(R.id.notes_root, WidgetUpdater.openPathPendingIntent(context, "/notes", 6002));
         views.setOnClickPendingIntent(R.id.notes_add, WidgetUpdater.composeNotePendingIntent(context));

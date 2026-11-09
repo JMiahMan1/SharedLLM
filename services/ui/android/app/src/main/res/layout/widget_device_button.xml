@@ -69,46 +69,48 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+                android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:background="@drawable/wg_tile"
-            android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-            <ImageView
-                android:id="@+id/btn_icon_1"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:importantForAccessibility="no"
-                android:scaleType="fitCenter"
-                android:src="@drawable/mi_power"
-                android:tint="#94A3B8" />
+            <TextView
+                android:id="@+id/btn_label_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="2"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="10dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
 
-                <TextView
-                    android:id="@+id/btn_label_1"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="1"
-                    android:singleLine="true"
-                    android:includeFontPadding="false"
-                    android:text="-"
-                    android:textColor="#F1F5F9"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                <ImageView
+                    android:id="@+id/btn_icon_1"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_power"
+                    android:tint="#94A3B8" />
 
                 <TextView
                     android:id="@+id/btn_state_1"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:singleLine="true"
@@ -116,7 +118,7 @@
                     android:text=""
                     android:textColor="#94A3B8"
                     android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginStart="4dp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -125,47 +127,49 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
             android:layout_marginStart="8dp"
             android:background="@drawable/wg_tile"
-            android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-            <ImageView
-                android:id="@+id/btn_icon_2"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:importantForAccessibility="no"
-                android:scaleType="fitCenter"
-                android:src="@drawable/mi_power"
-                android:tint="#94A3B8" />
+            <TextView
+                android:id="@+id/btn_label_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="2"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="10dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
 
-                <TextView
-                    android:id="@+id/btn_label_2"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="1"
-                    android:singleLine="true"
-                    android:includeFontPadding="false"
-                    android:text="-"
-                    android:textColor="#F1F5F9"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                <ImageView
+                    android:id="@+id/btn_icon_2"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_power"
+                    android:tint="#94A3B8" />
 
                 <TextView
                     android:id="@+id/btn_state_2"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:singleLine="true"
@@ -173,7 +177,7 @@
                     android:text=""
                     android:textColor="#94A3B8"
                     android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginStart="4dp" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
@@ -192,46 +196,48 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
+                android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:background="@drawable/wg_tile"
-            android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-            <ImageView
-                android:id="@+id/btn_icon_3"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:importantForAccessibility="no"
-                android:scaleType="fitCenter"
-                android:src="@drawable/mi_power"
-                android:tint="#94A3B8" />
+            <TextView
+                android:id="@+id/btn_label_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="2"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="10dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
 
-                <TextView
-                    android:id="@+id/btn_label_3"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="1"
-                    android:singleLine="true"
-                    android:includeFontPadding="false"
-                    android:text="-"
-                    android:textColor="#F1F5F9"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                <ImageView
+                    android:id="@+id/btn_icon_3"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_power"
+                    android:tint="#94A3B8" />
 
                 <TextView
                     android:id="@+id/btn_state_3"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:singleLine="true"
@@ -239,7 +245,7 @@
                     android:text=""
                     android:textColor="#94A3B8"
                     android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginStart="4dp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -248,47 +254,49 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
             android:layout_marginStart="8dp"
             android:background="@drawable/wg_tile"
-            android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:gravity="center_vertical"
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-            <ImageView
-                android:id="@+id/btn_icon_4"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:importantForAccessibility="no"
-                android:scaleType="fitCenter"
-                android:src="@drawable/mi_power"
-                android:tint="#94A3B8" />
+            <TextView
+                android:id="@+id/btn_label_4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="2"
+                android:includeFontPadding="false"
+                android:text="-"
+                android:textColor="#F1F5F9"
+                android:textSize="13sp"
+                android:textStyle="bold" />
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="10dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
 
-                <TextView
-                    android:id="@+id/btn_label_4"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:maxLines="1"
-                    android:singleLine="true"
-                    android:includeFontPadding="false"
-                    android:text="-"
-                    android:textColor="#F1F5F9"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                <ImageView
+                    android:id="@+id/btn_icon_4"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/mi_power"
+                    android:tint="#94A3B8" />
 
                 <TextView
                     android:id="@+id/btn_state_4"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:singleLine="true"
@@ -296,7 +304,7 @@
                     android:text=""
                     android:textColor="#94A3B8"
                     android:textSize="11sp"
-                    android:layout_marginTop="2dp" />
+                    android:layout_marginStart="4dp" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

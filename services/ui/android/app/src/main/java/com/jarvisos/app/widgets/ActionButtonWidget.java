@@ -49,6 +49,20 @@ public class ActionButtonWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context, int appWidgetId) {
+        RemoteViews base = buildBase(context, appWidgetId);
+        WidgetFit.Tweak noState = v -> v.setViewVisibility(R.id.action_state, View.GONE);
+        return WidgetFit.of(base).fallback(noState)
+                .at(40, 40, base, v -> {
+                    noState.apply(v);
+                    v.setViewVisibility(R.id.action_label, View.GONE);
+                    WidgetFit.sizeDp(v, R.id.action_button, 40, 40);
+                })
+                .at(70, 75, base, noState)
+                .at(70, 105, base)
+                .build();
+    }
+
+    static RemoteViews buildBase(Context context, int appWidgetId) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_action_button);
         WidgetStyle st = WidgetStyle.of(context);
         ActionButtonConfig cfg = ActionButtonConfig.load(context, appWidgetId);

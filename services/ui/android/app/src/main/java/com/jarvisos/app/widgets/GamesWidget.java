@@ -5,13 +5,10 @@ import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.util.SizeF;
 import android.view.View;
 import android.widget.RemoteViews;
 import com.jarvisos.app.R;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.json.JSONObject;
 
 /**
@@ -74,14 +71,24 @@ public class GamesWidget extends AppWidgetProvider {
         return d;
     }
 
+    private static final int[] S_TILE = {R.id.gw_played_tile, R.id.gw_best_tile, R.id.gw_crowns_tile};
+    private static final int[] S_LABEL = {R.id.gw_played_label, R.id.gw_best_label, R.id.gw_crowns_label};
+    private static final int[] S_VALUE = {R.id.gw_played_value, R.id.gw_best_value, R.id.gw_crowns_value};
+    private static final int[] S_CAPTION = {R.id.gw_played_caption, R.id.gw_best_caption, R.id.gw_crowns_caption};
+
     static RemoteViews build(Context context) {
         Data d = fetch(context);
-        RemoteViews full = buildFull(context, d);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return full;
-        Map<SizeF, RemoteViews> sizes = new HashMap<>();
-        sizes.put(new SizeF(160f, 90f), buildCompact(context, d));
-        sizes.put(new SizeF(240f, 230f), full);
-        return new RemoteViews(sizes);
+        RemoteViews compact = buildCompact(context, d);
+        RemoteViews full = buildFull(context, d, 1);
+        WidgetFit fit = WidgetFit.of(full)
+                .at(100, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, true))
+                .at(100, 150, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false))
+                .at(250, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, false, true))
+                .at(250, 150, compact)
+                .at(240, 230, full);
+        // Room for both live games only on a taller widget.
+        fit.at(240, 320, buildFull(context, d, 2));
+        return fit.build();
     }
 
     static RemoteViews buildCompact(Context context) {
@@ -89,7 +96,7 @@ public class GamesWidget extends AppWidgetProvider {
     }
 
     static RemoteViews buildFull(Context context) {
-        return buildFull(context, fetch(context));
+        return buildFull(context, fetch(context), LIVE.length);
     }
 
     private static void tile(RemoteViews views, int valueId, int captionId, StatsWidgetFormat.Tile tile) {
@@ -134,7 +141,7 @@ public class GamesWidget extends AppWidgetProvider {
         return views;
     }
 
-    static RemoteViews buildFull(Context context, Data d) {
+    static RemoteViews buildFull(Context context, Data d, int maxLive) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_games_hub);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.gh_root, R.id.gh_icon, R.id.gh_title, R.id.gh_refresh, st.accent);
@@ -157,7 +164,7 @@ public class GamesWidget extends AppWidgetProvider {
         }
 
         // Playing now: up to two rooms, each a tap straight into it.
-        List<GamesHub.Room> rooms = GamesHub.live(d.live, LIVE.length);
+        List<GamesHub.Room> rooms = GamesHub.live(d.live, Math.min(maxLive, LIVE.length));
         views.setViewVisibility(R.id.gh_live_label, rooms.isEmpty() ? View.GONE : View.VISIBLE);
         for (int i = 0; i < LIVE.length; i++) {
             if (i >= rooms.size()) {

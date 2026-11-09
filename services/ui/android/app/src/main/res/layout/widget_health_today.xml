@@ -73,7 +73,7 @@
             android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
             android:orientation="vertical"
-            android:padding="10dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -110,18 +110,20 @@
 
             <TextView
                 android:id="@+id/ht_steps_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
                 android:fontFamily="sans-serif-black"
                 android:maxLines="1"
-                android:singleLine="true"
                 android:includeFontPadding="false"
                 android:text="-"
                 android:textColor="#F1F5F9"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="18sp"
+                android:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/ht_steps_caption"
@@ -157,7 +159,7 @@
             android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
             android:orientation="vertical"
-            android:padding="10dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -194,18 +196,20 @@
 
             <TextView
                 android:id="@+id/ht_ready_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
                 android:fontFamily="sans-serif-black"
                 android:maxLines="1"
-                android:singleLine="true"
                 android:includeFontPadding="false"
                 android:text="-"
                 android:textColor="#F1F5F9"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="18sp"
+                android:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/ht_ready_caption"
@@ -230,7 +234,7 @@
             android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
             android:orientation="vertical"
-            android:padding="10dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -267,18 +271,20 @@
 
             <TextView
                 android:id="@+id/ht_sleep_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
                 android:fontFamily="sans-serif-black"
                 android:maxLines="1"
-                android:singleLine="true"
                 android:includeFontPadding="false"
                 android:text="-"
                 android:textColor="#F1F5F9"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="18sp"
+                android:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/ht_sleep_caption"
@@ -303,7 +309,7 @@
             android:background="@drawable/wg_tile"
             android:gravity="center_vertical"
             android:orientation="vertical"
-            android:padding="10dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -340,18 +346,20 @@
 
             <TextView
                 android:id="@+id/ht_water_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
                 android:fontFamily="sans-serif-black"
                 android:maxLines="1"
-                android:singleLine="true"
                 android:includeFontPadding="false"
                 android:text="-"
                 android:textColor="#F1F5F9"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:layout_marginTop="6dp" />
+                android:layout_marginTop="6dp"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="18sp"
+                android:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/ht_water_caption"

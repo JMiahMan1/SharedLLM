@@ -24,6 +24,15 @@ public class MediaWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        WidgetFit.Tweak noArt = v -> v.setViewVisibility(R.id.media_art_frame, android.view.View.GONE);
+        return WidgetFit.of(base).fallback(noArt)
+                .at(100, 100, base, noArt)
+                .at(240, 100, base)
+                .build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_media);
         views.setOnClickPendingIntent(R.id.media_root, WidgetUpdater.openPathPendingIntent(context, "/media", 7130));
         views.setOnClickPendingIntent(R.id.media_refresh, WidgetUpdater.refreshPendingIntent(context));

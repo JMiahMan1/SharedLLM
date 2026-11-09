@@ -43,6 +43,11 @@ public class TimersWidget extends AppWidgetProvider {
     }
 
     static RemoteViews build(Context context) {
+        RemoteViews base = buildBase(context);
+        return WidgetFit.of(base).rows(base, 100, ROW, 48, 52).build();
+    }
+
+    static RemoteViews buildBase(Context context) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_timers);
         WidgetStyle st = WidgetStyle.of(context);
         st.header(views, R.id.tm_root, R.id.tm_icon, R.id.tm_title, R.id.tm_refresh, st.accent);

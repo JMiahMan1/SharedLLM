@@ -6,12 +6,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
-import android.util.SizeF;
 import android.view.View;
 import android.widget.RemoteViews;
 import com.jarvisos.app.R;
-import java.util.HashMap;
-import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -67,14 +64,22 @@ public class BibleWidget extends AppWidgetProvider {
         return d;
     }
 
+    private static final int[] S_TILE = {R.id.bw_streak_tile, R.id.bw_quiz_tile, R.id.bw_due_tile};
+    private static final int[] S_LABEL = {R.id.bw_streak_label, R.id.bw_quiz_label, R.id.bw_due_label};
+    private static final int[] S_VALUE = {R.id.bw_streak_value, R.id.bw_quiz_value, R.id.bw_due_value};
+    private static final int[] S_CAPTION = {R.id.bw_streak_caption, R.id.bw_quiz_caption, R.id.bw_due_caption};
+
     static RemoteViews build(Context context) {
         Data d = fetch(context);
+        RemoteViews compact = buildCompact(context, d);
         RemoteViews full = buildFull(context, d);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return full;
-        Map<SizeF, RemoteViews> sizes = new HashMap<>();
-        sizes.put(new SizeF(160f, 90f), buildCompact(context, d));
-        sizes.put(new SizeF(240f, 230f), full);
-        return new RemoteViews(sizes);
+        WidgetFit fit = WidgetFit.of(full)
+                .at(100, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, true))
+                .at(100, 150, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, true, false))
+                .at(250, 80, compact, WidgetFit.stats(S_TILE, S_LABEL, S_VALUE, S_CAPTION, false, true))
+                .at(250, 150, compact)
+                .at(240, 230, full);
+        return fit.build();
     }
 
     static RemoteViews buildCompact(Context context) {
