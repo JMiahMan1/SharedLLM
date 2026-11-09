@@ -604,3 +604,17 @@ async def test_arcade_live_reports_an_unreachable_arcade(monkeypatch):
     out = await main.proxy_arcade_live(MagicMock())
 
     assert out == {"success": False, "arcade_available": False, "rooms": []}
+
+
+def test_cast_builds_each_games_own_stage_page(monkeypatch):
+    """Jubilee's TV page is /jubilee/tv/<CODE>; Parable Party's is /tv/<CODE>.
+    The caller names the game, never the URL a household TV is sent to."""
+    import services.gateway.main as gw
+
+    monkeypatch.setattr(gw, "ALPACA_ARCADE_PUBLIC_URL", "https://games.example/")
+    assert gw._arcade_stage_url("noah", "family-jubilee") == "https://games.example/jubilee/tv/NOAH"
+    assert gw._arcade_stage_url("NOAH", "jubilee") == "https://games.example/jubilee/tv/NOAH"
+    assert gw._arcade_stage_url("ab-12") == "https://games.example/tv/AB12"
+    assert gw._arcade_stage_url("ROOM", "family-good-word") == "https://games.example/tv/ROOM"
+    # An unknown game or a path-shaped one is never a path: the party stage.
+    assert gw._arcade_stage_url("ROOM", "../admin") == "https://games.example/tv/ROOM"

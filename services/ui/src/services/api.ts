@@ -3486,7 +3486,7 @@ export const api = {
     return resp.data;
   },
 
-  async castArcadeTv(payload: { screen_id: string; room_code: string; method?: string; stop?: boolean }): Promise<ArcadeCastResult> {
+  async castArcadeTv(payload: { screen_id: string; room_code: string; game?: string; method?: string; stop?: boolean }): Promise<ArcadeCastResult> {
     const resp = await apiClient.post('/api/arcade/cast', payload, { timeout: 100000 });
     return resp.data;
   },

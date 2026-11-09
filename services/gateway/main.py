@@ -5017,15 +5017,24 @@ async def proxy_arcade_rate(slug: str, request: Request):
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
 
 
-def _arcade_stage_url(room_code: str) -> str:
-    """The live TV stage for a party room, at the address phones already use.
+#: Each game's TV stage page on the arcade. A caller names the game, never a
+#: path or URL; an unknown game gets Parable Party's stage (``/tv``).
+_ARCADE_STAGE_PATHS = {
+    "family-jubilee": "/jubilee/tv",
+    "jubilee": "/jubilee/tv",
+}
+
+
+def _arcade_stage_url(room_code: str, game: str = "") -> str:
+    """The live TV stage for a game room, at the address phones already use.
 
     Built here rather than taken from the caller, so this route can only ever
-    put the arcade's own stage page on a household TV.
+    put the arcade's own stage pages on a household TV.
     """
     code = re.sub(r"[^A-Za-z0-9]", "", room_code or "").upper()[:8]
     base = ALPACA_ARCADE_PUBLIC_URL.rstrip("/")
-    return f"{base}/tv/{code}" if code else f"{base}/tv"
+    path = _ARCADE_STAGE_PATHS.get(str(game or "").strip().lower(), "/tv")
+    return f"{base}{path}/{code}" if code else f"{base}{path}"
 
 
 @app.get("/api/arcade/tvs")
@@ -5061,7 +5070,7 @@ async def proxy_arcade_cast(request: Request):
     if not screen_id:
         raise HTTPException(status_code=400, detail="screen_id is required")
     room_code = str(body.get("room_code") or body.get("code") or "")
-    stage_url = _arcade_stage_url(room_code)
+    stage_url = _arcade_stage_url(room_code, str(body.get("game") or ""))
     action = "stop" if body.get("stop") else "show"
     try:
         async with shared_http_client() as client:

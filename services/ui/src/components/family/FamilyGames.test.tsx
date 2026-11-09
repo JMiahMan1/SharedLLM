@@ -300,6 +300,7 @@ describe('FamilyGames', () => {
       expect(m.castTv).toHaveBeenCalledWith({
         screen_id: 'ha:media_player.living_room_lg',
         room_code: 'ZION',
+        game: 'family-good-word',
         method: undefined,
         stop: false,
       }),

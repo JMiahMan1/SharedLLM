@@ -424,6 +424,8 @@ export default function FamilyGames() {
             .castArcadeTv({
               screen_id: String(payload.screen_id ?? ''),
               room_code: String(payload.room_code ?? ''),
+              // Which game's TV page: the gateway maps it (Jubilee's board, not the party stage).
+              game: playing.slug,
               method: payload.method ? String(payload.method) : undefined,
               stop: Boolean(payload.stop),
             })
