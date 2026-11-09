@@ -179,6 +179,30 @@
         </receiver>
 
         <receiver
+            android:name=".widgets.GamesWidget"
+            android:exported="true"
+            android:label="Family Games">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/games_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widgets.BibleWidget"
+            android:exported="true"
+            android:label="Bible">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bible_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".widgets.VerseWidget"
             android:exported="true"
             android:label="Verse of the Day">

@@ -46,6 +46,8 @@ public final class WidgetUpdater {
         request(context, HealthWidget.class);
         request(context, HealthTodayWidget.class);
         request(context, VerseWidget.class);
+        request(context, GamesWidget.class);
+        request(context, BibleWidget.class);
         request(context, NotesWidget.class);
         request(context, SingleNoteWidget.class);
     }
@@ -231,6 +233,32 @@ public final class WidgetUpdater {
         if (ids == null || ids.length == 0) return;
         onBackground(() -> {
             RemoteViews views = HealthTodayWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    /** Family Games home-screen widget (the signed-in member's arcade card). */
+    public static void pushGames(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, GamesWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = GamesWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    /** Bible home-screen widget (own streak, today's quiz, memory verses due). */
+    public static void pushBible(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, BibleWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = BibleWidget.build(context);
             onMain(() -> {
                 for (int id : ids) mgr.updateAppWidget(id, views);
             });
