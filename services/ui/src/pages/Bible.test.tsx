@@ -19,6 +19,11 @@ import type {
   BibleVersionInfo,
 } from '../types/api';
 
+// The Today tab's reading plans read the signed-in member (for the family plans).
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { username: 'reader', display_name: 'Reader', is_admin: false }, isAuthenticated: true }),
+}));
+
 vi.mock('../hooks/useHaptics', () => ({
   useHaptics: () => ({ trigger: vi.fn(), isEnabled: () => true, setEnabled: vi.fn() }),
 }));
@@ -48,6 +53,11 @@ vi.mock('../services/api', async (importOriginal) => {
       getBlbLink: vi.fn(),
       getBibleStudyNotes: vi.fn(),
       getBibleEditions: vi.fn(),
+      // The reader's extras (narration voices, the lexicon, the interlinear)
+      // load beside the passage; answered here so they never reach the network.
+      getBibleVoices: vi.fn().mockResolvedValue({ voices: [], count: 0 }),
+      getBibleLexiconStatus: vi.fn().mockResolvedValue({ installed: false, entries: 0, occurrences: 0, source: '' }),
+      getBibleInterlinear: vi.fn().mockImplementation(async (ref: string) => ({ ref, available: false, attribution: null, verses: [] })),
     },
   };
 });
