@@ -595,3 +595,56 @@ def test_a_samsung_is_found_by_its_own_name_after_its_address_changes(monkeypatc
     screens = [{"platform": "samsung", "state": "unavailable", "entity_id": screen["entity_id"]}]
     asyncio.run(tv_stage._webos_live_state(screens))
     assert screens[0]["state"] == "on"
+
+
+def test_casting_over_a_page_already_up_closes_it_and_sends_the_new_address(monkeypatch):
+    """The web receiver already showing a page (an earlier game) made the
+    check pass at once; the connection closed before the new address went
+    out, so the TV kept the old page while the cast reported success."""
+    import sys
+    import types
+
+    calls = []
+
+    class Status:
+        def __init__(self, app_id):
+            self.app_id = app_id
+
+    class FakeCast:
+        name = "Office TV"
+
+        def __init__(self):
+            self.status = Status(tv_stage.DASHCAST_APP_ID)
+
+        def wait(self, timeout=None):
+            calls.append("wait")
+
+        def register_handler(self, h):
+            h.cc = self
+
+        def quit_app(self):
+            calls.append("quit")
+            self.status = Status(None)
+
+        def disconnect(self, timeout=None):
+            calls.append("disconnect")
+
+    class FakeDash:
+        def load_url(self, url, force=False):
+            calls.append(("load", url))
+            self.cc.status = Status(tv_stage.DASHCAST_APP_ID)
+
+    fake = FakeCast()
+    pc = types.ModuleType("pychromecast")
+    pc.get_chromecast_from_host = lambda *a, **k: fake
+    ctl = types.ModuleType("pychromecast.controllers")
+    dc = types.ModuleType("pychromecast.controllers.dashcast")
+    dc.DashCastController = FakeDash
+    monkeypatch.setitem(sys.modules, "pychromecast", pc)
+    monkeypatch.setitem(sys.modules, "pychromecast.controllers", ctl)
+    monkeypatch.setitem(sys.modules, "pychromecast.controllers.dashcast", dc)
+    monkeypatch.setattr(tv_stage, "CAST_SETTLE_S", 0)
+    ok, _ = tv_stage._cast_show_sync({"host": "10.0.0.5", "port": 8009}, "", "https://games.example/jubilee/tv/NEW")
+    assert ok
+    assert calls.index("quit") < calls.index(("load", "https://games.example/jubilee/tv/NEW"))
+    assert calls[-1] == "disconnect"

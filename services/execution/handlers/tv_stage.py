@@ -790,6 +790,11 @@ async def _wake(ha_url: str, ha_token: str, entity_id: str) -> None:
 
 # --------------------------------------------------------------------------- methods
 
+#: After the web receiver is up, how long to stay connected so the page
+#: address is delivered before the connection closes.
+CAST_SETTLE_S = 1.5
+
+
 def _cast_show_sync(cast_dev: dict[str, Any] | None, host: str, url: str) -> tuple[bool, str]:
     import pychromecast  # pyright: ignore[reportMissingImports]
     from pychromecast.controllers.dashcast import DashCastController  # pyright: ignore[reportMissingImports]
@@ -802,6 +807,16 @@ def _cast_show_sync(cast_dev: dict[str, Any] | None, host: str, url: str) -> tup
         port = int((cast_dev or {}).get("port") or 8009)
         cc = pychromecast.get_chromecast_from_host((h, port, None, None, None), timeout=CAST_CONNECT_TIMEOUT_S)
         cc.wait(timeout=CAST_CONNECT_TIMEOUT_S)
+        # A page already up (another game, an earlier room): close it first.
+        # With the web receiver already running, the check below passed at
+        # once and the connection closed before the new address was sent, so
+        # the TV kept the old page while the cast reported success.
+        if (cc.status and cc.status.app_id) == DASHCAST_APP_ID:
+            with contextlib.suppress(Exception):
+                cc.quit_app()
+            gone = time.time() + CAST_CONNECT_TIMEOUT_S
+            while time.time() < gone and (cc.status and cc.status.app_id) == DASHCAST_APP_ID:
+                time.sleep(0.3)
         dash = DashCastController()
         cc.register_handler(dash)
         # force=True navigates the receiver itself to the page instead of an
@@ -811,6 +826,8 @@ def _cast_show_sync(cast_dev: dict[str, Any] | None, host: str, url: str) -> tup
         deadline = time.time() + CAST_CONNECT_TIMEOUT_S
         while time.time() < deadline:
             if (cc.status and cc.status.app_id) == DASHCAST_APP_ID:
+                # Give the address time to reach the receiver before hanging up.
+                time.sleep(CAST_SETTLE_S)
                 return True, f"Showing on {cc.name or 'the TV'}"
             time.sleep(0.4)
         return False, "Cast device did not start the web receiver"
