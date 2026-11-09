@@ -4540,14 +4540,12 @@ def _may_manage_screen_time(viewer: User | None, subject: User | None) -> bool:
     )
 
 
-def _is_household_parent_of_minor(viewer: User | None, subject: User | None) -> bool:
-    """The parents own every child's device: an admin, the father or any mother
-    may lock or unlock a minor's phone or tablet, linked mother or not. Grown
-    members' devices stay their own."""
+def _is_household_owner(viewer: User | None, subject: User | None) -> bool:
+    """The parents own every device in the household: an admin, the father or
+    the mother may lock or unlock any member's phone or tablet."""
     return (
         viewer is not None
         and subject is not None
-        and (subject.family_role or "other") in roles.MINOR_FAMILY_ROLES
         and (bool(viewer.is_admin) or viewer.family_role in ("father", "mother"))
     )
 
@@ -5007,7 +5005,7 @@ def pause_screen_time(username: str, body: dict, session: Session = Depends(get_
     """Lock the phone now: ``{"until": ISO}`` for a while, ``{}`` until lifted,
     ``{"resume": true}`` to lift it."""
     subject = _screen_subject(session, username)
-    if not (_may_edit_screen_time(caller, subject) or _is_household_parent_of_minor(caller, subject)):
+    if not (_may_edit_screen_time(caller, subject) or _is_household_owner(caller, subject)):
         raise HTTPException(
             status_code=403, detail=f"Only a parent can pause a minor's {_device_word(session, subject.username)}"
         )
@@ -5609,7 +5607,7 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
         parent
         and parent.password_hash
         and verify_password(password, parent.password_hash)
-        and (_may_manage_screen_time(parent, caller) or _is_household_parent_of_minor(parent, caller))
+        and (_may_manage_screen_time(parent, caller) or _is_household_owner(parent, caller))
     )
     if not ok:
         recent.append(now)
