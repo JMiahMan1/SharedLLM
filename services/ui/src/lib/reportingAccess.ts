@@ -1,6 +1,7 @@
 import PhoneUsage from '../plugins/phoneUsage';
 import MediaSession from '../plugins/mediaSession';
 import Comms from '../plugins/comms';
+import PhotoScan from '../plugins/photoScan';
 import { hasActivityAccess } from './locationTracking';
 
 /**
@@ -25,6 +26,8 @@ export interface ReportingAccess {
   notifications: boolean;
   calls: boolean;
   sms: boolean;
+  /** Photos and videos for the safety scanner; null on an app build without it. */
+  photos: boolean | null;
   /** Physical activity (motion sensors: knowing when someone is driving); null on an app build without it. */
   activity: boolean | null;
 }
@@ -36,10 +39,11 @@ export interface ReportingAccess {
  * PhoneUsageSync) for the member page.
  */
 export async function readReportingAccess(): Promise<ReportingAccess> {
-  const [usage, media, comms, activity] = await Promise.all([
+  const [usage, media, comms, photos, activity] = await Promise.all([
     within(PhoneUsage.hasAccess(), CHECK_MS, { granted: false }),
     within(MediaSession.hasAccess(), CHECK_MS, { granted: false }),
     within(Comms.hasAccess(), CHECK_MS, { calls: false, sms: false }),
+    within<{ images: boolean; videos: boolean } | null>(PhotoScan.hasAccess(), CHECK_MS, null),
     within<boolean | null>(hasActivityAccess(), CHECK_MS, null),
   ]);
   return {
@@ -47,6 +51,7 @@ export async function readReportingAccess(): Promise<ReportingAccess> {
     notifications: Boolean(media?.granted),
     calls: Boolean(comms?.calls),
     sms: Boolean(comms?.sms),
+    photos: photos === null ? null : Boolean(photos.images || photos.videos),
     activity,
   };
 }

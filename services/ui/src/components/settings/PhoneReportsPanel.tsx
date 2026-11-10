@@ -4,6 +4,7 @@ import { Check, ClipboardList } from 'lucide-react';
 import PhoneUsage from '../../plugins/phoneUsage';
 import MediaSession from '../../plugins/mediaSession';
 import Comms from '../../plugins/comms';
+import PhotoScan from '../../plugins/photoScan';
 import { readReportingAccess, type ReportingAccess } from '../../lib/reportingAccess';
 import { requestActivityAccess } from '../../lib/locationTracking';
 
@@ -32,6 +33,7 @@ export default function PhoneReportsPanel() {
 
   if (!android || !access) return null;
   const askComms = () => void Comms.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
+  const askPhotos = () => void PhotoScan.requestAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
   const askActivity = () => void requestActivityAccess().then(() => readReportingAccess().then(setAccess)).catch(() => undefined);
   const rows: { key: keyof ReportingAccess; label: string; what: string; allow: () => void }[] = [
     { key: 'usage', label: 'Usage access', what: 'Screen time and app use', allow: () => void PhoneUsage.openSettings() },
@@ -39,6 +41,9 @@ export default function PhoneReportsPanel() {
     { key: 'calls', label: 'Call log', what: 'Calls made and received', allow: askComms },
     { key: 'sms', label: 'Text messages', what: 'Texts sent and received', allow: askComms },
     // An app build without it reports null: no row rather than a dead button.
+    ...(access.photos === null
+      ? []
+      : [{ key: 'photos' as const, label: 'Photos & videos', what: 'New photos and videos are checked for safety', allow: askPhotos }]),
     ...(access.activity === null
       ? []
       : [{ key: 'activity' as const, label: 'Physical activity', what: 'Knowing when you are driving, for trips and driving reports', allow: askActivity }]),

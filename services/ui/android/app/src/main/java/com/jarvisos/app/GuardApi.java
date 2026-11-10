@@ -647,20 +647,25 @@ final class GuardApi {
         }
     }
 
-    /** Report a photo or video thumbnail to be scanned for safety concerns. */
-    static void reportMediaScan(Context context, String mediaType, String fileName, String thumbnailB64) {
-        if (!photoScanEnabled(context)) return;
-        new Thread(() -> {
-            try {
-                JSONObject body = new JSONObject();
-                body.put("media_type", mediaType);
-                body.put("file_name", fileName);
-                body.put("image_b64", thumbnailB64);
-                send(context, "POST", "/api/guardian/media/scan", body.toString());
-            } catch (Exception ignored) {
-                // Best effort: media scanning never blocks the phone.
-            }
-        }).start();
+    /**
+     * Send one downscaled photo or video frame to the server's scanner.
+     * Returns the HTTP status (0 when there was no connection), so the
+     * collector can retry on a network failure but pass over an item the
+     * server will never accept.
+     */
+    static int uploadMediaScan(Context context, String mediaType, String fileName, String thumbnailB64) {
+        if (!photoScanEnabled(context)) return 204;
+        try {
+            JSONObject body = new JSONObject();
+            body.put("media_type", mediaType);
+            body.put("file_name", fileName);
+            body.put("image_b64", thumbnailB64);
+            HttpResult r = send(context, "POST", "/api/guardian/media/scan", body.toString());
+            return r == null ? 0 : r.status;
+        } catch (Exception e) {
+            // Best effort: media scanning never blocks the phone.
+            return 0;
+        }
     }
 
     /** Tell the parents protection changed. Kept until the server takes it (see {@link #flushTamper}). */

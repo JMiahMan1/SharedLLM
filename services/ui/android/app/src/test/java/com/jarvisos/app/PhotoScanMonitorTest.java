@@ -25,6 +25,19 @@ public class PhotoScanMonitorTest {
     }
 
     @Test
+    public void recognizesMediaInPictureMessagesAndNotifications() {
+        // MMS parts and notification attachments carry a mime type; older
+        // parts sometimes carry only a file name.
+        assertTrue(PhotoScanMonitor.isSupportedMedia("image/jpeg", null));
+        assertTrue(PhotoScanMonitor.isSupportedMedia("video/mp4", null));
+        assertTrue(PhotoScanMonitor.isSupportedMedia("image/heic", "IMG_0042.HEIC"));
+        assertTrue(PhotoScanMonitor.isSupportedMedia(null, "photo.jpg"));
+        assertFalse(PhotoScanMonitor.isSupportedMedia("text/plain", null));
+        assertFalse(PhotoScanMonitor.isSupportedMedia("application/pdf", "doc.pdf"));
+        assertFalse(PhotoScanMonitor.isSupportedMedia("", null));
+    }
+
+    @Test
     public void rejectsWhenDisabledAdultPhoneTooSmallOrAlreadySeen() {
         Set<String> seen = new HashSet<>();
         seen.add("seen_1");

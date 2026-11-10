@@ -51,6 +51,17 @@ public final class PhotoScanMonitor {
         return false;
     }
 
+    /** Whether a part or notification attachment is a supported photo or video. */
+    public static boolean isSupportedMedia(String mimeType, String fileName) {
+        String mime = mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.US);
+        if (SUPPORTED_IMAGE_MIMES.contains(mime) || SUPPORTED_VIDEO_MIMES.contains(mime)) return true;
+        if (fileName != null && fileName.contains(".")) {
+            String ext = fileName.substring(fileName.lastIndexOf('.') + 1).trim().toLowerCase(Locale.US);
+            return SUPPORTED_EXTENSIONS.contains(ext);
+        }
+        return false;
+    }
+
     /** Resolve media type category ("image" or "video") from mime or file name. */
     public static String mediaType(String mimeType, String fileName) {
         String mime = mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.US);

@@ -35,6 +35,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PhoneUsagePlugin.class);
 registerPlugin(MediaSessionPlugin.class);
 registerPlugin(CommsPlugin.class);
+        registerPlugin(PhotoScanPlugin.class);
         registerPlugin(GuardPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
@@ -69,6 +70,9 @@ registerPlugin(CommsPlugin.class);
         UsageSyncWorker.schedule(this);
         // Calls and texts the same way (a no-op without their permissions).
         CommsSyncWorker.schedule(this);
+        // New photos and videos on a protected child's phone (a no-op until
+        // the media permission is on and a parent keeps scanning enabled).
+        PhotoScanWorker.schedule(this);
     }
 
     @Override

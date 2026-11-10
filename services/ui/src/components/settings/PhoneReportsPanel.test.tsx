@@ -10,6 +10,8 @@ const comms = vi.hoisted(() => ({ hasAccess: vi.fn(), requestAccess: vi.fn() }))
 vi.mock('../../plugins/comms', () => ({ default: comms }));
 vi.mock('../../plugins/phoneUsage', () => ({ default: { hasAccess: vi.fn().mockResolvedValue({ granted: true }), openSettings: vi.fn() } }));
 vi.mock('../../plugins/mediaSession', () => ({ default: { hasAccess: vi.fn().mockResolvedValue({ granted: false }), openSettings: vi.fn() } }));
+const photos = vi.hoisted(() => ({ hasAccess: vi.fn(), requestAccess: vi.fn() }));
+vi.mock('../../plugins/photoScan', () => ({ default: photos }));
 const activity = vi.hoisted(() => ({ hasActivityAccess: vi.fn(), requestActivityAccess: vi.fn() }));
 vi.mock('../../lib/locationTracking', () => activity);
 
@@ -23,6 +25,11 @@ describe('PhoneReportsPanel', () => {
       return true;
     });
     comms.hasAccess.mockResolvedValue({ calls: false, sms: false });
+    photos.hasAccess.mockResolvedValue({ images: false, videos: false });
+    photos.requestAccess.mockImplementation(async () => {
+      photos.hasAccess.mockResolvedValue({ images: true, videos: true });
+      return { images: true, videos: true };
+    });
     comms.requestAccess.mockImplementation(async () => {
       comms.hasAccess.mockResolvedValue({ calls: true, sms: true });
       return { calls: true, sms: true };
@@ -37,6 +44,14 @@ describe('PhoneReportsPanel', () => {
     expect(comms.requestAccess).toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId('phone-report-calls')).toHaveTextContent('Allowed'));
     expect(screen.getByTestId('phone-report-sms')).toHaveTextContent('Allowed');
+  });
+
+  it('asks for photos and videos, which the safety scanner reads', async () => {
+    render(<PhoneReportsPanel />);
+    const row = await screen.findByTestId('phone-report-photos');
+    await userEvent.click(row.querySelector('button')!);
+    expect(photos.requestAccess).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('phone-report-photos')).toHaveTextContent('Allowed'));
   });
 
   it('asks for physical activity, which tells it when you are driving', async () => {

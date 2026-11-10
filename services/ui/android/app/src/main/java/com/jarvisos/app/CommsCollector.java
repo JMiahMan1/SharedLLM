@@ -197,6 +197,10 @@ final class CommsCollector {
                 postOrSkip(app, body);
                 prefs.edit().putLong(KEY_MMS, at).putLong(KEY_MMS_ID, id).apply();
                 sent++;
+                // A picture message is also a picture on the phone: sample its
+                // photo/video parts for the family's safety scanner. Never
+                // allowed to break the message upload.
+                PhotoScan.scanMms(app, id);
             }
         }
         return sent;

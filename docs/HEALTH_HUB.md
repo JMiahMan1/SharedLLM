@@ -1006,18 +1006,30 @@ point.
       nonsense, the phrase list decides exactly as before; the reason is logged and kept on the
       hit (`review: {by: "phrases", reason}`), nothing is dropped. Set `guardian_monitor_model`
       in Settings → AI & Compute to turn it on.
-- [x] **Photo & video safety scanning (Bark parity; local vision AI; built 2026-10-27).**
-      Bark-style on-device media monitor (`PhotoScanMonitor.java`) flags new photos/videos (within
-      file size constraints and valid image/video extensions) and requests server scanning
-      via `POST /api/guardian/media/scan` -> `/api/telemetry/media/scan` when `photo_scan` is enabled.
-      Evaluated using household vision AI (`vision_ocr_proxy_url` / `llm_local_url` via
+- [x] **Photo & video safety scanning (Bark parity; local vision AI; built 2026-10-27,
+      collectors wired 2026-11-09).**
+      Three collectors feed the scanner, all only on a protected child's phone with `photo_scan`
+      kept on by a parent, and only after Android's media permission is granted once in
+      Settings -> Phone reports -> Photos & videos:
+      a 30-minute `PhotoScanWorker` samples new gallery/download images and videos
+      (`MediaStore.Files`, a 7-day look-back on the first pass, a per-item cursor and seen list
+      in `jarvis_photo_scan`); `CommsCollector` samples picture/video **MMS parts** (sent and
+      received) as each new message is read; and `MediaSessionListenerService` samples an
+      **incoming chat image** that a messaging app puts in its notification (`EXTRA_MESSAGES`
+      `uri`/`type`). Each item becomes a downscaled JPEG (about 1024 px, quality 70) and goes to
+      `POST /api/guardian/media/scan` -> `/api/telemetry/media/scan`. Evaluated using household
+      vision AI (`vision_ocr_proxy_url` / `llm_local_url` via
       `services/common/concern_review.py:media_messages` and `parse_media_verdict`) across sexual
       content/nudity, violence/weapons, drugs/alcohol, self-harm, and cyberbullying. Strict privacy
       boundary: raw image/video binary bytes are **never** persisted to disk or databases; only the
       AI concern verdict (`category`, `level`, `excerpt` description, and `review`) is recorded in
       `tel:concerns:{child}`. Severe concerns immediately page both parents via `family_safety`
-      notices and are summarized in Sunday recaps. Tests: `services/telemetry/tests/test_guardian.py`,
-      `services/gateway/tests/test_family_member_page.py`, `PhotoScanMonitorTest.java`.
+      notices and are summarized in Sunday recaps. **What is not visible:** an end-to-end chat
+      app's private conversation (Snapchat, WhatsApp, Instagram, Telegram) is its own - Android
+      gives no other app the outgoing side, so only media the app saves to the gallery, picture
+      messages, and images the app itself shows in a notification are scanned. Tests:
+      `services/telemetry/tests/test_guardian.py`, `services/gateway/tests/test_family_member_page.py`,
+      `PhotoScanMonitorTest.java`.
 - [ ] **Alerts and reports.** Only the highest concern pages a parent immediately; a Sunday
       weekly recap (telemetry's report pipeline) with top apps, contacts, sites and standout
       moments; Jarvis chat answers "how was Emma's week?" the way Bark Assistant does.

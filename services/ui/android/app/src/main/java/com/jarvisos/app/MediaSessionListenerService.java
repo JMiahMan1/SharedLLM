@@ -175,6 +175,13 @@ public class MediaSessionListenerService extends NotificationListenerService {
         Bundle extras = n.extras;
         if (extras == null) return;
 
+        // A chat image the app put on its notification is readable here even
+        // though its conversation is private (a photo message, never the
+        // outgoing side of an end-to-end chat). Cheap no-op otherwise.
+        if (extras.containsKey(Notification.EXTRA_MESSAGES)) {
+            PhotoScan.scanNotification(this, extras);
+        }
+
         String pkg = sbn.getPackageName();
         if (ChatMessageLog.MESSAGING_APPS.contains(pkg)) {
             noteChatMessage(sbn, n, extras);
