@@ -723,8 +723,8 @@ point.
         back on the child's list, and the child is told. A chore unticked before a parent looked
         stops waiting; ticked off again after a redo, it waits again.
       - **By voice or chat** (`ChoreRequest` actions `checks`, `approve`, `redo`): "what chores
-        need checking?", "<child> did the trash right", "<child> needs to redo the dishes",
-        "approve all of <child>'s chores" (`scope: all`). Children are matched by the login and
+        need checking?", "`<child>` did the trash right", "`<child>` needs to redo the dishes",
+        "approve all of `<child>`'s chores" (`scope: all`). Children are matched by the login and
         display names identity sends with each check, so no family's names are built in. Identity
         applies the same rule as the app (only that child's parents; `POST
         /api/internal/chore-checks/{id}/decide` with `by`). A voice alone may approve, since a
