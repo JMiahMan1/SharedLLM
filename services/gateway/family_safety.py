@@ -17,6 +17,7 @@ geo (important places, long stops). See docs/FAMILY_HUB.md.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -216,6 +217,81 @@ async def sos(request: Request):
 
 CRASH_COOLDOWN_S = 2 * 60
 
+#: Every crash alert, "I'm OK" and hard hit the phone let go, newest first,
+#: with what the phone decided on (the hit, any fall before it, the GPS before
+#: and after, the device), so a false alarm can be worked out afterwards.
+CRASH_REPORTS_KEY = "family_safety:crash_reports"
+CRASH_REPORTS_KEEP = 500
+#: A report bigger than this keeps its summary and drops the raw traces.
+CRASH_REPORT_MAX_BYTES = 64_000
+CRASH_REPORT_KINDS = {"sent": "sent", "crash_false_alarm": "false_alarm", "crash_candidate_ignored": "ignored"}
+_TRACES = ("accel_before", "accel_after", "fixes_before", "fixes_after")
+
+
+def crash_summary(user: str, kind: str, detail: dict) -> str:
+    """One log line: what decided it, how hard, the GPS, any fall, the device."""
+    d = detail.get("diagnostics") if isinstance(detail.get("diagnostics"), dict) else {}
+    dev = d.get("device") if isinstance(d.get("device"), dict) else {}
+    parts = [
+        f"confirmed_by={d.get('confirmed_by')}", f"ignored={d.get('ignored') or detail.get('reason')}",
+        f"first_g={d.get('first_g')}", f"peak_g={d.get('peak_g', detail.get('peak_g'))}",
+        f"speed_mph={d.get('speed_before_mph', detail.get('speed_before_mph'))}",
+        f"gps_steady={d.get('gps_steady')}", f"fall_ms={d.get('fall_ms')}",
+        f"device={dev.get('kind')}/{dev.get('model')}/build {dev.get('app_build')}",
+    ]
+    if detail.get("answered_after_s") is not None or d.get("answered_after_s") is not None:
+        parts.append(f"answered_after_s={detail.get('answered_after_s', d.get('answered_after_s'))}")
+    return f"[family-safety] crash report {kind} for {user}: " + " ".join(parts)
+
+
+async def record_crash_report(user: str, kind: str, detail: dict) -> None:
+    """Keep one report (best effort: a lost report never holds up an alert)."""
+    from services.gateway.notices import _redis
+
+    entry = {"user": user, "kind": kind, "received_at": time.time(), **detail}
+    raw = json.dumps(entry, default=str)
+    if len(raw) > CRASH_REPORT_MAX_BYTES and isinstance(entry.get("diagnostics"), dict):
+        entry["diagnostics"] = {k: v for k, v in entry["diagnostics"].items() if k not in _TRACES}
+        entry["traces_dropped"] = True
+        raw = json.dumps(entry, default=str)
+    log.warning(crash_summary(user, kind, detail))
+    try:
+        async with _redis() as conn:
+            await conn.lpush(CRASH_REPORTS_KEY, raw)
+            await conn.ltrim(CRASH_REPORTS_KEY, 0, CRASH_REPORTS_KEEP - 1)
+    except Exception as e:
+        log.warning(f"[family-safety] crash report not kept: {type(e).__name__}: {e}")
+
+
+@router.get("/api/family/crash-reports")
+async def crash_reports(request: Request, user: str | None = None, kind: str | None = None, limit: int = 50):
+    """Admin only: the crash reports (newest first), optionally one person's
+    or one kind's ("sent", "false_alarm", "ignored")."""
+    from services.gateway.main import _require_admin
+    from services.gateway.notices import _redis
+
+    await _require_admin(request)
+    limit = max(1, min(int(limit), CRASH_REPORTS_KEEP))
+    try:
+        async with _redis() as conn:
+            rows = await conn.lrange(CRASH_REPORTS_KEY, 0, CRASH_REPORTS_KEEP - 1)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Crash reports are unavailable") from e
+    out = []
+    for raw in rows:
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            continue
+        if user and entry.get("user") != user.lower():
+            continue
+        if kind and entry.get("kind") != kind:
+            continue
+        out.append(entry)
+        if len(out) >= limit:
+            break
+    return {"reports": out}
+
 
 def crash_text(name: str, auto: bool, speed_mph: float | None, location: dict | None, now: float,
                device: str = "phone") -> tuple[str, str, str | None]:
@@ -274,6 +350,11 @@ async def crash(request: Request):
             actions=actions),
     )
     log.warning(f"[family-safety] crash alert for {user} (auto={auto}): {sent} of {len(family)} notices accepted")
+    await record_crash_report(user, "sent", {
+        "auto": auto, "peak_g": body.get("peak_g"), "speed_before_mph": speed, "detected_at": body.get("detected_at"),
+        "position": body.get("position"), "notices": sent,
+        "diagnostics": body.get("diagnostics") if isinstance(body.get("diagnostics"), dict) else None,
+    })
     if not sent:
         await _end_cooldown(cooldown)
         raise HTTPException(status_code=503, detail=f"No one could be told; the {device} will try again")

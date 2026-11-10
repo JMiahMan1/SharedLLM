@@ -6183,6 +6183,14 @@ async def post_activity(request: Request):
         # A driving event from the phone (hard braking, over 80 mph, ...):
         # geo keeps it for the driver report, as the signed-in person.
         await _forward_driving_event(request, payload)
+    elif payload["feature"] == "safety" and str(payload["event"]).startswith("crash_") \
+            and payload["event"] in family_safety.CRASH_REPORT_KINDS:
+        # An "I'm OK" after a crash alarm, or a hard hit the phone let go:
+        # kept with its diagnostics beside the alerts that went out.
+        ident = await _acting_identity(request)
+        if ident and isinstance(payload["detail"], dict):
+            await family_safety.record_crash_report(
+                str(ident["user"]).lower(), family_safety.CRASH_REPORT_KINDS[payload["event"]], payload["detail"])
     return await _proxy_execution_with_identity(request, "/execute/activity", payload, as_user=body.get("as_user"))
 
 

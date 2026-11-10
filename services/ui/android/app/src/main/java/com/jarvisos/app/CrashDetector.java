@@ -2,6 +2,7 @@ package com.jarvisos.app;
 
 import java.util.ArrayDeque;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -57,6 +58,12 @@ final class CrashDetector {
     static final int GPS_STEADY_FIXES = 3;
     static final long GPS_STEADY_MS = 5_000L;
     static final long GPS_FRESH_MS = 2_500L;
+    /** Accelerometer kept around an impact: this long before it and after it. */
+    static final long TRACE_MS = 1_000L;
+    static final int TRACE_MAX = 150;
+    /** Fixes (trusted or not) kept from before an impact. */
+    static final long FIX_LOG_MS = 10_000L;
+    static final int FIX_AFTER_MAX = 60;
     /** About 16 mph, the same speed {@link MotionModeSelector} takes for a vehicle. */
     static final double ARM_MIN_MPS = 7.0;
     static final long ARM_RECENT_MS = 10_000L;
@@ -94,6 +101,12 @@ final class CrashDetector {
         /** NaN when the fix had none. */
         final double accuracyM;
         final long positionAtMs;
+        /**
+         * What the detector saw, for working out a false alarm afterwards:
+         * see {@link CrashDetector#diagnostics}. Null on a crash kept by an
+         * older build.
+         */
+        JSONObject diagnostics;
 
         Result(double peakG, double speedBeforeMph, long detectedAtMs,
                double lat, double lon, double accuracyM, long positionAtMs) {
@@ -123,6 +136,7 @@ final class CrashDetector {
             body.put("speed_before_mph", speedBeforeMph);
             body.put("peak_g", peakG);
             body.put("detected_at", detectedAtMs);
+            if (diagnostics != null) body.put("diagnostics", diagnostics);
             return body;
         }
 
@@ -136,13 +150,16 @@ final class CrashDetector {
             o.put("lon", lon);
             if (!Double.isNaN(accuracyM)) o.put("accuracy", accuracyM);
             o.put("at", positionAtMs);
+            if (diagnostics != null) o.put("diagnostics", diagnostics);
             return o;
         }
 
         static Result fromJson(JSONObject o) {
-            return new Result(o.optDouble("peak_g", 0), o.optDouble("speed_before_mph", 0),
+            Result r = new Result(o.optDouble("peak_g", 0), o.optDouble("speed_before_mph", 0),
                     o.optLong("detected_at", 0), o.optDouble("lat", 0), o.optDouble("lon", 0),
                     o.has("accuracy") ? o.optDouble("accuracy", Double.NaN) : Double.NaN, o.optLong("at", 0));
+            r.diagnostics = o.optJSONObject("diagnostics");
+            return r;
         }
     }
 
@@ -181,6 +198,22 @@ final class CrashDetector {
     // and when the last long-enough fall ended.
     private long fallStart = -1L;
     private long fallEndedAt = Long.MIN_VALUE / 2;
+    private long lastFallMs;
+
+    // For the diagnostics: the last TRACE_MS of {time, magnitude}, every fix of
+    // the last FIX_LOG_MS as {time, speed, accuracy}, and what was kept of both
+    // around the current candidate.
+    private final ArrayDeque<double[]> trace = new ArrayDeque<>();
+    private final ArrayDeque<double[]> recentFixes = new ArrayDeque<>();
+    private JSONArray traceBefore = new JSONArray();
+    private JSONArray traceAfter = new JSONArray();
+    private JSONArray fixesBefore = new JSONArray();
+    private JSONArray fixesAfter = new JSONArray();
+    private double firstMps2;
+    private long fallMsAtImpact = -1L;
+    private long fallEndedMsBeforeImpact = -1L;
+    /** A hard hit that was not reported, and why, until {@link #takeIgnored} collects it. */
+    private JSONObject ignored;
 
     /** Whether the phone is in driving mode; outside it no new impact is taken. */
     void setDriving(boolean driving) {
@@ -210,8 +243,15 @@ final class CrashDetector {
         expire(timeMs);
         double magnitude = Math.sqrt(x * x + y * y + z * z);
         noteFall(timeMs, magnitude);
+        trace.addLast(new double[]{timeMs, magnitude});
+        while (trace.size() > TRACE_MAX || (!trace.isEmpty() && timeMs - (long) trace.peekFirst()[0] > TRACE_MS)) {
+            trace.removeFirst();
+        }
         double beyond = magnitude - GRAVITY;
         if (impactAt >= 0) {
+            if (timeMs - impactAt <= TRACE_MS && traceAfter.length() < TRACE_MAX) {
+                traceAfter.put(point(timeMs - impactAt, magnitude));
+            }
             // Later jolts of the same crash (a second hit, the car settling)
             // only raise the peak.
             if (beyond > peakMps2) peakMps2 = beyond;
@@ -219,10 +259,16 @@ final class CrashDetector {
         }
         boolean impact = beyond >= SPIKE_MPS2;
         if (!impact || !armed(timeMs)) return null;
-        if (timeMs - fallEndedAt <= DROP_LANDS_WITHIN_MS) return null;  // it fell, then landed
+        if (timeMs - fallEndedAt <= DROP_LANDS_WITHIN_MS) {
+            // It fell, then landed.
+            ignored = hitOnly("drop", timeMs, beyond);
+            return null;
+        }
         gpsSteadyAtImpact = gpsSteady(timeMs);
         impactAt = timeMs;
         peakMps2 = beyond;
+        firstMps2 = beyond;
+        snapshotBefore(timeMs);
         speedBefore = topRecentSpeed(timeMs);
         stopAt = -1L;
         holdFixes = 0;
@@ -236,6 +282,7 @@ final class CrashDetector {
         if (nowMs - impactAt <= STOP_WITHIN_MS || Double.isNaN(lastLat)) return null;
         Result r = new Result(round1(peakMps2 / GRAVITY), DrivingMonitor.mph(speedBefore), impactAt,
                 lastLat, lastLon, lastAccuracy, nowMs);
+        r.diagnostics = diagnostics("gps_lost");
         lastReportedAt = impactAt;
         clearCandidate();
         recentSpeeds.clear();
@@ -249,6 +296,13 @@ final class CrashDetector {
      */
     Result onFix(long timeMs, double speedMps, double accuracyM, double lat, double lon) {
         expire(timeMs);
+        recentFixes.addLast(new double[]{timeMs, speedMps, accuracyM});
+        while (!recentFixes.isEmpty() && timeMs - (long) recentFixes.peekFirst()[0] > FIX_LOG_MS) {
+            recentFixes.removeFirst();
+        }
+        if (impactAt >= 0 && timeMs >= impactAt && fixesAfter.length() < FIX_AFTER_MAX) {
+            fixesAfter.put(fixPoint(timeMs - impactAt, speedMps, accuracyM));
+        }
         boolean trusted = !Double.isNaN(speedMps) && !Double.isNaN(accuracyM) && accuracyM <= MAX_ACCURACY_M;
         if (!trusted) return null;
         lastLat = lat;
@@ -270,7 +324,7 @@ final class CrashDetector {
         }
         if (timeMs < impactAt) return null;  // a fix from before the impact, delivered late
         if (speedMps >= RESUMED_MPS) {
-            clearCandidate();
+            discard("drove_on");
             return null;
         }
         if (stopAt < 0) {
@@ -285,13 +339,14 @@ final class CrashDetector {
             // still time for one.
             stopAt = -1L;
             holdFixes = 0;
-            if (timeMs - impactAt > STOP_WITHIN_MS) clearCandidate();
+            if (timeMs - impactAt > STOP_WITHIN_MS) discard("rolled_on");
             return null;
         }
         holdFixes++;
         if (timeMs - stopAt < HOLD_MS || holdFixes < HOLD_MIN_FIXES) return null;
         Result r = new Result(round1(peakMps2 / GRAVITY), DrivingMonitor.mph(speedBefore), impactAt,
                 lat, lon, accuracyM, timeMs);
+        r.diagnostics = diagnostics("stop");
         lastReportedAt = impactAt;
         clearCandidate();
         recentSpeeds.clear();
@@ -302,9 +357,9 @@ final class CrashDetector {
     private void expire(long nowMs) {
         if (impactAt < 0) return;
         if (stopAt < 0 && nowMs - impactAt > STOP_WITHIN_MS) {
-            clearCandidate();
+            discard("no_stop");
         } else if (stopAt >= 0 && nowMs - stopAt > HOLD_MS + HOLD_GRACE_MS) {
-            clearCandidate();
+            discard("stop_unconfirmed");
         }
     }
 
@@ -314,7 +369,10 @@ final class CrashDetector {
             if (fallStart < 0) fallStart = timeMs;
             return;
         }
-        if (fallStart >= 0 && timeMs - fallStart >= FREE_FALL_MIN_MS) fallEndedAt = timeMs;
+        if (fallStart >= 0 && timeMs - fallStart >= FREE_FALL_MIN_MS) {
+            fallEndedAt = timeMs;
+            lastFallMs = timeMs - fallStart;
+        }
         fallStart = -1L;
     }
 
@@ -347,6 +405,120 @@ final class CrashDetector {
             if (age >= 0 && age <= ARM_RECENT_MS && s[1] > top) top = s[1];
         }
         return top;
+    }
+
+    /**
+     * A hard hit that did not become a crash, once: why ({@code "drop"},
+     * {@code "drove_on"}, {@code "no_stop"}, ...) with the same diagnostics a
+     * crash carries. Null when there is none. For the false-alarm record, so a
+     * family's alarms can be checked against the near misses.
+     */
+    JSONObject takeIgnored() {
+        JSONObject n = ignored;
+        ignored = null;
+        return n;
+    }
+
+    private void discard(String reason) {
+        JSONObject d = diagnostics(null);
+        try {
+            d.put("ignored", reason);
+        } catch (Exception ignoredJson) {
+            // Diagnostics are best effort.
+        }
+        ignored = d;
+        clearCandidate();
+    }
+
+    /** A hit filtered before it became a candidate. */
+    private JSONObject hitOnly(String reason, long timeMs, double beyond) {
+        JSONObject d = new JSONObject();
+        try {
+            d.put("ignored", reason);
+            d.put("impact_at", timeMs);
+            d.put("first_g", round1(beyond / GRAVITY));
+            d.put("speed_before_mph", DrivingMonitor.mph(topRecentSpeed(timeMs)));
+            d.put("fall_ms", lastFallMs);
+            d.put("fall_ended_ms_before", timeMs - fallEndedAt);
+            d.put("gps_steady", gpsSteady(timeMs));
+            d.put("accel_before", traceSince(timeMs));
+            d.put("fixes_before", fixesSince(timeMs));
+        } catch (Exception e) {
+            // Diagnostics are best effort.
+        }
+        return d;
+    }
+
+    private void snapshotBefore(long timeMs) {
+        traceBefore = traceSince(timeMs);
+        traceAfter = new JSONArray();
+        fixesBefore = fixesSince(timeMs);
+        fixesAfter = new JSONArray();
+        long sinceFall = timeMs - fallEndedAt;
+        fallMsAtImpact = sinceFall <= 5_000L ? lastFallMs : -1L;
+        fallEndedMsBeforeImpact = sinceFall <= 5_000L ? sinceFall : -1L;
+    }
+
+    private JSONArray traceSince(long timeMs) {
+        JSONArray a = new JSONArray();
+        for (double[] s : trace) a.put(point((long) s[0] - timeMs, s[1]));
+        return a;
+    }
+
+    private JSONArray fixesSince(long timeMs) {
+        JSONArray a = new JSONArray();
+        for (double[] f : recentFixes) a.put(fixPoint((long) f[0] - timeMs, f[1], f[2]));
+        return a;
+    }
+
+    /** [ms from the impact, magnitude in m/s² with gravity]. */
+    private static JSONArray point(long dt, double magnitude) {
+        JSONArray p = new JSONArray();
+        p.put(dt);
+        p.put(Double.isNaN(magnitude) ? JSONObject.NULL : round1(magnitude));
+        return p;
+    }
+
+    /** [ms from the impact, speed m/s or null, accuracy m or null]. */
+    private static JSONArray fixPoint(long dt, double speed, double accuracy) {
+        JSONArray p = new JSONArray();
+        p.put(dt);
+        p.put(Double.isNaN(speed) ? JSONObject.NULL : round1(speed));
+        p.put(Double.isNaN(accuracy) ? JSONObject.NULL : round1(accuracy));
+        return p;
+    }
+
+    /**
+     * Everything the decision rested on, for the current candidate:
+     * {@code confirmed_by} ("stop" or "gps_lost", null when it was not), the
+     * first and peak hit in g, the speed before, whether the GPS was steady,
+     * any free fall just before ({@code fall_ms}, -1 for none), the
+     * accelerometer from {@link #TRACE_MS} before to after the hit, and every
+     * fix from {@link #FIX_LOG_MS} before it to the decision. Times are ms
+     * from the impact.
+     */
+    private JSONObject diagnostics(String confirmedBy) {
+        JSONObject d = new JSONObject();
+        try {
+            d.put("confirmed_by", confirmedBy == null ? JSONObject.NULL : confirmedBy);
+            d.put("impact_at", impactAt);
+            d.put("first_g", round1(firstMps2 / GRAVITY));
+            d.put("peak_g", round1(peakMps2 / GRAVITY));
+            d.put("speed_before_mph", DrivingMonitor.mph(speedBefore));
+            d.put("gps_steady", gpsSteadyAtImpact);
+            d.put("fix_after_impact", fixSinceImpact);
+            d.put("stopped_at_ms", stopAt >= 0 ? stopAt - impactAt : -1);
+            d.put("hold_fixes", holdFixes);
+            d.put("fall_ms", fallMsAtImpact);
+            d.put("fall_ended_ms_before", fallEndedMsBeforeImpact);
+            d.put("accel_before", traceBefore);
+            d.put("accel_after", traceAfter);
+            d.put("fixes_before", fixesBefore);
+            d.put("fixes_after", fixesAfter);
+        } catch (Exception e) {
+            // Diagnostics are best effort; the alert never waits on them.
+        }
+        return d;
     }
 
     private void clearCandidate() {

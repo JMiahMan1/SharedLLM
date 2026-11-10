@@ -8,6 +8,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -186,20 +187,66 @@ final class CrashAlert {
      */
     private static void reportFalseAlarm(Context app) {
         try {
-            JSONObject crash = new JSONObject(prefs(app).getString(KEY_CRASH, "{}"));
+            SharedPreferences p = prefs(app);
+            JSONObject crash = new JSONObject(p.getString(KEY_CRASH, "{}"));
             JSONObject detail = new JSONObject();
             detail.put("at", crash.optLong("detected_at", System.currentTimeMillis()));
             detail.put("peak_g", crash.optDouble("peak_g", 0));
             detail.put("speed_before_mph", crash.optDouble("speed_before_mph", 0));
-            JSONObject body = new JSONObject();
-            body.put("feature", "safety");
-            body.put("event", "crash_false_alarm");
-            body.put("item", "");
-            body.put("detail", detail);
-            ActivityOutbox.add(app, body);
+            long startedAt = p.getLong(KEY_SENDS_AT, 0L) - COUNTDOWN_MS;
+            detail.put("answered_after_s", Math.max(0, (System.currentTimeMillis() - startedAt) / 1000));
+            detail.put("diagnostics", withDevice(app, crash.optJSONObject("diagnostics")));
+            report(app, "crash_false_alarm", detail);
         } catch (Exception e) {
             Log.w(TAG, "false alarm not recorded", e);
         }
+    }
+
+    /**
+     * A hard hit the detector let go ({@link CrashDetector#takeIgnored}): kept
+     * with the false alarms so the two can be compared.
+     */
+    static void reportIgnored(Context context, JSONObject diagnostics) {
+        try {
+            JSONObject detail = new JSONObject();
+            detail.put("at", diagnostics.optLong("impact_at", System.currentTimeMillis()));
+            detail.put("reason", diagnostics.optString("ignored", ""));
+            detail.put("diagnostics", withDevice(context.getApplicationContext(), diagnostics));
+            report(context.getApplicationContext(), "crash_candidate_ignored", detail);
+        } catch (Exception e) {
+            Log.w(TAG, "ignored hit not recorded", e);
+        }
+    }
+
+    private static void report(Context app, String event, JSONObject detail) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("feature", "safety");
+        body.put("event", event);
+        body.put("item", "");
+        body.put("detail", detail);
+        ActivityOutbox.add(app, body);
+    }
+
+    /** The diagnostics with what this device is: its kind, model, Android and app build. */
+    static JSONObject withDevice(Context app, JSONObject diagnostics) {
+        JSONObject d = diagnostics != null ? diagnostics : new JSONObject();
+        try {
+            JSONObject device = new JSONObject();
+            device.put("kind", DeviceNoun.of(app));
+            device.put("model", Build.MANUFACTURER + " " + Build.MODEL);
+            device.put("sdk", Build.VERSION.SDK_INT);
+            try {
+                PackageInfo pi = app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
+                device.put("app_build", Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                        ? pi.getLongVersionCode() : pi.versionCode);
+            } catch (Exception e) {
+                device.put("app_build", JSONObject.NULL);
+            }
+            d.put("device", device);
+        } catch (Exception e) {
+            // Best effort.
+        }
+        return d;
     }
 
     private static void clear(Context app) {
@@ -216,8 +263,18 @@ final class CrashAlert {
      */
     private static Outcome send(Context app, boolean auto) {
         try {
-            JSONObject crash = new JSONObject(prefs(app).getString(KEY_CRASH, "{}"));
-            String body = CrashDetector.Result.fromJson(crash).toBody(auto).toString();
+            SharedPreferences p = prefs(app);
+            JSONObject crash = new JSONObject(p.getString(KEY_CRASH, "{}"));
+            CrashDetector.Result result = CrashDetector.Result.fromJson(crash);
+            JSONObject diagnostics = withDevice(app, result.diagnostics);
+            if (!auto) {
+                // "Get help" tapped: how far into the countdown.
+                long startedAt = p.getLong(KEY_SENDS_AT, 0L) - COUNTDOWN_MS;
+                diagnostics.put("answered_after_s",
+                        Math.max(0, (p.getLong(KEY_FIRST_TRY_AT, System.currentTimeMillis()) - startedAt) / 1000));
+            }
+            result.diagnostics = diagnostics;
+            String body = result.toBody(auto).toString();
             GuardApi.HttpResult r = GuardApi.send(app, "POST", "/api/family/crash", body);
             if (r == null) return Outcome.RETRY;
             return outcomeFor(r.status);

@@ -129,6 +129,7 @@ public class LocationTrackingService extends Service {
             CrashDetector.Result crash = crashDetector.onAccel(wallTime(event.timestamp),
                     event.values[0], event.values[1], event.values[2]);
             if (crash != null) CrashAlert.start(LocationTrackingService.this, crash);
+            reportIgnoredHit();
             if (wasPending != crashDetector.isPending()) syncCrashListening();
         }
 
@@ -603,7 +604,22 @@ public class LocationTrackingService extends Service {
         CrashDetector.Result crash = crashDetector.onFix(at, speed, accuracy,
                 location.getLatitude(), location.getLongitude());
         if (crash != null) CrashAlert.start(this, crash);
+        reportIgnoredHit();
         if (wasPending != crashDetector.isPending() || accelRegistered) syncCrashListening();
+    }
+
+    /** At most one ignored hit reported per this long: a rough road can jolt every few seconds. */
+    private static final long IGNORED_REPORT_GAP_MS = 2 * 60 * 1000L;
+    private long lastIgnoredReportAt = Long.MIN_VALUE / 2;
+
+    /** A hard hit the detector let go (a drop, the car driving on), for the false-alarm record. */
+    private void reportIgnoredHit() {
+        JSONObject ignored = crashDetector.takeIgnored();
+        if (ignored == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastIgnoredReportAt < IGNORED_REPORT_GAP_MS) return;
+        lastIgnoredReportAt = now;
+        CrashAlert.reportIgnored(this, ignored);
     }
 
     private void postDrivingEvents(List<DrivingMonitor.Event> events) {

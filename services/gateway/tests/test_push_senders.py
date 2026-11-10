@@ -62,6 +62,17 @@ class _Redis:
     async def delete(self, key):
         self.s.pop(key, None)
 
+    # Lists, for the crash reports.
+    async def lpush(self, key, value):
+        self.h.setdefault(key, [])
+        self.h[key].insert(0, value)
+
+    async def ltrim(self, key, start, end):
+        self.h[key] = self.h.get(key, [])[start:end + 1]
+
+    async def lrange(self, key, start, end):
+        return list(self.h.get(key, [])[start:end + 1])
+
 
 @pytest.fixture
 def sent(monkeypatch):
@@ -707,3 +718,86 @@ def test_get_help_after_a_crash_says_they_asked(safety_client, sent):
     body = {"auto": False, "speed_before_mph": 30, "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000}}
     client.post("/api/family/crash", json=body)
     assert sent[0]["body"].startswith("Leo asked for help after a possible crash at about 30 mph.")
+
+
+@pytest.fixture
+def as_admin(monkeypatch):
+    from services.gateway import main
+
+    async def acting(request):
+        return {"user": "jeremiah", "is_admin": True}
+
+    monkeypatch.setattr(main, "_acting_identity", acting)
+
+
+def _crash_diagnostics(**extra):
+    return {"confirmed_by": "gps_lost", "first_g": 4.3, "peak_g": 4.8, "gps_steady": False, "fall_ms": -1,
+            "accel_before": [[-20, 9.8], [0, 52.0]], "fixes_after": [],
+            "device": {"kind": "tablet", "model": "samsung SM-X520", "app_build": 604}, **extra}
+
+
+def test_a_crash_alert_is_kept_with_what_the_phone_decided_on(safety_client, sent, as_admin):
+    import time
+
+    client, _ = safety_client
+    body = {"auto": True, "speed_before_mph": 41.6, "peak_g": 4.8, "detected_at": 1,
+            "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000},
+            "diagnostics": _crash_diagnostics()}
+    client.post("/api/family/crash", json=body)
+    reports = client.get("/api/family/crash-reports").json()["reports"]
+    assert len(reports) == 1
+    r = reports[0]
+    assert r["user"] == "leo" and r["kind"] == "sent" and r["auto"] is True and r["notices"] == 2
+    assert r["diagnostics"]["confirmed_by"] == "gps_lost"
+    assert r["diagnostics"]["device"]["kind"] == "tablet"
+    assert r["diagnostics"]["accel_before"][1] == [0, 52.0]
+
+
+def test_im_ok_and_hits_let_go_are_kept_beside_the_alerts(safety_client, sent, monkeypatch):
+    from services.gateway import main
+
+    client, _ = safety_client
+
+    async def acting(request):
+        return {"user": "Leo", "is_admin": True}
+
+    async def proxied(request, path, payload, as_user=None):
+        return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(main, "_acting_identity", acting)
+    monkeypatch.setattr(main, "_proxy_execution_with_identity", proxied)
+    client.post("/api/activity", json={"feature": "safety", "event": "crash_false_alarm", "item": "",
+                                       "detail": {"at": 1, "peak_g": 4.4, "answered_after_s": 12,
+                                                  "diagnostics": _crash_diagnostics(confirmed_by="stop")}})
+    client.post("/api/activity", json={"feature": "safety", "event": "crash_candidate_ignored", "item": "",
+                                       "detail": {"at": 2, "reason": "drop",
+                                                  "diagnostics": _crash_diagnostics(ignored="drop", fall_ms=220)}})
+    client.post("/api/activity", json={"feature": "notes", "event": "view"})
+    kinds = [r["kind"] for r in client.get("/api/family/crash-reports", params={"user": "leo"}).json()["reports"]]
+    assert kinds == ["ignored", "false_alarm"]
+    only = client.get("/api/family/crash-reports", params={"kind": "false_alarm"}).json()["reports"]
+    assert only[0]["answered_after_s"] == 12 and only[0]["diagnostics"]["confirmed_by"] == "stop"
+
+
+def test_a_huge_report_keeps_its_summary(safety_client, sent, as_admin):
+    import time
+
+    client, _ = safety_client
+    big = _crash_diagnostics(accel_before=[[i, 9.8] for i in range(20_000)])
+    client.post("/api/family/crash", json={"auto": True, "position": {"lat": 1, "lon": 2, "at": time.time() * 1000},
+                                           "diagnostics": big})
+    r = client.get("/api/family/crash-reports").json()["reports"][0]
+    assert r["traces_dropped"] is True and "accel_before" not in r["diagnostics"]
+    assert r["diagnostics"]["first_g"] == 4.3
+
+
+def test_only_an_admin_reads_crash_reports(safety_client, sent, monkeypatch):
+    from services.gateway import main
+
+    client, _ = safety_client
+
+    async def not_admin(request):
+        return {"user": "leo", "is_admin": False}
+
+    monkeypatch.setattr(main, "_acting_identity", not_admin)
+    assert client.get("/api/family/crash-reports").status_code == 403

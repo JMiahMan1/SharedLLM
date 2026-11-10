@@ -403,4 +403,73 @@ public class CrashDetectorTest {
         accel(9_000, 45);
         assertNotNull(stopFrom(12_000, 15_000));
     }
+
+    // What a crash, and a hit let go, carry for working out false alarms.
+
+    @Test
+    public void aCrashCarriesWhatItWasDecidedOn() throws Exception {
+        drive(10_000);
+        accel(10_480, 0.2);
+        accel(10_500, 45);
+        accel(10_520, 30);
+        CrashDetector.Result r = stopFrom(13_000, 15_000);
+        JSONObject d = r.diagnostics;
+        assertEquals("stop", d.getString("confirmed_by"));
+        assertEquals(4.6, d.getDouble("first_g"), 1e-9);
+        assertTrue(d.getBoolean("gps_steady"));
+        assertEquals(-1, d.getLong("fall_ms"));
+        assertEquals(2_500, d.getLong("stopped_at_ms"));
+        // The spike is in the trace at 0 ms, the one after it at +20 ms.
+        org.json.JSONArray before = d.getJSONArray("accel_before");
+        assertEquals(0, before.getJSONArray(before.length() - 1).getLong(0));
+        assertEquals(20, d.getJSONArray("accel_after").getJSONArray(0).getLong(0));
+        // Fixes from 10 s before (each [ms, speed, accuracy]) and the stop after.
+        assertEquals(20.0, d.getJSONArray("fixes_before").getJSONArray(0).getDouble(1), 1e-9);
+        assertEquals(2_500, d.getJSONArray("fixes_after").getJSONArray(0).getLong(0));
+        // It goes to the server, and survives the app restarting mid-countdown.
+        assertEquals("stop", r.toBody(true).getJSONObject("diagnostics").getString("confirmed_by"));
+        CrashDetector.Result back = CrashDetector.Result.fromJson(new JSONObject(r.toJson().toString()));
+        assertEquals("stop", back.diagnostics.getString("confirmed_by"));
+    }
+
+    @Test
+    public void aCrashThatTookTheGpsSaysSo() throws Exception {
+        drive(10_000);
+        accel(10_500, 45);
+        CrashDetector.Result r = detector.onAccel(T0 + 31_000, 0, 0, G);
+        assertEquals("gps_lost", r.diagnostics.getString("confirmed_by"));
+        assertFalse(r.diagnostics.getBoolean("fix_after_impact"));
+    }
+
+    @Test
+    public void aDropIsKeptAsAHitLetGo() throws Exception {
+        drive(10_000);
+        fall(10_500, 300);
+        accel(10_500, 60);
+        JSONObject n = detector.takeIgnored();
+        assertEquals("drop", n.getString("ignored"));
+        assertTrue(n.getLong("fall_ms") >= 280);
+        assertNull(detector.takeIgnored());  // once
+    }
+
+    @Test
+    public void aHitTheCarDroveOnFromIsKeptAsAHitLetGo() throws Exception {
+        drive(10_000);
+        accel(10_500, 45);
+        fix(12_000, 20);
+        JSONObject n = detector.takeIgnored();
+        assertEquals("drove_on", n.getString("ignored"));
+        assertTrue(n.isNull("confirmed_by"));
+    }
+
+    @Test
+    public void aCrashWithPatchyGpsThatNeverStoppedIsKeptAsNoStop() throws Exception {
+        detector.setDriving(true);
+        for (long t = 0; t <= 8_000; t += 4_000) fix(t, 20);
+        accel(9_000, 45);
+        detector.onAccel(T0 + 31_000, 0, 0, G);
+        JSONObject n = detector.takeIgnored();
+        assertEquals("no_stop", n.getString("ignored"));
+        assertFalse(n.getBoolean("gps_steady"));
+    }
 }
