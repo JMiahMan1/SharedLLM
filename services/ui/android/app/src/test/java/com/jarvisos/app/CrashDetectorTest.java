@@ -339,4 +339,12 @@ public class CrashDetectorTest {
         assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
         assertFalse(detector.isPending());
     }
+
+    @Test
+    public void onlyAPhoneListensForCrashes() {
+        assertTrue(CrashDetector.listensOn(411));   // a phone
+        assertTrue(CrashDetector.listensOn(0));     // unreadable: treated as a phone
+        assertFalse(CrashDetector.listensOn(600));  // a tablet
+        assertFalse(CrashDetector.listensOn(800));
+    }
 }

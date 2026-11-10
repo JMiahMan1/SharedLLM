@@ -25,6 +25,19 @@ import org.json.JSONObject;
  */
 final class CrashDetector {
     static final double GRAVITY = 9.81;
+
+    /**
+     * Only a phone listens for crashes. A tablet rides loose in a car (on a
+     * lap, in a seat-back pocket, slid to the floor), so a drop reads as a
+     * 4 g impact, and its GPS inside the car often gives no trusted fix for
+     * 20 s, which by itself confirms a crash. Noah's tablet sent two full
+     * crash alerts in one afternoon that way. Phone makers do the same: crash
+     * detection runs on phones and watches, not tablets.
+     */
+    static boolean listensOn(int smallestWidthDp) {
+        return "phone".equals(DeviceNoun.forWidth(smallestWidthDp));
+    }
+
     /**
      * About 4 g beyond gravity in one sample: an impact on its own. There is
      * deliberately no softer path (a 2.5 g jolt held for a few samples reads
