@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { isAxiosError } from 'axios';
+import toast from 'react-hot-toast';
 import {
   ArrowRight,
   CalendarClock,
@@ -21,6 +22,7 @@ import { useAuth } from '../context/AuthContext';
 import { memberPath, statusQuery } from '../lib/memberPage';
 import { duration } from '../lib/phoneUsageFormat';
 import { lockedLine } from '../lib/screenTimeText';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import UserAvatar from '../components/UserAvatar';
 import { TimeRing } from '../components/member/charts';
 import RecapCard from '../components/guardian/RecapCard';
@@ -46,17 +48,20 @@ const GRID = 'grid min-w-0 grid-cols-1 content-start items-start gap-3 sm:gap-4 
 
 type GuardianDomain = 'all' | 'overview' | 'heart' | 'time' | 'safety';
 
-const DOMAINS: Array<{ id: GuardianDomain; label: string; icon: LucideIcon; description: string }> = [
-  { id: 'all', label: 'All areas', icon: LayoutGrid, description: 'Every guardian card in one view' },
-  { id: 'overview', label: 'Overview & Alerts', icon: Sparkles, description: 'Weekly recap, open requests, and content concerns' },
-  { id: 'heart', label: 'Heart & Faith', icon: HeartHandshake, description: 'Scripture, prayer prompts, and parent conversation journal' },
-  { id: 'time', label: 'Time & Chores', icon: CalendarClock, description: 'Daily chores, earned screen time, and weekly routines' },
-  { id: 'safety', label: 'Safety & Devices', icon: ShieldCheck, description: 'Geofence alerts, lock-screen notifications, and device protection' },
+// `short` is the phone label (five tabs side by side on a 360 px screen); `label` stays the accessible name.
+const DOMAINS: Array<{ id: GuardianDomain; label: string; short: string; icon: LucideIcon; description: string }> = [
+  { id: 'all', label: 'All areas', short: 'All', icon: LayoutGrid, description: 'Every guardian card in one view' },
+  { id: 'overview', label: 'Overview & Alerts', short: 'Overview', icon: Sparkles, description: 'Weekly recap, open requests, and content concerns' },
+  { id: 'heart', label: 'Heart & Faith', short: 'Faith', icon: HeartHandshake, description: 'Scripture, prayer prompts, and parent conversation journal' },
+  { id: 'time', label: 'Time & Chores', short: 'Time', icon: CalendarClock, description: 'Daily chores, earned screen time, and weekly routines' },
+  { id: 'safety', label: 'Safety & Devices', short: 'Safety', icon: ShieldCheck, description: 'Geofence alerts, lock-screen notifications, and device protection' },
 ];
+const DOMAIN_IDS = new Set<string>(DOMAINS.map((d) => d.id));
 
 const ROLE_WORDS: Record<string, string> = { child: 'Child', teen: 'Teen' };
 const LOCK_FOR = [30, 60, 120];
 const BONUS = [15, 30, 60];
+const minutesWord = (m: number) => (m < 60 ? `${m} min` : `${m / 60} hr`);
 
 /**
  * The family guardian page.
@@ -83,12 +88,12 @@ export default function Guardian() {
 
 function Header({ description, child }: { description: string; child?: FamilyRecord }) {
   return (
-    <header className="glass-panel relative overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5">
+    <header className="glass-panel relative overflow-hidden rounded-2xl border border-white/10 p-3.5 sm:p-5">
       <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-sky-500/10 blur-3xl" aria-hidden />
       <div className="relative flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3.5">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/20 to-indigo-500/10 shadow-inner">
-            <ShieldHalf size={24} className="text-sky-300" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/20 to-indigo-500/10 shadow-inner sm:h-12 sm:w-12" aria-hidden>
+            <ShieldHalf size={22} className="text-sky-300" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -99,7 +104,8 @@ function Header({ description, child }: { description: string; child?: FamilyRec
                 </span>
               )}
             </div>
-            <p className="mt-0.5 break-words text-xs leading-relaxed text-slate-400">{description}</p>
+            {/* On a phone the child's own card below says who and how; the header stays one line. */}
+            <p className={`mt-0.5 break-words text-xs leading-relaxed text-slate-400 ${child ? 'hidden sm:block' : ''}`}>{description}</p>
           </div>
         </div>
         {child && (
@@ -107,8 +113,9 @@ function Header({ description, child }: { description: string; child?: FamilyRec
             to={memberPath(child.username)}
             className="glass-button inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold text-sky-100"
             data-testid="guardian-full-page"
+            aria-label={`${child.display_name || child.username}'s full page`}
           >
-            Full page <ArrowRight size={14} />
+            Full page <ArrowRight size={14} aria-hidden />
           </Link>
         )}
       </div>
@@ -127,13 +134,24 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
     setOpenAction(null);
     void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
   };
+  // Every quick action says what it did (or that it did not), so a tap is never silent.
   const pause = useMutation({
     mutationFn: (body: { until?: string; resume?: boolean }) => api.pauseScreenTime(username, body),
-    onSuccess: refresh,
+    onSuccess: (_d, body) => {
+      refresh();
+      toast.success(body.resume ? `${name}'s screen time is back on` : body.until
+        ? `${name}'s devices are locked until ${new Date(body.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+        : `${name}'s screen time is paused until you resume it`);
+    },
+    onError: () => toast.error(`Could not change ${name}'s screen time. Try again.`),
   });
   const bonus = useMutation({
     mutationFn: (minutes: number) => api.giveScreenTimeBonus(username, minutes),
-    onSuccess: refresh,
+    onSuccess: (_d, minutes) => {
+      refresh();
+      toast.success(`Gave ${name} ${minutesWord(minutes)} more today`);
+    },
+    onError: () => toast.error(`Could not give ${name} more time. Try again.`),
   });
 
   if (!status) return null;
@@ -174,8 +192,11 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
             </div>
             <p className="mt-0.5 text-xs text-slate-300">{summaryText}</p>
           </div>
-          <div className="hidden sm:block">
-            <TimeRing used={status.used_min} limit={status.limit_min} size={44} label={false} />
+          <div className="flex shrink-0 flex-col items-center gap-0.5" data-testid="guardian-status-ring">
+            <TimeRing used={status.used_min} limit={status.limit_min} size={40} label={false} />
+            <span className={`text-[10px] font-medium ${status.limit_min !== null && status.used_min > status.limit_min ? 'text-amber-300' : 'text-slate-400'}`} aria-hidden>
+              {duration(status.used_min * 60000)}
+            </span>
           </div>
         </div>
 
@@ -188,8 +209,8 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
               className="glass-button inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold disabled:opacity-50"
               data-testid="guardian-quick-pause"
             >
-              {status.paused ? <Play size={14} /> : <Pause size={14} />}
-              <span>{status.paused ? 'Resume' : 'Pause'}</span>
+              {status.paused ? <Play size={14} aria-hidden /> : <Pause size={14} aria-hidden />}
+              <span>{pause.isPending && !pause.variables?.until ? 'Saving…' : status.paused ? 'Resume' : 'Pause'}</span>
             </button>
             <button
               type="button"
@@ -199,7 +220,7 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
               className="glass-button inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold disabled:opacity-50"
               data-testid="guardian-quick-bonus"
             >
-              <PlusCircle size={14} />
+              <PlusCircle size={14} aria-hidden />
               <span>Bonus</span>
             </button>
             <button
@@ -210,7 +231,7 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
               className="glass-button inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold disabled:opacity-50"
               data-testid="guardian-quick-lock"
             >
-              <Lock size={14} />
+              <Lock size={14} aria-hidden />
               <span>Lock</span>
             </button>
           </div>
@@ -218,8 +239,13 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
       </div>
 
       {openAction && status.can_manage && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-white/5 pt-2.5">
-          <span className="text-[11px] font-medium text-slate-400">
+        <div
+          className="flex flex-wrap items-center gap-2 border-t border-white/5 pt-2.5"
+          role="group"
+          aria-label={openAction === 'bonus' ? `Give ${name} extra time today` : `Lock ${name}'s devices for`}
+          data-testid="guardian-quick-options"
+        >
+          <span className="w-full text-[11px] font-medium text-slate-400 sm:w-auto">
             {openAction === 'bonus' ? 'Give extra time today:' : 'Lock devices for:'}
           </span>
           {(openAction === 'bonus' ? BONUS : LOCK_FOR).map((m) => (
@@ -232,11 +258,18 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
                   ? bonus.mutate(m)
                   : pause.mutate({ until: new Date(Date.now() + m * 60000).toISOString() })
               }
-              className="min-h-11 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 text-xs font-semibold text-sky-100 hover:bg-sky-400/20 disabled:opacity-50"
+              className="min-h-11 flex-1 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 text-xs font-semibold text-sky-100 hover:bg-sky-400/20 disabled:opacity-50 sm:flex-none"
             >
-              {m < 60 ? `+${m} min` : `${m / 60} hr`}
+              {openAction === 'bonus' ? `+${minutesWord(m)}` : minutesWord(m)}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setOpenAction(null)}
+            className="min-h-11 rounded-xl px-3 text-xs font-medium text-slate-400 hover:text-white"
+          >
+            Cancel
+          </button>
         </div>
       )}
     </section>
@@ -275,16 +308,49 @@ function GuardianSelf() {
 /** A parent's side: one child at a time, the guarding cards that are theirs. */
 function GuardianChildren() {
   const me = useAuth().user?.username || '';
-  const { data: family = [], isLoading, error } = useQuery({
+  const { data: family = [], isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['family-roster'],
     queryFn: () => api.getFamily(),
     retry: false,
     staleTime: 10 * 60 * 1000,
   });
   const children = useMemo(() => family.filter((m) => m.is_minor && m.username !== me), [family, me]);
-  const [selected, setSelected] = useState('');
-  const [domain, setDomain] = useState<GuardianDomain>('all');
+  // The child and the area live in the address (?member=&area=), so a reload, the back button or a shared link
+  // lands where the parent was. A phone opens on the overview: every area at once is a dozen screens of scrolling.
+  const [params, setParams] = useSearchParams();
+  const phone = useMediaQuery(PHONE_QUERY);
+  const selected = params.get('member') || '';
+  const areaParam = params.get('area') || '';
+  const domain: GuardianDomain = DOMAIN_IDS.has(areaParam) ? (areaParam as GuardianDomain) : phone ? 'overview' : 'all';
+  const setParam = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    next.set(key, value);
+    setParams(next, { replace: true });
+  };
+  const setSelected = (username: string) => setParam('member', username);
+  const setDomain = (id: GuardianDomain) => setParam('area', id);
   const child = children.find((c) => c.username === selected) ?? children[0];
+  // Switching area or child brings the parent back to the top of what changed, not the middle of a long list.
+  const contentTop = useRef<HTMLDivElement>(null);
+  // The bar only takes a background once it is stuck under the header; in place it sits on the page like a card.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const bar = barRef.current;
+    const scroller = bar?.closest('main');
+    if (!bar || !scroller) return;
+    const check = () => setStuck(bar.getBoundingClientRect().top <= scroller.getBoundingClientRect().top + 1
+      && scroller.scrollTop > 0 && (contentTop.current?.getBoundingClientRect().top ?? 1) < bar.getBoundingClientRect().top + 1);
+    check();
+    scroller.addEventListener('scroll', check, { passive: true });
+    return () => scroller.removeEventListener('scroll', check);
+  }, [child?.username]);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    const el = contentTop.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' });
+  }, [domain, child?.username]);
   const { data: status } = useQuery({ ...statusQuery(child?.username || ''), enabled: Boolean(child) });
   const name = child ? child.display_name || child.username : '';
 
@@ -292,7 +358,11 @@ function GuardianChildren() {
     return (
       <div className={PAGE} data-testid="guardian-page">
         <Header description="The week, what to talk about and every control, one child at a time." />
-        <div className="h-40 skeleton rounded-2xl" aria-hidden />
+        <div className="space-y-3" role="status" aria-label="Loading your family">
+          <div className="h-12 skeleton rounded-2xl" aria-hidden />
+          <div className="h-28 skeleton rounded-2xl" aria-hidden />
+          <div className="h-40 skeleton rounded-2xl" aria-hidden />
+        </div>
       </div>
     );
   }
@@ -312,7 +382,17 @@ function GuardianChildren() {
     return (
       <div className={PAGE} data-testid="guardian-page">
         <Header description="The week, what to talk about and every control, one child at a time." />
-        <p className="glass-panel rounded-2xl p-5 text-sm text-amber-300">The family list could not be loaded.</p>
+        <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl p-5" role="alert" data-testid="guardian-load-error">
+          <p className="text-sm text-amber-300">The family list could not be loaded. Check the connection and try again.</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="glass-button min-h-11 rounded-xl px-4 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {isFetching ? 'Trying…' : 'Try again'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -339,8 +419,8 @@ function GuardianChildren() {
 
       {children.length > 1 && (
         <nav
-          className="-mx-1 flex gap-2.5 overflow-x-auto px-1 pb-1"
-          aria-label="Your children"
+          className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+          aria-label="Choose a child"
           data-testid="guardian-children"
           data-scroll-x
         >
@@ -372,41 +452,59 @@ function GuardianChildren() {
 
       <ChildStatusBanner child={child} status={status} />
 
-      <nav
-        className="sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/85 p-1.5 backdrop-blur"
-        aria-label="Guardian sections"
-        data-testid="guardian-domain-nav"
-        data-scroll-x
+      <div ref={contentTop} className="scroll-mt-4" aria-hidden />
+      {/* Sticks flush under the app's header (the shell scrolls <main>, padded 1 rem on phones and 2 on desktop),
+          so cards never show through above it. */}
+      <div
+        ref={barRef}
+        className={`sticky -top-4 z-20 -mx-4 px-4 py-2 transition-colors md:-top-8 md:-mx-8 md:px-8 ${
+          stuck ? 'bg-slate-950/90 shadow-lg shadow-black/30 backdrop-blur' : 'bg-transparent'
+        }`}
+        data-stuck={stuck || undefined}
       >
-        {DOMAINS.map((d) => {
-          const Icon = d.icon;
-          const active = domain === d.id;
-          return (
-            <button
-              key={d.id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => setDomain(d.id)}
-              className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3.5 text-xs font-semibold transition-colors ${
-                active
-                  ? 'border border-sky-400/40 bg-sky-400/15 text-white'
-                  : 'border border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
-              }`}
-            >
-              <Icon size={14} className={active ? 'text-sky-300' : 'text-slate-400'} />
-              <span>{d.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+        <div
+          className="grid grid-cols-5 gap-1 rounded-2xl border border-white/10 bg-slate-900/80 p-1 md:flex md:gap-1.5 md:p-1.5"
+          role="tablist"
+          aria-label={`Guardian areas for ${name}`}
+          data-testid="guardian-domain-nav"
+        >
+          {DOMAINS.map((d) => {
+            const Icon = d.icon;
+            const active = domain === d.id;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-controls="guardian-area-panel"
+                aria-label={d.label}
+                title={d.description}
+                onClick={() => setDomain(d.id)}
+                className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 md:min-h-11 md:shrink-0 md:flex-row md:gap-2 md:px-3.5 md:text-xs ${
+                  active
+                    ? 'border border-sky-400/40 bg-sky-400/15 text-white'
+                    : 'border border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                }`}
+                data-testid={`guardian-area-${d.id}`}
+              >
+                <Icon size={16} aria-hidden className={active ? 'text-sky-300' : 'text-slate-400'} />
+                <span className="max-w-full truncate md:hidden">{d.short}</span>
+                <span className="hidden md:inline">{d.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
+      <div id="guardian-area-panel" role="tabpanel" aria-label={DOMAINS.find((d) => d.id === domain)?.label} className="space-y-4 sm:space-y-5">
       {showOverview && (
         <section className="space-y-3" aria-label="Overview and alerts">
-          <SectionHeading
+          {domain === 'all' && <SectionHeading
             icon={Sparkles}
             title="Overview & Alerts"
             subtitle="Weekly activity summary, pending requests, and flagged content"
-          />
+          />}
           <div className={GRID}>
             <div className="min-w-0 md:col-span-2 lg:col-span-2">
               <RecapCard username={child.username} name={name} />
@@ -419,11 +517,11 @@ function GuardianChildren() {
 
       {showHeart && (
         <section className="space-y-3" aria-label="Heart and faith">
-          <SectionHeading
+          {domain === 'all' && <SectionHeading
             icon={HeartHandshake}
             title="Heart & Faith"
             subtitle="Scripture prompts, conversation starters, and shared parent notes"
-          />
+          />}
           <div className={GRID}>
             <GuidanceCard username={child.username} name={name} />
             <JournalCard username={child.username} name={name} />
@@ -433,11 +531,11 @@ function GuardianChildren() {
 
       {showTime && (
         <section className="space-y-3" aria-label="Time and chores">
-          <SectionHeading
+          {domain === 'all' && <SectionHeading
             icon={CalendarClock}
             title="Time & Chores"
             subtitle="Daily chores, earned bonus minutes, and weekly screen-time schedule"
-          />
+          />}
           <div className={GRID}>
             <ChoresCard username={child.username} name={name} />
             <EarnTimeControls username={child.username} name={name} />
@@ -448,11 +546,11 @@ function GuardianChildren() {
 
       {showSafety && (
         <section className="space-y-3" aria-label="Safety and devices">
-          <SectionHeading
+          {domain === 'all' && <SectionHeading
             icon={ShieldCheck}
             title="Safety & Devices"
             subtitle="Geofence alerts, lock-screen protection, and hardware management"
-          />
+          />}
           <div className={GRID}>
             <GeofenceAlertsCard username={child.username} name={name} />
             <NotificationLockCard username={child.username} name={name} />
@@ -463,6 +561,7 @@ function GuardianChildren() {
           </div>
         </section>
       )}
+      </div>
     </div>
   );
 }

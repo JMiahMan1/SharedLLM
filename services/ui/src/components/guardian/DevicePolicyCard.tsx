@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Cpu, Plus, Shield, Trash2, Wifi } from 'lucide-react';
+import { ChevronDown, Cpu, Plus, Shield, Trash2, Wifi } from 'lucide-react';
+import Toggle from '../ui/Toggle';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { statusQuery } from '../../lib/memberPage';
@@ -59,6 +60,9 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
 
   const [edited, setDraft] = useState<PolicyDraft | null>(null);
   const draft = edited ?? draftFrom(rules);
+  // Nothing here is applied until Save: say so, so an added network is not lost by walking away.
+  const dirty = edited !== null && JSON.stringify(edited) !== JSON.stringify(draftFrom(rules));
+  const [openPart, setOpenPart] = useState<'wifi' | 'certs' | null>(null);
 
   // Draft inputs for adding new Wi-Fi
   const [newSsid, setNewSsid] = useState('');
@@ -171,13 +175,14 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
 
   return (
     <MemberCard
-      title="Device Policies & Security"
+      title="Device policies"
       icon={Shield}
       tone="text-sky-300"
       testId="guardian-device-policy-card"
       isLoading={isLoading}
+      aside={dirty ? <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-amber-200" data-testid="device-policy-unsaved">Unsaved changes</span> : undefined}
     >
-      <div className="space-y-4 text-xs">
+      <div className="space-y-3 text-xs">
         {/* OS System Update Policy */}
         <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
           <div className="flex items-start gap-2.5">
@@ -185,13 +190,13 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
               <Cpu size={15} className="text-sky-300" />
             </span>
             <div>
-              <p className="font-semibold text-white">System Update Policy</p>
+              <p className="font-semibold text-white">System updates</p>
               <p className="text-[11px] leading-relaxed text-slate-400">Controls how Android OS system updates are installed on {name}&apos;s device.</p>
             </div>
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <div>
-              <label htmlFor="os-update-policy-select" className="mb-1 block text-slate-400">Update Policy</label>
+              <label htmlFor="os-update-policy-select" className="mb-1 block text-slate-400">When updates install</label>
               <select
                 id="os-update-policy-select"
                 value={draft.policyType}
@@ -199,16 +204,16 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 className="min-h-11 w-full rounded-xl border border-white/10 bg-slate-900 px-3 text-xs text-white"
                 data-testid="os-update-policy-select"
               >
-                <option value="default">Default (System / User decision)</option>
-                <option value="automatic">Automatic (Install immediately)</option>
-                <option value="windowed">Maintenance Window (Install overnight)</option>
-                <option value="postpone">Postpone (Delay up to 30 days)</option>
+                <option value="default">The phone decides (default)</option>
+                <option value="automatic">Right away</option>
+                <option value="windowed">Overnight, in a set window</option>
+                <option value="postpone">Hold off for up to 30 days</option>
               </select>
             </div>
             {draft.policyType === 'windowed' && (
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label htmlFor="os-update-window-start" className="mb-1 block text-slate-400">Window Start</label>
+                  <label htmlFor="os-update-window-start" className="mb-1 block text-slate-400">Window starts</label>
                   <input
                     id="os-update-window-start"
                     type="time"
@@ -219,7 +224,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                   />
                 </div>
                 <div className="flex-1">
-                  <label htmlFor="os-update-window-end" className="mb-1 block text-slate-400">Window End</label>
+                  <label htmlFor="os-update-window-end" className="mb-1 block text-slate-400">Window ends</label>
                   <input
                     id="os-update-window-end"
                     type="time"
@@ -237,36 +242,40 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
         {/* VPN Lockdown */}
         <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
           <div className="min-w-0 space-y-0.5">
-            <p className="font-semibold text-white">Always-on VPN Lockdown</p>
+            <p className="font-semibold text-white">Always-on VPN lockdown</p>
             <p className="text-[11px] leading-relaxed text-slate-400">
-              Blocks all device internet traffic if the Jarvis web filter VPN is disconnected.
+              No internet on {name}&apos;s phone unless the Jarvis web filter is connected.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setDraft({ ...draft, vpnLockdown: !draft.vpnLockdown })}
-            data-testid="toggle-vpn-lockdown"
-            className={`min-h-11 shrink-0 rounded-xl px-3.5 text-xs font-semibold transition-colors ${
-              draft.vpnLockdown
-                ? 'border border-sky-500/40 bg-sky-500/20 text-sky-200'
-                : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            {draft.vpnLockdown ? 'Lockdown On' : 'Off'}
-          </button>
+          <Toggle
+            checked={draft.vpnLockdown}
+            onChange={(next) => setDraft({ ...draft, vpnLockdown: next })}
+            ariaLabel="Always-on VPN lockdown"
+            testId="toggle-vpn-lockdown"
+          />
         </div>
 
         {/* Wi-Fi Provisioning */}
         <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
-          <div className="flex items-start gap-2.5">
+          <button
+            type="button"
+            onClick={() => setOpenPart(openPart === 'wifi' ? null : 'wifi')}
+            aria-expanded={openPart === 'wifi'}
+            className="flex min-h-11 w-full items-start gap-2.5 text-left"
+            data-testid="device-policy-wifi-toggle"
+          >
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10">
-              <Wifi size={15} className="text-emerald-300" />
+              <Wifi size={15} className="text-emerald-300" aria-hidden />
             </span>
-            <div>
-              <p className="font-semibold text-white">Provisioned Wi-Fi Networks</p>
-              <p className="text-[11px] leading-relaxed text-slate-400">Automatically configures trusted family Wi-Fi networks on device.</p>
-            </div>
-          </div>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold text-white">Wi-Fi networks</span>
+              <span className="block text-[11px] leading-relaxed text-slate-400">
+                {draft.wifiNetworks.length ? `${draft.wifiNetworks.length} set up on ${name}'s phone` : `Family Wi-Fi set up on ${name}'s phone`}
+              </span>
+            </span>
+            <ChevronDown size={16} aria-hidden className={`mt-2 shrink-0 text-slate-400 transition-transform ${openPart === 'wifi' ? 'rotate-180' : ''}`} />
+          </button>
+          {openPart === 'wifi' && (<>
           {draft.wifiNetworks.length > 0 && (
             <ul className="divide-y divide-white/5 rounded-xl border border-white/5 bg-black/20 px-3" data-testid="wifi-network-list">
               {draft.wifiNetworks.map((net) => (
@@ -280,6 +289,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                     onClick={() => handleRemoveWifi(net.ssid)}
                     className="-mr-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/10 hover:text-red-400"
                     title="Remove network"
+                    aria-label={`Remove ${net.ssid}`}
                     data-testid={`remove-wifi-${net.ssid}`}
                   >
                     <Trash2 size={14} />
@@ -294,14 +304,15 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
               <input
                 id="new-wifi-ssid"
                 type="text"
-                placeholder="Wi-Fi SSID"
+                placeholder="Network name (SSID)"
+                autoComplete="off"
                 value={newSsid}
                 onChange={(e) => setNewSsid(e.target.value)}
                 className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
                 data-testid="input-wifi-ssid"
               />
             </div>
-            <div>
+            {newSecurity !== 'open' && <div>
               <label htmlFor="new-wifi-password" className="sr-only">Password</label>
               <input
                 id="new-wifi-password"
@@ -310,9 +321,10 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
+                autoComplete="new-password"
                 data-testid="input-wifi-password"
               />
-            </div>
+            </div>}
             <div className="flex gap-2 sm:col-span-2">
               <label htmlFor="new-wifi-security" className="sr-only">Security</label>
               <select
@@ -331,26 +343,47 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                 type="button"
                 onClick={handleAddWifi}
                 className="glass-button flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-semibold text-white"
-                title="Add Wi-Fi"
+                title="Add network"
                 data-testid="btn-add-wifi"
               >
-                <Plus size={14} /> Add Wi-Fi
+                <Plus size={14} aria-hidden /> Add network
               </button>
             </div>
+            <label className="flex min-h-11 items-center gap-2 text-slate-300 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={newHidden}
+                onChange={(e) => setNewHidden(e.target.checked)}
+                className="h-4 w-4 accent-sky-400"
+                data-testid="input-wifi-hidden"
+              />
+              Hidden network (it does not broadcast its name)
+            </label>
           </div>
+          </>)}
         </div>
 
         {/* CA Root Certificates */}
         <div className="space-y-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
-          <div className="flex items-start gap-2.5">
+          <button
+            type="button"
+            onClick={() => setOpenPart(openPart === 'certs' ? null : 'certs')}
+            aria-expanded={openPart === 'certs'}
+            className="flex min-h-11 w-full items-start gap-2.5 text-left"
+            data-testid="device-policy-certs-toggle"
+          >
             <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/20 bg-amber-400/10">
-              <Shield size={15} className="text-amber-300" />
+              <Shield size={15} className="text-amber-300" aria-hidden />
             </span>
-            <div>
-              <p className="font-semibold text-white">Trusted CA Certificates</p>
-              <p className="text-[11px] leading-relaxed text-slate-400">Installs trusted root CA certificates into the device trust store.</p>
-            </div>
-          </div>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold text-white">Trusted certificates</span>
+              <span className="block text-[11px] leading-relaxed text-slate-400">
+                {draft.caCerts.length ? `${draft.caCerts.length} installed` : 'Advanced: root certificates the phone trusts'}
+              </span>
+            </span>
+            <ChevronDown size={16} aria-hidden className={`mt-2 shrink-0 text-slate-400 transition-transform ${openPart === 'certs' ? 'rotate-180' : ''}`} />
+          </button>
+          {openPart === 'certs' && (<>
           {draft.caCerts.length > 0 && (
             <ul className="divide-y divide-white/5 rounded-xl border border-white/5 bg-black/20 px-3" data-testid="ca-cert-list">
               {draft.caCerts.map((cert) => (
@@ -361,6 +394,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
                     onClick={() => handleRemoveCaCert(cert.alias)}
                     className="-mr-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-white/10 hover:text-red-400"
                     title="Remove certificate"
+                    aria-label={`Remove ${cert.alias}`}
                     data-testid={`remove-cert-${cert.alias}`}
                   >
                     <Trash2 size={14} />
@@ -375,7 +409,7 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
               <input
                 id="new-cert-alias"
                 type="text"
-                placeholder="Certificate Alias (e.g. JarvisHomeCA)"
+                placeholder="Name (e.g. JarvisHomeCA)"
                 value={newCertAlias}
                 onChange={(e) => setNewCertAlias(e.target.value)}
                 className="min-h-11 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white"
@@ -400,21 +434,33 @@ export default function DevicePolicyCard({ username, name }: DevicePolicyCardPro
               className="glass-button inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-semibold text-white"
               data-testid="btn-add-cert"
             >
-              <Plus size={14} /> Add Certificate
+              <Plus size={14} aria-hidden /> Add certificate
             </button>
           </div>
+          </>)}
         </div>
 
         {/* Save button */}
-        <div className="flex justify-end pt-1">
+        <div className="flex items-center justify-end gap-2 pt-1">
+          {dirty && (
+            <button
+              type="button"
+              onClick={() => setDraft(null)}
+              disabled={saveMutation.isPending}
+              className="min-h-11 rounded-xl px-4 text-xs font-medium text-slate-400 hover:text-white"
+              data-testid="discard-device-policies"
+            >
+              Discard
+            </button>
+          )}
           <button
             type="button"
             onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || !dirty}
             className="glass-button min-h-11 rounded-xl border border-sky-400/40 bg-sky-500/20 px-5 text-xs font-semibold text-sky-100 hover:bg-sky-500/30 disabled:opacity-50"
             data-testid="save-device-policies"
           >
-            {saveMutation.isPending ? 'Saving…' : 'Save Policies'}
+            {saveMutation.isPending ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
           </button>
         </div>
       </div>

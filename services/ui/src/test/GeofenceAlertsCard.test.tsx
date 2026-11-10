@@ -59,7 +59,7 @@ describe('GeofenceAlertsCard', () => {
 
     renderWithProviders(<GeofenceAlertsCard username="kid" name="Emma" />);
 
-    expect(await screen.findByText(/Photo & Video Safety Scan/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Photo and video safety scan/i)).toBeInTheDocument();
     expect(screen.getByText('School')).toBeInTheDocument();
     expect(screen.getByText('Home')).toBeInTheDocument();
 

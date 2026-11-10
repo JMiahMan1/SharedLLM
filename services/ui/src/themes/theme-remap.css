@@ -233,7 +233,7 @@
 [data-theme-scheme="light"] .bg-slate-950\/60 { background-color: color-mix(in srgb, var(--ht-surface) 60%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/70 { background-color: color-mix(in srgb, var(--ht-surface) 70%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/80 { background-color: color-mix(in srgb, var(--ht-surface) 80%, transparent) !important; }
-[data-theme-scheme="light"] .bg-slate-950\/85 { background-color: color-mix(in srgb, var(--ht-surface) 85%, transparent) !important; }
+[data-theme-scheme="light"] .bg-slate-950\/90 { background-color: color-mix(in srgb, var(--ht-surface) 90%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/95 { background-color: color-mix(in srgb, var(--ht-surface) 95%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/97 { background-color: color-mix(in srgb, var(--ht-surface) 97%, transparent) !important; }
 [data-theme-scheme="light"] .bg-slate-950\/98 { background-color: color-mix(in srgb, var(--ht-surface) 98%, transparent) !important; }
@@ -296,6 +296,7 @@
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.03\]:hover { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(17, 24, 39, 0.02) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.05\]:hover { background-color: rgba(17, 24, 39, 0.03) !important; }
+[data-theme-scheme="light"] .hover\:bg-white\/\[0\.06\]:hover { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.07\]:hover { background-color: rgba(17, 24, 39, 0.04) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(17, 24, 39, 0.05) !important; }
 [data-theme-scheme="light"] .hover\:bg-white\/\[0\.12\]:hover { background-color: rgba(17, 24, 39, 0.07) !important; }

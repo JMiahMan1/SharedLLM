@@ -38,13 +38,21 @@ describe('DevicePolicyCard', () => {
 
     renderWithProviders(<DevicePolicyCard username="kid" name="Emma" />);
 
-    expect(await screen.findByText(/System Update Policy/i)).toBeInTheDocument();
+    expect(await screen.findByText('System updates')).toBeInTheDocument();
+    // Wi-Fi and certificates are folded away behind a summary; opening each shows its list.
+    expect(screen.getByText("1 set up on Emma's phone")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('device-policy-wifi-toggle'));
     expect(screen.getByText('Home-WiFi')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('device-policy-certs-toggle'));
     expect(screen.getByText('JarvisRoot')).toBeInTheDocument();
+    // Nothing changed yet: nothing to save.
+    expect(screen.getByTestId('save-device-policies')).toBeDisabled();
 
     // Toggle VPN lockdown
     const vpnBtn = screen.getByTestId('toggle-vpn-lockdown');
     fireEvent.click(vpnBtn);
+
+    expect(screen.getByTestId('device-policy-unsaved')).toBeInTheDocument();
 
     // Change update policy to automatic
     const selectPolicy = screen.getByTestId('os-update-policy-select');
@@ -81,9 +89,10 @@ describe('DevicePolicyCard', () => {
 
     renderWithProviders(<DevicePolicyCard username="kid" name="Emma" />);
 
-    await screen.findByText(/System Update Policy/i);
+    await screen.findByText('System updates');
 
     // Add a Wi-Fi network
+    fireEvent.click(screen.getByTestId('device-policy-wifi-toggle'));
     const ssidInput = screen.getByTestId('input-wifi-ssid');
     const passInput = screen.getByTestId('input-wifi-password');
     const addWifiBtn = screen.getByTestId('btn-add-wifi');
@@ -95,6 +104,7 @@ describe('DevicePolicyCard', () => {
     expect(screen.getByText('GuestNetwork')).toBeInTheDocument();
 
     // Add a CA cert
+    fireEvent.click(screen.getByTestId('device-policy-certs-toggle'));
     const aliasInput = screen.getByTestId('input-cert-alias');
     const pemInput = screen.getByTestId('input-cert-pem');
     const addCertBtn = screen.getByTestId('btn-add-cert');

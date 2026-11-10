@@ -126,11 +126,12 @@ describe('The family guardian page (a parent)', () => {
     expect(await screen.findByTestId('guardian-child-status')).toHaveTextContent('45 min remaining today');
     expect(screen.getByTestId('guardian-domain-nav')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Heart & Faith' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Heart & Faith' }));
+    expect(screen.getByRole('tab', { name: 'Heart & Faith' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('guidance-bullying')).toBeInTheDocument();
     expect(screen.queryByTestId('screen-time-controls')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'All areas' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'All areas' }));
     expect(await screen.findByTestId('screen-time-controls')).toBeInTheDocument();
   });
 

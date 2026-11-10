@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, MapPin, Navigation } from 'lucide-react';
+import { Camera, MapPin, Navigation, Check } from 'lucide-react';
+import Toggle from '../ui/Toggle';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { zonePlaces } from '../../lib/wanderQueries';
@@ -66,7 +67,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
 
   return (
     <MemberCard
-      title="Places & Photo Safety"
+      title="Places & photo safety"
       icon={MapPin}
       tone="text-emerald-300"
       testId="guardian-geofences-card"
@@ -81,7 +82,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                 <Camera size={15} className="text-emerald-300" />
               </span>
               <div className="min-w-0 space-y-1">
-                <p className="font-semibold text-white">Photo &amp; Video Safety Scan</p>
+                <p className="font-semibold text-white">Photo and video safety scan</p>
                 <p className="text-[11px] leading-relaxed text-slate-400">
                   Checks new photos and videos on your child's phone - a small downscaled
                   copy, never the original - for safety concerns with your household AI.
@@ -89,19 +90,13 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={togglePhotoScan}
+            <Toggle
+              checked={photoScanEnabled}
+              onChange={togglePhotoScan}
               disabled={saveMutation.isPending}
-              data-testid="toggle-photo-scan"
-              className={`min-h-11 shrink-0 rounded-xl px-3.5 text-xs font-semibold transition-colors ${
-                photoScanEnabled
-                  ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-200'
-                  : 'border border-white/10 bg-white/5 text-slate-400 hover:text-white'
-              }`}
-            >
-              {photoScanEnabled ? 'On' : 'Off'}
-            </button>
+              ariaLabel={`Photo and video safety scan for ${name}`}
+              testId="toggle-photo-scan"
+            />
           </div>
         </div>
 
@@ -109,7 +104,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
         <div className="space-y-2.5">
           <div className="flex items-center gap-1.5 font-semibold text-slate-200">
             <Navigation size={13} className="text-sky-300" />
-            <span>Place Arrival &amp; Departure Alerts for {name}</span>
+            <span>Tell me when {name} arrives at or leaves a place</span>
           </div>
 
           {places.length === 0 ? (
@@ -131,7 +126,6 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                   >
                     <div className="min-w-0 flex-1 pr-2">
                       <p className="truncate font-semibold text-white">{place.name}</p>
-                      <p className="truncate text-[10px] text-slate-400">{place.id}</p>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -140,6 +134,8 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                         onClick={() => toggleGeofence(place.id, 'arrive')}
                         disabled={saveMutation.isPending}
                         data-testid={`geofence-arrive-${place.id}`}
+                        aria-pressed={arriveOn}
+                        aria-label={`Alert me when ${name} arrives at ${place.name}`}
                         className={`min-h-11 rounded-xl px-3 text-xs font-semibold transition-colors ${
                           arriveOn
                             ? 'border border-emerald-400/40 bg-emerald-400/20 text-emerald-200'
@@ -147,13 +143,15 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                         }`}
                         title="Alert parents on arrival"
                       >
-                        Arrive
+                        {arriveOn && <Check size={13} aria-hidden className="mr-1 inline" />}Arrives
                       </button>
                       <button
                         type="button"
                         onClick={() => toggleGeofence(place.id, 'depart')}
                         disabled={saveMutation.isPending}
                         data-testid={`geofence-depart-${place.id}`}
+                        aria-pressed={departOn}
+                        aria-label={`Alert me when ${name} leaves ${place.name}`}
                         className={`min-h-11 rounded-xl px-3 text-xs font-semibold transition-colors ${
                           departOn
                             ? 'border border-sky-400/40 bg-sky-400/20 text-sky-200'
@@ -161,7 +159,7 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
                         }`}
                         title="Alert parents on departure (with ETA home)"
                       >
-                        Depart
+                        {departOn && <Check size={13} aria-hidden className="mr-1 inline" />}Leaves
                       </button>
                     </div>
                   </div>

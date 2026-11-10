@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, BellOff, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { Bell, ChevronDown, ShieldCheck } from 'lucide-react';
+import Toggle from '../ui/Toggle';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { statusQuery } from '../../lib/memberPage';
 import { NOTIFICATION_CATEGORIES } from '../../lib/notificationCategories';
 import MemberCard from '../member/MemberCard';
 import type { ScreenRules } from '../../types/api';
+
+const COLLAPSED_ROWS = 4;
 
 interface NotificationLockCardProps {
   username: string;
@@ -85,6 +89,9 @@ export default function NotificationLockCard({ username, name, testId = 'guardia
   };
 
   const enabledCount = toggleable.length - disabled.size;
+  // A phone shows the first few; the rest are one tap away (fourteen rows was a dozen screens of switches).
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? toggleable : toggleable.slice(0, COLLAPSED_ROWS);
 
   return (
     <MemberCard
@@ -101,7 +108,7 @@ export default function NotificationLockCard({ username, name, testId = 'guardia
     >
       <div className="space-y-3 text-xs">
         <p className="leading-relaxed text-slate-400">
-          Set which notifications are enabled or disabled for {name}, and choose which enabled notices {name} may switch off for themselves.
+          Choose which notices {name} gets, and which of them {name} may switch off.
         </p>
 
         <div className="flex items-start gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] p-3">
@@ -114,72 +121,59 @@ export default function NotificationLockCard({ username, name, testId = 'guardia
           </div>
         </div>
 
-        <div className="space-y-2">
-          {toggleable.map((c) => {
+        <ul className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]" aria-label={`Notices for ${name}`}>
+          {shown.map((c) => {
             const isDisabled = disabled.has(c.id);
             const on = !isDisabled && allowed.has(c.id);
             return (
-              <div
-                key={c.id}
-                className={`flex flex-col gap-2.5 rounded-xl border p-3 transition-colors sm:flex-row sm:items-center sm:justify-between ${
-                  isDisabled
-                    ? 'border-white/5 bg-slate-950/40 opacity-80'
-                    : 'border-white/10 bg-white/[0.03]'
-                }`}
-                data-testid={`notify-lock-row-${c.id}`}
-              >
-                <div className="min-w-0 flex-1 pr-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className={`font-semibold ${isDisabled ? 'text-slate-400 line-through decoration-slate-600' : 'text-white'}`}>
-                      {c.label}
-                    </p>
-                    {isDisabled && (
-                      <span className="rounded-full border border-rose-400/30 bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-200">
-                        Disabled
-                      </span>
-                    )}
+              <li key={c.id} className="space-y-2 px-3 py-2.5" data-testid={`notify-lock-row-${c.id}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-semibold ${isDisabled ? 'text-slate-400' : 'text-white'}`}>{c.label}</p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{c.description}</p>
                   </div>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{c.description}</p>
+                  <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                    <span className={`text-[11px] font-medium ${isDisabled ? 'text-rose-300' : 'text-emerald-300'}`} aria-hidden>
+                      {isDisabled ? 'Off' : 'On'}
+                    </span>
+                    <Toggle
+                      checked={!isDisabled}
+                      onChange={() => toggleEnabled(c.id)}
+                      disabled={saveMutation.isPending}
+                      ariaLabel={`${c.label} notices for ${name}`}
+                      testId={`enable-notify-${c.id}`}
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleEnabled(c.id)}
-                    disabled={saveMutation.isPending}
-                    aria-pressed={!isDisabled}
-                    aria-label={`${isDisabled ? 'Enable' : 'Disable'} ${c.label} for ${name}`}
-                    data-testid={`enable-notify-${c.id}`}
-                    className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors ${
-                      isDisabled
-                        ? 'border border-rose-400/35 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
-                        : 'border border-emerald-400/35 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25'
-                    }`}
-                  >
-                    {isDisabled ? <BellOff size={13} /> : <Bell size={13} />}
-                    {isDisabled ? 'Disabled' : 'Enabled'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggle(c.id)}
-                    disabled={saveMutation.isPending}
-                    aria-pressed={on}
-                    aria-label={`${on ? 'Prevent' : 'Let'} ${name} switch off ${c.label}`}
-                    data-testid={`toggle-notify-${c.id}`}
-                    className={`min-h-11 shrink-0 rounded-xl px-3 text-xs font-semibold transition-colors ${
-                      isDisabled
-                        ? 'border border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-200'
-                        : on
-                          ? 'border border-sky-400/40 bg-sky-400/20 text-sky-200'
-                          : 'border border-white/10 bg-white/5 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    {isDisabled ? 'Locked off' : on ? 'Can switch off' : 'Always on'}
-                  </button>
-                </div>
-              </div>
+                {/* Only an enabled notice can be left to the child to switch off. */}
+                {!isDisabled && (
+                  <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-2.5 text-[11px] text-slate-300">
+                    <span>Let {name} switch this off</span>
+                    <Toggle
+                      checked={on}
+                      onChange={() => toggle(c.id)}
+                      disabled={saveMutation.isPending}
+                      ariaLabel={`Let ${name} switch off ${c.label}`}
+                      testId={`toggle-notify-${c.id}`}
+                    />
+                  </div>
+                )}
+              </li>
             );
           })}
-        </div>
+        </ul>
+        {toggleable.length > COLLAPSED_ROWS && (
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            aria-expanded={showAll}
+            className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] text-xs font-semibold text-sky-200 hover:bg-white/[0.06]"
+            data-testid="notify-show-all"
+          >
+            {showAll ? 'Show fewer' : `Show all ${toggleable.length} kinds of notice`}
+            <ChevronDown size={14} aria-hidden className={`transition-transform ${showAll ? 'rotate-180' : ''}`} />
+          </button>
+        )}
       </div>
     </MemberCard>
   );

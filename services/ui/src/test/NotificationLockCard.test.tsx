@@ -30,8 +30,9 @@ describe('NotificationLockCard', () => {
     expect(screen.getByText(/cannot be changed/i)).toBeInTheDocument();
 
     // Arrivals start locked (Always on); tapping flips them to Can switch off.
-    const arrivals = await screen.findByRole('button', { name: /Let Emma switch off Arrivals and departures/ });
-    expect(arrivals).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(await screen.findByTestId('notify-show-all'));
+    const arrivals = await screen.findByRole('switch', { name: /Let Emma switch off Arrivals and departures/ });
+    expect(arrivals).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(arrivals);
 
     await waitFor(() => expect(savedRules).not.toBeNull());
@@ -57,8 +58,9 @@ describe('NotificationLockCard', () => {
 
     renderWithProviders(<NotificationLockCard username="kid" name="Emma" />);
 
-    const presence = await screen.findByRole('button', { name: /Prevent Emma switch off Arrivals and departures/ });
-    expect(presence).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(await screen.findByTestId('notify-show-all'));
+    const presence = await screen.findByRole('switch', { name: /Let Emma switch off Arrivals and departures/ });
+    expect(presence).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(presence);
 
     await waitFor(() => expect(savedRules).not.toBeNull());
@@ -88,8 +90,9 @@ describe('NotificationLockCard', () => {
     renderWithProviders(<NotificationLockCard username="kid" name="Emma" />);
 
     // Raven starts enabled; disabling it adds it to notification_disabled and removes it from notification_toggle_allowed.
-    const disableRaven = await screen.findByRole('button', { name: 'Disable Raven missions for Emma' });
-    expect(disableRaven).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(await screen.findByTestId('notify-show-all'));
+    const disableRaven = await screen.findByRole('switch', { name: 'Raven missions notices for Emma' });
+    expect(disableRaven).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(disableRaven);
 
     await waitFor(() => expect(savedRules).not.toBeNull());
@@ -97,8 +100,8 @@ describe('NotificationLockCard', () => {
     expect(savedRules!.notification_toggle_allowed).toEqual([]);
 
     // Finished jobs starts disabled; clicking Enable removes it from notification_disabled.
-    const enableJobs = screen.getByRole('button', { name: 'Enable Finished jobs for Emma' });
-    expect(enableJobs).toHaveAttribute('aria-pressed', 'false');
+    const enableJobs = screen.getByRole('switch', { name: 'Finished jobs notices for Emma' });
+    expect(enableJobs).toHaveAttribute('aria-checked', 'false');
     savedRules = null;
     fireEvent.click(enableJobs);
 
