@@ -83,12 +83,9 @@ export default function GeofenceAlertsCard({ username, name }: GeofenceAlertsCar
               <div className="min-w-0 space-y-1">
                 <p className="font-semibold text-white">Photo &amp; Video Safety Scan</p>
                 <p className="text-[11px] leading-relaxed text-slate-400">
-                  Scans new photos locally using household AI for safety concerns without uploading private photos.
-                </p>
-                {/* The setting is kept, but no phone sends photos yet: saying
-                    "Active" told the parents something was watching that was not. */}
-                <p className="text-[11px] text-amber-300/90" data-testid="photo-scan-not-yet">
-                  Not scanning yet: the phone app does not send new photos in this version.
+                  Checks new photos and videos on your child's phone - a small downscaled
+                  copy, never the original - for safety concerns with your household AI.
+                  Covers the gallery, picture texts and chat images the phone can see.
                 </p>
               </div>
             </div>
