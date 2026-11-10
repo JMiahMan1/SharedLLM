@@ -27,7 +27,7 @@ interface MemberCardProps {
 export default function MemberCard({ title, icon: Icon, tone = 'text-sky-300', testId, aside, wide, isLoading, error, empty, children }: MemberCardProps) {
   return (
     <section
-      className={`glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-3.5 ${wide ? 'md:col-span-2 lg:col-span-2' : ''}`}
+      className={`glass-panel min-w-0 rounded-2xl border border-white/10 p-3.5 sm:p-5 space-y-3 ${wide ? 'md:col-span-2 lg:col-span-2' : ''}`}
       data-testid={testId}
       aria-label={title}
     >

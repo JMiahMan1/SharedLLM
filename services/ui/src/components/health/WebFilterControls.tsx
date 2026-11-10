@@ -5,6 +5,8 @@ import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import type { ScreenRules, WebFilterCategory, WebFilterRules } from '../../types/api';
 import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
+import MemberCard from '../member/MemberCard';
+import Toggle from '../ui/Toggle';
 
 const CATEGORIES: Array<{ id: WebFilterCategory; label: string }> = [
   { id: 'social', label: 'Social media' },
@@ -56,56 +58,54 @@ export default function WebFilterControls({ username, name, rules }: { username:
     save.mutate({ ...current, categories: next });
   };
 
-  const toggle = (key: 'enabled' | 'adult' | 'safe_search', label: string) => (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={Boolean(current[key])}
-      disabled={save.isPending || (key !== 'enabled' && !current.enabled)}
-      onClick={() => save.mutate({ ...current, [key]: !current[key] })}
-      className={`min-h-11 rounded-xl border px-3 text-left text-xs flex items-center justify-between gap-2 disabled:opacity-50 ${
-        current[key] ? 'border-sky-400/40 bg-sky-400/10 text-slate-100' : 'border-white/10 bg-white/5 text-slate-400'
-      }`}
-      data-testid={`web-filter-${key}`}
-    >
-      <span>{label}</span>
-      <span className="font-semibold">{current[key] ? 'On' : 'Off'}</span>
-    </button>
+  const toggle = (key: 'enabled' | 'adult' | 'safe_search', label: string, hint: string) => (
+    <div className={`flex items-center justify-between gap-3 px-3 py-2.5 ${key !== 'enabled' && !current.enabled ? 'opacity-60' : ''}`}>
+      <div className="min-w-0 text-xs">
+        <p className="font-medium text-slate-100">{label}</p>
+        <p className="text-[11px] text-slate-500">{hint}</p>
+      </div>
+      <Toggle
+        checked={Boolean(current[key])}
+        ariaLabel={label}
+        testId={`web-filter-${key}`}
+        disabled={save.isPending || (key !== 'enabled' && !current.enabled)}
+        onChange={() => save.mutate({ ...current, [key]: !current[key] })}
+      />
+    </div>
   );
 
   return (
-    <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="web-filter-controls">
-      <div className="flex items-center gap-2">
-        <Globe size={14} className="text-sky-300" />
-        <h3 className="text-sm font-semibold text-white">Websites on {name}'s {device}</h3>
-      </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {toggle('enabled', 'Web filter')}
-        {toggle('adult', 'Block adult & malware sites')}
-        {toggle('safe_search', 'Safe search')}
+    <MemberCard
+      title={`Websites on ${name}'s ${device}`}
+      icon={Globe}
+      testId="web-filter-controls"
+      aside={current.enabled ? 'Filter on' : 'Filter off'}
+    >
+      <div className="divide-y divide-white/5 rounded-xl border border-white/10 bg-white/[0.03]">
+        {toggle('enabled', 'Web filter', `Filters websites on the ${device}`)}
+        {toggle('adult', 'Block adult & malware sites', current.enabled ? 'Through a family-safe resolver' : 'Turn the web filter on first')}
+        {toggle('safe_search', 'Safe search', current.enabled ? 'Google, YouTube, Bing and DuckDuckGo' : 'Turn the web filter on first')}
       </div>
       {current.enabled && (
         <div className="space-y-2">
-          <p className="text-[11px] text-slate-400">Block categories</p>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3" data-testid="web-filter-categories">
+          <p className="text-[11px] text-slate-400">Block whole kinds of sites</p>
+          <div className="grid grid-cols-1 gap-x-4 divide-y divide-white/5 rounded-xl border border-white/10 bg-white/[0.03] sm:grid-cols-2 sm:divide-y-0" data-testid="web-filter-categories">
             {CATEGORIES.map((cat) => {
               const on = (current.categories || []).includes(cat.id);
               return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  role="switch"
-                  aria-checked={on}
-                  disabled={save.isPending}
-                  onClick={() => toggleCategory(cat.id)}
-                  data-testid={`web-filter-category-${cat.id}`}
-                  className={`min-h-10 rounded-xl border px-3 text-left text-xs flex items-center justify-between gap-2 disabled:opacity-50 ${
-                    on ? 'border-amber-400/40 bg-amber-400/10 text-slate-100' : 'border-white/10 bg-white/5 text-slate-400'
-                  }`}
-                >
-                  <span>{cat.label}</span>
-                  <span className="font-semibold">{on ? 'Blocked' : 'Allowed'}</span>
-                </button>
+                <div key={cat.id} className="flex min-h-11 items-center justify-between gap-3 px-3 py-1.5 text-xs">
+                  <span className="text-slate-200">{cat.label}</span>
+                  <span className="flex items-center gap-2">
+                    <span className={`text-[10px] ${on ? 'text-amber-300' : 'text-slate-500'}`}>{on ? 'Blocked' : 'Allowed'}</span>
+                    <Toggle
+                      checked={on}
+                      ariaLabel={`Block ${cat.label}`}
+                      testId={`web-filter-category-${cat.id}`}
+                      disabled={save.isPending}
+                      onChange={() => toggleCategory(cat.id)}
+                    />
+                  </span>
+                </div>
               );
             })}
           </div>
@@ -120,7 +120,7 @@ export default function WebFilterControls({ username, name, rules }: { username:
               value={block ?? (current.block || []).join('\n')}
               onChange={(e) => setBlock(e.target.value)}
               placeholder="tiktok.com"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+              className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400/50 focus:outline-none"
             />
           </label>
           <label className="block text-[11px] text-slate-400">
@@ -130,7 +130,7 @@ export default function WebFilterControls({ username, name, rules }: { username:
               value={allow ?? (current.allow || []).join('\n')}
               onChange={(e) => setAllow(e.target.value)}
               placeholder="khanacademy.org"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-slate-100"
+              className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400/50 focus:outline-none"
             />
           </label>
           {(block !== null || allow !== null) && (
@@ -154,7 +154,7 @@ export default function WebFilterControls({ username, name, rules }: { username:
         Filters by site name on the {device} (Wi-Fi and mobile data). A browser set to its own secure DNS can get around it; the
         guard keeps the filter from being switched off.
       </p>
-      {failure && <p className="text-xs text-amber-300">{failure}</p>}
-    </section>
+      {failure && <p className="text-xs text-amber-300" role="alert">{failure}</p>}
+    </MemberCard>
   );
 }

@@ -279,6 +279,7 @@
 [data-theme-scheme="light"] .from-orange-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.4% 0.038 75.164) 60%, transparent); }
 [data-theme-scheme="light"] .from-sky-950\/25 { --tw-gradient-from: color-mix(in srgb, oklch(95.1% 0.026 236.824) 60%, transparent); }
 [data-theme-scheme="light"] .from-slate-800 { --tw-gradient-from: var(--ht-surface); }
+[data-theme-scheme="light"] .from-slate-900 { --tw-gradient-from: var(--ht-surface); }
 [data-theme-scheme="light"] .from-slate-950 { --tw-gradient-from: var(--ht-surface); }
 [data-theme-scheme="light"] .from-slate-950\/50 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 60%, transparent); }
 [data-theme-scheme="light"] .from-slate-950\/55 { --tw-gradient-from: color-mix(in srgb, var(--ht-surface) 60%, transparent); }

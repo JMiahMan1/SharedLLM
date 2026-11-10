@@ -190,7 +190,12 @@ test.describe('guardian page', () => {
     }
 
     // The area and child are in the address, so a reload lands back on them.
-    await page.getByTestId('guardian-area-safety').click();
+    // On a cold dev server the first tap can land before the page settles: tap until it takes.
+    const safety = page.getByTestId('guardian-area-safety');
+    await expect(async () => {
+      await safety.click();
+      await expect(safety).toHaveAttribute('aria-selected', 'true', { timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
     await page.getByRole('button', { name: 'Sam' }).click();
     await expect(page).toHaveURL(/area=safety/);
     await expect(page).toHaveURL(/member=sam/);

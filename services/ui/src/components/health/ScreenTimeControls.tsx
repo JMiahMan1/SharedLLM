@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock } from 'lucide-react';
 import { isAxiosError } from 'axios';
+import toast from 'react-hot-toast';
+import Toggle from '../ui/Toggle';
 import { api } from '../../services/api';
 import { duration } from '../../lib/phoneUsageFormat';
 import { WEEKDAYS, WEEKDAY_LABELS, limitFor, schoolDays, statusQuery } from '../../lib/memberPage';
@@ -76,6 +78,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
     mutationFn: (rules: ScreenRules) => api.setScreenRules(username, rules),
     onSuccess: () => {
       setDraft(null);
+      toast.success(`${name}'s schedule is saved`);
       void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
     },
   });
@@ -85,7 +88,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
   const preview = draft && status ? rulesFrom(draft, status.rules) : undefined;
   const field = (key: 'daily' | 'weekend' | 'bedtimeStart' | 'bedtimeEnd' | 'schoolStart' | 'schoolEnd', label: string, type: 'number' | 'time') =>
     draft && (
-      <label className="block rounded-xl border border-white/10 bg-white/[0.03] p-3 text-[11px] font-medium text-slate-300">
+      <label className="block min-w-0 text-[11px] font-medium text-slate-300">
         {label}
         <input
           type={type}
@@ -109,11 +112,15 @@ export default function ScreenTimeControls({ username, name }: { username: strin
       isLoading={isLoading}
       error={isError ? 'The schedule could not be loaded.' : null}
       empty={status && !status.can_manage ? 'Only their parents can change this.' : null}
-      aside={status?.bonus_min ? `+${status.bonus_min} min bonus today` : undefined}
+      aside={
+        edited ? (
+          <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-amber-200" data-testid="screen-time-unsaved">Unsaved</span>
+        ) : status?.bonus_min ? `+${status.bonus_min} min bonus today` : undefined
+      }
     >
       {draft && status && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2.5">
             {field('daily', 'Every day (min)', 'number')}
             {field('weekend', 'Weekends (min)', 'number')}
           </div>
@@ -123,7 +130,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
                 <tr className="border-b border-white/10 text-left text-[10px] uppercase tracking-wider text-slate-400">
                   <th className="pb-2 font-semibold">Day</th>
                   <th className="pb-2 font-semibold">Limit (min)</th>
-                  <th className="pb-2 text-right font-semibold sm:text-left">School</th>
+                  <th className="pb-2 text-right font-semibold">School day</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -132,7 +139,12 @@ export default function ScreenTimeControls({ username, name }: { username: strin
                   const school = draft.school.includes(d);
                   return (
                     <tr key={d} data-testid={`schedule-${d}`}>
-                      <th scope="row" className="py-2 pr-2 text-left font-medium text-slate-200">{WEEKDAY_LABELS[d]}</th>
+                      <th scope="row" className="py-2 pr-2 text-left font-medium text-slate-200">
+                        {/* Three letters on a phone leave the limit field room to show its fallback. */}
+                        <span className="sm:hidden" aria-hidden>{WEEKDAY_LABELS[d].slice(0, 3)}</span>
+                        <span className="hidden sm:inline">{WEEKDAY_LABELS[d]}</span>
+                        <span className="sr-only sm:hidden">{WEEKDAY_LABELS[d]}</span>
+                      </th>
                       <td className="py-2 pr-2">
                         <input
                           type="number"
@@ -146,18 +158,15 @@ export default function ScreenTimeControls({ username, name }: { username: strin
                           className="min-h-11 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-400/50 focus:outline-none"
                         />
                       </td>
-                      <td className="py-2 text-right sm:text-left">
-                        <button
-                          type="button"
-                          aria-pressed={school}
-                          aria-label={`${WEEKDAY_LABELS[d]} is a school day`}
-                          onClick={() => setDraft({ ...draft, school: school ? draft.school.filter((x) => x !== d) : [...draft.school, d] })}
-                          className={`min-h-11 min-w-16 rounded-xl border px-3 text-xs font-semibold transition-colors ${
-                            school ? 'border-sky-400/40 bg-sky-400/15 text-sky-100' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          {school ? 'Yes' : 'No'}
-                        </button>
+                      <td className="py-2 text-right">
+                        <span className="inline-flex justify-end pr-1">
+                          <Toggle
+                            checked={school}
+                            ariaLabel={`${WEEKDAY_LABELS[d]} is a school day`}
+                            testId={`school-day-${d}`}
+                            onChange={() => setDraft({ ...draft, school: school ? draft.school.filter((x) => x !== d) : [...draft.school, d] })}
+                          />
+                        </span>
                       </td>
                     </tr>
                   );
@@ -165,14 +174,36 @@ export default function ScreenTimeControls({ username, name }: { username: strin
               </tbody>
             </table>
           </div>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-            {field('bedtimeStart', 'Bedtime starts', 'time')}
-            {field('bedtimeEnd', 'Bedtime ends', 'time')}
-            {field('schoolStart', 'School starts', 'time')}
-            {field('schoolEnd', 'School ends', 'time')}
+          <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+            <fieldset className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <legend className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Bedtime</legend>
+              <div className="grid grid-cols-2 gap-2.5">
+                {field('bedtimeStart', 'Bedtime starts', 'time')}
+                {field('bedtimeEnd', 'Bedtime ends', 'time')}
+              </div>
+            </fieldset>
+            <fieldset className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <legend className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">School hours</legend>
+              <div className="grid grid-cols-2 gap-2.5">
+                {field('schoolStart', 'School starts', 'time')}
+                {field('schoolEnd', 'School ends', 'time')}
+              </div>
+            </fieldset>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            {failure ? <p className="text-xs text-amber-300">{failure}</p> : <span />}
+          <p className="text-[11px] text-slate-500">Leave both times of a routine blank to switch it off.</p>
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            {failure && <p className="mr-auto text-xs text-amber-300" role="alert">{failure}</p>}
+            {edited && (
+              <button
+                type="button"
+                disabled={save.isPending}
+                onClick={() => setDraft(null)}
+                className="min-h-11 rounded-xl px-3 text-xs text-slate-400 hover:text-slate-200"
+                data-testid="screen-time-discard"
+              >
+                Discard
+              </button>
+            )}
             <button
               type="button"
               disabled={save.isPending || !edited}
@@ -180,7 +211,7 @@ export default function ScreenTimeControls({ username, name }: { username: strin
               className="glass-button min-h-11 rounded-xl px-4 text-xs font-semibold disabled:opacity-50"
               data-testid="screen-time-save"
             >
-              Save schedule
+              {save.isPending ? 'Saving…' : edited ? 'Save schedule' : 'Saved'}
             </button>
           </div>
         </div>

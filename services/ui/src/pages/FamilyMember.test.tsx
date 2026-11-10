@@ -177,10 +177,10 @@ describe('The family member page (a parent)', () => {
     fireEvent.click(await screen.findByTestId('member-pause'));
     await waitFor(() => expect(api.pauseScreenTime).toHaveBeenCalledWith('sam', {}));
     fireEvent.click(screen.getByTestId('member-bonus'));
-    fireEvent.click(screen.getByRole('button', { name: '30 min' }));
+    fireEvent.click(screen.getByRole('button', { name: '+30 min' }));
     await waitFor(() => expect(api.giveScreenTimeBonus).toHaveBeenCalledWith('sam', 30));
     fireEvent.click(screen.getByTestId('member-lock'));
-    fireEvent.click(screen.getByRole('button', { name: '1 h' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 hr' }));
     await waitFor(() => expect(api.pauseScreenTime).toHaveBeenLastCalledWith('sam', { until: expect.any(String) }));
   });
 
@@ -204,7 +204,8 @@ describe('The family member page (a parent)', () => {
     const { unmount } = wrap(<FamilyMember />, '/family/member/sam');
     const tabs = await screen.findByTestId('member-tabs');
     await waitFor(() => expect(screen.getByTestId('member-tab-comms')).toBeInTheDocument());
-    const names = [...tabs.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    // The phone bar shows a short word; the tab's name says it in full.
+    const names = [...tabs.querySelectorAll('[role="tab"]')].map((t) => t.getAttribute('aria-label'));
     expect(names.slice(0, 2)).toEqual(['Overview', 'Calls & messages']);
     expect(await screen.findByTestId('member-comms-glance')).toBeInTheDocument();
     unmount();

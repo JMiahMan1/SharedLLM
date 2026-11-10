@@ -50,8 +50,17 @@ The server decides; the page only hides what the server already refuses.
 ## Layout
 
 Desktop: the member strip on top, a left rail of sections, a two-column card
-grid. Phone: the member strip scrolls sideways, sections are a sticky
-horizontally scrolling tab bar, one column. Every chart has a text summary and
+grid (Overview flows its cards in two columns so short ones leave no gaps).
+Phone: the member strip scrolls sideways with the children first and the one
+shown kept in view; a compact header (state dot, one box for now and where,
+the four quick actions on one row, lock and bonus choices with Cancel and a
+confirming toast); sections are a sticky, sideways-scrolling tab bar flush
+under the app header, with short words ("Calls", "Apps", "Faith"; the full
+name is the tab's label), the chosen tab kept in view and a fade where more
+tabs hide; one column. Overview puts what needs a parent first: today,
+requests, concerns, then the week. Every on/off setting (school days, apps,
+install approvals, the web filter and its categories) is a switch; the
+weekly schedule shows Unsaved, Save and Discard. Every chart has a text summary and
 a loading, empty and error state; nothing is invented when data is missing.
 
 1. **Member strip (at a glance):** avatar, name, a status dot (in use,

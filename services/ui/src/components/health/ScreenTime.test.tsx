@@ -126,14 +126,14 @@ describe('ScreenTimeControls (a parent): the weekly schedule', () => {
     expect(await screen.findByLabelText('Monday limit in minutes')).toHaveAttribute('placeholder', '120 (2 h)');
     expect(screen.getByLabelText('Saturday limit in minutes')).toHaveAttribute('placeholder', '180 (3 h)');
     expect(screen.getByLabelText('Friday limit in minutes')).toHaveValue(150);
-    expect(screen.getByRole('button', { name: 'Saturday is a school day' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('switch', { name: 'Saturday is a school day' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('saves a day of its own, school days and cleared routines, keeping the rest', async () => {
     wrap(<ScreenTimeControls username="kid" name="Zachary" />);
     fireEvent.change(await screen.findByLabelText('Wednesday limit in minutes'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Every day (min)'), { target: { value: '90' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Friday is a school day' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Friday is a school day' }));
     fireEvent.change(screen.getByLabelText('Bedtime starts'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('screen-time-save'));
     await waitFor(() => expect(api.setScreenRules).toHaveBeenCalled());

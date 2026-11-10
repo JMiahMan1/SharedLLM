@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AppWindow } from 'lucide-react';
+import { AppWindow, Check } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { api } from '../../services/api';
 import { appName, duration } from '../../lib/phoneUsageFormat';
@@ -9,6 +9,8 @@ import { PERMISSION_WORDS } from '../../lib/guardRequests';
 import { guardRequestsQuery, usageQuery } from '../../lib/memberPage';
 import { localDay, shiftDay } from '../../lib/healthHub';
 import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
+import MemberCard from '../member/MemberCard';
+import Toggle from '../ui/Toggle';
 
 /**
  * A parent's app control for one child (Phase 11 step 5): switch an app off,
@@ -94,91 +96,94 @@ export default function AppControls({ username, name, rules }: { username: strin
 
   const failure = isAxiosError(save.error) ? (save.error.response?.data as { detail?: string })?.detail || 'That did not save.' : save.error ? 'That did not save.' : null;
 
+  const shown = apps.length;
   return (
-    <section className="glass-panel min-w-0 rounded-2xl p-4 sm:p-5 space-y-2" data-testid="app-controls">
-      <div className="flex items-center gap-2">
-        <AppWindow size={14} className="text-sky-300" />
-        <h3 className="text-sm font-semibold text-white">Apps on {name}'s {device}</h3>
-      </div>
+    <MemberCard
+      title={`Apps on ${name}'s ${device}`}
+      icon={AppWindow}
+      testId="app-controls"
+      aside={shown ? [blocked.size && `${blocked.size} off`, Object.keys(limits).length && `${Object.keys(limits).length} limited`].filter(Boolean).join(' · ') || undefined : undefined}
+    >
       {apps.length === 0 ? (
         <p className="text-[11px] text-slate-400">No app use reported yet. Apps show up here once {name}'s {device} shares its usage.</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="divide-y divide-white/5">
           {apps.map(([pkg, millis]) => {
             const off = blocked.has(pkg);
             const draft = limitDraft[pkg] ?? (limits[pkg] !== undefined ? String(limits[pkg]) : '');
             const state = awaiting.has(pkg) ? 'awaiting approval' : off ? 'blocked' : limits[pkg] !== undefined ? `limited to ${limits[pkg]} min` : 'allowed';
+            const tone = awaiting.has(pkg) ? 'text-sky-300' : off ? 'text-red-300' : limits[pkg] !== undefined ? 'text-amber-300' : 'text-slate-400';
             return (
-              <li key={pkg} className="flex items-center gap-2 text-xs" data-testid={`app-row-${pkg}`}>
-                <span className="min-w-0 flex-1">
-                  <span className={`block truncate ${off ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{appName(pkg)}</span>
-                  <span className="block text-[10px] text-slate-500">
+              <li key={pkg} className="space-y-1.5 py-2.5 text-xs first:pt-0 last:pb-0" data-testid={`app-row-${pkg}`}>
+                <div className="flex items-center gap-3">
+                  <span className={`min-w-0 flex-1 truncate text-sm ${off ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{appName(pkg)}</span>
+                  <Toggle checked={!off} ariaLabel={`${appName(pkg)} allowed`} disabled={save.isPending} onChange={() => toggle(pkg)} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-[11px] text-slate-500">
                     {todayMs.get(pkg) ? `${duration(todayMs.get(pkg) || 0)} today · ` : ''}
-                    {millis ? `${duration(millis)} this week` : 'not used this week'} · <span data-testid={`app-state-${pkg}`}>{state}</span>
+                    {millis ? `${duration(millis)} this week` : 'not used this week'} · <span className={tone} data-testid={`app-state-${pkg}`}>{state}</span>
                   </span>
-                </span>
-                <label className="flex items-center gap-1 text-[10px] text-slate-400">
-                  <input
-                    type="number"
-                    min={0}
-                    max={1440}
-                    inputMode="numeric"
-                    placeholder="no limit"
-                    aria-label={`Daily minutes for ${appName(pkg)}`}
-                    value={draft}
-                    onChange={(e) => setLimitDraft({ ...limitDraft, [pkg]: e.target.value })}
-                    onBlur={() => { if (limitDraft[pkg] !== undefined) setLimit(pkg); }}
-                    disabled={off || save.isPending}
-                    className="w-16 rounded-lg border border-white/10 bg-white/5 px-1.5 py-1 text-xs text-slate-100"
-                  />
-                  min/day
-                </label>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={!off}
-                  aria-label={`${appName(pkg)} allowed`}
-                  disabled={save.isPending}
-                  onClick={() => toggle(pkg)}
-                  className={`min-h-11 min-w-14 rounded-lg border px-2 text-[11px] font-semibold ${off ? 'border-red-400/40 bg-red-400/10 text-red-200' : 'border-white/10 bg-white/5 text-slate-200'}`}
-                >
-                  {off ? 'Off' : 'On'}
-                </button>
+                  {!off && (
+                    <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-400">
+                      <input
+                        type="number"
+                        min={0}
+                        max={1440}
+                        inputMode="numeric"
+                        placeholder="no limit"
+                        aria-label={`Daily minutes for ${appName(pkg)}`}
+                        value={draft}
+                        onChange={(e) => setLimitDraft({ ...limitDraft, [pkg]: e.target.value })}
+                        onBlur={() => { if (limitDraft[pkg] !== undefined) setLimit(pkg); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                        disabled={save.isPending}
+                        className="min-h-11 w-20 rounded-xl border border-white/10 bg-white/5 px-2 text-center text-sm text-slate-100 placeholder:text-[11px] placeholder:text-slate-500 focus:border-sky-400/50 focus:outline-none"
+                      />
+                      min/day
+                    </label>
+                  )}
+                </div>
               </li>
             );
           })}
         </ul>
       )}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={approvals}
-        disabled={save.isPending}
-        onClick={() => save.mutate(withRules({ install_approval: !approvals }))}
-        className={`min-h-11 w-full rounded-xl border px-3 text-left text-xs flex items-center justify-between gap-2 ${approvals ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-300'}`}
-        data-testid="install-approval"
-      >
-        <span>New apps wait for a parent's OK</span>
-        <span className="text-[11px] font-semibold">{approvals ? 'On' : 'Off'}</span>
-      </button>
-      <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+        <div className="min-w-0 text-xs">
+          <p className="font-medium text-slate-100">New apps wait for a parent's OK</p>
+          <p className="text-[11px] text-slate-500">A new app stays closed until a parent approves it.</p>
+        </div>
+        <Toggle
+          checked={approvals}
+          ariaLabel="New apps wait for a parent's OK"
+          testId="install-approval"
+          disabled={save.isPending}
+          onChange={() => save.mutate(withRules({ install_approval: !approvals }))}
+        />
+      </div>
+      <div className="space-y-1.5">
         <p className="text-[11px] text-slate-400">Ask a parent before an app gets:</p>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Permissions a parent approves first" data-testid="permission-gating">
-          {(Object.keys(PERMISSION_WORDS) as PermissionGroup[]).map((group) => (
-            <button
-              key={group}
-              type="button"
-              aria-pressed={gated.has(group)}
-              disabled={save.isPending}
-              onClick={() => toggleGroup(group)}
-              className={`min-h-11 rounded-xl border px-2.5 text-[11px] ${gated.has(group) ? 'border-sky-400/40 bg-sky-400/10 text-white' : 'border-white/10 bg-white/5 text-slate-400'}`}
-            >
-              {PERMISSION_WORDS[group]}
-            </button>
-          ))}
+          {(Object.keys(PERMISSION_WORDS) as PermissionGroup[]).map((group) => {
+            const on = gated.has(group);
+            return (
+              <button
+                key={group}
+                type="button"
+                aria-pressed={on}
+                disabled={save.isPending}
+                onClick={() => toggleGroup(group)}
+                className={`inline-flex min-h-11 items-center gap-1 rounded-xl border px-2.5 text-[11px] transition-colors ${on ? 'border-sky-400/40 bg-sky-400/15 text-white' : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'}`}
+              >
+                {on && <Check size={12} aria-hidden />}
+                {PERMISSION_WORDS[group]}
+              </button>
+            );
+          })}
         </div>
       </div>
-      {failure && <p className="text-xs text-amber-300">{failure}</p>}
-    </section>
+      {failure && <p className="text-xs text-amber-300" role="alert">{failure}</p>}
+    </MemberCard>
   );
 }

@@ -41,7 +41,7 @@ function SleepCard({ username, name }: { username: string; name: string }) {
       error={failed ? 'Sleep could not be loaded.' : null}
       empty={!shared ? `${name} does not share sleep with you.` : logged.length === 0 ? 'No sleep recorded in the last 14 nights.' : null}
     >
-      <DailyBars testId="member-sleep-chart" title="Hours of sleep per night, last 14 nights" data={points} format={formatMinutes} average={avg} />
+      <DailyBars testId="member-sleep-chart" title="Hours of sleep per night, last 14 nights" data={points} format={formatMinutes} average={avg} minutes />
     </MemberCard>
   );
 }

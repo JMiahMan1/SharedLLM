@@ -62,6 +62,7 @@ export function WeekCard({ username }: { username: string }) {
         data={bars.map((b) => ({ key: b.day, label: b.label, value: b.minutes, over: b.over }))}
         format={minutes}
         tickFormat={formatMinutes}
+        minutes
         limit={limit}
         average={avg}
       />
@@ -138,7 +139,6 @@ export function LastNightCard({ username, name }: { username: string; name: stri
   );
 }
 
-/** Aura's overview: today, the week, what they want, what to watch for, where they are. */
 /**
  * Today's calls and messages at a glance, with the way into the Calls &
  * messages tab: for a parent only (the server's ``comms``), so it is the
@@ -180,11 +180,12 @@ function CommsGlanceCard({ username, name }: { username: string; name: string })
 export default function OverviewSection({ username, name }: { username: string; name: string }) {
   return (
     <>
+      {/* What needs a parent first (answer a request, read a concern), then how the day and week went. */}
       <TodayCard username={username} />
-      <CommsGlanceCard username={username} name={name} />
       <RequestsCard username={username} name={name} />
-      <WeekCard username={username} />
       <ConcernsCard username={username} name={name} />
+      <CommsGlanceCard username={username} name={name} />
+      <WeekCard username={username} />
       <TopAppsCard username={username} />
       <MiniMapCard username={username} />
       <LastNightCard username={username} name={name} />

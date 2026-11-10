@@ -1,6 +1,6 @@
 import { Bar, BarChart, Cell, PolarAngleAxis, RadialBar, RadialBarChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { duration } from '../../lib/phoneUsageFormat';
-import type { HeatCell } from '../../lib/memberPage';
+import { axisTicks, type HeatCell } from '../../lib/memberPage';
 
 /*
  * The family member page's charts, one visual system (docs/FAMILY_MEMBER_PAGE.md):
@@ -67,11 +67,15 @@ interface DailyBarsProps {
   /** The chart's own accessible name, e.g. "Screen time, last 7 days". */
   title: string;
   height?: number;
+  /** Values are minutes: the axis then steps in whole quarter hours and hours. */
+  minutes?: boolean;
 }
 
+
 /** Day-by-day bars with an optional limit line and average line. */
-export function DailyBars({ data, format, tickFormat = format, limit = null, limitLabel = 'limit', average = null, testId, title, height = 160 }: DailyBarsProps) {
+export function DailyBars({ data, format, tickFormat = format, limit = null, limitLabel = 'limit', average = null, testId, title, height = 160, minutes = false }: DailyBarsProps) {
   const reported = data.filter((d) => d.value !== null);
+  const ticks = axisTicks(Math.max(0, ...data.map((d) => d.value ?? 0), limit ?? 0, average ?? 0), minutes);
   const rows = data.map((d) => ({ ...d, shown: d.value ?? 0 }));
   return (
     <figure className="space-y-2" data-testid={testId}>
@@ -79,7 +83,16 @@ export function DailyBars({ data, format, tickFormat = format, limit = null, lim
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: -18 }} barCategoryGap="22%">
             <XAxis dataKey="label" tick={{ fill: MUTED, fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
-            <YAxis tick={{ fill: MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={48} allowDecimals={false} tickFormatter={(v: number) => tickFormat(v)} />
+            <YAxis
+              tick={{ fill: MUTED, fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              width={44}
+              ticks={ticks}
+              domain={[0, ticks[ticks.length - 1]]}
+              allowDecimals={false}
+              tickFormatter={(v: number) => tickFormat(v)}
+            />
             <Tooltip
               cursor={{ fill: 'rgba(148,163,184,0.08)' }}
               content={({ active, payload }) => {
@@ -97,14 +110,25 @@ export function DailyBars({ data, format, tickFormat = format, limit = null, lim
                 <Cell key={d.key} fill={d.over ? OVER : MEASURE} fillOpacity={d.value === null ? 0 : 1} />
               ))}
             </Bar>
-            {limit !== null && <ReferenceLine y={limit} stroke={INK} strokeDasharray="4 3" strokeWidth={1.5} label={{ value: limitLabel, position: 'insideTopRight', fill: INK, fontSize: 10 }} />}
-            {average !== null && <ReferenceLine y={average} stroke={MUTED} strokeDasharray="1 3" strokeWidth={2} label={{ value: 'avg', position: 'insideBottomRight', fill: MUTED, fontSize: 10 }} />}
+            {limit !== null && <ReferenceLine y={limit} stroke={INK} strokeDasharray="4 3" strokeWidth={1.5} />}
+            {average !== null && <ReferenceLine y={average} stroke={MUTED} strokeDasharray="1 3" strokeWidth={2} />}
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <figcaption className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400" data-testid={`${testId}-summary`}>
-        {average !== null && <span>Average {format(average)}</span>}
-        {limit !== null && <span>{limitLabel.charAt(0).toUpperCase() + limitLabel.slice(1)} {format(limit)}</span>}
+      <figcaption className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400" data-testid={`${testId}-summary`}>
+        {/* The legend for the two lines, drawn as they are drawn on the chart. */}
+        {average !== null && (
+          <span className="inline-flex items-center gap-1.5">
+            <svg width="16" height="4" aria-hidden><line x1="0" y1="2" x2="16" y2="2" stroke={MUTED} strokeWidth="2" strokeDasharray="1 3" /></svg>
+            Average {format(average)}
+          </span>
+        )}
+        {limit !== null && (
+          <span className="inline-flex items-center gap-1.5">
+            <svg width="16" height="4" aria-hidden><line x1="0" y1="2" x2="16" y2="2" stroke={INK} strokeWidth="1.5" strokeDasharray="4 3" /></svg>
+            {limitLabel.charAt(0).toUpperCase() + limitLabel.slice(1)} {format(limit)}
+          </span>
+        )}
         <span>{reported.length} of {data.length} days reported</span>
         {data.some((d) => d.over) && <span className="text-amber-300">Over the limit on {data.filter((d) => d.over).length}</span>}
       </figcaption>

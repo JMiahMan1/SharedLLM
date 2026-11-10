@@ -15,6 +15,8 @@ export type SectionId = 'overview' | 'comms' | 'time' | 'apps' | 'activity' | 'l
 export interface MemberSection {
   id: SectionId;
   label: string;
+  /** The phone tab's word: the bar scrolls, so every word saved shows another tab. */
+  short: string;
   /** Technical data: shown only when the server says the viewer may see it. */
   technical?: boolean;
   /** Calls and messages: shown only to a parent (the server's ``comms``). */
@@ -22,15 +24,15 @@ export interface MemberSection {
 }
 
 export const MEMBER_SECTIONS: MemberSection[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'comms', label: 'Calls & messages', comms: true },
-  { id: 'time', label: 'Time' },
-  { id: 'apps', label: 'Apps & web' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'location', label: 'Location' },
-  { id: 'health', label: 'Health' },
-  { id: 'faith', label: 'Faith & growth' },
-  { id: 'devices', label: 'Devices', technical: true },
+  { id: 'overview', label: 'Overview', short: 'Overview' },
+  { id: 'comms', label: 'Calls & messages', short: 'Calls', comms: true },
+  { id: 'time', label: 'Time', short: 'Time' },
+  { id: 'apps', label: 'Apps & web', short: 'Apps' },
+  { id: 'activity', label: 'Activity', short: 'Activity' },
+  { id: 'location', label: 'Location', short: 'Location' },
+  { id: 'health', label: 'Health', short: 'Health' },
+  { id: 'faith', label: 'Faith & growth', short: 'Faith' },
+  { id: 'devices', label: 'Devices', short: 'Devices', technical: true },
 ];
 
 /** The member page's address (the old `/guardian?child=` opens it). */
@@ -309,4 +311,20 @@ export function commsLine(e: { feature: string; item: string; duration_s?: numbe
   const title = (TEXT_TITLE[direction] ?? ((w: string) => `Text with ${w}`))(who) + kind;
   const text = typeof e.detail?.body === 'string' ? e.detail.body : null;
   return { title, number: number && number !== who ? number : null, length: null, text };
+}
+
+/**
+ * Round axis ticks from zero to just past the highest value (bars, the limit
+ * line, the average): minutes step in 15/30 min or whole hours, anything else
+ * in 1, 2 or 5 times a power of ten. Four or five ticks keep a phone's narrow
+ * axis readable (labels like "1h 10m" used to wrap and clip).
+ */
+export function axisTicks(top: number, minutes = false): number[] {
+  const max = Math.max(1, top);
+  const steps = minutes
+    ? [5, 10, 15, 30, 60, 120, 180, 240, 360, 480, 720]
+    : [1, 2, 5].flatMap((m) => [1, 10, 100, 1000, 10000, 100000].map((p) => m * p)).sort((a, b) => a - b);
+  const step = steps.find((s) => max / s <= 4) ?? steps[steps.length - 1];
+  const count = Math.ceil(max / step);
+  return Array.from({ length: count + 1 }, (_, i) => i * step);
 }

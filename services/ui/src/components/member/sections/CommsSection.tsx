@@ -115,20 +115,25 @@ export default function CommsSection({ username, name }: { username: string; nam
   return (
     <>
       <MemberCard
-        title={`${name}'s calls & messages`}
+        title="Calls & messages"
         icon={MessageSquare}
         testId="member-comms-summary"
         wide
-        aside={
-          <span className="flex gap-1" role="group" aria-label="Period">
-            {RANGES.map((d) => (
-              <button key={d} type="button" aria-pressed={days === d} onClick={() => setDays(d)} className={chip(days === d)}>
-                {d === 1 ? 'Today' : `${d} days`}
-              </button>
-            ))}
-          </span>
-        }
       >
+        {/* The period as a segmented control on its own row: in the header it squeezed the title to "Sam's calls & ...". */}
+        <div className="grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1 sm:inline-grid sm:w-auto" role="group" aria-label="Period">
+          {RANGES.map((d) => (
+            <button
+              key={d}
+              type="button"
+              aria-pressed={days === d}
+              onClick={() => setDays(d)}
+              className={`min-h-10 rounded-lg px-4 text-xs font-medium transition-colors ${days === d ? 'bg-[var(--site-accent-soft)] text-[var(--site-accent-text)]' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              {d === 1 ? 'Today' : `${d} days`}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs" data-testid="member-comms-totals">
           <Stat label="Calls" value={String(totals.calls)} hint={totals.missed ? `${totals.missed} missed` : undefined} />
           <Stat label="Talk time" value={`${totals.talkMin} min`} />
@@ -141,7 +146,7 @@ export default function CommsSection({ username, name }: { username: string; nam
             <ul className="flex flex-wrap gap-1.5" data-testid="member-comms-contacts">
               {contacts.map((c) => (
                 <li key={c.who}>
-                  <button type="button" onClick={() => setSearch(c.who)} className="min-h-9 rounded-full bg-white/5 px-3 text-xs text-slate-200 hover:bg-white/10">
+                  <button type="button" onClick={() => setSearch(c.who)} className="min-h-11 rounded-full bg-white/5 px-3 text-xs text-slate-200 hover:bg-white/10">
                     {c.who} <span className="text-slate-500">· {c.calls ? `${c.calls} call${c.calls === 1 ? '' : 's'}` : ''}{c.calls && c.texts ? ', ' : ''}{c.texts ? `${c.texts} text${c.texts === 1 ? '' : 's'}` : ''}</span>
                   </button>
                 </li>
@@ -159,14 +164,14 @@ export default function CommsSection({ username, name }: { username: string; nam
         empty={events.length === 0 ? `No calls or messages from ${name}'s ${device} ${days === 1 ? 'today' : `in the last ${days} days`}. They show up once the ${device} allows calls and texts (Settings > Phone reports) and runs a recent app.` : null}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <div className="-mx-1 flex gap-2 overflow-x-auto px-1" role="group" aria-label="Show">
+          <div className="-mx-1 flex max-w-full gap-2 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Show">
             {KINDS.map((k) => (
               <button key={k.id} type="button" aria-pressed={kind === k.id} onClick={() => setKind(k.id)} className={chip(kind === k.id)}>
                 {k.label}
               </button>
             ))}
           </div>
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-white/5 px-3">
+          <label className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 sm:w-auto sm:min-w-[14rem] sm:flex-1">
             <Search size={14} className="shrink-0 text-slate-500" />
             <input
               value={search}

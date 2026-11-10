@@ -39,7 +39,7 @@ function status(username: string, technical: boolean) {
       earn: { steps_every: 1000, steps_min: 5, chore_min: 10, max_min: 60 }, chores_first: true,
     },
     earned_min: 30, banked_min: 15, chores_first: true, chores_left: 0,
-    can_manage: true, technical, ...(technical ? { protected: true, app_approvals: {}, permission_approvals: {} } : {}),
+    can_manage: true, technical, comms: true, ...(technical ? { protected: true, app_approvals: {}, permission_approvals: {} } : {}),
     limit_min: 120, used_min: username === 'sam' ? 95 : 140, bonus_min: 0, remaining_min: username === 'sam' ? 25 : 0,
     bedtime_active: false, school_active: false, paused: false, locked: username !== 'sam', reason: username === 'sam' ? null : 'limit',
     until: null, resets_at: `${day(1)}T00:00:00`, blocked_apps: [], app_minutes_left: {},
@@ -151,6 +151,22 @@ async function mockApi(page: Page, viewer: Viewer) {
     if (p === '/api/screen-time/chore-checks') {
       return json({ checks: [{ id: 4, username: 'sam', day: day(), chore_id: '51', title: 'Take out the trash', status: 'pending', created_at: new Date().toISOString() }] });
     }
+    // The Location section: the day on the map and the driving report (docs/WANDER.md).
+    if (/^\/api\/geo\/people\/[^/]+\/day$/.test(p)) {
+      const at = Date.now() / 1000 - 3 * 3600;
+      return json({ user: 'sam', day: url.searchParams.get('day'), points: [{ t: at, lat: 33.44, lon: -112.07 }, { t: at + 600, lat: 33.4484, lon: -112.074 }], stops: [], timeline: [] });
+    }
+    if (/^\/api\/geo\/people\/[^/]+\/driving$/.test(p)) {
+      return json({ user: 'sam', days: 7, trips: 0, miles: 0, drive_minutes: 0, top_speed_mph: 0, events: { hard_brake: 0, rapid_accel: 0, high_speed: 0, phone_use: 0, phone_use_min: 0 }, per_trip: [] });
+    }
+    // The Calls & messages section (parents only).
+    if (p.startsWith('/api/guardian/comms/')) {
+      const ago = (m: number) => new Date(Date.now() - m * 60000).toISOString();
+      return json({ days: Number(url.searchParams.get('days') || 7), events: [
+        { user: 'sam', feature: 'calls', item: 'Grandma', action: 'call', at: ago(120), duration_s: 420, detail: { direction: 'in', number: '+15555550101' } },
+        { user: 'sam', feature: 'sms', item: 'Leo', action: 'message', at: ago(60), detail: { direction: 'out', number: '+15555550102', body: 'see you at practice' } },
+      ] });
+    }
     if (/^\/api\/family\/member\/[^/]+\/devices$/.test(p)) {
       // The server's rule: the father and admins only.
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);
@@ -185,7 +201,7 @@ test.describe('family member page', () => {
 
     await page.screenshot({ path: info.outputPath('overview.png'), fullPage: true });
 
-    const mobile = info.project.name.includes('mobile');
+    const mobile = (page.viewportSize()?.width ?? 1280) < 1024; // the rail shows from lg up
     const sectionButton = (id: string) => page.getByTestId(`member-${mobile ? 'tab' : 'rail'}-${id}`);
     await expect(sectionButton('devices')).toBeVisible();
 
@@ -217,6 +233,14 @@ test.describe('family member page', () => {
     await sectionButton('activity').click();
     await expect(page.getByTestId('member-timeline-list')).toContainText('Lecrae');
 
+    await sectionButton('location').click();
+    await expect(page.getByTestId('member-places')).toContainText('School');
+    await expect(page.getByTestId('member-trips')).toContainText('No trips today');
+
+    await sectionButton('comms').click();
+    await expect(page.getByTestId('member-comms-totals')).toContainText('Talk time');
+    await expect(page.getByTestId('member-comms')).toContainText('see you at practice');
+
     await sectionButton('health').click();
     // Fourteen nights are fourteen reads of the sharing rules.
     await expect(page.getByTestId('member-sleep-chart-summary')).toContainText('14 of 14 days reported');
@@ -234,7 +258,7 @@ test.describe('family member page', () => {
     expect(unmocked).toEqual([]);
   });
 
-  test('the mother sees every personal section and control, no technical data', async ({ page }, info) => {
+  test('the mother sees every personal section and control, no technical data', async ({ page }) => {
     const { unmocked } = await mockApi(page, 'mom');
     const devicesCalls: string[] = [];
     page.on('request', (r) => { if (/\/api\/family\/member\/.*\/devices/.test(r.url())) devicesCalls.push(r.url()); });
@@ -242,7 +266,7 @@ test.describe('family member page', () => {
     await expect(page.getByTestId('member-header')).toContainText('Sam');
     // A Devices link falls back to the overview for her; the tab is not there.
     await expect(page.getByTestId('member-panel-overview')).toBeVisible();
-    const mobile = info.project.name.includes('mobile');
+    const mobile = (page.viewportSize()?.width ?? 1280) < 1024; // the rail shows from lg up
     await expect(page.getByTestId(`member-${mobile ? 'tab' : 'rail'}-overview`)).toBeVisible();
     await expect(page.getByTestId('member-tab-devices')).toHaveCount(0);
     await expect(page.getByTestId('member-rail-devices')).toHaveCount(0);
@@ -258,6 +282,58 @@ test.describe('family member page', () => {
     expect(devicesCalls).toEqual([]);
     const o = await overflow(page);
     expect(o.doc).toBeLessThanOrEqual(o.client + 1);
+    expect(unmocked).toEqual([]);
+  });
+
+  test('on a phone the profile is compact and every section fits the screen', async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) >= 1024, 'phone layout only');
+    const { unmocked } = await mockApi(page, 'dad');
+    await page.goto('/family/member/sam?section=health');
+    await expect(page.getByTestId('member-header')).toContainText('Sam');
+    // The four quick actions sit on one row, each a 44 px target.
+    const tops = new Set<number>();
+    for (const id of ['member-pause', 'member-bonus', 'member-lock', 'member-talk']) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      tops.add(Math.round(box.y));
+    }
+    expect(tops.size).toBe(1);
+    // The tabs start below the first half of the screen at most, and a deep link shows its tab.
+    const vh = page.viewportSize()!.height;
+    expect((await page.getByTestId('member-tabs').boundingBox())!.y).toBeLessThan(vh / 2);
+    const tab = page.getByTestId('member-tab-health');
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    const bar = (await page.getByTestId('member-tabs').boundingBox())!;
+    const t = (await tab.boundingBox())!;
+    expect(t.x).toBeGreaterThanOrEqual(bar.x - 1);
+    expect(t.x + t.width).toBeLessThanOrEqual(bar.x + bar.width + 1);
+    // The selected child is in view in the strip.
+    const strip = (await page.getByTestId('member-strip').boundingBox())!;
+    const me = (await page.getByTestId('member-strip-sam').boundingBox())!;
+    expect(me.x + me.width).toBeLessThanOrEqual(strip.x + strip.width + 1);
+
+    // Lock offers plain durations and a way out.
+    await page.getByTestId('member-lock').click();
+    await expect(page.getByTestId('member-quick-options')).toContainText('1 hr');
+    await page.getByTestId('member-quick-cancel').click();
+    await expect(page.getByTestId('member-quick-options')).toHaveCount(0);
+
+    // Every section: no sideways scrolling, and the tab bar stays put while scrolling.
+    for (const id of ['overview', 'comms', 'time', 'apps', 'activity', 'location', 'health', 'faith', 'devices']) {
+      await page.getByTestId(`member-tab-${id}`).click();
+      await expect(page.getByTestId(`member-panel-${id}`)).toBeVisible();
+      const o = await overflow(page);
+      expect(o.doc, id).toBeLessThanOrEqual(o.client + 1);
+    }
+    await page.getByTestId('member-tab-time').click();
+    await expect(page.getByTestId('weekly-schedule')).toBeVisible();
+    await page.evaluate(() => document.querySelector('main')?.scrollTo(0, 1500));
+    await expect.poll(async () => (await page.getByTestId('member-tabs').boundingBox())!.y).toBeLessThan(120);
+    // School days are switches; changing one offers Save and Discard.
+    await page.getByTestId('school-day-sat').click();
+    await expect(page.getByTestId('screen-time-unsaved')).toBeVisible();
+    await page.getByTestId('screen-time-discard').click();
+    await expect(page.getByTestId('screen-time-unsaved')).toHaveCount(0);
     expect(unmocked).toEqual([]);
   });
 });
