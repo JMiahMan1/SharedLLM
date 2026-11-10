@@ -539,8 +539,7 @@ public class LocationTrackingService extends Service {
      * Also re-asks for fixes when the rate they should come at changed.
      */
     private void syncCrashListening() {
-        boolean want = updatesRequested && requestMode() == MotionModeSelector.Mode.DRIVING
-                && CrashDetector.listensOn(getResources().getConfiguration().smallestScreenWidthDp);
+        boolean want = updatesRequested && requestMode() == MotionModeSelector.Mode.DRIVING;
         if (want && !accelRegistered && sensorManager != null) {
             Sensor accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             if (accel != null) {

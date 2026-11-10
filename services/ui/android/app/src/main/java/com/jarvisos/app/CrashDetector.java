@@ -26,17 +26,6 @@ import org.json.JSONObject;
 final class CrashDetector {
     static final double GRAVITY = 9.81;
 
-    /**
-     * Only a phone listens for crashes. A tablet rides loose in a car (on a
-     * lap, in a seat-back pocket, slid to the floor), so a drop reads as a
-     * 4 g impact, and its GPS inside the car often gives no trusted fix for
-     * 20 s, which by itself confirms a crash. Noah's tablet sent two full
-     * crash alerts in one afternoon that way. Phone makers do the same: crash
-     * detection runs on phones and watches, not tablets.
-     */
-    static boolean listensOn(int smallestWidthDp) {
-        return "phone".equals(DeviceNoun.forWidth(smallestWidthDp));
-    }
 
     /**
      * About 4 g beyond gravity in one sample: an impact on its own. There is
@@ -45,6 +34,29 @@ final class CrashDetector {
      * every false alarm costs a full-screen siren.
      */
     static final double SPIKE_MPS2 = 39.0;
+    /**
+     * A dropped device falls before it hits: for a moment it reads close to
+     * no acceleration at all (free fall), then the spike as it lands. A car
+     * crash has no fall before the hit; the device is moving with the car.
+     * So a spike right after at least {@link #FREE_FALL_MIN_MS} below
+     * {@link #FREE_FALL_MPS2} (about 0.3 g, gravity included) is a drop: a
+     * tablet slid off a lap, a phone knocked off the seat. A 15 cm fall
+     * already takes about 175 ms.
+     */
+    static final double FREE_FALL_MPS2 = 3.0;
+    static final long FREE_FALL_MIN_MS = 80L;
+    /** How soon after the fall ends the landing spike comes. */
+    static final long DROP_LANDS_WITHIN_MS = 300L;
+    /**
+     * A crash "takes the GPS with it" only if there was GPS to take: at least
+     * this many trusted fixes in the {@link #GPS_STEADY_MS} before the impact,
+     * the newest no older than {@link #GPS_FRESH_MS}. A tablet or a phone in
+     * a bag whose GPS was already coming and going says nothing by going quiet
+     * after a jolt.
+     */
+    static final int GPS_STEADY_FIXES = 3;
+    static final long GPS_STEADY_MS = 5_000L;
+    static final long GPS_FRESH_MS = 2_500L;
     /** About 16 mph, the same speed {@link MotionModeSelector} takes for a vehicle. */
     static final double ARM_MIN_MPS = 7.0;
     static final long ARM_RECENT_MS = 10_000L;
@@ -159,6 +171,16 @@ final class CrashDetector {
     private double lastAccuracy = Double.NaN;
     /** Whether any trusted fix has come since the impact. */
     private boolean fixSinceImpact;
+    /** Whether the GPS was steady just before the impact (see {@link #GPS_STEADY_FIXES}). */
+    private boolean gpsSteadyAtImpact;
+
+    // Times of trusted fixes in the last GPS_STEADY_MS, oldest first, while driving or not.
+    private final ArrayDeque<Long> trustedFixTimes = new ArrayDeque<>();
+
+    // Free fall: when the current run below FREE_FALL_MPS2 began (-1: not falling),
+    // and when the last long-enough fall ended.
+    private long fallStart = -1L;
+    private long fallEndedAt = Long.MIN_VALUE / 2;
 
     /** Whether the phone is in driving mode; outside it no new impact is taken. */
     void setDriving(boolean driving) {
@@ -186,7 +208,9 @@ final class CrashDetector {
         Result lost = gpsLost(timeMs);
         if (lost != null) return lost;
         expire(timeMs);
-        double beyond = Math.sqrt(x * x + y * y + z * z) - GRAVITY;
+        double magnitude = Math.sqrt(x * x + y * y + z * z);
+        noteFall(timeMs, magnitude);
+        double beyond = magnitude - GRAVITY;
         if (impactAt >= 0) {
             // Later jolts of the same crash (a second hit, the car settling)
             // only raise the peak.
@@ -195,6 +219,8 @@ final class CrashDetector {
         }
         boolean impact = beyond >= SPIKE_MPS2;
         if (!impact || !armed(timeMs)) return null;
+        if (timeMs - fallEndedAt <= DROP_LANDS_WITHIN_MS) return null;  // it fell, then landed
+        gpsSteadyAtImpact = gpsSteady(timeMs);
         impactAt = timeMs;
         peakMps2 = beyond;
         speedBefore = topRecentSpeed(timeMs);
@@ -206,7 +232,7 @@ final class CrashDetector {
 
     /** The no-fix case described at {@link #onAccel}; null otherwise. */
     private Result gpsLost(long nowMs) {
-        if (impactAt < 0 || fixSinceImpact || peakMps2 < SPIKE_MPS2) return null;
+        if (impactAt < 0 || fixSinceImpact || !gpsSteadyAtImpact || peakMps2 < SPIKE_MPS2) return null;
         if (nowMs - impactAt <= STOP_WITHIN_MS || Double.isNaN(lastLat)) return null;
         Result r = new Result(round1(peakMps2 / GRAVITY), DrivingMonitor.mph(speedBefore), impactAt,
                 lastLat, lastLon, lastAccuracy, nowMs);
@@ -228,6 +254,10 @@ final class CrashDetector {
         lastLat = lat;
         lastLon = lon;
         lastAccuracy = accuracyM;
+        trustedFixTimes.addLast(timeMs);
+        while (!trustedFixTimes.isEmpty() && timeMs - trustedFixTimes.peekFirst() > GPS_STEADY_MS) {
+            trustedFixTimes.removeFirst();
+        }
         if (impactAt >= 0 && timeMs >= impactAt) fixSinceImpact = true;
         if (impactAt < 0) {
             if (driving) {
@@ -278,6 +308,29 @@ final class CrashDetector {
         }
     }
 
+    /** Tracks runs of free fall; the end of a long-enough run is kept in {@link #fallEndedAt}. */
+    private void noteFall(long timeMs, double magnitude) {
+        if (magnitude < FREE_FALL_MPS2) {
+            if (fallStart < 0) fallStart = timeMs;
+            return;
+        }
+        if (fallStart >= 0 && timeMs - fallStart >= FREE_FALL_MIN_MS) fallEndedAt = timeMs;
+        fallStart = -1L;
+    }
+
+    private boolean gpsSteady(long timeMs) {
+        int count = 0;
+        long newest = Long.MIN_VALUE / 2;
+        for (long t : trustedFixTimes) {
+            long age = timeMs - t;
+            if (age >= 0 && age <= GPS_STEADY_MS) {
+                count++;
+                if (t > newest) newest = t;
+            }
+        }
+        return count >= GPS_STEADY_FIXES && timeMs - newest <= GPS_FRESH_MS;
+    }
+
     private boolean armed(long timeMs) {
         if (!driving || timeMs - lastReportedAt < DEBOUNCE_MS) return false;
         for (double[] s : recentSpeeds) {
@@ -301,5 +354,6 @@ final class CrashDetector {
         stopAt = -1L;
         holdFixes = 0;
         peakMps2 = 0;
+        gpsSteadyAtImpact = false;
     }
 }

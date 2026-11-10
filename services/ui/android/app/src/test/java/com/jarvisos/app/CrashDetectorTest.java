@@ -340,11 +340,67 @@ public class CrashDetectorTest {
         assertFalse(detector.isPending());
     }
 
+    // Drops and a GPS that was never steady (Noah's tablet, 2026-11-09).
+
+    /** {@code ms} of free fall ending just before {@code t}, sampled at 50 Hz. */
+    private void fall(long t, long ms) {
+        for (long s = t - ms; s < t; s += 20) detector.onAccel(T0 + s, 0, 0, 0.5);
+    }
+
     @Test
-    public void onlyAPhoneListensForCrashes() {
-        assertTrue(CrashDetector.listensOn(411));   // a phone
-        assertTrue(CrashDetector.listensOn(0));     // unreadable: treated as a phone
-        assertFalse(CrashDetector.listensOn(600));  // a tablet
-        assertFalse(CrashDetector.listensOn(800));
+    public void aDeviceDroppedInTheCarThenAStopIsNotACrash() {
+        drive(10_000);
+        fall(10_500, 300);       // slid off a lap: ~45 cm of fall
+        accel(10_500, 60);       // and lands hard on the floor
+        assertFalse(detector.isPending());
+        assertNull(stopFrom(13_000, 15_000));  // a red light right after
+    }
+
+    @Test
+    public void aDropThenTheGpsGoingQuietIsNotACrash() {
+        drive(10_000);
+        fall(10_500, 200);
+        accel(10_500, 50);
+        assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
+        assertFalse(detector.isPending());
+    }
+
+    @Test
+    public void aMomentOfLowReadingTooShortForAFallIsStillAnImpact() {
+        drive(10_000);
+        fall(10_500, 40);        // two samples: a bounce, not a fall
+        accel(10_500, 45);
+        assertTrue(detector.isPending());
+        assertNotNull(stopFrom(13_000, 15_000));
+    }
+
+    @Test
+    public void aCrashLongAfterAnEarlierDropIsStillACrash() {
+        drive(10_000);
+        fall(5_000, 300);
+        accel(5_000, 50);        // dropped earlier in the drive
+        assertFalse(detector.isPending());
+        accel(10_500, 45);       // the real hit, no fall before it
+        assertTrue(detector.isPending());
+        assertNotNull(stopFrom(13_000, 15_000));
+    }
+
+    @Test
+    public void quietGpsAfterAJoltSaysNothingWhenTheGpsWasPatchyBefore() {
+        detector.setDriving(true);
+        // Trusted fixes every 4 s: armed, but not a steady GPS.
+        for (long t = 0; t <= 8_000; t += 4_000) assertNull(fix(t, 20));
+        accel(9_000, 45);
+        assertTrue(detector.isPending());
+        assertNull(detector.onAccel(T0 + 31_000, 0, 0, G));
+        assertFalse(detector.isPending());
+    }
+
+    @Test
+    public void patchyGpsCanStillConfirmACrashByTheStop() {
+        detector.setDriving(true);
+        for (long t = 0; t <= 8_000; t += 4_000) assertNull(fix(t, 20));
+        accel(9_000, 45);
+        assertNotNull(stopFrom(12_000, 15_000));
     }
 }
