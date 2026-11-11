@@ -33,7 +33,7 @@ from services.config import (
 )
 
 # Now import everything from sibling modules
-from services.execution import device_registry, ha_client, hardware_router
+from services.execution import device_registry, ha_client, ha_health, hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.artifacts import artifact_name, create_artifact
 from services.execution.handlers import (
@@ -1456,7 +1456,7 @@ async def execute_trigger(payload: dict[str, Any]):
                     if mapped_esp not in esphome_triggered:
                         esphome_triggered.append(mapped_esp)
 
-            if ha_url and ha_token:
+            if ha_url and ha_token and not ha_health.is_down(ha_url):
                 try:
                     full_entity_id = ha_client.sanitize_entity_id("media_player", t_clean)
                     state_obj = await ha_client.get_state(ha_url, ha_token, full_entity_id)
@@ -1489,9 +1489,15 @@ async def execute_trigger(payload: dict[str, Any]):
                             {"media_content_id": media_url, "media_content_type": "audio/wav"},
                         )
                     log.info(f"HA/TV alert result on {full_entity_id}: {result}")
-                    media_triggered.append(full_entity_id)
-                    dispatched.append(full_entity_id)
-                    continue
+                    # HA failures come back as {"ok": False}, they do not raise. This
+                    # used to `continue` regardless, so with HA down the direct
+                    # ESPHome fallback below was unreachable and the alarm rang
+                    # nowhere. Only a delivered alert ends this target's attempts.
+                    if isinstance(result, dict) and result.get("ok"):
+                        media_triggered.append(full_entity_id)
+                        dispatched.append(full_entity_id)
+                        continue
+                    log.warning(f"HA alert not delivered on {full_entity_id}: {result}; trying direct routes")
                 except Exception as ha_err:
                     log.warning(f"HA alert failed on {t_clean}: {ha_err}")
 
@@ -1511,6 +1517,24 @@ async def execute_trigger(payload: dict[str, Any]):
                     )
                     esphome_triggered.append(mapped_esp)
                     dispatched.append(f"esphome:{mapped_esp}")
+                    continue
+
+            # 4. HA down and no ESPHome board: reach the speaker itself (Music
+            # Assistant, then Cast), so the alarm still rings somewhere audible.
+            if not ha_url or ha_health.is_down(ha_url):
+                from types import SimpleNamespace
+
+                from services.execution.direct_announce import announce_direct
+
+                full_entity_id = ha_client.sanitize_entity_id("media_player", t_clean)
+                direct = await announce_direct(
+                    full_entity_id, media_url, 0.7,
+                    SimpleNamespace(mass_url=creds.get("mass_url"), mass_token=creds.get("mass_token")),
+                )
+                if direct.get("ok"):
+                    dispatched.append(f"{direct['route']}:{full_entity_id}")
+                else:
+                    log.warning(f"Timer alert could not reach {full_entity_id} directly: {direct.get('error')}")
 
         if esphome_triggered or media_triggered:
             with suppress(Exception):
@@ -2063,17 +2087,24 @@ async def execute_announce(req: AnnouncementRequest):
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     if not ha_url or not ha_token:
-        return _fail(
-            f"Home Assistant URL or token not configured for user '{ctx.user}' "
-            "(Identity -> Services, or ask an admin to grant the shared ones).",
-            "announce",
-        )
+        if ctx.mass_url and ctx.mass_token and (req.entity_id or req.device_name):
+            # No HA at all, but a speaker can still be reached directly.
+            ha_url, ha_token = "", ""
+        else:
+            return _fail(
+                f"Home Assistant URL or token not configured for user '{ctx.user}' "
+                "(Identity -> Services, or ask an admin to grant the shared ones).",
+                "announce",
+            )
 
     # Entity resolution: if entity_id is missing, resolve from device_name
     if not target_player and req.device_name:
         target_player = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
         if target_player:
             log.info(f"[announce] Resolved device_name='{req.device_name}' -> entity_id='{target_player}'")
+        elif not ha_url or ha_health.is_down(ha_url):
+            # No HA to look the name up in; the direct routes match on this slug.
+            target_player = ha_client.sanitize_entity_id("media_player", req.device_name)
         else:
             return _fail(f"Could not find media_player matching '{req.device_name}'. Available devices: check HA entity list.", "announce")
 
@@ -2228,8 +2259,20 @@ async def execute_announce(req: AnnouncementRequest):
             log.error(f"[announce] Kokoro failed: {e}")
             result = {"ok": False, "error": str(e)}
 
+    # Home Assistant down: the audio is already made, so take it to the speaker
+    # directly (Music Assistant, then Cast) instead of through HA's integrations.
+    direct = False
+    ha_down = not ha_url or ha_health.is_down(ha_url) or ha_health.is_unreachable_result(result)
+    if not result.get("ok") and media_url and ha_down:
+        from services.execution.direct_announce import announce_direct
+
+        log.warning(f"[announce] Home Assistant is unreachable; announcing on {target_player} directly")
+        result = await announce_direct(target_player, media_url, req.volume, ctx)
+        direct = bool(result.get("ok"))
+        log.info(f"[announce] Direct result: {result}")
+
     # Fallback: Music Assistant (MASS) play_announcement
-    if not result.get("ok") and media_url:
+    if not result.get("ok") and media_url and not ha_down:
         log.info("[announce] Attempting Music Assistant (MASS) play_announcement...")
         # Resolve to MA player entity if target is a Roku
         fallback_target = target_player
@@ -2242,7 +2285,7 @@ async def execute_announce(req: AnnouncementRequest):
         })
 
     # Last resort: local Piper (try tts.piper, then tts.speak with tts.piper entity)
-    if not result.get("ok"):
+    if not result.get("ok") and not ha_down:
         log.info("[announce] Falling back to HA Piper...")
         result = await ha_client.call_service(ha_url, ha_token, "tts", "piper", target_player, {
             "message": req.message
@@ -2253,8 +2296,9 @@ async def execute_announce(req: AnnouncementRequest):
                 {"media_player_entity_id": target_player, "message": req.message},
             )
 
-    # 4. Verify playback actually happened
-    if result.get("ok") and media_url:
+    # 4. Verify playback actually happened (through HA; a direct play was
+    # confirmed by the route that made it, and HA cannot be asked anyway)
+    if result.get("ok") and media_url and not direct:
         log.info(f"[announce] Verifying playback on {target_player}...")
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
@@ -2271,7 +2315,7 @@ async def execute_announce(req: AnnouncementRequest):
             result = {"ok": False, "error": f"Playback not confirmed: {verification['detail']}", "verification": verification}
 
     # 5. Quick confirmation via logbook (faster than polling state)
-    if result.get("ok"):
+    if result.get("ok") and not direct:
         try:
             log_entries = await ha_client.get_logbook(ha_url, ha_token, target_player, days=1)
             if log_entries:
@@ -2279,6 +2323,16 @@ async def execute_announce(req: AnnouncementRequest):
                 log.info(f"[announce] Logbook confirms: {latest.get('state', '?')} - {latest.get('message', '')[:80]}")
         except Exception as e:
             log.debug(f"[announce] Logbook check skipped: {e}")
+
+    if direct:
+        # Music Assistant restores what the speaker was playing itself, and HA
+        # (which the restore below talks to) is not answering.
+        via = "Music Assistant" if result.get("route") == "mass_direct" else "Cast"
+        return _ok(
+            f"Announcement played on {result.get('target') or target_player} directly through {via} "
+            "(Home Assistant is down).",
+            "announce",
+        )
 
     # Wait for announcement audio to finish before restoring
     if result.get("ok"):
@@ -2382,12 +2436,19 @@ async def execute_entity_search(req: EntitySearchRequest):
     if not ctx.is_admin:
         permissions = await load_entity_permissions(ctx.user, ctx.is_admin)
 
+    stale_at: float | None = None
     try:
         all_states = await ha_client.get_states(ha_url, ha_token, strict=True)
     except Exception as e:
         # An empty list here used to mean "found 0 matching entities", which
-        # reads as a fact about the house rather than a failed read.
-        return _fail(f"Could not reach Home Assistant to search: {type(e).__name__}.", "entity_search")
+        # reads as a fact about the house rather than a failed read. With HA
+        # unreachable, answer from the last states it reported, and say when.
+        from services.execution import ha_snapshot
+
+        snapshot = await ha_snapshot.recall(ha_url) if ha_health.is_down(ha_url) else None
+        if snapshot is None:
+            return _fail(f"Could not reach Home Assistant to search: {type(e).__name__}.", "entity_search")
+        all_states, stale_at = snapshot
     results = []
 
     search_terms = req.query.lower().split()
@@ -2475,16 +2536,19 @@ async def execute_entity_search(req: EntitySearchRequest):
         results.sort(key=lambda r: (r.get("friendly_name") or r["entity_id"]).lower())
 
     limit = max(1, min(int(req.limit or 200), 1000))
-    return ExecutionResult(
-        status="SUCCESS",
-        message=f"Found {len(results)} matching entities.",
-        service="entity_search",
-        detail={
-            "entities": results[:limit],
-            "total": len(results),
-            "limit": limit,
-        },
-    )
+    detail: dict[str, Any] = {"entities": results[:limit], "total": len(results), "limit": limit}
+    message = f"Found {len(results)} matching entities."
+    if stale_at is not None:
+        from services.execution import ha_snapshot
+
+        # Never let a last-known state pass as the current one.
+        when = ha_snapshot.age_phrase(stale_at)
+        detail.update(stale=True, as_of=stale_at, as_of_phrase=when)
+        message = (
+            f"Home Assistant is down. Found {len(results)} matching entities; these are their "
+            f"last known states, from {when}."
+        )
+    return ExecutionResult(status="SUCCESS", message=message, service="entity_search", detail=detail)
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
@@ -2775,6 +2839,15 @@ async def health():
     checks["storage"] = storage_ok["status"]
     if not storage_ok["healthy"]:
         overall_status = "degraded"
+
+    # Home Assistant is reported, never counted: execution keeps serving (direct
+    # ESPHome/Cast/MA control) while HA is down, and a 503 here would make the
+    # gateway mark execution itself unreachable. Taken from ha_health, which
+    # learns from real calls, so this costs no request to HA.
+    ha_hosts = ha_health.status()
+    checks["home_assistant"] = "down" if any(h["status"] == "down" for h in ha_hosts.values()) else "ok"
+    if ha_hosts:
+        checks["home_assistant_hosts"] = ha_hosts
 
     status_code = 200 if overall_status == "healthy" else 503
     return JSONResponse(

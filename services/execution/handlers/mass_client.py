@@ -227,3 +227,129 @@ async def search(
     except Exception as e:
         raise MASearchError(f"MA search failed: {e}") from e
 
+
+
+# --------------------------------------------------------------------------- #
+# Direct player control, used when Home Assistant is down.                    #
+#                                                                             #
+# Normally speakers are driven through HA's music_assistant integration       #
+# (music_assistant.play_media / play_announcement). Music Assistant is its own #
+# server, so when HA is unreachable the same work can go straight to MA's     #
+# JSON-RPC `/api` - the endpoint the gateway already uses for players/all and  #
+# player commands.                                                             #
+# --------------------------------------------------------------------------- #
+
+
+class MACommandError(Exception):
+    """A direct Music Assistant command failed (connection, HTTP or MA error)."""
+
+
+def _api_url(mass_url: str) -> str:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(mass_url.rstrip("/"))
+    if not parsed.hostname:
+        raise MACommandError(f"Invalid mass_url (no host): {mass_url!r}")
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme or 'http'}://{parsed.hostname}{port}/api"
+
+
+async def ma_command(
+    mass_url: str, mass_token: str, command: str, args: dict[str, Any] | None = None, *, timeout: float = 15.0
+) -> Any:
+    """Send one command to MA's JSON-RPC `/api` and return its result. Raises MACommandError.
+
+    Unlike ``_ma_api`` (which returns [] on any failure, fine for lists), a
+    command's caller has to know whether it worked: "playing" must not be said
+    about a speaker that stayed silent.
+    """
+    if not mass_url or not mass_token:
+        raise MACommandError("Music Assistant is not configured")
+    payload: dict[str, Any] = {"message_id": uuid.uuid4().hex, "command": command}
+    if args:
+        payload["args"] = args
+    try:
+        async with _mass_session(mass_url) as client, client.post(
+            _api_url(mass_url),
+            json=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {mass_token}"},
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            text = await resp.text()
+            if resp.status != 200:
+                raise MACommandError(f"Music Assistant returned HTTP {resp.status} for {command}: {text[:200]}")
+            data = json.loads(text) if text.strip() else None
+    except MACommandError:
+        raise
+    except Exception as e:
+        raise MACommandError(f"Music Assistant {command} failed: {type(e).__name__}: {e}") from e
+    if isinstance(data, dict) and data.get("error_code"):
+        raise MACommandError(f"Music Assistant {command} error {data.get('error_code')}: {data.get('details')}")
+    if isinstance(data, dict) and "result" in data:
+        return data["result"]
+    return data
+
+
+async def get_players(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
+    result = await ma_command(mass_url, mass_token, "players/all")
+    return [p for p in (result or []) if isinstance(p, dict) and p.get("player_id")]
+
+
+def _slug(text: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")
+
+
+def match_player(players: list[dict[str, Any]], entity_id: str, friendly_name: str = "") -> dict[str, Any] | None:
+    """The MA player behind an HA ``media_player`` entity, without asking HA.
+
+    HA's music_assistant integration names its entities after the MA player
+    (``media_player.<slug of the player name>``, with ``_2``-style suffixes on
+    collisions), so the slug is the join key. Exact slug first, then the slug
+    without a numeric suffix, then a name that contains the entity's words.
+    Unavailable players are skipped: they cannot play.
+    """
+    object_id = entity_id.split(".", 1)[-1].lower()
+    import re
+
+    base = re.sub(r"_\d+$", "", object_id)
+    wanted = {object_id, base, _slug(friendly_name)} - {""}
+    live = [p for p in players if p.get("available", True)]
+    for candidates in (
+        [p for p in live if _slug(p.get("display_name") or p.get("name") or "") in wanted],
+        [p for p in live if p.get("player_id", "").lower() in wanted],
+        [p for p in live if base and base in _slug(p.get("display_name") or p.get("name") or "")],
+    ):
+        if candidates:
+            return candidates[0]
+    return None
+
+
+async def play_media(mass_url: str, mass_token: str, player_id: str, uri: str, option: str = "replace") -> None:
+    await ma_command(
+        mass_url, mass_token, "player_queues/play_media",
+        {"queue_id": player_id, "media": uri, "option": option or "replace"},
+    )
+
+
+async def play_announcement(
+    mass_url: str, mass_token: str, player_id: str, url: str, volume_level: int | None = None
+) -> None:
+    args: dict[str, Any] = {"player_id": player_id, "url": url}
+    if volume_level is not None:
+        args["volume_level"] = volume_level
+    await ma_command(mass_url, mass_token, "players/play_announcement", args, timeout=30.0)
+
+
+#: Same preference the HA path uses when a search returns several kinds of hit.
+_PLAY_ORDER = ("track", "album", "artist", "playlist", "radio")
+
+
+def best_uri(results: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """(uri, media_type) of the hit to play, in the HA path's category order."""
+    for kind in _PLAY_ORDER:
+        for item in results:
+            if item.get("type") == kind and item.get("uri"):
+                return item["uri"], kind
+    return None

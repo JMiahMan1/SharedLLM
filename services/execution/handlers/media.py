@@ -5,7 +5,7 @@ import re
 from typing import cast
 
 from services.config import MASS_CONFIG_ENTRY_ID
-from services.execution import activity, ha_client
+from services.execution import activity, ha_client, ha_health
 from services.execution.media_links import media_file_url
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 from services.shared.ma_player import is_music_assistant_player
@@ -67,6 +67,10 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
         entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player", media_type)
         if entity_id:
             return entity_id
+        if not ha_url or ha_health.is_down(ha_url):
+            # No HA to look the name up in: use the id HA would give it. The
+            # direct Music Assistant route matches players on this same slug.
+            return ha_client.sanitize_entity_id("media_player", req.device_name)
 
     # Fallback to active or available media_player from Home Assistant
     states = await ha_client.get_states(ha_url, ha_token)
@@ -147,8 +151,73 @@ async def _is_ma_entity(ctx, entity_id: str) -> bool:
     return bool(state) and is_music_assistant_player(state.get("attributes"), entity_id)
 
 
+async def play_music_direct(req: MediaPlayRequest, entity_id: str, ctx, why: str) -> ExecutionResult:
+    """Play on a speaker straight through Music Assistant, without Home Assistant.
+
+    The HA path (music_assistant.search / play_media) only relays to MA, which
+    is its own server; when HA is unreachable MA can still be asked directly.
+    The speaker is found among MA's players by the entity's name, and the
+    query is searched over MA's WebSocket like the browse widgets do.
+    """
+    from . import mass_client
+
+    prefix = f"Home Assistant is unreachable ({why})"
+    if not (ctx.mass_url and ctx.mass_token):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"{prefix} and no Music Assistant login is set up for direct playback.",
+            service="media_play", detail={"route": "none"},
+        )
+    query = (req.query or "").strip()
+    try:
+        player = mass_client.match_player(await mass_client.get_players(ctx.mass_url, ctx.mass_token), entity_id)
+        if player is None:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"{prefix} and Music Assistant has no available player matching {entity_id}.",
+                service="media_play", detail={"route": "none"},
+            )
+        if "://" in query:
+            uri, kind = query, "item"
+        else:
+            hit = mass_client.best_uri(
+                await mass_client.search(ctx.mass_url, ctx.mass_token, query, limit=10, library_only=False)
+            ) if query else None
+            if not hit:
+                return ExecutionResult(status="FAILURE", message=f"No match for '{query}'.", service="media_play")
+            uri, kind = hit
+        await mass_client.play_media(ctx.mass_url, ctx.mass_token, player["player_id"], uri, req.enqueue or "replace")
+    except (mass_client.MACommandError, mass_client.MASearchError) as e:
+        return ExecutionResult(
+            status="FAILURE", message=f"{prefix} and the direct Music Assistant route failed too: {e}",
+            service="media_play", detail={"route": "none"},
+        )
+    name = player.get("display_name") or player.get("name") or entity_id
+    log.info(f"[media/play] '{query}' -> MA player {player['player_id']} directly (HA unreachable: {why})")
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Playing '{query}' ({kind}) on {name} directly through Music Assistant (Home Assistant is down).",
+        service="media_play",
+        detail={"route": "mass_direct", "player_id": player["player_id"], "uri": uri},
+    )
+
+
 async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
-    """Play music via Music Assistant or fallback."""
+    """Play music via Music Assistant (through HA, or directly when HA is down)."""
+    if not ctx.ha_url or ha_health.is_down(ctx.ha_url):
+        return await play_music_direct(req, entity_id, ctx, "down" if ctx.ha_url else "not configured")
+    result = await _play_music_via_ha(req, entity_id, ctx)
+    # HA can go down between the checks above and the call (the first failures
+    # are what mark it down): the HA route then reports "unreachable".
+    if result.status != "SUCCESS" and (
+        ha_health.is_down(ctx.ha_url) or ha_health.UNREACHABLE.lower() in (result.message or "").lower()
+    ):
+        return await play_music_direct(req, entity_id, ctx, result.message or "unreachable")
+    return result
+
+
+async def _play_music_via_ha(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
+    """Play music via Music Assistant through Home Assistant's integration."""
     from . import roku as roku_handler
 
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
@@ -209,6 +278,8 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         )
 
         log.info(f"[media/play] MASS search response: {search_result}")
+        if ha_health.is_unreachable_result(search_result):
+            return ExecutionResult(status="FAILURE", message=str(search_result.get("error")), service="media_play")
         if search_result.get("ok") and search_result.get("service_response"):
             raw = search_result["service_response"]
             resp = raw.get("service_response", raw)
@@ -674,6 +745,36 @@ _QUEUE_COMMANDS = frozenset({
 
 
 async def handle_media_transport(req) -> ExecutionResult:
+    """Transport/remote commands: through HA, or straight to the device when HA is down."""
+    ctx = req.user_context
+    if not ctx.ha_url or ha_health.is_down(ctx.ha_url):
+        return await _transport_direct(req, "down" if ctx.ha_url else "not configured")
+    result = await _transport_via_ha(req)
+    if result.status != "SUCCESS" and (
+        ha_health.is_down(ctx.ha_url) or ha_health.UNREACHABLE.lower() in (result.message or "").lower()
+    ):
+        return await _transport_direct(req, "unreachable")
+    return result
+
+
+async def _transport_direct(req, why: str) -> ExecutionResult:
+    from .. import tv_direct
+
+    entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
+    result = await tv_direct.transport(
+        entity_id, req.command, req.user_context,
+        volume_level=getattr(req, "volume_level", None), muted=getattr(req, "muted", None),
+    )
+    message = result["message"]
+    if not result["ok"]:
+        message = f"Home Assistant is unreachable ({why}) and the direct route failed: {message}"
+    return ExecutionResult(
+        status="SUCCESS" if result["ok"] else "FAILURE", message=message, service="media_transport",
+        detail={"route": result["route"]},
+    )
+
+
+async def _transport_via_ha(req) -> ExecutionResult:
     """Handle media transport commands with TV-specific handling for Android TV, WebOS, Samsung, and Roku."""
     from ..announce_handlers import detect_tv_type
     from . import android_tv, roku, samsung, webos

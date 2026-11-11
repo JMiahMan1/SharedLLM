@@ -9,12 +9,22 @@ from contextlib import asynccontextmanager
 
 import aiohttp
 
-from services.execution import credential_alerts
+from services.execution import credential_alerts, ha_health, ha_snapshot
 from services.execution.http_client import get_session, host_of
 
 log = logging.getLogger("execution.ha_client")
 
-_TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
+# HA is on the LAN: a connect that has not completed in 5 s is not going to. The
+# total stays long because some services (scripts, TTS) legitimately take time.
+_TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=5.0)
+
+
+def _note(ha_url: str, exc: BaseException | None = None) -> None:
+    """Tell ha_health how a call went: answered (any HTTP status) or unreachable."""
+    if exc is None or isinstance(exc, aiohttp.ClientResponseError):
+        ha_health.record_answer(ha_url)
+    elif ha_health.is_unreachable_error(exc):
+        ha_health.record_unreachable(ha_url, exc)
 
 
 @asynccontextmanager
@@ -98,10 +108,16 @@ async def call_service(
     if service_data:
         payload.update(service_data)
 
+    skip = ha_health.skip_reason(ha_url)
+    if skip:
+        log.warning(f"[ha_client] {domain}.{service} -> {entity_id or '(no target)'} skipped: {skip}")
+        return {"ok": False, "error": skip, "ha_down": True}
+
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
             async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status})")
                 if return_response:
@@ -120,12 +136,17 @@ async def call_service(
             if e.status in (401, 403):
                 return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.status}
             return {"ok": False, "error": f"HA returned {e.status}: {detail}", "status_code": e.status}
-        except aiohttp.ClientError as e:
-            log.error(f"[ha_client] Request error: {e}")
-            return {"ok": False, "error": f"Home Assistant is unreachable: {e}"}
+        except (aiohttp.ClientError, TimeoutError) as e:
+            # A timeout used to fall to the generic branch below and return str(e),
+            # which is "" for aiohttp's timeouts: the router saw no "unreachable",
+            # skipped its direct fallback, and the person got an empty error.
+            reason = ha_health.describe(e)
+            log.error(f"[ha_client] Request error: {reason}")
+            _note(ha_url, e)
+            return {"ok": False, "error": f"{ha_health.UNREACHABLE}: {reason}"}
         except Exception as e:
             log.error(f"[ha_client] Unexpected error: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": str(e) or type(e).__name__}
 
 async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "") -> dict | None:
     """Retrieve the current state of an HA entity."""
@@ -133,6 +154,8 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "
         log.error("[ha_client] ha_url is None or empty. Cannot get state.")
         return None
 
+    if ha_health.skip_reason(ha_url):
+        return None
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
 
@@ -140,6 +163,7 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "
         try:
             log.debug(f"[ha_client] GET {url}")
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 if resp.status == 404:
                     return None
                 resp.raise_for_status()
@@ -147,10 +171,11 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str, account: str = "
                 await credential_alerts.auth_ok("home_assistant", account or "stored login")
                 return payload
         except Exception as e:
+            _note(ha_url, e)
             status = getattr(e, "status", None)
             if status in (401, 403):
                 await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
-            log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
+            log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {ha_health.describe(e)}")
             return None
 
 async def get_all_states(ha_url: str, ha_token: str, account: str = "") -> list:
@@ -163,13 +188,17 @@ async def get_config(ha_url: str, ha_token: str) -> dict:
         return {}
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/config"
+    if ha_health.skip_reason(ha_url):
+        return {}
     async with _ha_session(ha_url) as client:
         try:
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
-            log.error(f"[ha_client] get_config failed: {e}")
+            _note(ha_url, e)
+            log.error(f"[ha_client] get_config failed: {ha_health.describe(e)}")
             return {}
 
 async def get_config_entries(ha_url: str, ha_token: str, domain: str = "") -> list:
@@ -180,13 +209,17 @@ async def get_config_entries(ha_url: str, ha_token: str, domain: str = "") -> li
     url = f"{ha_url.rstrip('/')}/api/config/config_entries/entry"
     if domain:
         url += f"?domain={domain}"
+    if ha_health.skip_reason(ha_url):
+        return []
     async with _ha_session(ha_url) as client:
         try:
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
-            log.error(f"[ha_client] get_config_entries failed: {e}")
+            _note(ha_url, e)
+            log.error(f"[ha_client] get_config_entries failed: {ha_health.describe(e)}")
             return []
 
 async def find_mass_config_entry(ha_url: str, ha_token: str) -> str:
@@ -214,6 +247,11 @@ async def get_states(ha_url: str, ha_token: str, account: str = "", strict: bool
             raise RuntimeError("Home Assistant URL is not configured")
         return []
 
+    skip = ha_health.skip_reason(ha_url)
+    if skip:
+        if strict:
+            raise ConnectionError(skip)
+        return []
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
 
@@ -221,15 +259,19 @@ async def get_states(ha_url: str, ha_token: str, account: str = "", strict: bool
         try:
             log.info(f"[ha_client] GET {url}")
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 payload = await resp.json()
                 await credential_alerts.auth_ok("home_assistant", account or "stored login")
+                if isinstance(payload, list):
+                    ha_snapshot.remember(ha_url, payload)
                 return payload
         except Exception as e:
+            _note(ha_url, e)
             status = getattr(e, "status", None)
             if status in (401, 403):
                 await credential_alerts.auth_failed("home_assistant", account or "stored login", f"HTTP {status}")
-            log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
+            log.error(f"[ha_client] get_states failed: {type(e).__name__}: {ha_health.describe(e)}")
             if strict:
                 raise
             return []  # Ensure empty list on error
@@ -245,17 +287,21 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
+    if ha_health.skip_reason(ha_url):
+        return []
 
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url}")
             async with client.get(url, headers=headers, params=params, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 data = await resp.json()
                 # HA returns a list of lists (one per entity)
                 return data[0] if data else []
         except Exception as e:
-            log.error(f"[ha_client] get_history({entity_id}) failed: {e}")
+            _note(ha_url, e)
+            log.error(f"[ha_client] get_history({entity_id}) failed: {ha_health.describe(e)}")
             return []
 
 async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1) -> list:
@@ -269,15 +315,19 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
     params = {"entity": entity_id}
+    if ha_health.skip_reason(ha_url):
+        return []
 
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url} | entity={entity_id}")
             async with client.get(url, headers=headers, params=params, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
-            log.error(f"[ha_client] get_logbook({entity_id}) failed: {e}")
+            _note(ha_url, e)
+            log.error(f"[ha_client] get_logbook({entity_id}) failed: {ha_health.describe(e)}")
             return []
 
 _AREA_TEMPLATE = """
@@ -295,12 +345,20 @@ _TEMPLATE_DENIED_WARNED: set[str] = set()
 
 async def _render_areas(ha_url: str, ha_token: str) -> dict:
     """entity_id -> area name through HA's template API. Raises on HTTP errors."""
+    skip = ha_health.skip_reason(ha_url)
+    if skip:
+        raise ConnectionError(skip)
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
-    async with _ha_session(ha_url) as client, client.post(
-        f"{ha_url.rstrip('/')}/api/template", headers=headers, json={"template": _AREA_TEMPLATE}, timeout=_TIMEOUT
-    ) as resp:
-        resp.raise_for_status()
-        raw_data = await resp.json(content_type=None)
+    try:
+        async with _ha_session(ha_url) as client, client.post(
+            f"{ha_url.rstrip('/')}/api/template", headers=headers, json={"template": _AREA_TEMPLATE}, timeout=_TIMEOUT
+        ) as resp:
+            _note(ha_url)
+            resp.raise_for_status()
+            raw_data = await resp.json(content_type=None)
+    except Exception as e:
+        _note(ha_url, e)
+        raise
     if isinstance(raw_data, list):
         return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
     return {}
@@ -354,13 +412,17 @@ _REMOTE_CACHE_TTL = 600.0
 async def _render_template(ha_url: str, ha_token: str, template: str) -> str | None:
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/template"
+    if ha_health.skip_reason(ha_url):
+        return None
     async with _ha_session(ha_url) as client:
         try:
             async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 resp.raise_for_status()
                 return (await resp.text()).strip()
         except Exception as e:
-            log.warning(f"[ha_client] template render failed: {type(e).__name__}: {e}")
+            _note(ha_url, e)
+            log.warning(f"[ha_client] template render failed: {type(e).__name__}: {ha_health.describe(e)}")
             return None
 
 
@@ -522,13 +584,17 @@ async def get_services(ha_url: str, ha_token: str) -> list[dict]:
         return []
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/services"
+    if ha_health.skip_reason(ha_url):
+        return []
     async with _ha_session(ha_url) as client:
         try:
             async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
+                _note(ha_url)
                 if resp.status == 200:
                     data = await resp.json()
                     return data if isinstance(data, list) else []
         except Exception as e:
+            _note(ha_url, e)
             log.debug(f"[ha_client] get_services failed: {e}")
     return []
 

@@ -251,7 +251,15 @@ async def check_once(watcher: Watcher | None = None) -> int:
     states = {s.get("entity_id"): s for s in await ha_client.get_all_states(creds["ha_url"], creds["ha_token"], account="system account") or []
               if isinstance(s, dict)}
     if not states:
-        return 0
+        from services.execution import ha_health
+
+        if not ha_health.is_down(creds["ha_url"]):
+            return 0
+        # HA down: the sensors that live on ESPHome boards can still be read
+        # directly, so a leak or the doorbell is not missed during the outage.
+        states = await esphome_states(entries)
+        if not states:
+            return 0
     away = await nobody_home() if any(e["event"] == "motion_away" for e in entries) else None
     notices = watcher.check(entries, states, time.time(), away, _get_local_tz())
     if not notices:
@@ -262,6 +270,48 @@ async def check_once(watcher: Watcher | None = None) -> int:
         sent += await notify.send_many(entry["people"] or everyone, lambda user, note=note: {"user": user, **note})
         log.info(f"[home_alerts] {entry['event']} {entry['entity_id']}: {note['title']}")
     return sent
+
+
+async def esphome_states(entries: list[dict]) -> dict[str, dict]:
+    """HA-shaped states for mapped entities that live on ESPHome boards (no HA needed).
+
+    Binary sensors and switches read as "on"/"off" and sensors as their number,
+    which is what the rules compare; entities ESPHome reports in other shapes
+    (covers, locks) are left out rather than guessed.
+    """
+    from services.execution import esphome_client
+
+    by_device: dict[str, list[str]] = {}
+    for entry in entries:
+        try:
+            device = await esphome_client.find_device_for_ha_entity(entry["entity_id"])
+        except Exception:
+            device = None
+        if device:
+            by_device.setdefault(device, []).append(entry["entity_id"])
+    states: dict[str, dict] = {}
+    for device, entity_ids in by_device.items():
+        try:
+            listing = await esphome_client.list_entities(device)
+        except Exception as e:
+            log.warning(f"[home_alerts] could not read ESPHome device {device} directly: {e}")
+            continue
+        rows = {
+            (row.get("domain"), str(row.get("object_id", "")).lower()): row
+            for row in listing.get("entities", [])
+        }
+        for entity_id in entity_ids:
+            domain, object_id = entity_id.split(".", 1)
+            row = rows.get((domain, object_id.lower()))
+            if row is None or "state" not in row:
+                continue
+            value = row["state"]
+            if isinstance(value, bool):
+                value = "on" if value else "off"
+            states[entity_id] = {"entity_id": entity_id, "state": str(value), "attributes": {}}
+    if states:
+        log.info(f"[home_alerts] Home Assistant down; read {len(states)} sensor(s) directly from ESPHome")
+    return states
 
 
 async def home_alert_loop() -> None:

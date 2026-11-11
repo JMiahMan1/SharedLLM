@@ -250,6 +250,21 @@ def _isolate_environ():
         os.environ.update(saved)
 
 
+@pytest.fixture(autouse=True)
+def _reset_ha_health():
+    """Home Assistant up/down is process-wide state learned from failed calls.
+
+    A test whose fake HA refuses connections twice would otherwise leave HA
+    "down" for every later test, which then fail fast without calling their
+    fakes. Only touched when some test has imported it.
+    """
+    yield
+    for name in ("services.execution.ha_health", "services.execution.ha_snapshot"):
+        mod = sys.modules.get(name)
+        if mod is not None:
+            mod.reset()
+
+
 @pytest.fixture(scope="session")
 def test_fernet_key():
     return _test_fernet_key

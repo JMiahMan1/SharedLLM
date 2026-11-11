@@ -2,10 +2,10 @@
 import logging
 
 try:
-    import ha_client
+    import hardware_router
     from schemas import ExecutionResult, UserContext
 except ImportError:
-    from .. import ha_client
+    from .. import hardware_router
     from ..schemas import ExecutionResult, UserContext
 from pydantic import BaseModel
 
@@ -38,13 +38,22 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
             service="climate"
         )
 
+    # Through the hardware router like lights: HA first, and a direct ESPHome
+    # call when HA is unreachable (the router already translates
+    # climate.set_temperature). Calling HA directly here meant a thermostat on
+    # an ESPHome board was out of reach whenever HA was down.
     assert ctx.ha_url is not None and ctx.ha_token is not None
-    result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token,
-        "climate", "set_temperature",
-        req.entity_id, {"temperature": req.temperature},
+    result = await hardware_router.execute_device_command(
+        ctx, "climate", "set_temperature", req.entity_id,
+        {"temperature": req.temperature}, service_name="climate",
     )
-
-    if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message=f"Temperature set to {req.temperature} on {req.entity_id}.", service="climate")
-    return ExecutionResult(status="FAILURE", message=f"Climate command failed: {result.get('error')}", service="climate", detail=result)
+    if result.status == "SUCCESS":
+        via = " (directly; Home Assistant was unreachable)" if (result.detail or {}).get("route") == "esphome_direct" else ""
+        return ExecutionResult(
+            status="SUCCESS", message=f"Temperature set to {req.temperature} on {req.entity_id}{via}.",
+            service="climate", detail=result.detail,
+        )
+    message = result.message
+    if not message.startswith("Home Assistant is unreachable"):
+        message = f"Climate command failed: {message.removeprefix('Service call failed: ')}"
+    return ExecutionResult(status="FAILURE", message=message, service="climate", detail=result.detail)

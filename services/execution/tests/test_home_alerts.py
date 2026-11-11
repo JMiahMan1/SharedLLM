@@ -189,3 +189,75 @@ async def test_nobody_home_reads_the_presence_tracker(monkeypatch):
                        ({"a": {"room": "not_home"}, "b": {"room": "kitchen"}}, False)]:
         monkeypatch.setattr(presence, "get_presence_tracker", lambda d=data: Tracker(d))
         assert await ha.nobody_home() is want
+
+
+async def test_with_ha_down_a_leak_on_an_esphome_board_is_still_reported(monkeypatch):
+    """HA down: mapped sensors on ESPHome boards are read directly."""
+    import services.execution.handlers.calendar as cal
+    import services.execution.main as _main
+    from services.common import notify
+    from services.execution import esphome_client, ha_client, ha_health
+
+    sent = []
+    mapping = [{"entity_id": "binary_sensor.sink_leak", "event": "water_leak", "people": []},
+               {"entity_id": "binary_sensor.porch", "event": "doorbell", "people": []}]
+
+    async def fake_entries():
+        return ha.parse_mapping(__import__("json").dumps(mapping))
+
+    async def fake_creds():
+        return {"ha_url": "http://ha", "ha_token": "t"}
+
+    async def no_states(url, token, account=""):
+        return []
+
+    async def find(entity_id, devices=None):
+        return "kitchen_board" if entity_id == "binary_sensor.sink_leak" else None
+
+    async def listing(device):
+        assert device == "kitchen_board"
+        return {"entities": [{"domain": "binary_sensor", "object_id": "sink_leak", "state": True}]}
+
+    async def fake_send(payload, **_):
+        sent.append(payload)
+        return True
+
+    async def fake_family(**_):
+        return ["jeremiah"]
+
+    ha_health.record_unreachable("http://ha", "refused")
+    ha_health.record_unreachable("http://ha", "refused")
+    monkeypatch.setattr(ha, "_entries", fake_entries)
+    monkeypatch.setattr(_main, "resolve_first_user", fake_creds)
+    monkeypatch.setattr(ha_client, "get_all_states", no_states)
+    monkeypatch.setattr(esphome_client, "find_device_for_ha_entity", find)
+    monkeypatch.setattr(esphome_client, "list_entities", listing)
+    monkeypatch.setattr(notify, "family", fake_family)
+    monkeypatch.setattr(notify, "send", fake_send)
+    monkeypatch.setattr(cal, "_get_local_tz", lambda: TZ)
+
+    assert await ha.check_once(ha.Watcher()) == 1
+    assert [(p["user"], p["kind"]) for p in sent] == [("jeremiah", "water_leak")]
+
+
+async def test_an_empty_house_with_ha_up_does_not_read_esphome(monkeypatch):
+    import services.execution.main as _main
+    from services.execution import esphome_client, ha_client
+
+    async def fake_entries():
+        return ha.parse_mapping('[{"entity_id": "binary_sensor.sink_leak", "event": "water_leak"}]')
+
+    async def fake_creds():
+        return {"ha_url": "http://ha", "ha_token": "t"}
+
+    async def no_states(url, token, account=""):
+        return []
+
+    async def boom(*a, **k):
+        raise AssertionError("ESPHome must only be read while HA is down")
+
+    monkeypatch.setattr(ha, "_entries", fake_entries)
+    monkeypatch.setattr(_main, "resolve_first_user", fake_creds)
+    monkeypatch.setattr(ha_client, "get_all_states", no_states)
+    monkeypatch.setattr(esphome_client, "find_device_for_ha_entity", boom)
+    assert await ha.check_once(ha.Watcher()) == 0

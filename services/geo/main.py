@@ -21,7 +21,7 @@ import re
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -271,9 +271,19 @@ async def get_people(
         if e.get("paused")
     } - {clean_viewer}
 
-    states = await _ha_get_states()
+    source = "home_assistant"
+    try:
+        states = await _ha_get_states()
+        entities = _filter_entities(states, "person") + _filter_entities(states, "device_tracker")
+    except Exception as e:
+        # Home Assistant down: everyone's phone still reports to geo first
+        # (/record keeps the point before forwarding it to HA), so the people
+        # map is built from Jarvis's own breadcrumbs instead of failing.
+        log.warning(f"[Geo] /people: Home Assistant unavailable ({getattr(e, 'detail', e)}); using Jarvis's own fixes")
+        entities = await _people_from_history()
+        source = "jarvis"
     features = []
-    for s in _filter_entities(states, "person") + _filter_entities(states, "device_tracker"):
+    for s in entities:
         if visible is not None and not _entity_belongs_to(s.get("entity_id") or "", visible):
             continue
         if paused and _entity_belongs_to(s.get("entity_id") or "", paused):
@@ -281,7 +291,56 @@ async def get_people(
         f = _entity_to_feature(s["entity_id"], s)
         if f:
             features.append(f)
-    return {"type": "FeatureCollection", "features": features}
+    return {"type": "FeatureCollection", "features": features, "source": source}
+
+
+#: A breadcrumb older than this is not shown as where someone is.
+PEOPLE_FALLBACK_MAX_AGE_S = 24 * 3600
+
+
+async def _people_from_history() -> list[dict]:
+    """HA-shaped person states from the latest breadcrumb of each user (no HA needed)."""
+    r = await get_redis()
+    if not r:
+        return []
+    now = time.time()
+    out: list[dict] = []
+    async for key in r.scan_iter(match="geo:history:*"):
+        user = key.split("geo:history:", 1)[1]
+        if "." in user or ":" in user:
+            continue  # the entity-id copy of the same history (geo:history:person.x)
+        last = await r.zrevrange(key, 0, 0)
+        if not last:
+            continue
+        try:
+            point = json.loads(last[0])
+        except (TypeError, ValueError):
+            continue
+        ts = float(point.get("t") or 0)
+        if now - ts > PEOPLE_FALLBACK_MAX_AGE_S:
+            continue
+        zone = "not_home"
+        raw_zone = await r.get(f"geo:zone_state:{user}")
+        if raw_zone:
+            with contextlib.suppress(TypeError, ValueError):
+                zone = str(json.loads(raw_zone).get("zone") or zone).split(".")[-1]
+        when = datetime.fromtimestamp(ts, tz=UTC).isoformat()
+        out.append({
+            "entity_id": f"person.{user}",
+            "state": zone,
+            "last_updated": when,
+            "attributes": {
+                "friendly_name": user.replace("_", " ").title(),
+                "latitude": point.get("lat"),
+                "longitude": point.get("lon"),
+                "gps_accuracy": point.get("acc"),
+                "speed": point.get("spd"),
+                "course": point.get("brg"),
+                "battery_level": point.get("bat"),
+                "source_type": "jarvis",
+            },
+        })
+    return out
 
 
 def _entity_belongs_to(entity_id: str, usernames: set[str]) -> bool:

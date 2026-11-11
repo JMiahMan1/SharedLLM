@@ -354,3 +354,66 @@ def test_steps_tolerate_a_corrupt_freshness_stamp(client, hash_redis):
     resp = client.get("/steps", params={"user_id": "default", "days": 7})
     assert resp.status_code == 200
     assert resp.json()["last_synced"] is None
+
+
+# /people with Home Assistant down: built from Jarvis's own breadcrumbs, with
+# exactly the same consent filtering.
+class _HistoryRedis:
+    def __init__(self, points, zones):
+        import json
+        import time
+
+        now = time.time()
+        self.history = {
+            f"geo:history:{u}": [json.dumps({"t": now - age, "lat": 33.1, "lon": -111.5, "acc": 5, "bat": 80})]
+            for u, age in points.items()
+        }
+        # The entity-id copy of a user's history must not become a second person.
+        self.history.update({f"geo:history:person.{u}": v for u, v in list(
+            (k.split(":")[-1], v) for k, v in self.history.items())})
+        self.zones = {f"geo:zone_state:{u}": json.dumps({"zone": z}) for u, z in zones.items()}
+
+    async def scan_iter(self, match=None):
+        for key in list(self.history):
+            yield key
+
+    async def zrevrange(self, key, start, end):
+        return self.history.get(key, [])[:1]
+
+    async def get(self, key):
+        return self.zones.get(key)
+
+
+def _ha_down(monkeypatch, points, zones=None):
+    from fastapi import HTTPException
+
+    async def _down():
+        raise HTTPException(status_code=502, detail="HA unreachable")
+
+    fake = _HistoryRedis(points, zones or {})
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(geo, "_ha_get_states", _down)
+    monkeypatch.setattr(geo, "get_redis", _get)
+
+
+def test_people_with_ha_down_come_from_jarvis_breadcrumbs(client, monkeypatch):
+    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
+    _ha_down(monkeypatch, {"jeremiah": 60, "michele": 120, "old": 3 * 86400}, {"jeremiah": "zone.home"})
+    r = client.get("/people", params={"viewer": "jeremiah", "is_admin": "true"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "jarvis"
+    by_id = {f["properties"]["entity_id"]: f["properties"] for f in body["features"]}
+    assert sorted(by_id) == ["person.jeremiah", "person.michele"], "stale (3-day-old) fixes are not 'where someone is'"
+    assert by_id["person.jeremiah"]["state"] == "home"
+    assert by_id["person.jeremiah"]["source_type"] == "jarvis"
+
+
+def test_people_with_ha_down_still_respect_consent(client, monkeypatch):
+    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({"michele": {"enabled": True, "audience": "circle"}}))
+    _ha_down(monkeypatch, {"jeremiah": 60, "michele": 60})
+    ids = _person_ids(client.get("/people", params={"viewer": "sam"}))
+    assert ids == ["person.michele"]

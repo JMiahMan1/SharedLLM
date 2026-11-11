@@ -77,4 +77,20 @@ def test_every_dependency_still_gets_asked(client: TestClient):
         "identity": "ok",
         "rag": "ok",
         "storage": "ok",
+        "home_assistant": "ok",
     }
+
+
+def test_a_down_home_assistant_is_reported_but_never_fails_execution(client: TestClient):
+    """Execution keeps serving direct routes while HA is down; a 503 here would
+    make the gateway mark execution itself unreachable."""
+    from services.execution import ha_health
+
+    ha_health.record_unreachable("http://ha.local:8123", "connection refused")
+    ha_health.record_unreachable("http://ha.local:8123", "connection refused")
+    resp = client.get("/health", headers=HEADERS)
+    body = resp.json()
+    assert resp.status_code == 200, body
+    assert body["status"] == "healthy"
+    assert body["checks"]["home_assistant"] == "down"
+    assert body["checks"]["home_assistant_hosts"]["http://ha.local"]["last_error"] == "connection refused"
