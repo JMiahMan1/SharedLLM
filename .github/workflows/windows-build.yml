@@ -1,0 +1,108 @@
+name: Windows Guard Build
+
+on:
+  push:
+    branches: [ main, microservices ]
+    paths:
+      - 'agent/jarvis-guard/**'
+      - '.github/workflows/windows-build.yml'
+  pull_request:
+    branches: [ main, microservices ]
+    paths:
+      - 'agent/jarvis-guard/**'
+      - '.github/workflows/windows-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build-guard:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Publish jarvis-guard.exe
+      run: dotnet publish agent/jarvis-guard/jarvis-guard.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o dist/
+
+    - name: Verify the exe exists and is a PE binary
+      shell: bash
+      run: |
+        ls -la dist/jarvis-guard.exe
+        size=$(stat -c%s dist/jarvis-guard.exe)
+        if [ "$size" -lt 1000000 ]; then
+          echo "::error::jarvis-guard.exe is only $size bytes; refusing to keep it."
+          exit 1
+        fi
+        head -c 2 dist/jarvis-guard.exe | od -An -tx1 | grep -qi '^ *4d *5a' || {
+          echo "::error::jarvis-guard.exe does not start with the MZ header."
+          exit 1
+        }
+        echo "[OK] dist/jarvis-guard.exe ($size bytes) is a PE binary."
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-guard-windows
+        path: dist/jarvis-guard.exe
+        retention-days: 30
+
+    # Mirror of the Android APK publish step: the exe lands in
+    # data/app_updates/next to jarvis-os.apk. Skipped on pull requests.
+    - name: Publish exe to the hub
+      if: github.event_name != 'pull_request'
+      env:
+        PUBLISH_URL: ${{ secrets.WINDOWS_PUBLISH_URL }}
+        INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+        GIT_SHA: ${{ github.sha }}
+      run: |
+        if [ -z "$PUBLISH_URL" ] || [ -z "$INTERNAL_SECRET" ]; then
+          echo "::notice::WINDOWS_PUBLISH_URL / INTERNAL_SECRET not configured; skipping publish."
+          echo "::notice::The exe is still available as the jarvis-guard-windows artifact."
+          exit 0
+        fi
+        VERSION=0.1.0
+        HTTP=""
+        # Same retry semantics as the APK publish: the publish can land on a
+        # gateway that is mid-restart when a deploy just finished, so retry
+        # the transient statuses instead of throwing the whole build away.
+        for attempt in 1 2 3 4 5; do
+          HTTP=$(curl -sS --max-time 600 -o publish-response.json -w '%{http_code}' \
+            -H "X-Internal-Secret: $INTERNAL_SECRET" \
+            -F "exe=@dist/jarvis-guard.exe" \
+            -F "version=$VERSION" \
+            -F "git_sha=$GIT_SHA" \
+            -F "release_notes=Jarvis Guard agent build ${GIT_SHA:0:8}" \
+            "$PUBLISH_URL") || HTTP="000"
+          if [ "$HTTP" = "200" ]; then
+            break
+          fi
+          case "$HTTP" in
+            000|502|503|504)
+              if [ "$attempt" = "5" ]; then
+                break
+              fi
+              echo "::warning::Publish attempt $attempt got HTTP $HTTP (the server is probably restarting); retrying in $((attempt * 15))s."
+              sleep $((attempt * 15))
+              ;;
+            *)
+              break
+              ;;
+          esac
+        done
+        cat publish-response.json 2>/dev/null || true
+        echo
+        if [ "$HTTP" = "413" ]; then
+          echo "::error::The proxy in front of the server rejected the exe (HTTP 413)."
+          echo "::error::Raise the request body limit on the nginx that fronts the domain"
+          echo "::error::(add \`client_max_body_size 64m;\` to its server{} block, then reload nginx)."
+          exit 1
+        fi
+        if [ "$HTTP" != "200" ]; then
+          echo "::error::Publish failed with HTTP $HTTP"
+          exit 1
+        fi
+        echo "[OK] Published jarvis-guard build ${GIT_SHA:0:8}."
