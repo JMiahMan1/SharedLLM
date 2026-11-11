@@ -27,6 +27,7 @@ import { confirmDialog } from '../components/ui/confirmDialog';
 const KIND_ICON: Record<string, LucideIcon> = {
   phone: Smartphone,
   tablet: Tablet,
+  'windows-pc': Monitor,
   watch: Watch,
   speaker: Speaker,
   screen: Monitor,
@@ -896,6 +897,7 @@ function DeviceCard({
   const [showApps, setShowApps] = useState(false);
   const [showNotices, setShowNotices] = useState(false);
   const esphome = isEsphomeDevice(device);
+  const isWindowsPc = device.kind === 'windows-pc';
   // The gateway refuses update/wipe for a key nothing owns (422) and the
   // screen-time routes need a real owner, so a device with no owner can only be
   // inspected - the owner-scoped actions are hidden rather than left to fail.
@@ -931,7 +933,7 @@ function DeviceCard({
         ['Owner', device.owner_display_name || device.owner_username || 'unknown'],
         ['Form factor', deviceKindLabel(device.kind)],
         ['Model', [device.manufacturer, device.model].filter(Boolean).join(' ') || 'unknown'],
-        ['Android', [device.os_version, device.os_build].filter(Boolean).join(' · ') || 'unknown'],
+        [isWindowsPc ? 'Windows' : 'Android', [device.os_version, device.os_build].filter(Boolean).join(' · ') || 'unknown'],
         ['Jarvis app', device.app_version ? `${device.app_version}${device.app_build ? ` (build ${device.app_build})` : ''}` : 'unknown'],
         ...(batteryText ? ([['Battery', batteryText]] as Array<[string, string]>) : []),
         ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
@@ -1106,10 +1108,12 @@ function DeviceCard({
                   className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-unlock-${device.device_key}`}>
                   <Unlock size={14} /> Unlock
                 </button>
-                <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
-                  className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
-                  App control
-                </button>
+                {!isWindowsPc && (
+                  <button type="button" onClick={() => setShowApps((v) => !v)} aria-expanded={showApps}
+                    className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-apps-toggle-${device.device_key}`}>
+                    App control
+                  </button>
+                )}
                 {ownedByMinor && (
                   <button type="button" onClick={() => setShowNotices((v) => !v)} aria-expanded={showNotices}
                     className={`glass-button px-3 text-xs ${TOUCH}`} data-testid={`mdm-notices-toggle-${device.device_key}`}>
@@ -1126,7 +1130,7 @@ function DeviceCard({
             >
               <Activity size={14} /> Details &amp; history
             </button>
-            {hasOwner && (
+            {hasOwner && !isWindowsPc && (
               <button
                 type="button"
                 disabled={wipe.isPending}
@@ -1145,7 +1149,7 @@ function DeviceCard({
               </button>
             )}
           </div>
-          {hasOwner && showApps && <AppControls owner={owner} />}
+          {hasOwner && !isWindowsPc && showApps && <AppControls owner={owner} />}
           {ownedByMinor && showNotices && (
             <div className="space-y-2 border-t border-white/5 pt-2" data-testid={`mdm-notice-settings-${device.device_key}`}>
               <NotificationLockCard username={owner} name={minorName} testId={`mdm-notice-settings-card-${device.device_key}`} />
@@ -1385,7 +1389,7 @@ export default function Devices() {
                 key={d.device_key}
                 device={{
                   ...d,
-                  platform: isEsphomeDevice(d) ? 'esphome' : 'android',
+                  platform: isEsphomeDevice(d) ? 'esphome' : d.kind === 'windows-pc' ? 'windows' : 'android',
                   owner_username: d.owner_username || user?.username,
                   owner_display_name: user?.display_name || user?.username,
                 } as unknown as MdmDevice}
@@ -1440,7 +1444,7 @@ export default function Devices() {
         )}
         {inventory.data && inventory.data.devices.length === 0 && (
           <p className="p-4 text-sm text-slate-500" data-testid="mdm-empty">
-            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app; ESPHome watches and assistants are added by pairing.
+            No devices have registered yet. A phone or tablet registers when a member signs in to the Jarvis app; a family PC registers its Jarvis Guard agent with the family pairing code; ESPHome watches and assistants are added by pairing.
           </p>
         )}
         <ul className="divide-y divide-white/5">

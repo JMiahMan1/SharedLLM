@@ -121,11 +121,17 @@ class TestSelfRegistration:
         assert resp.json()["last_ip_address"] == "203.0.113.9"
 
     def test_kind_is_not_client_controlled(self, client: TestClient):
-        """A phone that claimed kind=light would move itself out of the
-        advanced panel, so the field is not accepted from the client."""
+        """The client may not smuggle in any non-mobile kind (an assistant/light
+        would move itself out of the advanced panel). The only PC-shaped
+        kind the client may name is `windows-pc`."""
         resp = client.post(REGISTER, json=_phone_payload(kind="light"))
-        assert resp.status_code == 200
-        assert resp.json()["kind"] == "phone"
+        assert resp.status_code == 422
+        ok = client.post(REGISTER, json=_phone_payload(device_key="d-winabcdefghijkl", kind="windows-pc"))
+        assert ok.status_code == 200
+        assert ok.json()["kind"] == "windows-pc"
+        # ...but not both a kind and a form factor.
+        both = client.post(REGISTER, json=_phone_payload(device_key="d-winabcdefghijkm", kind="windows-pc", form_factor="phone"))
+        assert both.status_code == 422
 
     def test_a_tablet_registers_as_a_tablet(self, client: TestClient):
         resp = client.post(REGISTER, json=_phone_payload(form_factor="tablet"))

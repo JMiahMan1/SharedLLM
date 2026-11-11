@@ -9,6 +9,7 @@
 const LABELS: Record<string, string> = {
   phone: 'Phone',
   tablet: 'Tablet',
+  'windows-pc': 'Windows PC',
   watch: 'Watch',
   speaker: 'Smart speaker',
   screen: 'Smart screen',
@@ -19,6 +20,7 @@ const LABELS: Record<string, string> = {
 const NOUNS: Record<string, string> = {
   phone: 'phone',
   tablet: 'tablet',
+  'windows-pc': 'Windows PC',
   watch: 'watch',
   speaker: 'smart speaker',
   screen: 'smart screen',
@@ -55,9 +57,10 @@ export function deviceNoun(kind: string | null | undefined): string {
 export function isEsphomeDevice(device: DevicePlatformLike | null | undefined): boolean {
   if (!device) return false;
   const platform = (device.platform ?? '').trim().toLowerCase();
-  if (platform === 'esphome') return true;
-  if (platform === 'android') return false;
   const kind = (device.kind ?? '').trim().toLowerCase();
+  if (platform === 'esphome') return true;
+  if (kind === 'windows-pc') return false;
+  if (platform === 'android') return false;
   const key = (device.device_key ?? '').trim().toLowerCase();
   const reg = (device.registered_by ?? '').trim().toLowerCase();
   return (
@@ -72,7 +75,8 @@ export function isAndroidDevice(device: DevicePlatformLike | null | undefined): 
   return Boolean(device) && !isEsphomeDevice(device);
 }
 
-export function devicePlatformLabel(device: DevicePlatformLike | null | undefined): 'ESPHome' | 'Android' {
+export function devicePlatformLabel(device: DevicePlatformLike | null | undefined): 'ESPHome' | 'Android' | 'Windows PC' {
+  if ((device?.kind ?? '').trim().toLowerCase() === 'windows-pc') return 'Windows PC';
   return isEsphomeDevice(device) ? 'ESPHome' : 'Android';
 }
 

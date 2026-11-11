@@ -2341,6 +2341,56 @@ def _presented_api_key(request: Request) -> str:
     return _query_api_key(request)
 
 
+#: How long a device key answer is kept, so a PC agent polling on its 60 s
+#: timer does not make the gateway ask identity to verify on every request.
+_DEVICE_KEY_CACHE_S = 60
+_device_key_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+async def _device_agent_key(request: Request) -> dict | None:
+    """Identity's answer for the Windows PC agent key this request presents.
+
+    The agent on a family PC authenticates with its own device-scoped key
+    (minted for the device, authorized as the device's owner; never the
+    parent's account and never an admin key). Gateway routes that attribute
+    what a PC reports (usage minutes, tamper reports) call this first: it
+    asks identity to verify the key and returns ``{"device_key":...,
+    "owner_username":..., "kind":...}``, or ``None`` when the request does
+    not present a valid device key. Cached for a minute; any failure is a
+    ``None``, never a raised error: the device path is a side door for a
+    subset of routes, not a new authentication gate.
+    """
+    key = _presented_api_key(request)
+    if not key:
+        return None
+    cache_key = hashlib.sha256(key.encode()).hexdigest()
+    hit = _device_key_cache.get(cache_key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    result: dict | None = None
+    try:
+        async with borrow_http_client() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC}/api/internal/device-key/verify",
+                json={"key": key},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0, connect=1.0),
+            )
+        if resp.status == 200:
+            data = await resp.json()
+            if isinstance(data, dict) and data.get("owner_username"):
+                result = {
+                    "device_key": str(data.get("device_key") or ""),
+                    "owner_username": str(data["owner_username"]),
+                    "kind": str(data.get("kind") or "windows-pc"),
+                }
+    except Exception as exc:
+        log.debug(f"[identity] device key verify failed: {exc}")
+        result = None
+    _device_key_cache[cache_key] = (time.time() + _DEVICE_KEY_CACHE_S, result)
+    return result
+
+
 async def _require_identity_from_request(request: Request, body: dict | None = None) -> Any:
     """Identity for a route that serves real family data. 401 unless proven.
 
@@ -6236,12 +6286,16 @@ async def get_geo_driver_report(request: Request, user: str, days: int = 7):
 @app.post("/api/usage")
 async def post_usage(request: Request):
     """General phone usage: screen time and when the day started and stopped."""
-    creds = await _resolve_identity_from_request(request)
-    user = str((creds or {}).get("user") or "").strip()
+    device_creds = await _device_agent_key(request)
+    creds = None if device_creds else await _resolve_identity_from_request(request)
+    user = str((device_creds or {}).get("owner_username") or (creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
-    device = str(body.get("device_key") or "").strip()
+    # A reporting PC names whose device this is with its device key, so the
+    # key wins over the body's claim: a key for one machine can never file
+    # minutes against another.
+    device = str(device_creds["device_key"] if device_creds else (body.get("device_key") or "")).strip()
     payload = {
         "user": user,
         "day": body.get("day"),
@@ -6536,12 +6590,17 @@ async def post_usage_night(request: Request):
     """One device's overnight screen-on stretches (18:00 to noon), for the sleep
     estimate. The device must have registered; the estimate later credits it to
     whoever the device is assigned to."""
-    creds = await _resolve_identity_from_request(request)
-    user = str((creds or {}).get("user") or "").strip()
+    creds = None
+    device_creds = await _device_agent_key(request)
+    user = str((device_creds or {}).get("owner_username") or "").strip()
+    if not user:
+        creds = await _resolve_identity_from_request(request)
+        user = str((creds or {}).get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
-    device = str(body.get("device_key") or "").strip()
+    # The device key names the device; the body must not override it.
+    device = str(device_creds["device_key"] if device_creds else (body.get("device_key") or "")).strip()
     night = str(body.get("night") or "").strip()
     intervals = body.get("intervals")
     if len(device) < 16 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", night) or not isinstance(intervals, list):
@@ -6952,6 +7011,12 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
     """
     now = _household_now()
     day = now.date().isoformat()
+    # A PC agent asking with its device key may only ask for its owner's
+    # status; the rules call below is already authorized that way by
+    # identity, this just says so in one place and keeps the notices honest.
+    device_creds = await _device_agent_key(request)
+    if device_creds and device_creds["owner_username"].lower() != username.lower():
+        raise HTTPException(status_code=403, detail="This PC is only registered to one member")
     status, body = await _identity_as_caller(request, "GET", f"/api/screen-time/{username}/rules", params={"day": day})
     if status != 200:
         raise HTTPException(status_code=status, detail=(body or {}).get("detail") or "Not allowed")
@@ -7161,8 +7226,11 @@ async def guard_message(request: Request):
 @app.post("/api/guard/tamper")
 async def guard_tamper(request: Request):
     """The phone reports protection being switched off or worked around."""
-    creds = await _resolve_identity_from_request(request)
-    child = str((creds or {}).get("user") or "").strip()
+    # A PC reports as a device: its owner is the member whose record and whose
+    # parents the report belongs to. The device key wins over the body's claim.
+    device_creds = await _device_agent_key(request)
+    creds = None if device_creds else await _resolve_identity_from_request(request)
+    child = str((device_creds or {}).get("owner_username") or (creds or {}).get("user") or "").strip()
     if not child:
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json() or {}
@@ -7171,7 +7239,7 @@ async def guard_tamper(request: Request):
         raise HTTPException(status_code=422, detail="Unknown event")
     # What it was about, when the phone says (the app, the DNS host, how many starts).
     detail = " ".join(str(body.get("detail") or "").split())[:_TAMPER_DETAIL_MAX]
-    report = {"event": event, "device_key": str(body.get("device_key") or "")}
+    report = {"event": event, "device_key": str((device_creds or {}).get("device_key") or body.get("device_key") or "")}
     if detail:
         report["detail"] = detail
     # Identity keeps the report on a minor's record (the father's Devices
@@ -16455,6 +16523,77 @@ async def publish_app_update(request: Request):
         # Once per build, however many times CI publishes it.
         await notices.app_update_published(apk_code, (info or {}).get("version_name"), str(notes))
     return {"status": "ok", "metadata": meta}
+
+
+#: The managed family PC agent (docs/WINDOWS_LOCK_SCREEN.md) is an exe, not a
+#: web bundle and not the APK, and is never served to children: it is fetched
+#: by enrolled machines only after they have paired with the hub.
+WINDOWS_EXE_NAME = "jarvis-guard.exe"
+WINDOWS_VERSION_FILE = "windows-version.json"
+#: A Windows executable always starts with the DOS "MZ" stub; a PE signature is
+#: the minimum payload an enrolled machine will accept.
+_WINDOWS_MZ = b"MZ"
+
+
+def _windows_versions_path() -> Path:
+    return APP_UPDATES_DIR / WINDOWS_VERSION_FILE
+
+
+def _read_windows_version() -> dict:
+    try:
+        return _normalize_version_meta(json.loads(_windows_versions_path().read_text()))
+    except Exception:
+        return {}
+
+
+@app.post("/api/app-updates/windows")
+async def publish_windows_agent(request: Request):
+    """Publish the managed family PC agent exe (CI only).
+
+    Mirrors the APK publish step: the exe lands in ``data/app_updates/`` next
+    to the bundle and the APK, the advertised version information is read from
+    the uploaded file rather than trusted from the caller, and the install
+    hash is published so enrolled machines can verify the download against
+    ``windows-version.json`` before handing it to the service to swap in.
+    """
+    form = await request.form()
+    secret = request.headers.get("X-Internal-Secret") or form.get("secret")
+    if not secret_matches(secret, INTERNAL_SECRET):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    version = str(form.get("version") or "0.1.0")
+    git_sha = str(form.get("git_sha") or "unknown")
+    notes = str(form.get("release_notes") or "Jarvis Guard agent")
+
+    exe_file = form.get("exe")
+    if not (isinstance(exe_file, UploadFile) and exe_file.filename):
+        raise HTTPException(status_code=400, detail="An exe\'s bytes are required.")
+
+    content = await exe_file.read()
+    if len(content) < 1024:
+        raise HTTPException(status_code=400, detail="Uploaded exe is suspiciously small; refusing to publish it.")
+    if not content.startswith(_WINDOWS_MZ):
+        raise HTTPException(status_code=400, detail="Uploaded exe does not start with an MZ header; refusing to publish it.")
+
+    out = APP_UPDATES_DIR / WINDOWS_EXE_NAME
+    tmp = APP_UPDATES_DIR / f".{WINDOWS_EXE_NAME}.tmp"
+    tmp.write_bytes(content)
+    tmp.replace(out)
+    digest = hashlib.sha256(content).hexdigest()
+    log.info(f"[AppUpdates] Published new {WINDOWS_EXE_NAME} ({len(content)} bytes, sha256 {digest})")
+
+    meta = {
+        "version": version,
+        "git_sha": git_sha,
+        "build_timestamp": datetime.now(UTC).isoformat(),
+        "release_notes": notes,
+        "exe_name": WINDOWS_EXE_NAME,
+        "exe_size_bytes": len(content),
+        "exe_sha256": digest,
+    }
+    _windows_versions_path().write_text(json.dumps(meta, indent=2))
+    return {"status": "ok", "metadata": meta}
+
 
 
 #: Transcription is minutes of CPU, not milliseconds of I/O. Whisper runs

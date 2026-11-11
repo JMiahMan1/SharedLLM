@@ -342,7 +342,7 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
 # asserts that.
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "light", "watch")
+DEVICE_KINDS = ("phone", "tablet", "windows-pc", "assistant", "speaker", "screen", "light", "watch")
 
 #: Kinds that are a person's own mobile device. They self-register on login
 #: (``registered_by="self"``) and the sleep estimate joins their overnight use.
@@ -351,9 +351,14 @@ DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "light", "w
 #: deliberately not here.
 MOBILE_DEVICE_KINDS = ("phone", "tablet")
 
+#: Kinds a self-registered client may name: the mobile pair plus the managed
+#: family PC agent (docs/WINDOWS_LOCK_SCREEN.md). Anything else stays admin- or
+#: pairing-registered only.
+SELF_REGISTER_KINDS = ("phone", "tablet", "windows-pc")
+
 #: Kinds that get the advanced panel. ``light`` is deliberately minimal: a
 #: light has no screen, no app, and nothing to install.
-ADVANCED_DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "watch")
+ADVANCED_DEVICE_KINDS = ("phone", "tablet", "windows-pc", "assistant", "speaker", "screen", "watch")
 
 NO_OPT_IN_EVENTS = frozenset(
     {
@@ -417,6 +422,14 @@ class Device(SQLModel, table=True):  # type: ignore
     #: JSON object of what the device can do, e.g.
     #: {"climate": true, "media": false}. Drives the capability-gap analysis.
     capabilities: str = Field(default="{}")
+
+    #: Windows agent credential: a device-scoped bearer key, stored as sha256
+    #: hex (empty = none minted). The agent presents this instead of any user
+    #: key; the raw value is shown once by the minting admin endpoint and
+    #: never stored. Scoped to the device's own reads/reports; never grants
+    #: rule edits or MDM powers.
+    agent_key_hash: str = Field(default="")
+    agent_key_created_at: str | None = None
 
     # Collected without opt-in.
     last_ip_address: str | None = None

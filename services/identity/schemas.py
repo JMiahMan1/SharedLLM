@@ -558,7 +558,9 @@ class UserWidgetUpdate(BaseModel):
 # User Panel: device registry
 # ---------------------------------------------------------------------------
 
-DEVICE_KINDS = ("phone", "tablet", "assistant", "speaker", "screen", "light", "watch")
+#: ``windows-pc`` is the managed family PC agent (docs/WINDOWS_LOCK_SCREEN.md): it
+#: registers through the same self-register route with ``kind="windows-pc"``.
+DEVICE_KINDS = ("phone", "tablet", "windows-pc", "assistant", "speaker", "screen", "light", "watch")
 
 
 class DeviceSelfRegister(BaseModel):
@@ -578,6 +580,9 @@ class DeviceSelfRegister(BaseModel):
     #: The mobile form factor this device is. Anything but phone/tablet is a
     #: 422; the server never lets the client name a non-mobile kind.
     form_factor: Literal["phone", "tablet"] | None = None
+    #: The one non-mobile kind a self-registered client may name: the managed
+    #: family PC agent (docs/WINDOWS_LOCK_SCREEN.md). Never anything else.
+    kind: Literal["windows-pc"] | None = None
     model: str | None = None
     manufacturer: str | None = None
     os_version: str | None = None

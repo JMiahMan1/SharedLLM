@@ -40,6 +40,7 @@ from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
     DEVICE_KINDS,
     MOBILE_DEVICE_KINDS,
+    SELF_REGISTER_KINDS,
     NO_OPT_IN_EVENTS,
     APIKey,
     AuditEvent,
@@ -248,6 +249,13 @@ def _ensure_schema_upgrades() -> None:
         _add_column("ravenmission", "workspace_id", "ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR")
         _add_column("ravenmission", "last_llm_reply", "ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT")
         _add_column("ravenmission", "artifacts", "ALTER TABLE ravenmission ADD COLUMN artifacts TEXT")
+
+    if _table_exists("device"):
+        # Windows agent credential: a scoped key the device stores instead of a
+        # user API key. sha256 hex (empty = none minted); the raw key is shown
+        # once at mint time and never stored.
+        _add_column("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''")
+        _add_column("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR")
 
     if _table_exists("deviceassignment"):
         _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
@@ -634,6 +642,37 @@ def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
     return None
 
 
+def _device_for_agent_key(session: Session, authorization: str | None) -> Device | None:
+    """Resolve a Windows agent's device-scoped bearer key to its Device.
+
+    The agent presents a key minted by an admin for one device only; it is not
+    a user's API key and must never widen to one. Empty-mint devices never match.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    key = authorization.split(" ", 1)[1].strip()
+    if not key:
+        return None
+    key_hash = digest_secret(key)
+    if not key_hash:
+        return None
+    device = session.exec(
+        select(Device).where(Device.agent_key_hash == key_hash, Device.agent_key_hash != "")
+    ).first()
+    if device is None or device.revoked:
+        return None
+    return device
+
+
+def _device_for_caller(session: Session, authorization: str | None) -> Device | None:
+    """The Device a presented agent key belongs to, if the header carries one.
+
+    Routes that must report onto or about the exact machine (capabilities,
+    no other PC's identifiers) call this alongside ``require_api_key``.
+    """
+    return _device_for_agent_key(session, authorization)
+
+
 def _migrate_api_key_material(session: Session) -> None:
     dirty = False
     for user in session.exec(select(User)).all():
@@ -720,9 +759,19 @@ def require_api_key(authorization: str = Header(None), session: Session = Depend
     key = authorization.split(" ")[1]
 
     user = _find_user_for_api_key(session, key)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-    return user
+    if user:
+        return user
+    # A Windows PC's agent key authenticates as the member the PC is assigned
+    # to, with the administrator bit dropped: a device sitting on a desk is a
+    # member's own credential minus the admin powers, never an admin route.
+    device = _device_for_agent_key(session, authorization)
+    if device and device.owner_username:
+        owner = session.exec(select(User).where(User.username == device.owner_username)).first()
+        if owner is not None:
+            safe = User.model_validate(owner)
+            safe.is_admin = False
+            return safe
+    raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
 # Push topics, notification preferences, UnifiedPush (docs/PUSH.md)
@@ -2503,6 +2552,21 @@ def internal_device_registered(device_key: str, session: Session = Depends(get_s
     """Internal: whether a phone or tablet with this key has registered."""
     row = session.exec(select(Device).where(Device.device_key == device_key.strip())).first()
     return {"registered": bool(row and row.kind in MOBILE_DEVICE_KINDS), "owner": row.owner_username if row else None}
+
+
+@app.post("/api/internal/device-key/verify")
+def internal_device_key_verify(body: dict, session: Session = Depends(get_session), _: None = Depends(require_internal)):
+    """Internal: resolve a Windows agent's device-scoped key to its device.
+
+    The gateway uses this to attribute the PC's usage and tamper reports to
+    the member the device is assigned to; the agent itself never has to know
+    any wider credential.
+    """
+    key = str((body or {}).get("key") or "").strip()
+    device = _device_for_agent_key(session, f"Bearer {key}" if key else None)
+    if device is None:
+        raise HTTPException(status_code=401, detail="No such device key")
+    return {"device_key": device.device_key, "owner_username": device.owner_username, "kind": device.kind}
 
 
 @app.get("/api/internal/user-device-assignments")
@@ -4952,7 +5016,10 @@ def _device_word(session: Session, username: str, device_key: str = "") -> str:
 def get_screen_rules(username: str, day: str = "", session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
     """A member's rules: theirs to read, their parents' to read and change,
     and readable (not changeable) by the other parent for the father and the
-    mother, whose collected data they share."""
+    mother, whose collected data they share.
+
+    A Windows agent holding a device-scoped key resolves as the member the
+    device is assigned to."""
     subject = _screen_subject(session, username)
     if caller.username != subject.username and not may_view_raw_data(caller, subject):
         raise HTTPException(status_code=403, detail="Only a parent can see this")
@@ -5588,16 +5655,21 @@ PARENT_UNLOCK_MINUTES = 10
 
 @app.post("/api/guard/parent-unlock")
 def guard_parent_unlock(body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
-    """A parent signs in on their child's phone to lift Jarvis's protection briefly.
+    """A parent signs in on their child's device to lift Jarvis's protection briefly.
 
-    The caller is the phone's signed-in child; the parent's own username and
-    password are checked, and they must be one of this child's parents.
+    The caller is the signed-in child (their API key), or a Windows PC holding
+    the device-scoped key its parent minted; in the latter case the caller
+    resolves as the member the device is assigned to (with the administrator
+    bit dropped). The parent's own username and password are checked, and
+    they must be one of this child's parents.
     """
     import time as _time
 
     now = _time.monotonic()
-    recent = [t for t in _UNLOCK_FAILURES.get(caller.username, []) if now - t < _UNLOCK_WINDOW_S]
-    _UNLOCK_FAILURES[caller.username] = recent
+    subject = caller
+    device_key = str((body or {}).get("device_key") or "")
+    recent = [t for t in _UNLOCK_FAILURES.get(subject.username, []) if now - t < _UNLOCK_WINDOW_S]
+    _UNLOCK_FAILURES[subject.username] = recent
     if len(recent) >= _UNLOCK_MAX_FAILURES:
         raise HTTPException(status_code=429, detail="Too many tries. Wait ten minutes, then try again.")
     username = str((body or {}).get("username") or "").strip().lower()
@@ -5607,24 +5679,24 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
         parent
         and parent.password_hash
         and verify_password(password, parent.password_hash)
-        and (_may_manage_screen_time(parent, caller) or _is_household_owner(parent, caller))
+        and (_may_manage_screen_time(parent, subject) or _is_household_owner(parent, subject))
     )
     if not ok:
         recent.append(now)
         raise HTTPException(status_code=401, detail="That is not one of your parents' logins.")
-    _UNLOCK_FAILURES.pop(caller.username, None)
+    _UNLOCK_FAILURES.pop(subject.username, None)
     # If the device was paused by a parent, signing in on the lock screen also
     # lifts the manual pause so the device does not immediately re-pause.
-    caller_rules = _screen_rules(session, caller.username)
+    caller_rules = _screen_rules(session, subject.username)
     if caller_rules.get("paused") or caller_rules.get("paused_until"):
         caller_rules.pop("paused", None)
         caller_rules.pop("paused_until", None)
         caller_rules.pop("paused_at", None)
-        _save_screen_rules(session, caller.username, caller_rules, parent.username)
+        _save_screen_rules(session, subject.username, caller_rules, parent.username)
         session.commit()
     until = datetime.now(UTC) + timedelta(minutes=PARENT_UNLOCK_MINUTES)
-    parents = _parents_of(session, caller)
-    # Only after a real parent login: the phone keeps these to check an
+    parents = _parents_of(session, subject)
+    # Only after a real parent login: the device keeps these to check an
     # offline code later. A child's own login never receives them.
     offline = [
         {"parent": row.username, "salt": row.salt, "iterations": row.iterations, "hash": row.hash}
@@ -5632,7 +5704,7 @@ def guard_parent_unlock(body: dict, session: Session = Depends(get_session), cal
     ] if parents else []
     return {
         "ok": True, "parent": parent.username, "until": until.isoformat(), "notify": parents, "offline_codes": offline,
-        "device": _device_word(session, caller.username, str((body or {}).get("device_key") or "")),
+        "device": _device_word(session, subject.username, device_key),
     }
 
 
@@ -7703,19 +7775,31 @@ def register_device(
     """
     key = body.device_key.strip()
     now = datetime.now().isoformat()
+    if body.kind == "windows-pc" and body.form_factor:
+        raise HTTPException(status_code=422, detail="Send either kind or form_factor, not both")
     device = session.exec(select(Device).where(Device.device_key == key)).first()
     if device is None:
         device = Device(
             device_key=key,
-            kind=infer_mobile_kind(body.form_factor, body.model),
+            kind="windows-pc" if body.kind == "windows-pc" else infer_mobile_kind(body.form_factor, body.model),
             registered_by="self",
             first_seen_at=now,
         )
         session.add(device)
-    elif device.registered_by == "admin" or device.kind not in MOBILE_DEVICE_KINDS:
+    elif device.registered_by == "admin" or device.kind not in SELF_REGISTER_KINDS:
         # A device already registered as an assistant/light/watch must not be
-        # silently reclassified by whoever holds its key.
+        # silently reclassified by whoever holds its key; a self-registered PC
+        # or phone is self-registered either way.
         raise HTTPException(status_code=409, detail="This device key is already registered as another kind")
+    elif body.kind == "windows-pc" and device.kind != "windows-pc":
+        raise HTTPException(status_code=409, detail="This device key is already registered as another kind")
+    elif body.kind == "windows-pc":
+        # Same install re-enrolling: nothing to correct beyond the row itself.
+        pass
+    elif device.kind == "windows-pc":
+        # A phone-shaped form_factor asking after a PC-registered key: refuse,
+        # so the app cannot yank a family computer out of the PC section.
+        raise HTTPException(status_code=409, detail="This device key is already registered as a windows-pc")
     elif body.form_factor and body.form_factor != device.kind:
         # The same install, corrected: it first reported as a phone and now
         # reports as a tablet (or the other way round).
@@ -7746,6 +7830,27 @@ def register_device(
     session.commit()
     session.refresh(device)
     return _device_to_read(device)
+
+
+@app.post("/api/user-panel/devices/{device_key}/agent-key")
+def mint_device_agent_key(device_key: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """Mint (or rotate) the device-scoped key the Windows agent stores on the PC.
+
+    Admin only (the installer calls this once during elevated setup). The raw
+    key is returned once and never stored -- only its hash is kept on the
+    device row. Rotating invalidates the previous key immediately.
+    """
+    if not _is_device_admin(caller, session):
+        raise HTTPException(status_code=403, detail="Admin only")
+    device = session.exec(select(Device).where(Device.device_key == device_key)).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="No such device")
+    raw = "wg_" + secrets.token_hex(24)
+    device.agent_key_hash = digest_secret(raw)
+    device.agent_key_created_at = datetime.now(UTC).isoformat()
+    session.add(device)
+    session.commit()
+    return {"agent_key": raw, "device_key": device.device_key, "owner_username": device.owner_username, "kind": device.kind}
 
 
 def _is_device_admin(user: User | None, session: Session | None = None) -> bool:
@@ -8156,16 +8261,24 @@ def report_capabilities(
     body: dict,
     session: Session = Depends(get_session),
     caller: User = Depends(require_api_key),
+    authorization: str = Header(None),
 ):
     """Record what a device can currently do, versioned over time.
 
     A capability gap only means something relative to what the device could do
-    at the time, so the inventory is appended rather than overwritten.
+    at the time, so the inventory is appended rather than overwritten. A
+    Windows agent holding this device's scoped key may report for it, and
+    nothing else.
     """
     device = session.exec(select(Device).where(Device.device_key == device_key)).first()
     if device is None:
         raise HTTPException(status_code=404, detail="No such device")
-    if device.owner_username and device.owner_username != caller.username and not caller.is_admin:
+    device_caller = _device_for_agent_key(session, authorization)
+    if device_caller is not None:
+        # The PC's own key may only speak for its own machine.
+        if device_caller.device_key != device.device_key:
+            raise HTTPException(status_code=403, detail="Not your device")
+    elif device.owner_username and device.owner_username != caller.username and not caller.is_admin:
         raise HTTPException(status_code=403, detail="Not your device")
     caps = body.get("capabilities")
     if not isinstance(caps, dict):

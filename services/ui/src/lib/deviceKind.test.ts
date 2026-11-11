@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deviceKindLabel, handheldNoun, thisDeviceNoun } from './deviceKind';
+import { deviceKindLabel, deviceNoun, devicePlatformLabel, handheldNoun, isEsphomeDevice, thisDeviceNoun } from './deviceKind';
 
 describe('deviceKindLabel', () => {
   it.each([
@@ -45,5 +45,20 @@ describe('thisDeviceNoun', () => {
     expect(thisDeviceNoun('tablet')).toBe('tablet');
     expect(thisDeviceNoun('phone')).toBe('phone');
     expect(thisDeviceNoun(null)).toBe('device');
+  });
+});
+
+describe('windows-pc', () => {
+  it('is named and platformed as a Windows PC, never an Android', () => {
+    expect(deviceKindLabel('windows-pc')).toBe('Windows PC');
+    expect(deviceKindLabel(' WINDOWS-PC ')).toBe('Windows PC');
+    expect(deviceNoun('windows-pc')).toBe('Windows PC');
+    expect(devicePlatformLabel({ kind: 'windows-pc' })).toBe('Windows PC');
+    expect(isEsphomeDevice({ kind: 'windows-pc' })).toBe(false);
+  });
+
+  it('is described as a device, never a phone or tablet, in family sentences', () => {
+    expect(handheldNoun(['windows-pc'])).toBe('device');
+    expect(handheldNoun(['windows-pc', 'tablet'])).toBe('tablet');
   });
 });
