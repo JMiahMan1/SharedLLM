@@ -161,3 +161,39 @@ def test_a_ring_stops_after_a_minute(monkeypatch):
     assert not ring.rings("dad", 1001.0)
     # Ringing a call nobody is in does nothing.
     assert asyncio.run(calls.hub.ring("empty", "mom", "Mom", {"kid"})) is False
+
+
+def test_turn_credential_is_coturn_rest_style_and_expires(monkeypatch):
+    """coturn (use-auth-secret) accepts base64(HMAC-SHA1(secret, '<expiry>:<user>'))."""
+    import base64
+    import hashlib
+    import hmac
+
+    monkeypatch.setenv("TURN_SECRET", "s3cret")
+    monkeypatch.setenv("TURN_URLS", "turn:turn.example.com:3478?transport=udp, turn:turn.example.com:3478?transport=tcp")
+    server = calls.turn_ice_server("mom", now=1000)
+    assert server["urls"] == [
+        "turn:turn.example.com:3478?transport=udp",
+        "turn:turn.example.com:3478?transport=tcp",
+    ]
+    assert server["username"] == f"{1000 + calls.TURN_CREDENTIAL_SECONDS}:mom"
+    expected = base64.b64encode(hmac.new(b"s3cret", server["username"].encode(), hashlib.sha1).digest()).decode()
+    assert server["credential"] == expected
+    assert calls.ice_servers_for("mom")[-1]["urls"] == server["urls"]
+
+
+def test_no_turn_without_secret_or_urls(monkeypatch):
+    monkeypatch.delenv("TURN_SECRET", raising=False)
+    monkeypatch.setenv("TURN_URLS", "turn:turn.example.com:3478")
+    assert calls.turn_ice_server("mom") is None
+    assert calls.ice_servers_for("mom") == calls.ICE_SERVERS
+
+
+def test_welcome_carries_a_turn_credential_when_configured(client, monkeypatch):
+    monkeypatch.setenv("TURN_SECRET", "s3cret")
+    monkeypatch.setenv("TURN_URLS", "turn:turn.example.com:3478")
+    with client.websocket_connect("/api/communication/calls/ws?token=mom-token&room=family&name=Family") as mom:
+        welcome = mom.receive_json()
+        turn = welcome["ice_servers"][-1]
+        assert turn["urls"] == ["turn:turn.example.com:3478"]
+        assert turn["username"].endswith(":mom")

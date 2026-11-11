@@ -39,6 +39,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(GuardPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
+        registerPlugin(DropInPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -62,6 +63,7 @@ registerPlugin(CommsPlugin.class);
 
         configureWebView();
         maybeConfirmGarage(getIntent());
+        maybeShowOverLockScreen(getIntent());
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
         PushService.start(this);
@@ -81,7 +83,22 @@ registerPlugin(CommsPlugin.class);
         if (intent != null) {
             setIntent(intent);
             maybeConfirmGarage(intent);
+            maybeShowOverLockScreen(intent);
             maybeOpenPath(intent);
+        }
+    }
+
+    /**
+     * A drop-in that could not reach a running WebView opens the call page
+     * here; it shows over the lock screen and wakes the display for the call
+     * only (DropInPlugin.ended turns this off again).
+     */
+    private void maybeShowOverLockScreen(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(DropInCall.EXTRA_DROP_IN, false)) return;
+        intent.removeExtra(DropInCall.EXTRA_DROP_IN);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
         }
     }
 

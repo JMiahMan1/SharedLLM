@@ -26,6 +26,9 @@
 <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Family Drop In answers by itself as a self-managed call (DropInCall). -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -512,6 +515,22 @@
             android:name=".MediaPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Family Drop In: Telecom's self-managed call that answers itself,
+             and the phoneCall/microphone service that keeps the WebView's
+             microphone working while the screen is off (DropInCall). -->
+        <service
+            android:name=".DropInConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".DropInService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall|microphone" />
 
         <!-- Rings the phone for a find_phone notice from the watch. -->
         <service

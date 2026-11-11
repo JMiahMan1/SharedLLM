@@ -17,6 +17,7 @@ import type { ActiveCall, CallParticipant } from '../types/api';
 import { useAuth } from './AuthContext';
 import { storageGetSync } from '../lib/storage';
 import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
+import { listenForDropIn, reportDropInEnded } from '../lib/dropIn';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
@@ -1167,6 +1168,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   }, [startCall]);
 
+  // Android answered a ring by itself while the app was in the background or
+  // the phone was locked (DropInCall.java): join the room now.
+  const endCallRef = useRef<() => void>(() => {});
+  useEffect(() => listenForDropIn(
+    (room, name) => {
+      autoTriedRef.current.add(room);
+      void startCall(room, name, { auto: true }).then(() => {
+        // Signed out, or already in another call: nothing joined, so the
+        // native call must not stay up holding the microphone.
+        if (callRef.current?.room !== room) reportDropInEnded();
+      });
+    },
+    () => endCallRef.current(),
+  ), [startCall]);
+
+  // Whenever this device is not in a live call, the native drop-in call (if
+  // any) must not linger: its notification and microphone end with ours.
+  const hadCallRef = useRef(false);
+  useEffect(() => {
+    const live = Boolean(call && (call.status === 'connecting' || call.status === 'connected'));
+    if (live) {
+      hadCallRef.current = true;
+    } else if (hadCallRef.current) {
+      hadCallRef.current = false;
+      reportDropInEnded();
+    }
+  }, [call]);
+
   const endCall = useCallback(() => {
     const session = sessionRef.current;
     const room = callRef.current?.room;
@@ -1181,6 +1210,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     mutedRef.current = false;
     cameraRef.current = false;
   }, []);
+
+  useEffect(() => {
+    endCallRef.current = endCall;
+  }, [endCall]);
 
   const toggleMute = useCallback(() => {
     const next = !mutedRef.current;

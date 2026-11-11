@@ -347,6 +347,8 @@ public class PushService extends Service {
             if (notice.isAlarmRing()) {
                 FindPhoneService.startAlarm(this, notice.title, notice.body);
             }
+            // Auto drop-in on: answer the family call by itself instead of ringing.
+            if (DropInCall.maybeAutoJoin(this, notice)) return;
             PushNotifier.show(this, notice);
             if (notice.isScreenTime()) {
                 // A parent's lock or unlock takes effect at once, not within the minute.

@@ -382,6 +382,21 @@ by default. Browsers may still ask for microphone permission the first time; if
 auto-join is blocked, the banner is the fallback. The setting and the media
 streams stay on the device.
 
+**In the background (Android).** The in-app check only runs while the app is
+open, so a phone in a pocket used to get nothing but a "X is calling"
+notification. Now the ring's push notice (`category: "call"`) reaches
+`PushService`, and with auto drop-in on `DropInCall` answers it by itself: it
+registers a self-managed call with Android's Telecom and answers it at once
+(`DropInConnectionService`). Being a real call is what lets an app use the
+microphone from the background; `DropInService` holds a
+`phoneCall|microphone` foreground service with an ongoing call notification
+(**Hang up**). The WebView's own call code then joins the room (the `DropIn`
+plugin's `join` event), or, when the app is not running, the call page opens
+over the lock screen. Audio goes to the speaker unless a headset or car is
+connected. When the web call ends, `DropIn.ended()` ends the Telecom call too.
+Telecom refuses a drop-in while the person is on a phone call; the ordinary
+ringing notice is shown instead.
+
 The gateway is only the signalling relay. Browsers connect to
 `/api/communication/calls/ws`, exchange SDP offers, answers and ICE candidates,
 then send audio and video directly to each other. Media never touches the
@@ -391,10 +406,30 @@ in-app banner poll.
 
 Calls are a mesh: each participant encodes one stream per other participant.
 `CALL_MAX_PEERS` (default 8) refuses a room beyond that, rather than melting
-the family's phones. The default ICE configuration uses public STUN, which is
-enough on a home network and most NATs; supply a TURN service without changing
-code with `CALL_ICE_SERVERS`, a JSON list in the usual
-`[{ "urls": "turn:...", "username": "...", "credential": "..." }]` form.
+the family's phones.
+
+**TURN relay.** Public STUN alone is enough on the home Wi-Fi, but a phone on
+mobile data usually cannot reach another phone directly (carrier NAT), and the
+call connects with no audio. The `coturn` service in `docker-compose.yml` is
+the relay. The gateway gives every caller a short-lived credential in the
+socket's `welcome` (coturn's `use-auth-secret` scheme:
+`username = "<expiry>:<user>"`, `credential = base64(HMAC-SHA1(TURN_SECRET,
+username))`, valid six hours), so no TURN password is stored or shared. Set in
+`.env`:
+
+| Variable | Meaning |
+| --- | --- |
+| `TURN_SECRET` | Shared by coturn and the gateway (`openssl rand -hex 32`) |
+| `TURN_URLS` | What phones are told, e.g. `turn:turn.sumemail.com:3478?transport=udp,turn:turn.sumemail.com:3478?transport=tcp` |
+| `TURN_PUBLIC_IP` | The public address the router forwards to this host |
+| `TURN_PRIVATE_IP` | This host's LAN address (default `192.168.2.205`) |
+| `TURN_MIN_PORT` / `TURN_MAX_PORT` | Relay port range (default 49160-49200) |
+
+The router must forward `3478/udp`, `3478/tcp` and the relay range (UDP) to the
+host. coturn refuses to relay to private addresses other than its own, so it
+cannot be used to reach the rest of the LAN. Without `TURN_SECRET`/`TURN_URLS`
+the gateway sends STUN only, and `CALL_ICE_SERVERS` (a JSON list) can still
+replace the STUN list.
 Rooms live in the gateway's memory, so restarting the gateway ends active
 calls; signalling reconnects are not preserved across a deploy.
 

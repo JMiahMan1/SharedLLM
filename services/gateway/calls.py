@@ -11,6 +11,9 @@ Nextcloud Talk. Talk still owns the chat; this module owns the call.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -68,6 +71,36 @@ def _ice_servers() -> list[dict[str, Any]]:
 
 
 ICE_SERVERS = _ice_servers()
+
+#: How long a TURN credential handed to one caller stays valid. A drop-in
+#: call can run for a long while; the relay only checks it when the call
+#: allocates (and refreshes) its relay, so a few hours is plenty.
+TURN_CREDENTIAL_SECONDS = 6 * 3600
+
+
+def turn_ice_server(username: str, now: float | None = None) -> dict[str, Any] | None:
+    """A short-lived TURN credential for coturn's ``use-auth-secret`` mode.
+
+    Without a relay, two phones behind different NATs (one on mobile data)
+    often cannot send each other audio at all. coturn on the home server
+    checks ``credential == base64(HMAC-SHA1(TURN_SECRET, username))`` where
+    ``username`` is ``<expiry>:<who>``, so no per-user password is stored and a
+    leaked credential expires on its own. None when TURN is not configured.
+    """
+    secret = (os.getenv("TURN_SECRET") or "").strip()
+    urls = [u.strip() for u in (os.getenv("TURN_URLS") or "").split(",") if u.strip()]
+    if not secret or not urls:
+        return None
+    expiry = int((now if now is not None else time.time()) + TURN_CREDENTIAL_SECONDS)
+    user = f"{expiry}:{re.sub(r'[^A-Za-z0-9_.-]', '', username) or 'jarvis'}"
+    digest = hmac.new(secret.encode(), user.encode(), hashlib.sha1).digest()
+    return {"urls": urls, "username": user, "credential": base64.b64encode(digest).decode()}
+
+
+def ice_servers_for(username: str) -> list[dict[str, Any]]:
+    """The ICE servers one caller gets: STUN, plus a TURN relay when set up."""
+    turn = turn_ice_server(username)
+    return [*ICE_SERVERS, turn] if turn else ICE_SERVERS
 
 
 @dataclass
@@ -351,7 +384,7 @@ async def calls_websocket(
             "type": "welcome",
             "self": peer.public(),
             "peers": [p.public() for p in existing],
-            "ice_servers": ICE_SERVERS,
+            "ice_servers": ice_servers_for(peer.username),
             "room": room,
             "name": await hub.room_name(room),
         },
