@@ -266,4 +266,30 @@ public class GuardRulesTest {
         assertEquals(Action.BLOCK_APP, GuardRules.decide(true, false, false, "com.android.chrome", "", "",
                 ALLOWED, LAUNCHER, BLOCKED, null, false, null, true, kiosk));
     }
+
+    private static Action duringUpdate(boolean selfUpdating, String pkg, String cls, String text) {
+        return GuardRules.decide(true, true, false, pkg, cls, text, ALLOWED, LAUNCHER, BLOCKED,
+                null, false, null, false, null, selfUpdating);
+    }
+
+    @Test
+    public void jarvisOwnUpdateScreenIsLetThroughOnlyWhileJarvisIsUpdating() {
+        String installer = "com.google.android.packageinstaller";
+        String ask = "Jarvis OS Do you want to update this app? Cancel Update";
+        // Before: the update screen names Jarvis OS, so it was a tamper screen.
+        assertEquals(Action.BLOCK_TAMPER, duringUpdate(false, installer, "com.android.packageinstaller.PackageInstallerActivity", ask));
+        // While Jarvis's own update runs it is allowed, even during a screen-time lock.
+        assertEquals(Action.ALLOW, duringUpdate(true, installer, "com.android.packageinstaller.PackageInstallerActivity", ask));
+        assertEquals(Action.ALLOW, duringUpdate(true, "com.samsung.android.packageinstaller", "", ask));
+    }
+
+    @Test
+    public void uninstallStaysCoveredEvenWhileJarvisIsUpdating() {
+        assertEquals(Action.BLOCK_TAMPER, duringUpdate(true, "com.google.android.packageinstaller",
+                "com.android.packageinstaller.UninstallerActivity", "Do you want to uninstall Jarvis OS?"));
+        assertEquals(Action.BLOCK_TAMPER, duringUpdate(true, "com.google.android.packageinstaller",
+                "", "Jarvis OS Do you want to uninstall this app?"));
+        // Settings pages about Jarvis stay covered too.
+        assertEquals(Action.BLOCK_TAMPER, duringUpdate(true, "com.android.settings", "", "App info Jarvis OS Force stop"));
+    }
 }

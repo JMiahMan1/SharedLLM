@@ -527,6 +527,11 @@
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
+        <!-- Android's answer to Jarvis installing its own update (SelfUpdate). -->
+        <receiver
+            android:name=".SelfUpdate$Receiver"
+            android:exported="false" />
+
         <service
             android:name=".DropInService"
             android:exported="false"

@@ -247,6 +247,11 @@ public class ApkInstallPlugin extends Plugin {
         if (DeviceOwnerGuard.isOwner(context) && DeviceOwnerGuard.installApkSilently(context, apk)) {
             return;
         }
+        // A session install: no tap needed on Android 12+ once Jarvis installed
+        // itself before, and Jarvis Guard lets its own update screen through.
+        if (SelfUpdate.install(context, apk)) {
+            return;
+        }
         Uri apkUri = FileProvider.getUriForFile(
             context, context.getPackageName() + ".fileprovider", apk);
         Intent intent = new Intent(Intent.ACTION_VIEW);

@@ -251,7 +251,7 @@ public class GuardService extends AccessibilityService {
                 GuardApi.isProtected(this), GuardApi.isLocked(this), GuardApi.isUnlocked(this),
                 pkg, cls, text, GuardApi.alwaysAllowed(this), launcher, GuardApi.blockedApps(this),
                 awaitingApproval, GuardApi.webFilterWanted(this), bypassApps,
-                GuardApi.kioskMode(this), GuardApi.kioskApps(this));
+                GuardApi.kioskMode(this), GuardApi.kioskApps(this), SelfUpdate.inProgress(this));
     }
 
     /** The window in front just changed. */

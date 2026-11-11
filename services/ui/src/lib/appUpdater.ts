@@ -301,12 +301,24 @@ export async function initAppUpdater(): Promise<void> {
     // Schedule background check 3 seconds after launch to keep startup lightning fast
     setTimeout(() => {
       void checkForAppUpdates({ silent: true });
+      void autoUpdateApk();
     }, 3000);
 
     // Periodic silent re-check (every 6 hours) for long-lived sessions
     setInterval(() => {
       void checkForAppUpdates({ silent: true });
+      void autoUpdateApk();
     }, 6 * 60 * 60 * 1000);
+
+    // A downloaded APK is installed once the app goes to the background, so
+    // nobody is thrown out of what they were doing.
+    try {
+      void App.addListener('pause', () => {
+        void installStagedApk();
+      }).catch(() => {});
+    } catch {
+      // No app lifecycle events: the next launch's check installs it instead.
+    }
   }
 }
 
@@ -678,4 +690,76 @@ export async function checkApkUpdate(): Promise<ApkUpdateStatus> {
       error: 'Could not reach the update server.',
     };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Automatic APK updates                                               */
+/* ------------------------------------------------------------------ */
+
+const AUTO_APK_TRIED_KEY = 'jarvis_auto_apk_tried';
+const AUTO_APK_RETRY_MS = 6 * 60 * 60 * 1000;
+
+let stagedApkVersion: number | null = null;
+let autoApkRunning = false;
+let updateBusy: () => boolean = () => false;
+
+/**
+ * Something that must not be cut off by the app restarting into a new APK
+ * (a live call). The install waits for the next time it is not busy.
+ */
+export function setApkUpdateBusyCheck(check: () => boolean): void {
+  updateBusy = check;
+}
+
+/**
+ * Download a newer APK on its own when the server publishes one, verified
+ * against the published digest, and install it the next time the app goes
+ * to the background. Android 12+ installs it without a tap once Jarvis has
+ * installed itself before (native SelfUpdate), and Jarvis Guard lets its own
+ * update screen through, so a child's phone no longer needs a parent's
+ * unlock for every update. Each version is tried at most every six hours.
+ */
+export async function autoUpdateApk(now: number = Date.now()): Promise<void> {
+  if (autoApkRunning || Capacitor.getPlatform() !== 'android') return;
+  autoApkRunning = true;
+  try {
+    if (!(await hasVerifiedInstallFlow())) return;
+    const status = await checkApkUpdate();
+    const code = status.apkVersionCode;
+    if (!status.updateAvailable || !status.apkUrl || !status.apkSha256 || !code) return;
+    if (stagedApkVersion === code) return;
+    const [triedCode, triedAt] = (readLocal(AUTO_APK_TRIED_KEY) || '').split(':').map(Number);
+    if (triedCode === code && now - (triedAt || 0) < AUTO_APK_RETRY_MS) return;
+    const permission = await getApkInstallPermission();
+    if (permission.known && !permission.allowed) return; // Settings shows "Allow updates"
+    writeLocal(AUTO_APK_TRIED_KEY, `${code}:${now}`);
+    await downloadApkWithProgress(status.apkUrl, status.apkSha256, () => {});
+    stagedApkVersion = code;
+    console.log(`[AppUpdater] APK ${code} downloaded; installs when the app is in the background`);
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      await installStagedApk();
+    }
+  } catch (err) {
+    console.warn('[AppUpdater] Automatic APK update failed:', err);
+  } finally {
+    autoApkRunning = false;
+  }
+}
+
+/** Install the APK `autoUpdateApk` downloaded, unless something is busy. */
+export async function installStagedApk(): Promise<void> {
+  if (stagedApkVersion === null || updateBusy()) return;
+  try {
+    await installVerifiedApk();
+    stagedApkVersion = null;
+  } catch (err) {
+    console.warn('[AppUpdater] Could not install the downloaded APK:', err);
+  }
+}
+
+/** Test hook. */
+export function __resetAutoApk(): void {
+  stagedApkVersion = null;
+  autoApkRunning = false;
+  updateBusy = () => false;
 }

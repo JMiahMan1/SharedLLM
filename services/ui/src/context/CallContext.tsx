@@ -18,6 +18,7 @@ import { useAuth } from './AuthContext';
 import { storageGetSync } from '../lib/storage';
 import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
 import { listenForDropIn, reportDropInEnded } from '../lib/dropIn';
+import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
@@ -971,6 +972,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [autoDropIn, setAutoDropIn] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  // An automatic app update restarts the app: never in the middle of a call.
+  useEffect(() => {
+    setApkUpdateBusyCheck(() => callRef.current !== null);
+    return () => setApkUpdateBusyCheck(() => false);
+  }, []);
 
   useEffect(() => {
     tokenRef.current = token;

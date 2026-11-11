@@ -124,10 +124,30 @@ public final class GuardRules {
                                 Collection<String> blockedApps, Collection<String> awaitingApproval,
                                 boolean filterOn, Collection<String> bypassApps,
                                 boolean kioskMode, Collection<String> kioskApps) {
+        return decide(protectedPhone, locked, unlocked, pkg, cls, text, alwaysAllowed, launcher,
+                blockedApps, awaitingApproval, filterOn, bypassApps, kioskMode, kioskApps, false);
+    }
+
+    /**
+     * As above, with {@code selfUpdating}: Jarvis itself just started
+     * installing a newer Jarvis (SelfUpdate). Android's "update this app?"
+     * screen names Jarvis OS like the uninstall dialog does, so without this
+     * a child's phone needed a parent's unlock for every app update. Only the
+     * install screen is let through; the uninstall dialog stays a tamper
+     * screen even then.
+     */
+    public static Action decide(boolean protectedPhone, boolean locked, boolean unlocked,
+                                String pkg, String cls, String text,
+                                Collection<String> alwaysAllowed, String launcher,
+                                Collection<String> blockedApps, Collection<String> awaitingApproval,
+                                boolean filterOn, Collection<String> bypassApps,
+                                boolean kioskMode, Collection<String> kioskApps,
+                                boolean selfUpdating) {
         if (pkg == null || pkg.isEmpty() || unlocked) return Action.ALLOW;
         String lowerText = text == null ? "" : text.toLowerCase(Locale.ROOT);
         String lowerCls = cls == null ? "" : cls.toLowerCase(Locale.ROOT);
 
+        if (protectedPhone && selfUpdating && isOwnUpdateScreen(pkg, lowerCls, lowerText)) return Action.ALLOW;
         if (protectedPhone && isTamperScreen(pkg, lowerCls, lowerText)) return Action.BLOCK_TAMPER;
         if (protectedPhone && filterOn && FilterBypass.isPrivateDnsScreen(pkg, lowerText)) return Action.BLOCK_TAMPER;
 
@@ -221,6 +241,15 @@ public final class GuardRules {
             "factory reset", "erase all data", "erase everything",
             "usage access", "add user", "user & account", "users",
             "date & time", "date and time", "developer options", "usb debugging"));
+
+    /**
+     * The package installer asking to install (update) Jarvis, not to remove
+     * it: let through only while Jarvis's own update is in progress.
+     */
+    static boolean isOwnUpdateScreen(String pkg, String lowerCls, String lowerText) {
+        if (!INSTALLERS.contains(pkg)) return false;
+        return !lowerCls.contains("uninstall") && !lowerText.contains("uninstall");
+    }
 
     /** A screen that would uninstall Jarvis or switch its protection off. */
     static boolean isTamperScreen(String pkg, String lowerCls, String lowerText) {

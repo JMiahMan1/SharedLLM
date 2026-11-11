@@ -100,7 +100,35 @@ published build exceeds older installs. A local Gradle build without
 ## Native APK updates
 
 The web bundle cannot change native code. When the published APK is newer than
-the running build, the app offers it for manual install.
+the running build, the Android app updates itself (below), and Settings still
+offers it for manual install.
+
+### Automatic install
+
+At launch and every six hours `autoUpdateApk` (`lib/appUpdater.ts`) downloads a
+newer published APK, verified against `apk_sha256`. It installs the APK the
+next time the app goes to the background (`pause`), never during a live call.
+Each version is tried at most once every six hours. Nothing happens until
+"Install unknown apps" is allowed for Jarvis OS; until then Settings shows
+**Allow updates**.
+
+The install is a `PackageInstaller` session (`SelfUpdate.java`), not the "open
+this .apk" hand-off. On Android 12+ a session that updates the installing app
+asks for nothing once Jarvis is its own installer of record
+(`USER_ACTION_NOT_REQUIRED`). The first time, and on older Android, Android
+still shows its install screen. If the app is in the background, a "Jarvis OS
+update ready" notification opens that screen instead. A device-owner phone
+installs silently (`DeviceOwnerGuard.installApkSilently`).
+
+**Jarvis Guard.** Android's update screen names "Jarvis OS", just like the
+uninstall dialog, so the guard used to cover it on a child's phone, and every
+update needed a parent's ten-minute unlock. While an update that Jarvis itself
+started is in progress (`SelfUpdate.inProgress`: 5 minutes from the commit,
+reopened when the person taps the notification), the guard lets the package
+installer through (`GuardRules.isOwnUpdateScreen`). The uninstall dialog and
+Settings pages about Jarvis stay covered, even during that window. Android
+refuses an update that is not signed with Jarvis's own key, so the window
+cannot be used to put anything else over Jarvis.
 
 **The server never takes the advertised version on trust.** `apk_version_code`
 is read out of `AndroidManifest.xml` inside the APK it is actually serving
@@ -155,7 +183,7 @@ Jarvis OS is a personal home app and will **never** ship on Google Play.
 | Passwords | env `KEYSTORE_PASSWORD` / `KEY_PASSWORD` (GitHub Actions secrets). Local fallback: gitignored `keystore.properties`. **No default password in source.** |
 | Signing | `build.gradle`: **both** `debug` and `release` build types use this keystore |
 | CI artifact | `jarvis-os-release-apk` → `app-release.apk` (signed) |
-| In-app install | `ApkInstall` Capacitor plugin (`ApkInstallPlugin.java`) → FileProvider → system installer |
+| In-app install | `ApkInstall` Capacitor plugin (`ApkInstallPlugin.java`) → `SelfUpdate` PackageInstaller session (FileProvider hand-off as fallback) |
 
 The keystore file and passwords must never appear in the repository. CI restores
 the keystore from secrets (and fails if any of the three secrets is missing)
@@ -165,9 +193,9 @@ Because debug and release share one certificate, OTA-era installs upgrade in
 place without uninstall. First transition from an old debug-keystore build may
 require one uninstall/install if signatures differ.
 
-Android still shows the system "Install?" sheet (or requires a one-time
-"Install unknown apps" grant for Jarvis OS). Fully silent installs are not
-possible on a non-rooted personal device without Play/MDM.
+Jarvis OS needs a one-time "Install unknown apps" grant. After the first
+in-app session install, Android 12+ updates it without a tap (see Automatic
+install). Older Android always shows the system "Install?" sheet.
 
 Publish path: CI signs and publishes the APK to the gateway (above);
 `deploy_remote.sh` can also download the `jarvis-os-release-apk` artifact and

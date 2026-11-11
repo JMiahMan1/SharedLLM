@@ -64,6 +64,7 @@ registerPlugin(CommsPlugin.class);
         configureWebView();
         maybeConfirmGarage(getIntent());
         maybeShowOverLockScreen(getIntent());
+        SelfUpdate.maybeContinue(this, getIntent());
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
         PushService.start(this);
@@ -84,6 +85,7 @@ registerPlugin(CommsPlugin.class);
             setIntent(intent);
             maybeConfirmGarage(intent);
             maybeShowOverLockScreen(intent);
+            SelfUpdate.maybeContinue(this, intent);
             maybeOpenPath(intent);
         }
     }
