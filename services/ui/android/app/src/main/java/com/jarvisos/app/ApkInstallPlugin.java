@@ -261,6 +261,18 @@ public class ApkInstallPlugin extends Plugin {
         context.startActivity(intent);
     }
 
+    /**
+     * This build installs its own updates through SelfUpdate (and its guard
+     * lets that through), so the web app may install them unattended. Older
+     * builds lack the method, and the web app leaves updates to Settings.
+     */
+    @PluginMethod
+    public void selfUpdateSupported(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("supported", true);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void canInstall(PluginCall call) {
         JSObject ret = new JSObject();

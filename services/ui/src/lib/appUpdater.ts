@@ -450,6 +450,7 @@ interface ApkInstallPlugin {
   /** Present only on builds that verify the download; see hasVerifiedFlow(). */
   downloadApk?(opts: { url: string; sha256: string }): Promise<{ path: string; sha256: string; bytes: number }>;
   installDownloadedApk?(): Promise<{ message: string }>;
+  selfUpdateSupported?(): Promise<{ supported: boolean }>;
   isApkDownloaded?(): Promise<{ downloaded: boolean }>;
   clearDownloadedApk?(): Promise<void>;
   addListener?(event: 'downloadProgress', cb: (p: ApkDownloadProgress) => void): Promise<{ remove(): Promise<void> }>;
@@ -723,7 +724,7 @@ export async function autoUpdateApk(now: number = Date.now()): Promise<void> {
   if (autoApkRunning || Capacitor.getPlatform() !== 'android') return;
   autoApkRunning = true;
   try {
-    if (!(await hasVerifiedInstallFlow())) return;
+    if (!(await hasVerifiedInstallFlow()) || !(await selfUpdateSupported())) return;
     const status = await checkApkUpdate();
     const code = status.apkVersionCode;
     if (!status.updateAvailable || !status.apkUrl || !status.apkSha256 || !code) return;
@@ -743,6 +744,21 @@ export async function autoUpdateApk(now: number = Date.now()): Promise<void> {
     console.warn('[AppUpdater] Automatic APK update failed:', err);
   } finally {
     autoApkRunning = false;
+  }
+}
+
+/**
+ * An APK older than the self-updating build hands the update to Android's
+ * installer screen, which Jarvis Guard covers as tampering on a child's
+ * phone: those builds are left to update from Settings.
+ */
+async function selfUpdateSupported(): Promise<boolean> {
+  const plugin = getApkInstallPlugin();
+  if (!plugin || typeof plugin.selfUpdateSupported !== 'function') return false;
+  try {
+    return (await plugin.selfUpdateSupported()).supported === true;
+  } catch {
+    return false;
   }
 }
 

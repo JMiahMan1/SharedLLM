@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   canInstall: vi.fn(),
   downloadApk: vi.fn(),
   installDownloadedApk: vi.fn(),
+  selfUpdateSupported: vi.fn(),
 }));
 
 vi.mock('axios', () => ({ default: { get: mocks.get } }));
@@ -23,6 +24,7 @@ vi.mock('@capacitor/core', () => ({
     canInstall: mocks.canInstall,
     downloadApk: mocks.downloadApk,
     installDownloadedApk: mocks.installDownloadedApk,
+    selfUpdateSupported: mocks.selfUpdateSupported,
     addListener: () => Promise.resolve({ remove: () => Promise.resolve() }),
   }),
 }));
@@ -52,6 +54,7 @@ describe('automatic APK update', () => {
     mocks.canInstall.mockResolvedValue({ allowed: true });
     mocks.downloadApk.mockResolvedValue({ path: 'x', sha256: 'a'.repeat(64), bytes: 1 });
     mocks.installDownloadedApk.mockResolvedValue({ message: 'ok' });
+    mocks.selfUpdateSupported.mockResolvedValue({ supported: true });
   });
 
   it('downloads a newer published APK and installs it once the app is in the background', async () => {
@@ -98,6 +101,13 @@ describe('automatic APK update', () => {
   it('leaves it to Settings when installing apps is not allowed', async () => {
     mocks.get.mockResolvedValue(published(611));
     mocks.canInstall.mockResolvedValue({ allowed: false });
+    await autoUpdateApk(1000);
+    expect(mocks.downloadApk).not.toHaveBeenCalled();
+  });
+
+  it('leaves an older APK (no self-update, guard would flag the installer) to Settings', async () => {
+    mocks.get.mockResolvedValue(published(611));
+    mocks.selfUpdateSupported.mockRejectedValue(new Error('not implemented'));
     await autoUpdateApk(1000);
     expect(mocks.downloadApk).not.toHaveBeenCalled();
   });
