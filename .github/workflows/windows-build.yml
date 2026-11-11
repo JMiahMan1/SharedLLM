@@ -54,6 +54,7 @@ jobs:
     # data/app_updates/next to jarvis-os.apk. Skipped on pull requests.
     - name: Publish exe to the hub
       if: github.event_name != 'pull_request'
+      shell: bash
       env:
         PUBLISH_URL: ${{ secrets.WINDOWS_PUBLISH_URL }}
         INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
