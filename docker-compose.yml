@@ -821,7 +821,7 @@ services:
   # The gateway hands each caller a short-lived credential signed with
   # TURN_SECRET (services/gateway/calls.py), so no passwords live here.
   # Host networking because the relay needs a UDP port range; the router must
-  # forward 3478/udp+tcp and TURN_MIN_PORT-TURN_MAX_PORT/udp to this host.
+  # forward TURN_PORT/udp+tcp and TURN_MIN_PORT-TURN_MAX_PORT/udp to this host.
   # Relaying to private addresses is refused (except this host) so the relay
   # cannot be used to reach anything else on the LAN. See docs/FAMILY_HUB.md.
   coturn:
@@ -835,6 +835,7 @@ services:
       - TURN_PUBLIC_IP=${TURN_PUBLIC_IP:-}
       - TURN_PRIVATE_IP=${TURN_PRIVATE_IP:-192.168.2.205}
       - TURN_REALM=${TURN_REALM:-sumemail.com}
+      - TURN_PORT=${TURN_PORT:-3478}
       - TURN_MIN_PORT=${TURN_MIN_PORT:-49160}
       - TURN_MAX_PORT=${TURN_MAX_PORT:-49200}
     entrypoint: ["sh", "-c"]
@@ -844,7 +845,7 @@ services:
           echo "coturn: TURN_SECRET and TURN_PUBLIC_IP must be set in .env" >&2; exit 1
         fi
         exec turnserver -n --log-file=stdout --simple-log --no-cli \
-          --listening-port=3478 --realm="$$TURN_REALM" \
+          --listening-port="$$TURN_PORT" --realm="$$TURN_REALM" \
           --use-auth-secret --static-auth-secret="$$TURN_SECRET" \
           --external-ip="$$TURN_PUBLIC_IP/$$TURN_PRIVATE_IP" \
           --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT" \

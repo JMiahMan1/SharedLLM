@@ -423,11 +423,12 @@ username))`, valid six hours), so no TURN password is stored or shared. Set in
 | `TURN_URLS` | What phones are told, e.g. `turn:turn.sumemail.com:3478?transport=udp,turn:turn.sumemail.com:3478?transport=tcp` |
 | `TURN_PUBLIC_IP` | The public address the router forwards to this host |
 | `TURN_PRIVATE_IP` | This host's LAN address (default `192.168.2.205`) |
+| `TURN_PORT` | Listening port (default 3478) |
 | `TURN_MIN_PORT` / `TURN_MAX_PORT` | Relay port range (default 49160-49200) |
 
-The router must forward `3478/udp`, `3478/tcp` and the relay range (UDP) to the
-host. coturn refuses to relay to private addresses other than its own, so it
-cannot be used to reach the rest of the LAN. Without `TURN_SECRET`/`TURN_URLS`
+The router must forward `TURN_PORT` (UDP and TCP) and the relay range (UDP)
+to the host. coturn refuses to relay to private addresses other than its own,
+so it cannot be used to reach the rest of the LAN. Without `TURN_SECRET`/`TURN_URLS`
 the gateway sends STUN only, and `CALL_ICE_SERVERS` (a JSON list) can still
 replace the STUN list.
 Rooms live in the gateway's memory, so restarting the gateway ends active
