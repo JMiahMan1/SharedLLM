@@ -143,7 +143,7 @@ No new rules engine - reuse everything the phone uses, add Windows deltas:
 |---|---|
 | `ScreenTime` status poll | Reuse `GET /api/screen-time/{u}/status?device_key=` verbatim. |
 | Device registration | Add `windows-pc` to the device-kind enum (identity `Device` model + `/api/user-panel/devices/register` validation) + migration of the CHECK constraint. |
-| Capabilities | Windows reports `guard:{serviceRunning, lockCapable, trayRunning, webFilterMode: off|report|enforce, version, reportedAt}`; Devices page renders a third row next to phone/tablet. |
+| Capabilities | Windows reports `guard:{serviceRunning, lockCapable, trayRunning, webFilterMode: off\|report\|enforce, version, reportedAt}`; Devices page renders a third row next to phone/tablet. |
 | Usage ingest | `POST /api/usage` already accepts `device_key`; add `source:"windows"` acceptance (no schema change if none needed; keep payload as-is). |
 | Tamper taxonomy | Reuse `guard_tamper` events (`uninstall_attempt`, `safe_mode_boot`, `admin_revoked`, `service_stopped`, `clock_skew`) → devices page + `family_safety` notices, same as phone. |
 | Ask-to-time flow | Unchanged: `/api/screen-time/requests` + Approve/Disapprove push; granted minutes extend today's budget and suspend sleep locks (`granted_until`). The lock screen buttons call the same endpoints. |
