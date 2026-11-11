@@ -14,9 +14,9 @@ import android.util.Log;
 /**
  * Family Drop In while the app is in the background or the phone is locked.
  *
- * A ring arrives as a "call" notice on {@link PushService}. With auto drop-in
- * on for this device (Settings, stored by the web app in CapacitorStorage),
- * the phone answers it by itself, like a walkie-talkie: it registers a
+ * A ring arrives as a "call" notice on {@link PushService}. When the person
+ * lets the caller drop in (their list, on the server) and this device's
+ * drop-in switch is on, the phone answers it by itself, like a walkie-talkie: it registers a
  * self-managed call with Android's Telecom and answers it at once
  * ({@link DropInConnectionService}). Being a real call is what lets the app
  * use the microphone from the background ({@link DropInService} runs as a
@@ -39,10 +39,24 @@ final class DropInCall {
 
     private DropInCall() {}
 
-    /** The web app's per-device "Auto drop-in" switch (lib/callSettings.ts). */
+    /**
+     * This device answers drop-ins by itself: on unless switched off. The web
+     * app copies the server's per-device switch here (lib/callSettings.ts),
+     * so a parent's change on a child's phone holds in the background too.
+     */
     static boolean enabled(Context context) {
         SharedPreferences cap = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
-        return "1".equals(cap.getString("jarvis_auto_drop_in", null));
+        return !"0".equals(cap.getString("jarvis_drop_in_device", null));
+    }
+
+    /**
+     * The ring lets this person's devices answer by themselves: the person
+     * (or a parent) put the caller on their drop-in list. The server marks
+     * it in the notice's link ({@code &drop_in=1}); any other ring just rings.
+     */
+    static boolean allowedByRing(PushNotice notice) {
+        if (notice == null || notice.path == null) return false;
+        return "1".equals(Uri.parse("jarvis://open" + notice.path).getQueryParameter("drop_in"));
     }
 
     /** The room a call notice rings, from its {@code /family?tab=calls&answer=<room>} link. */
@@ -53,12 +67,12 @@ final class DropInCall {
     }
 
     /**
-     * Answer a ringing call by itself when this device has auto drop-in on.
+     * Answer a ringing call by itself when the ring allows it and this device has drop-in on.
      * True when it took the call over (the ringing notice is then not shown).
      */
     static boolean maybeAutoJoin(Context context, PushNotice notice) {
         String room = roomOf(notice);
-        if (room == null || !enabled(context)) return false;
+        if (room == null || !allowedByRing(notice) || !enabled(context)) return false;
         if (current != null) return false; // already in a drop-in: let this one ring
         String name = notice.title == null ? "Family call" : notice.title;
         try {

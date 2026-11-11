@@ -370,22 +370,40 @@ starts a peer-to-peer WebRTC call inside Jarvis; nothing opens in Nextcloud or
 another tab. An active call shows **Join** instead, and the chat header's phone
 button starts the same drop-in.
 
-Calls behave like a family drop-in line. Pressing **Drop in** puts you in the
-room immediately. Any device with auto drop-in enabled joins automatically with
-its microphone and speaker after a short beep, so the caller is not left waiting
-for someone to accept. There is no ringing screen or accept alert. Devices that
-are not auto-joined see a quiet banner above the mobile bottom navigation and can
-join with one tap.
+Pressing **Drop in** puts you in the room at once and rings the conversation's
+other members. For each of them, the ring is a **drop-in** only when they let
+you drop in. Then a device of theirs with drop-in on joins by itself after a
+short chime, microphone and speaker on, like a walkie-talkie. Anyone else gets
+an ordinary ringing call to answer or decline.
 
-Auto drop-in is a per-device setting in **Settings → Family drop-in**. It is off
-by default. Browsers may still ask for microphone permission the first time; if
-auto-join is blocked, the banner is the fallback. The setting and the media
-streams stay on the device.
+Drop-in is set per account and per device, in **Settings → Family drop-in**
+(`components/settings/FamilyDropInSettings.tsx`), and kept on the server
+(`services/gateway/calls.py`, Redis hashes `calls:drop_in` and
+`calls:drop_in_devices`):
+
+- **Per account:** the family members who may drop in on a person. Nobody
+  until chosen. Adults choose their own. A child's or teen's list is chosen by
+  a parent (father, mother or an admin), and the child cannot change it. A
+  parent cannot change another adult's list.
+- **Per device:** whether each phone or tablet answers an allowed drop-in by
+  itself. On unless switched off. The same people can change it: adults on
+  their own devices, parents on a child's. Each device learns its switch from
+  the call-list poll (`GET /api/communication/calls?device_key=`) and stores it
+  for the Android side.
+
+A device that used the old per-device "Auto drop-in" switch carries an "on"
+over once: its owner's list becomes the whole family. Room speakers such as
+ESPHome voice assistants can join later as devices with their own switch.
+
+Browsers may still ask for microphone permission the first time. If auto-join
+is blocked, a Join banner is the fallback.
 
 **In the background (Android).** The in-app check only runs while the app is
 open, so a phone in a pocket used to get nothing but a "X is calling"
 notification. Now the ring's push notice (`category: "call"`) reaches
-`PushService`, and with auto drop-in on `DropInCall` answers it by itself: it
+`PushService`. When the notice's link carries `drop_in=1` (the person lets the
+caller drop in) and this device's switch is on, `DropInCall` answers it by
+itself: it
 registers a self-managed call with Android's Telecom and answers it at once
 (`DropInConnectionService`). Being a real call is what lets an app use the
 microphone from the background; `DropInService` holds a

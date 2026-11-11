@@ -4,7 +4,7 @@ import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
 import { Capacitor } from '@capacitor/core';
-import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, PhoneIncoming, Settings as SettingsIcon } from 'lucide-react';
+import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import LocationPausePanel from '../components/settings/LocationPausePanel';
@@ -22,7 +22,7 @@ import WatchPanel from '../components/settings/WatchPanel';
 import WeatherSettingsPanel from '../components/settings/WeatherSettingsPanel';
 import Toggle from '../components/ui/Toggle';
 import UserAvatar from '../components/UserAvatar';
-import { getAutoDropIn, setAutoDropIn } from '../lib/callSettings';
+import FamilyDropInSettings from '../components/settings/FamilyDropInSettings';
 import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../lib/adminPin';
 import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
 import {
@@ -465,66 +465,8 @@ const NotificationsRow = () => {
   );
 };
 
-/**
- * Opt-in auto drop-in. This is a per-device choice: only the device that
- * enables it answers a call to its owner by itself, microphone and speaker on.
- */
-const FamilyDropInSection = () => {
-  const [enabled, setEnabled] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    void getAutoDropIn().then((value) => {
-      if (!active) return;
-      setEnabled(value);
-      setLoaded(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const change = async (next: boolean) => {
-    setEnabled(next);
-    try {
-      await setAutoDropIn(next);
-      toast.success(next ? 'Auto drop-in is on for this device.' : 'Auto drop-in is off for this device.');
-    } catch {
-      setEnabled(!next);
-      toast.error('Could not save the drop-in setting.');
-    }
-  };
-
-  return (
-    <div className="glass-panel rounded-2xl p-4 space-y-2">
-      <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2 flex items-center gap-2">
-        <PhoneIncoming size={16} className="text-emerald-400" />
-        Family drop-in
-      </h2>
-      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5">
-        <div className="min-w-0">
-          <p className="text-white text-sm font-medium">Auto drop-in on this device</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            When someone calls you, this device answers by itself after a short chime, like an
-            Alexa drop-in. Off by default: calls ring, and you answer or decline.
-          </p>
-        </div>
-        <Toggle
-          checked={enabled}
-          disabled={!loaded}
-          onChange={(next) => void change(next)}
-          ariaLabel="Auto drop-in on this device"
-          testId="auto-drop-in"
-        />
-      </div>
-      <p className="px-1 text-[11px] leading-relaxed text-slate-500">
-        This is a per-device setting. The first time, the browser or phone may ask for microphone
-        permission. If auto-answer is blocked, the call shows a Join banner instead.
-      </p>
-    </div>
-  );
-};
+/** Who may drop in on you (and your children), and which devices answer by themselves. */
+const FamilyDropInSection = () => <FamilyDropInSettings />;
 
 /** Always-on info-gathering sensors. Each can be turned off; related services stop with it. */
 const SensorsSection = () => {

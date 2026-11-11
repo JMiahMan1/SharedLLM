@@ -8470,12 +8470,19 @@ async def ring_family_call(room: str, request: Request):
     if found is None:
         return {"ringing": []}
     display, recipients = found
-    if not recipients or not await _calls.hub.ring(room, me, display, recipients):
+    drop_in = await _calls.drop_in_recipients(me, recipients) if recipients else set()
+    if not recipients or not await _calls.hub.ring(room, me, display, recipients, drop_in):
         return {"ringing": []}
 
     group = len(recipients) > 1
     name = await _calls.hub.room_name(room)
     answer = f"/family?tab=calls&answer={room}"
+
+    def link(person: str) -> str:
+        # The phone answers by itself only when this person lets the caller
+        # drop in (DropInCall.java reads drop_in=1 from the link).
+        return f"{answer}&drop_in=1" if person in drop_in else answer
+
     await _notify.send_many(
         sorted(recipients),
         lambda person: _notify.notice(
@@ -8483,16 +8490,16 @@ async def ring_family_call(room: str, request: Request):
             "call",
             f"{display} is calling",
             f"Family call in {name}. Tap to answer." if group and name else "Tap to answer.",
-            url=answer,
+            url=link(person),
             tag=f"call:{room}",
             # 4 pops up on the "Family calls" channel; 5 would go to the
             # urgent SOS channel as an alarm.
             priority=4,
-            data={"call": room, "caller": display},
-            actions=[_notify.view_action(answer, "Answer")],
+            data={"call": room, "caller": display, "drop_in": person in drop_in},
+            actions=[_notify.view_action(link(person), "Answer")],
         ),
     )
-    return {"ringing": sorted(recipients)}
+    return {"ringing": sorted(recipients), "drop_in": sorted(drop_in)}
 
 
 @app.post("/api/communication/talk/call")

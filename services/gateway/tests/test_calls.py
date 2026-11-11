@@ -197,3 +197,127 @@ def test_welcome_carries_a_turn_credential_when_configured(client, monkeypatch):
         turn = welcome["ice_servers"][-1]
         assert turn["urls"] == ["turn:turn.example.com:3478"]
         assert turn["username"].endswith(":mom")
+
+
+# --- who may drop in on whom ------------------------------------------------
+
+class _FakeRedis:
+    def __init__(self):
+        self.h: dict[str, dict[str, str]] = {}
+
+    async def hmget(self, key, fields):
+        return [self.h.get(key, {}).get(f) for f in fields]
+
+    async def hset(self, key, field, value):
+        self.h.setdefault(key, {})[field] = value
+
+    async def hdel(self, key, field):
+        self.h.get(key, {}).pop(field, None)
+
+
+FAMILY = [
+    {"username": "dad", "display_name": "Dad", "family_role": "father", "is_admin": True},
+    {"username": "mom", "display_name": "Mom", "family_role": "mother"},
+    {"username": "kid", "display_name": "Kid", "family_role": "child"},
+    {"username": "big", "display_name": "Big", "family_role": "adult_child"},
+]
+DEVICES = {"kid": [{"device_key": "kid-phone", "kind": "phone", "label": "Kid's phone"}],
+           "mom": [{"device_key": "mom-phone", "kind": "phone", "label": "Mom's phone"}]}
+
+
+@pytest.fixture
+def drop_in_store(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from services.gateway import notices
+
+    store = _FakeRedis()
+
+    @asynccontextmanager
+    async def fake_redis(r=None):
+        yield store
+
+    async def family():
+        return [dict(u) for u in FAMILY]
+
+    async def owned(username):
+        return DEVICES.get(username, [])
+
+    async def fake_user(token):
+        name = token.removesuffix("-token")
+        return next((dict(u) for u in FAMILY if u["username"] == name), None)
+
+    monkeypatch.setattr(notices, "_redis", fake_redis)
+    monkeypatch.setattr(calls, "_family", family)
+    monkeypatch.setattr(calls, "_owned_devices", owned)
+    monkeypatch.setattr(calls, "_user_for_token", fake_user)
+    return store
+
+
+def _auth(who):
+    return {"Authorization": f"Bearer {who}-token"}
+
+
+def test_adults_set_their_own_and_parents_set_a_childs():
+    dad, mom, kid, big = FAMILY
+    assert calls.may_set_drop_in(mom, mom)
+    assert calls.may_set_drop_in(big, big)
+    assert calls.may_set_drop_in(mom, kid) and calls.may_set_drop_in(dad, kid)
+    # A child cannot change their own, and nobody changes another adult's.
+    assert not calls.may_set_drop_in(kid, kid)
+    assert not calls.may_set_drop_in(dad, mom)
+    assert not calls.may_set_drop_in(big, kid)
+
+
+def test_drop_in_lists_are_saved_and_checked(one_loop_client, drop_in_store):
+    c = one_loop_client
+    assert c.put("/api/communication/calls/drop-in/mom", json={"allow_from": ["dad", "mom", "nobody"]},
+                 headers=_auth("mom")).json() == {"username": "mom", "allow_from": ["dad"]}
+    assert c.put("/api/communication/calls/drop-in/kid", json={"allow_from": ["mom", "dad"]},
+                 headers=_auth("dad")).status_code == 200
+    assert c.put("/api/communication/calls/drop-in/kid", json={"allow_from": []},
+                 headers=_auth("kid")).status_code == 403
+    assert c.put("/api/communication/calls/drop-in/mom", json={"allow_from": []},
+                 headers=_auth("dad")).status_code == 403
+
+    import asyncio
+
+    assert asyncio.run(calls.drop_in_recipients("dad", {"mom", "kid", "big"})) == {"mom", "kid"}
+    assert asyncio.run(calls.drop_in_recipients("big", {"mom", "kid"})) == set()
+
+    # A parent sees their own list and each child's, and may edit the child's.
+    seen = c.get("/api/communication/calls/drop-in", headers=_auth("mom")).json()
+    by_user = {s["username"]: s for s in seen["settings"]}
+    assert set(by_user) == {"mom", "kid"}
+    assert by_user["kid"]["allow_from"] == ["dad", "mom"] and by_user["kid"]["can_edit"]
+    assert by_user["kid"]["devices"][0]["drop_in"] is True
+    # A child sees only their own, read-only.
+    [own] = c.get("/api/communication/calls/drop-in", headers=_auth("kid")).json()["settings"]
+    assert own["username"] == "kid" and own["can_edit"] is False
+
+
+def test_a_parent_switches_a_childs_device_and_the_device_learns_it(one_loop_client, drop_in_store):
+    c = one_loop_client
+    url = "/api/communication/calls/drop-in/kid/devices/kid-phone"
+    assert c.put(url, json={"drop_in": False}, headers=_auth("kid")).status_code == 403
+    assert c.put(url, json={"drop_in": False}, headers=_auth("mom")).json()["drop_in"] is False
+    assert c.put("/api/communication/calls/drop-in/kid/devices/mom-phone", json={"drop_in": False},
+                 headers=_auth("mom")).status_code == 404
+    polled = c.get("/api/communication/calls?device_key=kid-phone", headers=_auth("kid")).json()
+    assert polled["device_drop_in"] is False
+    c.put(url, json={"drop_in": True}, headers=_auth("dad"))
+    assert c.get("/api/communication/calls?device_key=kid-phone", headers=_auth("kid")).json()["device_drop_in"] is True
+
+
+def test_a_ring_marks_drop_in_only_for_who_allows_the_caller(one_loop_client, drop_in_store):
+    c = one_loop_client
+    import asyncio
+
+    with c.websocket_connect("/api/communication/calls/ws?token=dad-token&room=fam&name=Family") as dad:
+        dad.receive_json()
+        assert asyncio.run(calls.hub.ring("fam", "dad", "Dad", {"mom", "kid"}, {"mom"})) is True
+        [for_mom] = _calls_for(c, "mom-token")
+        [for_kid] = _calls_for(c, "kid-token")
+        assert for_mom["ringing"] and for_mom["drop_in"] is True
+        assert for_kid["ringing"] and for_kid["drop_in"] is False
+        dad.send({"type": "websocket.disconnect", "code": 1000})

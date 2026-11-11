@@ -9,7 +9,7 @@ import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { FreshPosition } from '../lib/freshPosition';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
-import type { ActiveCall, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
+import type { ActiveCall, DropInSettings, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
   SongJob,
   VoiceCheck,
@@ -2478,8 +2478,38 @@ export const api = {
 
   /** The family calls that currently have someone in them. */
   async getActiveCalls(): Promise<ActiveCall[]> {
-    const resp = await apiClient.get('/api/communication/calls');
-    return resp.data.calls;
+    return (await this.getCallList()).calls;
+  },
+
+  /**
+   * The family calls, and with `deviceKey` whether this device answers
+   * drop-ins by itself (a parent may switch it from another phone).
+   */
+  async getCallList(deviceKey?: string): Promise<{ calls: ActiveCall[]; deviceDropIn?: boolean }> {
+    const query = deviceKey ? `?device_key=${encodeURIComponent(deviceKey)}` : '';
+    const resp = await apiClient.get(`/api/communication/calls${query}`);
+    const data = resp.data ?? {};
+    return {
+      calls: Array.isArray(data.calls) ? data.calls : [],
+      deviceDropIn: typeof data.device_drop_in === 'boolean' ? data.device_drop_in : undefined,
+    };
+  },
+
+  /** Who may drop in on you (and, for a parent, on each child), with their devices. */
+  async getDropInSettings(): Promise<DropInSettings> {
+    const resp = await apiClient.get('/api/communication/calls/drop-in');
+    return resp.data;
+  },
+
+  async setDropInList(username: string, allowFrom: string[]): Promise<void> {
+    await apiClient.put(`/api/communication/calls/drop-in/${encodeURIComponent(username)}`, { allow_from: allowFrom });
+  },
+
+  async setDeviceDropIn(username: string, deviceKey: string, dropIn: boolean): Promise<void> {
+    await apiClient.put(
+      `/api/communication/calls/drop-in/${encodeURIComponent(username)}/devices/${encodeURIComponent(deviceKey)}`,
+      { drop_in: dropIn },
+    );
   },
 
   /** Ring the conversation's other members for a call you just started. */

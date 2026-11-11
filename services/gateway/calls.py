@@ -26,7 +26,7 @@ from typing import Any
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
-from services.gateway.config import IDENTITY_SVC
+from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
 
 log = logging.getLogger("gateway.calls")
 
@@ -136,6 +136,8 @@ class Ring:
     recipients: set[str]
     started_at: float = field(default_factory=time.time)
     declined: set[str] = field(default_factory=set)
+    #: Recipients who let the caller drop in: their devices answer by themselves.
+    drop_in: set[str] = field(default_factory=set)
 
     def rings(self, username: str, now: float) -> bool:
         return (
@@ -195,7 +197,10 @@ class CallHub:
         async with self._lock:
             return any(p.username == username for p in self._rooms.get(room, {}).values())
 
-    async def ring(self, room: str, caller: str, caller_name: str, recipients: set[str]) -> bool:
+    async def ring(
+        self, room: str, caller: str, caller_name: str, recipients: set[str],
+        drop_in: set[str] | None = None,
+    ) -> bool:
         """Start ringing a call's other members. False if it already rang or ended.
 
         One ring per call: a second "ring" (a retry, a second tab) changes
@@ -207,7 +212,9 @@ class CallHub:
                 return False
             present = {p.username for p in room_peers.values()}
             self._members[room] = {caller, *recipients}
-            self._rings[room] = Ring(caller, caller_name, set(recipients) - present)
+            self._rings[room] = Ring(
+                caller, caller_name, set(recipients) - present, drop_in=set(drop_in or ()) & set(recipients)
+            )
             return True
 
     async def decline(self, room: str, username: str) -> list[Peer]:
@@ -249,6 +256,8 @@ class CallHub:
                         "participants": [p.public() for p in participants],
                         "ringing": bool(ring and username not in present and ring.rings(username, now)),
                         "caller": ring.caller_name if ring else "",
+                        # This person lets the caller drop in: answer by itself.
+                        "drop_in": bool(ring and username in ring.drop_in),
                     }
                 )
             calls.sort(key=lambda c: c["started_at"], reverse=True)
@@ -329,9 +338,17 @@ def _display_name(user: dict[str, Any]) -> str:
 
 
 @router.get("/api/communication/calls")
-async def list_calls(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
-    """The calls in progress this person may see, for the Family Calls tab."""
-    return {"calls": await hub.snapshot(str(user.get("username") or ""))}
+async def list_calls(device_key: str = "", user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """The calls in progress this person may see, for the Family Calls tab.
+
+    With ``device_key``, also whether this device answers drop-ins by itself
+    (``device_drop_in``), so a parent's change on a child's phone arrives with
+    the next poll and the phone can store it for answering in the background.
+    """
+    out: dict[str, Any] = {"calls": await hub.snapshot(str(user.get("username") or ""))}
+    if device_key and len(device_key) <= 128:
+        out["device_drop_in"] = (await device_drop_in([device_key]))[device_key]
+    return out
 
 
 @router.post("/api/communication/calls/{room}/decline")
@@ -345,6 +362,236 @@ async def decline_call(room: str, user: dict[str, Any] = Depends(_caller)) -> di
         {"type": "declined", "username": user.get("username") or "", "name": _display_name(user)},
     )
     return {"declined": bool(peers)}
+
+
+# ---------------------------------------------------------------------------
+# Who may drop in on whom
+# ---------------------------------------------------------------------------
+#
+# Each person has a list of family members allowed to drop in on them: a ring
+# from one of them is answered by that person's devices by themselves, any
+# other ring just rings. Adults choose their own list; a child's or teen's is
+# chosen by a parent (father, mother or an admin), and they cannot change it.
+# Kept in Redis (append-only, on a volume), one hash field per person.
+
+DROP_IN_KEY = "calls:drop_in"
+#: Per device: "0" means this device never answers by itself. Absent is on,
+#: so the account's list decides. Room speakers (ESPHome assistants) can be
+#: devices here too, keyed by their device_key like a phone.
+DROP_IN_DEVICES_KEY = "calls:drop_in_devices"
+PARENT_ROLES = frozenset({"father", "mother"})
+MINOR_ROLES = frozenset({"child", "teen"})
+
+
+def is_parent(user: dict[str, Any]) -> bool:
+    return bool(user.get("is_admin")) or user.get("family_role") in PARENT_ROLES
+
+
+def is_minor(user: dict[str, Any]) -> bool:
+    return not user.get("is_admin") and user.get("family_role") in MINOR_ROLES
+
+
+def may_set_drop_in(actor: dict[str, Any], target: dict[str, Any]) -> bool:
+    """Adults set their own; parents set a child's or teen's. Nobody else's."""
+    if str(actor.get("username") or "") == str(target.get("username") or ""):
+        return not is_minor(actor)
+    return is_minor(target) and is_parent(actor)
+
+
+async def drop_in_lists(usernames: list[str]) -> dict[str, list[str] | None]:
+    """Each person's allowed callers; None when they never chose (nobody)."""
+    if not usernames:
+        return {}
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            raw = await conn.hmget(DROP_IN_KEY, usernames)
+    except Exception as e:
+        log.warning(f"[calls] drop-in settings unavailable: {type(e).__name__}: {e}")
+        return {u: None for u in usernames}
+    out: dict[str, list[str] | None] = {}
+    for user, value in zip(usernames, raw, strict=True):
+        try:
+            data = json.loads(value) if value else None
+        except ValueError:
+            data = None
+        allow = data.get("allow_from") if isinstance(data, dict) else None
+        out[user] = [str(a) for a in allow] if isinstance(allow, list) else None
+    return out
+
+
+async def device_drop_in(device_keys: list[str]) -> dict[str, bool]:
+    """Whether each device answers drop-ins by itself (on unless switched off)."""
+    if not device_keys:
+        return {}
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            raw = await conn.hmget(DROP_IN_DEVICES_KEY, device_keys)
+    except Exception as e:
+        log.warning(f"[calls] device drop-in settings unavailable: {type(e).__name__}: {e}")
+        return {k: True for k in device_keys}
+    return {k: v != "0" for k, v in zip(device_keys, raw, strict=True)}
+
+
+async def _owned_devices(username: str) -> list[dict[str, Any]]:
+    """``username``'s phones and tablets from Identity ([] when unreadable)."""
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            f"{IDENTITY_SVC}/api/internal/owned-devices/{username}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            data = await resp.json(content_type=None) if resp.status == 200 else None
+    except Exception as e:
+        log.warning(f"[calls] could not list {username}'s devices: {type(e).__name__}: {e}")
+        return []
+    details = data.get("details") if isinstance(data, dict) else None
+    return [
+        d for d in (details or [])
+        if isinstance(d, dict) and d.get("device_key") and not d.get("revoked")
+    ]
+
+
+async def drop_in_recipients(caller: str, recipients: set[str]) -> set[str]:
+    """The recipients who let ``caller`` drop in on them."""
+    lists = await drop_in_lists(sorted(recipients))
+    return {r for r, allow in lists.items() if allow and caller in allow}
+
+
+async def _family() -> list[dict[str, Any]]:
+    """The household's people (not the system account), from Identity."""
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+            f"{IDENTITY_SVC}/api/users", headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ) as resp:
+            users = await resp.json(content_type=None) if resp.status == 200 else None
+    except Exception as e:
+        log.warning(f"[calls] could not list the family: {type(e).__name__}: {e}")
+        users = None
+    if not isinstance(users, list):
+        raise HTTPException(status_code=503, detail="Could not read the family list. Try again.")
+    return [
+        u for u in users
+        if isinstance(u, dict) and u.get("username") and not u.get("is_system_default")
+    ]
+
+
+def _person(u: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "username": u["username"],
+        "name": _display_name(u),
+        "minor": is_minor(u),
+    }
+
+
+@router.get("/api/communication/calls/drop-in")
+async def get_drop_in(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """Who may drop in on you, and on each child or teen you look after.
+
+    ``people`` is everyone who could be allowed. ``settings`` holds the lists
+    this person can see: their own and, for a parent, every child's and
+    teen's; ``can_edit`` says which of them they may change.
+    """
+    me = str(user.get("username") or "")
+    family = await _family()
+    visible = [u for u in family if u["username"] == me or (is_parent(user) and is_minor(u))]
+    lists = await drop_in_lists([u["username"] for u in visible])
+    owned = {u["username"]: await _owned_devices(u["username"]) for u in visible}
+    switches = await device_drop_in([d["device_key"] for ds in owned.values() for d in ds])
+    return {
+        "me": me,
+        "people": [_person(u) for u in family],
+        "settings": [
+            {
+                **_person(u),
+                "allow_from": lists.get(u["username"]) or [],
+                "configured": lists.get(u["username"]) is not None,
+                "can_edit": may_set_drop_in(user, u),
+                "devices": [
+                    {
+                        "device_key": d["device_key"],
+                        "label": str(d.get("label") or d.get("kind") or "Device"),
+                        "kind": str(d.get("kind") or ""),
+                        "drop_in": switches.get(d["device_key"], True),
+                    }
+                    for d in owned[u["username"]]
+                ],
+            }
+            for u in visible
+        ],
+    }
+
+
+@router.put("/api/communication/calls/drop-in/{username}")
+async def put_drop_in(username: str, request: Request, user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """Set who may drop in on ``username`` (yourself, or a child as a parent)."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    allow = body.get("allow_from") if isinstance(body, dict) else None
+    if not isinstance(allow, list) or not all(isinstance(a, str) for a in allow):
+        raise HTTPException(status_code=422, detail="allow_from must be a list of usernames.")
+    family = {u["username"]: u for u in await _family()}
+    target = family.get(username)
+    if target is None:
+        raise HTTPException(status_code=404, detail="No such family member.")
+    if not may_set_drop_in(user, target):
+        raise HTTPException(
+            status_code=403,
+            detail="A parent chooses who can drop in on you." if username == user.get("username")
+            else "You can change this only for yourself or a child.",
+        )
+    chosen = sorted({a for a in allow if a in family and a != username})
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            await conn.hset(DROP_IN_KEY, username, json.dumps({
+                "allow_from": chosen, "set_by": str(user.get("username") or ""), "at": time.time(),
+            }))
+    except Exception as e:
+        log.warning(f"[calls] could not save drop-in for {username}: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=503, detail="Could not save. Try again.") from e
+    return {"username": username, "allow_from": chosen}
+
+
+@router.put("/api/communication/calls/drop-in/{username}/devices/{device_key}")
+async def put_device_drop_in(
+    username: str, device_key: str, request: Request, user: dict[str, Any] = Depends(_caller)
+) -> dict[str, Any]:
+    """Switch one of ``username``'s devices answering drop-ins by itself on or off."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    on = body.get("drop_in") if isinstance(body, dict) else None
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=422, detail="drop_in must be true or false.")
+    family = {u["username"]: u for u in await _family()}
+    target = family.get(username)
+    if target is None:
+        raise HTTPException(status_code=404, detail="No such family member.")
+    if not may_set_drop_in(user, target):
+        raise HTTPException(status_code=403, detail="You can change this only for yourself or a child.")
+    if device_key not in {d["device_key"] for d in await _owned_devices(username)}:
+        raise HTTPException(status_code=404, detail="No such device.")
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            if on:
+                await conn.hdel(DROP_IN_DEVICES_KEY, device_key)
+            else:
+                await conn.hset(DROP_IN_DEVICES_KEY, device_key, "0")
+    except Exception as e:
+        log.warning(f"[calls] could not save device drop-in: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=503, detail="Could not save. Try again.") from e
+    return {"device_key": device_key, "drop_in": on}
 
 
 @router.websocket("/api/communication/calls/ws")

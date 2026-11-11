@@ -1077,6 +1077,38 @@ export interface ActiveCall {
   ringing?: boolean;
   /** Who started the call, when they rang the conversation. */
   caller?: string;
+  /** This person lets the caller drop in: a device with drop-in on answers by itself. */
+  drop_in?: boolean;
+}
+
+export interface DropInPerson {
+  username: string;
+  name: string;
+  /** A child or teen: a parent chooses their drop-in settings. */
+  minor: boolean;
+}
+
+export interface DropInDevice {
+  device_key: string;
+  label: string;
+  kind: string;
+  /** This device answers allowed drop-ins by itself. */
+  drop_in: boolean;
+}
+
+export interface DropInSetting extends DropInPerson {
+  /** Who may drop in on this person. */
+  allow_from: string[];
+  /** False until the person (or a parent) has ever chosen. */
+  configured: boolean;
+  can_edit: boolean;
+  devices: DropInDevice[];
+}
+
+export interface DropInSettings {
+  me: string;
+  people: DropInPerson[];
+  settings: DropInSetting[];
 }
 
 export interface SmokeTestResult {

@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { AuthProvider } from '../context/AuthContext';
 import { CallProvider } from '../context/CallContext';
 import { server } from './setup';
-import { setAutoDropIn } from '../lib/callSettings';
+import { DEVICE_DROP_IN_KEY } from '../lib/callSettings';
 
 function renderCallProvider() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -26,20 +26,24 @@ function renderCallProvider() {
 
 const MOM = { id: 'p1', username: 'mom', name: 'Mom', muted: false, camera: false };
 
-function serveCalls(ringing: boolean) {
+function serveCalls(ringing: boolean, opts: { dropIn?: boolean; deviceDropIn?: boolean } = {}) {
   server.use(
     http.get('/api/communication/calls', () =>
       HttpResponse.json({
-        calls: [{ token: 'room-1', name: 'Family', started_at: 1_700_000_000, participants: [MOM], ringing, caller: 'Mom' }],
+        calls: [{
+          token: 'room-1', name: 'Family', started_at: 1_700_000_000, participants: [MOM], ringing, caller: 'Mom',
+          drop_in: opts.dropIn ?? false,
+        }],
+        ...(opts.deviceDropIn === undefined ? {} : { device_drop_in: opts.deviceDropIn }),
       }),
     ),
   );
 }
 
 describe('incoming call ringing', () => {
-  afterEach(async () => {
+  afterEach(() => {
     vi.restoreAllMocks();
-    await setAutoDropIn(false);
+    localStorage.removeItem(DEVICE_DROP_IN_KEY);
   });
 
   it('rings a full-screen incoming call while it is ringing you', async () => {
@@ -80,18 +84,40 @@ describe('incoming call ringing', () => {
     await waitFor(() => expect(declined).toEqual(['room-1']));
   });
 
-  it('with auto drop-in on, answers by itself instead of ringing', async () => {
+  it('answers by itself when you let the caller drop in and this device has drop-in on', async () => {
     Object.defineProperty(navigator, 'vibrate', { value: vi.fn(), configurable: true });
     const getUserMedia = vi
       .spyOn(navigator.mediaDevices, 'getUserMedia')
       .mockRejectedValue(new Error('no microphone in tests'));
-    await setAutoDropIn(true);
-    serveCalls(true);
+    serveCalls(true, { dropIn: true, deviceDropIn: true });
 
     renderCallProvider();
 
     await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
     expect(screen.queryByTestId('incoming-call')).not.toBeInTheDocument();
+  });
+
+  it('rings when the caller is not on your drop-in list', async () => {
+    Object.defineProperty(navigator, 'vibrate', { value: vi.fn(), configurable: true });
+    const getUserMedia = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+    serveCalls(true, { dropIn: false, deviceDropIn: true });
+
+    renderCallProvider();
+
+    expect(await screen.findByTestId('incoming-call')).toHaveTextContent('Mom');
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('rings when this device has drop-in switched off, and remembers that', async () => {
+    Object.defineProperty(navigator, 'vibrate', { value: vi.fn(), configurable: true });
+    const getUserMedia = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+    serveCalls(true, { dropIn: true, deviceDropIn: false });
+
+    renderCallProvider();
+
+    expect(await screen.findByTestId('incoming-call')).toHaveTextContent('Mom');
+    expect(getUserMedia).not.toHaveBeenCalled();
+    await waitFor(() => expect(localStorage.getItem(DEVICE_DROP_IN_KEY)).toBe('0'));
   });
 
   it('a call in progress that is not ringing you shows a quiet Join banner', async () => {

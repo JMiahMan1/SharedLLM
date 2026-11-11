@@ -16,7 +16,14 @@ import { api } from '../services/api';
 import type { ActiveCall, CallParticipant } from '../types/api';
 import { useAuth } from './AuthContext';
 import { storageGetSync } from '../lib/storage';
-import { AUTO_DROP_IN_EVENT, getAutoDropIn } from '../lib/callSettings';
+import {
+  AUTO_DROP_IN_EVENT,
+  clearLegacyAutoDropIn,
+  getDeviceDropIn,
+  readLegacyAutoDropIn,
+  storeDeviceDropIn,
+} from '../lib/callSettings';
+import { getDeviceKey } from '../lib/deviceRegistration';
 import { listenForDropIn, reportDropInEnded } from '../lib/dropIn';
 import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 
@@ -992,7 +999,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     const refresh = () => {
-      void getAutoDropIn().then((enabled) => {
+      void getDeviceDropIn().then((enabled) => {
         if (!active) return;
         autoDropInRef.current = enabled;
         setAutoDropIn(enabled);
@@ -1007,6 +1014,37 @@ export function CallProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('storage', refresh);
     };
   }, []);
+
+  // Before drop-in was per person, a device's switch let anyone in the
+  // conversation drop in. Carry an "on" over once: the person's list becomes
+  // everyone in the family (they can narrow it in Settings).
+  useEffect(() => {
+    if (!token || !user?.username) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const legacy = await readLegacyAutoDropIn();
+        if (legacy === null) return;
+        if (legacy === '1') {
+          const settings = await api.getDropInSettings();
+          const mine = settings.settings.find((s) => s.username === settings.me);
+          if (cancelled) return;
+          if (mine?.can_edit && !mine.configured) {
+            await api.setDropInList(
+              settings.me,
+              settings.people.map((p) => p.username).filter((u) => u !== settings.me),
+            );
+          }
+        }
+        await clearLegacyAutoDropIn();
+      } catch {
+        // Try again next time the app opens.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user?.username]);
 
   useEffect(() => {
     callRef.current = call;
@@ -1025,18 +1063,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const load = async () => {
       try {
-        const calls = await api.getActiveCalls();
+        const deviceKey = await getDeviceKey().catch(() => '');
+        const { calls, deviceDropIn } = await api.getCallList(deviceKey || undefined);
         if (cancelled) return;
         // A malformed answer must not take the banner down with it.
         const list = Array.isArray(calls) ? calls : [];
         setActiveCalls(list);
+        if (deviceDropIn !== undefined && deviceDropIn !== autoDropInRef.current) {
+          autoDropInRef.current = deviceDropIn;
+          setAutoDropIn(deviceDropIn);
+          void storeDeviceDropIn(deviceDropIn);
+        }
 
-        // Drop-in: a call ringing this person is answered by this device on
-        // its own - also right after the app opens (from the call notice).
+        // Drop-in: a call from someone this person lets drop in is answered
+        // by this device on its own - also right after the app opens (from
+        // the call notice). Any other ring rings.
         if (!callRef.current && autoDropInRef.current) {
           const username = usernameRef.current;
           const ringing = list.find((active) =>
             active.ringing
+            && active.drop_in
             && !autoTriedRef.current.has(active.token)
             && !(username && active.participants.some((person) => person.username === username)));
           if (ringing) {
@@ -1251,7 +1297,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const visible = call ? [] : activeCalls.filter((active) => !dismissed.includes(active.token));
   // With auto drop-in on, the device is about to answer by itself.
-  const incomingCall = autoDropIn ? undefined : visible.find((active) => active.ringing);
+  const incomingCall = visible.find((active) => active.ringing && !(autoDropIn && active.drop_in));
   const bannerCall = incomingCall ? undefined : visible.find((active) => !active.ringing);
   const incomingToken = incomingCall?.token;
   const bannerToken = bannerCall?.token;
