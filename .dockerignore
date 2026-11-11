@@ -29,3 +29,10 @@ Thumbs.db
 # Ignore logs and temp
 *.log
 tmp/
+
+# Runtime data lives in mounted volumes, never in images. Matches .gitignore:
+# a server-side build (deploy_local_build.sh) used to send the live databases
+# into every image's `COPY . .`, and failed outright on data/nominatim (owned
+# by the postgres uid, unreadable to the deploying user).
+data/*
+!data/phrasebook.json
