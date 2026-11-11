@@ -105,3 +105,33 @@ def test_imageproxy_400_when_target_service_unconfigured(client, upstream, monke
     )
     assert resp.status_code == 400
     assert "not configured" in resp.json()["detail"]
+
+
+def test_imageproxy_redirects_a_public_cdn_cover_without_fetching_it(client, upstream):
+    """MA's player image_url can be a public CDN URL with no proxy_id. It used
+    to be rebased onto Home Assistant and 404; the browser is sent to it
+    instead, and the gateway still contacts no unknown host."""
+    url = "https://image-cdn.spotifycdn.com/image/ab67616d00001e0292f2d790c6a97b195f66d51e"
+    resp = client.get("/api/media/imageproxy", params={"path": url}, follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == url
+    assert not any("spotifycdn" in u for u in _requested(upstream))
+
+
+def test_imageproxy_still_rebases_lan_and_service_paths(client, upstream):
+    """Only https public names with a non-service path are redirected."""
+    from urllib.parse import urlparse
+
+    from services.gateway import main
+
+    for url in (
+        "https://192.168.2.20/cover.jpg",
+        "https://nas.local/cover.jpg",
+        "https://intranet/cover.jpg",
+        "http://image-cdn.spotifycdn.com/image/abc",
+        "https://ha.example.ui.nabu.casa/api/image/serve/abc",
+        "https://other.example.com/imageproxy?path=art.jpg",
+        "https://other.example.com/local/cover.png",
+    ):
+        assert not main._is_public_image_url(urlparse(url)), url
+    assert main._is_public_image_url(urlparse("https://i.scdn.co/image/abc"))

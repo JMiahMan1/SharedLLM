@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -19158,6 +19159,35 @@ def _ma_image_size(width: int) -> int:
     return _MA_IMAGE_SIZES[-1]
 
 
+# Paths that belong to one of the household's own services (HA entity
+# pictures and /local files, MA's imageproxy, ABS covers). A full URL with one
+# of these on an unknown host is rebased onto the configured base instead.
+_SERVICE_IMAGE_PATH_PREFIXES = ("/api/", "/imageproxy", "/local/")
+
+
+def _is_public_image_url(parsed) -> bool:
+    """An https URL on a public DNS name whose path is not a service path.
+
+    Such a URL is a third-party CDN image the browser can load itself. IP
+    literals, single-label and LAN names (``.local``, ``.lan``, ...) are never
+    treated as public.
+    """
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host or "." not in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    if host == "localhost" or host.endswith((".local", ".lan", ".home", ".internal", ".localdomain", ".localhost", ".home.arpa")):
+        return False
+    path = parsed.path or "/"
+    return not path.startswith(_SERVICE_IMAGE_PATH_PREFIXES)
+
+
 @app.get("/api/media/imageproxy")
 async def media_imageproxy(path: str, request: Request, service: str = "", w: int | None = None):
     """Proxy image requests (entity pictures/covers) from Home Assistant, Music Assistant, or Audiobookshelf.
@@ -19200,6 +19230,14 @@ async def media_imageproxy(path: str, request: Request, service: str = "", w: in
             if _h:
                 allowed_hosts.add(_h)
         rebase = (parsed.hostname or "").lower() not in allowed_hosts
+
+    # A public CDN cover (MA hands out e.g. https://image-cdn.spotifycdn.com/
+    # image/<id> as a player's image_url, with no proxy_id) is not on any
+    # configured host and its path means nothing to MA/HA/ABS, so rebasing it
+    # only produced a 404 from Home Assistant. Send the browser to it instead:
+    # the gateway still never contacts an unknown host (SSRF stays closed).
+    if rebase and not service and _is_public_image_url(parsed):
+        return RedirectResponse(path, status_code=307, headers={"Cache-Control": "private, max-age=86400"})
 
     # Infer which upstream hosts the image.
     svc = (service or "").lower()
