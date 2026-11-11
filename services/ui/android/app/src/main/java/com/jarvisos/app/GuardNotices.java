@@ -33,9 +33,9 @@ final class GuardNotices {
 
     private GuardNotices() {}
 
-    /** The one-minute warning (heads-up, one at a time). */
-    static void warn(Context context, String text) {
-        show(context, notice("guard-warning", "One minute", text, 4, null));
+    /** A warning before a lock (heads-up, one at a time: a newer one replaces it). */
+    static void warn(Context context, String title, String text) {
+        show(context, notice("guard-warning", title, text, 4, null));
     }
 
     /** "<site> is blocked" with "Ask a parent"; tapping it sends the request as the child. */

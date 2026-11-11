@@ -1,119 +1,172 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
+using System.Text.Json;
 using JarvisGuard.Core;
 
 namespace JarvisGuard.Agent;
 
 /// <summary>
 /// Foreground-app meter: what the PC is doing, accumulated per executable and
-/// posted to the hub as the same shape of usage report the phone posts.
-/// Samples every two seconds, skips when the user has been idle for ten.
+/// posted to the hub as the same shape of usage report the phone posts. The
+/// tray samples the desktop (see Tray.ForegroundSampler) and hands the
+/// minutes over the pipe; this keeps the day's total and reports it.
+///
+/// Like the phone, each report is the <em>day's running total</em> for this
+/// PC: the hub keeps the largest reading per device per day, so a report of
+/// just the last half hour would be lost under an earlier, bigger one. The
+/// total is kept on disk so a restart mid-day carries on from it.
 /// </summary>
 public sealed class UsageMeter
 {
-    private const int SampleMs = 2000;
-    private const int IdleLimitMs = 10 * 60 * 1000;
     private const int FlushEverySeconds = 1800;
+    /// <summary>The most one report from the tray may add: it reports every 30 s.</summary>
+    private const long MaxReportMs = 90_000;
 
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint flags, StringBuilder name, ref uint size);
-    [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
-    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
-    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(out LASTINPUTINFO plii);
-    [DllImport("user32.dll")] private static extern uint GetTickCount();
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
-
-    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-
-    private readonly Dictionary<string, long> _appsMs = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _lock = new();
-    private long _totalMs;
-    private string? _firstUse, _lastUse;
-    private long _lastFlush = Stopwatch.GetTimestamp();
-
-    /// <summary>One sample. Cheap enough to call every two seconds.</summary>
-    public void Tick()
+    /// <summary>One day of this PC's use: what is posted, and what is kept on disk.</summary>
+    private sealed class DayTotal
     {
-        try
-        {
-            if (IdleMilliseconds() > IdleLimitMs) return;
-            var exe = ForegroundExeName();
-            if (exe is null) return;
-            lock (_lock)
-            {
-                _appsMs.TryGetValue(exe, out var ms);
-                _appsMs[exe] = ms + SampleMs;
-                _totalMs += SampleMs;
-                var now = DateTime.UtcNow.ToString("O");
-                _firstUse ??= now;
-                _lastUse = now;
-            }
-        }
-        catch { /* metering must never take the agent down */ }
+        public string Day { get; set; } = "";
+        public long TotalMs { get; set; }
+        public long? FirstUseMs { get; set; }
+        public long? LastUseMs { get; set; }
+        public Dictionary<string, long> AppsMs { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>How much of <see cref="TotalMs"/> the hub has already been told.</summary>
+        public long SentMs { get; set; }
     }
 
-    public bool DueForFlush => Stopwatch.GetElapsedTime(_lastFlush) > TimeSpan.FromSeconds(FlushEverySeconds);
+    private readonly object _lock = new();
+    private readonly string? _path;
+    private DayTotal _today;
+    /// <summary>Yesterday's last minutes, when the day turned over before they were sent.</summary>
+    private DayTotal? _unsentYesterday;
+    private long _lastFlush = Stopwatch.GetTimestamp();
 
-    /// <summary>Build the payload and reset the counters.</summary>
-    public object SnapshotAndReset()
+    public UsageMeter(string? path = null)
     {
-        lock (_lock)
-        {
-            var apps = _appsMs
-                .OrderByDescending(kv => kv.Value)
-                .Take(50)
-                .Select(kv => new { package = kv.Key, millis = kv.Value })
-                .ToArray();
-            var local = DateTime.Now;
-            var payload = new
-            {
-                day = local.Date.ToString("yyyy-MM-dd"),
-                millis = _totalMs,
-                first_use = _firstUse,
-                last_use = _lastUse,
-                sessions = 1,
-                apps,
-                source = "windows",
-                device_key = DeviceKey,
-            };
-            _appsMs.Clear();
-            _totalMs = 0;
-            _firstUse = null;
-            _lastUse = null;
-            _lastFlush = Stopwatch.GetTimestamp();
-            return payload;
-        }
+        _path = path;
+        _today = Load(path) is { } saved && saved.Day == Today() ? saved : new DayTotal { Day = Today() };
     }
 
     public string? DeviceKey { get; set; }
 
-    private static uint IdleMilliseconds()
+    /// <summary>
+    /// Foreground minutes the tray measured in the signed-in session (a
+    /// SYSTEM service cannot see the desktop), per executable.
+    /// </summary>
+    public void Add(IReadOnlyDictionary<string, long>? appsMs)
     {
-        var lii = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
-        if (!GetLastInputInfo(out lii)) return 0;
-        return GetTickCount() - lii.dwTime;
+        if (appsMs is null || appsMs.Count == 0) return;
+        lock (_lock)
+        {
+            RollOverIfNewDay();
+            long budget = MaxReportMs;
+            foreach (var (exe, raw) in appsMs)
+            {
+                if (string.IsNullOrWhiteSpace(exe) || raw <= 0 || budget <= 0) continue;
+                var ms = Math.Min(raw, budget);
+                budget -= ms;
+                var name = exe.Trim().ToLowerInvariant();
+                if (name.Length > 128) name = name[..128];
+                _today.AppsMs.TryGetValue(name, out var had);
+                _today.AppsMs[name] = had + ms;
+                _today.TotalMs += ms;
+            }
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _today.FirstUseMs ??= now;
+            _today.LastUseMs = now;
+            Save();
+        }
     }
 
-    private static string? ForegroundExeName()
+    public bool DueForFlush => Stopwatch.GetElapsedTime(_lastFlush) > TimeSpan.FromSeconds(FlushEverySeconds);
+
+    /// <summary>Whole minutes used today that the hub has not been told yet.</summary>
+    public int PendingMinutes
     {
-        var hWnd = GetForegroundWindow();
-        if (hWnd == IntPtr.Zero) return null;
-        GetWindowThreadProcessId(hWnd, out uint pid);
-        if (pid == 0) return null;
-        var h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-        if (h == IntPtr.Zero) return null;
+        get
+        {
+            lock (_lock)
+            {
+                RollOverIfNewDay();
+                return (int)(Math.Max(0, _today.TotalMs - _today.SentMs) / 60000);
+            }
+        }
+    }
+
+    /// <summary>Whether anything was used since the last report.</summary>
+    public bool HasUnsent
+    {
+        get { lock (_lock) return _unsentYesterday is not null || _today.TotalMs > _today.SentMs; }
+    }
+
+    /// <summary>
+    /// The reports to post: the day's running total (and yesterday's, when the
+    /// day turned over with minutes still unsent). Marks them sent and saves.
+    /// </summary>
+    public IReadOnlyList<object> Snapshot()
+    {
+        lock (_lock)
+        {
+            RollOverIfNewDay();
+            var payloads = new List<object>();
+            if (_unsentYesterday is not null) payloads.Add(Payload(_unsentYesterday));
+            _unsentYesterday = null;
+            payloads.Add(Payload(_today));
+            _today.SentMs = _today.TotalMs;
+            _lastFlush = Stopwatch.GetTimestamp();
+            Save();
+            return payloads;
+        }
+    }
+
+    private object Payload(DayTotal d) => new
+    {
+        day = d.Day,
+        millis = d.TotalMs,
+        first_use = d.FirstUseMs,
+        last_use = d.LastUseMs,
+        sessions = 1,
+        apps = d.AppsMs
+            .OrderByDescending(kv => kv.Value)
+            .Take(50)
+            .Select(kv => new { package = kv.Key, millis = kv.Value })
+            .ToArray(),
+        source = "windows",
+        device_key = DeviceKey,
+    };
+
+    private void RollOverIfNewDay()
+    {
+        var today = Today();
+        if (_today.Day == today) return;
+        if (_today.TotalMs > _today.SentMs) _unsentYesterday = _today;
+        _today = new DayTotal { Day = today };
+    }
+
+    private static string Today() => DateTime.Now.ToString("yyyy-MM-dd");
+
+    private void Save()
+    {
+        if (_path is null) return;
         try
         {
-            var sb = new StringBuilder(1024);
-            uint size = 1024;
-            if (!QueryFullProcessImageNameW(h, 0, sb, ref size)) return null;
-            return Path.GetFileNameWithoutExtension(sb.ToString()).ToLowerInvariant();
+            var tmp = _path + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(_today, JsonOptions.Web));
+            File.Move(tmp, _path, overwrite: true);
         }
-        finally { CloseHandle(h); }
+        catch { /* a lost total costs at most the minutes since the last report */ }
+    }
+
+    private static DayTotal? Load(string? path)
+    {
+        try
+        {
+            if (path is null || !File.Exists(path)) return null;
+            var saved = JsonSerializer.Deserialize<DayTotal>(File.ReadAllText(path), JsonOptions.Web);
+            if (saved is null) return null;
+            saved.AppsMs = new Dictionary<string, long>(saved.AppsMs, StringComparer.OrdinalIgnoreCase);
+            return saved;
+        }
+        catch { return null; }
     }
 }

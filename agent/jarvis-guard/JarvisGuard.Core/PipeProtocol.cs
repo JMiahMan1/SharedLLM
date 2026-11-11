@@ -13,10 +13,13 @@ public static class PipeProtocol
 {
     public sealed class Request
     {
-        public string Cmd { get; set; } = "";          // "status" | "parent-unlock"
+        public string Cmd { get; set; } = "";          // "status" | "parent-unlock" | "ask-time"
         public string? HubUrl { get; set; }
         public string? ParentUsername { get; set; }
         public string? ParentPassword { get; set; }
+        public int Minutes { get; set; }               // for cmd=ask-time
+        public string? Note { get; set; }              // for cmd=ask-time: why, in the child's words
+        public Dictionary<string, long>? Apps { get; set; } // for cmd=usage: foreground ms per exe since the last report
     }
 
     public sealed class Response

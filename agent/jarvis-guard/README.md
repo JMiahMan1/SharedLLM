@@ -16,9 +16,16 @@ three modes:
   usage, and enforces the decision: a locked PC signs its interactive
   sessions out. Offline, bedtime/school are re-evaluated against the local
   clock from the last cached rules (fail closed); everything else fails open.
-- `--tray` (per sign-in, all users) - the always-on signage: a tray shield,
-  its tooltip, and a right-click menu (open the hub, ask a parent for more
-  time, a parent can unlock, about).
+- `--tray` (per sign-in, all users) - the always-on signage: a tray shield
+  whose tooltip shows time left and used today; a click opens the time panel
+  (left, used of how much, what locks next, "Ask for more time"); a
+  right-click menu (screen time, ask for more time, open the hub, a parent
+  can unlock, about). Ten and five minutes before a lock it raises the panel
+  as a warning; a minute before, a balloon. It also measures foreground use
+  in the signed-in session - only while the session is unlocked, the display
+  on and the user not idle for ten minutes - and hands it to the service over
+  the pipe (a SYSTEM process cannot see the desktop). "Ask for more time"
+  goes through the service (`ask-time`) to `POST /api/screen-time/requests`.
 - `--overlay` (launched by the tray) - the lock surface: full screen signage
   with the reason and a parent sign-in. It shows state; it does not hold the
   lock (the session sign-out does).
@@ -87,6 +94,11 @@ install.ps1           elevated installer (register → assign → mint scoped ke
   console sessions once per lock transition (`WTSLogoffSession`). A child who
   signs back in while still in a locked window signs out again on the next
   poll - the phone's behavior, one step louder.
+- Usage is reported as the day's running total for this PC (kept in
+  `usage.today.json`, so a restart carries on), because the hub keeps the
+  largest reading per device per day. Within 15 minutes of the limit it is
+  reported every poll so the hub locks on time; the tray counts unsent
+  minutes so its warnings and "time left" are current.
 - `until` is shown but not enforced client-side beyond the hub's answer on
   the next poll (60 s).
 - Screen-time grants reach this PC through the same `granted_until` the

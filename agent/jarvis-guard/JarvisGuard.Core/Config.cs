@@ -25,6 +25,9 @@ public static class Config
     // re-evaluates these rules against the local clock. May carry the child's
     // household rules; never carries the API key. Admin/SYSTEM-only ACL.
     public static readonly string RawStatusPath = Path.Combine(Root, "status.raw.json");
+    // Today's running total of foreground minutes (agent-side only), so a
+    // restart mid-day carries on from it instead of starting at zero.
+    public static readonly string UsagePath = Path.Combine(Root, "usage.today.json");
 
     public static void WriteRawStatus(string json)
     {
@@ -96,6 +99,16 @@ public sealed class GuardState
     public string? Reason { get; set; }
     public string? Until { get; set; }
     public int RemainingMinutes { get; set; }
+    /// <summary>Used today, counting this PC's minutes not yet sent to the hub.</summary>
+    public int UsedMinutes { get; set; }
+    /// <summary>Everything allowed today (limit + bonus + earned + banked); null with no limit.</summary>
+    public int? AllowedMinutes { get; set; }
+    public int BonusMinutes { get; set; }
+    public int EarnedMinutes { get; set; }
+    public int BankedMinutes { get; set; }
+    /// <summary>When the next lock lands (ISO), and why: what the 10/5/1-minute warnings count down to.</summary>
+    public string? NextLockAt { get; set; }
+    public string? NextLockReason { get; set; }
     public string ThemeId { get; set; } = "clean-athletic";
     /// <summary>When the agent last heard from the hub (UTC).</summary>
     public string AsOfUtc { get; set; } = "";

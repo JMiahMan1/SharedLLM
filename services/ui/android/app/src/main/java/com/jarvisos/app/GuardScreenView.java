@@ -399,6 +399,111 @@ final class GuardScreenView {
     }
 
     /**
+     * A small panel over whatever the child is doing (not a lock): today's
+     * screen time at a glance - what is left, what was used of how much, and
+     * what locks next - with "Ask for more time" right there. With a
+     * {@code warningTitle} it is the ten- and five-minute warning; without
+     * one it is the "how much have I used" panel the Quick Settings tile opens.
+     * {@code onClose} takes it down.
+     */
+    static View buildTimePanel(Context context, String warningTitle, String warningText, Runnable onClose) {
+        Palette pal = Palette.resolve(context);
+        org.json.JSONObject s = GuardApi.lastStatus(context);
+        boolean known = s.length() > 0;
+        boolean warning = warningTitle != null && !warningTitle.isEmpty();
+
+        FrameLayout frame = new FrameLayout(context);
+        frame.setBackgroundColor(0x99000000);
+        frame.setClickable(true);
+
+        LinearLayout card = panel(context, pal.card, 24, pal.stroke);
+        card.setPadding(dp(context, 22), dp(context, 18), dp(context, 22), dp(context, 18));
+        card.setElevation(dp(context, 6));
+        card.setClickable(true);
+
+        card.addView(cardHeader(context, pal, R.drawable.mi_hourglass, pal.brand,
+                warning ? warningTitle : "Screen time today"));
+        if (warning && warningText != null && !warningText.isEmpty()) {
+            TextView w = text(context, warningText, 16, pal.textPrimary);
+            w.setGravity(Gravity.START);
+            w.setPadding(dp(context, 2), 0, dp(context, 2), dp(context, 12));
+            card.addView(w);
+        }
+
+        boolean limited = com.jarvisos.app.widgets.ScreenTimeFormat.limited(s);
+        if (!known) {
+            TextView none = text(context, "Screen time isn't available yet. Check again once the "
+                    + DeviceNoun.of(context) + " is online.", 14, pal.textSecondary);
+            none.setGravity(Gravity.START);
+            card.addView(none);
+        } else {
+            TextView big = text(context, com.jarvisos.app.widgets.ScreenTimeFormat.headline(s), 24, pal.textPrimary);
+            big.setTypeface(Typeface.DEFAULT_BOLD);
+            big.setGravity(Gravity.START);
+            card.addView(big);
+
+            int used = Math.max(0, s.optInt("used_min", 0));
+            String usedLine = limited
+                    ? "Used " + com.jarvisos.app.widgets.WidgetTime.minutes(used) + " of "
+                    + com.jarvisos.app.widgets.WidgetTime.minutes(TimeUsage.allowed(s))
+                    : "Used " + com.jarvisos.app.widgets.WidgetTime.minutes(used) + " today";
+            TextView usedView = text(context, usedLine, 15, pal.textSecondary);
+            usedView.setGravity(Gravity.START);
+            usedView.setPadding(0, dp(context, 2), 0, dp(context, 10));
+            card.addView(usedView);
+
+            if (limited) card.addView(usageBar(context, pal, TimeUsage.usedPercent(s)));
+
+            String extra = TimeUsage.extraLine(s);
+            String next = com.jarvisos.app.widgets.ScreenTimeFormat.line1(s, java.util.TimeZone.getDefault());
+            for (String line : new String[]{extra, next}) {
+                if (line == null || line.isEmpty()) continue;
+                TextView v = text(context, line, 14, pal.textSecondary);
+                v.setGravity(Gravity.START);
+                v.setPadding(0, dp(context, 8), 0, 0);
+                card.addView(v);
+            }
+        }
+
+        Sheet sheet = new Sheet(context, "Back");
+        boolean canAsk = known && (limited || !s.optString("next_lock_at", "").isEmpty()
+                || com.jarvisos.app.widgets.ScreenTimeFormat.locked(s));
+        if (canAsk) {
+            Button ask = primaryButton(context, pal, "Ask for more time");
+            ask.setOnClickListener(v -> sheet.show(askCard(context, pal, sheet, pal.brand)));
+            addFullWidth(card, ask, 18);
+        }
+        Button close = ghostButton(context, pal, warning ? "OK" : "Close");
+        close.setOnClickListener(v -> onClose.run());
+        addFullWidth(card, close, canAsk ? 10 : 18);
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                Math.min(dp(context, 440), context.getResources().getDisplayMetrics().widthPixels - dp(context, 32)),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        ScrollView scroller = new ScrollView(context);
+        scroller.addView(card);
+        frame.addView(scroller, cardLp);
+        frame.addView(sheet.layer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return frame;
+    }
+
+    /** A plain track with today's used share filled in. */
+    private static View usageBar(Context context, Palette pal, int usedPercent) {
+        LinearLayout track = new LinearLayout(context);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        track.setBackground(rounded(context, pal.tonal, 999, 0, 0));
+        int pct = Math.max(0, Math.min(100, usedPercent));
+        View fill = new View(context);
+        fill.setBackground(rounded(context, pal.brand, 999, 0, 0));
+        track.addView(fill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, pct));
+        View rest = new View(context);
+        track.addView(rest, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 100 - pct));
+        track.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 10)));
+        return track;
+    }
+
+    /**
      * The panel painted over the lock, Family Link style: a dimmed lock behind a
      * bottom sheet with a grabber, one accent, and a way back. Only one is up at a
      * time and it never removes the lock under it.
@@ -406,9 +511,16 @@ final class GuardScreenView {
     private static final class Sheet {
         final FrameLayout layer;
         private final Context context;
+        /** The way back from a card: to the lock, or to the warning or panel the card was opened from. */
+        final String backLabel;
 
         Sheet(Context context) {
+            this(context, "Back to the lock");
+        }
+
+        Sheet(Context context, String backLabel) {
             this.context = context;
+            this.backLabel = backLabel;
             layer = new FrameLayout(context);
             layer.setBackgroundColor(0x66000000);
             layer.setClickable(true);
@@ -495,7 +607,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
         return card;
     }
 
@@ -539,7 +651,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
         return card;
     }
 
@@ -589,7 +701,7 @@ final class GuardScreenView {
             }).start();
         });
         addFullWidth(card, send, 10);
-        card.addView(ghostButton(context, pal, sheet, "Back to the lock"));
+        card.addView(ghostButton(context, pal, sheet, sheet.backLabel));
         return card;
     }
 
@@ -611,7 +723,7 @@ final class GuardScreenView {
         TextView sub = text(context, subText, 14, pal.textSecondary);
         sub.setPadding(0, 0, 0, dp(context, 16));
         panel.addView(sub);
-        Button back = primaryButton(context, pal, "Back to the lock");
+        Button back = primaryButton(context, pal, sheet.backLabel);
         back.setOnClickListener(v -> sheet.hide());
         addFullWidth(panel, back, 0);
         return panel;

@@ -789,6 +789,16 @@ point.
       the same for the app in front when it has one minute of its own left (`LockWarning`,
       JVM-tested). Bedtime and school now also lock on the phone's clock the moment they start,
       without waiting for the next status.
+      *Ten- and five-minute warnings, and checking time used (2026-11-10)*: ten and five minutes
+      before any lock (bedtime, school, chores first, the day's limit) the guard shows a dialog
+      over the app in front (`TimePanelOverlay`, an Accessibility overlay) with the minutes
+      left, today's used/allowed time and "Ask for more time" (the same request as the lock
+      screen); the one-minute heads-up stays a notice. Each stage shows once per lock
+      (`LockWarning.Tracker`), and starts over when the lock moves 15+ minutes away (time was
+      given). Time used: a **Screen time** Quick Settings tile shows time left (or used, with
+      no limit) and opens the same panel; Android 13+ offers to add it once on a limited
+      child's phone. Only real use counts: time behind the lock screen
+      (`KEYGUARD_SHOWN`..`KEYGUARD_HIDDEN`) is not screen time (`ForegroundTime`).
 - [x] **Web filtering.** On-device VPN/DNS filter with category lists, allow/block lists,
       safe-search enforcement, an "ask a parent" request flow, and Qustodio-style bypass
       blocks (unsupported browsers, split-screen, safe mode).

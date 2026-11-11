@@ -41,7 +41,7 @@ public sealed class GuardService
 
     private readonly GuardConfig _config;
     private readonly ApiClient _api;
-    private readonly UsageMeter _meter = new();
+    private readonly UsageMeter _meter = new(Config.UsagePath);
     private readonly object _stateLock = new();
 
     private bool _wasLocked;
@@ -66,19 +66,14 @@ public sealed class GuardService
         using var pipeCts = new CancellationTokenSource();
         _ = Task.Run(() => PipeServerAsync(pipeCts.Token));
 
-        using var meterTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(UsageMeter_SampleMs));
-        _ = Task.Run(async () =>
-        {
-            while (await meterTimer.WaitForNextTickAsync()) _meter.Tick();
-        });
+        // Foreground minutes arrive from the tray over the pipe ("usage"):
+        // this SYSTEM process runs in session 0 and cannot see the desktop.
 
         using var pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(PollSeconds));
         // First poll immediately, then on the timer.
         await PollOnceAsync();
         while (await pollTimer.WaitForNextTickAsync()) await PollOnceAsync();
     }
-
-    private const int UsageMeter_SampleMs = 2000;
 
     private void ReportSafeBootIfNeeded()
     {
@@ -130,12 +125,20 @@ public sealed class GuardService
             // not wipe. It is logged for the parents' MDM log instead.
             if (hub.WipeRequested) Log("wipe requested by the hub; ignored (no wipe in this build)");
 
+            var time = TimeBudget.Apply(hub, _meter.PendingMinutes, DateTimeOffset.Now);
             Publish(new GuardState
             {
                 Locked = hub.Locked,
                 Reason = hub.Reason,
                 Until = hub.Until,
-                RemainingMinutes = hub.RemainingMinutes,
+                RemainingMinutes = time.RemainingMinutes,
+                UsedMinutes = time.UsedMinutes,
+                AllowedMinutes = time.AllowedMinutes,
+                BonusMinutes = hub.BonusMinutes,
+                EarnedMinutes = hub.EarnedMinutes,
+                BankedMinutes = hub.BankedMinutes,
+                NextLockAt = hub.Locked ? null : time.NextLockAt,
+                NextLockReason = hub.Locked ? null : time.NextLockReason,
                 ThemeId = hub.ThemeId ?? "clean-athletic",
                 AsOfUtc = DateTime.UtcNow.ToString("O"),
                 Source = "hub",
@@ -145,7 +148,9 @@ public sealed class GuardService
             Enforce(hub.Locked, hub.Reason);
             if (DateTimeOffset.UtcNow - _lastCapability > TimeSpan.FromSeconds(CapabilitySeconds))
                 await ReportCapabilitiesAsync();
-            if (_meter.DueForFlush) await FlushUsageAsync();
+            // Near the limit, report every poll so the hub locks on time (and
+            // the next poll's numbers are the hub's own).
+            if (_meter.DueForFlush || (TimeBudget.ReportNow(time) && _meter.HasUnsent)) await FlushUsageAsync();
             return;
         }
 
@@ -161,6 +166,14 @@ public sealed class GuardService
             Reason = offline.Reason,
             Until = cached?.Until,
             RemainingMinutes = cached?.RemainingMinutes ?? 0,
+            UsedMinutes = cached?.UsedMinutes ?? 0,
+            AllowedMinutes = cached?.AllowedMinutes,
+            BonusMinutes = cached?.BonusMinutes ?? 0,
+            EarnedMinutes = cached?.EarnedMinutes ?? 0,
+            BankedMinutes = cached?.BankedMinutes ?? 0,
+            // Bedtime and school still lock on the local clock offline, so their warnings stand.
+            NextLockAt = offline.Locked || cached?.NextLockReason is not ("bedtime" or "school") ? null : cached.NextLockAt,
+            NextLockReason = offline.Locked || cached?.NextLockReason is not ("bedtime" or "school") ? null : cached.NextLockReason,
             ThemeId = cached?.ThemeId ?? "clean-athletic",
             AsOfUtc = DateTime.UtcNow.ToString("O"),
             Source = "offline",
@@ -175,9 +188,11 @@ public sealed class GuardService
     {
         try
         {
-            var payload = _meter.SnapshotAndReset();
-            var resp = await _api.PostUsageAsync(payload);
-            Log($"usage flush: {(int)resp.StatusCode}");
+            foreach (var payload in _meter.Snapshot())
+            {
+                var resp = await _api.PostUsageAsync(payload);
+                Log($"usage flush: {(int)resp.StatusCode}");
+            }
         }
         catch (Exception ex) { Log($"usage flush failed: {ex.Message}"); }
     }
@@ -256,6 +271,38 @@ public sealed class GuardService
         {
             case "status":
                 return new PipeProtocol.Response { Ok = true, State = Config.ReadState() };
+
+            case "usage":
+                _meter.Add(request.Apps);
+                return new PipeProtocol.Response { Ok = true };
+
+            case "ask-time":
+                if (request.Minutes is < 5 or > 240)
+                    return new PipeProtocol.Response { Ok = false, Error = "Pick how much more time to ask for." };
+                try
+                {
+                    var note = request.Note?.Trim();
+                    if (note is { Length: > 200 }) note = note[..200];
+                    var resp = await _api.AskMoreTimeAsync(request.Minutes, note);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        Log($"asked for {request.Minutes} more minutes");
+                        return new PipeProtocol.Response { Ok = true };
+                    }
+                    var detail = "";
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+                        if (doc.RootElement.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String)
+                            detail = d.GetString() ?? "";
+                    }
+                    catch { /* no detail to show */ }
+                    return new PipeProtocol.Response { Ok = false, Error = string.IsNullOrWhiteSpace(detail) ? "That did not work. Try again in a minute." : detail };
+                }
+                catch
+                {
+                    return new PipeProtocol.Response { Ok = false, Error = "No connection to the family hub. Try again when the PC is online." };
+                }
 
             case "parent-unlock":
                 if (string.IsNullOrWhiteSpace(request.ParentUsername) || request.ParentPassword is null)

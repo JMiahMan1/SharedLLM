@@ -154,6 +154,33 @@ registerPlugin(CommsPlugin.class);
         super.onResume();
         configureWebView();
         PushNotifier.appVisible = true;
+        offerTimeTile();
+    }
+
+    /**
+     * Once, on a child's phone with a time limit: Android's own "Add tile?"
+     * prompt for the Screen time Quick Settings tile, so time left is one
+     * swipe down from any app (Android 13+; older phones add it by hand).
+     */
+    private void offerTimeTile() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        try {
+            if (!GuardApi.isProtected(this)) return;
+            if (!com.jarvisos.app.widgets.ScreenTimeFormat.limited(GuardApi.lastStatus(this))) return;
+            android.content.SharedPreferences p = GuardApi.prefs(this);
+            if (p.getBoolean("time_tile_offered", false)) return;
+            p.edit().putBoolean("time_tile_offered", true).apply();
+            android.app.StatusBarManager bar = getSystemService(android.app.StatusBarManager.class);
+            if (bar == null) return;
+            bar.requestAddTileService(
+                    new android.content.ComponentName(this, ScreenTimeTileService.class),
+                    "Screen time",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.mi_hourglass),
+                    getMainExecutor(),
+                    result -> { });
+        } catch (Exception ignored) {
+            // The tile can still be added by hand from the Quick Settings editor.
+        }
     }
 
     @Override

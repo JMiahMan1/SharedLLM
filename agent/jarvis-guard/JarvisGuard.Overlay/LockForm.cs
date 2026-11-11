@@ -82,7 +82,11 @@ public sealed class LockForm : Form
         _actionRow.AutoSize = true;
 
         var askButton = MakeButton("Ask for more time…");
-        askButton.Click += (_, _) => OpenHub("/family/member/");
+        askButton.Click += (_, _) =>
+        {
+            using var ask = new Tray.AskTimeForm();
+            ask.ShowDialog(this);
+        };
         var messageButton = MakeButton("Message a parent");
         messageButton.Click += (_, _) => OpenHub("/family/member/");
         _toggleUnlockButton.Text = "A parent can unlock…";

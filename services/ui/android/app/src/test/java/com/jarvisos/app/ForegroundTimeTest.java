@@ -67,4 +67,31 @@ public class ForegroundTimeTest {
         assertEquals(4_000L, time.lastUseFor("com.a").longValue());
         assertEquals(3_000L, time.millisFor("com.a"));
     }
+
+    @Test
+    public void nothingCountsWhileTheLockScreenIsUp() {
+        ForegroundTime time = new ForegroundTime();
+        time.accept(UsageEvents.Event.ACTIVITY_RESUMED, 1_000L, "com.a");
+        time.accept(UsageEvents.Event.KEYGUARD_SHOWN, 3_000L, null);
+        // An app that shows over the lock screen (or is woken behind it) does not count.
+        time.accept(UsageEvents.Event.ACTIVITY_RESUMED, 4_000L, "com.alarm");
+        time.accept(UsageEvents.Event.ACTIVITY_PAUSED, 6_000L, "com.alarm");
+        time.accept(UsageEvents.Event.KEYGUARD_HIDDEN, 10_000L, null);
+        time.accept(UsageEvents.Event.ACTIVITY_RESUMED, 10_500L, "com.a");
+        time.finish(12_500L);
+        assertEquals(2_000L + 2_000L, time.millisFor("com.a"));
+        assertEquals(0L, time.millisFor("com.alarm"));
+        assertEquals(4_000L, time.totalMillis());
+    }
+
+    @Test
+    public void theAppBehindTheLockScreenCountsFromTheUnlock() {
+        ForegroundTime time = new ForegroundTime();
+        time.accept(UsageEvents.Event.ACTIVITY_RESUMED, 1_000L, "com.a");
+        time.accept(UsageEvents.Event.KEYGUARD_SHOWN, 2_000L, null);
+        // Screen sits on the lock screen for a long time; then unlocked with no new RESUMED.
+        time.accept(UsageEvents.Event.KEYGUARD_HIDDEN, 600_000L, null);
+        time.finish(603_000L);
+        assertEquals(1_000L + 3_000L, time.totalMillis());
+    }
 }

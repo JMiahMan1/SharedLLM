@@ -81,7 +81,10 @@ public class GuardService extends AccessibilityService {
     private volatile Set<String> awaitingApproval = Collections.emptySet();
     /** The app last in front: the one asking when a permission dialog opens. */
     private volatile String lastApp = "";
-    private String lastWarningKey = "";
+    /** Which of the 10/5/1-minute warnings were shown for the lock coming up. */
+    private final LockWarning.Tracker warnings = new LockWarning.Tracker();
+    /** The ten- and five-minute warning dialog; created on first use. */
+    private TimePanelOverlay timePanel;
     private BroadcastReceiver installs;
     /** Installed apps that get around the web filter (FilterBypass.apps). */
     private volatile Set<String> bypassApps = Collections.emptySet();
@@ -549,19 +552,33 @@ public class GuardService extends AccessibilityService {
         }
     }
 
-    /** Family Link's one-minute warning before bedtime, school, the day's limit or an app's own minutes. */
+    /**
+     * Warnings before bedtime, school, chores first or the end of the day's
+     * time: a dialog with "Ask for more time" ten and five minutes before, and
+     * a last heads-up notice a minute before; an app's own last minute too.
+     */
     private void checkWarning() {
-        if (!GuardApi.isProtected(this) || GuardApi.isLocked(this) || GuardApi.isUnlocked(this)) return;
-        LockWarning.Warning w = LockWarning.due(System.currentTimeMillis(),
+        boolean active = GuardApi.isProtected(this) && !GuardApi.isLocked(this) && !GuardApi.isUnlocked(this);
+        if (!active) {
+            // The lock landed (or a parent lifted it): the warning has nothing left to say.
+            if (timePanel != null) timePanel.hide();
+            return;
+        }
+        LockWarning.Warning w = warnings.next(System.currentTimeMillis(),
                 GuardApi.nextLockAt(this), GuardApi.nextLockReason(this), DeviceNoun.of(this));
         if (w == null && !lastApp.isEmpty()) {
             w = LockWarning.appDue(lastApp, UnifiedPushDistributor.label(this, lastApp),
                     GuardApi.appMinutesLeft(this).get(lastApp), GuardApi.statusDay(this));
+            if (w != null && !warnings.markShown(w.key)) w = null;
         }
-        if (w == null || w.key.equals(lastWarningKey)) return;
-        lastWarningKey = w.key;
-        GuardNotices.warn(this, w.text);
-        Toast.makeText(this, w.text, Toast.LENGTH_LONG).show();
+        if (w == null) return;
+        GuardNotices.warn(this, w.title, w.text);
+        if (w.dialog()) {
+            if (timePanel == null) timePanel = new TimePanelOverlay(this);
+            timePanel.show(w.title, w.text);
+        } else {
+            Toast.makeText(this, w.text, Toast.LENGTH_LONG).show();
+        }
     }
 
     private boolean isAnApp(String pkg, String launcher) {
@@ -631,6 +648,7 @@ public class GuardService extends AccessibilityService {
         // Switched off in Settings (or killed): take the lock down and tell the
         // parents on a child's phone.
         if (lockOverlay != null) lockOverlay.hide();
+        if (timePanel != null) timePanel.hide();
         if (GuardApi.isProtected(this) && !GuardApi.isUnlocked(this)) {
             GuardApi.reportTamper(this, "guard_disabled");
         }

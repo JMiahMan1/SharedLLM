@@ -54,5 +54,14 @@ public sealed class ApiClient : IDisposable
             device_key = _config.DeviceKey,
         });
 
+    /// <summary>"Ask for more time": a request a parent answers from their phone (Grant / Not today).</summary>
+    public Task<HttpResponseMessage> AskMoreTimeAsync(int minutes, string? note) =>
+        _http.PostAsJsonAsync("api/screen-time/requests", new
+        {
+            minutes,
+            note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+            day = DateTime.Now.ToString("yyyy-MM-dd"),
+        });
+
     public void Dispose() => _http.Dispose();
 }
