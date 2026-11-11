@@ -845,7 +845,8 @@ services:
           echo "coturn: TURN_SECRET and TURN_PUBLIC_IP must be set in .env" >&2; exit 1
         fi
         exec turnserver -n --log-file=stdout --simple-log --no-cli \
-          --listening-port="$$TURN_PORT" --realm="$$TURN_REALM" \
+          --listening-port="$$TURN_PORT" \
+          --listening-ip="$$TURN_PRIVATE_IP" --relay-ip="$$TURN_PRIVATE_IP" --realm="$$TURN_REALM" \
           --use-auth-secret --static-auth-secret="$$TURN_SECRET" \
           --external-ip="$$TURN_PUBLIC_IP/$$TURN_PRIVATE_IP" \
           --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT" \
