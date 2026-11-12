@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
-import { navPagesFor, type NavPage } from './navItems';
+import { navPagesFor, navSectionsFor, type NavPage } from './navItems';
 import { usePublishBottomBarHeight } from '../../lib/bottomBar';
 import { readMobileNavPaths, subscribeMobileNav } from '../../lib/mobileNav';
 import { useDialogFocus } from '../../lib/focusTrap';
@@ -47,6 +47,9 @@ const BottomNav = () => {
   });
   const pinnedSet = new Set(pinnedItems.map((page) => page.path));
   const moreItems = pages.filter((item) => !pinnedSet.has(item.path));
+  // The More sheet lists the unpinned pages under the same headings as the
+  // sidebar, so the home controls are found together on a phone too.
+  const moreSections = navSectionsFor(isAdmin, moreItems);
 
   const moreActive = moreItems.some((item) => pathMatches(location.pathname, item.path));
 
@@ -95,28 +98,35 @@ const BottomNav = () => {
                 <X size={18} />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {moreItems.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  end={item.path === '/'}
-                  onClick={() => {
-                    handleTap();
-                    setMoreOpen(false);
-                  }}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-xl border transition-colors',
-                      isActive || pathMatches(location.pathname, item.path)
-                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-300'
-                        : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                    )
-                  }
-                >
-                  <item.icon size={18} className="shrink-0" />
-                  <span className="text-sm font-medium">{item.label}</span>
-                </NavLink>
+            <div className="max-h-[70dvh] overflow-y-auto overscroll-contain space-y-3 pb-1">
+              {moreSections.map((section) => (
+                <section key={section.key} aria-label={section.label} data-testid={`more-section-${section.key}`}>
+                  <h2 className="px-2 pb-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">{section.label}</h2>
+                  <div className="grid grid-cols-2 gap-2">
+                    {section.pages.map((item) => (
+                      <NavLink
+                        key={item.path}
+                        to={item.path}
+                        end={item.path === '/'}
+                        onClick={() => {
+                          handleTap();
+                          setMoreOpen(false);
+                        }}
+                        className={({ isActive }) =>
+                          cn(
+                            'flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-xl border transition-colors',
+                            isActive || pathMatches(location.pathname, item.path)
+                              ? 'bg-purple-500/15 border-purple-500/40 text-purple-300'
+                              : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                          )
+                        }
+                      >
+                        <item.icon size={18} className="shrink-0" />
+                        <span className="text-sm font-medium truncate">{item.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </div>

@@ -1,6 +1,9 @@
 name: UI E2E
 
-# The hermetic Playwright suite (desktop + phone Chromium). A nightly run is
+# The hermetic Playwright suite in Chromium at every size the app is used at:
+# desktop, Pixel 7, a small phone (360x740) and a tablet in portrait and
+# landscape. It runs on every push that touches the UI's source, so each UI
+# change is checked across formats. A nightly run is
 # enough to notice drift in the app; on `microservices` it also runs whenever a
 # spec or this file changes, because GitHub only schedules and dispatches the
 # default branch's workflows. Once this file is on `main`, the schedule and
@@ -19,6 +22,8 @@ on:
     branches: [microservices]
     paths:
       - 'services/ui/e2e/**'
+      - 'services/ui/src/**'
+      - 'services/ui/playwright.config.ts'
       - '.github/workflows/ui-e2e.yml'
 
 permissions:
@@ -53,12 +58,16 @@ jobs:
         working-directory: services/ui
         env:
           SKIP_VISUAL: '1'
-        run: npx playwright test --project=hermetic-desktop --project=hermetic-mobile --reporter=line --workers=2
+        run: npx playwright test --project=hermetic-desktop --project=hermetic-mobile --project=hermetic-small-phone --project=hermetic-tablet-portrait --project=hermetic-tablet-landscape --reporter=line,html --workers=2
 
-      - name: Upload the report on failure
-        if: failure()
+      # Every run, not only a failed one: the per-page, per-format screenshots
+      # are attached to the report.
+      - name: Upload the report and screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: services/ui/playwright-report
+          path: |
+            services/ui/playwright-report
+            services/ui/test-results
           retention-days: 7

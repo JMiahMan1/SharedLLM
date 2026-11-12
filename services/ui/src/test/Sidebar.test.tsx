@@ -1,5 +1,5 @@
-import { screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { fireEvent, screen, within } from '@testing-library/react';
+import { beforeEach, describe, it, expect } from 'vitest';
 import Sidebar from '../components/layout/Sidebar';
 import { renderWithProviders } from './render';
 
@@ -28,5 +28,34 @@ describe('Sidebar Component', () => {
     expect(await screen.findByText('All services online')).toBeInTheDocument();
     expect(await screen.findByText('abc1234')).toBeInTheDocument();
     expect(screen.queryByText(/v1\.0\.0-alpha/)).toBeNull();
+  });
+
+  describe('sections', () => {
+    beforeEach(() => localStorage.removeItem('jarvis_sidebar_collapsed_v1'));
+
+    it('groups the pages under headings, with the home controls under Home', async () => {
+      renderWithProviders(<Sidebar />);
+      const home = screen.getByTestId('nav-section-home');
+      expect(within(home).getByRole('button', { name: /Home/ })).toHaveAttribute('aria-expanded', 'true');
+      for (const label of ['Rooms', 'Climate', 'Cameras', 'Energy']) expect(within(home).getByText(label)).toBeInTheDocument();
+      const manage = screen.getByTestId('nav-section-manage');
+      for (const label of ['Schedules', 'Automations', 'History']) expect(within(manage).getByText(label)).toBeInTheDocument();
+      // Admin-only pages appear under System once the admin profile loads.
+      const system = screen.getByTestId('nav-section-system');
+      expect(await within(system).findByText('Admin')).toBeInTheDocument();
+    });
+
+    it('folds a section and remembers it, but never hides the section of the open page', () => {
+      renderWithProviders(<Sidebar />, { route: '/' });
+      const toggle = within(screen.getByTestId('nav-section-manage')).getByRole('button', { name: /Manage home/ });
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(localStorage.getItem('jarvis_sidebar_collapsed_v1')).toContain('manage');
+
+      localStorage.setItem('jarvis_sidebar_collapsed_v1', JSON.stringify(['home']));
+      renderWithProviders(<Sidebar />, { route: '/climate' });
+      const homeButtons = screen.getAllByRole('button', { name: /^Home/ });
+      expect(homeButtons[homeButtons.length - 1]).toHaveAttribute('aria-expanded', 'true');
+    });
   });
 });

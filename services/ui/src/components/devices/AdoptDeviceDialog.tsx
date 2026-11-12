@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, MonitorCheck } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { failureText } from '../../lib/discoveredDevices';
-import type { AdoptResult, DiscoveryInput } from '../../lib/discoveredDevices';
+import type { AdoptResult, DiscoveryInput, HubArea } from '../../lib/discoveredDevices';
 
 interface Props {
   title: string;
@@ -10,7 +10,9 @@ interface Props {
   /** Fields known up front (an encrypted node's key, a Matter code); the hub may ask for more. */
   needs: DiscoveryInput[];
   submitLabel?: string;
-  onSubmit: (values: { name?: string; input: Record<string, string> }) => Promise<AdoptResult>;
+  /** Rooms the new device can be put in; the picker is left out when there are none. */
+  areas?: HubArea[];
+  onSubmit: (values: { name?: string; areaId?: string; input: Record<string, string> }) => Promise<AdoptResult>;
   onDone: (result: AdoptResult) => void;
   onClose: () => void;
 }
@@ -31,8 +33,9 @@ const DEFAULT_POLL_MS = 2000;
  * - `pending`: the device is waiting for a person (Allow on the TV). The dialog
  *   says so and asks again with the `session` until the hub answers otherwise.
  */
-export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, submitLabel = 'Add', onSubmit, onDone, onClose }: Props) {
+export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, submitLabel = 'Add', areas = [], onSubmit, onDone, onClose }: Props) {
   const [name, setName] = useState('');
+  const [areaId, setAreaId] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
   const [needs, setNeeds] = useState<DiscoveryInput[]>(initialNeeds);
   const [message, setMessage] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
     );
     if (sessionId) input.session = sessionId;
     try {
-      const result = await onSubmit({ name: name.trim() || undefined, input });
+      const result = await onSubmit({ name: name.trim() || undefined, areaId: areaId || undefined, input });
       if (alive.current) handle(result, current, sessionId);
     } catch (err) {
       if (!alive.current) return;
@@ -131,17 +134,30 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
             <label className="block text-xs text-slate-400">
               Name (optional)
               <input
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+                className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 autoComplete="off"
               />
             </label>
+            {areas.length > 0 && (
+              <label className="block text-xs text-slate-400">
+                Room (optional)
+                <select
+                  className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+                  value={areaId}
+                  onChange={(e) => setAreaId(e.target.value)}
+                >
+                  <option value="">Choose later</option>
+                  {areas.map((a) => <option key={a.area_id} value={a.area_id}>{a.name}</option>)}
+                </select>
+              </label>
+            )}
             {needs.map((n) => (
               <label key={n.key} className="block text-xs text-slate-400">
                 {n.label}{n.optional ? ' (optional)' : ''}
                 <input
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
+                  className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
                   type={n.type === 'password' ? 'password' : 'text'}
                   value={values[n.key] || ''}
                   onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}

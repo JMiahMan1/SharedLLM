@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import * as dashboards from '../lib/dashboards';
+import * as schedules from '../lib/schedules';
+import type { ClimateOverview, Thermostat as ScheduledThermostat } from '../lib/schedules';
 import type { EnergySummary, HubEntity, Thermostat } from '../lib/dashboards';
 import { api } from '../services/api';
 import Rooms from './Rooms';
@@ -15,10 +17,14 @@ vi.mock('../lib/dashboards', async (importOriginal) => {
   const real = (await importOriginal()) as Record<string, unknown>;
   return {
     ...real,
-    getRooms: vi.fn(), getClimate: vi.fn(), getHistory: vi.fn(), getEntities: vi.fn(), getStatistics: vi.fn(),
+    getRooms: vi.fn(), getClimate: vi.fn(), getStatisticsStatus: vi.fn(), importStatistics: vi.fn(), getHistory: vi.fn(), getEntities: vi.fn(), getStatistics: vi.fn(),
     getEnergySummary: vi.fn(), getEnergyPrefs: vi.fn(), saveEnergyPrefs: vi.fn(), getEnergyCandidates: vi.fn(),
     suggestTariff: vi.fn(), importEnergyFromHa: vi.fn(), getDashboardPrefs: vi.fn(), saveDashboardPrefs: vi.fn(),
   };
+});
+vi.mock('../lib/schedules', async (importOriginal) => {
+  const real = (await importOriginal()) as Record<string, unknown>;
+  return { ...real, getClimate: vi.fn(), holdThermostat: vi.fn(), resumeThermostat: vi.fn() };
 });
 vi.mock('../services/api', () => ({ api: { callHaService: vi.fn().mockResolvedValue({ status: 'SUCCESS' }) }, apiClient: {} }));
 vi.mock('../lib/mediaToken', () => ({ useMediaToken: () => null }));
@@ -90,6 +96,63 @@ describe('Rooms', () => {
   });
 });
 
+const scheduled = (extra: Partial<ScheduledThermostat> = {}): ScheduledThermostat => ({
+  entity_id: 'climate.hall', name: 'hall', area: 'Den', state: 'cool', current_temperature: 78, temperature: 76,
+  capabilities: { hvac_modes: ['off', 'cool', 'heat'], fan_modes: [] },
+  current: null, next: null, hold: null, effective: { source: 'schedule', setpoint: { hvac_mode: 'cool', temperature: 76 } },
+  summary: 'Following Weekday: 76, goes to 80 at 5:00 PM', ...extra,
+});
+
+const overview = (t: ScheduledThermostat): ClimateOverview => ({
+  thermostats: [t], programs: [], settings: {} as ClimateOverview['settings'], away: { active: false, reason: null },
+  energy: { in_window: false, window: null, power_kw: null, shed: [] }, can_edit: false, now: '2026-01-05T12:00:00Z', time_zone: 'UTC',
+});
+
+describe('Rooms home overview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUser = { username: 'parent', is_admin: true };
+    vi.mocked(dashboards.getRooms).mockResolvedValue({
+      floors: [],
+      areas: [
+        { area_id: 'den', name: 'Den', floor_id: null, icon: null, entities: [
+          ent('light.lamp', { state: 'on' }), ent('light.spot', { state: 'on' }), ent('camera.drive'),
+        ] },
+        { area_id: 'hall', name: 'Hall', floor_id: null, icon: null, entities: [ent('light.ceiling', { state: 'off', area_id: 'hall' })] },
+      ],
+      unassigned: [],
+    });
+    vi.mocked(schedules.getClimate).mockResolvedValue(overview(scheduled()));
+    vi.mocked(dashboards.getEnergySummary).mockResolvedValue(summary());
+  });
+
+  it('surfaces lights by room, thermostats with their schedule, cameras and energy today', async () => {
+    wrap(<Rooms />);
+    const glance = await screen.findByTestId('home-overview');
+    expect(within(glance).getByText('2 lights on in 1 room')).toBeInTheDocument();
+    expect(await within(glance).findByText('Following Weekday: 76, goes to 80 at 5:00 PM')).toBeInTheDocument();
+    expect(within(glance).getByTestId('glance-cameras')).toHaveAttribute('href', '/cameras');
+    expect(await within(glance).findByTestId('glance-energy')).toHaveTextContent('30.0 kWh');
+  });
+
+  it('turns a room off at once and puts it back when the hub refuses', async () => {
+    vi.mocked(api.callHaService).mockRejectedValueOnce(new Error('refused')).mockResolvedValue({ status: 'SUCCESS' } as never);
+    wrap(<Rooms />);
+    const glance = await screen.findByTestId('home-overview');
+    fireEvent.click(within(glance).getByRole('button', { name: 'Turn off the lights in Den' }));
+    expect(within(glance).getByText('No lights on')).toBeInTheDocument();
+    await waitFor(() => expect(within(glance).getByText('2 lights on in 1 room')).toBeInTheDocument());
+    expect(api.callHaService).toHaveBeenCalledWith('light', 'turn_off', 'light.lamp', null);
+  });
+
+  it('says where to go when there are no rooms yet', async () => {
+    vi.mocked(dashboards.getRooms).mockResolvedValue({ floors: [], areas: [], unassigned: [] });
+    wrap(<Rooms />);
+    const empty = await screen.findByTestId('empty-state');
+    expect(within(empty).getByRole('link', { name: 'Go to Devices' })).toHaveAttribute('href', '/devices');
+  });
+});
+
 describe('Climate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,6 +171,33 @@ describe('Climate', () => {
     fireEvent.click(within(card).getByRole('button', { name: /Heat/ }));
     await waitFor(() => expect(api.callHaService).toHaveBeenCalledWith('climate', 'set_hvac_mode', 'climate.hall', { hvac_mode: 'heat' }));
     expect(within(card).getByLabelText('hall target')).toHaveTextContent('76');
+  });
+
+  it('shows the schedule summary and holds from the Climate page', async () => {
+    vi.mocked(schedules.getClimate).mockResolvedValue(overview(scheduled()));
+    wrap(<Climate />);
+    const card = await screen.findByTestId('thermostat-card');
+    expect(await within(card).findByText('Following Weekday: 76, goes to 80 at 5:00 PM')).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Hold hall' }));
+    expect(await screen.findByTestId('hold-control')).toBeInTheDocument();
+  });
+
+  it('resumes a held thermostat from the Climate page', async () => {
+    vi.mocked(schedules.getClimate).mockResolvedValue(overview(scheduled({
+      hold: { setpoint: { hvac_mode: 'cool', temperature: 72 }, until: null, kind: 'permanent', set_at: '2026-01-05T10:00:00Z', by: null },
+    })));
+    vi.mocked(schedules.resumeThermostat).mockResolvedValue(scheduled());
+    wrap(<Climate />);
+    const card = await screen.findByTestId('thermostat-card');
+    expect(await within(card).findByText(/Held at 72/)).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Resume the schedule of hall' }));
+    await waitFor(() => expect(schedules.resumeThermostat).toHaveBeenCalledWith('climate.hall'));
+  });
+
+  it('points an admin to Devices when there are no thermostats', async () => {
+    vi.mocked(dashboards.getClimate).mockResolvedValue({ thermostats: [] });
+    wrap(<Climate />);
+    expect(await screen.findByRole('link', { name: 'Go to Devices' })).toHaveAttribute('href', '/devices');
   });
 });
 
@@ -166,6 +256,20 @@ describe('Energy', () => {
     await waitFor(() => expect(dashboards.saveEnergyPrefs).toHaveBeenCalled());
     const saved = vi.mocked(dashboards.saveEnergyPrefs).mock.calls[0][0];
     expect(saved.tariff?.periods[0].start).toBe('15:00');
+  });
+
+  it('shows an admin the long-term history status next to the settings', async () => {
+    vi.mocked(dashboards.getStatisticsStatus).mockResolvedValue({
+      metadata: 12, statistics: { rows: 100, first: '2024-03-01T00:00:00Z', last: new Date().toISOString() },
+      statistics_short_term: { rows: 10, first: null, last: null }, last_import: null, last_error: null,
+    });
+    wrap(<Energy />);
+    fireEvent.click(await screen.findByRole('button', { name: /Settings/ }));
+    const card = await screen.findByTestId('statistics-status');
+    expect(await within(card).findByText(/Hourly history for 12 sensors/)).toBeInTheDocument();
+    vi.mocked(dashboards.importStatistics).mockResolvedValue({});
+    fireEvent.click(within(card).getByRole('button', { name: 'Import history from Home Assistant' }));
+    await waitFor(() => expect(dashboards.importStatistics).toHaveBeenCalled());
   });
 
   it('hides settings from members', async () => {

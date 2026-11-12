@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  actionEntities, actionType, filterItems, fromBuilder, toBuilder, withActionEntities,
+  actionEntities, actionType, filterItems, fromBuilder, mergeRemap, toBuilder, withActionEntities,
   type AutomationItem, type Config,
 } from './automations';
 
@@ -65,5 +65,26 @@ describe('filterItems', () => {
     expect(filterItems(items, 'light.porch').map((i) => i.id)).toEqual(['porch_lights']);
     expect(filterItems(items, '', 'scene').map((i) => i.id)).toEqual(['movie']);
     expect(filterItems(items, '').map((i) => i.id)).toEqual(['bedtime', 'movie', 'porch_lights']);
+  });
+});
+
+describe('mergeRemap', () => {
+  it('adds the suggestion but keeps what was written by hand for the same old id', () => {
+    const merged = mergeRemap(
+      { entities: { 'light.old': 'light.mine' } },
+      { entities: { 'light.old': 'light.theirs', 'switch.old': 'switch.new' }, devices: { d1: 'd2' } },
+    );
+    expect(merged.entities).toEqual({ 'light.old': 'light.mine', 'switch.old': 'switch.new' });
+    expect(merged.devices).toEqual({ d1: 'd2' });
+  });
+
+  it('adds a dropped thermostat action once', () => {
+    const drop = { match: { type: 'set_preset_mode', preset_mode: 'eco' }, reason: 'not supported' };
+    const merged = mergeRemap({ drop_actions: [drop] }, { drop_actions: [{ ...drop }, { match: { type: 'x' }, reason: 'y' }] });
+    expect(merged.drop_actions).toHaveLength(2);
+  });
+
+  it('leaves out empty sections and keeps other keys', () => {
+    expect(mergeRemap({ only: ['a'] }, {})).toEqual({ only: ['a'] });
   });
 });

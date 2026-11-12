@@ -22,6 +22,8 @@ import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
 import NewDevicesPanel from '../components/devices/NewDevicesPanel';
+import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
+import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
@@ -1430,16 +1432,27 @@ export default function Devices() {
 
   return (
     <div className={PAGE}>
-      <header className="glass-panel rounded-2xl border border-white/10 p-4 sm:p-5">
-        <h1 className="text-xl font-bold text-white sm:text-2xl">Device management</h1>
-        <p className="mt-0.5 text-xs text-slate-400">
-          Phones, tablets, ESPHome watches &amp; companion nodes, shared School and Library folders, and remote actions.
-        </p>
-      </header>
+      <PageHeader icon={Smartphone} tone="text-violet-400" title="Devices and integrations"
+        subtitle="Family phones and tablets, new devices to add, the hub's integrations, shared folders and remote actions.">
+        {/* The page is long; a row of jumps gets an admin to each part in one tap. */}
+        <nav aria-label="Sections of this page" className="flex gap-2 overflow-x-auto touch-pan-x pb-1" data-testid="devices-sections">
+          {[
+            ['devices-family', 'Family devices'],
+            ...(user?.is_admin ? [['devices-new', 'Add devices'], ['devices-integrations', 'Integrations'], ['devices-phones', 'Phones']] : []),
+            ['devices-folders', 'Shared folders'],
+            ['devices-activity', 'Activity'],
+          ].map(([id, label]) => (
+            <a key={id} href={`#${id}`} className={`${HEADER_ACTION} shrink-0 whitespace-nowrap`}>{label}</a>
+          ))}
+        </nav>
+      </PageHeader>
 
+      <div id="devices-family" className="scroll-mt-4">
       <Panel title="Family devices" icon={Smartphone}
         aside={<span className="text-xs text-slate-500">{inventory.data?.devices.length ?? 0} device(s)</span>}>
-        {inventory.isLoading && <p className="p-4 text-sm text-slate-500">Loading devices…</p>}
+        {inventory.isLoading && <div className="space-y-2 p-4" role="status" aria-label="Loading devices">
+          {[0, 1, 2].map((i) => <div key={i} className="skeleton h-14 w-full rounded-xl" />)}
+        </div>}
         {inventory.error && (
           <p className="p-4 text-sm text-amber-300/90" data-testid="mdm-error">
             {refused ? 'Device management is for the father and admins.' : 'Devices could not be loaded.'}
@@ -1477,16 +1490,19 @@ export default function Devices() {
           </div>
         )}
       </Panel>
+      </div>
 
       {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
-      {user?.is_admin && <NewDevicesPanel />}
-      {user?.is_admin && <IntegrationsPanel />}
-      {user?.is_admin && <PhonesPanel />}
+      {user?.is_admin && <div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div>}
+      {user?.is_admin && <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>}
+      {user?.is_admin && <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>}
 
-      {files.isLoading && <p className="text-sm text-slate-500">Loading shared folders…</p>}
-      {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
+      <div id="devices-folders" className="scroll-mt-4 space-y-4">
+        {files.isLoading && <CardSkeletons count={1} className="grid" height="h-24" label="Loading shared folders" />}
+        {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
+      </div>
 
-      <AuditLogPanel />
+      <div id="devices-activity" className="scroll-mt-4"><AuditLogPanel /></div>
 
       {detailDevice && (
         <DeviceDetailSheet

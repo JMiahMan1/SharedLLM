@@ -231,6 +231,43 @@ export async function importEnergyFromHa(): Promise<Record<string, unknown>> {
   return (await apiClient.post('/api/dashboard/energy/import', {})).data;
 }
 
+export interface StatTableSpan { rows: number; first: string | null; last: string | null }
+
+export interface StatisticsImportReport {
+  source?: string;
+  metadata?: number;
+  statistics?: Record<string, StatTableSpan & { statistics?: number; rebased?: number }>;
+  imported_at?: string;
+}
+
+export interface StatisticsStatus {
+  metadata: number;
+  statistics: StatTableSpan;
+  statistics_short_term: StatTableSpan;
+  compiled_until?: unknown;
+  last_import: StatisticsImportReport | null;
+  last_error: string | null;
+}
+
+/** Admins: what the hub's long-term statistics hold and when they were last imported. */
+export async function getStatisticsStatus(): Promise<StatisticsStatus> {
+  return (await apiClient.get('/api/dashboard/statistics/status')).data;
+}
+
+/** Admins: copy the long-term statistics from the old Home Assistant recorder. Slow (minutes). */
+export async function importStatistics(): Promise<StatisticsImportReport> {
+  return (await apiClient.post('/api/dashboard/statistics/import', {}, { timeout: 900_000 })).data;
+}
+
+/** "Mar 2024 to today" for a statistics table, or "" when it is empty. */
+export function statSpanText(span: StatTableSpan | null | undefined, now: Date = new Date()): string {
+  if (!span || !span.rows || !span.first) return '';
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', year: 'numeric' });
+  const last = span.last ? new Date(span.last) : null;
+  const recent = last && now.getTime() - last.getTime() < 36 * 3600 * 1000;
+  return `${fmt(span.first)} to ${recent || !span.last ? 'today' : fmt(span.last)}`;
+}
+
 export async function getDashboardPrefs(): Promise<DashboardPrefs> {
   return (await apiClient.get('/api/dashboard/prefs')).data;
 }

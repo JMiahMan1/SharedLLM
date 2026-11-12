@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   binaryLabel, describePeriod, formatKwh, formatState, groupByDomain, groupByFloor, isNumericSeries,
-  mergeNumericSeries, numericPoints, parseEntityParam, shiftDate, tariffPeriodError, timelineSegments, toggleIn,
+  mergeNumericSeries, numericPoints, parseEntityParam, shiftDate, statSpanText, tariffPeriodError, timelineSegments, toggleIn,
   touSplits, type EnergySummary, type HubEntity, type TariffPeriod,
 } from './dashboards';
 
@@ -123,5 +123,19 @@ describe('energy helpers', () => {
     const splits = touSplits(summary);
     expect(splits.map((s) => s.source)).toEqual(['tariff', 'utility']);
     expect(splits[1].periods.map((p) => p.name)).toEqual(['On peak', 'Off peak']);
+  });
+});
+
+describe('statSpanText', () => {
+  const now = new Date('2026-06-15T12:00:00Z');
+  it('says "to today" when the statistics are current', () => {
+    expect(statSpanText({ rows: 10, first: '2024-03-02T00:00:00Z', last: '2026-06-15T10:00:00Z' }, now)).toMatch(/2024 to today$/);
+  });
+  it('names the last month when the statistics stopped', () => {
+    expect(statSpanText({ rows: 10, first: '2024-03-02T00:00:00Z', last: '2025-01-10T00:00:00Z' }, now)).not.toMatch(/today/);
+  });
+  it('is empty when there is nothing', () => {
+    expect(statSpanText({ rows: 0, first: null, last: null }, now)).toBe('');
+    expect(statSpanText(null, now)).toBe('');
   });
 });

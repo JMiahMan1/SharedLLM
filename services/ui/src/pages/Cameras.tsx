@@ -8,6 +8,8 @@ import { api } from '../services/api';
 import { useMediaToken } from '../lib/mediaToken';
 import { useHaptics } from '../hooks/useHaptics';
 import { errorText } from '../lib/errorText';
+import PageHeader from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import { useAuth } from '../context/AuthContext';
 import { browserCaps, playbackModes } from '../lib/cameraLive';
 import RealtimePlayer from '../components/cameras/RealtimePlayer';
@@ -458,28 +460,21 @@ const Cameras = () => {
   }, [selectedId, setParams]);
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 pb-24">
-      <div className="flex items-center gap-2">
-        <Cctv className="text-cyan-400" size={22} aria-hidden />
-        <h1 className="text-2xl font-bold text-white">Cameras</h1>
-      </div>
+    <div className="mx-auto w-full max-w-6xl space-y-4 pb-24" data-testid="cameras-page">
+      <PageHeader icon={Cctv} tone="text-cyan-400" title="Cameras"
+        subtitle="Tap a camera to watch it live or see today's recordings." />
 
       {cameras.isLoading ? (
-        <div className="flex justify-center py-10" role="status" aria-label="Loading">
-          <Loader2 className="animate-spin text-slate-500" />
-        </div>
+        <CardSkeletons count={3} height="aspect-video h-auto" label="Loading cameras" />
       ) : cameras.isError ? (
-        <div className="glass-panel rounded-2xl p-6 text-center">
-          <p className="text-sm text-red-300">{errorText(cameras.error, 'Couldn’t reach the cameras')}</p>
-          <button type="button" onClick={() => void cameras.refetch()} className={`${TOUCH} px-4 text-sm text-cyan-300 underline`}>
-            Try again
-          </button>
-        </div>
+        <ErrorRetry title={errorText(cameras.error, 'Could not reach the cameras')} onRetry={() => void cameras.refetch()} />
       ) : list.length === 0 ? (
-        <div className="glass-panel rounded-2xl p-6 text-center">
-          <p className="text-sm text-slate-400">No cameras to show.</p>
-          <p className="text-xs text-slate-500 mt-1">Cameras you are allowed to see show up here.</p>
-        </div>
+        <EmptyState
+          icon={<Cctv size={28} />}
+          title="No cameras yet"
+          detail={isAdmin ? 'Add one in Devices; it shows up here as soon as it is set up.' : 'Cameras you are allowed to see show up here.'}
+          action={isAdmin ? { label: 'Go to Devices', to: '/devices' } : null}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((camera) => (

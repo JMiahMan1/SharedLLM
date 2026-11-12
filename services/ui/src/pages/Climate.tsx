@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, History as HistoryIcon, Loader2, Settings2, Thermometer } from 'lucide-react';
+import { CalendarClock, History as HistoryIcon, Settings2, Thermometer } from 'lucide-react';
 import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { ClimateControl, SensorChip } from '../components/dashboards/EntityControls';
+import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
+import ScheduleStatus from '../components/schedules/ScheduleStatus';
+import { getClimate as getScheduleOverview, type Thermostat as ScheduledThermostat } from '../lib/schedules';
 import {
   failureText, formatPower, getClimate, getDashboardPrefs, getEntities, getHistory, mergeNumericSeries,
   numericPoints, saveDashboardPrefs, seriesColour, toWatts, type HubEntity, type Thermostat,
@@ -47,7 +51,7 @@ function ThermostatChart({ thermostat }: { thermostat: Thermostat }) {
     return { rows: mergeNumericSeries(series, data.end), lines };
   }, [data, thermostat]);
 
-  if (isLoading) return <p className="text-xs text-slate-500">Loading the last 24 hours...</p>;
+  if (isLoading) return <div className="skeleton h-56 w-full rounded-xl" role="status" aria-label="Loading the last 24 hours" />;
   if (!rows.length) return <p className="text-xs text-slate-500">No history for the last 24 hours.</p>;
   return (
     <div className="h-56" data-testid="climate-chart">
@@ -124,7 +128,9 @@ function PowerEditor({ thermostat, onSaved }: { thermostat: Thermostat; onSaved:
   );
 }
 
-function ThermostatCard({ thermostat, isAdmin, onChanged }: { thermostat: Thermostat; isAdmin: boolean; onChanged: () => void }) {
+function ThermostatCard({ thermostat, scheduled, isAdmin, onChanged }: {
+  thermostat: Thermostat; scheduled?: ScheduledThermostat; isAdmin: boolean; onChanged: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   return (
     <article className="glass-card rounded-2xl p-4 space-y-3" data-testid="thermostat-card" aria-label={thermostat.name}>
@@ -134,11 +140,12 @@ function ThermostatCard({ thermostat, isAdmin, onChanged }: { thermostat: Thermo
           {thermostat.area_name && <p className="text-xs text-slate-500">{thermostat.area_name}</p>}
         </div>
         {isAdmin && (
-          <button type="button" aria-label={`Choose power sensors for ${thermostat.name}`} onClick={() => setEditing((e) => !e)}
-            className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5"><Settings2 size={16} /></button>
+          <button type="button" aria-label={`Choose power sensors for ${thermostat.name}`} aria-expanded={editing} onClick={() => setEditing((e) => !e)}
+            className={HEADER_ACTION}><Settings2 size={16} aria-hidden /></button>
         )}
       </header>
       <ClimateControl entity={thermostat} onChanged={onChanged} compact />
+      {scheduled && <ScheduleStatus thermostat={scheduled} onChanged={onChanged} />}
       {(thermostat.sensors.length > 0 || thermostat.power.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {thermostat.sensors.map((s) => <SensorChip key={s.entity_id} entity={s} />)}
@@ -158,29 +165,53 @@ function ThermostatCard({ thermostat, isAdmin, onChanged }: { thermostat: Thermo
 
 export default function Climate() {
   const { user } = useAuth();
+  const isAdmin = Boolean(user?.is_admin);
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ['dashboard', 'climate'], queryFn: getClimate, refetchInterval: CLIMATE_POLL_MS });
-  const onChanged = () => window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['dashboard', 'climate'] }), 1500);
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard', 'climate'], queryFn: getClimate, refetchInterval: CLIMATE_POLL_MS });
+  // The schedule side (what each thermostat follows, holds) comes from the
+  // hub's scheduler; a thermostat it does not know simply has no schedule line.
+  const schedule = useQuery({ queryKey: ['homehub-climate'], queryFn: getScheduleOverview, retry: false,
+    refetchInterval: () => (document.hidden ? false : 30_000) });
+  const scheduledById = useMemo(
+    () => new Map((schedule.data?.thermostats ?? []).map((t) => [t.entity_id, t])),
+    [schedule.data],
+  );
+  const onChanged = () => {
+    void queryClient.invalidateQueries({ queryKey: ['homehub-climate'] });
+    window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['dashboard', 'climate'] }), 1500);
+  };
   const ids = (data?.thermostats ?? []).flatMap((t) => [t.entity_id, ...t.power.map((p) => p.entity_id)]);
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-7xl mx-auto">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Thermometer size={22} className="text-cyan-400" />Climate</h1>
-        <nav className="flex gap-2 text-sm" aria-label="Related pages">
-          <Link to="/schedules" className="min-h-11 flex items-center gap-1 rounded-xl bg-white/5 px-3"><CalendarClock size={14} />Schedules</Link>
-          {ids.length > 0 && (
-            <Link to={`/history?e=${ids.slice(0, 12).join(',')}&r=24h`} className="min-h-11 flex items-center gap-1 rounded-xl bg-white/5 px-3">
-              <HistoryIcon size={14} />History
-            </Link>
-          )}
-        </nav>
-      </header>
-      {isLoading && <p className="flex items-center gap-2 text-slate-400"><Loader2 className="animate-spin" size={16} />Loading thermostats...</p>}
-      {error && <p role="alert" className="text-red-400">{failureText(error, 'Could not load the thermostats')}</p>}
-      {data && data.thermostats.length === 0 && <p className="text-slate-400">No thermostats you can see.</p>}
+    <div className="mx-auto w-full max-w-7xl space-y-4 pb-24" data-testid="climate-page">
+      <PageHeader
+        icon={Thermometer}
+        tone="text-cyan-400"
+        title="Climate"
+        subtitle="Every thermostat: set it, hold it, and see the last day."
+        actions={(
+          <>
+            <Link to="/schedules" className={HEADER_ACTION}><CalendarClock size={14} aria-hidden />Schedules</Link>
+            {ids.length > 0 && (
+              <Link to={`/history?e=${ids.slice(0, 12).join(',')}&r=24h`} className={HEADER_ACTION}>
+                <HistoryIcon size={14} aria-hidden />History
+              </Link>
+            )}
+          </>
+        )}
+      />
+      {isLoading && <CardSkeletons count={2} className="grid gap-4 lg:grid-cols-2" height="h-72" label="Loading thermostats" />}
+      {error && <ErrorRetry title={failureText(error, 'Could not load the thermostats')} onRetry={() => void refetch()} />}
+      {data && data.thermostats.length === 0 && (
+        <EmptyState
+          icon={<Thermometer size={28} />}
+          title="No thermostats yet"
+          detail={isAdmin ? 'Add one in Devices; it shows up here once it is in a room.' : 'Thermostats you are allowed to use show up here.'}
+          action={isAdmin ? { label: 'Go to Devices', to: '/devices' } : null}
+        />
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         {data?.thermostats.map((t) => (
-          <ThermostatCard key={t.entity_id} thermostat={t} isAdmin={Boolean(user?.is_admin)} onChanged={onChanged} />
+          <ThermostatCard key={t.entity_id} thermostat={t} scheduled={scheduledById.get(t.entity_id)} isAdmin={isAdmin} onChanged={onChanged} />
         ))}
       </div>
     </div>

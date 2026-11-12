@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Phone, RefreshCw, Users } from 'lucide-react';
 import { api } from '../../services/api';
@@ -180,9 +180,12 @@ export default function FamilyCalls() {
 
       <p className="px-1 text-xs leading-relaxed text-slate-500">
         Calls use your microphone and optional camera, and nothing is recorded. Anyone in the
-        conversation can join while the call is live. Turn on auto drop-in for a device in
-        Settings → Family drop-in.
+        conversation can join while the call is live.
       </p>
+      <Link to="/settings#family-drop-in"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-slate-200 hover:bg-white/10">
+        Who can drop in on me
+      </Link>
     </section>
   );
 }

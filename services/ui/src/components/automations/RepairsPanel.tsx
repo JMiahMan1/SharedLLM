@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Loader2, Wrench } from 'lucide-react';
+import { Loader2, Sparkles, Wrench } from 'lucide-react';
 import { errorText } from '../../lib/errorText';
-import { getRemap, previewRemap, saveRemap, type Remap, type RemapRow } from '../../lib/automations';
+import {
+  getRemap, mergeRemap, previewRemap, saveRemap, suggestRemap, type Remap, type RemapEvidence, type RemapRow,
+} from '../../lib/automations';
 import { Field, MessageList } from './FormBits';
 import { BUTTON, INPUT, PRIMARY } from './styles';
 
@@ -11,8 +13,11 @@ const QUERY_KEY = ['homehub-remap'];
 
 /**
  * Admins: imported automations that name old device or entity ids, and what
- * the stored remap changes in each. The remap itself is household data held by
- * the hub; it is edited here as JSON, previewed, then saved.
+ * the stored remap changes in each. "Find fixes" asks the hub to match old ids
+ * to the devices that replaced them (and which thermostat actions to drop),
+ * previews the result in words, and saves it on request. The remap itself is
+ * household data held by the hub; hand editing it as JSON stays available
+ * under Advanced.
  */
 export default function RepairsPanel({ onSaved }: { onSaved: () => void }) {
   const queryClient = useQueryClient();
@@ -21,6 +26,7 @@ export default function RepairsPanel({ onSaved }: { onSaved: () => void }) {
   const [preview, setPreview] = useState<RemapRow[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [evidence, setEvidence] = useState<RemapEvidence[] | null>(null);
 
   useEffect(() => {
     // Seed the editor from the stored remap once it arrives.
@@ -51,13 +57,30 @@ export default function RepairsPanel({ onSaved }: { onSaved: () => void }) {
         const result = await saveRemap(value);
         queryClient.setQueryData(QUERY_KEY, result);
         setPreview(null);
-        toast.success('Remap saved');
+        toast.success('Repairs saved');
         onSaved();
       } else {
         setPreview((await previewRemap(value)).report);
       }
     } catch (err) {
       setError(errorText(err, 'That did not work'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function suggest() {
+    const current = parsed();
+    if (!current) return;
+    setBusy(true);
+    try {
+      const result = await suggestRemap();
+      const merged = mergeRemap(current, result.remap ?? {});
+      setText(JSON.stringify(merged, null, 2));
+      setEvidence(result.evidence ?? []);
+      setPreview((await previewRemap(merged)).report);
+    } catch (err) {
+      setError(errorText(err, 'Could not find fixes'));
     } finally {
       setBusy(false);
     }
@@ -79,14 +102,35 @@ export default function RepairsPanel({ onSaved }: { onSaved: () => void }) {
           <ul className="space-y-2">
             {rows.map((row) => <RepairRow key={`${row.kind}:${row.id}`} row={row} />)}
           </ul>
-          <Field label="Remap (JSON)" hint='{"entities": {"old.id": "new.id"}, "devices": {}, "drop_actions": [], "only": []}'>
-            <textarea className={`${INPUT} font-mono text-xs`} rows={8} spellCheck={false} value={text}
-              onChange={(e) => setText(e.target.value)} />
-          </Field>
+          {evidence && (
+            <div className="space-y-1" data-testid="remap-evidence">
+              <p className="text-xs text-slate-400">
+                {evidence.length ? `Found ${evidence.length} match${evidence.length === 1 ? '' : 'es'}:` : 'No new matches found.'}
+              </p>
+              <ul className="space-y-1 text-xs">
+                {evidence.map((e) => (
+                  <li key={`${e.kind}:${e.old}`} className="rounded-lg bg-white/5 px-3 py-2">
+                    <span className={e.new ? 'text-emerald-300' : 'text-amber-200'}>{e.new ? 'Matched' : 'No match'}</span>
+                    <span className="text-slate-300">: {e.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <details className="rounded-xl border border-white/10 p-3">
+            <summary className="min-h-11 cursor-pointer list-none flex items-center text-xs text-slate-300">Advanced: edit the remap by hand</summary>
+            <Field label="Remap (JSON)" hint='{"entities": {"old.id": "new.id"}, "devices": {}, "drop_actions": [], "only": []}'>
+              <textarea className={`${INPUT} font-mono text-xs`} rows={8} spellCheck={false} value={text}
+                onChange={(e) => setText(e.target.value)} />
+            </Field>
+          </details>
           {error && <MessageList tone="error" items={[error]} />}
           <div className="flex flex-wrap gap-2">
+            <button type="button" className={BUTTON} disabled={busy} onClick={() => void suggest()}>
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Find fixes
+            </button>
             <button type="button" className={BUTTON} disabled={busy} onClick={() => void run(false)}>Preview</button>
-            <button type="button" className={PRIMARY} disabled={busy} onClick={() => void run(true)}>Save remap</button>
+            <button type="button" className={PRIMARY} disabled={busy} onClick={() => void run(true)}>Save repairs</button>
           </div>
         </>
       )}

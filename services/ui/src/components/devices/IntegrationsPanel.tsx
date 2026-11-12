@@ -9,6 +9,7 @@ import {
   failureStatus,
   failureText,
   getBuilderLink,
+  entriesNeedingAttention,
   getEntries,
   getManualFlows,
   reconfigureEntry,
@@ -108,7 +109,38 @@ export default function IntegrationsPanel() {
         </span>
       </header>
 
-      {list.isLoading && <p className="p-4 text-sm text-slate-500">Loading integrations…</p>}
+      {list.data && (() => {
+        const down = entriesNeedingAttention(list.data.entries);
+        if (!list.data.entries.length) return null;
+        return down.length === 0 ? (
+          <p className="px-4 pt-3 text-xs text-emerald-300" role="status" data-testid="integrations-health">
+            All {list.data.entries.length} connections are working.
+          </p>
+        ) : (
+          <div className="space-y-1 px-4 pt-3" role="status" data-testid="integrations-health">
+            <p className="text-xs font-semibold text-amber-200">
+              {down.length} connection{down.length === 1 ? ' needs' : 's need'} attention
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {down.map((entry) => (
+                <li key={entry.entry_id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpen((o) => ({ ...o, [entry.entry_id]: true }))}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-left text-xs text-amber-100"
+                    title={entry.reason || undefined}
+                  >
+                    {entry.title}: {entry.reason || entry.state.replace('_', ' ')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
+      {list.isLoading && <div className="space-y-2 p-4" role="status" aria-label="Loading integrations">
+        {[0, 1, 2].map((i) => <div key={i} className="skeleton h-12 w-full rounded-xl" />)}
+      </div>}
       {list.error && <p className="p-4 text-sm text-amber-300/90">{failureText(list.error)}</p>}
 
       <ul className="divide-y divide-white/5">

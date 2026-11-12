@@ -5,6 +5,9 @@ import { ChevronLeft, ChevronRight, Loader2, Settings2, Zap } from 'lucide-react
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import EnergySettings from '../components/energy/EnergySettings';
+import StatisticsStatusCard from '../components/energy/StatisticsStatusCard';
+import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import {
   COST_SOURCE_LABEL, RANGES, bucketLabel, failureText, formatKwh, formatMoney, formatPower, getEnergySummary,
   isCurrentRange, rangeTitle, shiftDate, touSplits, type EnergyRange, type EnergySummary,
@@ -119,34 +122,39 @@ export default function Energy() {
   const [date, setDate] = useState(() => new Date());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const current = isCurrentRange(range, date);
-  const { data, isLoading, error, isFetching } = useQuery({
+  const { data, isLoading, error, isFetching, refetch } = useQuery({
     queryKey: ['dashboard', 'energy', range, date.toDateString()],
     queryFn: () => getEnergySummary(range, date),
     refetchInterval: current ? ENERGY_POLL_MS : false,
   });
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-7xl mx-auto">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Zap size={22} className="text-amber-400" />Energy</h1>
-        {isAdmin && (
-          <button type="button" className="min-h-11 flex items-center gap-1 rounded-xl bg-white/5 px-3 text-sm"
-            onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}>
-            <Settings2 size={14} />Settings
+    <div className="mx-auto w-full max-w-7xl space-y-4 pb-24" data-testid="energy-page">
+      <PageHeader
+        icon={Zap}
+        tone="text-amber-400"
+        title="Energy"
+        subtitle="What the house used, what it cost, and where it went."
+        actions={isAdmin ? (
+          <button type="button" className={HEADER_ACTION} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}>
+            <Settings2 size={14} aria-hidden />Settings
           </button>
-        )}
-      </header>
+        ) : undefined}
+      />
 
       {settingsOpen && isAdmin && (
-        <EnergySettings onClose={() => setSettingsOpen(false)}
-          onSaved={() => void queryClient.invalidateQueries({ queryKey: ['dashboard', 'energy'] })} />
+        <>
+          <EnergySettings onClose={() => setSettingsOpen(false)}
+            onSaved={() => void queryClient.invalidateQueries({ queryKey: ['dashboard', 'energy'] })} />
+          <StatisticsStatusCard />
+        </>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-xl bg-white/5 p-1" role="tablist" aria-label="Range">
           {RANGES.map((r) => (
             <button key={r.key} type="button" role="tab" aria-selected={range === r.key}
-              className={`min-h-9 rounded-lg px-3 text-sm ${range === r.key ? 'bg-amber-500/25 text-amber-100' : ''}`}
+              className={`min-h-11 rounded-lg px-3 text-sm ${range === r.key ? 'bg-amber-500/25 text-amber-100' : ''}`}
               onClick={() => setRange(r.key)}>{r.label}</button>
           ))}
         </div>
@@ -160,16 +168,20 @@ export default function Energy() {
         {isFetching && <Loader2 size={14} className="animate-spin text-slate-500" />}
       </div>
 
-      {isLoading && <p className="flex items-center gap-2 text-slate-400"><Loader2 className="animate-spin" size={16} />Loading...</p>}
-      {error && <p role="alert" className="text-red-400">{failureText(error, 'Could not load the energy numbers')}</p>}
+      {isLoading && <CardSkeletons count={4} className="grid grid-cols-2 lg:grid-cols-4 gap-3" height="h-8" label="Loading energy" />}
+      {error && <ErrorRetry title={failureText(error, 'Could not load the energy numbers')} onRetry={() => void refetch()} />}
 
       {data && (
         <>
           {data.grid.stats.length === 0 && data.utility.length === 0 && (
-            <p className="text-slate-400">
-              Nothing to show yet: no whole-house or utility source is set up.
-              {isAdmin ? ' Open Settings to choose one, or import the Home Assistant energy settings.' : ''}
-            </p>
+            <EmptyState
+              icon={<Zap size={28} />}
+              title="No energy meter set up yet"
+              detail={isAdmin
+                ? 'Choose the whole-house meter or utility account in Settings, or bring over the Home Assistant energy settings.'
+                : 'A parent can choose the meter in the energy settings.'}
+              action={isAdmin ? { label: 'Open energy settings', onClick: () => setSettingsOpen(true) } : null}
+            />
           )}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Kpi label="Used" value={formatKwh(data.grid.kwh)} tone="text-amber-300"

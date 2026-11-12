@@ -10,7 +10,7 @@ import { BUTTON, INPUT } from './styles';
  */
 
 /**
- * A labelled control. `group` renders a div instead of a <label>: a <label>
+ * A labelled control. `group` renders a div instead of a label element: a label
  * names every button inside it, so a picker full of buttons must not sit in one.
  */
 export function Field({ label, hint, children, group = false }: { label: string; hint?: string; children: ReactNode; group?: boolean }) {

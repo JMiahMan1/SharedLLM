@@ -13,7 +13,7 @@ import {
   type ClimateSettings, type EnergyWindow, type Thermostat,
 } from '../../lib/schedules';
 
-/** `<input type="datetime-local">` value for an ISO moment, in local time. */
+/** A datetime-local input's value for an ISO moment, in local time. */
 function toLocalInput(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);

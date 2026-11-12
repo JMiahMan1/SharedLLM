@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Download, History, Loader2, Play, Plus, Search, Upload, Workflow } from 'lucide-react';
+import { AlertTriangle, Download, History, Loader2, Play, Plus, Search, Upload, Workflow, Wrench } from 'lucide-react';
+import PageHeader from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import Toggle from '../components/ui/Toggle';
 import Modal from '../components/ui/Modal';
 import AutomationEditor from '../components/automations/AutomationEditor';
@@ -66,20 +68,22 @@ export default function Automations() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 pb-24">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Workflow className="text-sky-400" size={22} aria-hidden />
-          <h1 className="text-2xl font-bold text-white">Automations</h1>
-        </div>
-        {canEdit && (
-          <div className="flex flex-wrap gap-2">
+      <PageHeader
+        icon={Workflow}
+        tone="text-sky-400"
+        title="Automations"
+        subtitle={canEdit ? 'Rules, scripts and scenes the hub runs on its own.' : 'Scenes and routines you can run.'}
+        actions={canEdit ? (
+          <>
             <NewItemButton onPick={(k) => setEditing({ kind: k, id: null })} />
-            <button type="button" className={BUTTON} onClick={() => setImporting(true)}><Upload size={14} /> Import</button>
-            <button type="button" className={BUTTON} onClick={() => void exportAll()}><Download size={14} /> Export</button>
-            <button type="button" className={BUTTON} aria-pressed={showRepairs} onClick={() => setShowRepairs((v) => !v)}>Repairs</button>
-          </div>
-        )}
-      </div>
+            <button type="button" className={BUTTON} onClick={() => setImporting(true)}><Upload size={14} aria-hidden /> Import</button>
+            <button type="button" className={BUTTON} onClick={() => void exportAll()}><Download size={14} aria-hidden /> Export</button>
+            <button type="button" className={BUTTON} aria-pressed={showRepairs} onClick={() => setShowRepairs((v) => !v)}>
+              <Wrench size={14} aria-hidden /> Repairs
+            </button>
+          </>
+        ) : undefined}
+      />
 
       {canEdit && showRepairs && <RepairsPanel onSaved={refresh} />}
 
@@ -96,16 +100,16 @@ export default function Automations() {
       </div>
 
       {list.isLoading ? (
-        <div className="flex justify-center py-10" role="status" aria-label="Loading"><Loader2 className="animate-spin text-slate-500" /></div>
+        <CardSkeletons count={4} className="space-y-2" height="h-8" label="Loading automations" />
       ) : list.isError ? (
-        <div className="glass-panel rounded-2xl p-6 text-center">
-          <p className="text-sm text-red-300">{errorText(list.error, 'Could not reach the hub')}</p>
-          <button type="button" className={`${BUTTON} mt-2`} onClick={() => void list.refetch()}>Try again</button>
-        </div>
+        <ErrorRetry title={errorText(list.error, 'Could not reach the hub')} onRetry={() => void list.refetch()} />
       ) : items.length === 0 ? (
-        <div className="glass-panel rounded-2xl p-6 text-center text-sm text-slate-400">
-          {query || kind !== 'all' ? 'Nothing matches.' : 'No automations yet.'}
-        </div>
+        query || kind !== 'all' ? (
+          <EmptyState title="Nothing matches" detail="Try another word, or show all kinds." action={{ label: 'Show everything', onClick: () => { setQuery(''); setKind('all'); } }} />
+        ) : (
+          <EmptyState icon={<Workflow size={28} />} title="No automations yet"
+            detail={canEdit ? 'Create one with New, or import the ones from Home Assistant.' : 'Automations a parent sets up show up here.'} />
+        )
       ) : (
         <ul className="space-y-2" data-testid="automation-list">
           {items.map((item) => (

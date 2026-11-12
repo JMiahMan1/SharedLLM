@@ -140,6 +140,6 @@ describe('Cameras page', () => {
   it('says when there are no cameras to show', async () => {
     server.use(http.get('/api/cameras', () => HttpResponse.json({ cameras: [] })));
     renderWithProviders(<Cameras />, { route: '/cameras' });
-    expect(await screen.findByText('No cameras to show.')).toBeInTheDocument();
+    expect(await screen.findByText('No cameras yet')).toBeInTheDocument();
   });
 });

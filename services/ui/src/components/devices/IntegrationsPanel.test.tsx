@@ -11,6 +11,7 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => {
   return {
     failureText: real.failureText,
     failureStatus: real.failureStatus,
+    entriesNeedingAttention: real.entriesNeedingAttention,
     getEntries: vi.fn(),
     getBuilderLink: vi.fn(),
     getManualFlows: vi.fn(),
@@ -125,5 +126,13 @@ describe('IntegrationsPanel', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove anyway' }));
     await waitFor(() => expect(hub.removeEntry).toHaveBeenLastCalledWith('hk1', true));
     await waitFor(() => expect(screen.queryByTestId('remove-dialog')).toBeNull());
+  });
+
+  it('says which connections need attention and opens one from the summary', async () => {
+    wrap();
+    const health = await screen.findByTestId('integrations-health');
+    expect(within(health).getByText('1 connection needs attention')).toBeInTheDocument();
+    fireEvent.click(within(health).getByRole('button', { name: /Camera Hub: login failed/ }));
+    expect(screen.getByRole('button', { name: /Camera Hub/, expanded: true })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { useEffect } from 'react';
 import BottomNav from './BottomNav';
 import Header from './Header';
 import ServerConfigBanner from './ServerConfigBanner';
@@ -11,16 +10,6 @@ interface MobileShellProps {
 }
 
 const MobileShell = ({ children }: MobileShellProps) => {
-  const isNative = Capacitor.isNativePlatform();
-  const [isMobileWidth, setIsMobileWidth] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobileWidth(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
   // The document itself must never scroll under the phone shell: a drag would
   // slide the whole app under the status bar and the navigation buttons.
   // Only <main> scrolls; the lock lifts when the shell goes (the login page).
@@ -35,7 +24,6 @@ const MobileShell = ({ children }: MobileShellProps) => {
     };
   }, []);
 
-  const showBottomNav = isNative || isMobileWidth;
 
   return (
     // Pinned to the WebView's own box rather than sized by 100vh/100dvh, which
@@ -48,11 +36,14 @@ const MobileShell = ({ children }: MobileShellProps) => {
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-clear-bottom-bar scroll-smooth transition-all duration-300">
         {children}
       </main>
-      {showBottomNav && (
-        <div className="z-40 transition-all duration-300">
-          <BottomNav />
-        </div>
-      )}
+      {/* The app only mounts this shell for a phone or tablet (App.tsx: native,
+          a narrow window, or a phone or tablet browser), and the header here
+          has no menu, so the bottom bar is the only way between pages. It used
+          to hide at 768px and wider, which left a tablet browser with no
+          navigation at all. */}
+      <div className="z-40 transition-all duration-300">
+        <BottomNav />
+      </div>
     </div>
   );
 };

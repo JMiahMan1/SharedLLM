@@ -208,6 +208,46 @@ export async function saveRemap(remap: Remap): Promise<{ remap: Remap; report: R
   return (await apiClient.put(`${BASE}/remap`, { remap })).data;
 }
 
+export interface RemapEvidence {
+  old: string;
+  new: string | null;
+  kind: 'entity' | 'device' | 'registry_id';
+  reason: string;
+}
+
+/**
+ * The hub's proposal for repairing imported automations: old ids matched to
+ * the devices that replaced them, and thermostat actions to drop. A proposal
+ * only; nothing changes until it is saved.
+ */
+export async function suggestRemap(): Promise<{ remap: Remap; evidence: RemapEvidence[] }> {
+  return (await apiClient.post(`${BASE}/remap/suggest`)).data;
+}
+
+/**
+ * Merge a suggestion into the remap being edited. What the person already
+ * wrote wins over the suggestion for the same old id, and a dropped action
+ * already listed (same match) is not added twice.
+ */
+export function mergeRemap(current: Remap, suggested: Remap): Remap {
+  const out: Remap = { ...current };
+  for (const key of ['entities', 'registry_ids', 'devices'] as const) {
+    const merged = { ...(suggested[key] ?? {}), ...(current[key] ?? {}) };
+    if (Object.keys(merged).length) out[key] = merged;
+  }
+  const drops = [...(current.drop_actions ?? [])];
+  const seen = new Set(drops.map((d) => JSON.stringify(d.match)));
+  for (const d of suggested.drop_actions ?? []) {
+    const key = JSON.stringify(d.match);
+    if (!seen.has(key)) {
+      seen.add(key);
+      drops.push(d);
+    }
+  }
+  if (drops.length) out.drop_actions = drops;
+  return out;
+}
+
 export async function previewRemap(remap: Remap): Promise<{ report: RemapRow[] }> {
   return (await apiClient.post(`${BASE}/remap/preview`, { remap })).data;
 }

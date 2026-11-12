@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Loader2, Plane, Plus, Zap } from 'lucide-react';
+import { CalendarClock, Plane, Plus, Thermometer, Zap } from 'lucide-react';
+import PageHeader from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import ThermostatCard from '../components/schedules/ThermostatCard';
 import ProgramEditor, { SlotEditor } from '../components/schedules/ProgramEditor';
 import ClimateSettingsPanel from '../components/schedules/ClimateSettingsPanel';
@@ -40,22 +42,18 @@ export default function Schedules() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 pb-24">
-      <div className="flex items-center gap-2">
-        <CalendarClock className="text-sky-400" size={22} aria-hidden />
-        <h1 className="text-2xl font-bold text-white">Schedules</h1>
-      </div>
-      <div className="flex gap-1.5" role="tablist" aria-label="Schedules">
-        <Chip active={tab === 'thermostats'} onClick={() => setTab('thermostats')}>Thermostats</Chip>
-        <Chip active={tab === 'other'} onClick={() => setTab('other')}>Other schedules</Chip>
-      </div>
+      <PageHeader icon={CalendarClock} tone="text-sky-400" title="Schedules"
+        subtitle="Each thermostat's week, holds, away and energy saving, and other timed jobs.">
+        <div className="flex gap-1.5" role="tablist" aria-label="Schedules">
+          <Chip active={tab === 'thermostats'} onClick={() => setTab('thermostats')}>Thermostats</Chip>
+          <Chip active={tab === 'other'} onClick={() => setTab('other')}>Other schedules</Chip>
+        </div>
+      </PageHeader>
 
       {tab === 'other' ? <OtherSchedules catalog={catalog.data} /> : climate.isLoading ? (
-        <div className="flex justify-center py-10" role="status" aria-label="Loading"><Loader2 className="animate-spin text-slate-500" /></div>
+        <CardSkeletons count={2} className="grid grid-cols-1 gap-3 lg:grid-cols-2" height="h-48" label="Loading" />
       ) : climate.isError ? (
-        <div className="glass-panel rounded-2xl p-6 text-center">
-          <p className="text-sm text-red-300">{errorText(climate.error, 'Could not reach the hub')}</p>
-          <button type="button" className={`${BUTTON} mt-2`} onClick={() => void climate.refetch()}>Try again</button>
-        </div>
+        <ErrorRetry title={errorText(climate.error, 'Could not reach the hub')} onRetry={() => void climate.refetch()} />
       ) : climate.data && (
         <>
           {(climate.data.away?.active || climate.data.energy?.in_window) && (
@@ -92,7 +90,9 @@ export default function Schedules() {
           )}
 
           {thermostats.length === 0 ? (
-            <p className="glass-panel rounded-2xl p-6 text-center text-sm text-slate-400">No thermostats to show.</p>
+            <EmptyState icon={<Thermometer size={28} />} title="No thermostats yet"
+              detail={canEdit ? 'Add one in Devices; its schedule is set up here.' : 'Thermostats you are allowed to use show up here.'}
+              action={canEdit ? { label: 'Go to Devices', to: '/devices' } : null} />
           ) : (
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {thermostats.map((t) => (
@@ -112,7 +112,7 @@ export default function Schedules() {
                       onClick={() => setProgram(p)} aria-label={`Open program ${p.name}`}>
                       <span className="text-sm font-semibold text-white">{p.name}{p.enabled ? '' : ' (off)'}</span>
                       <span className="text-xs text-slate-500">
-                        {weekdaysText(p.weekdays)} · {p.entity_ids.map((id) => thermostats.find((t) => t.entity_id === id)?.name || id).join(', ')}
+                        {weekdaysText(p.weekdays)} · {p.entity_ids.map((id) => thermostats.find((t) => t.entity_id === id)?.name || 'a thermostat you cannot see').join(', ')}
                         {p.start_date || p.end_date ? ` · ${p.start_date ?? '...'} to ${p.end_date ?? '...'}` : ''}
                       </span>
                       {p.reason && <span className="text-[11px] text-amber-200">{p.reason}</span>}

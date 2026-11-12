@@ -14,6 +14,7 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => ({
   commissionMatter: vi.fn(),
   getManualFlows: vi.fn(),
   addByAddress: vi.fn(),
+  getEntries: vi.fn().mockResolvedValue({ areas: [{ area_id: 'den', name: 'Den' }], entries: [] }),
 }));
 vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() });
@@ -98,8 +99,20 @@ describe('NewDevicesPanel', () => {
     const dialog = await screen.findByTestId('adopt-dialog');
     fireEvent.change(within(dialog).getByLabelText(/Setup code/), { target: { value: '3497-011-2332' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /Add/ }));
-    await waitFor(() => expect(discovered.commissionMatter).toHaveBeenCalledWith('3497-011-2332', undefined));
+    await waitFor(() => expect(discovered.commissionMatter).toHaveBeenCalledWith('3497-011-2332', undefined, undefined));
     await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
+  });
+
+  it('puts a new Matter device straight into the chosen room', async () => {
+    vi.mocked(discovered.commissionMatter).mockResolvedValue({ status: 'adopted', entry_id: 'm1', name: 'Smart Bulb' });
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: /Add Matter device/ }));
+    const dialog = await screen.findByTestId('adopt-dialog');
+    // The rooms come from the hub, so the picker appears once they arrive.
+    fireEvent.change(await within(dialog).findByLabelText(/Room/), { target: { value: 'den' } });
+    fireEvent.change(within(dialog).getByLabelText(/Setup code/), { target: { value: '3497-011-2332' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Add$/ }));
+    await waitFor(() => expect(discovered.commissionMatter).toHaveBeenCalledWith('3497-011-2332', undefined, 'den'));
   });
 
   it('adds a device by address after the TV is accepted', async () => {
@@ -118,8 +131,8 @@ describe('NewDevicesPanel', () => {
     expect(await within(dialog).findByText('Accept on your TV')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(1, 'samsungtv',
-      { name: undefined, input: { host: '192.0.2.70' }, host: '192.0.2.70', url: undefined });
+      { name: undefined, area_id: undefined, input: { host: '192.0.2.70' }, host: '192.0.2.70', url: undefined });
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(2, 'samsungtv',
-      { name: undefined, input: { host: '192.0.2.70', session: 's1' }, host: '192.0.2.70', url: undefined });
+      { name: undefined, area_id: undefined, input: { host: '192.0.2.70', session: 's1' }, host: '192.0.2.70', url: undefined });
   });
 });

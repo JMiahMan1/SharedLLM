@@ -43,6 +43,11 @@ function status(username: string, technical: boolean) {
     bedtime_active: false, school_active: false, paused: false, locked: username !== 'sam', reason: username === 'sam' ? null : 'limit',
     until: null, resets_at: `${day(1)}T00:00:00`, blocked_apps: [], app_minutes_left: {},
     next_lock_at: new Date(Date.now() + 130 * 60000).toISOString(), next_lock_reason: 'bedtime',
+    locked_sections: ['chat', 'bible'],
+    locked_section_choices: [
+      { id: 'chat', label: 'Chat', core: true }, { id: 'calls', label: 'Calls' }, { id: 'devices', label: 'Lights and the TV remote' },
+      { id: 'bible', label: 'Bible' }, { id: 'music', label: 'Music' },
+    ],
   };
 }
 
@@ -220,6 +225,26 @@ test.describe('guardian page', () => {
     expect(o.doc).toBeLessThanOrEqual(o.client + 1);
     expect(unmocked).toEqual([]);
     expect(errors).toEqual([]);
+  });
+
+  test('"While locked" fits every screen and every choice is a 44px target', async ({ page }, info) => {
+    const { unmocked } = await mockApi(page, 'dad');
+    await page.goto('/guardian?area=time&member=sam');
+    const card = page.getByTestId('locked-sections-card');
+    const chat = page.getByTestId('locked-section-chat');
+    await expect(chat).toBeVisible();
+    for (const id of ['chat', 'calls', 'devices', 'bible', 'music']) {
+      // The whole row is the tap target (the label wraps the checkbox).
+      const box = await page.getByTestId(`locked-section-${id}`).locator('xpath=ancestor::label[1]').boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+    }
+    await chat.scrollIntoViewIfNeeded();
+    await card.screenshot({ path: info.outputPath(`while-locked-${info.project.name}.png`) });
+    await info.attach(`while locked (${info.project.name})`, { path: info.outputPath(`while-locked-${info.project.name}.png`), contentType: 'image/png' });
+    const o = await overflow(page);
+    expect(o.doc).toBeLessThanOrEqual(o.client + 1);
+    expect(unmocked).toEqual([]);
   });
 
   test('a mother gets no device policies or devices', async ({ page }) => {

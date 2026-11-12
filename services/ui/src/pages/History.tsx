@@ -1,12 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
+import StatisticsStatusCard from '../components/energy/StatisticsStatusCard';
 import { useQuery } from '@tanstack/react-query';
-import { History as HistoryIcon, Loader2, Search, X } from 'lucide-react';
+import { ChevronDown, History as HistoryIcon, Search, X } from 'lucide-react';
 import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
-  HISTORY_PRESETS, MAX_HISTORY_ENTITIES, failureText, getEntities, getHistory, getStatistics, isNumericSeries,
+  DOMAIN_LABELS, HISTORY_PRESETS, MAX_HISTORY_ENTITIES, failureText, getEntities, getHistory, getStatistics, isNumericSeries,
   mergeNumericSeries, numericPoints, parseEntityParam, rangeFromParams, seriesColour, stateColour, timelineSegments,
   type HistorySeries, type PickerEntity, type StatRow,
 } from '../lib/dashboards';
@@ -47,7 +51,7 @@ function EntityPicker({ selected, onChange }: { selected: string[]; onChange: (i
         {selected.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 rounded-full bg-white/10 pl-3 pr-1 text-xs" data-testid="history-chip">
             {byId.get(id)?.name ?? id}
-            <button type="button" aria-label={`Remove ${byId.get(id)?.name ?? id}`} className="min-h-9 min-w-9 flex items-center justify-center"
+            <button type="button" aria-label={`Remove ${byId.get(id)?.name ?? id}`} className="min-h-11 min-w-11 flex items-center justify-center"
               onClick={() => onChange(selected.filter((x) => x !== id))}><X size={12} /></button>
           </span>
         ))}
@@ -65,7 +69,7 @@ function EntityPicker({ selected, onChange }: { selected: string[]; onChange: (i
               <button type="button" role="option" aria-selected={false} className="w-full min-h-11 px-3 text-left text-sm flex justify-between gap-2"
                 onClick={() => { onChange([...selected, e.entity_id]); setQ(''); }}>
                 <span className="truncate">{e.name}</span>
-                <span className="text-xs text-slate-500 shrink-0">{e.domain}{e.unit ? ` · ${e.unit}` : ''}</span>
+                <span className="text-xs text-slate-500 shrink-0">{DOMAIN_LABELS[e.domain] ?? e.domain}{e.unit ? ` · ${e.unit}` : ''}</span>
               </button>
             </li>
           ))}
@@ -95,6 +99,8 @@ function Timeline({ name, points, startMs, endMs }: { name: string; points: Hist
 }
 
 export default function History() {
+  const isAdmin = Boolean(useAuth().user?.is_admin);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [params, setParams] = useSearchParams();
   const selected = parseEntityParam(params.get('e'));
   const range = rangeFromParams(params);
@@ -111,7 +117,7 @@ export default function History() {
     setParams(next, { replace: true });
   };
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'history', selected.join(','), range.key, range.key === 'custom' ? range.start.toISOString() : '',
       range.key === 'custom' ? range.end.toISOString() : ''],
     enabled: selected.length > 0,
@@ -164,8 +170,9 @@ export default function History() {
     : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold flex items-center gap-2"><HistoryIcon size={22} className="text-sky-400" />History</h1>
+    <div className="mx-auto w-full max-w-7xl space-y-4 pb-24" data-testid="history-page">
+      <PageHeader icon={HistoryIcon} tone="text-sky-400" title="History"
+        subtitle="How any device or sensor changed over time." />
       <div className="glass-card rounded-2xl p-4 space-y-3">
         <EntityPicker selected={selected} onChange={(ids) => update({ e: ids.join(',') || null })} />
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Range">
@@ -185,9 +192,12 @@ export default function History() {
         </div>
       </div>
 
-      {selected.length === 0 && <p className="text-slate-400">Pick devices or sensors to see how they changed.</p>}
-      {isLoading && selected.length > 0 && <p className="flex items-center gap-2 text-slate-400"><Loader2 className="animate-spin" size={16} />Loading...</p>}
-      {error && <p role="alert" className="text-red-400">{failureText(error, 'Could not load the history')}</p>}
+      {selected.length === 0 && (
+        <EmptyState icon={<HistoryIcon size={28} />} title="Pick something to chart"
+          detail="Search above for a device or sensor, a thermostat or a power circuit, and add up to twelve at once." />
+      )}
+      {isLoading && selected.length > 0 && <CardSkeletons count={1} className="grid" height="h-64" label="Loading history" />}
+      {error && <ErrorRetry title={failureText(error, 'Could not load the history')} onRetry={() => void refetch()} />}
 
       {charts.byUnit.map(({ unit, ids, rows }) => (
         <section key={unit || 'none'} className="glass-card rounded-2xl p-4" aria-label={unit ? `Values in ${unit}` : 'Values'}>
@@ -218,6 +228,16 @@ export default function History() {
             <Timeline key={id} name={nameOf(id)} points={data.history[id]} startMs={data.startMs} endMs={data.endMs} />
           ))}
         </section>
+      )}
+      {isAdmin && (
+        <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+          <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
+            <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+            Advanced: long-term history
+          </summary>
+          {/* Read from the hub only once opened. */}
+          {advancedOpen && <div className="pt-3"><StatisticsStatusCard /></div>}
+        </details>
       )}
     </div>
   );

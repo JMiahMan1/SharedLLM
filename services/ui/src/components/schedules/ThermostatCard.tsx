@@ -35,7 +35,7 @@ export default function ThermostatCard({ thermostat, programs, now, onSlot, onCh
   const week = useMemo(() => weekPrograms(programs, thermostat.entity_id, now), [programs, thermostat.entity_id, now]);
   const unit = thermostat.capabilities?.unit ?? '°';
   const tone = actionTone(thermostat.hvac_action ?? undefined, thermostat.state);
-  const name = thermostat.name || thermostat.entity_id;
+  const name = thermostat.name || 'Thermostat';
   const source = thermostat.effective?.source ?? 'none';
 
   async function resume() {

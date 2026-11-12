@@ -203,7 +203,8 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
 
   // The shell's activity beacon and the active-calls banner run on every page too.
   await page.route('**/api/activity', (route) => route.fulfill({ json: { status: 'ok' } }));
-  await page.route('**/api/communication/calls', (route) => route.fulfill({ json: { calls: [] } }));
+  // The call list is also asked for with ?device_key= (CallContext); a glob without a query misses that.
+  await page.route((url: URL) => url.pathname === '/api/communication/calls', (route) => route.fulfill({ json: { calls: [] } }));
 
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>

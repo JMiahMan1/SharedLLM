@@ -10,6 +10,9 @@ const HERMETIC_BASE_URL = `http://localhost:${HERMETIC_PORT}`;
 // skips that one spec rather than comparing a Mac render with a Linux one.
 const SKIP_VISUAL = process.env.SKIP_VISUAL === '1' ? '**/visual.spec.ts' : undefined;
 
+/** Specs that check layout at every size; the format projects run only these. */
+const FORMAT_SPECS = ['**/home/**/*.spec.ts', '**/guardian.spec.ts'];
+
 const projects: PlaywrightTestConfig['projects'] = [
   {
     name: 'hermetic-desktop',
@@ -31,6 +34,52 @@ const projects: PlaywrightTestConfig['projects'] = [
     workers: 4,
     use: {
       ...devices['Pixel 7'],
+      baseURL: HERMETIC_BASE_URL,
+    },
+  },
+  // Every UI change is checked at these sizes too: a small Android phone, and a
+  // tablet both ways round. They run in Chromium (the only browser CI installs),
+  // with a tablet's user agent so the app picks the shell it would on the device.
+  // They run the specs written for every format (FORMAT_SPECS); older specs
+  // still assume the desktop or Pixel 7 project and join as they are adapted.
+  {
+    name: 'hermetic-small-phone',
+    grepInvert: /@live/,
+    testMatch: FORMAT_SPECS,
+    testIgnore: SKIP_VISUAL,
+    fullyParallel: true,
+    workers: 4,
+    use: {
+      ...devices['Pixel 5'],
+      viewport: { width: 360, height: 740 },
+      baseURL: HERMETIC_BASE_URL,
+    },
+  },
+  {
+    name: 'hermetic-tablet-portrait',
+    grepInvert: /@live/,
+    testMatch: FORMAT_SPECS,
+    testIgnore: SKIP_VISUAL,
+    fullyParallel: true,
+    workers: 4,
+    use: {
+      ...devices['iPad Pro 11'],
+      browserName: 'chromium',
+      viewport: { width: 820, height: 1180 },
+      baseURL: HERMETIC_BASE_URL,
+    },
+  },
+  {
+    name: 'hermetic-tablet-landscape',
+    grepInvert: /@live/,
+    testMatch: FORMAT_SPECS,
+    testIgnore: SKIP_VISUAL,
+    fullyParallel: true,
+    workers: 4,
+    use: {
+      ...devices['iPad Pro 11 landscape'],
+      browserName: 'chromium',
+      viewport: { width: 1180, height: 820 },
       baseURL: HERMETIC_BASE_URL,
     },
   },

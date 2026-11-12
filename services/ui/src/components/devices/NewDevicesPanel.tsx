@@ -7,6 +7,7 @@ import {
   addByAddress,
   adoptDevice,
   commissionMatter,
+  getEntries,
   failureText,
   getDiscovered,
   getManualFlows,
@@ -48,6 +49,10 @@ export default function NewDevicesPanel() {
     staleTime: 10 * 60 * 1000 });
   const [showIgnored, setShowIgnored] = useState(false);
   const list = useQuery({ queryKey: QUERY_KEY, queryFn: getDiscovered, retry: false, refetchInterval: 60_000 });
+  // The rooms a new device can go in, from the same list the Integrations panel shows.
+  const dialogOpen = Boolean(adopting || manual || matterOpen);
+  const entries = useQuery({ queryKey: ['homehub-entries'], queryFn: getEntries, retry: false, enabled: dialogOpen });
+  const areas = entries.data?.areas ?? [];
   const refresh = () => queryClient.invalidateQueries({ queryKey: QUERY_KEY });
 
   const scan = useMutation({
@@ -204,7 +209,8 @@ export default function NewDevicesPanel() {
           title={`Add ${adopting.name || adopting.host}`}
           intro={`${adopting.label}${adopting.host ? ` at ${adopting.host}` : ''}`}
           needs={adopting.needs}
-          onSubmit={({ name, input }) => adoptDevice(adopting.id, { name, input })}
+          areas={areas}
+          onSubmit={({ name, areaId, input }) => adoptDevice(adopting.id, { name, area_id: areaId, input })}
           onDone={added}
           onClose={() => setAdopting(null)}
         />
@@ -214,7 +220,8 @@ export default function NewDevicesPanel() {
           title={`Add ${manual.label}`}
           intro="For a device that is on the network but was not found automatically."
           needs={manual.fields}
-          onSubmit={({ name, input }) => addByAddress(manual.domain, { name, input, host: input.host, url: input.url })}
+          areas={areas}
+          onSubmit={({ name, areaId, input }) => addByAddress(manual.domain, { name, area_id: areaId, input, host: input.host, url: input.url })}
           onDone={added}
           onClose={() => setManual(null)}
         />
@@ -224,7 +231,8 @@ export default function NewDevicesPanel() {
           title="Add a Matter device"
           intro="Put the device in pairing mode on the home network, then enter its setup code. Adding it can take a minute or two."
           needs={[MATTER_CODE]}
-          onSubmit={async ({ name, input }) => commissionMatter(input.code || '', name)}
+          areas={areas}
+          onSubmit={async ({ name, areaId, input }) => commissionMatter(input.code || '', name, areaId)}
           onDone={added}
           onClose={() => setMatterOpen(false)}
         />

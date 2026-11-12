@@ -21,7 +21,7 @@ export default function HoldControl({ thermostat, onChanged }: { thermostat: The
   const [choice, setChoice] = useState<HoldOption['value']>(() => (thermostat.next ? 'next_slot' : 'permanent'));
   const [time, setTime] = useState('');
   const [busy, setBusy] = useState(false);
-  const name = thermostat.name || thermostat.entity_id;
+  const name = thermostat.name || 'Thermostat';
 
   async function hold() {
     const until = holdUntilValue(choice, time);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_PAGES, navPagesFor } from './navItems';
+import { NAV_GROUPS, NAV_PAGES, navPagesFor, navSectionsFor, sectionOfPath } from './navItems';
 
 describe('nav pages', () => {
   it('offers the family guardian as its own page, right after Family', () => {
@@ -33,5 +33,57 @@ describe('nav pages', () => {
     // It was reachable only through Family -> Create.
     const recipes = NAV_PAGES.find((page) => page.path === '/recipes');
     expect(recipes?.label).toBe('Recipes');
+  });
+
+  describe('sections', () => {
+    const labelsIn = (isAdmin: boolean, key: string) =>
+      navSectionsFor(isAdmin).find((section) => section.key === key)?.pages.map((page) => page.label) ?? [];
+
+    it('puts every page in a known section', () => {
+      const keys = new Set(NAV_GROUPS.map((group) => group.key));
+      for (const page of NAV_PAGES) expect(keys.has(page.group)).toBe(true);
+    });
+
+    it('groups the everyday home controls under Home', () => {
+      expect(labelsIn(true, 'home')).toEqual(['Rooms', 'Climate', 'Cameras', 'Energy', 'Remote']);
+    });
+
+    it('groups setting up the home under Manage home, with Devices for an admin', () => {
+      expect(labelsIn(true, 'manage')).toEqual(['Schedules', 'Automations', 'Devices', 'History']);
+    });
+
+    it('files a member\'s "Shared files" with the other files, not with home setup', () => {
+      expect(labelsIn(false, 'manage')).not.toContain('Shared files');
+      expect(labelsIn(false, 'library')).toContain('Shared files');
+    });
+
+    it('hides admin-only pages from a member and keeps them for an admin', () => {
+      expect(labelsIn(false, 'system')).toEqual(['Settings']);
+      expect(labelsIn(true, 'system')).toEqual(expect.arrayContaining(['Lab', 'Admin', 'Settings']));
+    });
+
+    it('lists every page this role may open exactly once across the sections', () => {
+      for (const isAdmin of [true, false]) {
+        const inSections = navSectionsFor(isAdmin).flatMap((section) => section.pages.map((page) => page.path));
+        expect(inSections.sort()).toEqual(navPagesFor(isAdmin).map((page) => page.path).sort());
+      }
+    });
+
+    it('drops a section with nothing in it for the pages given', () => {
+      const onlyRooms = navPagesFor(true).filter((page) => page.path === '/rooms');
+      expect(navSectionsFor(true, onlyRooms).map((section) => section.key)).toEqual(['home']);
+    });
+
+    it('finds the section of a page and of its child routes', () => {
+      const sections = navSectionsFor(true);
+      expect(sectionOfPath(sections, '/climate')).toBe('home');
+      expect(sectionOfPath(sections, '/media/library')).toBe('everyday');
+      expect(sectionOfPath(sections, '/')).toBe('everyday');
+      expect(sectionOfPath(sections, '/nowhere')).toBeNull();
+    });
+
+    it('keeps the phone bottom bar at five pinned pages', () => {
+      expect(NAV_PAGES.filter((page) => page.pinnedOnMobile !== undefined).length).toBeLessThanOrEqual(5);
+    });
   });
 });

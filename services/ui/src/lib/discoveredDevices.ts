@@ -85,8 +85,9 @@ export async function ignoreDevice(id: string, ignored = true): Promise<Discover
   return resp.data;
 }
 
-export async function commissionMatter(code: string, name?: string): Promise<AdoptResult> {
-  const resp = await apiClient.post('/api/homehub/matter/commission', { code, ...(name ? { name } : {}) },
+export async function commissionMatter(code: string, name?: string, areaId?: string): Promise<AdoptResult> {
+  const resp = await apiClient.post('/api/homehub/matter/commission',
+    { code, ...(name ? { name } : {}), ...(areaId ? { area_id: areaId } : {}) },
     { timeout: 240_000 });
   return resp.data;
 }
@@ -175,6 +176,19 @@ export interface BuilderLink {
   reason?: string | null;
   entry_id?: string;
   title?: string;
+}
+
+/**
+ * Connections that are not working (any state but loaded, and not switched
+ * off on purpose), worst first: a failed setup before one still starting.
+ * This is how an admin sees at a glance that, say, the music server or a
+ * camera hub has dropped.
+ */
+export function entriesNeedingAttention<T extends { state: string; disabled_by?: string | null; title: string }>(entries: T[]): T[] {
+  const rank = (state: string) => (/error|failed/.test(state) ? 0 : state === 'not_loaded' ? 1 : 2);
+  return entries
+    .filter((e) => e.state !== 'loaded' && !e.disabled_by)
+    .sort((a, b) => rank(a.state) - rank(b.state) || a.title.localeCompare(b.title));
 }
 
 export async function getEntries(): Promise<EntriesList> {

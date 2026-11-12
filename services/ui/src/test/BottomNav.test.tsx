@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from './render';
 import BottomNav from '../components/layout/BottomNav';
@@ -75,5 +75,30 @@ describe('BottomNav custom layout', () => {
     expect(await screen.findByRole('link', { name: 'Notes' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Calendar' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Wander' })).not.toBeInTheDocument();
+  });
+});
+
+describe('BottomNav sections', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('lists the More pages under the same headings as the sidebar, home controls together', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<BottomNav />);
+    await user.click(screen.getByRole('button', { name: /more pages/i }));
+    const home = await screen.findByTestId('more-section-home');
+    for (const label of ['Rooms', 'Climate', 'Cameras', 'Energy']) {
+      expect(within(home).getByRole('link', { name: label })).toBeInTheDocument();
+    }
+    const manage = screen.getByTestId('more-section-manage');
+    expect(within(manage).getByRole('link', { name: 'Automations' })).toBeInTheDocument();
+    expect(within(manage).getByRole('link', { name: 'Schedules' })).toBeInTheDocument();
+  });
+
+  it('keeps the bar itself at five pages plus More', () => {
+    renderWithProviders(<BottomNav />);
+    const bar = screen.getByRole('button', { name: /more pages/i }).parentElement as HTMLElement;
+    expect(within(bar).getAllByRole('link')).toHaveLength(5);
   });
 });

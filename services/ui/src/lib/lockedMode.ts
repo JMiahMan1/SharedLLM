@@ -173,6 +173,13 @@ export function startLockedMode(): void {
   void Guard.addListener('lockedMode', setLockedMode).catch(() => undefined);
 }
 
+// The hermetic browser tests run on the dev server, where there is no native
+// Guard to ask; they turn locked mode on through this hook. A production
+// build drops it (import.meta.env.DEV is false there).
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __jarvisSetLockedMode?: typeof setLockedMode }).__jarvisSetLockedMode = setLockedMode;
+}
+
 /** For tests: forget the state and start over. */
 export function resetLockedModeForTests(): void {
   current = OFF;

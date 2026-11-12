@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
+import { useLocation as useRouterLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -466,7 +467,19 @@ const NotificationsRow = () => {
 };
 
 /** Who may drop in on you (and your children), and which devices answer by themselves. */
-const FamilyDropInSection = () => <FamilyDropInSettings />;
+/**
+ * "Who can drop in on me" is linked from the family calls screen
+ * (`/settings#family-drop-in`); a link inside the app does not scroll to its
+ * anchor by itself, so this does once the section is on screen.
+ */
+const FamilyDropInSection = () => {
+  const { hash } = useRouterLocation();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (hash === '#family-drop-in') ref.current?.scrollIntoView?.({ block: 'start' });
+  }, [hash]);
+  return <div id="family-drop-in" ref={ref} className="scroll-mt-4"><FamilyDropInSettings /></div>;
+};
 
 /** Always-on info-gathering sensors. Each can be turned off; related services stop with it. */
 const SensorsSection = () => {
