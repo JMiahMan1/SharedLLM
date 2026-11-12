@@ -16,7 +16,7 @@
 #   ./scripts/backup_databases.sh
 #
 # Nightly at 03:30, keeping 14 days (add with `crontab -e`):
-#   30 3 * * * /home/jeremiah/SharedLLM/scripts/backup_databases.sh >> /home/jeremiah/SharedLLM/data/backup.log 2>&1
+#   30 3 * * * /opt/SharedLLM/scripts/backup_databases.sh >> /opt/SharedLLM/data/backup.log 2>&1
 #
 # Environment:
 #   BACKUP_DIR    where the archives go (default: <root>/data/backups)

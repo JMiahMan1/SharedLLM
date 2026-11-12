@@ -148,7 +148,7 @@ def test_ma_rejected_token_is_an_error(test_client, monkeypatch):
 # Audiobookshelf with an API key
 
 def test_abs_api_key_is_enough_to_test(test_client, monkeypatch):
-    calls = _patch_client(monkeypatch, 200, payload={"username": "jeremiah"})
+    calls = _patch_client(monkeypatch, 200, payload={"username": "alex"})
 
     data = _test(
         test_client,
@@ -157,7 +157,7 @@ def test_abs_api_key_is_enough_to_test(test_client, monkeypatch):
     )
 
     assert data["status"] == "SUCCESS"
-    assert "jeremiah" in data["message"]
+    assert "alex" in data["message"]
     assert calls[0]["method"] == "get"
     assert calls[0]["url"] == "https://abs.example.com/api/me"
     assert calls[0]["headers"]["Authorization"] == "Bearer abs-key"
@@ -185,12 +185,12 @@ def test_abs_without_any_credential_fails_loudly(test_client):
 # GitHub (the branch referenced undefined names and always raised)
 
 def test_github_token_test_does_not_crash(test_client, monkeypatch):
-    _patch_client(monkeypatch, 200, payload={"login": "jeremiah"})
+    _patch_client(monkeypatch, 200, payload={"login": "alex"})
 
     data = _test(test_client, "GitHub", {"github_token": "gh-token"})
 
     assert data["status"] == "SUCCESS"
-    assert "jeremiah" in data["message"]
+    assert "alex" in data["message"]
 
 
 def test_github_requires_token(test_client):
@@ -223,20 +223,20 @@ def test_blank_secret_is_tested_with_the_saved_one(test_client, monkeypatch):
 
 def test_abs_username_password_posts_to_the_root_login(test_client, monkeypatch):
     """ABS logs in at /login; /api/login answers 401 (see abs_client.py)."""
-    calls = _patch_client(monkeypatch, 200, payload={"user": {"username": "jeremiah"}})
+    calls = _patch_client(monkeypatch, 200, payload={"user": {"username": "alex"}})
 
     data = _test(
         test_client,
         "Audiobookshelf",
         {
             "audiobookshelf_url": "https://abs.example.com/",
-            "audiobookshelf_user": "jeremiah",
+            "audiobookshelf_user": "alex",
             "audiobookshelf_pass": "pw",
         },
     )
 
     assert data["status"] == "SUCCESS"
-    assert "jeremiah" in data["message"]
+    assert "alex" in data["message"]
     assert calls[0]["method"] == "post"
     assert calls[0]["url"] == "https://abs.example.com/login"
 
@@ -251,7 +251,7 @@ def test_nextcloud_reads_the_users_own_ocs_status(test_client, monkeypatch):
     data = _test(
         test_client,
         "Nextcloud",
-        {"nextcloud_url": "https://cloud.example.com/", "nextcloud_user": "jeremiah", "nextcloud_pass": "pw"},
+        {"nextcloud_url": "https://cloud.example.com/", "nextcloud_user": "alex", "nextcloud_pass": "pw"},
     )
 
     assert data["status"] == "SUCCESS"
@@ -266,7 +266,7 @@ def test_nextcloud_permission_error_is_reported_not_read_as_success(test_client,
     data = _test(
         test_client,
         "Nextcloud",
-        {"nextcloud_url": "https://cloud.example.com", "nextcloud_user": "jeremiah", "nextcloud_pass": "pw"},
+        {"nextcloud_url": "https://cloud.example.com", "nextcloud_user": "alex", "nextcloud_pass": "pw"},
     )
 
     assert data["status"] == "ERROR"
@@ -325,7 +325,7 @@ def test_github_and_gitlab_use_the_verifying_client(test_client, monkeypatch):
         @asynccontextmanager
         async def _cm(*args, **kwargs):
             used[kind] += 1
-            yield _Client([], 200, {"login": "jeremiah", "username": "jeremiah"})
+            yield _Client([], 200, {"login": "alex", "username": "alex"})
 
         return _cm
 

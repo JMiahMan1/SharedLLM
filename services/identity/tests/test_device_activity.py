@@ -55,10 +55,10 @@ def login(session: Session, username: str) -> TestClient:
     return TestClient(app)
 
 
-def _client(session: Session, caller: str = "michele") -> TestClient:
+def _client(session: Session, caller: str = "sam") -> TestClient:
     main.engine = session.bind
     SQLModel.metadata.create_all(main.engine)
-    for name, admin in (("jeremiah", True), ("michele", False), ("kate", False)):
+    for name, admin in (("alex", True), ("sam", False), ("kate", False)):
         if session.exec(select(User).where(User.username == name)).first() is None:
             _make_user(session, name, is_admin=admin)
     session.commit()
@@ -68,7 +68,7 @@ def _client(session: Session, caller: str = "michele") -> TestClient:
 
 @pytest.fixture
 def client(session: Session):
-    yield _client(session, "michele")
+    yield _client(session, "sam")
     app.dependency_overrides = {}
 
 
@@ -115,7 +115,7 @@ class TestWhatADeviceHasReported:
             session.add(
                 DeviceEvent(
                     device_key=key,
-                    username="michele",
+                    username="sam",
                     event=event,
                     extra="{}",
                     at=(now - timedelta(hours=offset)).isoformat(),
@@ -135,7 +135,7 @@ class TestWhatADeviceHasReported:
         self, client: TestClient, session: Session
     ):
         key = _register(client)
-        session.add(DeviceEvent(device_key=key, username="michele", event="app_open", extra="{not json"))
+        session.add(DeviceEvent(device_key=key, username="sam", event="app_open", extra="{not json"))
         session.commit()
         body = client.get(f"/api/user-panel/devices/{key}/activity").json()
         assert body["counts"] == {"app_open": 1}
@@ -162,7 +162,7 @@ class TestTheWindowAndTheLimit:
         session.add(
             DeviceEvent(
                 device_key=key,
-                username="michele",
+                username="sam",
                 event="app_open",
                 extra="{}",
                 at="2026-01-01T00:00:00",
@@ -171,7 +171,7 @@ class TestTheWindowAndTheLimit:
         session.add(
             DeviceEvent(
                 device_key=key,
-                username="michele",
+                username="sam",
                 event="battery",
                 extra="{}",
                 at="2099-01-01T00:00:00",
@@ -210,7 +210,7 @@ class TestWhoseDeviceItIs:
     def test_an_admin_may_read_any_device(self, client: TestClient, session: Session):
         key = _register(client)
         _report(client, key, "app_open")
-        body = login(session, "jeremiah").get(f"/api/user-panel/devices/{key}/activity").json()
+        body = login(session, "alex").get(f"/api/user-panel/devices/{key}/activity").json()
         assert body["counts"] == {"app_open": 1}
 
     def test_the_response_carries_no_field_outside_the_allowlist(self, client: TestClient):

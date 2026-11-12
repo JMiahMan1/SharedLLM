@@ -85,12 +85,12 @@ async def _run(identify_result, monkeypatch, learning_for=None):
 @pytest.mark.asyncio
 async def test_audio_passes_through_and_the_speaker_is_recorded(monkeypatch):
     sent, received, reply, redis = await _run(
-        {"matched": True, "matched_username": "michele", "score": 0.91}, monkeypatch
+        {"matched": True, "matched_username": "sam", "score": 0.91}, monkeypatch
     )
     assert received == sent  # byte for byte
     assert reply.type == "transcript" and reply.data["text"] == "Turn on the kitchen lights."
     value, ttl = redis.values[voice_speaker.key("turn on the kitchen lights")]
-    assert voice_speaker.decode(value) == "michele" and ttl == voice_speaker.TTL_SECONDS
+    assert voice_speaker.decode(value) == "sam" and ttl == voice_speaker.TTL_SECONDS
 
 
 @pytest.mark.asyncio
@@ -111,13 +111,13 @@ async def test_a_learning_session_is_offered_the_next_match(monkeypatch):
     await _run(
         {
             "matched": True,
-            "matched_username": "michele",
+            "matched_username": "sam",
             "score": 0.91,
             "embedding": [0.01] * 256,
             "speech_seconds": 2.8,
         },
         monkeypatch,
-        learning_for="michele",
+        learning_for="sam",
     )
     await asyncio.wait_for(learned.wait(), 2)
 
@@ -167,14 +167,14 @@ async def test_learning_posts_the_signature_and_spends_a_sample(monkeypatch):
     monkeypatch.setattr(wyoming_stt.aiohttp, "ClientSession", FakeSession)
     redis = _LearnRedis()
     await wyoming_stt._learn(redis, {
-        "matched_username": "michele",
+        "matched_username": "sam",
         "score": 0.91,
         "embedding": [0.01] * 256,
         "speech_seconds": 2.8,
     })
 
     assert calls["url"].endswith("/api/voice/learn")
-    assert calls["json"]["username"] == "michele"
+    assert calls["json"]["username"] == "sam"
     assert calls["json"]["model"] == wyoming_stt.voiceprint.MODEL
     assert redis.value == "1" and not redis.deleted
 
@@ -188,7 +188,7 @@ async def test_an_unsure_match_is_never_learned(monkeypatch):
     monkeypatch.setattr(wyoming_stt.aiohttp, "ClientSession", NoSession)
     redis = _LearnRedis()
     await wyoming_stt._learn(redis, {
-        "matched_username": "michele",
+        "matched_username": "sam",
         "score": 0.7,
         "embedding": [0.01] * 256,
     })
@@ -207,8 +207,8 @@ def test_pcm_is_converted_to_16k_mono():
 
 
 def test_a_voice_never_opens_the_house_even_an_admins():
-    admin_by_voice = {"user": "jeremiah", "is_admin": True, "identified_by": "voice"}
+    admin_by_voice = {"user": "alex", "is_admin": True, "identified_by": "voice"}
     assert not authorize_action(admin_by_voice, "lock", "unlock")
     assert not authorize_action(admin_by_voice, "cover", "open")
     assert authorize_action(admin_by_voice, "light", "turn_on")
-    assert authorize_action({"user": "jeremiah", "is_admin": True}, "lock", "unlock")
+    assert authorize_action({"user": "alex", "is_admin": True}, "lock", "unlock")

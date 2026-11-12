@@ -30,7 +30,7 @@ def accounts(monkeypatch):
 
     def install(bot_answers, member_answers=lambda e: (True, {}, "")):
         bot = _Account("jarvis", bot_answers)
-        member = _Account("michele", member_answers)
+        member = _Account("sam", member_answers)
         monkeypatch.setattr(talk, "_jarvis_bot", lambda: bot)
         return bot, member, member_posts
 
@@ -41,7 +41,7 @@ def accounts(monkeypatch):
 async def test_a_bot_post_is_authored_by_jarvis(accounts):
     bot, member, member_posts = accounts(lambda e: (True, {"id": 5}, ""))
 
-    ok, _, _ = await talk._post_as_jarvis(member, "room-1", {"message": "✅ Michele got it!"})
+    ok, _, _ = await talk._post_as_jarvis(member, "room-1", {"message": "✅ Sam got it!"})
 
     assert ok and bot.calls == [("POST", "/ocs/v2.php/apps/spreed/api/v1/chat/room-1")]
     assert member_posts == []

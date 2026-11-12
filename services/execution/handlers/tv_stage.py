@@ -275,7 +275,7 @@ def _local_networks() -> set[ipaddress.IPv4Network]:
 
 
 def neighbour_networks(nets: set[ipaddress.IPv4Network], span: int = 1) -> set[ipaddress.IPv4Network]:
-    """The private /24s beside each of ``nets`` (pure). 192.168.2.0/24 -> .1 and .3."""
+    """The private /24s beside each of ``nets`` (pure). 192.0.2.0/24 -> 192.0.1.0/24 and 192.0.3.0/24."""
     out: set[ipaddress.IPv4Network] = set()
     for net in nets:
         a, b, c, _ = net.network_address.packed

@@ -19,7 +19,7 @@ def provider(monkeypatch):
 def request(action, **kwargs):
     from services.execution.schemas import TalkRequest
 
-    return TalkRequest(user_context={"user": "jeremiah"}, action=action, **kwargs)
+    return TalkRequest(user_context={"user": "alex"}, action=action, **kwargs)
 
 
 async def test_create_poll_posts_question_and_options(provider, monkeypatch):

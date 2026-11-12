@@ -131,7 +131,7 @@ class FakeClient:
 def _provider(files, library_path="/Books/Text", **extra):
     settings = {
         "url": "https://cloud.example",
-        "username": "summers",
+        "username": "rivera",
         "password": "secret",
         "library_path": library_path,
     }

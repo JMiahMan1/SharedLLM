@@ -319,7 +319,7 @@ def _instant(value: str | None, *, field: str = "recorded_at") -> str:
 def _household_tz():
     """The zone the household lives in - the service's own local zone.
 
-    The container runs with ``TZ=America/Phoenix``, so ``astimezone()`` is the
+    The container runs with the household ``TZ``, so ``astimezone()`` is the
     same zone ``_instant`` anchors a bare instant to.
     """
     return datetime.now().astimezone().tzinfo

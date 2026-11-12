@@ -3,7 +3,7 @@
 Every couple of minutes, for each ESPHome device that has an owner and a
 ``set_glance`` action (the Jarvis watch), find family members the owner may
 see who are on the move and ask geo for their drive time home (OSRM, subject
-to sharing consent), e.g. "Michele · home 18m". The line is pushed only when
+to sharing consent), e.g. "Sam · home 18m". The line is pushed only when
 it changes -- each push wakes the watch's radio -- and cleared once nobody is
 driving.
 """
@@ -29,7 +29,7 @@ _last_pushed: dict[str, str] = {}
 
 
 def glance_line(etas: list[tuple[str, dict]]) -> str:
-    """'Michele · home 18m' (two people at most) from (name, eta) pairs."""
+    """'Sam · home 18m' (two people at most) from (name, eta) pairs."""
     parts = []
     for name, eta in etas[:2]:
         if eta.get("arrived"):

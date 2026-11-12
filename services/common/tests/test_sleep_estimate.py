@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from services.common.sleep_estimate import estimate_night, night_window
 
-TZ = "America/Phoenix"  # no DST, so the arithmetic below stays readable
+TZ = "Etc/GMT+7"  # no DST, so the arithmetic below stays readable
 
 
 def ms(text: str) -> int:

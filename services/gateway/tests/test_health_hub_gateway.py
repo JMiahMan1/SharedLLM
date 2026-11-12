@@ -222,13 +222,13 @@ def test_active_minutes_composes_geo_and_the_health_store(client, monkeypatch):
 def _family_client(monkeypatch, days):
     """Patch the caller, the health answer and the telemetry read for /family."""
     async def _ident(_request):
-        return {"user": "michele", "is_admin": False}
+        return {"user": "jamie", "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_acting_identity", _ident)
     family = {
-        "viewer": "michele",
+        "viewer": "jamie",
         "day": "2026-10-21",
-        "people": [{"user_id": "jeremiah", "scopes": ["digital"], "digital": {"shared": True}}],
+        "people": [{"user_id": "alex", "scopes": ["digital"], "digital": {"shared": True}}],
     }
 
     class _Health:
@@ -262,7 +262,7 @@ def test_the_digital_scope_is_filled_from_telemetry(client, monkeypatch):
     body = client.get("/api/health/family", params={"day": "2026-10-21"}).json()
     assert body["people"][0]["digital"] == {
         "shared": True, "available": True, "screen_time_min": 60, "day": "2026-10-21"}
-    assert any(url.endswith("/api/telemetry/usage/jeremiah") for url, _kw in seen)
+    assert any(url.endswith("/api/telemetry/usage/alex") for url, _kw in seen)
 
 
 def test_the_digital_scope_says_when_no_day_was_reported(client, monkeypatch):

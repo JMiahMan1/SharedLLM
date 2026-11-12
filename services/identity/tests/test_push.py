@@ -16,10 +16,10 @@ def session_fixture():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        session.add(User(username="michele", display_name="Michele", is_admin=False))
-        session.add(User(username="jeremiah", display_name="Jeremiah", is_admin=True))
+        session.add(User(username="sam", display_name="Sam", is_admin=False))
+        session.add(User(username="alex", display_name="Alex", is_admin=True))
         session.add(User(username="mom", display_name="Mom", family_role="mother"))
-        session.add(User(username="gracie", display_name="Gracie", family_role="teen", mother_username="mom"))
+        session.add(User(username="taylor", display_name="Taylor", family_role="teen", mother_username="mom"))
         session.commit()
         yield session
 
@@ -39,18 +39,18 @@ def as_user_fixture(session: Session):
 
 
 def test_topic_is_created_once_and_kept(as_user, session):
-    client = as_user("michele")
-    first = client.get("/api/internal/push/topic", params={"username": "michele"}).json()["topic"]
-    again = client.get("/api/internal/push/topic", params={"username": "michele"}).json()["topic"]
+    client = as_user("sam")
+    first = client.get("/api/internal/push/topic", params={"username": "sam"}).json()["topic"]
+    again = client.get("/api/internal/push/topic", params={"username": "sam"}).json()["topic"]
     assert first == again
-    assert re.fullmatch(r"jarvis-michele-[A-Za-z0-9_-]{24}", first)
-    stored = session.exec(select(User).where(User.username == "michele")).first()
+    assert re.fullmatch(r"jarvis-sam-[A-Za-z0-9_-]{24}", first)
+    stored = session.exec(select(User).where(User.username == "sam")).first()
     session.refresh(stored)
     assert stored.push_topic == first
 
 
 def test_topic_for_an_unknown_person_is_404(as_user):
-    assert as_user("michele").get("/api/internal/push/topic", params={"username": "nobody"}).status_code == 404
+    assert as_user("sam").get("/api/internal/push/topic", params={"username": "nobody"}).status_code == 404
 
 
 def test_topics_are_valid_ntfy_names_for_any_username():
@@ -59,17 +59,17 @@ def test_topics_are_valid_ntfy_names_for_any_username():
 
 
 def test_preferences_default_on_and_admin_only_for_admins(as_user):
-    body = as_user("michele").get("/api/users/me/notification-preferences").json()
+    body = as_user("sam").get("/api/users/me/notification-preferences").json()
     assert "admin" not in body["preferences"]
     assert all(body["preferences"].values())
     assert set(body["preferences"]) == set(push.CATEGORIES) - {"admin"}
 
-    admin = as_user("jeremiah").get("/api/users/me/notification-preferences").json()
+    admin = as_user("alex").get("/api/users/me/notification-preferences").json()
     assert admin["preferences"]["admin"] is True
 
 
 def test_put_changes_only_the_named_switches(as_user):
-    client = as_user("michele")
+    client = as_user("sam")
     resp = client.put("/api/users/me/notification-preferences", json={"bible": False})
     assert resp.status_code == 200
     assert resp.json()["preferences"]["bible"] is False
@@ -79,7 +79,7 @@ def test_put_changes_only_the_named_switches(as_user):
 
 
 def test_put_rejects_unknown_categories_and_non_booleans(as_user):
-    client = as_user("michele")
+    client = as_user("sam")
     assert client.put("/api/users/me/notification-preferences", json={"nope": False}).status_code == 422
     assert client.put("/api/users/me/notification-preferences", json={"chat": "off"}).status_code == 422
     # admin is not a switch a non-admin has
@@ -87,42 +87,42 @@ def test_put_rejects_unknown_categories_and_non_booleans(as_user):
 
 
 def test_internal_preferences_cover_every_category(as_user):
-    client = as_user("jeremiah")
+    client = as_user("alex")
     client.put("/api/users/me/notification-preferences", json={"raven": False})
-    body = client.get("/api/internal/push/preferences", params={"username": "jeremiah"}).json()
+    body = client.get("/api/internal/push/preferences", params={"username": "alex"}).json()
     assert set(body["preferences"]) == set(push.CATEGORIES)
     assert body["preferences"]["raven"] is False and body["is_admin"] is True
 
-    other = client.get("/api/internal/push/preferences", params={"username": "michele"}).json()
+    other = client.get("/api/internal/push/preferences", params={"username": "sam"}).json()
     assert other["preferences"]["admin"] is False and other["is_admin"] is False
 
 
 def test_admins_lists_only_admins(as_user):
-    assert as_user("michele").get("/api/internal/push/admins").json() == {"admins": ["jeremiah"]}
+    assert as_user("sam").get("/api/internal/push/admins").json() == {"admins": ["alex"]}
 
 
 def _reg(**over):
-    body = {"username": "michele", "device_id": "pixel-1", "app": "com.nextcloud.talk2", "token": "tok-1"}
+    body = {"username": "sam", "device_id": "pixel-1", "app": "com.nextcloud.talk2", "token": "tok-1"}
     body.update(over)
     return body
 
 
 def test_up_register_is_idempotent_and_listed(as_user):
-    client = as_user("michele")
+    client = as_user("sam")
     first = client.post("/api/internal/push/up/register", json=_reg()).json()
     again = client.post("/api/internal/push/up/register", json=_reg()).json()
     assert first["topic"] == again["topic"] and first["topic"].startswith("up")
     other = client.post("/api/internal/push/up/register", json=_reg(device_id="tablet")).json()
     assert other["topic"] != first["topic"]
 
-    everything = client.get("/api/internal/push/up", params={"username": "michele"}).json()["registrations"]
+    everything = client.get("/api/internal/push/up", params={"username": "sam"}).json()["registrations"]
     assert [r["device_id"] for r in everything] == ["pixel-1", "tablet"]
-    one = client.get("/api/internal/push/up", params={"username": "michele", "device_id": "tablet"}).json()
+    one = client.get("/api/internal/push/up", params={"username": "sam", "device_id": "tablet"}).json()
     assert [r["topic"] for r in one["registrations"]] == [other["topic"]]
 
 
 def test_up_unregister_removes_only_that_registration(as_user, session):
-    client = as_user("michele")
+    client = as_user("sam")
     client.post("/api/internal/push/up/register", json=_reg())
     client.post("/api/internal/push/up/register", json=_reg(app="org.matrix.client"))
     resp = client.post("/api/internal/push/up/unregister", json=_reg()).json()
@@ -132,9 +132,9 @@ def test_up_unregister_removes_only_that_registration(as_user, session):
 
 
 def test_up_unregister_without_a_device_matches_app_and_token(as_user, session):
-    client = as_user("michele")
+    client = as_user("sam")
     client.post("/api/internal/push/up/register", json=_reg(device_id="tablet"))
-    body = {"username": "michele", "app": "com.nextcloud.talk2", "token": "tok-1"}
+    body = {"username": "sam", "app": "com.nextcloud.talk2", "token": "tok-1"}
     assert client.post("/api/internal/push/up/unregister", json=body).json()["removed"] == 1
     assert session.exec(select(UnifiedPushRegistration)).all() == []
 
@@ -143,18 +143,18 @@ def test_up_unregister_without_a_device_matches_app_and_token(as_user, session):
     {"device_id": ""}, {"device_id": "a b"}, {"app": "x/y"}, {"token": ""}, {"token": "t" * 1025}, {"username": ""},
 ])
 def test_up_register_validates(as_user, bad):
-    assert as_user("michele").post("/api/internal/push/up/register", json=_reg(**bad)).status_code == 422
+    assert as_user("sam").post("/api/internal/push/up/register", json=_reg(**bad)).status_code == 422
 
 
 def test_up_register_for_unknown_person_is_404(as_user):
-    assert as_user("michele").post("/api/internal/push/up/register", json=_reg(username="nobody")).status_code == 404
+    assert as_user("sam").post("/api/internal/push/up/register", json=_reg(username="nobody")).status_code == 404
 
 
 def test_forget_user_drops_their_push_data(as_user, session):
-    client = as_user("michele")
+    client = as_user("sam")
     client.put("/api/users/me/notification-preferences", json={"chat": False})
     client.post("/api/internal/push/up/register", json=_reg())
-    push.forget_user(session, "michele")
+    push.forget_user(session, "sam")
     assert session.exec(select(UserNotificationPreference)).all() == []
     assert session.exec(select(UnifiedPushRegistration)).all() == []
 
@@ -163,8 +163,8 @@ def test_internal_routes_need_the_internal_secret(session):
     main.engine = session.bind
     app.dependency_overrides = {}
     client = TestClient(app)
-    for path in ("/api/internal/push/topic?username=michele", "/api/internal/push/admins",
-                 "/api/internal/push/preferences?username=michele", "/api/internal/push/up?username=michele"):
+    for path in ("/api/internal/push/topic?username=sam", "/api/internal/push/admins",
+                 "/api/internal/push/preferences?username=sam", "/api/internal/push/up?username=sam"):
         assert client.get(path).status_code in (401, 403), path
     assert client.post("/api/internal/push/up/register", json=_reg()).status_code in (401, 403)
     assert client.get("/api/users/me/notification-preferences").status_code == 401
@@ -172,18 +172,18 @@ def test_internal_routes_need_the_internal_secret(session):
 
 def test_internal_put_switches_one_persons_category(as_user):
     """Geo carries its old presence switch over through this."""
-    client = as_user("jeremiah")
-    body = client.put("/api/internal/push/preferences", params={"username": "michele"},
+    client = as_user("alex")
+    body = client.put("/api/internal/push/preferences", params={"username": "sam"},
                       json={"family_presence": False}).json()
     assert body["preferences"]["family_presence"] is False and body["preferences"]["chat"] is True
-    assert client.put("/api/internal/push/preferences", params={"username": "michele"},
+    assert client.put("/api/internal/push/preferences", params={"username": "sam"},
                       json={"nonsense": False}).status_code == 422
     assert client.put("/api/internal/push/preferences", params={"username": "nobody"},
                       json={"family_presence": False}).status_code == 404
 
 
 def test_a_minor_cannot_switch_off_a_notice_their_parent_has_not_allowed(as_user):
-    client = as_user("gracie")
+    client = as_user("taylor")
     body = client.get("/api/users/me/notification-preferences").json()
     assert set(body["locked"]) == set(push.CATEGORIES) - {"admin"}
     resp = client.put("/api/users/me/notification-preferences",
@@ -194,17 +194,17 @@ def test_a_minor_cannot_switch_off_a_notice_their_parent_has_not_allowed(as_user
 
 
 def test_a_parents_allow_list_unlocks_only_the_named_categories(as_user):
-    client = as_user("gracie")
+    client = as_user("taylor")
     # Default (no rule): even the harmless switch is locked.
     resp = client.get("/api/users/me/notification-preferences").json()
     assert "family_presence" in resp["locked"]
     # A parent allows the arrivals switch for the teen.
     parent = as_user("mom")
-    put = parent.put("/api/screen-time/gracie/rules",
+    put = parent.put("/api/screen-time/taylor/rules",
                      json={"notification_toggle_allowed": ["family_presence"]})
     assert put.status_code == 200
     assert put.json()["rules"]["notification_toggle_allowed"] == ["family_presence"]
-    client = as_user("gracie")  # the fixture rebinds the caller globally per client
+    client = as_user("taylor")  # the fixture rebinds the caller globally per client
     resp = client.get("/api/users/me/notification-preferences").json()
     assert "family_presence" not in resp["locked"]
     assert "chat" in resp["locked"]
@@ -217,16 +217,16 @@ def test_a_parents_allow_list_unlocks_only_the_named_categories(as_user):
 
 def test_family_safety_can_never_be_allowed_for_a_minor(as_user):
     parent = as_user("mom")
-    assert parent.put("/api/screen-time/gracie/rules",
+    assert parent.put("/api/screen-time/taylor/rules",
                       json={"notification_toggle_allowed": ["family_safety"]}).status_code == 422
-    assert parent.put("/api/screen-time/gracie/rules",
+    assert parent.put("/api/screen-time/taylor/rules",
                       json={"notification_toggle_allowed": ["admin"]}).status_code == 422
-    assert parent.put("/api/screen-time/gracie/rules",
+    assert parent.put("/api/screen-time/taylor/rules",
                       json={"notification_toggle_allowed": ["nonsense"]}).status_code == 422
 
 
 def test_grown_ups_are_not_locked(as_user):
-    body = as_user("michele").get("/api/users/me/notification-preferences").json()
+    body = as_user("sam").get("/api/users/me/notification-preferences").json()
     assert body["locked"] == []
 
 
@@ -235,9 +235,9 @@ def test_unknown_ids_in_a_stored_allow_list_are_dropped(as_user, session):
     safety categories are dropped when the allow-list is read."""
     from services.identity.models import ScreenRules
 
-    session.add(ScreenRules(username="gracie", data='{"notification_toggle_allowed": ["family_presence", "family_safety", "nope"]}'))
+    session.add(ScreenRules(username="taylor", data='{"notification_toggle_allowed": ["family_presence", "family_safety", "nope"]}'))
     session.commit()
-    body = as_user("gracie").get("/api/users/me/notification-preferences").json()
+    body = as_user("taylor").get("/api/users/me/notification-preferences").json()
     assert body["locked"] == [c for c in body["locked"] if c != "family_presence"]
     assert "family_presence" not in body["locked"]
     assert "family_safety" in body["locked"]
@@ -246,7 +246,7 @@ def test_unknown_ids_in_a_stored_allow_list_are_dropped(as_user, session):
 def test_a_parent_can_disable_and_enable_notifications_for_a_minor(as_user):
     parent = as_user("mom")
     put = parent.put(
-        "/api/screen-time/gracie/rules",
+        "/api/screen-time/taylor/rules",
         json={"notification_disabled": ["raven", "jobs"], "notification_toggle_allowed": ["bible"]},
     )
     assert put.status_code == 200
@@ -254,12 +254,12 @@ def test_a_parent_can_disable_and_enable_notifications_for_a_minor(as_user):
     assert put.json()["rules"]["notification_toggle_allowed"] == ["bible"]
 
     # Safety and admin categories cannot be disabled for a minor.
-    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["family_safety"]}).status_code == 422
-    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["admin"]}).status_code == 422
-    assert parent.put("/api/screen-time/gracie/rules", json={"notification_disabled": ["nonsense"]}).status_code == 422
+    assert parent.put("/api/screen-time/taylor/rules", json={"notification_disabled": ["family_safety"]}).status_code == 422
+    assert parent.put("/api/screen-time/taylor/rules", json={"notification_disabled": ["admin"]}).status_code == 422
+    assert parent.put("/api/screen-time/taylor/rules", json={"notification_disabled": ["nonsense"]}).status_code == 422
 
     # For the minor, disabled categories are off and locked; unlocked categories can be toggled; others are locked on.
-    client = as_user("gracie")
+    client = as_user("taylor")
     resp = client.get("/api/users/me/notification-preferences").json()
     assert resp["preferences"]["raven"] is False
     assert resp["preferences"]["jobs"] is False

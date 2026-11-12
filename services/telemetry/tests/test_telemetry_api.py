@@ -30,32 +30,32 @@ def test_health_is_public(client):
 
 
 def test_endpoints_require_internal_secret(client):
-    assert client.get("/api/telemetry/schedules/jeremiah").status_code == 401
-    assert client.get("/api/telemetry/schedules/jeremiah", headers={"X-Internal-Secret": "wrong"}).status_code == 401
+    assert client.get("/api/telemetry/schedules/alex").status_code == 401
+    assert client.get("/api/telemetry/schedules/alex", headers={"X-Internal-Secret": "wrong"}).status_code == 401
 
 
 def test_schedule_can_be_created_and_read_back(client, rc):
     resp = client.put(
-        "/api/telemetry/schedules/jeremiah",
+        "/api/telemetry/schedules/alex",
         headers=HEADERS,
-        json={"type": "health", "period": "daily", "run_at": "21:00", "timezone": "America/Phoenix"},
+        json={"type": "health", "period": "daily", "run_at": "21:00", "timezone": "Etc/GMT+7"},
     )
     assert resp.status_code == 200
     job = resp.json()["job"]
     assert job["run_at"] == "21:00"
     assert job["enabled"] is True
 
-    listed = client.get("/api/telemetry/schedules/jeremiah", headers=HEADERS).json()["jobs"]
+    listed = client.get("/api/telemetry/schedules/alex", headers=HEADERS).json()["jobs"]
     assert len(listed) == 1
     assert listed[0]["period"] == "daily"
 
 
 def test_schedule_update_reuses_same_job(client, rc):
     body = {"type": "power", "period": "monthly", "run_at": "20:00", "timezone": "UTC"}
-    first = client.put("/api/telemetry/schedules/jeremiah", headers=HEADERS, json=body).json()["job"]
-    second = client.put("/api/telemetry/schedules/jeremiah", headers=HEADERS, json=body).json()["job"]
+    first = client.put("/api/telemetry/schedules/alex", headers=HEADERS, json=body).json()["job"]
+    second = client.put("/api/telemetry/schedules/alex", headers=HEADERS, json=body).json()["job"]
     assert first["id"] == second["id"]
-    jobs = client.get("/api/telemetry/schedules/jeremiah", headers=HEADERS).json()["jobs"]
+    jobs = client.get("/api/telemetry/schedules/alex", headers=HEADERS).json()["jobs"]
     assert len(jobs) == 1
 
 
@@ -71,12 +71,12 @@ def test_schedule_rejects_unknown_type_and_period(client, rc):
 
 
 def test_schedules_are_isolated_per_user(client, rc):
-    client.put("/api/telemetry/schedules/jeremiah", headers=HEADERS, json={"type": "health", "period": "daily"})
+    client.put("/api/telemetry/schedules/alex", headers=HEADERS, json={"type": "health", "period": "daily"})
     client.put("/api/telemetry/schedules/work", headers=HEADERS, json={"type": "health", "period": "daily"})
-    mine = client.get("/api/telemetry/schedules/jeremiah", headers=HEADERS).json()["jobs"]
+    mine = client.get("/api/telemetry/schedules/alex", headers=HEADERS).json()["jobs"]
     theirs = client.get("/api/telemetry/schedules/work", headers=HEADERS).json()["jobs"]
     assert len(mine) == 1 and len(theirs) == 1
-    assert mine[0]["user"] == "jeremiah"
+    assert mine[0]["user"] == "alex"
     assert theirs[0]["user"] == "work"
 
 
@@ -84,7 +84,7 @@ def test_on_demand_request_is_queued(client, rc):
     resp = client.post(
         "/api/telemetry/reports/request",
         headers=HEADERS,
-        json={"user": "jeremiah", "type": "health", "period": "weekly"},
+        json={"user": "alex", "type": "health", "period": "weekly"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -103,16 +103,16 @@ def test_reports_listing_and_latest(client, rc):
     async def seed():
         rc_ = rc
         await store.save_report(rc_, {
-            "id": "r1", "user": "jeremiah", "type": "health", "period": "daily",
+            "id": "r1", "user": "alex", "type": "health", "period": "daily",
             "status": "ready", "analysis": "ok", "stats": {}, "generated_ts": 1,
         })
 
     anyio.run(seed)
 
-    listed = client.get("/api/telemetry/reports/jeremiah", headers=HEADERS).json()["reports"]
+    listed = client.get("/api/telemetry/reports/alex", headers=HEADERS).json()["reports"]
     assert len(listed) == 1
     latest = client.get(
-        "/api/telemetry/reports/jeremiah/latest?type=health", headers=HEADERS
+        "/api/telemetry/reports/alex/latest?type=health", headers=HEADERS
     ).json()["report"]
     assert latest["id"] == "r1"
 
@@ -121,12 +121,12 @@ def test_notifications_endpoint(client, rc):
     import anyio
 
     async def seed():
-        await store.push_notification(rc, "jeremiah", {
+        await store.push_notification(rc, "alex", {
             "id": "n1", "kind": "report_ready", "title": "hi", "read": False,
         })
 
     anyio.run(seed)
-    body = client.get("/api/telemetry/notifications/jeremiah", headers=HEADERS).json()
+    body = client.get("/api/telemetry/notifications/alex", headers=HEADERS).json()
     assert body["notifications"][-1]["kind"] == "report_ready"
 
 
@@ -138,12 +138,12 @@ def test_another_service_can_notify_a_user(client, rc, monkeypatch):
         return {"webpush": 1, "fcm": False, "pruned": 0}
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
-                       json={"user": "Michele", "kind": "presence", "title": "Jeremiah left Work",
-                             "body": "Home in about 22 minutes.", "data": {"person": "jeremiah"}})
+                       json={"user": "Sam", "kind": "presence", "title": "Alex left Work",
+                             "body": "Home in about 22 minutes.", "data": {"person": "alex"}})
     assert resp.status_code == 200
-    assert sent == [("michele", "Jeremiah left Work", "Home in about 22 minutes.", {"person": "jeremiah"})]
-    inbox = client.get("/api/telemetry/notifications/michele", headers=HEADERS).json()["notifications"]
-    assert inbox[-1]["kind"] == "presence" and inbox[-1]["title"] == "Jeremiah left Work"
+    assert sent == [("sam", "Alex left Work", "Home in about 22 minutes.", {"person": "alex"})]
+    inbox = client.get("/api/telemetry/notifications/sam", headers=HEADERS).json()["notifications"]
+    assert inbox[-1]["kind"] == "presence" and inbox[-1]["title"] == "Alex left Work"
 
 
 def test_notify_needs_a_user_and_a_title(client, rc):
@@ -159,7 +159,7 @@ def test_a_once_notice_is_sent_only_once(client, rc, monkeypatch):
         return {}
 
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
-    body = {"user": "jeremiah", "kind": "leave_by", "title": "Leave by 2:40 for Dentist", "once": "leave:abc"}
+    body = {"user": "alex", "kind": "leave_by", "title": "Leave by 2:40 for Dentist", "once": "leave:abc"}
     first = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     again = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert "duplicate" not in first and again["duplicate"] is True

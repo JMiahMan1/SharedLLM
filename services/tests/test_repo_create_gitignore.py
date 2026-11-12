@@ -29,7 +29,7 @@ async def _run_repo_create(tmp_path, preexisting_gitignore=False):
         # git init / remote remove / remote add all "succeed"
         return {"returncode": 0, "stdout": "", "stderr": ""}
 
-    with patch.object(git_handler, "_create_github_repo", AsyncMock(return_value="https://github.com/JMiahMan1/my-repo.git")), \
+    with patch.object(git_handler, "_create_github_repo", AsyncMock(return_value="https://github.com/Example-User/my-repo.git")), \
          patch.object(git_handler, "_resolve_workspace_path", AsyncMock(return_value=str(ws))), \
          patch.object(git_handler, "_run_git", side_effect=fake_run_git), \
          patch.object(git_handler, "_bind_workspace_repo", AsyncMock()):

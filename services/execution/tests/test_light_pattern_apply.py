@@ -6,7 +6,7 @@ from services.execution.handlers import groups
 from services.execution.schemas import ExecutionResult, UserContext
 from services.execution.schemas_groups import LightPatternRequest
 
-CTX = UserContext(user="jeremiah", is_admin=True, ha_url="http://ha", ha_token="t")
+CTX = UserContext(user="alex", is_admin=True, ha_url="http://ha", ha_token="t")
 PATTERNS = [{"pattern_id": "xmas", "pattern_name": "Christmas", "cluster_id": None, "transition_ms": 0,
              "steps": [{"positions": [0, 2], "rgb": [255, 0, 0], "brightness_pct": 90},
                        {"positions": [1, 3], "rgb": [0, 170, 0], "brightness_pct": 70}]}]

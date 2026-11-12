@@ -75,7 +75,7 @@ def worker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_monitor_answers_a_question_from_another_talk_app(worker):
-    w = worker([{"id": 7, "actor_id": "michele", "message": "@Jarvis, what's for dinner?"}])
+    w = worker([{"id": 7, "actor_id": "sam", "message": "@Jarvis, what's for dinner?"}])
     r = _Redis()
     # A primed room: only messages after the last one seen count.
     r.store["jarvis:talk:last_msg:room1"] = "6"
@@ -87,7 +87,7 @@ async def test_monitor_answers_a_question_from_another_talk_app(worker):
 
 @pytest.mark.asyncio
 async def test_monitor_skips_a_question_the_app_already_claimed(worker):
-    w = worker([{"id": 7, "actor_id": "michele", "message": "@Jarvis what's for dinner?"}])
+    w = worker([{"id": 7, "actor_id": "sam", "message": "@Jarvis what's for dinner?"}])
     r = _Redis(claimed=[7])
     r.store["jarvis:talk:last_msg:room1"] = "6"
     await bw.RavenWorker._check_talk_once(w, r)
@@ -104,7 +104,7 @@ async def test_monitor_carries_the_room_context_into_the_job(worker):
             "actor_display_name": "Mom",
             "message": 'It survived the night.\n\n```jarvis-envelope\n{"kind": "assistant", "title": "Jarvis"}\n```jarvis-envelope',
         },
-        {"id": 7, "actor_id": "michele", "actor_display_name": "Michele", "message": "@Jarvis, what's for dinner?"},
+        {"id": 7, "actor_id": "sam", "actor_display_name": "Sam", "message": "@Jarvis, what's for dinner?"},
     ]
     w = worker(messages)
     r = _Redis()

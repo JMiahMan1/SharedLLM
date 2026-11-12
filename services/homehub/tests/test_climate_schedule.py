@@ -27,16 +27,16 @@ def slot(start: str, stop: str, temp: int, mode: str) -> dict:
 
 
 HOUSEHOLD = {"schedules": [
-    {"schedule_id": "aa0001", "name": "Winter/Spring Week Day", "weekdays": ["workday"],
+    {"schedule_id": "aa0001", "name": "Cool Season Weekdays", "weekdays": ["workday"],
      "start_date": "2026-11-01", "end_date": "2027-04-30", "repeat_type": "pause", "enabled": True,
      "timeslots": [slot("00:00:00", "05:00:00", 73, "cool"), slot("05:00:00", "09:00:00", 85, "off"),
                    slot("09:00:00", "17:00:00", 73, "cool"), slot("17:00:00", "21:00:00", 85, "off"),
                    slot("21:00:00", "00:00:00", 73, "cool")]},
-    {"schedule_id": "aa0002", "name": "Spring/Summer Weekend", "weekdays": ["weekend"], "start_date": None,
+    {"schedule_id": "aa0002", "name": "Weekend Program", "weekdays": ["weekend"], "start_date": None,
      "end_date": None, "repeat_type": "repeat", "enabled": False,
      "timeslots": [slot("00:00:00", "05:00:00", 73, "cool"), slot("05:00:00", "19:00:00", 74, "cool"),
                    slot("19:00:00", "00:00:00", 75, "cool")]},
-    {"schedule_id": "aa0003", "name": "Summer Week Day", "weekdays": ["workday"], "start_date": "2026-05-01",
+    {"schedule_id": "aa0003", "name": "Hot Season Weekdays", "weekdays": ["workday"], "start_date": "2026-05-01",
      "end_date": "2026-10-31", "repeat_type": "pause", "enabled": True,
      "timeslots": [slot("00:00:00", "10:00:00", 75, "cool"), slot("10:00:00", "14:00:00", 72, "cool"),
                    slot("14:00:00", "20:00:00", 85, "off"), slot("20:00:00", "00:00:00", 73, "cool")]},
@@ -91,8 +91,8 @@ def test_household_schedules_read_as_programs_and_compile_back_identically() -> 
 
 async def test_household_programs_are_listed_and_saving_them_changes_nothing(env: Env) -> None:
     progs = {p["name"]: p for p in cl(env).programs()}
-    assert set(progs) == {"Winter/Spring Week Day", "Spring/Summer Weekend", "Summer Week Day"}
-    assert progs["Spring/Summer Weekend"]["enabled"] is False
+    assert set(progs) == {"Cool Season Weekdays", "Weekend Program", "Hot Season Weekdays"}
+    assert progs["Weekend Program"]["enabled"] is False
     before = copy.deepcopy(env.store.get_kv("scheduler")["schedules"])
     for p in progs.values():
         await cl(env).save_program(p["id"], p)
@@ -102,8 +102,8 @@ async def test_household_programs_are_listed_and_saving_them_changes_nothing(env
         for k in ("weekdays", "start_date", "end_date", "repeat_type", "enabled", "name"):
             assert after[conf["schedule_id"]][k] == conf[k]
     assert {s.entity_id for s in env.engine.schedules.values()} == {
-        "switch.schedule_winter_spring_week_day", "switch.schedule_spring_summer_weekend",
-        "switch.schedule_summer_week_day"}
+        "switch.schedule_cool_season_weekdays", "switch.schedule_weekend_program",
+        "switch.schedule_hot_season_weekdays"}
 
 
 async def run_week(e: Env, days: int = 8) -> list[tuple[str, str, str, Any]]:
@@ -119,7 +119,7 @@ async def run_week(e: Env, days: int = 8) -> list[tuple[str, str, str, Any]]:
 
 
 async def test_behaviour_is_unchanged_after_migration(tmp_path) -> None:
-    # Wednesday 2026-10-28 00:30 Phoenix: across the summer program's last day and the winter one's first.
+    # Wednesday 2026-10-28 00:30 UTC-7: across the summer program's last day and the winter one's first.
     start = datetime(2026, 10, 28, 7, 30, tzinfo=UTC)
     raw = await household(tmp_path, start, "raw.db")
     raw_calls = await run_week(raw)
@@ -141,15 +141,15 @@ async def test_behaviour_is_unchanged_after_migration(tmp_path) -> None:
 
 async def test_current_next_and_the_published_sensor(env: Env) -> None:
     t = cl(env).thermostat(A)
-    assert t["current"]["program_name"] == "Winter/Spring Week Day"
+    assert t["current"]["program_name"] == "Cool Season Weekdays"
     assert t["current"]["setpoint"] == {"temperature": 73, "hvac_mode": "cool"}
-    assert t["next"]["at"] == "2026-11-12T00:00:00+00:00"  # 17:00 Phoenix
+    assert t["next"]["at"] == "2026-11-12T00:00:00+00:00"  # 17:00 UTC-7
     assert t["effective"]["source"] == "schedule"
     st = env.hub.states.get("sensor.hall_schedule")
     assert st.state == "schedule"
     assert st.attributes["next_change_at"] == "2026-11-11T17:00:00-07:00"
     assert st.attributes["next_setpoint"] == {"temperature": 85, "hvac_mode": "off"}
-    assert st.attributes["summary"] == "Following Winter/Spring Week Day: 73 cool, goes to off at 5:00 PM"
+    assert st.attributes["summary"] == "Following Cool Season Weekdays: 73 cool, goes to off at 5:00 PM"
     await advance(env.engine, 5 * 3600 + 2)
     assert env.hub.states.get("sensor.hall_schedule").attributes["next_change_at"] == "2026-11-11T21:00:00-07:00"
 
@@ -199,7 +199,7 @@ async def test_an_expired_hold_is_dropped_at_startup(tmp_path) -> None:
     await automation_api.stop(e.engine)
     await e.engine.stop()
     e.store.close()
-    later = datetime(2026, 11, 11, 21, 0, tzinfo=UTC)  # 14:00 Phoenix
+    later = datetime(2026, 11, 11, 21, 0, tzinfo=UTC)  # 14:00 UTC-7
     e2 = await household(tmp_path, later)
     try:
         assert cl(e2).holds == {} and cl(e2).thermostat(A)["effective"]["source"] == "schedule"

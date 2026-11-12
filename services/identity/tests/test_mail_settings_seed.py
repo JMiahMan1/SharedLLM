@@ -18,8 +18,8 @@ _MAIL_ENV = {
     "INTERNAL_SECRET": "test-secret",
     "FERNET_KEY": "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=",
     "DEFAULT_ADMIN_PASSWORD": "changeme",
-    "MAIL_URL": "https://mail.sumemail.com",
-    "MAIL_ADMIN_URL": "https://mail.sumemail.com/admin",
+    "MAIL_URL": "https://mail.example.com",
+    "MAIL_ADMIN_URL": "https://mail.example.com/admin",
     "MAIL_ADMIN": "house-admin",
     "MAIL_PASS": "super-secret-mail-password",
     "MAIL_USER": "mom",
@@ -50,8 +50,8 @@ def test_mail_settings_are_seeded_into_the_database():
 
         stored = {g.key: g.value for g in session.exec(select(GlobalSetting)).all()}
 
-    assert stored["mail_url"] == "https://mail.sumemail.com"
-    assert stored["mail_admin_url"] == "https://mail.sumemail.com/admin"
+    assert stored["mail_url"] == "https://mail.example.com"
+    assert stored["mail_admin_url"] == "https://mail.example.com/admin"
     assert stored["mail_admin"] == "house-admin"
     assert stored["mail_pass"] == "super-secret-mail-password"
     # Per-user credentials are NOT global settings.

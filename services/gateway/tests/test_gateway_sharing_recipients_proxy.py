@@ -24,7 +24,7 @@ from services.gateway.main import app
 
 RECIPIENTS = [
     {"username": "default", "display_name": "Default"},
-    {"username": "jeremiah", "display_name": "Jeremiah"},
+    {"username": "alex", "display_name": "Alex"},
 ]
 
 

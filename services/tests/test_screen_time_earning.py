@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from services.common.screen_time import carried_over, earned, evaluate, wants_progress, week_start
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 WED = lambda h, m=0: datetime(2026, 10, 21, h, m, tzinfo=TZ)  # noqa: E731 - a Wednesday
 
 EARN = {"steps_every": 1000, "steps_min": 5, "exercise_every": 15, "exercise_min": 10, "chore_min": 10, "max_min": 60}

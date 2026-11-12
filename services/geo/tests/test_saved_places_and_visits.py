@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 import services.geo.main as geo
 from services.geo import places, visits
 
-HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 33.1667, "longitude": -111.5646, "radius": 100.0}
-SPOT = (33.45, -111.90)
+HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 39.7392, "longitude": -104.9903, "radius": 100.0}
+SPOT = (40.0225, -105.3257)
 
 
 class R:
@@ -49,7 +49,7 @@ class R:
 
 
 def test_validate_takes_a_name_and_a_point_and_defaults_the_rest():
-    place = places.validate({"name": "  Gymnastics  ", "lat": 33.4, "lon": -111.9})
+    place = places.validate({"name": "  Gymnastics  ", "lat": 39.9725, "lon": -105.3257})
     assert place["name"] == "Gymnastics"
     assert place["scope"] == "user"
     assert place["important"] is False
@@ -78,15 +78,15 @@ def test_validate_clamps_the_radius_and_keeps_the_chosen_scope():
 
 
 def test_validate_cleans_the_notify_list():
-    place = places.validate({"name": "x", "lat": 1, "lon": 2, "important": True, "notify": ["Michele", "michele", " Leo "]})
+    place = places.validate({"name": "x", "lat": 1, "lon": 2, "important": True, "notify": ["Sam", "sam", " Leo "]})
     assert place["important"] is True
-    assert place["notify"] == ["leo", "michele"]
+    assert place["notify"] == ["leo", "sam"]
 
 
 @pytest.mark.asyncio
 async def test_a_saved_place_round_trips_and_carries_its_owner():
     r = R()
-    made = await places.add(r, "Dad", places.validate({"name": "Gymnastics", "lat": 33.4, "lon": -111.9}))
+    made = await places.add(r, "Dad", places.validate({"name": "Gymnastics", "lat": 39.9725, "lon": -105.3257}))
     assert made["owner"] == "dad"
     assert places._PLACE_ID.match(made["id"])
     assert (await places.get(r, made["id"]))["name"] == "Gymnastics"
@@ -102,7 +102,7 @@ async def test_a_private_place_is_only_visible_to_its_owner():
     await places.add(r, "dad", places.validate({"name": "Dentist", "lat": 1, "lon": 2}))
     await places.add(r, "dad", places.validate({"name": "School", "lat": 3, "lon": 4, "scope": "family"}))
     assert {p["name"] for p in await places.list_for(r, "dad")} == {"Dentist", "School"}
-    assert [p["name"] for p in await places.list_for(r, "michele")] == ["School"]
+    assert [p["name"] for p in await places.list_for(r, "sam")] == ["School"]
     assert len(await places.list_all(r)) == 2
 
 
@@ -111,13 +111,13 @@ async def test_only_the_owner_or_an_admin_may_change_a_place():
     r = R()
     private = await places.add(r, "dad", places.validate({"name": "Dentist", "lat": 1, "lon": 2}))
     assert places.can_see(private, "dad")
-    assert not places.can_see(private, "michele")
+    assert not places.can_see(private, "sam")
     assert places.can_edit(private, "dad")
-    assert not places.can_edit(private, "michele")
-    assert places.can_edit(private, "michele", is_admin=True)
+    assert not places.can_edit(private, "sam")
+    assert places.can_edit(private, "sam", is_admin=True)
     family = await places.add(r, "dad", places.validate({"name": "School", "lat": 3, "lon": 4, "scope": "family"}))
-    assert places.can_see(family, "michele")
-    assert not places.can_edit(family, "michele")
+    assert places.can_see(family, "sam")
+    assert not places.can_edit(family, "sam")
 
 
 @pytest.mark.asyncio
@@ -138,8 +138,8 @@ async def test_update_merges_and_remove_forgets():
 async def test_a_saved_place_becomes_a_zone_and_carries_its_own_alert():
     r = R()
     made = await places.add(r, "dad", places.validate({
-        "name": "Gymnastics", "lat": 33.4, "lon": -111.9, "radius": 200,
-        "important": True, "notify": ["Michele"],
+        "name": "Gymnastics", "lat": 39.9725, "lon": -105.3257, "radius": 200,
+        "important": True, "notify": ["Sam"],
     }))
     zone = places.to_zone(made)
     assert zone["entity_id"] == f"place.{made['id']}"
@@ -147,7 +147,7 @@ async def test_a_saved_place_becomes_a_zone_and_carries_its_own_alert():
     assert zone["radius"] == 200
     assert zone["custom"] is True
     assert places.to_answer(made)["entity_id"] == f"place.{made['id']}"
-    assert places.alert_for(made) == {"important": True, "notify": ["michele"]}
+    assert places.alert_for(made) == {"important": True, "notify": ["sam"]}
 
 
 # --- long stays somewhere unsaved ------------------------------------------
@@ -156,7 +156,7 @@ async def test_a_saved_place_becomes_a_zone_and_carries_its_own_alert():
 @pytest.mark.asyncio
 async def test_a_short_stay_is_not_remembered():
     r = R()
-    assert await visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S - 1, 1000) is None
+    assert await visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S - 1, 1000) is None
     assert await visits.list_for(r, "leo") == []
 
 
@@ -164,8 +164,8 @@ async def test_a_short_stay_is_not_remembered():
 async def test_the_same_stay_seen_twice_counts_once():
     r = R()
     since = 1000.0
-    first = await visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, since)
-    again = await visits.note_stay(r, "leo", 33.4001, -111.9001, visits.MIN_STAY_S + 60, since)
+    first = await visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, since)
+    again = await visits.note_stay(r, "leo", 39.9726, -105.3258, visits.MIN_STAY_S + 60, since)
     assert first["count"] == 1
     assert again["count"] == 1
     assert len(await visits.list_for(r, "leo")) == 1
@@ -174,9 +174,9 @@ async def test_the_same_stay_seen_twice_counts_once():
 @pytest.mark.asyncio
 async def test_a_second_visit_suggests_saving_the_spot():
     r = R()
-    await visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, 1000)
+    await visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, 1000)
     assert await visits.suggestions(r, "leo") == []
-    await visits.note_stay(r, "leo", 33.4002, -111.9002, visits.MIN_STAY_S * 2, 9000)
+    await visits.note_stay(r, "leo", 39.9727, -105.3259, visits.MIN_STAY_S * 2, 9000)
     found = await visits.suggestions(r, "leo")
     assert len(found) == 1
     assert found[0]["count"] == 2
@@ -186,9 +186,9 @@ async def test_a_second_visit_suggests_saving_the_spot():
 @pytest.mark.asyncio
 async def test_a_dismissed_spot_stops_being_suggested():
     r = R()
-    await visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, 1000)
-    await visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, 9000)
-    assert await visits.dismiss(r, "leo", 33.4, -111.9) is True
+    await visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, 1000)
+    await visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, 9000)
+    assert await visits.dismiss(r, "leo", 39.9725, -105.3257) is True
     assert await visits.suggestions(r, "leo") == []
     assert await visits.dismiss(r, "leo", 40.0, -100.0) is False
 
@@ -220,14 +220,14 @@ def test_routes_add_list_change_and_remove_a_place(routes):
     client, _ = routes
     headers = {"X-Internal-Secret": "s3cret"}
     made = client.post("/places", params={"owner": "dad"}, headers=headers,
-                       json={"name": "Gymnastics", "lat": 33.4, "lon": -111.9, "scope": "family"})
+                       json={"name": "Gymnastics", "lat": 39.9725, "lon": -105.3257, "scope": "family"})
     assert made.status_code == 200
     place = made.json()["place"]
     assert place["owner"] == "dad"
     assert place["entity_id"].startswith("place.")
-    listed = client.get("/places", params={"viewer": "michele"}, headers=headers).json()["places"]
+    listed = client.get("/places", params={"viewer": "sam"}, headers=headers).json()["places"]
     assert [p["id"] for p in listed] == [place["id"]]
-    changed = client.put(f"/places/{place['id']}", headers=headers, json={"important": True, "notify": ["michele"]})
+    changed = client.put(f"/places/{place['id']}", headers=headers, json={"important": True, "notify": ["sam"]})
     assert changed.json()["place"]["important"] is True
     assert client.delete(f"/places/{place['id']}", headers=headers).status_code == 200
     assert client.delete(f"/places/{place['id']}", headers=headers).status_code == 404
@@ -247,15 +247,15 @@ def test_routes_list_and_dismiss_a_visit_suggestion(routes):
     client, r = routes
     headers = {"X-Internal-Secret": "s3cret"}
     assert client.get("/visit-suggestions", params={"user": "leo"}, headers=headers).json()["suggestions"] == []
-    asyncio.run(visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, 1000))
-    asyncio.run(visits.note_stay(r, "leo", 33.4, -111.9, visits.MIN_STAY_S, 9000))
+    asyncio.run(visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, 1000))
+    asyncio.run(visits.note_stay(r, "leo", 39.9725, -105.3257, visits.MIN_STAY_S, 9000))
     found = client.get("/visit-suggestions", params={"user": "leo"}, headers=headers).json()["suggestions"]
     assert len(found) == 1
     assert found[0]["place"] == "Corner Cafe"
     bad = client.post("/visit-suggestions/dismiss", params={"user": "leo"}, headers=headers, json={"lat": "x"})
     assert bad.status_code == 422
     dismissed = client.post("/visit-suggestions/dismiss", params={"user": "leo"}, headers=headers,
-                            json={"lat": 33.4, "lon": -111.9})
+                            json={"lat": 39.9725, "lon": -105.3257})
     assert dismissed.status_code == 200
     assert client.get("/visit-suggestions", params={"user": "leo"}, headers=headers).json()["suggestions"] == []
 
@@ -267,9 +267,9 @@ def test_routes_list_and_dismiss_a_visit_suggestion(routes):
 async def test_a_saved_place_carries_its_own_alert_and_a_zone_uses_the_family_settings():
     r = R()
     made = await places.add(r, "dad", places.validate({
-        "name": "Gym", "lat": 1, "lon": 2, "important": True, "notify": ["michele"],
+        "name": "Gym", "lat": 1, "lon": 2, "important": True, "notify": ["sam"],
     }))
-    assert await geo._place_alert(r, f"place.{made['id']}") == {"important": True, "notify": ["michele"]}
+    assert await geo._place_alert(r, f"place.{made['id']}") == {"important": True, "notify": ["sam"]}
     assert await geo._place_alert(r, "zone.nope") == {}
 
 

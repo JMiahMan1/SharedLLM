@@ -5,11 +5,11 @@ answer from the family's books and cite a chapter rather than a character offset
 
 ## What this is
 
-The library lives at `cloud.sumemail.com/Books/Text` and is reached **over WebDAV**.
+The library lives at `cloud.example.com/Books/Text` and is reached **over WebDAV**.
 Calibre (or Calibre-Web) and Jarvis's librarian (below) write `metadata.db`; the indexer only reads it.
 
 ```
-cloud.sumemail.com/Books/Text     Nextcloud, one copy of the books
+cloud.example.com/Books/Text     Nextcloud, one copy of the books
         |  WebDAV GET
         v
 storage /index/full                downloads metadata.db, parses it, fetches each EPUB
@@ -81,7 +81,7 @@ commentary from it. Both consumers share one setting and one WebDAV path, and
 neither of them writes to the library.
 
 ```
-cloud.sumemail.com/Books/Text
+cloud.example.com/Books/Text
         |  WebDAV GET / PROPFIND
         v
 services/storage   POST /providers/list      (browse one folder)

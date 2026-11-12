@@ -46,7 +46,7 @@ substitute a hardcoded constant and carry on.
 
 - **No hardcoded failovers.** If a URL, token, username, key or path is not configured,
   raise or return a clear error naming the missing setting. Do not fall back to a
-  guessed or legacy literal (for example `http://localhost`, `https://mail.sumemail.com`,
+  guessed or legacy literal (for example `http://localhost`, `https://mail.example.com`,
   or an old host or user ID baked into code). A stale literal is far harder to find
   later than an error.
 - **Config is configuration.** Defaults belong in env/config/settings that are readable

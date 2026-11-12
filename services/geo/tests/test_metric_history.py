@@ -22,7 +22,7 @@ from services.geo.metric_history import (
     to_payload,
 )
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 TODAY = date(2025, 10, 1)
 
 

@@ -53,7 +53,7 @@ def belongs_to(event: dict, user: str, creds: dict) -> bool:
     """Whether the event is this person's to drive to.
 
     A household calendar (Skylight) is shared: everyone reads everyone's
-    events, so "Work at Discount Tire" is not a reason to remind the whole
+    events, so "Work at Acme Hardware" is not a reason to remind the whole
     family. Theirs is: a Skylight event filed under their name, an event on a
     calendar account mapped to them in calendar settings ("people"), or one
     from their own Nextcloud or iCal calendars. Household-wide events are left

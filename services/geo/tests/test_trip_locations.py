@@ -82,22 +82,22 @@ def client(fake_redis):
     return TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
 
 
-HEADERS = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
+HEADERS = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"}
 
 
-def _insert_trip(r: FakeRedis, trip_id: str, user_id: str = "jeremiah") -> dict:
+def _insert_trip(r: FakeRedis, trip_id: str, user_id: str = "alex") -> dict:
     now = time.time()
     trip = {
         "id": trip_id,
         "user_id": user_id,
-        "user_name": "Jeremiah",
+        "user_name": "Alex",
         "start_time": now - 3600,
         "end_time": now - 1800,
         "duration_seconds": 1800,
         "distance_miles": 12.0,
         "top_speed_mph": 55.0,
-        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-        "end_location": {"name": "Mall", "latitude": 33.25, "longitude": -111.63},
+        "start_location": {"name": "Home", "latitude": 39.7392, "longitude": -104.9903},
+        "end_location": {"name": "Mall", "latitude": 39.8225, "longitude": -105.0557},
         "fuel_type": "gasoline",
         "mpg": 24.0,
         "cost_per_gallon": 3.65,
@@ -111,22 +111,22 @@ def _mock_place_sources(monkeypatch, *, pois=None):
     monkeypatch.setattr(
         geo,
         "_resolve_place_details_cached",
-        AsyncMock(return_value={"name": "Home", "address": "1 Main St, Phoenix, AZ", "source": "ha_zone"}),
+        AsyncMock(return_value={"name": "Home", "address": "1 Main St, Springfield, IL", "source": "ha_zone"}),
     )
     monkeypatch.setattr(
         geo,
         "_nominatim_reverse_details",
         AsyncMock(
             return_value={
-                "display_name": "1 Main St, Phoenix, Maricopa County, Arizona",
-                "address": {"house_number": "1", "road": "Main St", "city": "Phoenix"},
+                "display_name": "1 Main St, Springfield, Sangamon County, Illinois",
+                "address": {"house_number": "1", "road": "Main St", "city": "Springfield"},
             }
         ),
     )
     monkeypatch.setattr(
         geo,
         "_ha_zones_containing",
-        AsyncMock(return_value=[{"name": "Home", "kind": "zone", "latitude": 33.1667, "longitude": -111.5646, "distance_m": 0}]),
+        AsyncMock(return_value=[{"name": "Home", "kind": "zone", "latitude": 39.7392, "longitude": -104.9903, "distance_m": 0}]),
     )
     monkeypatch.setattr(
         geo,
@@ -135,8 +135,8 @@ def _mock_place_sources(monkeypatch, *, pois=None):
             return_value=pois
             if pois is not None
             else [
-                {"name": "Whole Foods Market", "kind": "shop", "latitude": 33.167, "longitude": -111.564, "distance_m": 60},
-                {"name": "Pizzeria Bianco", "kind": "restaurant", "latitude": 33.168, "longitude": -111.565, "distance_m": 120},
+                {"name": "Whole Foods Market", "kind": "shop", "latitude": 39.7395, "longitude": -104.9897, "distance_m": 60},
+                {"name": "Corner Pizzeria", "kind": "restaurant", "latitude": 39.7405, "longitude": -104.9907, "distance_m": 120},
             ]
         ),
     )
@@ -144,7 +144,7 @@ def _mock_place_sources(monkeypatch, *, pois=None):
 
 def test_suggestions_include_zones_pois_and_addresses(client, fake_redis, monkeypatch):
     _mock_place_sources(monkeypatch)
-    resp = client.get("/locations/suggestions?lat=33.1667&lon=-111.5646", headers=HEADERS)
+    resp = client.get("/locations/suggestions?lat=39.7392&lon=-104.9903", headers=HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
@@ -155,14 +155,14 @@ def test_suggestions_include_zones_pois_and_addresses(client, fake_redis, monkey
     assert "zone" in kinds and "shop" in kinds and "address" in kinds
     # Address components come from Nominatim (road + city)
     assert any("Main St" in n for n in names)
-    assert "Phoenix" in names or any("Phoenix" in n for n in names)
+    assert "Springfield" in names or any("Springfield" in n for n in names)
     # Zones are nearest-first, and names are deduped
     assert len(names) == len(set(n.lower() for n in names))
 
 
 def test_suggestions_survive_overpass_failure(client, fake_redis, monkeypatch):
     _mock_place_sources(monkeypatch, pois=[])
-    resp = client.get("/locations/suggestions?lat=33.1667&lon=-111.5646", headers=HEADERS)
+    resp = client.get("/locations/suggestions?lat=39.7392&lon=-104.9903", headers=HEADERS)
     assert resp.status_code == 200
     names = [c["name"] for c in resp.json()["candidates"]]
     # No POIs, but zones + address candidates still usable
@@ -176,9 +176,9 @@ def test_suggestions_require_secret_and_coordinates(client, fake_redis, monkeypa
     from fastapi.testclient import TestClient as _TC
 
     unauthenticated = _TC(geo.app)
-    assert unauthenticated.get("/locations/suggestions?lat=33.0&lon=-111.0").status_code == 403
-    assert client.get("/locations/suggestions?lon=-111.0", headers=HEADERS).status_code == 422
-    assert client.get("/locations/suggestions?lat=95.0&lon=-111.0", headers=HEADERS).status_code == 422
+    assert unauthenticated.get("/locations/suggestions?lat=39.5725&lon=-104.4257").status_code == 403
+    assert client.get("/locations/suggestions?lon=-104.4257", headers=HEADERS).status_code == 422
+    assert client.get("/locations/suggestions?lat=95.0&lon=-104.4257", headers=HEADERS).status_code == 422
 
 
 def test_update_trip_place_names_and_address(client, fake_redis):
@@ -187,21 +187,21 @@ def test_update_trip_place_names_and_address(client, fake_redis):
         "/trips/t_names",
         json={
             "start_name": "Whole Foods Market",
-            "end_name": "Pizzeria Bianco",
-            "start_address": "1 Main St, Phoenix, AZ",
-            "end_address": "2 Oak Ave, Tempe, AZ",
+            "end_name": "Corner Pizzeria",
+            "start_address": "1 Main St, Springfield, IL",
+            "end_address": "2 Oak Ave, Shelbyville, IL",
         },
         headers=HEADERS,
     )
     assert resp.status_code == 200
     updated = resp.json()
     assert updated["start_location"]["name"] == "Whole Foods Market"
-    assert updated["start_location"]["address"] == "1 Main St, Phoenix, AZ"
-    assert updated["end_location"]["name"] == "Pizzeria Bianco"
-    assert updated["end_location"]["address"] == "2 Oak Ave, Tempe, AZ"
+    assert updated["start_location"]["address"] == "1 Main St, Springfield, IL"
+    assert updated["end_location"]["name"] == "Corner Pizzeria"
+    assert updated["end_location"]["address"] == "2 Oak Ave, Shelbyville, IL"
     # Coordinates + distance are locked telemetry
-    assert updated["start_location"]["latitude"] == 33.1667
-    assert updated["end_location"]["longitude"] == -111.63
+    assert updated["start_location"]["latitude"] == 39.7392
+    assert updated["end_location"]["longitude"] == -105.0557
     assert updated["distance_miles"] == 12.0
 
     # A picked (non-street) name wins on read: no re-resolution over the top
@@ -230,6 +230,6 @@ def test_update_trip_names_forbidden_for_other_user(client, fake_redis):
     resp = client.patch(
         "/trips/t_owned",
         json={"start_name": "Renamed"},
-        headers={**HEADERS, "X-User-Id": "michele"},
+        headers={**HEADERS, "X-User-Id": "sam"},
     )
     assert resp.status_code == 403

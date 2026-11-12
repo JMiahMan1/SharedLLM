@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 
 
 class FakeRedis:
@@ -58,9 +58,9 @@ async def test_reading_is_bucketed_by_its_own_timestamp(rc, monkeypatch):
     import services.geo.main as geo
 
     yesterday = "2026-09-25"
-    await geo._record_daily_steps(rc, "jeremiah", steps=1234, timestamp=ts_for(yesterday))
+    await geo._record_daily_steps(rc, "alex", steps=1234, timestamp=ts_for(yesterday))
 
-    buckets = rc.hashes["geo:steps:jeremiah"]
+    buckets = rc.hashes["geo:steps:alex"]
     assert buckets[yesterday] == "1234"
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     assert today not in buckets
@@ -70,21 +70,21 @@ async def test_cumulative_readings_keep_the_max_per_day(rc):
     import services.geo.main as geo
 
     day = "2026-09-25"
-    await geo._record_daily_steps(rc, "jeremiah", steps=800, timestamp=ts_for(day))
-    await geo._record_daily_steps(rc, "jeremiah", steps=1200, timestamp=ts_for(day))
+    await geo._record_daily_steps(rc, "alex", steps=800, timestamp=ts_for(day))
+    await geo._record_daily_steps(rc, "alex", steps=1200, timestamp=ts_for(day))
     # A reboot makes the raw counter smaller; it must not reduce the day
-    await geo._record_daily_steps(rc, "jeremiah", steps=40, timestamp=ts_for(day))
+    await geo._record_daily_steps(rc, "alex", steps=40, timestamp=ts_for(day))
 
-    assert rc.hashes["geo:steps:jeremiah"][day] == "1200"
+    assert rc.hashes["geo:steps:alex"][day] == "1200"
 
 
 async def test_a_bad_reading_is_ignored(rc):
     import services.geo.main as geo
 
     day = "2026-09-25"
-    await geo._record_daily_steps(rc, "jeremiah", steps=-5, timestamp=ts_for(day))
-    await geo._record_daily_steps(rc, "jeremiah", steps=500000, timestamp=ts_for(day))
-    assert not rc.hashes.get("geo:steps:jeremiah")
+    await geo._record_daily_steps(rc, "alex", steps=-5, timestamp=ts_for(day))
+    await geo._record_daily_steps(rc, "alex", steps=500000, timestamp=ts_for(day))
+    assert not rc.hashes.get("geo:steps:alex")
 
 
 async def test_sources_fuse_with_max_not_sum(rc):
@@ -96,12 +96,12 @@ async def test_sources_fuse_with_max_not_sum(rc):
     import services.geo.main as geo
 
     day = "2026-09-25"
-    await geo._record_daily_steps(rc, "jeremiah", 8000, ts_for(day), source="phone")
-    await geo._record_daily_steps(rc, "jeremiah", 9200, ts_for(day), source="watch")
+    await geo._record_daily_steps(rc, "alex", 8000, ts_for(day), source="phone")
+    await geo._record_daily_steps(rc, "alex", 9200, ts_for(day), source="watch")
 
-    assert rc.hashes["geo:steps_src:jeremiah:phone"][day] == "8000"
-    assert rc.hashes["geo:steps_src:jeremiah:watch"][day] == "9200"
-    assert rc.hashes["geo:steps:jeremiah"][day] == "9200"
+    assert rc.hashes["geo:steps_src:alex:phone"][day] == "8000"
+    assert rc.hashes["geo:steps_src:alex:watch"][day] == "9200"
+    assert rc.hashes["geo:steps:alex"][day] == "9200"
 
 
 async def test_watch_can_lead_and_phone_can_later_exceed(rc):
@@ -109,32 +109,32 @@ async def test_watch_can_lead_and_phone_can_later_exceed(rc):
 
     day = "2026-09-25"
     # Watch leads while the phone is on the table
-    await geo._record_daily_steps(rc, "jeremiah", 4000, ts_for(day), source="watch")
-    assert rc.hashes["geo:steps:jeremiah"][day] == "4000"
+    await geo._record_daily_steps(rc, "alex", 4000, ts_for(day), source="watch")
+    assert rc.hashes["geo:steps:alex"][day] == "4000"
     # Phone catches up and passes it
-    await geo._record_daily_steps(rc, "jeremiah", 6000, ts_for(day), source="phone")
-    assert rc.hashes["geo:steps:jeremiah"][day] == "6000"
+    await geo._record_daily_steps(rc, "alex", 6000, ts_for(day), source="phone")
+    assert rc.hashes["geo:steps:alex"][day] == "6000"
     # And a stale, lower watch reading must not lower the fused day
-    await geo._record_daily_steps(rc, "jeremiah", 4100, ts_for(day), source="watch")
-    assert rc.hashes["geo:steps:jeremiah"][day] == "6000"
+    await geo._record_daily_steps(rc, "alex", 4100, ts_for(day), source="watch")
+    assert rc.hashes["geo:steps:alex"][day] == "6000"
 
 
 async def test_unknown_source_falls_back_to_phone(rc):
     import services.geo.main as geo
 
     day = "2026-09-25"
-    await geo._record_daily_steps(rc, "jeremiah", 500, ts_for(day), source="hacked")
-    assert rc.hashes["geo:steps_src:jeremiah:phone"][day] == "500"
+    await geo._record_daily_steps(rc, "alex", 500, ts_for(day), source="hacked")
+    assert rc.hashes["geo:steps_src:alex:phone"][day] == "500"
 
 
 async def test_step_goal_round_trip(rc, monkeypatch):
     import services.geo.main as geo
 
     # Default when unset
-    assert await geo._get_step_goal(rc, "jeremiah") == geo.DEFAULT_STEP_GOAL
+    assert await geo._get_step_goal(rc, "alex") == geo.DEFAULT_STEP_GOAL
 
-    rc.strings["geo:steps_goal:jeremiah"] = "12000"
-    assert await geo._get_step_goal(rc, "jeremiah") == 12000
+    rc.strings["geo:steps_goal:alex"] = "12000"
+    assert await geo._get_step_goal(rc, "alex") == 12000
 
 
 async def test_a_sparse_history_is_still_cut_to_the_window(rc, monkeypatch):
@@ -148,6 +148,6 @@ async def test_a_sparse_history_is_still_cut_to_the_window(rc, monkeypatch):
 
     today = datetime.now(TZ).date()
     for back, steps in ((0, 1200), (3, 4000), (40, 9000)):
-        rc.hashes.setdefault("geo:steps:michele", {})[(today - timedelta(days=back)).isoformat()] = str(steps)
-    week = await geo._get_daily_steps(rc, "michele", 7)
+        rc.hashes.setdefault("geo:steps:sam", {})[(today - timedelta(days=back)).isoformat()] = str(steps)
+    week = await geo._get_daily_steps(rc, "sam", 7)
     assert sorted(week.values()) == [1200, 4000]

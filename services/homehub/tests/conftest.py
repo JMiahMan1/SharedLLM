@@ -9,7 +9,7 @@ from services.homehub.core import Area, ConfigEntry, DeviceEntry, EntityEntry, H
 def make_hub(domain: str = "test", data: dict | None = None, entities: list[dict] | None = None,
              options: dict | None = None, entry_id: str = "entry1") -> tuple[Hub, ConfigEntry]:
     """``entities`` items are EntityEntry kwargs; ``config_entry_id``/``platform`` default to the entry."""
-    hub = Hub(time_zone="America/Phoenix", location={"latitude": 33.4, "longitude": -111.9, "elevation": 360})
+    hub = Hub(time_zone="Etc/GMT+7", location={"latitude": 39.9725, "longitude": -105.3257, "elevation": 360})
     entry = ConfigEntry(entry_id=entry_id, domain=domain, title=f"{domain} test", data=data or {},
                         options=options or {})
     hub.config_entries[entry.entry_id] = entry

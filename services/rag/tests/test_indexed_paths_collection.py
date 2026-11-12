@@ -42,27 +42,27 @@ def wired(tmp_path):
 
 
 def test_reports_paths_for_the_requested_collection(wired):
-    _add(wired, "a", "nextcloud_files", "summers", "/books/one.epub")
-    _add(wired, "b", "calibre_files", "summers", "/library/two.epub")
-    paths = run(rag_main.get_indexed_paths("summers", "calibre_files"))["paths"]
+    _add(wired, "a", "nextcloud_files", "rivera", "/books/one.epub")
+    _add(wired, "b", "calibre_files", "rivera", "/library/two.epub")
+    paths = run(rag_main.get_indexed_paths("rivera", "calibre_files"))["paths"]
     assert paths == ["/library/two.epub"]
 
 
 def test_default_collection_is_preserved_for_existing_callers(wired):
-    _add(wired, "a", "nextcloud_files", "summers", "/notes/a.md")
-    paths = run(rag_main.get_indexed_paths("summers"))["paths"]
+    _add(wired, "a", "nextcloud_files", "rivera", "/notes/a.md")
+    paths = run(rag_main.get_indexed_paths("rivera"))["paths"]
     assert paths == ["/notes/a.md"]
 
 
 def test_users_do_not_see_each_others_paths(wired):
-    _add(wired, "a", "nextcloud_files", "summers", "/notes/summers.md")
+    _add(wired, "a", "nextcloud_files", "rivera", "/notes/rivera.md")
     _add(wired, "b", "nextcloud_files", "other", "/notes/other.md")
     assert run(rag_main.get_indexed_paths("other"))["paths"] == ["/notes/other.md"]
 
 
 def test_unknown_collection_is_empty_not_an_error(wired):
-    _add(wired, "a", "nextcloud_files", "summers", "/notes/a.md")
-    assert run(rag_main.get_indexed_paths("summers", "nothing_here"))["paths"] == []
+    _add(wired, "a", "nextcloud_files", "rivera", "/notes/a.md")
+    assert run(rag_main.get_indexed_paths("rivera", "nothing_here"))["paths"] == []
 
 
 def test_rows_without_a_path_are_discarded(wired):
@@ -70,7 +70,7 @@ def test_rows_without_a_path_are_discarded(wired):
     conn.execute(
         "INSERT OR REPLACE INTO rag_items (id, collection_name, user_id, content, metadata,"
         " created_at, indexed_at) VALUES (?,?,?,?,?,?,?)",
-        ("x", "nextcloud_files", "summers", "text", json.dumps({"other": 1}), "t", "t"),
+        ("x", "nextcloud_files", "rivera", "text", json.dumps({"other": 1}), "t", "t"),
     )
     conn.commit()
-    assert run(rag_main.get_indexed_paths("summers"))["paths"] == []
+    assert run(rag_main.get_indexed_paths("rivera"))["paths"] == []

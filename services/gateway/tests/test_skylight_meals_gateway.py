@@ -63,7 +63,7 @@ def _patch_execution(monkeypatch, payload=None):
 
 @pytest.fixture
 def resolver(monkeypatch):
-    def _install(user="jeremiah", is_admin=True, skylight_enabled=True, key="test-token"):
+    def _install(user="alex", is_admin=True, skylight_enabled=True, key="test-token"):
         async def _resolve(request, body=None):
             if request.headers.get("Authorization", "") != f"Bearer {key}":
                 raise HTTPException(status_code=401, detail="Authentication required")
@@ -77,7 +77,7 @@ def resolver(monkeypatch):
 
 @pytest.fixture
 def meals_client(resolver):
-    def _make(user="jeremiah", is_admin=True, skylight_enabled=True, key="test-token"):
+    def _make(user="alex", is_admin=True, skylight_enabled=True, key="test-token"):
         resolver(user=user, is_admin=is_admin, skylight_enabled=skylight_enabled, key=key)
         return TestClient(app, headers={"Authorization": f"Bearer {key}"}, raise_server_exceptions=False)
 
@@ -135,7 +135,7 @@ def test_pushing_the_week_and_the_grocery_list_forward(meals_client, monkeypatch
 
 def test_a_disabled_account_is_told_so_and_forwards_nothing(meals_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = meals_client(user="michele", is_admin=False, skylight_enabled=False).get(
+    resp = meals_client(user="sam", is_admin=False, skylight_enabled=False).get(
         "/api/integrations/skylight/meals"
     )
     assert resp.status_code == 400

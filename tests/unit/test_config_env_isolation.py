@@ -8,7 +8,7 @@ modules' imports is a var that two modules disagree about.
 
 That is not hypothetical. conftest.py's _load_env_files() reads the developer's
 real .env, and EXECUTION_EXTERNAL_HOST was only ever set there
-(=192.168.2.205). Two test modules clobbered it to "localhost" at import, and two
+(=192.0.2.205). Two test modules clobbered it to "localhost" at import, and two
 others reload services.config mid-session, so
 services/execution/abs_client.py and services/config.py ended up holding
 different snapshots of the same name, and test_abs_stream_url.py compared one
@@ -387,7 +387,7 @@ def _conftest_in_subprocess(queried: list[str], ambient: dict[str, str], scrub_p
         # The five test_music_proxy 401s, verbatim.
         ("INTERNAL_SECRET", "a-real-deployment-secret"),
         # Bug #15's original symptom, as a CI runner would supply it.
-        ("EXECUTION_EXTERNAL_HOST", "192.168.2.205"),
+        ("EXECUTION_EXTERNAL_HOST", "192.0.2.205"),
         # A var a developer's own shell usually exports.
         ("HA_URL", "https://homeassistant.internal:8123"),
         ("GITHUB_TOKEN", "ghp_real_token"),

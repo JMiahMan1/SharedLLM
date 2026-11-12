@@ -127,7 +127,7 @@ async def test_arcade_rate_uses_the_signed_in_username_initials(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah"}),
+        AsyncMock(return_value={"user": "alex"}),
     )
     request = MagicMock()
     request.json = AsyncMock(return_value={"stars": 4})
@@ -135,7 +135,7 @@ async def test_arcade_rate_uses_the_signed_in_username_initials(monkeypatch):
     response = await main.proxy_arcade_rate("space-invaders", request)
 
     assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/rate"
-    assert seen["json"] == {"stars": 4, "initials": "JER"}
+    assert seen["json"] == {"stars": 4, "initials": "ALE"}
     assert response.status_code == 200
 
 
@@ -146,7 +146,7 @@ async def test_arcade_rate_rejects_an_out_of_range_vote(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah"}),
+        AsyncMock(return_value={"user": "alex"}),
     )
     request = MagicMock()
     request.json = AsyncMock(return_value={"stars": 6})
@@ -160,9 +160,9 @@ async def test_arcade_rate_rejects_an_out_of_range_vote(monkeypatch):
 def test_arcade_callsign_is_the_first_three_letters_of_the_account():
     from services.gateway import main
 
-    assert main._arcade_initials("jeremiah") == "JER"
-    assert main._arcade_initials("Michele") == "MIC"
-    assert main._arcade_initials("kate.summers") == "KAT"
+    assert main._arcade_initials("alex") == "ALE"
+    assert main._arcade_initials("Sam") == "SAM"
+    assert main._arcade_initials("kate.rivera") == "KAT"
     assert main._arcade_initials("") == "YOU"
 
 
@@ -182,10 +182,10 @@ async def test_arcade_scoreboard_reads_each_family_member(monkeypatch):
         async def get(self, url, **kwargs):
             if url.endswith("/api/users/family-directory"):
                 return _Resp(200, [
-                    {"username": "jeremiah", "display_name": "Jeremiah"},
-                    {"username": "michele", "display_name": "Michele"},
+                    {"username": "alex", "display_name": "Alex"},
+                    {"username": "sam", "display_name": "Sam"},
                 ])
-            if url.endswith("/api/players/JER"):
+            if url.endswith("/api/players/ALE"):
                 return _Resp(200, {"player": {"best_score": 62960, "games_scored": 9, "crowns": 9, "podiums": 9, "submits": 15, "total_games": 20}})
             return _Resp(404, {})
 
@@ -197,7 +197,7 @@ async def test_arcade_scoreboard_reads_each_family_member(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah"}),
+        AsyncMock(return_value={"user": "alex"}),
     )
     request = MagicMock()
     request.headers = {"Authorization": "Bearer test-key"}
@@ -205,8 +205,8 @@ async def test_arcade_scoreboard_reads_each_family_member(monkeypatch):
     payload = await main.proxy_arcade_scoreboard(request)
 
     assert payload["arcade_available"] is True
-    assert [p["username"] for p in payload["players"]] == ["jeremiah", "michele"]
-    assert payload["players"][0]["initials"] == "JER"
+    assert [p["username"] for p in payload["players"]] == ["alex", "sam"]
+    assert payload["players"][0]["initials"] == "ALE"
     assert payload["players"][0]["best_score"] == 62960
     assert payload["players"][0]["you"] is True
     assert payload["players"][1]["best_score"] == 0
@@ -228,8 +228,8 @@ async def test_arcade_scoreboard_carries_the_games_each_member_played(monkeypatc
     class _Client:
         async def get(self, url, **kwargs):
             if url.endswith("/api/users/family-directory"):
-                return _Resp(200, [{"username": "jeremiah", "display_name": "Jeremiah"}])
-            if url.endswith("/api/players/JER"):
+                return _Resp(200, [{"username": "alex", "display_name": "Alex"}])
+            if url.endswith("/api/players/ALE"):
                 return _Resp(200, {"player": {
                     "best_score": 4200, "games_scored": 1, "crowns": 1, "podiums": 1, "submits": 2, "total_games": 7,
                     "per_game": [
@@ -247,7 +247,7 @@ async def test_arcade_scoreboard_carries_the_games_each_member_played(monkeypatc
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah"}),
+        AsyncMock(return_value={"user": "alex"}),
     )
     request = MagicMock()
     request.headers = {}
@@ -257,7 +257,7 @@ async def test_arcade_scoreboard_carries_the_games_each_member_played(monkeypatc
 
     me = payload["players"][0]
     # The family board's player card opens the family collection, not the arcade.
-    assert me["player_url"].endswith("/player/JER?collection=family")
+    assert me["player_url"].endswith("/player/ALE?collection=family")
     # Only games actually played are carried, so the payload stays lean.
     assert [g["slug"] for g in me["per_game"]] == ["family-telly-swing"]
     assert me["per_game"][0]["my_best"] == 4200
@@ -293,7 +293,7 @@ async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "michele"}),
+        AsyncMock(return_value={"user": "sam"}),
     )
     request = MagicMock()
     request.json = AsyncMock(return_value={"score": 1234, "capture_id": "capture-1"})
@@ -302,9 +302,9 @@ async def test_arcade_score_is_saved_under_the_signed_in_member(monkeypatch):
 
     assert seen["url"] == f"{main.ALPACA_ARCADE_URL}/api/games/space-invaders/scores"
     assert seen["json"] == {
-        "initials": "MIC",
+        "initials": "SAM",
         "score": 1234,
-        "player_id": "michele",
+        "player_id": "sam",
         "capture_id": "capture-1",
     }
     assert response.status_code == 200
@@ -317,7 +317,7 @@ async def test_arcade_score_requires_a_captured_score(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "michele"}),
+        AsyncMock(return_value={"user": "sam"}),
     )
     request = MagicMock()
     request.json = AsyncMock(return_value={"score": 1234})
@@ -364,8 +364,8 @@ async def test_arcade_highscores_marks_the_signed_in_player(monkeypatch):
             return {
                 "success": True,
                 "players": [
-                    {"player_id": "jeremiah", "initials": "JER", "best_score": 62960},
-                    {"player_id": "michele", "initials": "MIC", "best_score": 0},
+                    {"player_id": "alex", "initials": "ALE", "best_score": 62960},
+                    {"player_id": "sam", "initials": "SAM", "best_score": 0},
                 ],
                 "games": [{"slug": "space-invaders", "title": "Space Invaders", "scores": []}],
             }
@@ -383,7 +383,7 @@ async def test_arcade_highscores_marks_the_signed_in_player(monkeypatch):
     monkeypatch.setattr(
         main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah"}),
+        AsyncMock(return_value={"user": "alex"}),
     )
 
     payload = await main.proxy_arcade_highscores(MagicMock())
@@ -450,12 +450,12 @@ async def test_arcade_tvs_come_from_execution_discovery_for_the_caller(monkeypat
     seen = []
     screens = [{"id": "ha:media_player.den", "name": "Den TV", "display": "web"}]
     monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"screens": screens, "home_assistant": True}))
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "alex"}))
 
     out = await main.proxy_arcade_tvs(MagicMock(), refresh=True)
 
     assert out == {"success": True, "tvs": screens, "home_assistant": True}
-    assert seen == [("GET", f"{main.EXECUTION_SVC}/execute/stage/screens", {"user_id": "jeremiah", "refresh": "true"})]
+    assert seen == [("GET", f"{main.EXECUTION_SVC}/execute/stage/screens", {"user_id": "alex", "refresh": "true"})]
 
 
 @pytest.mark.asyncio
@@ -464,7 +464,7 @@ async def test_arcade_cast_sends_only_the_arcades_own_stage_page(monkeypatch):
 
     seen = []
     monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"success": True}))
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "alex"}))
     request = MagicMock()
     request.json = AsyncMock(return_value={
         "screen_id": "ha:media_player.den", "room_code": "zi-on", "url": "http://evil.example/", "ha_token": "x",
@@ -478,7 +478,7 @@ async def test_arcade_cast_sends_only_the_arcades_own_stage_page(monkeypatch):
         "screen_id": "ha:media_player.den",
         "url": f"{main.ALPACA_ARCADE_PUBLIC_URL.rstrip('/')}/tv/ZION",
         "method": "",
-        "user_id": "jeremiah",
+        "user_id": "alex",
     }
 
 
@@ -488,7 +488,7 @@ async def test_arcade_cast_stop_and_missing_screen(monkeypatch):
 
     seen = []
     monkeypatch.setattr(main, "shared_http_client", _stage_client(seen, {"success": True}))
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jeremiah"}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "alex"}))
     request = MagicMock()
     request.json = AsyncMock(return_value={"screen_id": "cast:abc", "room_code": "ZION", "stop": True})
     await main.proxy_arcade_cast(request)
@@ -530,7 +530,7 @@ async def test_admin_can_list_and_end_party_rooms(monkeypatch):
         yield _Client()
 
     monkeypatch.setattr(main, "shared_http_client", fake_client)
-    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="alex"))
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
     await main.proxy_party_rooms(MagicMock())
     await main.proxy_party_room_end("zion", MagicMock())
@@ -576,7 +576,7 @@ async def test_arcade_live_lists_rooms_for_any_signed_in_member(monkeypatch):
         yield _Client()
 
     monkeypatch.setattr(main, "shared_http_client", fake_client)
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "noah"}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jordan"}))
 
     out = await main.proxy_arcade_live(MagicMock())
 
@@ -599,7 +599,7 @@ async def test_arcade_live_reports_an_unreachable_arcade(monkeypatch):
         yield _Client()
 
     monkeypatch.setattr(main, "shared_http_client", fake_client)
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "noah"}))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value={"user": "jordan"}))
 
     out = await main.proxy_arcade_live(MagicMock())
 

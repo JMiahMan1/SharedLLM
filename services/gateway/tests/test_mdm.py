@@ -536,7 +536,7 @@ def test_esphome_ota_uploads_firmware_and_records_audit(world):
             "service": "esphome",
             "detail": {
                 "device": "jarvis-watch",
-                "host": "192.168.2.105",
+                "host": "192.0.2.105",
                 "method": "esphome_ota",
                 "ota_version": 2,
             },

@@ -11,14 +11,14 @@ def test_health():
     assert resp.status_code == 200
 
 def test_workspaces():
-    params = {"rag_user": "jeremiah"}
+    params = {"rag_user": "alex"}
     resp = httpx.get(f"{BASE_URL}/workspaces", params=params, headers={"X-Internal-Secret": INTERNAL_SECRET})
     print(f"Workspaces: {resp.status_code} - {resp.json()}")
     assert resp.status_code == 200
     return resp.json().get("workspaces", [])
 
 def test_git_status(ws_id):
-    payload = {"workspace_id": ws_id, "rag_user": "jeremiah"}
+    payload = {"workspace_id": ws_id, "rag_user": "alex"}
     resp = httpx.post(f"{BASE_URL}/git/status", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
     print(f"Git status ({ws_id}): {resp.status_code} - {resp.json()}")
     assert resp.status_code == 200

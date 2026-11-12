@@ -53,11 +53,11 @@ async def test_hyphenated_entity_resolution(user_ctx):
         )
 
         # Test 2: Name with apostrophe
-        req2 = LightControlRequest(user_context=user_ctx, entity_id="Jeremiah's Lamp", action="turn_on")
+        req2 = LightControlRequest(user_context=user_ctx, entity_id="Alex's Lamp", action="turn_on")
         res2 = await light.handle_light(req2)
         assert res2.status == "SUCCESS"
         mock_call.assert_called_with(
-            "http://ha", "test_tok", "light", "turn_on", "light.jeremiah_s_lamp", None
+            "http://ha", "test_tok", "light", "turn_on", "light.alex_s_lamp", None
         )
 @pytest.mark.asyncio
 async def test_security_status_check(user_ctx):
@@ -115,7 +115,7 @@ async def test_tv_cast_macro(user_ctx):
          patch("services.execution.ha_client.call_service", new_callable=AsyncMock) as mock_call, \
          patch("services.execution.ha_client.call_service", mock_call), \
          patch("services.execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
-         patch("services.config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
+         patch("services.config.EXECUTION_EXTERNAL_HOST", "192.0.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
 
         mock_download.return_value = ("mock_media_id", "mock_title")

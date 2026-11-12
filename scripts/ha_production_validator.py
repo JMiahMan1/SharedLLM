@@ -1,3 +1,7 @@
+"""Live Home Assistant validator. Entities come from env, never from code:
+VALIDATOR_LIGHT_ENTITY, VALIDATOR_SPEAKER_ENTITY, VALIDATOR_TV_ENTITY
+(a scenario whose entity is unset is skipped).
+"""
 import datetime
 import json
 import os
@@ -118,7 +122,11 @@ def test_discovery():
     log_step("Discovery Sync API", success, data.get("message"), detail=data)
     return success
 
-def test_light_interaction(entity_id="light.piano_lamp"):
+def test_light_interaction(entity_id=None):
+    entity_id = entity_id or os.getenv("VALIDATOR_LIGHT_ENTITY")
+    if not entity_id:
+        print("SKIP light: set VALIDATOR_LIGHT_ENTITY")
+        return None
     print_header(f"SCENARIO: Light Interaction ({entity_id})")
 
     # 1. Get Initial State
@@ -161,7 +169,11 @@ def test_light_interaction(entity_id="light.piano_lamp"):
 
     return changed and len(recent_logs) > 0
 
-def test_announcement_logic(entity_id="media_player.office_speaker"):
+def test_announcement_logic(entity_id=None):
+    entity_id = entity_id or os.getenv("VALIDATOR_SPEAKER_ENTITY")
+    if not entity_id:
+        print("SKIP announcement: set VALIDATOR_SPEAKER_ENTITY")
+        return None
     print_header("SCENARIO: Announcement Stability (Roku/MASS)")
 
     # We won't check audio output (hard to do remotely), but we can check if the
@@ -209,7 +221,11 @@ def get_system_logs(service="execution", lines=20):
         print(f"Error fetching logs: {e}")
         return False
 
-def test_music_assistant(entity_id="media_player.office_speaker"):
+def test_music_assistant(entity_id=None):
+    entity_id = entity_id or os.getenv("VALIDATOR_SPEAKER_ENTITY")
+    if not entity_id:
+        print("SKIP music: set VALIDATOR_SPEAKER_ENTITY")
+        return None
     print_header("SCENARIO: Music Assistant (MASS) Play")
     print(f"[RUN] Testing Music Assistant on {entity_id}...")
 
@@ -225,7 +241,11 @@ def test_music_assistant(entity_id="media_player.office_speaker"):
     log_step("Music Assistant Dispatch", success, data.get("message"), detail=data)
     return success
 
-def test_video_playback(entity_id="media_player.office_tv_chrome"):
+def test_video_playback(entity_id=None):
+    entity_id = entity_id or os.getenv("VALIDATOR_TV_ENTITY")
+    if not entity_id:
+        print("SKIP video: set VALIDATOR_TV_ENTITY")
+        return None
     print_header("SCENARIO: Video Interaction (Cast)")
     print(f"[RUN] Testing YouTube Video on {entity_id}...")
 

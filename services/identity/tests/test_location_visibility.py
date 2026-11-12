@@ -39,7 +39,7 @@ def client():
         for name, data in sharing.items():
             session.add(UserActivitySharing(username=name, data=json.dumps(data)))
         for name in ("dad", "mom", "kid", "grown", "aunt", "hermit", "default"):
-            session.add(GlobalSetting(key=f"user_location:{name}", value=json.dumps({"latitude": 33.4, "longitude": -112.0})))
+            session.add(GlobalSetting(key=f"user_location:{name}", value=json.dumps({"latitude": 40.0, "longitude": -105.5})))
         session.commit()
     return TestClient(app)
 

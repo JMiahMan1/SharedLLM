@@ -16,8 +16,8 @@ from services.homehub.drivers.cast import CastDriver
 from services.homehub.drivers.media_common import F
 from services.homehub.tests.conftest import make_hub
 
-OFFICE = "81dfea8f-d1d7-a0f2-3d19-5597d16ca2be"
-BEDROOM = "16b032a3-f048-710f-0506-ad3136885e30"
+OFFICE = "00000000-0000-4000-8000-00000000c001"
+BEDROOM = "00000000-0000-4000-8000-00000000c002"
 STRANGER = "00000000-0000-0000-0000-000000000001"
 
 
@@ -38,7 +38,7 @@ class FakeBrowser:
 
     def appear(self, key: str, name: str):
         u = UUID(key)
-        self.devices[u] = SimpleNamespace(uuid=u, friendly_name=name, host="192.168.2.50", port=8009)
+        self.devices[u] = SimpleNamespace(uuid=u, friendly_name=name, host="192.0.2.50", port=8009)
         self.listener.add_cast(u, "svc")
 
 
@@ -94,7 +94,7 @@ class FakeCast:
 def setup(monkeypatch):
     FakeBrowser.instances.clear()
     monkeypatch.setattr(mod, "CastBrowser", FakeBrowser)
-    hub, entry = make_hub("cast", {"known_hosts": ["192.168.1.213"], "uuid": [], "ignore_cec": [], "user_id": "u"}, [
+    hub, entry = make_hub("cast", {"known_hosts": ["198.51.100.213"], "uuid": [], "ignore_cec": [], "user_id": "u"}, [
         {"entity_id": "media_player.office_tv_chrome", "unique_id": OFFICE},
         {"entity_id": "media_player.master_bedroom_tv", "unique_id": BEDROOM},
     ])
@@ -119,7 +119,7 @@ async def test_discovery_connects_only_wanted_uuids(setup):
     hub, drv, made = setup
     await drv.async_setup()
     b = FakeBrowser.instances[-1]
-    assert b.started and b.hosts == ["192.168.1.213"]
+    assert b.started and b.hosts == ["198.51.100.213"]
     assert hub.states.get("media_player.office_tv_chrome").state == "unavailable"
     b.appear(OFFICE, "Office TV")
     b.appear(STRANGER, "Neighbour")

@@ -5,7 +5,7 @@ import socket
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-MAC_ADDR = os.getenv("WOL_MAC_ADDR", "30:95:87:15:E7:6D")
+MAC_ADDR = os.getenv("WOL_MAC_ADDR", "")
 BROADCAST_IP = os.getenv("WOL_BROADCAST_IP", "255.255.255.255")
 SUBNET_BROADCAST = os.getenv("WOL_SUBNET_BROADCAST")
 
@@ -23,8 +23,11 @@ def send_wol(mac, ip_broadcast="255.255.255.255", port=9):
         logging.info(f"Magic Packet sent to {mac} ({ip_broadcast}:{port})")
 
 def main():
+    if not MAC_ADDR:
+        logging.error("Set WOL_MAC_ADDR to the device's MAC address.")
+        raise SystemExit(2)
     try:
-        logging.info("Sending WoL to Office TV...")
+        logging.info(f"Sending WoL to {MAC_ADDR}...")
         send_wol(MAC_ADDR, BROADCAST_IP)
         if SUBNET_BROADCAST:
             send_wol(MAC_ADDR, SUBNET_BROADCAST)

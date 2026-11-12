@@ -9,7 +9,7 @@ FastPath.
 Device registry lives in the Identity service as the GlobalSetting
 ``esphome_devices``, a JSON list:
 
-    [{"name": "office-light", "host": "192.168.2.87",
+    [{"name": "office-light", "host": "192.0.2.87",
       "port": 6053, "noise_psk": "base64-key-from-device-yaml",
       "ha_entity_id": "light.office_light"}]
 
@@ -166,7 +166,7 @@ async def _load_devices_from_identity() -> dict[str, dict]:
         raise EsphomeConfigError(
             "Setting 'esphome_devices' is not configured. Add it in "
             "Settings (Identity GlobalSettings) as a JSON list like: "
-            '[{"name": "office-light", "host": "192.168.2.87", '
+            '[{"name": "office-light", "host": "192.0.2.87", '
             '"port": 6053, "noise_psk": "<key from device YAML>"}]'
         )
     try:

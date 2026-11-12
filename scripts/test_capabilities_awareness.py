@@ -1,7 +1,10 @@
 import json
 import os
+import sys
 
 import httpx
+
+LIVE_TEST_USER = os.environ.get("LIVE_TEST_USER") or sys.exit("Set LIVE_TEST_USER to the Jarvis username to test as.")
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
@@ -26,7 +29,7 @@ def run_tests():
                 json={
                     "query": query,
                     "stream": False,
-                    "rag_user": "jeremiah"
+                    "rag_user": LIVE_TEST_USER
                 },
                 headers={
                     "Authorization": f"Bearer {INTERNAL_SECRET}",

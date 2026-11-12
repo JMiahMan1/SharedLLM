@@ -38,7 +38,7 @@ class TestProfile:
         saved = client.put(
             "/profile",
             json={
-                "display_name": "Jeremiah",
+                "display_name": "Alex",
                 "birth_year": 1985,
                 "height_cm": 180,
                 "sex": "male",
@@ -176,7 +176,7 @@ class TestMetrics:
             json={"samples": [{"metric": "weight", "value": 80, "unit": "kg"}]},
         ).json()["samples"][0]
         response = client.delete(
-            f"/metrics/{created['id']}", headers={"X-User-Id": "michele"}
+            f"/metrics/{created['id']}", headers={"X-User-Id": "sam"}
         )
         assert response.status_code == 404
 
@@ -554,17 +554,17 @@ class TestSummary:
 
         The day boundary used to be a raw string compare on recorded_at, so
         anything logged after 5pm local (the container runs
-        TZ=America/Phoenix) landed on tomorrow: today's ring, the weekly water
+        TZ=Etc/GMT+7) landed on tomorrow: today's ring, the weekly water
         average and the streak all read the wrong day.
         """
         import os
         import time
 
         original = os.environ.get("TZ")
-        os.environ["TZ"] = "America/Phoenix"
+        os.environ["TZ"] = "Etc/GMT+7"
         time.tzset()
         try:
-            # 20:00 Phoenix on 2026-10-21 is 03:00Z on the 22nd.
+            # 20:00 UTC-7 on 2026-10-21 is 03:00Z on the 22nd.
             client.post(
                 "/metrics",
                 json={"samples": [{"metric": "water", "value": 500, "unit": "ml", "recorded_at": "2026-10-22T03:00:00Z"}]},
@@ -599,11 +599,11 @@ class TestSharingAndExport:
             "/food",
             json={"day": "2026-10-21", "name": "Toast", "calories": 120},
         )
-        assert client.put("/shares", json={"viewer": "michele", "scope": "sleep"}).status_code == 200
-        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "michele"}).json()
+        assert client.put("/shares", json={"viewer": "sam", "scope": "sleep"}).status_code == 200
+        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "sam"}).json()
         assert body["people"] == [
             {
-                "user_id": "jeremiah",
+                "user_id": "alex",
                 "scopes": ["sleep"],
                 "sleep": {
                     "duration_minutes": 450,
@@ -615,29 +615,29 @@ class TestSharingAndExport:
         ]
 
     def test_sharing_off_hides_again(self, client):
-        client.put("/shares", json={"viewer": "michele", "scope": "sleep"})
-        client.put("/shares", json={"viewer": "michele", "scope": "sleep", "enabled": False})
-        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "michele"}).json()
+        client.put("/shares", json={"viewer": "sam", "scope": "sleep"})
+        client.put("/shares", json={"viewer": "sam", "scope": "sleep", "enabled": False})
+        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "sam"}).json()
         assert body["people"] == []
 
     def test_a_digital_scope_projects_as_a_grant_only(self, client):
         # An adult opens their own digital wellbeing to someone. The health
         # store holds only the grant; the gateway fills the number in from
         # telemetry, so nothing about the phone is invented here.
-        assert client.put("/shares", json={"viewer": "michele", "scope": "digital"}).status_code == 200
-        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "michele"}).json()
+        assert client.put("/shares", json={"viewer": "sam", "scope": "digital"}).status_code == 200
+        body = client.get("/family?day=2026-10-21", headers={"X-User-Id": "sam"}).json()
         assert body["people"] == [
-            {"user_id": "jeremiah", "scopes": ["digital"], "digital": {"shared": True}}
+            {"user_id": "alex", "scopes": ["digital"], "digital": {"shared": True}}
         ]
 
     def test_a_minor_cannot_open_their_phone_use(self, client):
         client.put("/profile", json={"kid_mode": True})
-        response = client.put("/shares", json={"viewer": "michele", "scope": "digital"})
+        response = client.put("/shares", json={"viewer": "sam", "scope": "digital"})
         assert response.status_code == 422
         assert "adults" in response.json()["detail"]
 
     def test_you_cannot_share_with_yourself(self, client):
-        response = client.put("/shares", json={"viewer": "jeremiah", "scope": "sleep"})
+        response = client.put("/shares", json={"viewer": "alex", "scope": "sleep"})
         assert response.status_code == 422
 
     def test_export_contains_every_store(self, client):
@@ -645,23 +645,23 @@ class TestSharingAndExport:
         client.put("/checkins/2026-10-21", json={"energy": 4})
         # Cheers go both ways in the export: what you gave is your history too.
         # A cheer needs a share in the right direction, so set up one each way.
-        client.put("/shares", json={"viewer": "jeremiah", "scope": "sleep"}, headers={"X-User-Id": "michele"})
-        client.put("/shares", json={"viewer": "michele", "scope": "sleep"})
-        sent = client.post("/cheers", json={"to_user": "michele", "kind": "well_done", "day": "2026-10-21"})
+        client.put("/shares", json={"viewer": "alex", "scope": "sleep"}, headers={"X-User-Id": "sam"})
+        client.put("/shares", json={"viewer": "sam", "scope": "sleep"})
+        sent = client.post("/cheers", json={"to_user": "sam", "kind": "well_done", "day": "2026-10-21"})
         assert sent.status_code == 200, sent.text
         received = client.post(
             "/cheers",
-            json={"to_user": "jeremiah", "kind": "proud", "day": "2026-10-21"},
-            headers={"X-User-Id": "michele"},
+            json={"to_user": "alex", "kind": "proud", "day": "2026-10-21"},
+            headers={"X-User-Id": "sam"},
         )
         assert received.status_code == 200, received.text
         body = client.get("/export").json()
-        assert body["user_id"] == "jeremiah"
+        assert body["user_id"] == "alex"
         assert len(body["sleep"]) == 1
         assert len(body["checkins"]) == 1
         assert "activity" in body["notes"]
-        assert [row["to_user"] for row in body["cheers_sent"]] == ["michele"]
-        assert [row["from_user"] for row in body["cheers_received"]] == ["michele"]
+        assert [row["to_user"] for row in body["cheers_sent"]] == ["sam"]
+        assert [row["from_user"] for row in body["cheers_received"]] == ["sam"]
 
 
 def _cycle_profile(client, *, birth_year: int | None = 1990, sex: str = "female", kid_mode: bool = False):
@@ -850,8 +850,8 @@ class TestCycleApi:
         _cycle_profile(client)
         _enable_cycle(client)
         client.post("/cycle/periods", json={"start_day": TODAY})
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
-        family = client.get("/family", headers={"X-User-Id": "michele"}).json()
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 200
+        family = client.get("/family", headers={"X-User-Id": "sam"}).json()
         cycle_entry = family["people"][0]["cycle"]
         assert cycle_entry["enabled"] is True
         assert cycle_entry["phase"] == "menstrual"
@@ -896,15 +896,15 @@ class TestCycleApi:
 
     def test_cycle_sharing_requires_tracking_to_be_on(self, client):
         _cycle_profile(client)
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 422
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 422
 
     def test_turning_tracking_off_removes_cycle_grants(self, client):
         _cycle_profile(client)
         _enable_cycle(client)
         client.post("/cycle/periods", json={"start_day": TODAY})
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 200
         assert client.put("/cycle/settings", json={"enabled": False}).status_code == 200
-        assert client.get("/family", headers={"X-User-Id": "michele"}).json()["people"] == []
+        assert client.get("/family", headers={"X-User-Id": "sam"}).json()["people"] == []
 
     def test_tracking_is_available_to_a_young_profile_too(self, client):
         # Tracking follows the person's own choice; only sharing narrows for a

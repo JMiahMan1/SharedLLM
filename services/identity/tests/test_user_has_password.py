@@ -32,7 +32,7 @@ def session_fixture():
             User(username="alice", api_key="key-alice", password_hash=hash_password("a-password"))
         )
         # Imported from Nextcloud, never given a password.
-        session.add(User(username="kaleb", api_key="key-kaleb"))
+        session.add(User(username="robin", api_key="key-robin"))
         session.commit()
         yield session
 
@@ -49,4 +49,4 @@ def client_fixture(session: Session):
 def test_the_account_list_says_who_has_no_password(client):
     listed = {row["username"]: row["has_password"] for row in client.get("/api/users").json()}
     assert listed["alice"] is True
-    assert listed["kaleb"] is False
+    assert listed["robin"] is False

@@ -3,7 +3,7 @@
 from services.geo.auto_workouts import detect_auto_workouts
 
 
-def trail(mph: float, minutes: int, *, start: float = 1_700_000_000.0, spacing: int = 30, lat: float = 33.1667) -> list[dict]:
+def trail(mph: float, minutes: int, *, start: float = 1_700_000_000.0, spacing: int = 30, lat: float = 39.7392) -> list[dict]:
     """A straight, constant-speed trail with one fix every ``spacing`` seconds."""
     points = []
     step_m = mph * 0.44704 * spacing
@@ -11,7 +11,7 @@ def trail(mph: float, minutes: int, *, start: float = 1_700_000_000.0, spacing: 
         points.append({
             "t": start + index * spacing,
             "lat": lat + index * step_m / 111_320.0,
-            "lon": -111.5646,
+            "lon": -104.9903,
             "spd": mph * 0.44704,
         })
     return points

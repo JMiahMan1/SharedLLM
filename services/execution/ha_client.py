@@ -451,8 +451,8 @@ async def find_companion_remote(ha_url: str, ha_token: str, media_entity_id: str
     """The ``remote.*`` entity that sends keys to the same device as a media player.
 
     The two are rarely named alike (live: ``media_player.office_tv`` is driven by
-    ``remote.office_tv_remote``, ``media_player.gracies_tv`` by
-    ``remote.28_tcl_roku_tv``), and Home Assistant answers a service call to a
+    ``remote.office_tv_remote``, ``media_player.kids_room_tv`` by
+    ``remote.bedroom_roku_tv``), and Home Assistant answers a service call to a
     non-existent entity with success -- so guessing the name made remote keys
     vanish silently. Ask HA's device registry first, then match by name, and only
     then fall back to the same-named entity.
@@ -538,7 +538,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             if word in eid_base:
                 name_score += 2
 
-        # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
+        # Penalty for numeric suffixes (e.g., "den_tv" when searching "office tv")
         if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_") and any(c.isdigit() for c in eid_base.split("_")[-1:]):
             name_score -= 5
 

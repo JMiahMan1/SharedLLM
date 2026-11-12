@@ -919,7 +919,7 @@ def main():
     parser.add_argument("--output", "-o", help="Output JSON file path")
     parser.add_argument("--output-dir", default=None, help="Directory for screenshots/OCR (default: /tmp/webscraper_output)")
     parser.add_argument("--ocr-model", default=None, help="OCR vision model name (e.g. qwen2.5-vl:7b)")
-    parser.add_argument("--ocr-proxy", default=None, help="OCR proxy URL (e.g. http://jeremiah-home-desktop.local:11434)")
+    parser.add_argument("--ocr-proxy", default=None, help="OCR proxy URL (e.g. http://llm-host.local:11434)")
     parser.add_argument("--json-output", action="store_true", help="Print structured JSON to stdout for programmatic parsing")
 
     args = parser.parse_args()

@@ -8,7 +8,7 @@ drops the connection when a ping goes unanswered; ``on_stop`` then marks the
 node's entities unavailable and reconnects with backoff.
 
 Registry entities map to the node's entities by unique_id. HA's current format
-is ``{MAC}/{device_id}/{platform}/{entity name}`` (``3C:84:27:05:3E:F8/0/light/LCD Backlight``;
+is ``{MAC}/{device_id}/{platform}/{entity name}`` (``02:00:00:00:3E:F8/0/light/LCD Backlight``;
 the name may contain ``/`` and is empty for the node's main entity, as in
 ``.../light/``). Text sensors keep ``text_sensor`` there although the HA domain
 is ``sensor``. HA's older ``{node}{platform}{object_id}`` ids are matched too.
@@ -19,7 +19,7 @@ remembered, nothing more.
 
 User-defined actions on the node (``api: actions:``) are registered as hub
 services ``esphome.{node_name}_{action}`` (dashes in the node name become
-underscores, as HA does), so ``esphome.smart_speaker_set_playlists`` keeps
+underscores, as HA does), so ``esphome.kitchen_node_set_mode`` keeps
 working. With ``allow_service_calls`` in the entry options, actions the node asks
 for (``homeassistant.action``) run on the hub, and states the node subscribes to
 (``homeassistant`` sensors) are sent to it as they change, which is what the

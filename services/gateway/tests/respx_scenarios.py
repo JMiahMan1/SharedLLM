@@ -54,7 +54,7 @@ async def test_rag_500_timeout():
 
     # Mock identity success
     respx.post("http://127.0.0.1:8001/api/resolve").return_value = MagicMock(
-        200, json={"user": "jeremiah", "is_admin": True}
+        200, json={"user": "alex", "is_admin": True}
     )
 
     async with aiohttp.ClientSession(app=app, base_url="http://test") as ac:

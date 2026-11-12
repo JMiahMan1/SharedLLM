@@ -55,7 +55,7 @@ async def test_a_grounded_turn_skips_rag_and_memory(monkeypatch):
         "query": "Explain John 3:16",
         "model": "assistant",
         "system": "You are a Bible study helper.",
-        "creds": {"user": "jeremiah"},
+        "creds": {"user": "alex"},
         "grounded": True,
     })
 

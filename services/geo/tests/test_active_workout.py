@@ -86,12 +86,12 @@ async def _ready(redis):
 
 def test_a_running_workout_is_returned(client):
     test_client, store = client
-    store["geo:active_workout:michele"] = _active("michele")
+    store["geo:active_workout:sam"] = _active("sam")
 
     resp = test_client.get(
         "/workouts/active",
-        params={"viewer": "michele"},
-        headers={"X-User-Id": "michele"},
+        params={"viewer": "sam"},
+        headers={"X-User-Id": "sam"},
     )
     assert resp.status_code == 200
     body = resp.json()["workout"]
@@ -104,30 +104,30 @@ def test_no_running_workout_is_404(client):
     test_client, _ = client
     resp = test_client.get(
         "/workouts/active",
-        params={"viewer": "michele"},
-        headers={"X-User-Id": "michele"},
+        params={"viewer": "sam"},
+        headers={"X-User-Id": "sam"},
     )
     assert resp.status_code == 404
 
 
 def test_it_requires_the_internal_secret(client):
     _test_client, store = client
-    store["geo:active_workout:michele"] = _active("michele")
+    store["geo:active_workout:sam"] = _active("sam")
     bare = TestClient(geo.app)
     assert bare.get(
-        "/workouts/active", headers={"X-User-Id": "michele"}
+        "/workouts/active", headers={"X-User-Id": "sam"}
     ).status_code == 403
 
 
 def test_you_cannot_read_another_users_running_workout(client):
     """Without consent, the answer is 404 -- not just empty."""
     test_client, store = client
-    store["geo:active_workout:jeremiah"] = _active("jeremiah")
+    store["geo:active_workout:alex"] = _active("alex")
 
     resp = test_client.get(
         "/workouts/active",
-        params={"viewer": "michele"},
-        headers={"X-User-Id": "jeremiah"},
+        params={"viewer": "sam"},
+        headers={"X-User-Id": "alex"},
     )
     assert resp.status_code == 404
 
@@ -137,7 +137,7 @@ def test_opted_in_user_can_read_the_running_workout(client, monkeypatch):
         return {
             "users": [
                 {
-                    "username": "jeremiah",
+                    "username": "alex",
                     "enabled": True,
                     "audience": "circle",
                     "user_ids": [],
@@ -147,25 +147,25 @@ def test_opted_in_user_can_read_the_running_workout(client, monkeypatch):
 
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing)
     test_client, store = client
-    store["geo:active_workout:jeremiah"] = _active("jeremiah")
+    store["geo:active_workout:alex"] = _active("alex")
 
     resp = test_client.get(
         "/workouts/active",
-        params={"viewer": "michele"},
-        headers={"X-User-Id": "jeremiah"},
+        params={"viewer": "sam"},
+        headers={"X-User-Id": "alex"},
     )
     assert resp.status_code == 200
-    assert resp.json()["workout"]["user_id"] == "jeremiah"
+    assert resp.json()["workout"]["user_id"] == "alex"
 
 
 def test_an_admin_can_read_it_regardless_of_consent(client):
     test_client, store = client
-    store["geo:active_workout:jeremiah"] = _active("jeremiah")
+    store["geo:active_workout:alex"] = _active("alex")
 
     resp = test_client.get(
         "/workouts/active",
-        params={"viewer": "michele", "is_admin": "true"},
-        headers={"X-User-Id": "jeremiah"},
+        params={"viewer": "sam", "is_admin": "true"},
+        headers={"X-User-Id": "alex"},
     )
     assert resp.status_code == 200
 
@@ -183,11 +183,11 @@ def test_a_stored_workout_is_not_in_the_history_list(client):
     reveal it -- which is why a client-side scan could never work.
     """
     test_client, store = client
-    store["geo:active_workout:michele"] = _active("michele")
+    store["geo:active_workout:sam"] = _active("sam")
 
     listed = test_client.get(
         "/workouts",
-        params={"user_id": "michele", "viewer": "michele"},
+        params={"user_id": "sam", "viewer": "sam"},
     )
     assert listed.status_code == 200
     assert listed.json()["workouts"] == []

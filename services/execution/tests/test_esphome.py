@@ -23,7 +23,7 @@ def one_device(monkeypatch):
         "_device_cache",
         {
             "office-light": {
-                "host": "192.168.2.87",
+                "host": "192.0.2.87",
                 "port": 6053,
                 "noise_psk": "psk-key-abc",
             }
@@ -139,7 +139,7 @@ async def test_handler_list_success(one_device):
     from services.execution.schemas import EsphomeRequest, UserContext
 
     req = EsphomeRequest(
-        user_context=UserContext(user="jeremiah"),
+        user_context=UserContext(user="alex"),
         action="list",
         device="office-light",
     )
@@ -157,7 +157,7 @@ async def test_handler_config_error_is_failure_not_exception(one_device):
     from services.execution.schemas import EsphomeRequest, UserContext
 
     req = EsphomeRequest(
-        user_context=UserContext(user="jeremiah"),
+        user_context=UserContext(user="alex"),
         action="call",
         device="nope",
         entity="whatever",
@@ -175,7 +175,7 @@ def test_route_wired_via_testclient(one_device):
 
     client = TestClient(app)
     payload = {
-        "user_context": {"user": "jeremiah"},
+        "user_context": {"user": "alex"},
         "action": "call",
         "device": "office-light",
         "entity": "office_light",
@@ -216,7 +216,7 @@ def _configure_req(api_key="sk-user"):
     from services.execution.schemas import EsphomeRequest, UserContext
 
     return EsphomeRequest(
-        user_context=UserContext(user="jeremiah", api_key=api_key),
+        user_context=UserContext(user="alex", api_key=api_key),
         action="configure_jarvis",
         device="office-light",
     )
@@ -311,7 +311,7 @@ WATCH_SERVICES = [_svc("pair_begin"), _svc("pair_confirm", "code", "owner"), _sv
 def _device_api(services, confirm_ok=True, requires_encryption=False):
     """APIClient stand-in recording connects (with their psk) and actions."""
     calls = {"connects": [], "actions": [], "keys": []}
-    info = MagicMock(friendly_name="Jarvis Watch", mac_address="74:4D:BD:2C:97:28",
+    info = MagicMock(friendly_name="Jarvis Watch", mac_address="02:00:00:2C:97:28",
                      model="esp32-s3-devkitc-1", esphome_version="2026.9.0", project_version="1.2.0")
     info.name = "jarvis-watch"
 
@@ -343,7 +343,7 @@ def _device_api(services, confirm_ok=True, requires_encryption=False):
 
 def _pair_req(step, **kw):
     from services.execution.schemas import EsphomePairRequest, UserContext
-    return EsphomePairRequest(user_context=UserContext(user="jeremiah", api_key="sk-user"), step=step, **kw)
+    return EsphomePairRequest(user_context=UserContext(user="alex", api_key="sk-user"), step=step, **kw)
 
 
 @pytest.fixture()
@@ -374,7 +374,7 @@ async def test_pair_start_asks_a_screen_device_for_its_code(pairing_env):
     ec = pairing_env[0]
     make, calls = _device_api(WATCH_SERVICES)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("start", host="192.168.2.105"))
+        res = await handle_esphome_pair(_pair_req("start", host="192.0.2.105"))
     assert res.status == "SUCCESS", res.message
     assert res.detail["method"] == "code"
     assert calls["actions"] == [("pair_begin", {})]
@@ -398,16 +398,16 @@ async def test_pair_finish_with_the_right_code_links_the_device(pairing_env):
     ec, saved, removed, claims = pairing_env
     make, calls = _device_api(WATCH_SERVICES)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456"))
+        res = await handle_esphome_pair(_pair_req("finish", host="192.0.2.105", code="123456"))
     assert res.status == "SUCCESS", res.message
     psk = calls["keys"][0].decode()
     assert calls["connects"] == [None, psk]  # plain, then encrypted with the new key
-    assert ("pair_confirm", {"code": "123456", "owner": "jeremiah"}) in calls["actions"]
+    assert ("pair_confirm", {"code": "123456", "owner": "alex"}) in calls["actions"]
     assert ("configure_jarvis", {"url": "http://10.0.0.9:11435", "api_key": "sk-device"}) in calls["actions"]
-    assert saved == [("jarvis-watch", {"host": "192.168.2.105", "port": 6053, "noise_psk": psk, "owner": "jeremiah",
+    assert saved == [("jarvis-watch", {"host": "192.0.2.105", "port": 6053, "noise_psk": psk, "owner": "alex",
                                        "jarvis_url": "http://10.0.0.9:11435"})]
     assert claims[0]["verified"] is True and claims[0]["kind"] == "watch"
-    assert claims[0]["device_key"] == "esphome:744dbd2c9728"
+    assert claims[0]["device_key"] == "esphome:0200002c9728"
     assert claims[0]["app_version"] == "1.2.0"  # the watch's own firmware version
     assert removed == []
 
@@ -418,7 +418,7 @@ async def test_pair_finish_with_a_wrong_code_undoes_everything(pairing_env):
     ec, saved, removed, claims = pairing_env
     make, calls = _device_api(WATCH_SERVICES, confirm_ok=False)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="000000"))
+        res = await handle_esphome_pair(_pair_req("finish", host="192.0.2.105", code="000000"))
     assert res.status == "FAILURE"
     assert res.message == "Wrong code."
     assert calls["keys"][-1] == b""  # key cleared on the device
@@ -447,7 +447,7 @@ async def test_code_device_without_a_code_is_asked_for_one(pairing_env):
     ec, saved = pairing_env[0], pairing_env[1]
     make, calls = _device_api(WATCH_SERVICES)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105"))
+        res = await handle_esphome_pair(_pair_req("finish", host="192.0.2.105"))
     assert res.status == "FAILURE" and "Enter the code" in res.message
     assert calls["keys"] == [] and saved == []  # nothing changed on the device
 
@@ -458,7 +458,7 @@ async def test_an_already_keyed_device_says_how_to_proceed(pairing_env):
     ec = pairing_env[0]
     make, _ = _device_api(WATCH_SERVICES, requires_encryption=True)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("start", host="192.168.2.105"))
+        res = await handle_esphome_pair(_pair_req("start", host="192.0.2.105"))
     assert res.status == "FAILURE" and "already has an encryption key" in res.message
 
 
@@ -469,7 +469,7 @@ async def test_pairing_without_any_address_fails_before_touching_the_device(pair
     monkeypatch.setattr(ec, "JARVIS_HOST", None)
     make, calls = _device_api(WATCH_SERVICES)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456"))
+        res = await handle_esphome_pair(_pair_req("finish", host="192.0.2.105", code="123456"))
     assert res.status == "FAILURE" and "JARVIS_HOST" in res.message
     assert calls["connects"] == []
 
@@ -481,8 +481,8 @@ async def test_a_paired_device_obeys_only_its_owner(one_device, monkeypatch):
     one_device._device_cache["office-light"]["owner"] = "kate"
     api_cls, _ = _mock_api_class([aioesphomeapi.LightInfo(key=1, name="Office Light", object_id="office_light")])
     with patch.object(one_device.aioesphomeapi, "APIClient", api_cls):
-        mine = await handle_esphome(EsphomeRequest(user_context=UserContext(user="jeremiah"), action="list", device="office-light"))
-        admin = await handle_esphome(EsphomeRequest(user_context=UserContext(user="jeremiah", is_admin=True), action="list", device="office-light"))
+        mine = await handle_esphome(EsphomeRequest(user_context=UserContext(user="alex"), action="list", device="office-light"))
+        admin = await handle_esphome(EsphomeRequest(user_context=UserContext(user="alex", is_admin=True), action="list", device="office-light"))
         owner = await handle_esphome(EsphomeRequest(user_context=UserContext(user="Kate"), action="list", device="office-light"))
     assert mine.status == "FAILURE" and "another user" in mine.message
     assert admin.status == "SUCCESS" and owner.status == "SUCCESS"
@@ -496,10 +496,10 @@ async def test_pairing_gives_the_device_the_address_jarvis_was_reached_at(pairin
     monkeypatch.setattr(ec, "JARVIS_HOST", None)
     make, calls = _device_api(WATCH_SERVICES)
     with patch.object(ec.aioesphomeapi, "APIClient", side_effect=make):
-        res = await handle_esphome_pair(_pair_req("finish", host="192.168.2.105", code="123456",
-                                                  jarvis_url="https://jarvis.sumemail.com/"))
+        res = await handle_esphome_pair(_pair_req("finish", host="192.0.2.105", code="123456",
+                                                  jarvis_url="https://jarvis.example.com/"))
     assert res.status == "SUCCESS", res.message
-    assert ("configure_jarvis", {"url": "https://jarvis.sumemail.com", "api_key": "sk-device"}) in calls["actions"]
+    assert ("configure_jarvis", {"url": "https://jarvis.example.com", "api_key": "sk-device"}) in calls["actions"]
 
 
 @pytest.mark.asyncio
@@ -507,9 +507,9 @@ async def test_get_device_resolves_friendly_label_and_slug(one_device):
     """'Office Light' (the friendly label stored in Identity's Device table)
     resolves the 'office-light' entry in esphome_devices."""
     cfg = await one_device.get_device("Office Light")
-    assert cfg["host"] == "192.168.2.87"
+    assert cfg["host"] == "192.0.2.87"
     cfg_prefix = await one_device.get_device("esphome:Office Light")
-    assert cfg_prefix["host"] == "192.168.2.87"
+    assert cfg_prefix["host"] == "192.0.2.87"
 
 
 @pytest.mark.asyncio
@@ -555,7 +555,7 @@ async def test_list_entities_includes_live_states_and_metadata(one_device):
     def fake_subscribe(on_state):
         on_state(aioesphomeapi.SensorState(key=10, state=84.4, missing_state=False))
         on_state(aioesphomeapi.BinarySensorState(key=11, state=True, missing_state=False))
-        on_state(aioesphomeapi.TextSensorState(key=12, state="SummersLAN", missing_state=False))
+        on_state(aioesphomeapi.TextSensorState(key=12, state="RiveraLAN", missing_state=False))
         on_state(aioesphomeapi.SelectState(key=13, state="live", missing_state=False))
         on_state(aioesphomeapi.NumberState(key=14, state=75.0, missing_state=False))
         on_state(aioesphomeapi.LightState(key=15, state=True, brightness=0.8))
@@ -578,7 +578,7 @@ async def test_list_entities_includes_live_states_and_metadata(one_device):
     assert by_oid["battery"]["state"] == 84
     assert by_oid["battery"]["unit"] == "%"
     assert by_oid["charging"]["state"] is True
-    assert by_oid["wi_fi_network"]["state"] == "SummersLAN"
+    assert by_oid["wi_fi_network"]["state"] == "RiveraLAN"
     assert by_oid["power_mode"]["state"] == "live"
     assert by_oid["power_mode"]["options"] == ["deep", "ble", "live"]
     assert by_oid["screen_brightness"]["state"] == 75.0
@@ -671,7 +671,7 @@ async def test_esphome_ota_update_via_native_protocol_and_handler(one_device):
 
     firmware = b"\xe9\x04\x02\x20" + b"jarvis-watch-firmware-payload" * 32
     req = EsphomeRequest(
-        user_context=UserContext(user="jeremiah", is_admin=True),
+        user_context=UserContext(user="alex", is_admin=True),
         action="ota",
         device="office-light",
         params={
@@ -694,7 +694,7 @@ async def test_esphome_ota_update_via_native_protocol_and_handler(one_device):
     assert res.detail["method"] == "esphome_ota"
     assert res.detail["filename"] == "watch-v1.3.0.bin"
     assert res.detail["bytes"] == len(firmware)
-    fake_sync.assert_called_once_with("192.168.2.87", 3232, firmware, None)
+    fake_sync.assert_called_once_with("192.0.2.87", 3232, firmware, None)
 
 
 @pytest.mark.asyncio
@@ -710,7 +710,7 @@ async def test_esphome_ota_falls_back_to_web_server_when_tcp_3232_refused(one_de
 
     assert res["method"] == "web_server"
     assert res["bytes"] == len(firmware)
-    fake_http.assert_awaited_once_with("192.168.2.87", 80, firmware, filename="s3_speaker.bin", password=None)
+    fake_http.assert_awaited_once_with("192.0.2.87", 80, firmware, filename="s3_speaker.bin", password=None)
 
 
 @pytest.mark.asyncio

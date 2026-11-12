@@ -7,14 +7,14 @@ from services.gateway import main as gateway_main
 from services.gateway.main import app
 
 PARTICIPANTS = [
-    {"actor_id": "michele", "display_name": "Michele"},
-    {"actor_id": "noah", "display_name": "Noah"},
+    {"actor_id": "sam", "display_name": "Sam"},
+    {"actor_id": "jordan", "display_name": "Jordan"},
     {"actor_id": "jarvis", "display_name": "Jarvis"},
 ]
 
 USERS = [
-    {"username": "michele", "nextcloud_user": "michele"},
-    {"username": "noah", "nextcloud_user": "noah"},
+    {"username": "sam", "nextcloud_user": "sam"},
+    {"username": "jordan", "nextcloud_user": "jordan"},
     # The bot is a room member too, and must never be notified.
     {"username": "jarvis", "nextcloud_user": "jarvis", "is_system_default": True},
 ]
@@ -57,7 +57,7 @@ def _setup(monkeypatch):
     notices: list[dict] = []
 
     async def fake_identity(request, body=None):
-        return {"user": "michele"}
+        return {"user": "sam"}
 
     async def fake_proxy(request, endpoint, payload=None, *, method="POST", as_user=None):
         if (payload or {}).get("action") == "participants":
@@ -88,9 +88,9 @@ def test_a_call_tells_the_rooms_other_members_once(monkeypatch):
 
     first = client.post("/api/communication/talk/call", json={"token": "room-family"})
     assert first.status_code == 200
-    assert [n["user"] for n in notices] == ["noah"]
+    assert [n["user"] for n in notices] == ["jordan"]
     assert notices[0]["category"] == "call"
-    assert notices[0]["title"] == "Michele is on a family call"
+    assert notices[0]["title"] == "Sam is on a family call"
     assert notices[0]["data"]["url"] == "/family?tab=calls"
     assert notices[0]["tag"] == "call:room-family"
 
@@ -138,15 +138,15 @@ def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
         async def send_json(self, payload):
             pass
 
-    peer = calls.Peer(id="p1", room="room-family", username="michele", name="Michele", websocket=_Socket())
+    peer = calls.Peer(id="p1", room="room-family", username="sam", name="Sam", websocket=_Socket())
     asyncio.run(calls.hub.join(peer, "Family"))
 
     first = client.post("/api/communication/calls/room-family/ring")
-    assert first.json()["ringing"] == ["noah"]
+    assert first.json()["ringing"] == ["jordan"]
     [notice] = notices
-    assert notice["user"] == "noah"
+    assert notice["user"] == "jordan"
     assert notice["category"] == "call"
-    assert notice["title"] == "Michele is calling"
+    assert notice["title"] == "Sam is calling"
     assert notice["priority"] == 4
     assert notice["data"]["url"] == "/family?tab=calls&answer=room-family"
 
@@ -155,7 +155,7 @@ def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
     assert notices == []
 
 
-def _joined(room, username="michele"):
+def _joined(room, username="sam"):
     import asyncio
 
     from services.gateway import calls
@@ -169,7 +169,7 @@ def _joined(room, username="michele"):
 
 
 def test_a_ring_reaches_a_member_whose_talk_id_differs_in_case(monkeypatch):
-    """Nextcloud keeps "Noah" while Identity stores "noah": he must still ring."""
+    """Nextcloud keeps "Jordan" while Identity stores "jordan": he must still ring."""
     from services.gateway import calls
 
     notices = _setup(monkeypatch)
@@ -177,13 +177,13 @@ def test_a_ring_reaches_a_member_whose_talk_id_differs_in_case(monkeypatch):
     monkeypatch.setitem(
         globals(),
         "PARTICIPANTS",
-        [{"actor_id": "michele", "display_name": "Michele"}, {"actor_id": "Noah", "display_name": "Noah"}],
+        [{"actor_id": "sam", "display_name": "Sam"}, {"actor_id": "Jordan", "display_name": "Jordan"}],
     )
-    _joined("room-noah")
+    _joined("room-jordan")
 
-    reply = TestClient(app).post("/api/communication/calls/room-noah/ring").json()
-    assert reply["ringing"] == ["noah"]
-    assert [n["user"] for n in notices] == ["noah"]
+    reply = TestClient(app).post("/api/communication/calls/room-jordan/ring").json()
+    assert reply["ringing"] == ["jordan"]
+    assert [n["user"] for n in notices] == ["jordan"]
 
 
 def test_a_one_to_one_room_rings_even_when_its_member_list_is_unreadable(monkeypatch, caplog):
@@ -198,7 +198,7 @@ def test_a_one_to_one_room_rings_even_when_its_member_list_is_unreadable(monkeyp
             return JSONResponse(status_code=200, content={"status": "FAILURE", "message": "Forbidden", "detail": None})
         if action == "open":
             return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
-                "conversation": {"token": "room-dm", "type": 1, "name": "noah", "display_name": "Noah"},
+                "conversation": {"token": "room-dm", "type": 1, "name": "jordan", "display_name": "Jordan"},
             }})
         return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {}})
 
@@ -207,8 +207,8 @@ def test_a_one_to_one_room_rings_even_when_its_member_list_is_unreadable(monkeyp
 
     with caplog.at_level("WARNING"):
         reply = TestClient(app).post("/api/communication/calls/room-dm/ring").json()
-    assert reply["ringing"] == ["noah"]
-    assert [n["user"] for n in notices] == ["noah"]
+    assert reply["ringing"] == ["jordan"]
+    assert [n["user"] for n in notices] == ["jordan"]
     assert "Talk gave no members" in caplog.text and "Forbidden" in caplog.text
 
 
@@ -240,7 +240,7 @@ def test_members_without_a_family_account_are_logged_not_rung(monkeypatch, caplo
     monkeypatch.setitem(
         globals(),
         "PARTICIPANTS",
-        [{"actor_id": "michele", "display_name": "Michele"}, {"actor_id": "stranger", "display_name": "Guest"}],
+        [{"actor_id": "sam", "display_name": "Sam"}, {"actor_id": "stranger", "display_name": "Guest"}],
     )
     _joined("room-odd")
 
@@ -256,14 +256,14 @@ def test_talk_recipients_skips_guests_and_the_system_account():
 
     display, recipients, unmatched = talk_recipients(
         [
-            {"actor_type": "users", "actor_id": "Michele", "display_name": "Mum"},
-            {"actor_type": "users", "actor_id": "NOAH"},
+            {"actor_type": "users", "actor_id": "Sam", "display_name": "Mum"},
+            {"actor_type": "users", "actor_id": "JORDAN"},
             {"actor_type": "users", "actor_id": "jarvis"},
             {"actor_type": "emails", "actor_id": "abc123"},
         ],
         USERS,
-        "michele",
+        "sam",
     )
     assert display == "Mum"
-    assert recipients == {"noah"}
+    assert recipients == {"jordan"}
     assert unmatched == ["jarvis"]

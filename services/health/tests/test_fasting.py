@@ -9,7 +9,7 @@ import pytest
 from services.health import fasting, fasting_notices, fasting_traditions
 from services.health.models import FastingSession
 
-PHOENIX = ZoneInfo("America/Phoenix")
+LOCAL_TZ = ZoneInfo("Etc/GMT+7")
 
 
 @pytest.fixture(autouse=True)
@@ -114,14 +114,14 @@ def test_a_minor_has_no_fasting_to_share(client):
 
 
 def test_a_station_fast_ends_at_the_ninth_hour(client):
-    started = datetime(2026, 11, 4, 7, 0, tzinfo=PHOENIX)
-    end = fasting_traditions.planned_end("station", started, target_hours=None, days=None, until=None, tz=PHOENIX)
-    assert end == datetime(2026, 11, 4, 15, 0, tzinfo=PHOENIX)
+    started = datetime(2026, 11, 4, 7, 0, tzinfo=LOCAL_TZ)
+    end = fasting_traditions.planned_end("station", started, target_hours=None, days=None, until=None, tz=LOCAL_TZ)
+    assert end == datetime(2026, 11, 4, 15, 0, tzinfo=LOCAL_TZ)
     # Begun after 3 PM, it runs to 3 PM the next day.
-    late = fasting_traditions.planned_end("station", started.replace(hour=19), target_hours=None, days=None, until=None, tz=PHOENIX)
-    assert late == datetime(2026, 11, 5, 15, 0, tzinfo=PHOENIX)
-    assert fasting_traditions.planned_end("lent", started, target_hours=None, days=None, until=None, tz=PHOENIX) == started + timedelta(days=40)
-    assert fasting_traditions.planned_end("paschal", started, target_hours=None, days=None, until=None, tz=PHOENIX) == started + timedelta(hours=40)
+    late = fasting_traditions.planned_end("station", started.replace(hour=19), target_hours=None, days=None, until=None, tz=LOCAL_TZ)
+    assert late == datetime(2026, 11, 5, 15, 0, tzinfo=LOCAL_TZ)
+    assert fasting_traditions.planned_end("lent", started, target_hours=None, days=None, until=None, tz=LOCAL_TZ) == started + timedelta(days=40)
+    assert fasting_traditions.planned_end("paschal", started, target_hours=None, days=None, until=None, tz=LOCAL_TZ) == started + timedelta(hours=40)
 
 
 def test_a_fast_of_a_kind_carries_its_name_end_and_season(client):
@@ -142,38 +142,38 @@ def test_the_traditions_name_their_sources(client):
 
 
 def test_those_it_is_shared_with_are_asked_to_pray(client, sent):
-    client.put("/shares", json={"viewer": "michele", "scope": "fasting"})
+    client.put("/shares", json={"viewer": "sam", "scope": "fasting"})
     client.post("/fasting/start", json={"kind": "station", "intention": "a friend's surgery"})
     start = [n for n in sent if n.get("kind") == "fast_shared"]
-    assert [n["user"] for n in start] == ["michele"]
-    assert "Pray with Jeremiah" in start[0]["title"] and "a friend's surgery" in start[0]["body"]
+    assert [n["user"] for n in start] == ["sam"]
+    assert "Pray with Alex" in start[0]["title"] and "a friend's surgery" in start[0]["body"]
     client.post("/fasting/stop", json={})
     assert sum(1 for n in sent if n.get("kind") == "fast_shared") == 2
 
 
 def test_a_private_fast_tells_no_one(client, sent):
-    client.put("/shares", json={"viewer": "michele", "scope": "fasting"})
+    client.put("/shares", json={"viewer": "sam", "scope": "fasting"})
     client.post("/fasting/start", json={"notify_shared": False})
     client.post("/fasting/stop", json={})
     assert not [n for n in sent if n.get("kind") == "fast_shared"]
 
 
 def _row(**kw) -> FastingSession:
-    base = {"id": 7, "user_id": "jeremiah", "started_at": datetime(2026, 11, 4, 6, 0, tzinfo=PHOENIX).isoformat()}
+    base = {"id": 7, "user_id": "alex", "started_at": datetime(2026, 11, 4, 6, 0, tzinfo=LOCAL_TZ).isoformat()}
     return FastingSession(**{**base, **kw})
 
 
 def test_the_hours_of_prayer_are_due_only_inside_the_fast():
-    row = _row(ends_at=datetime(2026, 11, 4, 15, 0, tzinfo=PHOENIX).isoformat())
-    at_noon = datetime(2026, 11, 4, 12, 10, tzinfo=PHOENIX)
-    assert [(what, d.get("clock")) for _, what, d in fasting_notices.due([row], at_noon, PHOENIX)] == [("prayer", "12:00")]
-    assert fasting_notices.due([row], datetime(2026, 11, 4, 12, 45, tzinfo=PHOENIX), PHOENIX) == []
+    row = _row(ends_at=datetime(2026, 11, 4, 15, 0, tzinfo=LOCAL_TZ).isoformat())
+    at_noon = datetime(2026, 11, 4, 12, 10, tzinfo=LOCAL_TZ)
+    assert [(what, d.get("clock")) for _, what, d in fasting_notices.due([row], at_noon, LOCAL_TZ)] == [("prayer", "12:00")]
+    assert fasting_notices.due([row], datetime(2026, 11, 4, 12, 45, tzinfo=LOCAL_TZ), LOCAL_TZ) == []
     # Reminders off: nothing until the end.
-    assert fasting_notices.due([_row(prayer_reminders=False)], at_noon, PHOENIX) == []
+    assert fasting_notices.due([_row(prayer_reminders=False)], at_noon, LOCAL_TZ) == []
     # Before the fast began, the hour is not its own.
-    late = _row(started_at=datetime(2026, 11, 4, 12, 5, tzinfo=PHOENIX).isoformat())
-    assert fasting_notices.due([late], at_noon, PHOENIX) == []
-    done = fasting_notices.due([row], datetime(2026, 11, 4, 15, 3, tzinfo=PHOENIX), PHOENIX)
+    late = _row(started_at=datetime(2026, 11, 4, 12, 5, tzinfo=LOCAL_TZ).isoformat())
+    assert fasting_notices.due([late], at_noon, LOCAL_TZ) == []
+    done = fasting_notices.due([row], datetime(2026, 11, 4, 15, 3, tzinfo=LOCAL_TZ), LOCAL_TZ)
     assert [what for _, what, _ in done] == ["complete"]
 
 
@@ -182,28 +182,28 @@ def test_the_hours_of_prayer_are_due_only_inside_the_fast():
 async def test_an_hour_of_prayer_carries_the_psalm_and_opens_it_in_the_bible(sent, engine, monkeypatch):
     from sqlmodel import Session
 
-    started = datetime(2026, 11, 4, 6, 0, tzinfo=PHOENIX)
+    started = datetime(2026, 11, 4, 6, 0, tzinfo=LOCAL_TZ)
     with Session(engine) as session:
-        session.add(FastingSession(user_id="jeremiah", started_at=started.isoformat(),
-                                   ends_at=datetime(2026, 11, 4, 15, 0, tzinfo=PHOENIX).isoformat()))
+        session.add(FastingSession(user_id="alex", started_at=started.isoformat(),
+                                   ends_at=datetime(2026, 11, 4, 15, 0, tzinfo=LOCAL_TZ).isoformat()))
         session.commit()
-    await fasting_notices.remind_once(lambda: engine, lambda: PHOENIX, now=datetime(2026, 11, 4, 12, 5, tzinfo=PHOENIX))
+    await fasting_notices.remind_once(lambda: engine, lambda: LOCAL_TZ, now=datetime(2026, 11, 4, 12, 5, tzinfo=LOCAL_TZ))
     prayer = next(n for n in sent if n.get("kind") == "fast_prayer")
     assert prayer["title"] == "Sixth hour: time to pray"
     psalm = prayer["data"]["url"].split("ref=", 1)[1]
     assert prayer["data"]["url"].startswith("/bible?ref=Psalm")
     # The psalm's words are in the message, in the person's translation.
-    assert "for jeremiah]" in prayer["body"] and "Lord's Prayer" in prayer["body"]
+    assert "for alex]" in prayer["body"] and "Lord's Prayer" in prayer["body"]
     assert [a["label"] for a in prayer["actions"]][1] == "Open my fast" and psalm
 
 
 def test_a_shared_fast_asks_for_prayer_with_a_verse_to_open(client, sent):
-    client.put("/shares", json={"viewer": "michele", "scope": "fasting"})
+    client.put("/shares", json={"viewer": "sam", "scope": "fasting"})
     client.post("/fasting/start", json={"kind": "station"})
     notice = next(n for n in sent if n.get("kind") == "fast_shared")
     assert notice["data"]["url"].startswith("/bible?ref=")
     assert notice["actions"][0]["label"].startswith("Read ")
-    assert "for michele]" in notice["body"]
+    assert "for sam]" in notice["body"]
 
 
 def test_a_running_fasts_start_can_be_corrected_and_its_end_moves_with_it(client):

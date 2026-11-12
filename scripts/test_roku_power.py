@@ -4,12 +4,15 @@ import time
 
 import requests
 
+LIVE_TV_ENTITY = os.environ.get("LIVE_TV_ENTITY") or sys.exit("Set LIVE_TV_ENTITY to the TV media_player entity id to test.")
+LIVE_REMOTE_ENTITY = os.environ.get("LIVE_REMOTE_ENTITY") or sys.exit("Set LIVE_REMOTE_ENTITY to the TV remote entity id to test.")
+
 # Add project root to path
 sys.path.append(os.getcwd())
 
 # Configuration
-MEDIA_PLAYER_ID = "media_player.28_tcl_roku_tv"
-REMOTE_ID = "remote.28_tcl_roku_tv"
+MEDIA_PLAYER_ID = LIVE_TV_ENTITY
+REMOTE_ID = LIVE_REMOTE_ENTITY
 HA_URL = os.getenv("HA_URL", "http://ai.local:8123") # Default internal if env missing
 HA_TOKEN = os.getenv("HA_TOKEN")
 

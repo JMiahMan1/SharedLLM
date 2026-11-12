@@ -438,9 +438,10 @@ username))`, valid six hours), so no TURN password is stored or shared. Set in
 | Variable | Meaning |
 | --- | --- |
 | `TURN_SECRET` | Shared by coturn and the gateway (`openssl rand -hex 32`) |
-| `TURN_URLS` | What phones are told, e.g. `turn:turn.sumemail.com:3478?transport=udp,turn:turn.sumemail.com:3478?transport=tcp` |
+| `TURN_URLS` | What phones are told, e.g. `turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp` |
 | `TURN_PUBLIC_IP` | The public address the router forwards to this host |
-| `TURN_PRIVATE_IP` | This host's LAN address (default `192.168.2.205`) |
+| `TURN_PRIVATE_IP` | This host's LAN address, required (e.g. `192.0.2.205`) |
+| `TURN_REALM` | coturn's realm, your domain, required (e.g. `example.com`) |
 | `TURN_PORT` | Listening port (default 3478) |
 | `TURN_MIN_PORT` / `TURN_MAX_PORT` | Relay port range (default 49160-49200) |
 

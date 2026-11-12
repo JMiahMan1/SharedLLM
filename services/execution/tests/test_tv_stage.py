@@ -52,7 +52,7 @@ def test_audio_only_cast_and_groups_are_not_screens():
 
 
 def test_roku_gets_a_live_stream_and_is_labelled_video():
-    screens = tv_stage.build_screens([_ha_tv("media_player.gracie_roku", "Gracie TV", "roku")], [])
+    screens = tv_stage.build_screens([_ha_tv("media_player.taylor_roku", "Taylor TV", "roku")], [])
     assert screens[0]["methods"] == ["roku_stream"]
     assert screens[0]["display"] == "video"
 
@@ -240,14 +240,14 @@ def test_master_bedroom_samsung_and_its_plugged_in_chromecast_are_both_listed():
         _ha_tv("media_player.master_bedroom_tv_2", "Master Bedroom TV", "music_assistant",
                cast_sibling="media_player.master_bedroom_tv"),
     ]
-    cc = _cast("Master Bedroom TV", "16b032a3-f048-710f-0506-ad3136885e30", host="192.168.1.240")
-    uuids = {"media_player.master_bedroom_tv": "16b032a3f048710f0506ad3136885e30"}
+    cc = _cast("Master Bedroom TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240")
+    uuids = {"media_player.master_bedroom_tv": "16b00000000040008000000000000001"}
     screens = tv_stage.build_screens(ha, [cc], None, uuids)
     by_id = {s["id"]: s for s in screens}
     assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
     for s in screens:  # either entry reaches the TV through the Chromecast, found on another subnet
         assert s["methods"] == ["cast_web"]
-        assert s["cast"]["host"] == "192.168.1.240"
+        assert s["cast"]["host"] == "172.16.1.240"
 
 
 def test_cast_device_is_matched_by_cast_id_before_name():
@@ -268,45 +268,45 @@ def test_built_in_cast_is_still_one_screen():
 
 def test_neighbour_networks_cover_both_sides():
     import ipaddress
-    nets = tv_stage.neighbour_networks({ipaddress.ip_network("192.168.2.0/24")})
-    assert {str(n) for n in nets} == {"192.168.1.0/24", "192.168.3.0/24"}
+    nets = tv_stage.neighbour_networks({ipaddress.ip_network("172.16.2.0/24")})
+    assert {str(n) for n in nets} == {"172.16.1.0/24", "172.16.3.0/24"}
 
 
 def test_known_hosts_are_read_from_the_options_form():
     flow = {"flow_id": "f", "data_schema": [
-        {"name": "known_hosts", "description": {"suggested_value": ["192.168.1.240", "bogus", "192.168.1.240"]}},
+        {"name": "known_hosts", "description": {"suggested_value": ["172.16.1.240", "bogus", "172.16.1.240"]}},
         {"name": "uuid", "description": {"suggested_value": ["x"]}},
     ]}
-    assert tv_stage.known_hosts_from_flow(flow) == ["192.168.1.240"]
+    assert tv_stage.known_hosts_from_flow(flow) == ["172.16.1.240"]
 
 
 def test_eureka_answer_becomes_a_cast_device():
     info = {"name": "Master Bedroom TV", "device_info": {
-        "ssdp_udn": "16b032a3-f048-710f-0506-ad3136885e30", "model_name": "Chromecast",
+        "ssdp_udn": "16b00000-0000-4000-8000-000000000001", "model_name": "Chromecast",
         "manufacturer": "Google", "capabilities": {"display_supported": True}}}
-    dev = tv_stage.cast_from_eureka("192.168.1.240", info)
-    assert dev["name"] == "Master Bedroom TV" and dev["cast_type"] == "cast" and dev["host"] == "192.168.1.240"
+    dev = tv_stage.cast_from_eureka("172.16.1.240", info)
+    assert dev["name"] == "Master Bedroom TV" and dev["cast_type"] == "cast" and dev["host"] == "172.16.1.240"
     speaker = tv_stage.cast_from_eureka("1.2.3.4", {"name": "Kitchen", "ssdp_udn": "u",
                                                      "device_info": {"capabilities": {"display_supported": False}}})
     assert speaker["cast_type"] == "audio"
 
 
 def test_mdns_and_unicast_results_merge_by_cast_id():
-    a = _cast("Office TV", "81df-ea8f", host="192.168.2.88")
-    b = {**_cast("Office TV", "81DFEA8F", host="192.168.2.88"), "found_by": "unicast"}
-    c = {**_cast("Bedroom", "16b0", host="192.168.1.240"), "found_by": "unicast"}
+    a = _cast("Office TV", "81df-ea8f", host="172.16.2.88")
+    b = {**_cast("Office TV", "81DFEA8F", host="172.16.2.88"), "found_by": "unicast"}
+    c = {**_cast("Bedroom", "16b0", host="172.16.1.240"), "found_by": "unicast"}
     merged = tv_stage.merge_cast_devices([a], [b, c])
-    assert [d["host"] for d in merged] == ["192.168.2.88", "192.168.1.240"]
+    assert [d["host"] for d in merged] == ["172.16.2.88", "172.16.1.240"]
 
 
 def test_cross_subnet_discovery_works_without_home_assistant(monkeypatch, tmp_path):
     import ipaddress
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
-    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("192.168.2.0/24")})
+    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("172.16.2.0/24")})
     tv_stage._sweep_cache.update({"at": 0.0, "key": "", "devices": []})
 
     async def port_open(ip, port=8009):
-        return ip == "192.168.1.240"
+        return ip == "172.16.1.240"
 
     async def info(ip):
         return tv_stage.cast_from_eureka(ip, {"name": "Master Bedroom TV", "ssdp_udn": "16b0"})
@@ -318,14 +318,14 @@ def test_cross_subnet_discovery_works_without_home_assistant(monkeypatch, tmp_pa
     monkeypatch.setattr(tv_stage, "_cast_info", info)
     monkeypatch.setattr(tv_stage, "_router_status", no_router)
     found = asyncio.run(tv_stage.discover_remote_cast_devices("", "", force=True))
-    assert [d["host"] for d in found] == ["192.168.1.240"]
-    assert tv_stage._learned_hosts() == ["192.168.1.240"]
+    assert [d["host"] for d in found] == ["172.16.1.240"]
+    assert tv_stage._learned_hosts() == ["172.16.1.240"]
 
 
 def test_router_device_list_is_asked_instead_of_sweeping(monkeypatch, tmp_path):
     import ipaddress
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
-    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("192.168.2.0/24")})
+    monkeypatch.setattr(tv_stage, "_local_networks", lambda: {ipaddress.ip_network("172.16.2.0/24")})
     tv_stage._sweep_cache.update({"at": 0.0, "key": "", "devices": []})
     probed = []
 
@@ -337,9 +337,9 @@ def test_router_device_list_is_asked_instead_of_sweeping(monkeypatch, tmp_path):
         return tv_stage.cast_from_eureka(ip, {"name": "Garage TV", "ssdp_udn": "g1"})
 
     async def router():
-        return {"configured": True, "networks": [{"name": "lan", "cidr": "192.168.2.1/24"},
+        return {"configured": True, "networks": [{"name": "lan", "cidr": "172.16.2.1/24"},
                                                  {"name": "iot", "cidr": "10.9.0.1/24"}],
-                "devices": {"aa": {"name": "Garage TV", "ip": "10.9.0.7"}, "bb": {"name": "pc", "ip": "192.168.2.50"},
+                "devices": {"aa": {"name": "Garage TV", "ip": "10.9.0.7"}, "bb": {"name": "pc", "ip": "172.16.2.50"},
                             "cc": {"name": "lamp", "ip": "10.9.0.8"}}}
 
     monkeypatch.setattr(tv_stage, "_port_open", port_open)
@@ -351,9 +351,9 @@ def test_router_device_list_is_asked_instead_of_sweeping(monkeypatch, tmp_path):
 
 
 def test_router_view_reads_networks_and_addresses():
-    nets, ips = tv_stage.router_view({"networks": [{"cidr": "192.168.1.1/24"}, {"cidr": "bogus"}],
-                                      "devices": {"m": {"ip": "192.168.1.240"}, "n": {"ip": None}}})
-    assert {str(n) for n in nets} == {"192.168.1.0/24"} and ips == ["192.168.1.240"]
+    nets, ips = tv_stage.router_view({"networks": [{"cidr": "172.16.1.1/24"}, {"cidr": "bogus"}],
+                                      "devices": {"m": {"ip": "172.16.1.240"}, "n": {"ip": None}}})
+    assert {str(n) for n in nets} == {"172.16.1.0/24"} and ips == ["172.16.1.240"]
 
 
 def test_audio_only_players_are_not_offered_video():
@@ -434,9 +434,9 @@ def test_live_house_shape_lists_samsung_and_chromecast_and_drops_the_wrapper():
     ]
     states = [{"entity_id": "media_player.master_bedroom_tv", "attributes": {"friendly_name": "Master Bedroom TV"}},
               {"entity_id": "media_player.master_bedroom_tv_2", "attributes": {"friendly_name": "Master Bedroom TV"}}]
-    cc = {**_cast("Master Bedroom TV", "16b032a3-f048-710f-0506-ad3136885e30", host="192.168.1.240"),
+    cc = {**_cast("Master Bedroom TV", "16b00000-0000-4000-8000-000000000001", host="172.16.1.240"),
           "found_by": "unicast"}
-    uuids = {"media_player.master_bedroom_tv": "16b032a3f048710f0506ad3136885e30"}
+    uuids = {"media_player.master_bedroom_tv": "16b00000000040008000000000000001"}
     screens = tv_stage.build_screens(ha, [cc], states, uuids)
     by_id = {s["id"]: s for s in screens}
     assert set(by_id) == {"ha:media_player.master_bedroom_samsung", "ha:media_player.master_bedroom_tv"}
@@ -458,8 +458,8 @@ def test_the_owning_integration_decides_the_platform_not_the_name():
     assert "ha:media_player.lg_webos_tv_un6955zuf_airplay" not in screens  # an AirPlay speaker shows no page
     assert screens["ha:media_player.living_room_tv"]["methods"] == ["webos_direct", "webos_browser"]
     # A Roku reached through its Music Assistant entity keeps its stream (it goes to the Roku itself).
-    roku = tv_stage.build_screens([_ha_tv("media_player.gracies_tv", "Gracies TV", "roku")], [],
-                                  platforms={"media_player.gracies_tv": "music_assistant"})
+    roku = tv_stage.build_screens([_ha_tv("media_player.taylors_tv", "Taylors TV", "roku")], [],
+                                  platforms={"media_player.taylors_tv": "music_assistant"})
     assert roku and roku[0]["methods"] == ["roku_stream"]
 
 
@@ -504,12 +504,12 @@ def test_a_sleeping_lg_is_woken_then_shown(monkeypatch):
 
 
 def test_the_lg_is_found_by_its_network_name_even_after_its_address_changes():
-    # Home Assistant still had 192.168.2.160; the TV had moved to 192.168.4.156.
+    # Home Assistant still had 172.16.2.160; the TV had moved to 172.16.4.156.
     screen = {"name": "Living Room TV", "entity_id": "media_player.living_room_tv"}
-    router = {"8c:19:b5:22:1a:7c": {"name": "LivingRoomTv", "ip": "192.168.4.156"},
-              "10:a5:62:91:d8:15": {"name": "10:a5:62:91:d8:15", "ip": "192.168.4.215"}}
-    assert tv_stage.webos_host_candidates(screen, router, remembered="192.168.4.100", ha_ip="192.168.2.160") == [
-        "192.168.4.156", "192.168.4.100", "192.168.2.160"]
+    router = {"02:00:00:22:1a:7c": {"name": "LivingRoomTv", "ip": "172.16.4.156"},
+              "02:00:00:91:d8:15": {"name": "02:00:00:91:d8:15", "ip": "172.16.4.215"}}
+    assert tv_stage.webos_host_candidates(screen, router, remembered="172.16.4.100", ha_ip="172.16.2.160") == [
+        "172.16.4.156", "172.16.4.100", "172.16.2.160"]
 
 
 class _FakeWebOs:
@@ -541,7 +541,7 @@ def test_the_lg_browser_opens_directly_and_the_pairing_key_is_kept(monkeypatch, 
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
 
     async def host(*_a, **_k):
-        return "192.168.4.156"
+        return "172.16.4.156"
 
     async def no_sleep(*_a, **_k):
         return None
@@ -561,10 +561,10 @@ def test_the_lg_browser_opens_directly_and_the_pairing_key_is_kept(monkeypatch, 
 
 def test_an_lg_that_answers_directly_is_listed_as_on(monkeypatch, tmp_path):
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
-    tv_stage._webos_remember("media_player.living_room_tv", host="192.168.4.156", client_key="k")
+    tv_stage._webos_remember("media_player.living_room_tv", host="172.16.4.156", client_key="k")
 
     async def port_open(ip, port=8009):
-        return ip == "192.168.4.156"
+        return ip == "172.16.4.156"
 
     monkeypatch.setattr(tv_stage, "_port_open", port_open)
     screens = [{"platform": "webos", "state": "unavailable", "entity_id": "media_player.living_room_tv"},
@@ -578,20 +578,20 @@ def test_a_samsung_is_found_by_its_own_name_after_its_address_changes(monkeypatc
     monkeypatch.setattr(tv_stage, "TOKEN_DIR", tmp_path)
 
     async def name_at(ip):
-        return {"192.168.4.114": "[TV] Loft Samsung Q900", "192.168.4.50": "[TV] Other"}.get(ip, "")
+        return {"172.16.4.114": "[TV] Loft Samsung Q900", "172.16.4.50": "[TV] Other"}.get(ip, "")
 
     async def no_ip(*_a, **_k):
-        return "192.168.2.77"  # Home Assistant's stale address: nothing answers there
+        return "172.16.2.77"  # Home Assistant's stale address: nothing answers there
 
     async def router():
-        return {"devices": {"a": {"name": "LoftTV", "ip": "192.168.4.114"}, "b": {"name": "x", "ip": "192.168.4.50"}}}
+        return {"devices": {"a": {"name": "LoftTV", "ip": "172.16.4.114"}, "b": {"name": "x", "ip": "172.16.4.50"}}}
 
     monkeypatch.setattr(tv_stage, "_samsung_name_at", name_at)
     monkeypatch.setattr(tv_stage, "_entity_ip", no_ip)
     monkeypatch.setattr(tv_stage, "_router_status", router)
     screen = {"name": "[TV] Loft Samsung Q900", "entity_id": "media_player.tv_loft_samsung_q900_2"}
-    assert asyncio.run(tv_stage._samsung_find_host(screen, "u", "t")) == "192.168.4.114"
-    tv_stage._samsung_remember(screen["entity_id"], "192.168.4.114")
+    assert asyncio.run(tv_stage._samsung_find_host(screen, "u", "t")) == "172.16.4.114"
+    tv_stage._samsung_remember(screen["entity_id"], "172.16.4.114")
     screens = [{"platform": "samsung", "state": "unavailable", "entity_id": screen["entity_id"]}]
     asyncio.run(tv_stage._webos_live_state(screens))
     assert screens[0]["state"] == "on"

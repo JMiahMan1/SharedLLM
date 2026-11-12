@@ -9,7 +9,7 @@ import pytest
 from services.homehub import templating as t
 from services.homehub.core import Area, DeviceEntry, EntityEntry, Hub
 
-NOW = datetime(2026, 11, 11, 19, 0, tzinfo=UTC)  # noon in Phoenix, a Wednesday
+NOW = datetime(2026, 11, 11, 19, 0, tzinfo=UTC)  # noon at UTC-7, a Wednesday
 
 
 def clock() -> datetime:
@@ -18,7 +18,7 @@ def clock() -> datetime:
 
 @pytest.fixture
 def hub() -> Hub:
-    hub = Hub(time_zone="America/Phoenix")
+    hub = Hub(time_zone="Etc/GMT+7")
     hub.areas["office"] = Area("office", "Office")
     hub.areas["kitchen"] = Area("kitchen", "Kitchen", aliases=["Cook Room"])
     hub.devices["dev1"] = DeviceEntry(id="dev1", name="Desk Lamp", area_id="office", manufacturer="WiZ",
@@ -110,7 +110,7 @@ def test_registry_helpers(hub: Hub) -> None:
 
 
 def test_time_functions_use_the_hub_zone_and_the_given_clock(hub: Hub) -> None:
-    assert r(hub, "{{ now().hour }} {{ now().tzinfo }}") == "12 America/Phoenix"
+    assert r(hub, "{{ now().hour }} {{ now().tzinfo }}") == "12 Etc/GMT+7"
     assert r(hub, "{{ utcnow().hour }}") == "19"
     assert r(hub, "{{ today_at('07:30').isoformat() }}") == "2026-11-11T07:30:00-07:00"
     assert r(hub, "{{ now() > today_at('07:30') }}") == "True"

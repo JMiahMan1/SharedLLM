@@ -434,11 +434,11 @@ async def build_capability_map(
 
     Returns:
         {
-            "gracies tv": {
-                "entity_id": "media_player.28_tcl_roku_tv",
+            "bedroom tv": {
+                "entity_id": "media_player.bedroom_roku_tv",
                 "device_type": "roku",
-                "ip": "192.168.2.166",
-                "mac": "cc:b0:da:c6:8f:21",
+                "ip": "192.0.2.166",
+                "mac": "02:00:00:00:00:21",
                 "power_on": ["ha_turn_on", "ecp_home_key"],
                 "power_off": ["ha_turn_off", "remote_power_off"],
                 "play_media": ["ecp_launch", "ma_delegation"],
@@ -489,7 +489,7 @@ def resolve_by_friendly_name(
     """
     Resolve a fuzzy friendly name query to (entity_id, capabilities).
 
-    Handles partial matches like "gracies", "office tv", "master bedroom".
+    Handles partial matches like "bedroom", "office tv", "master bedroom".
     Returns (entity_id, cap_dict) or (None, None).
     """
     query_lower = query.lower().strip()

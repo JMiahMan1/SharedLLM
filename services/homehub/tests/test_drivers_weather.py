@@ -36,14 +36,14 @@ def open_meteo_payload(is_day=1, code=0):
 
 def om_hub():
     hub, entry = make_hub("open_meteo", data={"zone": "zone.home"},
-                          entities=[{"entity_id": "weather.home", "unique_id": "01KC6X2WZHRQ8Y60AGF94G6TJG"}])
+                          entities=[{"entity_id": "weather.home", "unique_id": "01J0000000000000000000WTHR"}])
     hub.location["unit_system_v2"] = "us_customary"
     return hub, entry
 
 
 async def test_open_meteo_publishes_ha_weather_and_uses_the_zone(monkeypatch):
     hub, entry = om_hub()
-    hub.states.set("zone.home", "0", {"latitude": 33.17, "longitude": -111.56, "radius": 40})
+    hub.states.set("zone.home", "0", {"latitude": 39.7425, "longitude": -104.9857, "radius": 40})
     drv = weather.OpenMeteoDriver(hub, entry)
     seen = {}
 
@@ -53,7 +53,7 @@ async def test_open_meteo_publishes_ha_weather_and_uses_the_zone(monkeypatch):
 
     monkeypatch.setattr(drv, "_get_json", fake_get)
     await drv.async_setup()
-    assert seen["latitude"] == 33.17 and seen["temperature_unit"] == "fahrenheit"
+    assert seen["latitude"] == 39.7425 and seen["temperature_unit"] == "fahrenheit"
     st = hub.states.get("weather.home")
     assert st.state == "sunny"
     a = st.attributes
@@ -67,7 +67,7 @@ async def test_open_meteo_publishes_ha_weather_and_uses_the_zone(monkeypatch):
 async def test_open_meteo_clear_night_and_location_fallback(monkeypatch):
     hub, entry = om_hub()
     drv = weather.OpenMeteoDriver(hub, entry)
-    assert drv.location() == (33.4, -111.9)  # no zone state: the core config location
+    assert drv.location() == (39.9725, -105.3257)  # no zone state: the core config location
 
     async def fake_get(url, params=None, headers=None):
         return open_meteo_payload(is_day=0)
@@ -126,7 +126,7 @@ def test_wmo_and_nws_conditions():
 
 # -- NWS ----------------------------------------------------------------------------
 
-LAT, LON = 33.166726063935485, -111.56459569931032
+LAT, LON = 39.739226063935485, -104.99029569931032
 P = f"{LAT}_{LON}"
 
 OBSERVATION = {"properties": {

@@ -89,7 +89,7 @@ class TestRoutes:
         assert body["week_start"] == "2026-10-19" and body["week_end"] == "2026-10-25"
         assert body["joined"] is True
         assert body["leaderboard"] == [
-            {"user_id": "jeremiah", "count": 0, "days": [], "guideline_goal": True, "reached": False}
+            {"user_id": "alex", "count": 0, "days": [], "guideline_goal": True, "reached": False}
         ]
 
     def test_minor_or_unknown_cannot_create(self, client):
@@ -149,7 +149,7 @@ class TestRoutes:
         listing = client.get("/challenges", params={"day": WEEK_DAY}).json()
         board = listing["challenges"][0]["leaderboard"]
         assert board[0] == {
-            "user_id": "jeremiah",
+            "user_id": "alex",
             "count": 2,
             "days": ["2026-10-19", "2026-10-20"],
             "guideline_goal": False,
@@ -165,7 +165,7 @@ class TestRoutes:
         client.post(f"/challenges/{created['id']}/join", headers=_as("emma"))
         board = client.get("/challenges", params={"day": WEEK_DAY}).json()["challenges"][0]["leaderboard"]
         # The health store holds no steps, so nobody is shown as having walked zero days.
-        assert {row["user_id"] for row in board} == {"jeremiah", "emma"}
+        assert {row["user_id"] for row in board} == {"alex", "emma"}
         assert all(row["unavailable"] is True and row["count"] == 0 for row in board)
 
     def test_water_uses_the_members_own_goal(self, client):
@@ -197,7 +197,7 @@ class TestRoutes:
         assert [row["user_id"] for row in joined["leaderboard"]].count("emma") == 1
         left = client.delete(path, headers=_as("emma")).json()
         assert left["joined"] is False
-        assert [row["user_id"] for row in left["leaderboard"]] == ["jeremiah"]
+        assert [row["user_id"] for row in left["leaderboard"]] == ["alex"]
         assert client.post("/challenges/9999/join").status_code == 404
 
     def test_only_the_creator_or_an_admin_ends_it(self, client):

@@ -106,7 +106,7 @@ API keys. See `docs/INTEGRATIONS.md` for each service's fields and
 
 Username and password against identity (`POST /api/auth/login`); the last
 username is remembered. In the Android app the form also has the server URL
-(default `https://jarvis.sumemail.com`; a bare host is taken as https) with a
+(for example `https://jarvis.example.com`; a bare host is taken as https) with a
 connection test. There is no fingerprint sign-in: no password is stored on the
 phone, so the old fingerprint button could never work.
 

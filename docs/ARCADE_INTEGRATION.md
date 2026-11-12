@@ -37,9 +37,9 @@ re-implement.
   the six highest-rated games with ≥1 vote, else best benchmark score.
 - **UI**: `services/ui/src/components/family/ArcadeGames.tsx` on the Family →
   Games tab: featured shelf, full list, star ratings, plays, play links.
-- **Config**: `ALPACA_ARCADE_URL` (default `http://<desktop-host>.local:5001`)
+- **Config**: `ALPACA_ARCADE_URL` (required, no default; set it in `.env`, e.g. `http://llm-host.local:5001`)
   is the gateway's server-side fetch target; `ALPACA_ARCADE_PUBLIC_URL`
-  (default `https://games.sumemail.com`) is the browser-facing play host. The
+  (required, no default, e.g. `https://games.example.com`; unset, the games shelf reports an error naming it) is the browser-facing play host. The
   public URL must be reachable from phones and the native app, and must be
   HTTPS when the app is served over HTTPS.
 - **Tests**: `services/gateway/tests/test_arcade_proxy.py`,
@@ -172,7 +172,7 @@ it never touches a running, paused or restarting game.
    the gateway, which:
    - adds points to the achievements ledger (`docs/ACHIEVEMENTS.md`),
    - posts a Talk message via the existing bot path, e.g.
-     "🎮 Michele scored 12,300 on Tetris", and
+     "🎮 Sam scored 12,300 on Tetris", and
    - can mirror points into Skylight stars (`docs/FAMILY_HUB.md`).
    Kid-safe by default: initials only, no free-text.
 

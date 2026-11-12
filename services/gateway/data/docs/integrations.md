@@ -4,7 +4,7 @@ This guide provides instructions for connecting your private cloud and home auto
 
 ## Home Assistant
 Connect Jarvis to your home's central nervous system.
-- **Instance URL**: The public or local IP of your HA instance (e.g., `http://192.168.1.100:8123`).
+- **Instance URL**: The public or local IP of your HA instance (e.g., `http://198.51.100.100:8123`).
 - **Long-Lived Token**: Generate this in Home Assistant under **Profile > Long-lived access tokens**. Jarvis uses this to read entity states and execute service calls.
 
 ## Nextcloud

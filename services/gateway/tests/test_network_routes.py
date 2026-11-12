@@ -19,7 +19,7 @@ def calls(monkeypatch):
     async def admin(request):
         auth = request.headers.get("Authorization")
         if auth == "Bearer admin-key":
-            return "jeremiah"
+            return "alex"
         raise HTTPException(status_code=403 if auth else 401, detail="Admin only")
 
     async def call(method, url, *, params=None, json=None):
@@ -51,7 +51,7 @@ def client():
                                        ("post", "/api/network/check"),
                                        ("put", "/api/network/settings")])
 def test_only_admins_see_the_network(client, calls, verb, path):
-    kwargs = {"json": {"url": "https://192.168.2.1", "username": "jarvis"}} if verb == "put" else {}
+    kwargs = {"json": {"url": "https://192.0.2.1", "username": "jarvis"}} if verb == "put" else {}
     assert getattr(client, verb)(path, headers=KID, **kwargs).status_code == 403
     assert getattr(client, verb)(path, **kwargs).status_code == 401
     assert calls == []
@@ -66,21 +66,21 @@ def test_status_log_and_usage_come_from_the_monitor(client, calls):
 
 def test_saving_settings_stores_them_in_identity_then_checks(client, calls):
     resp = client.put("/api/network/settings", headers=ADMIN,
-                      json={"url": "https://192.168.2.1/", "username": " jarvis ", "password": "r0uter-pw"})
+                      json={"url": "https://192.0.2.1/", "username": " jarvis ", "password": "r0uter-pw"})
     assert resp.status_code == 200 and "r0uter-pw" not in resp.text
     seeded = [c[3] for c in calls if c[1].endswith("/seed-credential")]
-    assert seeded == [{"field": "router_url", "value": "https://192.168.2.1"},
+    assert seeded == [{"field": "router_url", "value": "https://192.0.2.1"},
                       {"field": "router_user", "value": "jarvis"},
                       {"field": "router_pass", "value": "r0uter-pw"}]
     assert calls[-1][1].endswith("/api/network/check")
 
 
 def test_a_blank_password_keeps_the_stored_one(client, calls):
-    client.put("/api/network/settings", headers=ADMIN, json={"url": "https://192.168.2.1", "username": "jarvis"})
+    client.put("/api/network/settings", headers=ADMIN, json={"url": "https://192.0.2.1", "username": "jarvis"})
     assert [c[3]["field"] for c in calls if c[1].endswith("/seed-credential")] == ["router_url", "router_user"]
 
 
-@pytest.mark.parametrize("url", ["http://192.168.2.1", "192.168.2.1", "https://"])
+@pytest.mark.parametrize("url", ["http://192.0.2.1", "192.0.2.1", "https://"])
 def test_the_router_address_must_be_https(client, calls, url):
     resp = client.put("/api/network/settings", headers=ADMIN, json={"url": url, "username": "jarvis"})
     assert resp.status_code == 400 and calls == []

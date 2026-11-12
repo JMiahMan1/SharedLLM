@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import services.geo.main as geo
 from services.geo import day_history
 
-HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 33.1667, "longitude": -111.5646, "radius": 100.0}
+HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 39.7392, "longitude": -104.9903, "radius": 100.0}
 
 
 def _walk(t0, lat, lon, minutes, every=60):
@@ -17,27 +17,27 @@ def _walk(t0, lat, lon, minutes, every=60):
 
 def test_a_long_stay_is_a_stop_and_driving_past_is_not():
     t0 = 1_700_000_000
-    home = _walk(t0, 33.1667, -111.5646, 60)                       # an hour at home
-    drive = [{"t": t0 + 3700 + i * 30, "lat": 33.17 + i * 0.01, "lon": -111.56} for i in range(10)]
-    school = _walk(t0 + 4100, 33.30, -111.56, 25)                  # 25 min at school
+    home = _walk(t0, 39.7392, -104.9903, 60)                       # an hour at home
+    drive = [{"t": t0 + 3700 + i * 30, "lat": 39.7425 + i * 0.01, "lon": -104.9857} for i in range(10)]
+    school = _walk(t0 + 4100, 39.8725, -104.9857, 25)                  # 25 min at school
     found = day_history.stops(home + drive + school)
     assert len(found) == 2
     assert found[0]["since"] == t0 and found[0]["until"] == t0 + 3600
-    assert abs(found[1]["lat"] - 33.30) < 0.001
+    assert abs(found[1]["lat"] - 39.8725) < 0.001
 
 
 def test_a_short_stop_is_not_on_the_timeline():
-    assert day_history.stops(_walk(0, 33.0, -111.0, 5)) == []
+    assert day_history.stops(_walk(0, 39.5725, -104.4257, 5)) == []
 
 
 def test_the_path_is_thinned_but_keeps_the_end():
-    points = [{"t": i, "lat": 33.0, "lon": -111.0} for i in range(2001)]
+    points = [{"t": i, "lat": 39.5725, "lon": -104.4257} for i in range(2001)]
     thin = day_history.thin(points, 800)
     assert len(thin) <= 801 and thin[-1] is points[-1]
 
 
 def test_the_day_is_the_local_day():
-    start, end = day_history.day_bounds(date(2026, 10, 31), "America/Phoenix")
+    start, end = day_history.day_bounds(date(2026, 10, 31), "Etc/GMT+7")
     assert end - start == 86400
     assert start == 1793430000  # 2026-10-31 00:00 at UTC-7
 
@@ -56,12 +56,12 @@ class R:
         return {"geo:trip:t1": json.dumps(trip)}.get(key)
 
 
-START, _ = day_history.day_bounds(date(2026, 10, 31), "America/Phoenix")
+START, _ = day_history.day_bounds(date(2026, 10, 31), "Etc/GMT+7")
 
 
 @pytest.fixture
 def client(monkeypatch):
-    history = [(p["t"], json.dumps(p)) for p in _walk(START + 600, 33.1667, -111.5646, 50)]
+    history = [(p["t"], json.dumps(p)) for p in _walk(START + 600, 39.7392, -104.9903, 50)]
     r = R(history, [(START + 4000, "t1")])
 
     async def redis():
@@ -103,5 +103,5 @@ def test_a_spot_is_named_by_the_family_place_first(client, monkeypatch):
 
     monkeypatch.setattr(geo, "_resolve_place_name_cached", street)
     headers = {"X-Internal-Secret": "test-secret"}
-    assert client.get("/place-name", params={"lat": 33.1667, "lon": -111.5646}, headers=headers).json() == {"name": "Home", "zone": "zone.home"}
-    assert client.get("/place-name", params={"lat": 33.5, "lon": -111.9}, headers=headers).json() == {"name": "123 Main St", "zone": None}
+    assert client.get("/place-name", params={"lat": 39.7392, "lon": -104.9903}, headers=headers).json() == {"name": "Home", "zone": "zone.home"}
+    assert client.get("/place-name", params={"lat": 40.0725, "lon": -105.3257}, headers=headers).json() == {"name": "123 Main St", "zone": None}

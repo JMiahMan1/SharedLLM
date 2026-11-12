@@ -117,7 +117,7 @@ the forecast meets it within the next `hours`:
 
 ```json
 {"id": "hay", "kind": "rain", "title": "Cover the hay", "note": "Tarps are in the barn.",
- "people": ["jeremiah"], "hours": 12, "threshold": 60,
+ "people": ["alex"], "hours": 12, "threshold": 60,
  "location": {"name": "Barn", "latitude": 36.0, "longitude": -86.8}}
 ```
 

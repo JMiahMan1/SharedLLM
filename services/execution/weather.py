@@ -11,7 +11,7 @@ Assistant's ``zone.home``), caches it in Redis, and runs one loop every
    Weather reminders) is a JSON list of rules such as
 
        {"id": "hay", "kind": "rain", "title": "Cover the hay",
-        "note": "Tarp is in the barn.", "people": ["jeremiah"],
+        "note": "Tarp is in the barn.", "people": ["alex"],
         "hours": 12, "threshold": 60,
         "location": {"name": "Barn", "latitude": 36.0, "longitude": -86.8}}
 

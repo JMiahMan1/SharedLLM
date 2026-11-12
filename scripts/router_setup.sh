@@ -4,7 +4,7 @@
 # the Jarvis server:
 #
 #   scripts/router_setup.sh [router ssh target] [router ssh port] [server ssh target] [server dir]
-#   scripts/router_setup.sh root@192.168.2.1 32100 jeremiah@192.168.2.205 /home/jeremiah/SharedLLM
+#   scripts/router_setup.sh root@192.0.2.1 32100 admin@192.0.2.10 /home/admin/SharedLLM
 #
 # What it changes on the router, after saving a backup to ~/Desktop:
 #   - /usr/share/rpcd/acl.d/jarvis-monitor.json: an ACL that can only read
@@ -17,10 +17,11 @@
 # Undo: remove the ACL file and the rpcd login, then `/etc/init.d/rpcd reload`.
 set -euo pipefail
 
-ROUTER="${1:-root@192.168.2.1}"
+ROUTER="${1:?pass the router ssh target, e.g. root@192.0.2.1}"
 PORT="${2:-22}"
 SERVER="${3:-}"
-SERVER_DIR="${4:-/home/jeremiah/SharedLLM}"
+# Relative paths resolve in the server user's home directory.
+SERVER_DIR="${4:-${DEPLOY_DIR:-SharedLLM}}"
 ROUTER_URL="${ROUTER_URL:-https://${ROUTER#*@}}"
 LOGIN="jarvis"
 

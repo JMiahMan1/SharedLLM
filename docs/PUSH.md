@@ -82,8 +82,8 @@ The subscription limit has no exemption in ntfy and is raised to 200 for the
 gateway's streams. Nothing else on the stack network is exempt.
 
 Found on the live server (2026-10-15): Caddy's access log shows every request
-for the public host name arriving from 192.168.2.30 (a Caddy, `Via: 1.1
-Caddy`) with `X-Forwarded-For` and `X-Real-Ip` of 192.168.2.1, the router,
+for the public host name arriving from 192.0.2.30 (a Caddy, `Via: 1.1
+Caddy`) with `X-Forwarded-For` and `X-Real-Ip` of 192.0.2.1, the router,
 for every client, GitHub's webhook deliveries included. So that proxy itself
 sees all of the internet as the router's address: until the router forwards
 without rewriting the source address, all outside senders share one limit
@@ -109,7 +109,7 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   "user": "<member>",
   "category": "chat",
   "kind": "chat",
-  "title": "Jeremiah",
+  "title": "Alex",
   "body": "On my way",
   "priority": 4,
   "tag": "chat:abc123",
@@ -215,7 +215,7 @@ The Android app implements the distributor side of UnifiedPush AND_3
 
 - `POST /api/push/up/register` (person's key, `X-Device-Id`), body
   `{"app": "com.nextcloud.talk2", "token": "<connector token>"}` returns
-  `{"endpoint": "https://jarvis.sumemail.com/push/up<id>", "topic": "up<id>"}`.
+  `{"endpoint": "https://jarvis.example.com/push/up<id>", "topic": "up<id>"}`.
   Stored in identity against the person and device.
   Registering the same app and token again returns the same topic. At most
   50 registrations per device. The endpoint's host is `JARVIS_HOST`.

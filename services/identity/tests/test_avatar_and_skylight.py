@@ -20,7 +20,7 @@ def session_fixture():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(User(id=1, username="default", display_name="Admin", is_admin=True, is_system_default=True))
-        session.add(User(id=2, username="michele", display_name="Michele"))
+        session.add(User(id=2, username="sam", display_name="Sam"))
         session.commit()
         yield session
 
@@ -35,7 +35,7 @@ def _act_as(username: str) -> None:
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     identity_main.engine = session.bind
-    _act_as("michele")
+    _act_as("sam")
     yield TestClient(app)
     app.dependency_overrides = {}
 
@@ -53,7 +53,7 @@ def test_a_built_in_picture_is_saved(client):
 def test_an_uploaded_photo_is_kept_and_served(client, session):
     body = client.post("/api/users/me/avatar/image", json={"data_url": _data_url(PNG)}).json()
     assert body["avatar"].startswith("upload:")
-    img = client.get("/api/users/michele/avatar/image")
+    img = client.get("/api/users/sam/avatar/image")
     assert img.status_code == 200 and img.headers["content-type"] == "image/png" and img.content == PNG
 
 
@@ -69,8 +69,8 @@ def test_removing_the_picture_deletes_the_photo(client, session):
     client.post("/api/users/me/avatar/image", json={"data_url": _data_url(PNG)})
     assert client.delete("/api/users/me/avatar").json()["avatar"] is None
     session.expire_all()
-    assert session.get(UserAvatarImage, "michele") is None
-    assert client.get("/api/users/michele/avatar/image").status_code == 404
+    assert session.get(UserAvatarImage, "sam") is None
+    assert client.get("/api/users/sam/avatar/image").status_code == 404
 
 
 def test_skylight_reads_not_set_up_until_the_household_account_is(client, session):
@@ -96,6 +96,6 @@ def test_a_default_chat_is_remembered_and_cleared(client):
 def test_the_family_directory_shows_names_and_pictures_only(client, session):
     client.put("/api/users/me/avatar", json={"preset": "jonahs-whale"})
     people = {p["username"]: p for p in client.get("/api/users/family-directory").json()}
-    assert people["michele"]["avatar"] == "preset:jonahs-whale"
-    assert set(people["michele"]) == {"username", "display_name", "nextcloud_user", "avatar"}
+    assert people["sam"]["avatar"] == "preset:jonahs-whale"
+    assert set(people["sam"]) == {"username", "display_name", "nextcloud_user", "avatar"}
     assert "default" in people

@@ -32,7 +32,7 @@ it can flash any node in the house. So:
   ```
 
   ```
-  sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.168.2.0/24" port port="6052" protocol="tcp" accept'
+  sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.0.2.0/24" port port="6052" protocol="tcp" accept'
   sudo firewall-cmd --reload
   ```
 

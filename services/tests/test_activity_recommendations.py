@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from services.common.activity_recommendations import recommend_activity
 
-TZ = "America/Phoenix"
+TZ = "Etc/GMT+7"
 
 
 def _at(hour, minute=0, day=23):

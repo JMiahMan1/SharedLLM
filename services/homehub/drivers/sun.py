@@ -7,7 +7,7 @@ is ``above_horizon`` while the sun's elevation is above -0.833 degrees (the
 refraction-corrected horizon astral itself uses), and ``rising`` is true while
 the next noon comes before the next midnight.
 
-``sun.sun`` drives the "Lights On at Night" and "String Lights" automations,
+``sun.sun`` drives sunrise/sunset automations (e.g. evening lights),
 so it is recomputed every minute: a sunrise or sunset shows within a minute.
 """
 from __future__ import annotations

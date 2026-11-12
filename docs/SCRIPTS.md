@@ -48,7 +48,7 @@ API keys, HA token) from the environment; none are hard-coded.
 |---|---|
 | Gateway / API | `test_gateway.py`, `test_stream.py`, `test_frontend_api.py`, `test_integration.py`, `test_live_api.py`, `test_remote.py`, `test_remote_endpoint.py`, `test_chat_lifecycle.py`, `test_llm.py`, `test_ollama_direct.py` |
 | RAG / Raven | `audit_rag.py`, `test_capabilities_awareness.py`, `verify_autonomous_evolution.py` |
-| Home Assistant | `test_ha_integration.py`, `test_ha_connectivity.py`, `ha_production_validator.py`, `test_gracies_single.py`, `test_listen_fix.py` |
+| Home Assistant | `test_ha_integration.py`, `test_ha_connectivity.py`, `ha_production_validator.py`, `test_single_tv.py`, `test_listen_fix.py` |
 | Music Assistant / ABS | `test_ma_types.py`, `test_ma_cleaning.py`, `test_ma_search_and_play.py`, `test_abs_auth.py`, `live_test_media_ui_flow.py`, `test-media-player.js` (Playwright; `npm install` in `scripts/` first, via `scripts/package.json`) |
 | Media / video | `test_media_playback.py`, `test_music_and_video.py`, `test_video_all_devices.py`, `test_video_switching.py`, `test_volume.py` |
 | Roku | `test_roku_power.py`, `test_roku_power_focused.py`, `test_roku_state_diagnostic.py` |

@@ -2,7 +2,7 @@
 
 The LAN upstream drops about one lookup in ten (17/20 answered when measured),
 and each drop surfaced in containers as "Temporary failure in name resolution"
-for cloud.sumemail.com, ha.sumemail.com and the like.
+for cloud.example.com, ha.example.com and the like.
 """
 import asyncio
 import time
@@ -12,9 +12,9 @@ from services.dns.tests.test_upstream_timeout import _load_dns, _SlowUpstream
 
 def test_a_list_of_upstreams_is_parsed():
     dns = _load_dns({"DNS_UPSTREAM_TIMEOUT": "1.0"})
-    client = dns._DNSClient(" 192.168.2.1 , 8.8.8.8 ")
-    assert client.servers == ["192.168.2.1", "8.8.8.8"]
-    assert client.server == "192.168.2.1"
+    client = dns._DNSClient(" 192.0.2.1 , 8.8.8.8 ")
+    assert client.servers == ["192.0.2.1", "8.8.8.8"]
+    assert client.server == "192.0.2.1"
 
 
 def test_a_dead_upstream_does_not_hide_a_live_one(monkeypatch):

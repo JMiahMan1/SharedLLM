@@ -48,7 +48,7 @@ def _install(monkeypatch, widgets, search_payload, identity_status=200):
             return _Resp(200, search_payload)
 
     async def fake_ctx(request, body):
-        return {"user": "jeremiah"}
+        return {"user": "alex"}
 
     monkeypatch.setattr(gateway_main, "shared_http_client", fake_shared)
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
@@ -73,7 +73,7 @@ def test_favorites_joined_with_state_in_pin_order(monkeypatch):
     ]
     assert seen["identity_auth"] == "Bearer sk-x"
     assert seen["exec_json"]["domain"] == "light,lock,switch"
-    assert seen["exec_json"]["user_context"] == {"user": "jeremiah"}
+    assert seen["exec_json"]["user_context"] == {"user": "alex"}
 
 
 def test_climate_pins_carry_thermostat_attributes(monkeypatch):
@@ -151,19 +151,19 @@ def test_device_pairing_route_forwards_to_execution_as_the_user(monkeypatch):
                                "detail": {"method": "code"}})
 
     async def fake_ctx(request, body):
-        return {"user": "jeremiah", "api_key": "sk-x"}
+        return {"user": "alex", "api_key": "sk-x"}
 
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
     monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
     resp = TestClient(app).post("/api/devices/pair",
-                                json={"step": "start", "host": "192.168.2.105", "jarvis_url": "http://evil.example"},
+                                json={"step": "start", "host": "192.0.2.105", "jarvis_url": "http://evil.example"},
                                 headers={"Authorization": "Bearer sk-x", "X-Forwarded-Proto": "https",
-                                         "X-Forwarded-Host": "jarvis.sumemail.com"})
+                                         "X-Forwarded-Host": "jarvis.example.com"})
     assert resp.status_code == 200
     assert seen["url"].endswith("/execute/esphome/pair")
     # the address the user reached Jarvis at, not one the caller supplies
-    assert seen["json"]["jarvis_url"] == "https://jarvis.sumemail.com"
-    assert seen["json"]["step"] == "start" and seen["json"]["user_context"]["user"] == "jeremiah"
+    assert seen["json"]["jarvis_url"] == "https://jarvis.example.com"
+    assert seen["json"]["step"] == "start" and seen["json"]["user_context"]["user"] == "alex"
 
 
 def test_esphome_control_route_forwards_to_execution_as_the_user(monkeypatch):
@@ -179,7 +179,7 @@ def test_esphome_control_route_forwards_to_execution_as_the_user(monkeypatch):
             return _Resp(200, {"status": "SUCCESS", "message": "", "detail": {"entities": []}})
 
     async def fake_ctx(request, body):
-        return {"user": "jeremiah", "api_key": "sk-x"}
+        return {"user": "alex", "api_key": "sk-x"}
 
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
     monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
@@ -187,7 +187,7 @@ def test_esphome_control_route_forwards_to_execution_as_the_user(monkeypatch):
                                 headers={"Authorization": "Bearer sk-x"})
     assert resp.status_code == 200
     assert seen["url"].endswith("/execute/esphome")
-    assert seen["json"]["device"] == "jarvis-watch" and seen["json"]["user_context"]["user"] == "jeremiah"
+    assert seen["json"]["device"] == "jarvis-watch" and seen["json"]["user_context"]["user"] == "alex"
 
 
 def test_workspace_lint_route_forwards_to_execution(monkeypatch):
@@ -202,7 +202,7 @@ def test_workspace_lint_route_forwards_to_execution(monkeypatch):
             return _Resp(200, {"status": "SUCCESS", "message": "", "detail": {"problems": []}})
 
     async def fake_ctx(request, body):
-        return {"user": "jeremiah", "api_key": "sk-x"}
+        return {"user": "alex", "api_key": "sk-x"}
 
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
     monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)
@@ -221,7 +221,7 @@ def test_entity_search_failure_is_passed_on_not_a_500(monkeypatch):
                                "detail": None})
 
     async def fake_ctx(request, body):
-        return {"user": "jeremiah"}
+        return {"user": "alex"}
 
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: _ExecClient())
     monkeypatch.setattr(gateway_main, "_resolve_user_context", fake_ctx)

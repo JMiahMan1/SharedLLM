@@ -32,7 +32,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const DEFAULTS = {
-  host: process.env.JARVIS_HOST || env.JARVIS_HOST || 'https://jarvis.sumemail.com',
+  host: process.env.JARVIS_HOST || env.JARVIS_HOST,
   user: process.env.JARVIS_USER || env.JARVIS_USER,
   pass: process.env.JARVIS_PASS || env.JARVIS_PASS,
 };
@@ -52,6 +52,10 @@ function parseArgs() {
 }
 
 const opts = parseArgs();
+if (!opts.host) {
+  console.error('❌ --host (or JARVIS_HOST) is required');
+  process.exit(1);
+}
 if (!opts.user || !opts.pass) {
   console.error('❌ --user and --pass are required');
   console.error('   Usage: node test-media-player.js --user USERNAME --pass PASSWORD');

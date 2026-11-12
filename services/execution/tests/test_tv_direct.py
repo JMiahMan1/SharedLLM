@@ -17,7 +17,7 @@ HA = "http://ha.local:8123"
 
 
 def _dev(platform, **over):
-    base = {"entity_id": "media_player.den_tv", "platform": platform, "ip": "192.168.2.60",
+    base = {"entity_id": "media_player.den_tv", "platform": platform, "ip": "172.16.2.60",
             "mac": "", "name": "Den TV", "webos_key": ""}
     base.update(over)
     return base
@@ -43,9 +43,9 @@ async def test_locate_prefers_the_tv_stages_remembered_lg_pairing(monkeypatch):
     from services.execution import device_registry
 
     monkeypatch.setattr(device_registry, "get_device", AsyncMock(return_value={"integration": "webostv", "ip": "10.0.0.9", "mac": "aa:bb"}))
-    monkeypatch.setattr(tv_stage, "_webos_store", lambda: {"media_player.den_tv": {"host": "192.168.2.61", "client_key": "K"}})
+    monkeypatch.setattr(tv_stage, "_webos_store", lambda: {"media_player.den_tv": {"host": "172.16.2.61", "client_key": "K"}})
     dev = await tv_direct.locate("media_player.den_tv")
-    assert (dev["platform"], dev["ip"], dev["webos_key"], dev["mac"]) == ("webos", "192.168.2.61", "K", "aa:bb")
+    assert (dev["platform"], dev["ip"], dev["webos_key"], dev["mac"]) == ("webos", "172.16.2.61", "K", "aa:bb")
 
 
 async def test_a_stale_registry_address_is_never_used(monkeypatch):
@@ -91,7 +91,7 @@ async def test_a_roku_gets_an_ecp_keypress(monkeypatch):
     monkeypatch.setattr(tv_direct.aiohttp, "ClientSession", _Post(sent))
     result = await tv_direct.transport("media_player.den_tv", "home", SimpleNamespace())
     assert result["ok"] and result["route"] == "roku_ecp"
-    assert sent == ["http://192.168.2.60:8060/keypress/Home"]
+    assert sent == ["http://172.16.2.60:8060/keypress/Home"]
 
 
 async def test_an_unpaired_lg_is_reported_not_prompted(monkeypatch):

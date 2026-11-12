@@ -18,7 +18,7 @@ def test_resolve_exact_friendly_name_match():
         mock_states_store = [
             {"entity_id": "media_player.office_tv", "attributes": {"friendly_name": "Office TV"}},
             {"entity_id": "media_player.office_tv_chrome", "attributes": {"friendly_name": "Office TV Cast"}},
-            {"entity_id": "media_player.office_tv_3", "attributes": {"friendly_name": "Office TV 3"}},
+            {"entity_id": "media_player.den_tv", "attributes": {"friendly_name": "Office TV 3"}},
         ]
 
         from services.execution import ha_client

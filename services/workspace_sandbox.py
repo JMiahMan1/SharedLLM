@@ -342,7 +342,7 @@ def ensure_workspace_container(
     cred_env = _sandbox_credential_env()
     if env:
         cred_env.update({k: str(v) for k, v in env.items()})
-    # The SOURCE must be the real Docker-host path (e.g. /home/jeremiah/workspaces/...),
+    # The SOURCE must be the real Docker-host path (e.g. /home/<user>/workspaces/...),
     # not the container-internal /workspaces/... path, or the daemon would bind an
     # unrelated empty host directory. The TARGET stays host_path so the agent's
     # absolute paths remain valid verbatim inside the container.
@@ -848,7 +848,7 @@ def _run_tcp_proxy(host_port: int, target_ip: str, target_port: int, stop_event:
 def _forward_host() -> str:
     """The LAN address devices use to reach a forwarded workspace port.
 
-    This used to be hardcoded to one machine's address (192.168.2.205), so on
+    This used to be hardcoded to one machine's LAN address, so on
     any other host the URL handed to the UI pointed somewhere that does not
     exist. EXECUTION_EXTERNAL_HOST is already the configured answer -- the
     execution service builds its stream URLs from the same value -- and when it

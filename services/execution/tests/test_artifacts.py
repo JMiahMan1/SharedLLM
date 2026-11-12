@@ -26,7 +26,7 @@ async def test_generated_bytes_are_uploaded_for_the_speaking_user(monkeypatch):
     monkeypatch.setattr(artifacts, "INTERNAL_SECRET", "secret")
 
     result = await artifacts.create_artifact(
-        user_context=_Context("jeremiah"),
+        user_context=_Context("alex"),
         kind="tts_audio",
         name="/tmp/narration.wav",
         data=b"RIFF",
@@ -39,7 +39,7 @@ async def test_generated_bytes_are_uploaded_for_the_speaking_user(monkeypatch):
     assert result == {"id": "abc", "name": "narration.wav"}
     assert seen["method"] == "POST"
     assert seen["url"] == "http://storage:8005/artifacts"
-    assert seen["headers"] == {"X-Internal-Secret": "secret", "X-User": "jeremiah"}
+    assert seen["headers"] == {"X-Internal-Secret": "secret", "X-User": "alex"}
     assert seen["json"]["name"] == "narration.wav"
     assert base64.b64decode(seen["json"]["content_b64"]) == b"RIFF"
     assert seen["json"]["workspace_id"] == "ws-1"
@@ -70,7 +70,7 @@ async def test_a_storage_failure_does_not_lose_the_render(monkeypatch):
 
     monkeypatch.setattr(artifacts, "http_request", rejected)
     assert await artifacts.create_artifact(
-        user_context=_Context("jeremiah"),
+        user_context=_Context("alex"),
         kind="tts_audio",
         name="speech.wav",
         data=b"RIFF",
@@ -83,7 +83,7 @@ async def test_an_unreachable_storage_service_is_swallowed(monkeypatch):
 
     monkeypatch.setattr(artifacts, "http_request", broken)
     assert await artifacts.create_artifact(
-        user_context=_Context("jeremiah"),
+        user_context=_Context("alex"),
         kind="tts_audio",
         name="speech.wav",
         data=b"RIFF",

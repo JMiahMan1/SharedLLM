@@ -2,9 +2,13 @@
 """
 Comprehensive test for video playback on all devices
 """
+import os
+import sys
 import time
 
 import requests
+
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
 
 REMOTE_URL = "http://ai.local:11435/api/chat"
 
@@ -50,7 +54,7 @@ def main():
     # Test both devices
     devices = [
         ("Office TV", "Watch Landslide by Fleetwood Mac on Office TV"),
-        ("Gracies TV", "Watch Landslide by Fleetwood Mac on Gracies TV")
+        (f"{LIVE_TV_NAME}", f"Watch Landslide by Fleetwood Mac on {LIVE_TV_NAME}")
     ]
 
     for device_name, query in devices:

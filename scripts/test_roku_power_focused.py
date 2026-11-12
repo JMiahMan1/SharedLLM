@@ -4,14 +4,18 @@ Focused Roku Power Control Test
 Tests multiple methods to turn on the TV and verifies actual state changes
 """
 import os
+import sys
 import time
 
 import requests
 
+LIVE_TV_ENTITY = os.environ.get("LIVE_TV_ENTITY") or sys.exit("Set LIVE_TV_ENTITY to the TV media_player entity id to test.")
+LIVE_REMOTE_ENTITY = os.environ.get("LIVE_REMOTE_ENTITY") or sys.exit("Set LIVE_REMOTE_ENTITY to the TV remote entity id to test.")
+
 HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
-MEDIA_PLAYER = "media_player.28_tcl_roku_tv"
-REMOTE = "remote.28_tcl_roku_tv"
+MEDIA_PLAYER = LIVE_TV_ENTITY
+REMOTE = LIVE_REMOTE_ENTITY
 
 headers = {
     "Authorization": f"Bearer {HA_TOKEN}",

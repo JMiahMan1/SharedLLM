@@ -182,7 +182,7 @@ def anon_client():
 
 @pytest.fixture
 def make_client(monkeypatch):
-    def _make(user="michele", is_admin=False, key="test-token"):
+    def _make(user="sam", is_admin=False, key="test-token"):
         async def _resolve(api_key):
             if api_key != key:
                 return None
@@ -222,7 +222,7 @@ def test_imported_books_are_proxied_to_their_own_path(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"books": [], "count": 0})
 
     async def _allow(*_args, **_kwargs):
-        return {"user": "michele", "is_admin": False}
+        return {"user": "sam", "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_require_identity_from_request", _allow)
     resp = make_client().get("/api/bible/imported-books", params={"kind": "study"})
@@ -239,53 +239,53 @@ def test_imported_books_are_proxied_to_their_own_path(make_client, monkeypatch):
 )
 def test_reads_are_scoped_to_the_caller(make_client, monkeypatch, path):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get(path)
-    assert captured["calls"][-1]["params"]["username"] == "michele"
+    make_client(user="sam").get(path)
+    assert captured["calls"][-1]["params"]["username"] == "sam"
 
 
 def test_a_query_supplied_user_id_cannot_reach_another_readers_totals(make_client, monkeypatch):
     """/stats has no user_id parameter on purpose -- see the route docstring."""
     captured = _patch_bible(monkeypatch, payload={})
-    resp = make_client(user="michele").get("/api/bible/stats", params={"user_id": "jeremiah"})
+    resp = make_client(user="sam").get("/api/bible/stats", params={"user_id": "alex"})
     assert resp.status_code == 200
-    assert captured["calls"][-1]["params"]["username"] == "michele"
+    assert captured["calls"][-1]["params"]["username"] == "sam"
 
 
 def test_achievements_cannot_be_read_for_another_reader(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/achievements", params={"user_id": "jeremiah"})
-    assert captured["calls"][-1]["params"]["username"] == "michele"
+    make_client(user="sam").get("/api/bible/achievements", params={"user_id": "alex"})
+    assert captured["calls"][-1]["params"]["username"] == "sam"
 
 
 def test_state_write_ignores_a_username_in_the_body(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").put(
-        "/api/bible/state", json={"username": "jeremiah", "book": "John", "chapter": 3, "verse": 16}
+    make_client(user="sam").put(
+        "/api/bible/state", json={"username": "alex", "book": "John", "chapter": 3, "verse": 16}
     )
     sent = captured["calls"][-1]
-    assert sent["params"]["username"] == "michele"
+    assert sent["params"]["username"] == "sam"
     assert "username" not in sent["json"], "the body's username must never reach the bible service"
 
 
 def test_mark_write_ignores_a_username_in_the_body(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").put(
-        "/api/bible/marks", json={"username": "jeremiah", "ref": "John 3:16", "kind": "highlight"}
+    make_client(user="sam").put(
+        "/api/bible/marks", json={"username": "alex", "ref": "John 3:16", "kind": "highlight"}
     )
     sent = captured["calls"][-1]
-    assert sent["params"]["username"] == "michele"
+    assert sent["params"]["username"] == "sam"
     assert sent["json"]["ref"] == "John 3:16"
 
 
 def test_deleting_someone_elses_mark_uses_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").delete("/api/bible/marks/3", params={"username": "jeremiah"})
-    assert captured["calls"][-1]["params"]["username"] == "michele"
+    make_client(user="sam").delete("/api/bible/marks/3", params={"username": "alex"})
+    assert captured["calls"][-1]["params"]["username"] == "sam"
 
 
 def test_events_forward_only_the_three_metadata_fields(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").post(
+    make_client(user="sam").post(
         "/api/bible/events",
         json={"kind": "chapter_read", "ref": "John 3", "value": 3, "note": "my private note"},
     )
@@ -297,38 +297,38 @@ def test_events_forward_only_the_three_metadata_fields(make_client, monkeypatch)
 # family sharing: viewer is forwarded, consent is the bible service's job
 def test_activity_summary_sends_the_viewer_so_consent_can_be_checked(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/activity/summary", params={"user_id": "jeremiah"})
+    make_client(user="sam").get("/api/bible/activity/summary", params={"user_id": "alex"})
     sent = captured["calls"][-1]["params"]
-    assert sent["username"] == "jeremiah", "the requested reader must survive"
-    assert sent["target"] == "michele", "the bible service needs the viewer to apply consent"
+    assert sent["username"] == "alex", "the requested reader must survive"
+    assert sent["target"] == "sam", "the bible service needs the viewer to apply consent"
 
 
 def test_a_refused_cross_user_read_stays_404(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=404, payload={"detail": "Not found"})
-    resp = make_client(user="michele").get(
-        "/api/bible/activity/summary", params={"user_id": "jeremiah"}
+    resp = make_client(user="sam").get(
+        "/api/bible/activity/summary", params={"user_id": "alex"}
     )
     assert resp.status_code == 404, "an unshared reader must not look like an outage"
 
 
 def test_activity_feed_is_scoped_to_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/activity/feed")
-    assert captured["calls"][-1]["params"]["viewer"] == "michele"
+    make_client(user="sam").get("/api/bible/activity/feed")
+    assert captured["calls"][-1]["params"]["viewer"] == "sam"
 
 
 # translation of upstream failures
 def test_verse_context_forwards_only_the_four_choices(make_client, monkeypatch):
     """A client may choose the day, translation, scope and refresh -- nothing else."""
     captured = _patch_bible(monkeypatch, payload={"verse": {}, "context": {}})
-    resp = make_client(user="michele").post(
+    resp = make_client(user="sam").post(
         "/api/bible/verse-of-day/context",
         json={
             "day": "2026-10-17",
             "version": "kjv",
             "scope": "nt",
             "refresh": True,
-            "username": "jeremiah",
+            "username": "alex",
             "question": "my private question",
         },
     )
@@ -346,7 +346,7 @@ def test_verse_context_forwards_only_the_four_choices(make_client, monkeypatch):
 
 def test_verse_context_defaults_to_every_verse_without_a_refresh(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"verse": {}, "context": {}})
-    make_client(user="michele").post("/api/bible/verse-of-day/context", json={})
+    make_client(user="sam").post("/api/bible/verse-of-day/context", json={})
     assert captured["calls"][-1]["json"] == {
         "day": None,
         "version": None,
@@ -361,7 +361,7 @@ def test_study_notes_forward_only_what_the_caller_asked_for(make_client, monkeyp
         monkeypatch,
         payload={"version": "nkjv", "notes": [], "count": 0, "available_kinds": {}},
     )
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/study/notes", params={"ref": "John 3:16", "kind": "commentary"}
     )
     assert resp.status_code == 200
@@ -375,14 +375,14 @@ def test_study_notes_keep_the_upstream_explanation_of_there_being_none(make_clie
     """A translation with no study material must say so, not look broken."""
     detail = {"version": "kjv", "notes": [], "count": 0, "note": "kjv carries no study notes"}
     _patch_bible(monkeypatch, payload=detail)
-    resp = make_client(user="michele").get("/api/bible/study/notes", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/study/notes", params={"ref": "John 3:16"})
     assert resp.status_code == 200
     assert resp.json()["note"] == "kjv carries no study notes"
 
 
 def test_an_unknown_study_note_kind_stays_a_400(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=400, payload={"detail": "unknown study note kind 'sermon'"})
-    resp = make_client(user="michele").get("/api/bible/study/notes", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/study/notes", params={"ref": "John 3:16"})
     assert resp.status_code == 400
     assert "sermon" in resp.json()["detail"]
 
@@ -392,7 +392,7 @@ def test_the_study_editions_catalogue_carries_no_username(make_client, monkeypat
     captured = _patch_bible(
         monkeypatch, payload={"version": "nkjv", "default": "kjv", "editions": [], "other_translations": []}
     )
-    resp = make_client(user="michele").get("/api/bible/editions", params={"version": "nkjv"})
+    resp = make_client(user="sam").get("/api/bible/editions", params={"version": "nkjv"})
     assert resp.status_code == 200
     call = captured["calls"][-1]
     assert call["url"] == f"{gateway_main.BIBLE_SVC}/editions"
@@ -403,11 +403,11 @@ def test_the_study_editions_catalogue_carries_no_username(make_client, monkeypat
 def test_the_cross_version_switch_is_passed_as_a_flag_and_only_when_asked(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"version": "nkjv", "notes": [], "count": 0})
 
-    off = make_client(user="michele").get("/api/bible/study/notes", params={"ref": "John 3:16"})
+    off = make_client(user="sam").get("/api/bible/study/notes", params={"ref": "John 3:16"})
     assert off.status_code == 200
     assert "cross_version" not in captured["calls"][-1]["params"]
 
-    on = make_client(user="michele").get(
+    on = make_client(user="sam").get(
         "/api/bible/study/notes", params={"ref": "John 3:16", "cross_version": "true"}
     )
     assert on.status_code == 200
@@ -416,7 +416,7 @@ def test_the_cross_version_switch_is_passed_as_a_flag_and_only_when_asked(make_c
 
 def test_a_chosen_study_bible_is_passed_through(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"version": "nkjv", "notes": [], "count": 0})
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/study/notes", params={"ref": "John 3:16", "edition": "nkjv-macarthur"}
     )
     assert resp.status_code == 200
@@ -430,35 +430,35 @@ def test_an_unimported_corpus_stays_503_with_its_message(make_client, monkeypatc
         status=503,
         payload={"detail": "No Bible text is imported. Run: python -m services.bible.import_corpus"},
     )
-    resp = make_client(user="michele").get("/api/bible/passages", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/passages", params={"ref": "John 3:16"})
     assert resp.status_code == 503
     assert "import_corpus" in resp.json()["detail"]
 
 
 def test_an_unconfigured_blb_url_is_not_flattened_to_502(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=503, payload={"detail": "blb_base_url is not configured."})
-    resp = make_client(user="michele").get("/api/bible/blb/link", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/blb/link", params={"ref": "John 3:16"})
     assert resp.status_code == 503
     assert "blb_base_url" in resp.json()["detail"]
 
 
 def test_a_genuine_upstream_fault_is_502(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=502, payload={})
-    assert make_client(user="michele").get("/api/bible/stats").status_code == 502
+    assert make_client(user="sam").get("/api/bible/stats").status_code == 502
 
 
 # transport
 def test_unset_optional_params_are_dropped_not_forwarded_as_none(make_client, monkeypatch):
     """yarl raises on a None query value, so this would be a 500 without the drop."""
     captured = _patch_bible(monkeypatch, payload={})
-    resp = make_client(user="michele").get("/api/bible/passages", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/passages", params={"ref": "John 3:16"})
     assert resp.status_code == 200
     assert captured["calls"][-1]["params"] == {"ref": "John 3:16"}
 
 
 def test_every_upstream_call_carries_the_internal_secret(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/passages", params={"ref": "John 3:16"})
+    make_client(user="sam").get("/api/bible/passages", params={"ref": "John 3:16"})
     headers = captured["calls"][-1]["headers"]
     assert headers.get("X-Internal-Secret") == gateway_main.INTERNAL_SECRET
 
@@ -466,7 +466,7 @@ def test_every_upstream_call_carries_the_internal_secret(make_client, monkeypatc
 def test_the_daily_route_is_a_single_get_for_the_android_widget(make_client, monkeypatch):
     """The home-screen widget can only issue a bearer-authenticated GET."""
     captured = _patch_bible(monkeypatch, payload={"day": "2026-01-01"})
-    resp = make_client(user="michele").get("/api/bible/daily")
+    resp = make_client(user="sam").get("/api/bible/daily")
     assert resp.status_code == 200
     assert captured["calls"][-1]["verb"] == "get"
 
@@ -474,7 +474,7 @@ def test_the_daily_route_is_a_single_get_for_the_android_widget(make_client, mon
 def test_the_voice_list_never_carries_a_username(make_client, monkeypatch):
     """These are engine voices, not reading state; nothing personal travels."""
     captured = _patch_bible(monkeypatch, payload={"voices": ["af_heart"], "count": 1})
-    resp = make_client(user="michele").get("/api/bible/voices")
+    resp = make_client(user="sam").get("/api/bible/voices")
     assert resp.status_code == 200
     call = captured["calls"][-1]
     assert call["url"].endswith("/voices")
@@ -483,7 +483,7 @@ def test_the_voice_list_never_carries_a_username(make_client, monkeypatch):
 
 def test_narration_forwards_only_the_passage_and_the_voice(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"audio_base64": "AAA="})
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/narration", params={"ref": "John 3:16", "version": "nkjv", "voice": "af_heart"}
     )
     assert resp.status_code == 200
@@ -496,7 +496,7 @@ def test_narration_forwards_only_the_passage_and_the_voice(make_client, monkeypa
 
 def test_an_unset_voice_is_dropped_rather_than_forwarded_empty(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"audio_base64": "AAA="})
-    make_client(user="michele").get("/api/bible/narration", params={"ref": "John 3:16"})
+    make_client(user="sam").get("/api/bible/narration", params={"ref": "John 3:16"})
     assert "version" not in captured["calls"][-1]["params"]
 
 
@@ -507,7 +507,7 @@ def test_a_missing_kokoro_voice_keeps_the_install_hint(make_client, monkeypatch)
         status=503,
         payload={"detail": "Kokoro voices missing. Install them with POST /execute/tts/download"},
     )
-    resp = make_client(user="michele").get("/api/bible/narration", params={"ref": "John 3:16"})
+    resp = make_client(user="sam").get("/api/bible/narration", params={"ref": "John 3:16"})
     assert resp.status_code == 503
     assert "/execute/tts/download" in resp.json()["detail"]
 
@@ -516,7 +516,7 @@ def test_a_passage_that_is_too_long_to_narrate_is_a_400(make_client, monkeypatch
     captured = _patch_bible(
         monkeypatch, status=400, payload={"detail": "That passage is 200 verses. Select a shorter passage."}
     )
-    resp = make_client(user="michele").get("/api/bible/narration", params={"ref": "Psalms 119"})
+    resp = make_client(user="sam").get("/api/bible/narration", params={"ref": "Psalms 119"})
     assert resp.status_code == 400
     assert "shorter passage" in resp.json()["detail"]
     assert captured["calls"]
@@ -524,7 +524,7 @@ def test_a_passage_that_is_too_long_to_narrate_is_a_400(make_client, monkeypatch
 
 def test_the_narration_plan_is_asked_without_a_voice_when_none_is_chosen(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"count": 12, "chunks": []})
-    resp = make_client(user="michele").get("/api/bible/narration/plan", params={"ref": "Romans 8"})
+    resp = make_client(user="sam").get("/api/bible/narration/plan", params={"ref": "Romans 8"})
     assert resp.status_code == 200
     call = captured["calls"][-1]
     assert call["url"].endswith("/narration/plan")
@@ -533,7 +533,7 @@ def test_the_narration_plan_is_asked_without_a_voice_when_none_is_chosen(make_cl
 
 def test_one_piece_is_asked_for_by_its_index(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"audio_base64": "AAA=", "index": 3})
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/narration/chunk",
         params={"ref": "Romans 8", "index": 3, "version": "nkjv", "voice": "af_heart"},
     )
@@ -548,7 +548,7 @@ def test_one_piece_is_asked_for_by_its_index(make_client, monkeypatch):
 
 def test_a_piece_past_the_end_is_the_readers_problem_not_the_operators(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=400, payload={"detail": "There are 12 pieces. Ask for 0 to 11."})
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/narration/chunk", params={"ref": "Romans 8", "index": 99}
     )
     assert resp.status_code == 400
@@ -561,7 +561,7 @@ def test_a_missing_voice_file_still_names_its_fix_on_the_piece_route(make_client
         status=503,
         payload={"detail": "Kokoro voices missing. Install them with POST /execute/tts/download"},
     )
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/narration/chunk", params={"ref": "Romans 8", "index": 0}
     )
     assert resp.status_code == 503
@@ -571,7 +571,7 @@ def test_a_missing_voice_file_still_names_its_fix_on_the_piece_route(make_client
 # imports are an administrator's job
 def test_a_family_member_cannot_import_a_translation(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    resp = make_client(user="michele", is_admin=False).post(
+    resp = make_client(user="sam", is_admin=False).post(
         "/api/bible/admin/imports", json={"code": "esv", "kind": "json"}
     )
     assert resp.status_code == 403
@@ -588,7 +588,7 @@ def test_an_anonymous_upload_never_reaches_the_service(anon_client, monkeypatch)
 def test_an_import_forwards_only_the_declared_fields(make_client, monkeypatch):
     """An unexpected key is dropped here rather than reaching the filesystem."""
     captured = _patch_bible(monkeypatch, payload={"status": "succeeded"})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports",
         json={
             "code": "esv",
@@ -618,7 +618,7 @@ def test_a_refusal_is_reported_as_a_readable_report_not_a_bare_422(make_client, 
             "log": ["Refused: Exodus is missing from that PDF"],
         },
     )
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports", json={"code": "esv", "kind": "pdf"}
     )
     assert resp.status_code == 422
@@ -627,14 +627,14 @@ def test_a_refusal_is_reported_as_a_readable_report_not_a_bare_422(make_client, 
 
 def test_the_import_catalogue_is_admin_only(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"versions": [], "runs": []})
-    assert make_client(user="michele", is_admin=False).get("/api/bible/admin/imports").status_code == 403
-    assert make_client(user="jeremiah", is_admin=True).get("/api/bible/admin/imports").status_code == 200
+    assert make_client(user="sam", is_admin=False).get("/api/bible/admin/imports").status_code == 403
+    assert make_client(user="alex", is_admin=True).get("/api/bible/admin/imports").status_code == 200
     assert captured["calls"][-1]["url"].endswith("/admin/imports")
 
 
 def test_an_unset_import_directory_reaches_the_operator(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=503, payload={"detail": "BIBLE_IMPORT_DIR is not configured."})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports", json={"code": "esv", "provider": "api.bible", "provider_id": "ESV"}
     )
     assert resp.status_code == 503
@@ -644,7 +644,7 @@ def test_an_unset_import_directory_reaches_the_operator(make_client, monkeypatch
 def test_the_upload_is_remultiparted_with_its_file(make_client, monkeypatch):
     """The bible service decides what the file is, so it must receive the bytes."""
     captured = _patch_bible(monkeypatch, payload={"status": "succeeded", "verse_count": 31102})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports/upload",
         files={"file": ("nkjv.epub", b"PK\x03\x04fake", "application/epub+zip")},
         data={"code": "nkjv", "kind": "epub", "import_notes": "true", "edition": "nkjv-macarthur"},
@@ -661,7 +661,7 @@ def test_the_upload_is_remultiparted_with_its_file(make_client, monkeypatch):
 
 def test_an_upload_without_a_file_is_refused_before_the_service(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports/upload", data={"code": "esv"}
     )
     assert resp.status_code == 400
@@ -676,7 +676,7 @@ def test_a_bible_crash_is_reported_with_its_status_and_text(make_client, monkeyp
     opaque failure with no hint that the importer had crashed at all.
     """
     _patch_bible(monkeypatch, status=500, raw=b"Internal Server Error")
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports/upload",
         files={"file": ("nkjv.epub", b"PK\x03\x04fake", "application/epub+zip")},
         data={"code": "nkjv", "kind": "epub"},
@@ -701,7 +701,7 @@ def test_the_cost_estimate_reports_what_would_still_be_requested(make_client, mo
             "within_budget": True,
         },
     )
-    resp = make_client(user="jeremiah", is_admin=True).get(
+    resp = make_client(user="alex", is_admin=True).get(
         "/api/bible/admin/providers/api.bible/estimate", params={"translation_id": "niv"}
     )
     assert resp.status_code == 200
@@ -717,7 +717,7 @@ def test_an_estimate_over_the_budget_is_passed_through_so_the_ui_can_warn(make_c
         monkeypatch,
         payload={"chapters": 1189, "cached": 0, "remaining": 1189, "budget": 500, "within_budget": False},
     )
-    resp = make_client(user="jeremiah", is_admin=True).get(
+    resp = make_client(user="alex", is_admin=True).get(
         "/api/bible/admin/providers/api.bible/estimate", params={"translation_id": "nlt"}
     )
     assert resp.status_code == 200
@@ -726,7 +726,7 @@ def test_an_estimate_over_the_budget_is_passed_through_so_the_ui_can_warn(make_c
 
 def test_estimating_a_cost_is_admin_only(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"remaining": 0})
-    resp = make_client(user="michele").get(
+    resp = make_client(user="sam").get(
         "/api/bible/admin/providers/api.bible/estimate", params={"translation_id": "niv"}
     )
     assert resp.status_code == 403
@@ -754,7 +754,7 @@ def test_the_library_folder_is_forwarded_as_a_path_not_a_query_string(make_clien
     in a query string is a quoting problem waiting to happen.
     """
     captured = _patch_bible(monkeypatch, payload={"root": "/Books/Text", "entries": [], "count": 0})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/library", json={"path": "/Books/Text/Thomas Nelson; NKJV (3198)"}
     )
     assert resp.status_code == 200
@@ -766,7 +766,7 @@ def test_the_library_folder_is_forwarded_as_a_path_not_a_query_string(make_clien
 def test_browsing_the_library_with_no_path_asks_for_the_shelf_root(make_client, monkeypatch):
     """The admin page lists the shelf first, so an absent path means the root."""
     captured = _patch_bible(monkeypatch, payload={"root": "/Books/Text", "entries": []})
-    resp = make_client(user="jeremiah", is_admin=True).post("/api/bible/admin/library", json={})
+    resp = make_client(user="alex", is_admin=True).post("/api/bible/admin/library", json={})
     assert resp.status_code == 200
     assert captured["calls"][-1]["json"] == {"path": ""}
 
@@ -774,14 +774,14 @@ def test_browsing_the_library_with_no_path_asks_for_the_shelf_root(make_client, 
 def test_browsing_the_library_keeps_the_reason_the_shelf_is_unreachable(make_client, monkeypatch):
     """An unset shelf is the operator's to fix, so the sentence has to survive."""
     _patch_bible(monkeypatch, status=503, payload={"detail": "calibre_library_path is not set."})
-    resp = make_client(user="jeremiah", is_admin=True).post("/api/bible/admin/library", json={})
+    resp = make_client(user="alex", is_admin=True).post("/api/bible/admin/library", json={})
     assert resp.status_code == 503
     assert "calibre_library_path" in resp.json()["detail"]
 
 
 def test_browsing_the_library_is_admin_only(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"entries": []})
-    resp = make_client(user="michele").post("/api/bible/admin/library", json={})
+    resp = make_client(user="sam").post("/api/bible/admin/library", json={})
     assert resp.status_code == 403
     assert captured["calls"] == []
 
@@ -789,7 +789,7 @@ def test_browsing_the_library_is_admin_only(make_client, monkeypatch):
 def test_a_library_import_is_forwarded_whole(make_client, monkeypatch):
     """The gateway never fetches the file; it names the shelf and stands back."""
     captured = _patch_bible(monkeypatch, payload={"status": "succeeded", "code": "kjv"})
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports",
         json={"code": "kjv", "kind": "epub", "library_path": "/Books/Text/Thomas Nelson/Bible.epub"},
     )
@@ -804,7 +804,7 @@ def test_a_shelf_import_refusal_reaches_the_operator_as_422(make_client, monkeyp
         monkeypatch,
         payload={"status": "failed", "message": "Exodus is missing from that book."},
     )
-    resp = make_client(user="jeremiah", is_admin=True).post(
+    resp = make_client(user="alex", is_admin=True).post(
         "/api/bible/admin/imports",
         json={"code": "kjv", "library_path": "/Books/Text/x.epub"},
     )
@@ -816,14 +816,14 @@ def test_a_shelf_import_refusal_reaches_the_operator_as_422(make_client, monkeyp
 def test_asking_about_a_passage_is_scoped_to_its_reader(make_client, monkeypatch):
     """The caller names the question; the username never comes from the body."""
     captured = _patch_bible(monkeypatch, payload={"answer": "It is about love.", "reference": "John 3:16"})
-    resp = make_client(user="jeremiah").post(
+    resp = make_client(user="alex").post(
         "/api/bible/study/ask",
-        json={"ref": "John 3:16", "question": "What does this mean?", "username": "michele"},
+        json={"ref": "John 3:16", "question": "What does this mean?", "username": "sam"},
     )
     assert resp.status_code == 200
     assert resp.json()["answer"] == "It is about love."
     call = captured["calls"][-1]
-    assert call["params"]["username"] == "jeremiah"
+    assert call["params"]["username"] == "alex"
     assert "username" not in call["json"]
     assert call["json"]["ref"] == "John 3:16"
     assert call["json"]["question"] == "What does this mean?"
@@ -831,7 +831,7 @@ def test_asking_about_a_passage_is_scoped_to_its_reader(make_client, monkeypatch
 
 def test_the_passage_choice_travels_with_the_question(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"answer": "ok"})
-    make_client(user="jeremiah").post(
+    make_client(user="alex").post(
         "/api/bible/study/ask",
         json={
             "ref": "John 3",
@@ -849,7 +849,7 @@ def test_the_passage_choice_travels_with_the_question(make_client, monkeypatch):
 
 def test_a_default_ask_does_not_opt_into_other_translations(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={"answer": "ok"})
-    make_client(user="jeremiah").post("/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"})
+    make_client(user="alex").post("/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"})
     assert captured["calls"][-1]["json"]["cross_version"] is False
 
 
@@ -859,7 +859,7 @@ def test_a_model_that_cannot_answer_keeps_its_own_sentence(make_client, monkeypa
         status=503,
         payload={"detail": "Study help could not reach the language model: gateway down"},
     )
-    resp = make_client(user="jeremiah").post(
+    resp = make_client(user="alex").post(
         "/api/bible/study/ask", json={"ref": "John 3", "question": "Why?"}
     )
     assert resp.status_code == 503
@@ -883,66 +883,66 @@ def test_the_ask_waits_longer_than_a_reading_route(
 # games: the caller plays and is scored as themselves
 def test_a_game_attempt_is_scored_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").post(
+    make_client(user="sam").post(
         "/api/bible/games/daily/attempt",
-        params={"username": "jeremiah"},
-        json={"username": "jeremiah", "seed": "2026-10-13", "answers": ["John"], "duration_ms": 900, "correct": 10},
+        params={"username": "alex"},
+        json={"username": "alex", "seed": "2026-10-13", "answers": ["John"], "duration_ms": 900, "correct": 10},
     )
     sent = captured["calls"][-1]
-    assert sent["params"]["username"] == "michele"
+    assert sent["params"]["username"] == "sam"
     assert sent["json"] == {"seed": "2026-10-13", "answers": ["John"], "duration_ms": 900}
 
 
 def test_the_leaderboard_is_read_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/games/leaderboard", params={"viewer": "jeremiah"})
-    assert captured["calls"][-1]["params"]["viewer"] == "michele"
+    make_client(user="sam").get("/api/bible/games/leaderboard", params={"viewer": "alex"})
+    assert captured["calls"][-1]["params"]["viewer"] == "sam"
 
 
 def test_a_game_is_fetched_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/games/which_book", params={"seed": "abc"})
+    make_client(user="sam").get("/api/bible/games/which_book", params={"seed": "abc"})
     sent = captured["calls"][-1]
-    assert sent["params"] == {"username": "michele", "seed": "abc"}
+    assert sent["params"] == {"username": "sam", "seed": "abc"}
 
 
 def test_a_recall_is_graded_for_the_caller_and_sends_only_the_attempt(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").post(
-        "/api/bible/memorize/4/recall", json={"typed": "Jesus wept", "username": "jeremiah", "passed": True}
+    make_client(user="sam").post(
+        "/api/bible/memorize/4/recall", json={"typed": "Jesus wept", "username": "alex", "passed": True}
     )
     sent = captured["calls"][-1]
-    assert sent["params"]["username"] == "michele"
+    assert sent["params"]["username"] == "sam"
     assert sent["json"] == {"typed": "Jesus wept"}
 
 
 def test_plan_progress_is_the_callers_own(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").post("/api/bible/plans/john-21/days/3/complete", params={"username": "jeremiah"})
-    assert captured["calls"][-1]["params"]["username"] == "michele"
+    make_client(user="sam").post("/api/bible/plans/john-21/days/3/complete", params={"username": "alex"})
+    assert captured["calls"][-1]["params"]["username"] == "sam"
 
 
 def test_a_streamed_study_answer_is_relayed_line_by_line(make_client, monkeypatch):
     stream = b'{"type": "start", "reference": "John 3:16"}\n{"type": "text", "text": "Love"}\n{"type": "done", "answer": "Love"}\n'
     captured = _patch_bible(monkeypatch, raw=stream)
-    resp = make_client(user="michele").post(
-        "/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": "Why?", "username": "jeremiah", "depth": "teen"}
+    resp = make_client(user="sam").post(
+        "/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": "Why?", "username": "alex", "depth": "teen"}
     )
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     assert [e["type"] for e in events] == ["start", "text", "done"]
     sent = captured["calls"][-1]
-    assert sent["params"] == {"username": "michele"}
+    assert sent["params"] == {"username": "sam"}
     assert "username" not in sent["json"] and sent["json"]["depth"] == "teen"
 
 
 def test_a_refused_stream_becomes_one_error_event(make_client, monkeypatch):
     _patch_bible(monkeypatch, status=400, payload={"detail": "Ask a question about this passage."})
-    resp = make_client(user="michele").post("/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": ""})
+    resp = make_client(user="sam").post("/api/bible/study/ask/stream", json={"ref": "John 3:16", "question": ""})
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     assert events == [{"type": "error", "detail": "Ask a question about this passage.", "status": 400}]
 
 
 def test_a_game_review_is_read_as_the_caller(make_client, monkeypatch):
     captured = _patch_bible(monkeypatch, payload={})
-    make_client(user="michele").get("/api/bible/games/attempts/7", params={"viewer": "jeremiah"})
-    assert captured["calls"][-1]["params"] == {"viewer": "michele"}
+    make_client(user="sam").get("/api/bible/games/attempts/7", params={"viewer": "alex"})
+    assert captured["calls"][-1]["params"] == {"viewer": "sam"}

@@ -7,9 +7,9 @@ from services.execution import watch_glance
 
 
 def test_the_line_is_short_and_readable():
-    etas = [("michele", {"to": "Home", "duration_s": 1080}), ("kate", {"to": "Home", "duration_s": 4500})]
-    assert watch_glance.glance_line(etas) == "Michele · home 18m  Kate · home 1h15"
-    assert watch_glance.glance_line([("michele", {"arrived": True})]) == ""
+    etas = [("sam", {"to": "Home", "duration_s": 1080}), ("kate", {"to": "Home", "duration_s": 4500})]
+    assert watch_glance.glance_line(etas) == "Sam · home 18m  Kate · home 1h15"
+    assert watch_glance.glance_line([("sam", {"arrived": True})]) == ""
     assert len(watch_glance.glance_line([("x" * 80, {"duration_s": 60})])) <= watch_glance.MAX_LEN
 
 
@@ -41,19 +41,19 @@ class _Session:
 async def test_only_others_on_the_move_are_asked_about_as_the_owner():
     now = time.time()
     session = _Session({
-        "jeremiah": {"speed": 25, "updated_at": now},            # the owner: never
-        "michele": {"speed": 20, "updated_at": now},             # driving: yes
+        "alex": {"speed": 25, "updated_at": now},            # the owner: never
+        "sam": {"speed": 20, "updated_at": now},             # driving: yes
         "kate": {"speed": 0, "updated_at": now},                 # still: no
         "default": {"speed": 30, "updated_at": now - 3600},      # stale: no
     })
-    line = await watch_glance.line_for("jeremiah", session)
-    assert line == "Michele · home 10m"
+    line = await watch_glance.line_for("alex", session)
+    assert line == "Sam · home 10m"
     assert len(session.asked) == 1
     url, params = session.asked[0]
-    assert url.endswith("/people/michele/eta") and params["viewer"] == "jeremiah"
+    assert url.endswith("/people/sam/eta") and params["viewer"] == "alex"
 
 
 @pytest.mark.asyncio
 async def test_someone_not_sharing_with_the_owner_stays_off_the_watch():
-    session = _Session({"michele": {"speed": 20, "updated_at": time.time()}}, eta_status=404)
-    assert await watch_glance.line_for("jeremiah", session) == ""
+    session = _Session({"sam": {"speed": 20, "updated_at": time.time()}}, eta_status=404)
+    assert await watch_glance.line_for("alex", session) == ""

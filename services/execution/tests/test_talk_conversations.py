@@ -5,7 +5,7 @@ from services.execution.handlers import talk as talk_handler
 
 
 class FakeProvider:
-    username = "jeremiah"
+    username = "alex"
     password = "p"
     base_url = "https://cloud.test"
 
@@ -18,7 +18,7 @@ def provider(monkeypatch):
 def request(action, **kwargs):
     from services.execution.schemas import TalkRequest
 
-    return TalkRequest(user_context={"user": "jeremiah"}, action=action, **kwargs)
+    return TalkRequest(user_context={"user": "alex"}, action=action, **kwargs)
 
 
 def _talk(monkeypatch, answers):
@@ -37,11 +37,11 @@ def _talk(monkeypatch, answers):
 
 async def test_a_group_is_created_then_each_person_invited(provider, monkeypatch):
     calls = _talk(monkeypatch, {("POST", "/api/v4/room"): (True, {"token": "abc", "displayName": "Family", "type": 2, "participantType": 1}, "")})
-    result = await talk_handler.handle_talk(request("create_group", message="Family", participants=["michele", "kids"]))
+    result = await talk_handler.handle_talk(request("create_group", message="Family", participants=["sam", "kids"]))
     assert result.status == "SUCCESS"
     assert calls[0]["data"] == {"roomType": "2", "roomName": "Family"}
     invited = [c["data"]["newParticipant"] for c in calls[1:]]
-    assert invited == ["michele", "kids"] and all(c["endpoint"].endswith("/room/abc/participants") for c in calls[1:])
+    assert invited == ["sam", "kids"] and all(c["endpoint"].endswith("/room/abc/participants") for c in calls[1:])
     assert result.detail["conversation"]["can_moderate"] is True
 
 
@@ -61,11 +61,11 @@ async def test_deleting_falls_back_to_leaving_when_not_a_moderator(provider, mon
 async def test_members_are_listed_added_and_removed(provider, monkeypatch):
     calls = _talk(
         monkeypatch,
-        {("GET", "/room/abc/participants"): (True, [{"attendeeId": 5, "actorType": "users", "actorId": "michele", "displayName": "Michele", "participantType": 3}], "")},
+        {("GET", "/room/abc/participants"): (True, [{"attendeeId": 5, "actorType": "users", "actorId": "sam", "displayName": "Sam", "participantType": 3}], "")},
     )
     listed = await talk_handler.handle_talk(request("participants", token="abc"))
     assert listed.detail["participants"] == [
-        {"attendee_id": 5, "actor_type": "users", "actor_id": "michele", "display_name": "Michele", "is_moderator": False}
+        {"attendee_id": 5, "actor_type": "users", "actor_id": "sam", "display_name": "Sam", "is_moderator": False}
     ]
     assert (await talk_handler.handle_talk(request("add_participant", token="abc", target_user="kids"))).status == "SUCCESS"
     assert calls[-1]["data"] == {"newParticipant": "kids", "source": "users"}
@@ -74,6 +74,6 @@ async def test_members_are_listed_added_and_removed(provider, monkeypatch):
 
 
 async def test_people_search_returns_users_only(provider, monkeypatch):
-    _talk(monkeypatch, {("GET", "/core/autocomplete/get"): (True, [{"id": "michele", "label": "Michele", "source": "users"}, {"id": "g", "label": "Group", "source": "groups"}], "")})
+    _talk(monkeypatch, {("GET", "/core/autocomplete/get"): (True, [{"id": "sam", "label": "Sam", "source": "users"}, {"id": "g", "label": "Group", "source": "groups"}], "")})
     result = await talk_handler.handle_talk(request("people", search="mi"))
-    assert result.detail["people"] == [{"id": "michele", "label": "Michele"}]
+    assert result.detail["people"] == [{"id": "sam", "label": "Sam"}]

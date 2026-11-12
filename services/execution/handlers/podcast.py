@@ -98,8 +98,17 @@ async def _write_to_workspace(req, relative_path: str, content_b64: str) -> tupl
     return True, f"saved to {relative_path}"
 
 
+_NO_WEB_URL = (
+    "ALPACA_WEB_URL is not set, so there is no alpaca dashboard to render with. "
+    "Set ALPACA_WEB_URL in .env (e.g. http://<llm-host>:5000) and restart execution."
+)
+
+
 async def handle_podcast_render(req) -> ExecutionResult:
     """Render a scripted podcast episode and save the mixed WAV into the workspace."""
+    if not ALPACA_WEB_URL:
+        return ExecutionResult(status="FAILURE", message=f"Podcast render failed: {_NO_WEB_URL}",
+                               service="podcast_render", detail={"missing": "ALPACA_WEB_URL"})
     # The workspace only has to EXIST here - there is no input file to resolve,
     # the script arrives in the request body. Resolving it anyway means an
     # unresolvable workspace is a clear FAILURE before a 30-minute render.
@@ -421,6 +430,9 @@ async def handle_speaker_identify(req) -> ExecutionResult:
 
 async def handle_list_voices(req) -> ExecutionResult:
     """List the enrolled speaker profiles and the curated podcast host pairs."""
+    if not ALPACA_WEB_URL:
+        return ExecutionResult(status="FAILURE", message=f"Listing voices failed: {_NO_WEB_URL}",
+                               service="list_voices", detail={"missing": "ALPACA_WEB_URL"})
     try:
         import aiohttp
 

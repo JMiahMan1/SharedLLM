@@ -66,7 +66,7 @@ def _patch_execution(monkeypatch, payload=None, captured=None):
 def resolver(monkeypatch):
     """Install a stand-in for the gateway's identity resolution."""
 
-    def _install(user="jeremiah", is_admin=True, skylight_enabled=True, key="test-token"):
+    def _install(user="alex", is_admin=True, skylight_enabled=True, key="test-token"):
         async def _resolve(request, body=None):
             if request.headers.get("Authorization", "") != f"Bearer {key}":
                 raise HTTPException(status_code=401, detail="Authentication required")
@@ -80,7 +80,7 @@ def resolver(monkeypatch):
 
 @pytest.fixture
 def chores_client(resolver):
-    def _make(user="jeremiah", is_admin=True, skylight_enabled=True, key="test-token"):
+    def _make(user="alex", is_admin=True, skylight_enabled=True, key="test-token"):
         resolver(user=user, is_admin=is_admin, skylight_enabled=skylight_enabled, key=key)
         return TestClient(app, headers={"Authorization": f"Bearer {key}"}, raise_server_exceptions=False)
 
@@ -97,43 +97,43 @@ def _forwarded_user(captured):
 # who sees what
 def test_admin_without_a_scope_gets_the_whole_frame(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="jeremiah", is_admin=True).get("/api/integrations/skylight/chores")
+    resp = chores_client(user="alex", is_admin=True).get("/api/integrations/skylight/chores")
     assert resp.status_code == 200
     assert _forwarded_user(captured) == ""
 
 
 def test_admin_can_narrow_to_their_own_chores(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="jeremiah", is_admin=True).get(
+    resp = chores_client(user="alex", is_admin=True).get(
         "/api/integrations/skylight/chores", params={"scope": "me", "date": "today"}
     )
     assert resp.status_code == 200
-    assert _forwarded_user(captured) == "jeremiah"
+    assert _forwarded_user(captured) == "alex"
     assert captured["calls"][0]["params"]["date"] == "today"
 
 
 def test_admin_can_ask_for_one_member_by_login_name(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="jeremiah", is_admin=True).get(
-        "/api/integrations/skylight/chores", params={"scope": "michele"}
+    resp = chores_client(user="alex", is_admin=True).get(
+        "/api/integrations/skylight/chores", params={"scope": "sam"}
     )
     assert resp.status_code == 200
-    assert _forwarded_user(captured) == "michele"
+    assert _forwarded_user(captured) == "sam"
 
 
 def test_member_always_gets_their_own_chores(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="michele", is_admin=False).get(
+    resp = chores_client(user="sam", is_admin=False).get(
         "/api/integrations/skylight/chores", params={"scope": "all"}
     )
     assert resp.status_code == 200
-    assert _forwarded_user(captured) == "michele"
+    assert _forwarded_user(captured) == "sam"
 
 
 def test_member_asking_for_someone_else_is_refused_and_forwards_nothing(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="michele", is_admin=False).get(
-        "/api/integrations/skylight/chores", params={"scope": "jeremiah"}
+    resp = chores_client(user="sam", is_admin=False).get(
+        "/api/integrations/skylight/chores", params={"scope": "alex"}
     )
     assert resp.status_code == 403
     assert "your own chores" in resp.json()["message"]
@@ -142,7 +142,7 @@ def test_member_asking_for_someone_else_is_refused_and_forwards_nothing(chores_c
 
 def test_a_disabled_account_is_told_so_and_forwards_nothing(chores_client, monkeypatch):
     captured = _patch_execution(monkeypatch)
-    resp = chores_client(user="michele", is_admin=False, skylight_enabled=False).get(
+    resp = chores_client(user="sam", is_admin=False, skylight_enabled=False).get(
         "/api/integrations/skylight/chores"
     )
     assert resp.status_code == 400
@@ -176,10 +176,10 @@ def acting(monkeypatch):
 
 @pytest.mark.parametrize("ident, allowed", [
     (None, 401),
-    ({"user": "noah", "is_admin": False, "family_role": "child"}, 403),
+    ({"user": "jordan", "is_admin": False, "family_role": "child"}, 403),
     ({"user": "gran", "is_admin": False, "family_role": "other"}, 403),
     ({"user": "mom", "is_admin": False, "family_role": "mother"}, 200),
-    ({"user": "jeremiah", "is_admin": True, "family_role": "father"}, 200),
+    ({"user": "alex", "is_admin": True, "family_role": "father"}, 200),
 ])
 def test_only_parents_add_change_or_remove_chores(monkeypatch, acting, ident, allowed):
     acting["ident"] = ident
@@ -187,7 +187,7 @@ def test_only_parents_add_change_or_remove_chores(monkeypatch, acting, ident, al
     client = TestClient(app)
     calls = [
         client.get("/api/integrations/skylight/members"),
-        client.post("/api/integrations/skylight/chores", json={"title": "Hay", "assignees": ["noah"]}),
+        client.post("/api/integrations/skylight/chores", json={"title": "Hay", "assignees": ["jordan"]}),
         client.patch("/api/integrations/skylight/chores/50-2026-11-03", json={"title": "Hay barn"}),
         client.delete("/api/integrations/skylight/chores/50?apply_to=all"),
     ]
@@ -217,10 +217,10 @@ def test_a_mother_can_look_at_a_childs_chores_and_a_child_cannot(monkeypatch, re
     captured = _patch_execution(monkeypatch)
     client = TestClient(app)
     auth = {"Authorization": f"Bearer {key}"}
-    assert client.get("/api/integrations/skylight/chores?scope=noah", headers=auth).status_code == 200
-    assert captured["calls"][-1]["params"]["user"] == "noah"
+    assert client.get("/api/integrations/skylight/chores?scope=jordan", headers=auth).status_code == 200
+    assert captured["calls"][-1]["params"]["user"] == "jordan"
 
-    key = resolver(user="noah", is_admin=False)
-    acting["ident"] = {"user": "noah", "is_admin": False, "family_role": "child"}
-    resp = client.get("/api/integrations/skylight/chores?scope=gracie", headers={"Authorization": f"Bearer {key}"})
+    key = resolver(user="jordan", is_admin=False)
+    acting["ident"] = {"user": "jordan", "is_admin": False, "family_role": "child"}
+    resp = client.get("/api/integrations/skylight/chores?scope=taylor", headers={"Authorization": f"Bearer {key}"})
     assert resp.status_code == 403, resp.text

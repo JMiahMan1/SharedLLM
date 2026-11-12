@@ -26,7 +26,7 @@ def test_media_group_list_uses_body_model(monkeypatch):
     resp = client.post("/execute/groups/media", headers=HEADERS, json={
         "action": "list",
         "group_id": "media_all",
-        "user_context": {"user": "jeremiah"},
+        "user_context": {"user": "alex"},
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "SUCCESS"
@@ -40,13 +40,13 @@ def test_media_group_create_records_acting_user(monkeypatch):
         "action": "create",
         "group_id": "living_room",
         "member_entity_ids": ["media_player.living_room_tv"],
-        "user_context": {"user": "michele"},
+        "user_context": {"user": "sam"},
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "SUCCESS"
     method, path, payload = calls[0]
     assert (method, path) == ("POST", "/api/groups/media")
-    assert payload["owner_user_id"] == "michele"
+    assert payload["owner_user_id"] == "sam"
 
 
 def test_media_group_create_without_user_context_has_empty_owner(monkeypatch):
@@ -75,13 +75,13 @@ def test_light_cluster_create_records_acting_user(monkeypatch):
     resp = client.post("/execute/groups/lights", headers=HEADERS, json={
         "action": "create",
         "cluster_id": "porch",
-        "user_context": {"user": "jeremiah"},
+        "user_context": {"user": "alex"},
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "SUCCESS"
     method, path, payload = calls[0]
     assert (method, path) == ("POST", "/api/groups/lights")
-    assert payload["owner_user_id"] == "jeremiah"
+    assert payload["owner_user_id"] == "alex"
 
 
 def test_light_pattern_list_uses_body_model(monkeypatch):

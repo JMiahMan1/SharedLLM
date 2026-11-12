@@ -2,9 +2,13 @@
 """
 Comprehensive test for Music Assistant and Video playback on all devices
 """
+import os
+import sys
 import time
 
 import requests
+
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
 
 REMOTE_URL = "http://ai.local:11435/api/chat"
 
@@ -51,11 +55,11 @@ def main():
     tests = [
         # Music Assistant tests
         ("Music - Office TV", "Play Brandon Lake on Office TV", "Office TV"),
-        ("Music - Gracies TV", "Listen to Brandon Lake on Gracies TV", "Gracies TV"),
+        (f"Music - {LIVE_TV_NAME}", f"Listen to Brandon Lake on {LIVE_TV_NAME}", f"{LIVE_TV_NAME}"),
 
         # Video tests
         ("Video - Office TV", "Watch Landslide by Fleetwood Mac on Office TV", "Office TV"),
-        ("Video - Gracies TV", "Watch Landslide by Fleetwood Mac on Gracies TV", "Gracies TV"),
+        (f"Video - {LIVE_TV_NAME}", f"Watch Landslide by Fleetwood Mac on {LIVE_TV_NAME}", f"{LIVE_TV_NAME}"),
     ]
 
     for test_name, query, expected_device in tests:

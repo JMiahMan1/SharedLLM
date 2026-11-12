@@ -56,13 +56,13 @@ async def test_autowire_prefers_exec_data_url_over_gh_view():
          patch.object(al, "_shell_out", side_effect=fake_shell_out):
         await al._autowire_created_repo(
             "ws1", fake_creds, "gh repo create my-repo --private",
-            {"status": "SUCCESS", "detail": {"repo_url": "https://github.com/JMiahMan1/my-repo.git"}},
+            {"status": "SUCCESS", "detail": {"repo_url": "https://github.com/Example-User/my-repo.git"}},
         )
 
     # gh repo view must NOT have been invoked
     assert not any("gh repo view" in c for c in gh_calls), gh_calls
     # workspace patched with the correct (non-SharedLLM) repo url
     assert calls["patches"], "workspace was never patched"
-    assert calls["patches"][0]["repo_url"] == "https://github.com/JMiahMan1/my-repo.git"
+    assert calls["patches"][0]["repo_url"] == "https://github.com/Example-User/my-repo.git"
     assert calls["patches"][0]["git_remote"] == "origin"
     assert calls["patches"][0]["default_branch"] == "main"

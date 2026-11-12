@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from services.config import INTERNAL_SECRET
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 
 
 class FakeRedis:
@@ -86,7 +86,7 @@ def _no_network(monkeypatch):
 async def test_viewer_may_see_own_data_without_sharing(monkeypatch):
     import services.geo.main as geo
 
-    assert await geo._viewer_may_see("jeremiah", "jeremiah") is True
+    assert await geo._viewer_may_see("alex", "alex") is True
 
 
 async def test_viewer_blocked_when_target_not_opted_in(monkeypatch):
@@ -96,7 +96,7 @@ async def test_viewer_blocked_when_target_not_opted_in(monkeypatch):
         return {"users": []}
 
     monkeypatch.setattr(geo, "_fetch_activity_sharing", fake_sharing)
-    assert await geo._viewer_may_see("jeremiah", "alice") is False
+    assert await geo._viewer_may_see("alex", "alice") is False
 
 
 async def test_viewer_blocked_when_disabled_or_not_in_audience(monkeypatch):
@@ -111,10 +111,10 @@ async def test_viewer_blocked_when_disabled_or_not_in_audience(monkeypatch):
         }
 
     monkeypatch.setattr(geo, "_fetch_activity_sharing", fake_sharing)
-    assert await geo._viewer_may_see("jeremiah", "alice") is False
-    assert await geo._viewer_may_see("jeremiah", "bob") is False
+    assert await geo._viewer_may_see("alex", "alice") is False
+    assert await geo._viewer_may_see("alex", "bob") is False
     assert await geo._viewer_may_see("sam", "bob") is True
-    assert await geo._viewer_may_see("jeremiah", "bob") is False
+    assert await geo._viewer_may_see("alex", "bob") is False
 
 
 async def test_viewer_allowed_for_circle_audience(monkeypatch):
@@ -130,17 +130,17 @@ async def test_viewer_allowed_for_circle_audience(monkeypatch):
 async def test_summary_own_data_always_allowed(rc, monkeypatch):
     import services.geo.main as geo
 
-    seed_day(rc, "jeremiah", 4321)
-    rc.hashes["geo:points:jeremiah"] = {"first_steps": "2026-09-20"}
+    seed_day(rc, "alex", 4321)
+    rc.hashes["geo:points:alex"] = {"first_steps": "2026-09-20"}
 
     async def fake_get_redis():
         return rc
 
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
     out = await geo.get_activity_summary(
-        user_id="jeremiah",
+        user_id="alex",
         window="today",
-        viewer="jeremiah",
+        viewer="alex",
         x_internal_secret=INTERNAL_SECRET,
     )
     assert out["status"] == "SUCCESS"
@@ -163,7 +163,7 @@ async def test_summary_cross_user_requires_opt_in(rc, monkeypatch):
         await geo.get_activity_summary(
             user_id="alice",
             window="week",
-            viewer="jeremiah",
+            viewer="alex",
             x_internal_secret=INTERNAL_SECRET,
         )
     assert exc.value.status_code == 404
@@ -175,7 +175,7 @@ async def test_summary_cross_user_allowed_when_shared(rc, monkeypatch):
     seed_day(rc, "alice", 2500)
 
     async def fake_sharing():
-        return {"users": [share_row("alice", audience="users", user_ids=["jeremiah"])]}
+        return {"users": [share_row("alice", audience="users", user_ids=["alex"])]}
 
     async def fake_get_redis():
         return rc
@@ -185,7 +185,7 @@ async def test_summary_cross_user_allowed_when_shared(rc, monkeypatch):
     out = await geo.get_activity_summary(
         user_id="alice",
         window="week",
-        viewer="jeremiah",
+        viewer="alex",
         x_internal_secret=INTERNAL_SECRET,
     )
     assert out["steps_total"] == 2500
@@ -200,9 +200,9 @@ async def test_summary_requires_internal_secret(rc, monkeypatch):
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
     with pytest.raises(HTTPException) as exc:
         await geo.get_activity_summary(
-            user_id="jeremiah",
+            user_id="alex",
             window="week",
-            viewer="jeremiah",
+            viewer="alex",
             x_internal_secret="wrong",
         )
     assert exc.value.status_code == 403
@@ -223,7 +223,7 @@ async def test_feed_filters_disabled_and_non_audience_users(rc, monkeypatch):
                 share_row(
                     "bob",
                     audience="users",
-                    user_ids=["jeremiah"],
+                    user_ids=["alex"],
                     share=("totals", "achievements"),
                 ),
                 share_row("carol", enabled=False, audience="circle"),
@@ -237,7 +237,7 @@ async def test_feed_filters_disabled_and_non_audience_users(rc, monkeypatch):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", fake_sharing)
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
     out = await geo.get_activity_feed(
-        viewer="jeremiah",
+        viewer="alex",
         window="week",
         x_internal_secret=INTERNAL_SECRET,
     )
@@ -254,10 +254,10 @@ async def test_feed_filters_disabled_and_non_audience_users(rc, monkeypatch):
 async def test_feed_never_includes_the_viewer(rc, monkeypatch):
     import services.geo.main as geo
 
-    seed_day(rc, "jeremiah", 999)
+    seed_day(rc, "alex", 999)
 
     async def fake_sharing():
-        return {"users": [share_row("jeremiah", audience="circle")]}
+        return {"users": [share_row("alex", audience="circle")]}
 
     async def fake_get_redis():
         return rc
@@ -265,7 +265,7 @@ async def test_feed_never_includes_the_viewer(rc, monkeypatch):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", fake_sharing)
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
     out = await geo.get_activity_feed(
-        viewer="jeremiah",
+        viewer="alex",
         window="week",
         x_internal_secret=INTERNAL_SECRET,
     )

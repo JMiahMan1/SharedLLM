@@ -20,8 +20,8 @@ def snap(t, server_bytes=0, tv_bytes=0, busy=0, active=0, uptime=1000, log=(), l
         "system": {"uptime": uptime, "load1": 0.1, "mem_total": 1000, "mem_available": 600},
         "board": {"model": "Test router", "hostname": "router", "version": "25.12"},
         "interfaces": [{"name": "wan", "up": True, "uptime": 50, "proto": "static", "device": "wan", "ipv4": []}],
-        "leases": [{"mac": SERVER, "ip": "192.168.2.205", "name": "server", "expires": 100},
-                   {"mac": TV, "ip": "192.168.2.160", "name": "", "expires": 100}],
+        "leases": [{"mac": SERVER, "ip": "192.0.2.205", "name": "server", "expires": 100},
+                   {"mac": TV, "ip": "192.0.2.160", "name": "", "expires": 100}],
         "hosts": {TV: "LivingRoomTv"},
         "pools": [{"network": "devices", "size": 150, "used": leases_used}],
         "radios": [{
@@ -56,7 +56,7 @@ def test_a_slow_device_downloading_nonstop_is_named_once():
     # 80 MB a minute over a 19.5 Mbit/s link is about 55% of the airtime.
     notices, loads = run_minutes(state, 8, server_mb_per_min=80, busy_pct=75)
     assert [n["title"] for n in notices] == ["server is crowding the 2.4 GHz Wi-Fi"]
-    assert "server (192.168.2.205)" in notices[0]["body"] and "Home-Devices" in notices[0]["body"]
+    assert "server (192.0.2.205)" in notices[0]["body"] and "Home-Devices" in notices[0]["body"]
     assert notices[0]["data"]["url"] == "/admin/network"
     top = max(loads[0]["clients"], key=lambda c: c["share_pct"])
     assert top["mac"] == SERVER and 50 < top["share_pct"] < 60
@@ -135,8 +135,8 @@ def test_static_lease_names_win_and_pools_count_only_their_range():
         "wan": {".type": "dhcp", ".name": "wan", "interface": "wan", "ignore": "1"},
     }
     assert rm._static_hosts(dhcp) == {TV: "tv", "aa:00:00:00:00:03": "two-macs", "aa:00:00:00:00:04": "two-macs"}
-    interfaces = [{"interface": "devices", "ipv4-address": [{"address": "192.168.2.1", "mask": 24}]}]
-    leases = [{"ipaddr": "192.168.2.30"}, {"ipaddr": "192.168.2.39"}, {"ipaddr": "192.168.2.40"}, {"ipaddr": "192.168.2.10"}]
+    interfaces = [{"interface": "devices", "ipv4-address": [{"address": "192.0.2.1", "mask": 24}]}]
+    leases = [{"ipaddr": "192.0.2.30"}, {"ipaddr": "192.0.2.39"}, {"ipaddr": "192.0.2.40"}, {"ipaddr": "192.0.2.10"}]
     assert rm._pools(dhcp, interfaces, leases) == [{"network": "devices", "size": 10, "used": 2}]
 
 
@@ -186,7 +186,7 @@ def test_the_monitor_stores_status_log_and_usage_and_hides_the_password(monkeypa
     monkeypatch.setattr(rm, "internet_up", lambda: True)
     monkeypatch.setattr(rm, "collect", lambda client, last_id: next(snaps))
     monkeypatch.setattr(RouterClient, "verify_certificate", lambda self: "ab" * 32)
-    m = rm.Monitor(r, lambda: {"url": "https://192.168.2.1", "user": "jarvis", "password": "s3cret", "cert_sha256": None},
+    m = rm.Monitor(r, lambda: {"url": "https://192.0.2.1", "user": "jarvis", "password": "s3cret", "cert_sha256": None},
                    pins.append, notify=lambda n: sent.append(n) or True)
     first = m.tick(now=1000)
     assert first["connected"] and pins == ["ab" * 32]
@@ -212,7 +212,7 @@ def test_a_changed_certificate_never_gets_the_password(monkeypatch):
     posted = []
     monkeypatch.setattr("services.control_plane.router_client.certificate_fingerprint", lambda url, timeout: "11" * 32)
     monkeypatch.setattr("services.control_plane.router_client.requests.post", lambda *a, **k: posted.append(k))
-    client = RouterClient("https://192.168.2.1", "jarvis", "s3cret", pin="22" * 32)
+    client = RouterClient("https://192.0.2.1", "jarvis", "s3cret", pin="22" * 32)
     with pytest.raises(RouterError, match="certificate changed"):
         client.call("system", "info")
     assert posted == []
@@ -241,7 +241,7 @@ def test_an_expired_session_logs_in_again(monkeypatch):
 
     monkeypatch.setattr("services.control_plane.router_client.certificate_fingerprint", lambda url, timeout: "11" * 32)
     monkeypatch.setattr("services.control_plane.router_client.requests.post", post)
-    client = RouterClient("https://192.168.2.1", "jarvis", "pw", pin="11" * 32)
+    client = RouterClient("https://192.0.2.1", "jarvis", "pw", pin="11" * 32)
     client.session = "stale"
     assert client.call("system", "info") == {"uptime": 5}
     # The stale session is refused, a new login follows, then the call is retried.
@@ -305,15 +305,15 @@ def test_usage_sums_devices_networks_and_a_series(monkeypatch):
     monkeypatch.setattr(network_routes, "monitor", lambda: type("M", (), {"r": r})())
     r.set(rm.STATUS_KEY, json.dumps({
         "usage_source": "nlbw",
-        "devices": {SERVER: {"name": "server", "ip": "192.168.2.205"}, TV: {"name": "LivingRoomTv", "ip": "192.168.4.20"}},
-        "networks": [{"name": "devices", "cidr": "192.168.2.1/24"}, {"name": "kids", "cidr": "192.168.4.1/24"}],
+        "devices": {SERVER: {"name": "server", "ip": "192.0.2.205"}, TV: {"name": "LivingRoomTv", "ip": "203.0.113.20"}},
+        "networks": [{"name": "devices", "cidr": "192.0.2.1/24"}, {"name": "kids", "cidr": "203.0.113.1/24"}],
     }))
     hour = lambda h: rm.USAGE_PREFIX + _time.strftime("%Y-%m-%dT%H", _time.localtime(now - h * 3600))  # noqa: E731
     r.hashes[hour(0)] = {f"{SERVER}:down": 5000, f"{SERVER}:up": 500, f"{TV}:down": 100}
     r.hashes[hour(1)] = {SERVER: 1000}  # written before the download/upload split
     out = network_routes.usage(hours=2)
     assert out["source"] == "nlbw" and out["bucket"] == "hour"
-    assert out["devices"][0] == {"mac": SERVER, "name": "server", "ip": "192.168.2.205", "network": "devices",
+    assert out["devices"][0] == {"mac": SERVER, "name": "server", "ip": "192.0.2.205", "network": "devices",
                                  "down": 6000, "up": 500, "bytes": 6500}
     assert {n["name"]: n["down"] for n in out["networks"]} == {"devices": 6000, "kids": 100}
     assert [p["down"] for p in out["series"]] == [1000, 5100]
@@ -332,13 +332,13 @@ def test_an_outage_is_recorded_when_the_internet_returns(monkeypatch):
 
 
 def test_a_fixed_lease_gives_its_address_when_not_in_the_active_list():
-    dhcp = {"cfg9": {".type": "host", "name": "desktop", "mac": "AA:00:00:00:00:07", "ip": "192.168.2.43"}}
+    dhcp = {"cfg9": {".type": "host", "name": "desktop", "mac": "AA:00:00:00:00:07", "ip": "192.0.2.43"}}
     s = snap(0)
     s["hosts"] = {**s["hosts"], **rm._static_hosts(dhcp)}
     s["host_ips"] = rm._static_host_ips(dhcp)
-    assert rm.device_name("aa:00:00:00:00:07", s) == ("desktop", "192.168.2.43")
+    assert rm.device_name("aa:00:00:00:00:07", s) == ("desktop", "192.0.2.43")
     # An active lease still wins.
-    assert rm.device_name(SERVER, s)[1] == "192.168.2.205"
+    assert rm.device_name(SERVER, s)[1] == "192.0.2.205"
 
 
 def test_settings_unreadable_at_startup_recover_on_their_own(monkeypatch):
@@ -347,7 +347,7 @@ def test_settings_unreadable_at_startup_recover_on_their_own(monkeypatch):
     monkeypatch.setattr(rm, "internet_up", lambda: True)
     monkeypatch.setattr(rm, "collect", lambda client, last_id: snap(0, server_bytes=0, busy=0, active=0))
     monkeypatch.setattr(RouterClient, "verify_certificate", lambda self: "ab" * 32)
-    good = {"url": "https://192.168.2.1", "user": "jarvis", "password": "s3cret", "cert_sha256": "ab" * 32}
+    good = {"url": "https://192.0.2.1", "user": "jarvis", "password": "s3cret", "cert_sha256": "ab" * 32}
     answers = iter([rm.SettingsUnavailable("ConnectionError"), good, rm.SettingsUnavailable("Identity answered 503")])
 
     def load():

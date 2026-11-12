@@ -42,7 +42,7 @@ class FakeRuntime(Runtime):
 @pytest.fixture
 def rt(tmp_path):
     store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
-    hub = Hub(time_zone="America/Phoenix")
+    hub = Hub(time_zone="Etc/GMT+7")
     hub.store = store
     hub.areas["porch"] = Area("porch", "Porch")
     return FakeRuntime(hub, store)

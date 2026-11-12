@@ -4,7 +4,8 @@ These tests exercise the full webscraper pipeline: Playwright → screenshot →
 vision_ocr (Qwen2.5-VL) → structured extraction.
 
 Requires:
-  - Execution service running on localhost:8003
+  - LIVE_TEST_USER: the username whose credentials Identity resolves (skips when unset)
+  - Execution service running on localhost:8003 (EXECUTION_SVC_URL)
   - Playwright browsers installed
   - OCR model + proxy configured (VISION_OCR_MODEL / VISION_OCR_PROXY_URL
     env vars, or identity settings with vision_ocr_model + llm_local_url)
@@ -27,7 +28,7 @@ EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
 @pytest.mark.local_only
 async def test_web_scraper_simple_query():
     """Basic webscraper call with a simple product query."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -51,7 +52,7 @@ async def test_web_scraper_simple_query():
 @pytest.mark.local_only
 async def test_web_scraper_multiple_sources():
     """Scrape from multiple sources simultaneously."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -71,7 +72,7 @@ async def test_web_scraper_multiple_sources():
 @pytest.mark.local_only
 async def test_web_scraper_mobile_mode():
     """Web scraper with mobile viewport flag."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -92,7 +93,7 @@ async def test_web_scraper_mobile_mode():
 @pytest.mark.local_only
 async def test_web_scraper_custom_url():
     """Scrape a custom URL instead of named sources."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -112,7 +113,7 @@ async def test_web_scraper_custom_url():
 @pytest.mark.local_only
 async def test_web_scraper_with_ocr_model_override():
     """Web scraper with explicit OCR model and proxy settings."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -135,7 +136,7 @@ async def test_web_scraper_with_ocr_model_override():
 @pytest.mark.local_only
 async def test_web_scraper_empty_result_handling():
     """Web scraper with a query that may return no results should not crash."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",
@@ -155,7 +156,7 @@ async def test_web_scraper_empty_result_handling():
 @pytest.mark.local_only
 async def test_web_scraper_with_output_file():
     """Web scraper with output_file parameter."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=180.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_scraper",

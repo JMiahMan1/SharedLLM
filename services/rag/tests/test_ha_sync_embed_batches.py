@@ -119,7 +119,7 @@ def test_the_sync_still_reports_success_and_counts(tmp_path):
 
 def test_an_empty_payload_embeds_only_the_status_row(tmp_path):
     _install(tmp_path)
-    result = _sync({"entities": [], "user_id": "jeremiah"})
+    result = _sync({"entities": [], "user_id": "alex"})
 
     assert result["status"] == "SUCCESS"
     assert result["count"] == 0
@@ -236,11 +236,11 @@ def test_users_keep_their_own_copies_and_do_not_re_embed_each_other(tmp_path):
     own unchanged, and re-embedded everything: RAG spent about half of every
     hour embedding, and only the last user to sync had HA entities indexed."""
     conn = _install(tmp_path)
-    for user in ("default", "michele", "jeremiah"):
+    for user in ("default", "sam", "alex"):
         _sync({"entities": _entities(20)}, user_id=user)
     _fake_embed.batches = []
 
-    for user in ("default", "michele", "jeremiah"):
+    for user in ("default", "sam", "alex"):
         _sync({"entities": _entities(20)}, user_id=user)
 
     # Only the three status rows are re-embedded; every entity is unchanged.
@@ -251,20 +251,20 @@ def test_users_keep_their_own_copies_and_do_not_re_embed_each_other(tmp_path):
             " AND id LIKE 'ha:%' GROUP BY user_id"
         ).fetchall()
     )
-    assert per_user == {"default": 20, "michele": 20, "jeremiah": 20}
+    assert per_user == {"default": 20, "sam": 20, "alex": 20}
 
 
 def test_rows_under_the_old_shared_id_are_replaced_without_dropping_live_entities(tmp_path):
     conn = _install(tmp_path)
     rag_main._add_item(
-        "ha_entities", "ha:light.kitchen_0", "michele", "old text", {"entity_id": "light.kitchen_0"},
+        "ha_entities", "ha:light.kitchen_0", "sam", "old text", {"entity_id": "light.kitchen_0"},
         0, "2026-01-01T00:00:00Z", vector=[0.0] * rag_main.EMBEDDING_DIM,
     )
 
-    result = _sync({"entities": _entities(2)}, user_id="michele")
+    result = _sync({"entities": _entities(2)}, user_id="sam")
 
     ids = {r[0] for r in conn.execute("SELECT id FROM rag_items WHERE collection_name = 'ha_entities'")}
     assert "ha:light.kitchen_0" not in ids
-    assert {"ha:michele:light.kitchen_0", "ha:michele:light.kitchen_1"} <= ids
+    assert {"ha:sam:light.kitchen_0", "ha:sam:light.kitchen_1"} <= ids
     # The entity is still in HA, so the gateway must not clear its state cache.
     assert result["orphaned_entity_ids"] == []

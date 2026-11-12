@@ -43,7 +43,7 @@ def client(monkeypatch):
         # Opted in to the whole circle, so any non-owner may read.
         return {
             "users": [
-                {"username": "michele", "enabled": True, "audience": "circle", "user_ids": []},
+                {"username": "sam", "enabled": True, "audience": "circle", "user_ids": []},
             ]
         }
 
@@ -64,7 +64,7 @@ def _today():
 
 class TestRangesEndpoint:
     def test_returns_buckets_for_a_range(self, client):
-        r = client.get("/steps/ranges?range=W&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 200
         body = r.json()
         assert body["range"] == "W"
@@ -72,45 +72,45 @@ class TestRangesEndpoint:
 
     def test_carries_the_users_goal_through(self, client, fake_redis_instance):
         fake_redis_instance.goal = 7777
-        r = client.get("/steps/ranges?range=D&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=D&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.json()["goal"] == 7777
 
     def test_a_year_is_twelve_monthly_buckets(self, client):
         """Not 365 daily buckets: that is unreadable on a phone."""
-        r = client.get("/steps/ranges?range=Y&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=Y&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert len(r.json()["buckets"]) == 12
 
     @pytest.mark.parametrize("rng", ["D", "W", "M", "3M", "Y"])
     def test_every_range_is_accepted(self, client, rng):
-        r = client.get(f"/steps/ranges?range={rng}&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get(f"/steps/ranges?range={rng}&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 200
         assert r.json()["range"] == rng
 
     def test_rejects_an_unknown_range(self, client):
         """Fail loudly rather than silently defaulting to something plausible."""
-        r = client.get("/steps/ranges?range=FOREVER&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=FOREVER&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 422
         assert "range must be one of" in r.json()["detail"]
 
     def test_reports_that_history_is_too_thin_for_a_baseline(self, client):
-        r = client.get("/steps/ranges?range=W&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         body = r.json()
         assert body["thin"] is True
         assert body["baseline"] is None
         assert body["baseline_min_days"] == 7
 
     def test_gaps_are_reported(self, client):
-        r = client.get("/steps/ranges?range=W&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.json()["has_gaps"] is True
 
     def test_uses_the_configured_timezone_for_today(self, client):
         """A day boundary computed in the wrong zone files today's steps under
         yesterday, which is invisible until the totals look wrong."""
-        r = client.get("/steps/ranges?range=D&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=D&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.json()["buckets"][0]["start"] == _today()
 
     def test_a_missing_user_is_not_confused_with_unshared(self, client):
-        r = client.get("/steps/ranges?range=W&user_id=nobody&viewer=jeremiah", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=nobody&viewer=alex", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 404
 
 
@@ -123,24 +123,24 @@ class TestConsent:
         before forwarding. So the 30-day cap on /steps must not be read as a
         privacy control -- this route is no looser than the route beside it.
         """
-        r = client.get("/steps/ranges?range=W&user_id=michele", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 200
 
     def test_a_known_viewer_is_still_filtered(self, client, monkeypatch):
         """The counterpart: as soon as a viewer is named, consent applies."""
         async def opted_out():
-            return {"users": [{"username": "michele", "enabled": False, "audience": "circle", "user_ids": []}]}
+            return {"users": [{"username": "sam", "enabled": False, "audience": "circle", "user_ids": []}]}
 
         monkeypatch.setattr(geo_main, "_fetch_activity_sharing", opted_out)
-        r = client.get("/steps/ranges?range=W&user_id=michele&viewer=jeremiah", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam&viewer=alex", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 404
 
     def test_withheld_when_the_owner_has_opted_out(self, client, monkeypatch):
         async def opted_out():
-            return {"users": [{"username": "michele", "enabled": False, "audience": "circle", "user_ids": []}]}
+            return {"users": [{"username": "sam", "enabled": False, "audience": "circle", "user_ids": []}]}
 
         monkeypatch.setattr(geo_main, "_fetch_activity_sharing", opted_out)
-        r = client.get("/steps/ranges?range=W&user_id=michele&viewer=jeremiah", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam&viewer=alex", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 404
 
     def test_withheld_when_the_viewer_is_not_in_the_audience(self, client, monkeypatch):
@@ -148,7 +148,7 @@ class TestConsent:
             return {
                 "users": [
                     {
-                        "username": "michele",
+                        "username": "sam",
                         "enabled": True,
                         "audience": "users",
                         "user_ids": ["someone-else"],
@@ -157,7 +157,7 @@ class TestConsent:
             }
 
         monkeypatch.setattr(geo_main, "_fetch_activity_sharing", restricted)
-        r = client.get("/steps/ranges?range=W&user_id=michele&viewer=jeremiah", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        r = client.get("/steps/ranges?range=W&user_id=sam&viewer=alex", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert r.status_code == 404
 
     def test_a_new_route_does_not_become_a_consent_bypass(self, client, monkeypatch):
@@ -172,7 +172,7 @@ class TestConsent:
             return await real(viewer, target, is_admin)
 
         monkeypatch.setattr(geo_main, "_require_may_view", spy)
-        client.get("/steps/ranges?range=Y&user_id=michele&viewer=jeremiah", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
+        client.get("/steps/ranges?range=Y&user_id=sam&viewer=alex", headers={"X-Internal-Secret": geo_main.INTERNAL_SECRET})
         assert seen.get("called") is not None
 
 

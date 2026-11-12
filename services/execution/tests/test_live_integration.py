@@ -1,5 +1,13 @@
-"""LIVE integration tests: hit actual services running on the server (192.168.2.205).
-No mocks. These tests validate real HTTP communication with each service."""
+"""LIVE integration tests: hit actual services running on a deployed stack.
+No mocks. These tests validate real HTTP communication with each service.
+
+All tests here are marked ``local_only`` (deselected in CI). Run-time flags:
+  IDENTITY_SVC_URL, EXECUTION_SVC_URL, GATEWAY_SVC_URL, STORAGE_SVC_URL, RAG_SVC_URL
+      Service base URLs (default to localhost ports).
+  INTERNAL_SECRET   The shared internal secret.
+  LIVE_TEST_USER    The username to resolve through Identity. Tests that need a real
+                    user skip when it is not set; there is no default.
+"""
 import os
 
 import httpx
@@ -14,10 +22,19 @@ RAG_URL = os.getenv("RAG_SVC_URL", "http://localhost:8004")
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
+LIVE_TEST_USER = os.environ.get("LIVE_TEST_USER", "")
 
 
-def _get_user_credentials(username: str = "jeremiah") -> dict:
+def _live_user() -> str:
+    """The real username to test with, from LIVE_TEST_USER; skip when unset."""
+    if not LIVE_TEST_USER:
+        pytest.skip("LIVE_TEST_USER is not set (the username to resolve through Identity)")
+    return LIVE_TEST_USER
+
+
+def _get_user_credentials(username: str | None = None) -> dict:
     """Resolve user credentials from the Identity service, the single source of truth."""
+    username = username or _live_user()
     with httpx.Client(timeout=10.0) as client:
         resp = client.post(
             f"{IDENTITY_URL}/api/resolve",
@@ -61,7 +78,7 @@ async def test_execution_health_check_live():
 @pytest.mark.local_only
 async def test_identity_resolve_by_username_live():
     """Resolving by username returns valid credentials."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     assert creds["ha_url"].startswith(("http://", "https://"))
     assert len(creds["ha_token"]) > 10
 
@@ -120,14 +137,14 @@ async def test_identity_resolve_by_voice_id_live():
 async def test_identity_resolve_by_api_key_live():
     """Resolving by api_key returns valid credentials."""
     # Get a known api_key from the resolve-by-username call
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     # The credentials dict may contain api_key or api_key_enc
     # Try resolving with the plaintext api_key if available
     async with httpx.AsyncClient(timeout=10.0) as client:
         # We need the actual api_key; fetch it via the identity endpoint
         resolve_resp = await client.post(
             f"{IDENTITY_URL}/api/resolve",
-            json={"user": "jeremiah"},
+            json={"user": _live_user()},
             headers=INTERNAL_HEADERS,
         )
     data = resolve_resp.json()
@@ -178,7 +195,7 @@ async def test_identity_resolve_missing_user_returns_404_live():
 @pytest.mark.local_only
 async def test_identity_credentials_have_all_types_live():
     """Credentials returned contain expected key types (HA, GitHub, etc.)."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     # HA credentials must always be present
     assert "ha_url" in creds
     assert "ha_token" in creds
@@ -190,7 +207,7 @@ async def test_identity_credentials_have_all_types_live():
 @pytest.mark.local_only
 async def test_execution_light_endpoint_live():
     """POST /execute/light returns a response (may fail at HA layer, but endpoint works)."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/light",
@@ -213,7 +230,7 @@ async def test_execution_light_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_security_lock_endpoint_live():
     """POST /execute/security returns a response for lock action."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/security",
@@ -234,7 +251,7 @@ async def test_execution_security_lock_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_security_status_endpoint_live():
     """POST /execute/security with action=status returns state."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/security",
@@ -256,7 +273,7 @@ async def test_execution_security_status_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_climate_endpoint_live():
     """POST /execute/climate returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/climate",
@@ -277,7 +294,7 @@ async def test_execution_climate_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_calendar_endpoint_live():
     """POST /execute/calendar returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/calendar",
@@ -296,7 +313,7 @@ async def test_execution_calendar_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_note_endpoint_live():
     """POST /execute/note returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/note",
@@ -316,7 +333,7 @@ async def test_execution_note_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_talk_endpoint_live():
     """POST /execute/talk returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/talk",
@@ -346,7 +363,7 @@ async def test_execution_timers_list_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_media_status_endpoint_live():
     """POST /execute/media/status returns media player state."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/media/status",
@@ -368,7 +385,7 @@ async def test_execution_media_status_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_media_status_with_volume_live():
     """Media status response includes volume_level for active player."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/media/status",
@@ -390,7 +407,7 @@ async def test_execution_media_status_with_volume_live():
 @pytest.mark.local_only
 async def test_execution_media_transport_endpoint_live():
     """POST /execute/media/transport returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/media/transport",
@@ -410,7 +427,7 @@ async def test_execution_media_transport_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_video_play_endpoint_live():
     """POST /execute/video/play returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/video/play",
@@ -431,7 +448,7 @@ async def test_execution_video_play_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_web_search_endpoint_live():
     """POST /execute/web_search returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_search",
@@ -450,7 +467,7 @@ async def test_execution_web_search_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_web_read_endpoint_live():
     """POST /execute/web_read returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/web_read",
@@ -469,7 +486,7 @@ async def test_execution_web_read_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_entity_search_endpoint_live():
     """POST /execute/entity/search returns entity list."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/entity/search",
@@ -489,7 +506,7 @@ async def test_execution_entity_search_endpoint_live():
 @pytest.mark.local_only
 async def test_execution_ltm_search_endpoint_live():
     """POST /execute/ltm/search returns a response."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
             f"{EXECUTION_URL}/execute/ltm/search",
@@ -522,7 +539,7 @@ async def test_gateway_health_check_live():
 @pytest.mark.local_only
 async def test_gateway_media_status_proxy_live():
     """Gateway proxy forwards identity resolution to execution."""
-    _get_user_credentials("jeremiah")
+    _get_user_credentials()
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(
             f"{GATEWAY_URL}/execute/media/status",
@@ -604,15 +621,15 @@ async def test_rag_health_check_live():
 async def test_identity_resolve_multiple_users_exist_live():
     """Multiple users should be resolvable by username."""
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # Resolve jeremiah
+        # Resolve the live test user
         resp1 = await client.post(
             f"{IDENTITY_URL}/api/resolve",
-            json={"user": "jeremiah"},
+            json={"user": _live_user()},
             headers=INTERNAL_HEADERS,
         )
     assert resp1.status_code == 200
     data1 = resp1.json()
-    assert data1["credentials"]["user"] == "jeremiah"
+    assert data1["credentials"]["user"] == _live_user()
 
     # The system should have at least 2 users; verify by resolving user_id 2 if exists
     resp2 = await client.post(
@@ -658,7 +675,7 @@ async def test_identity_credential_isolation_live():
 @pytest.mark.local_only
 async def test_identity_decrypted_credentials_live():
     """Credentials returned from identity service are decrypted (not encrypted)."""
-    creds = _get_user_credentials("jeremiah")
+    creds = _get_user_credentials()
     ha_token = creds.get("ha_token", "")
     # Decrypted token should NOT start with encryption prefix (e.g., "enc:" or base64 garbage)
     assert not ha_token.startswith("enc:")
@@ -669,7 +686,7 @@ async def test_identity_decrypted_credentials_live():
 @pytest.mark.local_only
 async def test_execution_discovery_entities_live():
     """GET /discovery/entities returns entity list from HA."""
-    _get_user_credentials("jeremiah")
+    _get_user_credentials()
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(
             f"{EXECUTION_URL}/discovery/entities",

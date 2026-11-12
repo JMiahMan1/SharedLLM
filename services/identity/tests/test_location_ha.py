@@ -58,7 +58,7 @@ def test_update_location_missing_secret_is_403_not_422(test_client):
     # so clients treat it as auth failure, not a malformed request.
     response = test_client.post(
         "/api/users/default/location",
-        json={"latitude": 33.1, "longitude": -111.5, "accuracy": 10},
+        json={"latitude": 39.7, "longitude": -105.0, "accuracy": 10},
     )
     assert response.status_code == 403
 
@@ -70,7 +70,7 @@ def test_location_accepts_numeric_user_id(test_client):
     response = test_client.post(
         f"/api/users/{numeric_id}/location",
         headers={"X-Internal-Secret": "test-secret"},
-        json={"latitude": 33.2, "longitude": -111.6, "accuracy": 5},
+        json={"latitude": 39.8, "longitude": -105.1, "accuracy": 5},
     )
     assert response.status_code == 200
     # Stored under username key, retrievable by username
@@ -79,7 +79,7 @@ def test_location_accepts_numeric_user_id(test_client):
         headers={"X-Internal-Secret": "test-secret"},
     )
     assert get_resp.status_code == 200
-    assert get_resp.json()["latitude"] == 33.2
+    assert get_resp.json()["latitude"] == 39.8
 
 
 @pytest.mark.asyncio

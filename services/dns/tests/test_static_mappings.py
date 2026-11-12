@@ -1,6 +1,6 @@
 """Static mappings as the DNS panel stores them: hosts that move and services on several machines.
 
-The alpaca / Ollama box (``jeremiah-home-desktop.local``) is listed with every
+The alpaca / Ollama box (``llm-host.local``) is listed with every
 address it has had on every network it joins; only the ones that answer are
 handed out. A service can also run on more than one machine at once, so every
 answering address is given, in the order listed.
@@ -14,12 +14,12 @@ import pytest
 
 from services.dns.tests.test_upstream_timeout import _load_dns
 
-ALPACA = "jeremiah-home-desktop.local"
+ALPACA = "llm-host.local"
 # The live entry's shape (Identity ``dns_mappings``), as the UI writes it.
 ALPACA_ENTRY = {
-    "ip": "192.168.2.43", "record_type": "A", "ttl": 300, "is_active": True,
+    "ip": "192.0.2.43", "record_type": "A", "ttl": 300, "is_active": True,
     "created_at": "", "updated_at": "2026-09-18T13:47:25.572835Z",
-    "values": ["192.168.2.43", "192.168.2.46", "192.168.2.44", "192.168.2.201", "192.168.4.179", "192.168.1.216"],
+    "values": ["192.0.2.43", "192.0.2.46", "192.0.2.44", "192.0.2.201", "203.0.113.179", "198.51.100.216"],
 }
 
 
@@ -60,28 +60,28 @@ def _ask(r, name):
 
 
 def test_the_live_alpaca_entry_answers_only_the_address_that_is_up(dns):
-    r, _ = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"192.168.2.43"})
-    assert _ips(_ask(r, ALPACA)) == ["192.168.2.43"]
+    r, _ = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"192.0.2.43"})
+    assert _ips(_ask(r, ALPACA)) == ["192.0.2.43"]
 
 
 def test_when_the_box_moves_networks_the_answer_follows_it(dns):
-    r, live = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"192.168.2.43"})
+    r, live = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"192.0.2.43"})
 
     async def run():
         first = await r.resolve(_Query(ALPACA))
         live.clear()
-        live.add("192.168.4.179")  # same machine, now on the other network
+        live.add("203.0.113.179")  # same machine, now on the other network
         r._health.clear()  # next health interval
         return first, await r.resolve(_Query(ALPACA))
 
     first, second = asyncio.run(run())
-    assert _ips(first) == ["192.168.2.43"]
-    assert _ips(second) == ["192.168.4.179"]
+    assert _ips(first) == ["192.0.2.43"]
+    assert _ips(second) == ["203.0.113.179"]
 
 
 def test_a_service_on_several_machines_gets_every_live_one_in_listed_order(dns):
-    r, _ = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"192.168.1.216", "192.168.2.43"})
-    assert _ips(_ask(r, ALPACA)) == ["192.168.2.43", "192.168.1.216"]
+    r, _ = _resolver(dns, {ALPACA: ALPACA_ENTRY}, up={"198.51.100.216", "192.0.2.43"})
+    assert _ips(_ask(r, ALPACA)) == ["192.0.2.43", "198.51.100.216"]
 
 
 def test_an_address_taken_out_of_the_list_is_never_handed_out_again(dns):
@@ -99,25 +99,25 @@ def test_an_address_taken_out_of_the_list_is_never_handed_out_again(dns):
 
 def test_a_record_switched_off_in_the_panel_is_not_answered(dns):
     entry = {**ALPACA_ENTRY, "is_active": False}
-    r, _ = _resolver(dns, {ALPACA: entry}, up={"192.168.2.43"})
+    r, _ = _resolver(dns, {ALPACA: entry}, up={"192.0.2.43"})
     assert _ask(r, ALPACA) is None
 
 
 def test_names_match_whatever_their_case(dns):
-    r, _ = _resolver(dns, {"Jeremiah-Home-Desktop.local": "192.168.2.43"})
-    assert _ips(_ask(r, ALPACA.upper())) == ["192.168.2.43"]
+    r, _ = _resolver(dns, {"llm-host.local": "192.0.2.43"})
+    assert _ips(_ask(r, ALPACA.upper())) == ["192.0.2.43"]
 
 
 def test_a_mistyped_value_is_skipped_not_fatal(dns):
-    r, _ = _resolver(dns, {"nas.local": {"values": ["192.168.2.300", "nas", "192.168.2.10"]}})
-    assert _ips(_ask(r, "nas.local")) == ["192.168.2.10"]
+    r, _ = _resolver(dns, {"nas.local": {"values": ["192.0.2.300", "nas", "192.0.2.10"]}})
+    assert _ips(_ask(r, "nas.local")) == ["192.0.2.10"]
     r2, _ = _resolver(dns, {"nas.local": ["not-an-ip"]})
     assert _ask(r2, "nas.local") is None
 
 
 def test_the_records_own_ttl_is_used_and_health_checked_answers_stay_short(dns):
     r, _ = _resolver(dns, {"one.local": {"values": ["10.0.0.9"], "ttl": 60},
-                           ALPACA: ALPACA_ENTRY}, up={"192.168.2.43"})
+                           ALPACA: ALPACA_ENTRY}, up={"192.0.2.43"})
     assert [x["ttl"] for x in _ask(r, "one.local")] == [60]
     assert all(x["ttl"] <= max(5, int(dns.DNS_HEALTH_TTL)) for x in _ask(r, ALPACA))
 
@@ -135,8 +135,8 @@ class TestAliases:
         r, _ = _resolver(dns, {
             ALPACA: ALPACA_ENTRY,
             "ollama.home": {"record_type": "CNAME", "values": [ALPACA], "ttl": 300},
-        }, up={"192.168.2.43"})
-        assert _ips(_ask(r, "ollama.home")) == ["192.168.2.43"]
+        }, up={"192.0.2.43"})
+        assert _ips(_ask(r, "ollama.home")) == ["192.0.2.43"]
 
     def test_an_alias_to_an_internet_name_goes_upstream(self, dns):
         r, _ = _resolver(dns, {"docs.home": {"record_type": "CNAME", "values": ["docs.example.com."]}},
@@ -151,13 +151,13 @@ class TestAliases:
         assert _ask(r, "a.home") is None
 
     def test_an_alias_answer_goes_out_under_the_asked_name(self, dns):
-        r, _ = _resolver(dns, {ALPACA: "192.168.2.43",
+        r, _ = _resolver(dns, {ALPACA: "192.0.2.43",
                                "ollama.home": {"record_type": "CNAME", "values": [ALPACA]}})
         server = dns.UDPServer(r)
         reply = server._build_response(dns.DNSQuery(1, "ollama.home", 1), _ask(r, "ollama.home"))
         name = b"\x06ollama\x04home\x00"
         assert reply.count(name) == 2  # the question and the answer
-        assert reply.endswith(socket.inet_aton("192.168.2.43"))
+        assert reply.endswith(socket.inet_aton("192.0.2.43"))
 
 
 def test_the_stored_shape_keeps_every_address(dns):

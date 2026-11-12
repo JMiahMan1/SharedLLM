@@ -91,7 +91,7 @@ So trip detection needs a phone that reports every ~30 s while moving. A
 phone that only sends its 5-10 minute heartbeat (no "Allow all the time",
 battery optimisation on, or an OEM that kills the service) never produces a
 trip: its fixes are stored, but no two are close enough in time to measure a
-speed. Seen live 2026-10-15: Michele's phone reported every ~600 s for days,
+speed. Seen live 2026-10-15: Sam's phone reported every ~600 s for days,
 so none of the 15 trips were hers.
 
 `GET /trips?scope=family&viewer=…` is what Wander shows: the viewer's trips
@@ -127,7 +127,7 @@ costs do not change when gas moves.
 | `OSRM_URL`, `OSRM_FOOT_URL` | compose env | road / foot routing |
 | `NOMINATIM_URL` | compose env | self-hosted geocoding (public Nominatim is the fallback outside the import) |
 | `FAMILY_CHAT_TOKEN` | env | room for achievement cards (silent when unset) |
-| `APP_TIMEZONE` | env | day boundaries (default `America/Phoenix`) |
+| `APP_TIMEZONE` | env | day boundaries (your zone, e.g. `America/Denver`; defaults to `TZ`; geo refuses to start with neither set) |
 | `LONG_STOP_HOURS`, `LONG_STOP_RADIUS_M`, `LONG_STOP_ACTIVE_HOURS` | env | long stop notices (2 h, 150 m, `8-21`) |
 | `WEEKLY_SUMMARY_HOUR` | env | Sunday step summary from this local hour (19) |
 
@@ -139,8 +139,8 @@ routed via Caddy `:8009`.
 - `osrm` (roads, ~770 MB) and `osrm-foot` (paths, ~1.2 GB), both rebuilt by
   GitHub Actions from `osrm/regions.txt` (`.github/workflows/osrm-map.yml`);
   the control plane redeploys both after a build (`services/control_plane/osrm_map.py`).
-- `nominatim` (Arizona, ~10 GB on disk in `data/nominatim`, ~1.5 GB RAM). It
-  does not grow with `osrm/regions.txt`: places outside Arizona use the public
+- `nominatim` (one region, e.g. a US state; ~10 GB on disk in `data/nominatim`, ~1.5 GB RAM). It
+  does not grow with `osrm/regions.txt`: places outside that region use the public
   service. Re-importing a merged extract would cover more.
 - Leave-by reminders need the person's own events and a fresh position;
   phones without the battery exemption or "Allow all the time" go quiet.

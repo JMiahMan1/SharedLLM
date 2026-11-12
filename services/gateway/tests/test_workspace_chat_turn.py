@@ -32,7 +32,7 @@ def store(monkeypatch):
         return 404, {"detail": "Chat not found"}
 
     monkeypatch.setattr(workspace_chat, "identity_chat", fake_identity_chat)
-    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", AsyncMock(return_value={"user": "jeremiah", "is_admin": True}))
+    monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", AsyncMock(return_value={"user": "alex", "is_admin": True}))
     monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="assistant-model"))
     monkeypatch.setattr(gateway_main, "_workspace_context", AsyncMock(return_value=""))
     monkeypatch.setattr(gateway_main, "select_system_instruction_for_query", lambda q, m: "SYSTEM")

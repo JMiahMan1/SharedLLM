@@ -50,8 +50,8 @@ from services.homehub.drivers import esphome
 from services.homehub.drivers.esphome import ESPHomeDriver
 from services.homehub.tests.conftest import make_hub
 
-MAC = "3C:84:27:E1:C0:38"
-DATA = {"host": "192.168.2.127", "port": 6053, "password": "", "noise_psk": "not-a-real-key",
+MAC = "02:00:00:00:01:02"
+DATA = {"host": "192.0.2.127", "port": 6053, "password": "", "noise_psk": "not-a-real-key",
         "device_name": "smart-speaker"}
 
 INFOS = [
@@ -79,16 +79,16 @@ INFOS = [
 ]
 
 ENTITIES = [
-    {"entity_id": "light.office_office_jarvis_status_led_bar", "unique_id": f"{MAC}/0/light/Status LED Bar"},
-    {"entity_id": "switch.office_office_jarvis_mute", "unique_id": f"{MAC}/0/switch/Mute"},
-    {"entity_id": "sensor.office_jarvis_wifi_signal", "unique_id": f"{MAC}/0/sensor/WiFi Signal"},
-    {"entity_id": "sensor.office_office_jarvis_ip_address_for_smart_speaker",
+    {"entity_id": "light.den_den_speaker_status_led_bar", "unique_id": f"{MAC}/0/light/Status LED Bar"},
+    {"entity_id": "switch.den_den_speaker_mute", "unique_id": f"{MAC}/0/switch/Mute"},
+    {"entity_id": "sensor.den_speaker_wifi_signal", "unique_id": f"{MAC}/0/sensor/WiFi Signal"},
+    {"entity_id": "sensor.den_den_speaker_ip_address_for_smart_speaker",
      "unique_id": f"{MAC}/0/text_sensor/IP Address for smart-speaker"},
-    {"entity_id": "number.office_office_jarvis_led_brightness", "unique_id": f"{MAC}/0/number/LED Brightness"},
-    {"entity_id": "select.office_office_jarvis_wake_word_sensitivity",
+    {"entity_id": "number.den_den_speaker_led_brightness", "unique_id": f"{MAC}/0/number/LED Brightness"},
+    {"entity_id": "select.den_den_speaker_wake_word_sensitivity",
      "unique_id": f"{MAC}/0/select/Wake word sensitivity"},
-    {"entity_id": "button.office_office_jarvis_reboot", "unique_id": f"{MAC}/0/button/Reboot"},
-    {"entity_id": "media_player.office_office_jarvis_smart_speaker",
+    {"entity_id": "button.den_den_speaker_reboot", "unique_id": f"{MAC}/0/button/Reboot"},
+    {"entity_id": "media_player.den_den_speaker_smart_speaker",
      "unique_id": f"{MAC}/0/media_player/smart-speaker"},
     {"entity_id": "switch.scr_save", "unique_id": f"{MAC}/0/switch/Scr/save enable"},
     {"entity_id": "light.hall_lamp", "unique_id": f"{MAC}/0/light/"},
@@ -99,7 +99,7 @@ ENTITIES = [
     {"entity_id": "lock.lock", "unique_id": f"{MAC}/0/lock/Lock"},
     {"entity_id": "siren.siren", "unique_id": f"{MAC}/0/siren/Siren"},
     {"entity_id": "sensor.gone", "unique_id": f"{MAC}/0/sensor/Removed From Firmware"},
-    {"entity_id": "select.office_jarvis_assistant", "unique_id": f"{MAC}-pipeline"},
+    {"entity_id": "select.den_speaker_assistant", "unique_id": f"{MAC}-pipeline"},
 ]
 
 SET_PLAYLISTS = UserService(name="set_playlists", key=99, args=[
@@ -113,7 +113,7 @@ INITIAL_STATES = [
                effect="None"),
     SwitchState(key=2, state=False),
     SensorState(key=3, state=-61.4),
-    TextSensorState(key=4, state="192.168.2.127"),
+    TextSensorState(key=4, state="192.0.2.127"),
     NumberState(key=5, state=40.0),
     SelectState(key=6, state="Moderately sensitive"),
     MediaPlayerEntityState(key=8, state=MediaPlayerState.IDLE, volume=0.5, muted=False),
@@ -192,7 +192,7 @@ def last_command(drv):
 async def test_setup_maps_unique_ids_and_publishes_pushed_states(driver):
     hub, drv = driver
     await drv.async_setup()
-    led = hub.states.get("light.office_office_jarvis_status_led_bar")
+    led = hub.states.get("light.den_den_speaker_status_led_bar")
     assert led.state == "on"
     assert led.attributes["brightness"] == 128
     assert led.attributes["color_mode"] == "rgb" and led.attributes["rgb_color"] == [255, 0, 128]
@@ -200,41 +200,41 @@ async def test_setup_maps_unique_ids_and_publishes_pushed_states(driver):
     assert led.attributes["min_color_temp_kelvin"] == 2000 and led.attributes["max_color_temp_kelvin"] == 6536
     assert led.attributes["effect_list"] == ["None", "Rainbow"]
     assert led.attributes["supported_features"] == 4 | 8 | 32
-    wifi = hub.states.get("sensor.office_jarvis_wifi_signal")
+    wifi = hub.states.get("sensor.den_speaker_wifi_signal")
     assert wifi.state == "-61" and wifi.attributes["unit_of_measurement"] == "dBm"
     assert wifi.attributes["state_class"] == "measurement"
-    assert hub.states.get("sensor.office_office_jarvis_ip_address_for_smart_speaker").state == "192.168.2.127"
-    num = hub.states.get("number.office_office_jarvis_led_brightness")
+    assert hub.states.get("sensor.den_den_speaker_ip_address_for_smart_speaker").state == "192.0.2.127"
+    num = hub.states.get("number.den_den_speaker_led_brightness")
     assert num.state == "40.0" and num.attributes["max"] == 100
-    sel = hub.states.get("select.office_office_jarvis_wake_word_sensitivity")
+    sel = hub.states.get("select.den_den_speaker_wake_word_sensitivity")
     assert sel.state == "Moderately sensitive" and "Very sensitive" in sel.attributes["options"]
-    mp = hub.states.get("media_player.office_office_jarvis_smart_speaker")
+    mp = hub.states.get("media_player.den_den_speaker_smart_speaker")
     assert mp.state == "idle" and mp.attributes["volume_level"] == 0.5
     assert mp.attributes["supported_features"] & 512
     assert hub.states.get("switch.scr_save").state == "on"           # a name with "/" in it
     assert hub.states.get("light.hall_lamp").state == "off"          # the node's nameless main entity
     assert hub.states.get("cover.garage").state == "closed"
     assert hub.states.get("binary_sensor.presence").state == "on"    # older unique_id format
-    assert hub.states.get("button.office_office_jarvis_reboot").state == "unknown"
+    assert hub.states.get("button.den_den_speaker_reboot").state == "unknown"
     assert hub.states.get("sensor.gone").state == "unavailable"
-    assert hub.states.get("select.office_jarvis_assistant") is None   # HA-side, left alone
+    assert hub.states.get("select.den_speaker_assistant") is None   # HA-side, left alone
 
 
 async def test_switch_command_waits_for_the_pushed_state(driver):
     hub, drv = driver
     await drv.async_setup()
-    res = await hub.call_service("switch", "turn_on", {"entity_id": "switch.office_office_jarvis_mute"})
+    res = await hub.call_service("switch", "turn_on", {"entity_id": "switch.den_den_speaker_mute"})
     assert last_command(drv) == ("switch_command", (2, True), {"device_id": 0})
-    assert hub.states.get("switch.office_office_jarvis_mute").state == "on"
-    assert any(s.entity_id == "switch.office_office_jarvis_mute" for s in res["changed_states"])
-    await hub.call_service("switch", "toggle", {"entity_id": "switch.office_office_jarvis_mute"})
+    assert hub.states.get("switch.den_den_speaker_mute").state == "on"
+    assert any(s.entity_id == "switch.den_den_speaker_mute" for s in res["changed_states"])
+    await hub.call_service("switch", "toggle", {"entity_id": "switch.den_den_speaker_mute"})
     assert last_command(drv)[1] == (2, False)
 
 
 async def test_light_commands(driver):
     hub, drv = driver
     await drv.async_setup()
-    eid = "light.office_office_jarvis_status_led_bar"
+    eid = "light.den_den_speaker_status_led_bar"
     await hub.call_service("light", "turn_on", {"entity_id": eid, "brightness": 51, "rgb_color": [0, 128, 64]})
     name, args, kw = last_command(drv)
     assert name == "light_command" and args == (1,)
@@ -256,18 +256,18 @@ async def test_light_commands(driver):
 async def test_number_select_button_cover_valve_fan_lock_siren(driver):
     hub, drv = driver
     await drv.async_setup()
-    await hub.call_service("number", "set_value", {"entity_id": "number.office_office_jarvis_led_brightness",
+    await hub.call_service("number", "set_value", {"entity_id": "number.den_den_speaker_led_brightness",
                                                    "value": "75"})
     assert last_command(drv) == ("number_command", (5, 75.0), {"device_id": 0})
-    await hub.call_service("select", "select_option", {"entity_id": "select.office_office_jarvis_wake_word_sensitivity",
+    await hub.call_service("select", "select_option", {"entity_id": "select.den_den_speaker_wake_word_sensitivity",
                                                        "option": "Very sensitive"})
     assert last_command(drv) == ("select_command", (6, "Very sensitive"), {"device_id": 0})
     with pytest.raises(HubError):
         await hub.call_service("select", "select_option",
-                               {"entity_id": "select.office_office_jarvis_wake_word_sensitivity", "option": "Loud"})
-    await hub.call_service("button", "press", {"entity_id": "button.office_office_jarvis_reboot"})
+                               {"entity_id": "select.den_den_speaker_wake_word_sensitivity", "option": "Loud"})
+    await hub.call_service("button", "press", {"entity_id": "button.den_den_speaker_reboot"})
     assert last_command(drv) == ("button_command", (7,), {"device_id": 0})
-    assert hub.states.get("button.office_office_jarvis_reboot").state not in ("unknown", "unavailable")
+    assert hub.states.get("button.den_den_speaker_reboot").state not in ("unknown", "unavailable")
     await hub.call_service("cover", "open_cover", {"entity_id": "cover.garage"})
     assert last_command(drv) == ("cover_command", (11,), {"position": 1.0, "device_id": 0})
     await hub.call_service("cover", "stop_cover", {"entity_id": "cover.garage"})
@@ -281,13 +281,13 @@ async def test_number_select_button_cover_valve_fan_lock_siren(driver):
     await hub.call_service("siren", "turn_on", {"entity_id": "siren.siren", "tone": "beep", "duration": 3})
     assert last_command(drv)[2]["tone"] == "beep" and last_command(drv)[2]["duration"] == 3
     with pytest.raises(ServiceNotFound):
-        await drv.async_call(hub.entities["sensor.office_jarvis_wifi_signal"], "sensor", "set_value", {"value": 1})
+        await drv.async_call(hub.entities["sensor.den_speaker_wifi_signal"], "sensor", "set_value", {"value": 1})
 
 
 async def test_media_player_commands(driver):
     hub, drv = driver
     await drv.async_setup()
-    mp = "media_player.office_office_jarvis_smart_speaker"
+    mp = "media_player.den_den_speaker_smart_speaker"
     await hub.call_service("media_player", "play_media", {"entity_id": mp, "media_content_id": "http://x/a.mp3",
                                                           "media_content_type": "music", "announce": True})
     assert last_command(drv) == ("media_player_command", (8,),
@@ -321,13 +321,13 @@ async def test_disconnect_marks_unavailable_and_reconnects(driver, monkeypatch, 
     await drv.async_setup()
     first = drv._client
     await first.on_stop(False)
-    assert hub.states.get("switch.office_office_jarvis_mute").state == "unavailable"
+    assert hub.states.get("switch.den_den_speaker_mute").state == "unavailable"
     assert "disconnected" in caplog.text
     with pytest.raises(DeviceUnavailable):
-        await hub.call_service("switch", "turn_on", {"entity_id": "switch.office_office_jarvis_mute"})
+        await hub.call_service("switch", "turn_on", {"entity_id": "switch.den_den_speaker_mute"})
     await drv._reconnect_task
     assert drv._client is not None and drv._client is not first
-    assert hub.states.get("switch.office_office_jarvis_mute").state == "off"
+    assert hub.states.get("switch.den_den_speaker_mute").state == "off"
     await drv.async_unload()
 
 
@@ -397,11 +397,11 @@ async def test_node_subscriptions_to_hub_states(driver):
 
 async def test_voice_pipeline_selects_are_kept_by_the_hub(driver):
     hub, drv = driver
-    hub.publish("select.office_jarvis_assistant", "preferred", {"options": ["preferred", "Jarvis"]})
+    hub.publish("select.den_speaker_assistant", "preferred", {"options": ["preferred", "Jarvis"]})
     await drv.async_setup()
-    await hub.call_service("select", "select_option", {"entity_id": "select.office_jarvis_assistant",
+    await hub.call_service("select", "select_option", {"entity_id": "select.den_speaker_assistant",
                                                        "option": "Jarvis"})
-    st = hub.states.get("select.office_jarvis_assistant")
+    st = hub.states.get("select.den_speaker_assistant")
     assert st.state == "Jarvis" and st.attributes["options"] == ["preferred", "Jarvis"]
 
 
@@ -434,10 +434,10 @@ async def test_stale_ip_falls_back_to_mdns_and_keeps_it(caplog, monkeypatch):
 
     drv._make_client = factory  # type: ignore[method-assign]
     await drv.async_setup()
-    assert tried == ["192.168.2.127", "smart-speaker.local"]
+    assert tried == ["192.0.2.127", "smart-speaker.local"]
     assert drv.host == "smart-speaker.local"
-    assert "answered at smart-speaker.local, not 192.168.2.127" in caplog.text
-    assert hub.states.get("switch.office_office_jarvis_mute").state == "off"
+    assert "answered at smart-speaker.local, not 192.0.2.127" in caplog.text
+    assert hub.states.get("switch.den_den_speaker_mute").state == "off"
     # A reconnect goes straight to the address that worked.
     tried.clear()
     await drv._client.on_stop(False)
@@ -451,11 +451,11 @@ async def test_both_addresses_failing_names_both():
     drv._make_client = lambda host: FakeClient(fail=True, host=host)  # type: ignore[method-assign]
     with pytest.raises(DeviceUnavailable) as err:
         await drv.async_setup()
-    assert "192.168.2.127" in str(err.value) and "smart-speaker.local" in str(err.value)
+    assert "192.0.2.127" in str(err.value) and "smart-speaker.local" in str(err.value)
 
 
 async def test_options_host_overrides_everything():
-    _, drv = _driver_with(options={"host": "192.168.2.250"})
+    _, drv = _driver_with(options={"host": "192.0.2.250"})
     tried: list[str] = []
 
     def factory(host):
@@ -465,12 +465,12 @@ async def test_options_host_overrides_everything():
     drv._make_client = factory  # type: ignore[method-assign]
     with pytest.raises(DeviceUnavailable):
         await drv.async_setup()
-    assert tried == ["192.168.2.250"]
+    assert tried == ["192.0.2.250"]
 
 
 def test_no_mdns_fallback_without_a_device_name():
     _, drv = _driver_with(data={"device_name": ""})
-    assert drv.candidates == ["192.168.2.127"]
+    assert drv.candidates == ["192.0.2.127"]
 
 
 async def test_camera_snapshot_comes_from_a_single_image_request(monkeypatch):

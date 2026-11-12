@@ -36,3 +36,6 @@ pytest>=8.0.0
 pytest-asyncio>=0.24.0
 respx>=0.21.0
 pytest-mock>=3.14.0
+# Offline lookup of the household time zone from the home location
+# (services/common/household_tz.py, "Derive from home location"). Wheels for 3.11.
+timezonefinder>=6.5,<10

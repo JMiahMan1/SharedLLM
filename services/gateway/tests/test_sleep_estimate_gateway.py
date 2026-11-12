@@ -16,7 +16,7 @@ def client(monkeypatch):
         return {"user": "kid", "user_id": 7, "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _resolve)
-    monkeypatch.setenv("TIMEZONE", "America/Phoenix")
+    monkeypatch.setenv("TIMEZONE", "Etc/GMT+7")
     return TestClient(app, headers={"Authorization": "Bearer test-token"})
 
 
@@ -57,7 +57,7 @@ def _services(monkeypatch, *, owned=(DEVICE,), registered=True, nights=()):
     return calls
 
 
-# 2026-10-20 22:30 and 2026-10-21 06:30 in Phoenix (UTC-7).
+# 2026-10-20 22:30 and 2026-10-21 06:30 at UTC-7 (Etc/GMT+7, no DST).
 BED, WAKE = 1792560600000, 1792589400000
 
 
@@ -86,7 +86,8 @@ def test_posting_a_night_records_the_poster(client, monkeypatch):
     calls = _services(monkeypatch)
     r = client.post("/api/usage/night", json={"device_key": DEVICE, "night": "2026-10-21", "intervals": [[1, 2]]})
     assert r.status_code == 200
-    post = next(c for c in calls if c[0] == "POST")
+    # The device-key check posts to identity first; the night goes to telemetry.
+    post = next(c for c in calls if c[0] == "POST" and c[1].endswith("/api/telemetry/night"))
     assert post[2]["json"] == {"device": DEVICE, "night": "2026-10-21", "user": "kid", "intervals": [[1, 2]]}
 
 

@@ -11,7 +11,7 @@ from services.homehub.drivers import wiz
 from services.homehub.drivers.wiz import WizDriver, udp_request
 from services.homehub.tests.conftest import make_hub
 
-MAC = "d8a011ec7291"
+MAC = "02000000010a"
 
 
 def tw_entities(mac: str = MAC) -> list[dict]:
@@ -63,7 +63,7 @@ class FakeBulb:
 
 
 def make_driver(bulb: FakeBulb, entities=None, title="WiZ Tunable White EC7291"):
-    hub, entry = make_hub("wiz", {"host": "192.168.2.12"}, tw_entities() if entities is None else entities)
+    hub, entry = make_hub("wiz", {"host": "192.0.2.12"}, tw_entities() if entities is None else entities)
     entry.title = title
     drv = WizDriver(hub, entry)
     drv._request = bulb  # type: ignore[method-assign]

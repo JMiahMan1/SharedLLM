@@ -22,7 +22,7 @@ async def test_get_dns_config_returns_mappings():
     with patch("services.gateway.main.fetch_global_setting", new_callable=AsyncMock) as mock_fetch:
         async def side_effect(key, default=""):
             return {
-                "dns_mappings": '{"ollama-server.local": "192.168.4.179"}',
+                "dns_mappings": '{"ollama-server.local": "203.0.113.179"}',
                 "dns_upstream": "8.8.8.8,1.1.1.1",
                 "dns_poll_interval": "30",
             }.get(key, default)
@@ -30,7 +30,7 @@ async def test_get_dns_config_returns_mappings():
 
         result = await get_dns_config(mock_request)
 
-    assert result["dns_mappings"] == {"ollama-server.local": "192.168.4.179"}
+    assert result["dns_mappings"] == {"ollama-server.local": "203.0.113.179"}
     assert result["dns_upstream"] == "8.8.8.8,1.1.1.1"
     assert result["dns_poll_interval"] == 30
 
@@ -42,7 +42,7 @@ async def test_register_dns_entry_adds_mapping():
 
     from services.gateway.main import register_dns_entry
 
-    body = json.dumps({"hostname": "new-host", "ip": "192.168.4.179"}).encode()
+    body = json.dumps({"hostname": "new-host", "ip": "203.0.113.179"}).encode()
 
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
@@ -68,7 +68,7 @@ async def test_register_dns_entry_adds_mapping():
     patch_call = mock_client.patch.call_args
     patched_value = json.loads(patch_call[1]["json"]["value"])
     assert patched_value["existing"] == "10.0.0.1"
-    assert patched_value["new-host"] == "192.168.4.179"
+    assert patched_value["new-host"] == "203.0.113.179"
 
 
 @pytest.mark.server_only

@@ -81,7 +81,7 @@ class FakeClient:
     """Serves the library the way a mounted Nextcloud directory would."""
 
     def __init__(self, catalog: bytes, epub: bytes | None):
-        self.username = "summers"
+        self.username = "rivera"
         self.password = "secret"
         self.catalog = catalog
         self.epub = epub
@@ -110,7 +110,7 @@ class SectionOnlyCalibreProvider(CalibreStorageProvider):
 def _provider(client, **overrides):
     settings = {
         "url": "https://cloud.example",
-        "username": "summers",
+        "username": "rivera",
         "password": "secret",
         "library_path": LIBRARY,
         **overrides,

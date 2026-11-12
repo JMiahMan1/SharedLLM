@@ -13,13 +13,13 @@ from services.homehub.drivers.samsungtv import HA_LEGACY_ID, HA_NAME, LegacyBrid
 from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.media_fakes import AVT, RC, FakeHttp, device_xml, soap_reply, soap_router
 
-LEGACY = {"host": "192.168.2.82", "mac": "c4:73:1e:18:5b:54", "method": "legacy", "model": "UN46EH5300",
+LEGACY = {"host": "192.0.2.82", "mac": "02:00:00:00:01:03", "method": "legacy", "model": "UN46EH5300",
           "name": "UN46EH5300", "port": 55000, "manufacturer": "Samsung Electronics",
-          "ssdp_main_tv_agent_location": "http://192.168.2.82:7676/smp_10_",
-          "ssdp_rendering_control_location": "http://192.168.2.82:7676/smp_18_"}
-WS = {"host": "192.168.2.115", "mac": "38:68:a4:9a:01:a9", "method": "websocket", "model": "QN75Q900RBFXZA",
+          "ssdp_main_tv_agent_location": "http://192.0.2.82:7676/smp_10_",
+          "ssdp_rendering_control_location": "http://192.0.2.82:7676/smp_18_"}
+WS = {"host": "192.0.2.115", "mac": "02:00:00:00:01:04", "method": "websocket", "model": "QN75Q900RBFXZA",
       "port": 8002, "token": "12345678", "ssdp_main_tv_agent_location": None,
-      "ssdp_rendering_control_location": "http://192.168.2.115:9197/dmr"}
+      "ssdp_rendering_control_location": "http://192.0.2.115:9197/dmr"}
 
 
 class FakeLegacyRemote:
@@ -92,10 +92,10 @@ def rc_http(http: FakeHttp, base: str, volume="30", mute="0", with_avt=False):
 
 def build(data, on=True, monkeypatch=None):
     hub, entry = make_hub("samsungtv", data, [
-        {"entity_id": "media_player.tv", "unique_id": "0a21fe80-00aa-1000-9b13-f47b5e72fe9c"},
-        {"entity_id": "remote.tv", "unique_id": "0a21fe80-00aa-1000-9b13-f47b5e72fe9c"},
+        {"entity_id": "media_player.tv", "unique_id": "00000000-0000-4000-8000-00000000c004"},
+        {"entity_id": "remote.tv", "unique_id": "00000000-0000-4000-8000-00000000c004"},
     ])
-    hub.devices["dev1"] = DeviceEntry(id="dev1", name="TV", connections=[["mac", "7e:20:51:5a:1a:89"],
+    hub.devices["dev1"] = DeviceEntry(id="dev1", name="TV", connections=[["mac", "02:00:00:00:01:05"],
                                                                          ["mac", data["mac"]]])
     drv = SamsungTVDriver(hub, entry)
     http = FakeHttp()
@@ -166,14 +166,14 @@ async def test_turn_on_sends_wol_to_every_mac(monkeypatch):
     rc_http(http, "/smp_18_")
     await drv.async_setup()
     sent: list[str] = []
-    monkeypatch.setattr(mod, "known_macs", lambda d, e=None, h=None: ["c4:73:1e:18:5b:54", "7e:20:51:5a:1a:89"])
+    monkeypatch.setattr(mod, "known_macs", lambda d, e=None, h=None: ["02:00:00:00:01:03", "02:00:00:00:01:05"])
 
     async def fake_wol(macs, broadcast="255.255.255.255"):
         sent.extend(macs)
         return len(sent)
     monkeypatch.setattr(mod, "wake_on_lan", fake_wol)
     await drv.async_call(hub.entities["media_player.tv"], "media_player", "turn_on", {})
-    assert sent == ["c4:73:1e:18:5b:54", "7e:20:51:5a:1a:89"]
+    assert sent == ["02:00:00:00:01:03", "02:00:00:00:01:05"]
 
 
 async def test_websocket_power_state_keys_app_and_url():
@@ -185,7 +185,7 @@ async def test_websocket_power_state_keys_app_and_url():
     ent = hub.entities["media_player.tv"]
     await drv.async_call(ent, "media_player", "media_pause", {})
     r = FakeWSRemote.instances[-1]
-    assert r.args == {"host": "192.168.2.115", "port": 8002, "token": "12345678", "name": HA_NAME}
+    assert r.args == {"host": "192.0.2.115", "port": 8002, "token": "12345678", "name": HA_NAME}
     assert r.sent[-1]["params"]["DataOfCmd"] == "KEY_PAUSE"
     await drv.async_call(ent, "media_player", "play_media", {"media_content_id": "111299001912",
                                                              "media_content_type": "app"})

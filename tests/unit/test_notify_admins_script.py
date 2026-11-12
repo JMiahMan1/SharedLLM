@@ -103,7 +103,7 @@ def _run_deploy_end(tmp_path: Path, exit_code: int, remote_log: str) -> tuple[in
     log.write_text(remote_log)
     harness = (
         "set -euo pipefail\n"
-        f'SSH_OPTS="-o BatchMode=yes"; HOST=jeremiah@server; DIR=/srv/jarvis; REMOTE_LOG="{log}"\n'
+        f'SSH_OPTS="-o BatchMode=yes"; HOST=alex@server; DIR=/srv/jarvis; REMOTE_LOG="{log}"\n'
         'SERVICES="gateway logging"; BRANCH=microservices\n'
         'DEPLOY_STEP="updating the server (pull, restart, health check, OTA bundle)"\n'
         + _deploy_notifier()

@@ -24,7 +24,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
   `HA_URL_REDIRECTS` (`services/common/ha_redirect.py`, applied by identity and
   `services/config.py`) points that URL, and Music Assistant's old URL, at the
   hub:
-  `HA_URL_REDIRECTS=https://ha.sumemail.com=http://192.168.2.205:8123,http://ha.sumemail.com:8095=http://192.168.2.205:8095`.
+  `HA_URL_REDIRECTS=https://ha.example.com=http://192.0.2.205:8123,http://ha.example.com:8095=http://192.0.2.205:8095`.
 - **Credentials at rest** (ESPHome keys, HomeKit pairing keys, TV tokens, cloud
   logins) are Fernet-encrypted with the stack's `FERNET_KEY`. Without a key the
   hub refuses to store them.
@@ -116,7 +116,7 @@ To also accept the broadcast replies, fix the source ports
 
 ## Known issues
 
-- **Garage door sensor (hardware): needs fixing.** `binary_sensor.garage_door_sensor`
+- **Garage door sensor (hardware): needs fixing.** `binary_sensor.demo_door_sensor`
   on the garage ESPHome node has read `on` continuously since at least
   2026-11-01, through every open and close (under HA too). Until it is
   repaired: nothing reports whether the door is open, the "Close Garage if
@@ -150,7 +150,7 @@ State lives in `./data/homehub` (the hub), `./data/matter-server` and
 4. Check `GET /hub/status`: every config entry with its state and unavailable
    count, every automation with its status or the reason it is disabled.
 5. Fix device addresses that changed without HA's discovery:
-   `PATCH /hub/entries/<entry_id>/options {"host": "192.168.2.x"}` reloads that entry.
+   `PATCH /hub/entries/<entry_id>/options {"host": "192.0.2.x"}` reloads that entry.
 
 **Never run HA and the hub against the same devices at the same time.** In
 particular the Matter fabric storage must have only one live controller.

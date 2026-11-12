@@ -85,7 +85,7 @@ class MAWebSocketClient:
         Initialize the MA WebSocket client.
 
         Args:
-            mass_url: MA base URL (e.g., "http://ha.sumemail.com:8095")
+            mass_url: MA base URL (e.g., "http://ha.example.com:8095")
             mass_token: JWT authentication token
             reconnect_base_delay: Base delay for reconnect attempts (seconds)
             reconnect_max_delay: Maximum delay between reconnect attempts (seconds)

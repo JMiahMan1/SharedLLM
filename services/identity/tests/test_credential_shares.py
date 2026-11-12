@@ -187,19 +187,19 @@ def test_system_default_user_owns_the_shared_credentials(client: TestClient):
 def test_renamed_default_user_is_still_the_shared_owner(client: TestClient, session: Session):
     """"User 1" may be renamed: is_system_default, not the username, decides."""
     shared = _user(session, SHARED)
-    shared.username = "jeremiah"
-    shared.display_name = "Jeremiah"
+    shared.username = "alex"
+    shared.display_name = "Alex"
     session.add(shared)
     session.commit()
 
-    _act_as(session, "jeremiah")
+    _act_as(session, "alex")
     assert client.put(
         "/api/users/bob/credential-shares", json={"services": ["music_assistant"]}
     ).status_code == 200
 
     data = _resolve(client, "bob")
     assert data["mass_token"] == "shared-ma-token"
-    assert data["shared_credential_owner"] == "jeremiah"
+    assert data["shared_credential_owner"] == "alex"
 
 
 def test_grant_to_a_user_with_no_shared_credentials_fails_loudly(

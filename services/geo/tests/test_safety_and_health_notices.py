@@ -11,7 +11,7 @@ import services.geo.main as geo
 from services.geo import health_notices, safety
 
 TZ = ZoneInfo(geo.APP_TIMEZONE)
-HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 33.1667, "longitude": -111.5646, "radius": 100.0}
+HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 39.7392, "longitude": -104.9903, "radius": 100.0}
 
 
 class R:
@@ -55,7 +55,7 @@ def sent(monkeypatch):
         return True
 
     async def tracked(r):
-        return ["jeremiah", "kate", "michele"]
+        return ["alex", "kate", "sam"]
 
     async def may_see(viewer, target):
         return viewer != "kate"
@@ -84,14 +84,14 @@ async def _stay(r, user, lat, lon, start, hours):
 async def test_two_hours_somewhere_unknown_tells_the_family_once(sent):
     r = R()
     start = at(2026, 10, 14, 10)
-    await _stay(r, "michele", 33.6, -111.9, start, 2.1)
+    await _stay(r, "sam", 40.1725, -105.3257, start, 2.1)
     assert await geo._sweep_long_stops(r, start + 2.2 * 3600) == 1
-    assert [n["user"] for n in sent] == ["jeremiah"]  # not kate (no consent), not herself
+    assert [n["user"] for n in sent] == ["alex"]  # not kate (no consent), not herself
     notice = sent[0]
     assert notice["category"] == "family_safety"
-    assert notice["title"] == "Michele has been stopped for 2 h"
+    assert notice["title"] == "Sam has been stopped for 2 h"
     assert "Desert Ridge Mall" in notice["body"]
-    assert notice["data"]["url"] == "/wander?person=michele"
+    assert notice["data"]["url"] == "/wander?person=sam"
     assert await geo._sweep_long_stops(r, start + 3 * 3600) == 0, "at most once per stop"
 
 
@@ -99,10 +99,10 @@ async def test_two_hours_somewhere_unknown_tells_the_family_once(sent):
 async def test_a_short_stop_or_a_known_place_says_nothing(sent):
     r = R()
     start = at(2026, 10, 14, 10)
-    await _stay(r, "michele", 33.6, -111.9, start, 1)
+    await _stay(r, "sam", 40.1725, -105.3257, start, 1)
     assert await geo._sweep_long_stops(r, start + 1.1 * 3600) == 0
     r = R()
-    await _stay(r, "jeremiah", 33.1667, -111.5646, start, 5)  # home
+    await _stay(r, "alex", 39.7392, -104.9903, start, 5)  # home
     assert await geo._sweep_long_stops(r, start + 5.1 * 3600) == 0
     assert sent == []
 
@@ -111,8 +111,8 @@ async def test_a_short_stop_or_a_known_place_says_nothing(sent):
 async def test_moving_on_starts_a_new_stop(sent):
     r = R()
     start = at(2026, 10, 14, 9)
-    await _stay(r, "michele", 33.6, -111.9, start, 1.5)
-    await _stay(r, "michele", 33.7, -111.9, start + 1.6 * 3600, 1)  # 11 km away
+    await _stay(r, "sam", 40.1725, -105.3257, start, 1.5)
+    await _stay(r, "sam", 40.2725, -105.3257, start + 1.6 * 3600, 1)  # 11 km away
     assert await geo._sweep_long_stops(r, start + 2.7 * 3600) == 0
 
 
@@ -120,7 +120,7 @@ async def test_moving_on_starts_a_new_stop(sent):
 async def test_long_stops_are_quiet_at_night(sent):
     r = R()
     start = at(2026, 10, 14, 21)
-    await _stay(r, "michele", 33.6, -111.9, start, 3)
+    await _stay(r, "sam", 40.1725, -105.3257, start, 3)
     assert await geo._sweep_long_stops(r, at(2026, 10, 14, 23) + 1800) == 0
     assert sent == []
 
@@ -137,9 +137,9 @@ def test_active_hours_can_be_all_day():
 @pytest.mark.asyncio
 async def test_place_settings_are_stored_and_shown_on_the_zones():
     r = R()
-    await safety.save_place_setting(r, "zone.school", True, ["Leo", "michele", " "])
+    await safety.save_place_setting(r, "zone.school", True, ["Leo", "sam", " "])
     settings = await safety.place_settings(r)
-    assert settings == {"zone.school": {"important": True, "notify": ["leo", "michele"], "icon": ""}}
+    assert settings == {"zone.school": {"important": True, "notify": ["leo", "sam"], "icon": ""}}
     features = [{"properties": {"entity_id": "zone.school"}}, {"properties": {"entity_id": "zone.home"}}]
     safety.annotate_zone_features(features, settings)
     assert features[0]["properties"]["important"] is True

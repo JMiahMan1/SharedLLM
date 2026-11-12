@@ -23,7 +23,7 @@ def _voice_of(seed: int) -> list[float]:
     return [rng.gauss(0, 1) for _ in range(voice.DIMENSIONS)]
 
 
-VOICES = {"jeremiah": _voice_of(1), "michele": _voice_of(2), "leo": _voice_of(3)}
+VOICES = {"alex": _voice_of(1), "sam": _voice_of(2), "leo": _voice_of(3)}
 
 
 def _take(who: str, n: int, wobble: float = 0.15) -> list[float]:
@@ -37,8 +37,8 @@ def session_fixture():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        session.add(User(id=1, username="jeremiah", display_name="Jeremiah", is_admin=True))
-        session.add(User(id=2, username="michele", display_name="Michele"))
+        session.add(User(id=1, username="alex", display_name="Alex", is_admin=True))
+        session.add(User(id=2, username="sam", display_name="Sam"))
         session.add(User(id=3, username="leo", display_name="Leo"))
         session.commit()
         yield session
@@ -59,7 +59,7 @@ def client_fixture(session: Session, monkeypatch):
     client = TestClient(app)
     client.spoken = spoken
     client.act_as = lambda username: _act_as(username)
-    _act_as("jeremiah")
+    _act_as("alex")
     yield client
     app.dependency_overrides = {}
 
@@ -85,10 +85,10 @@ def _enroll(client, who: str, takes: int = voice.MIN_SAMPLES):
 def test_enrollment_needs_several_takes_before_it_counts(client, session):
     assert client.get("/api/users/me/voice").json()["enrolled"] is False
     for n in range(voice.MIN_SAMPLES):
-        body = _say(client, _take("jeremiah", n)).json()
+        body = _say(client, _take("alex", n)).json()
         assert body["samples"] == n + 1
         assert body["enrolled"] is (n + 1 >= voice.MIN_SAMPLES)
-    user = session.exec(select(User).where(User.username == "jeremiah")).one()
+    user = session.exec(select(User).where(User.username == "alex")).one()
     session.refresh(user)
     assert user.voice_fingerprint and user.voice_fingerprint.startswith("ge2e:")
     status = client.get("/api/users/me/voice").json()
@@ -96,8 +96,8 @@ def test_enrollment_needs_several_takes_before_it_counts(client, session):
 
 
 def test_a_take_from_someone_else_is_refused(client):
-    _say(client, _take("jeremiah", 0))
-    refused = _say(client, _take("michele", 0))
+    _say(client, _take("alex", 0))
+    refused = _say(client, _take("sam", 0))
     assert refused.status_code == 422 and "does not sound like your earlier" in refused.json()["detail"]
     assert client.get("/api/users/me/voice").json()["samples"] == 1
 
@@ -110,7 +110,7 @@ def test_too_little_speech_is_reported_not_stored(client):
 
 def test_only_the_newest_takes_are_kept(client):
     for n in range(voice.MAX_SAMPLES + 2):
-        _say(client, _take("jeremiah", n))
+        _say(client, _take("alex", n))
     assert client.get("/api/users/me/voice").json()["samples"] == voice.MAX_SAMPLES
 
 
@@ -133,11 +133,11 @@ def test_a_stranger_is_not_matched_but_the_ranking_is_returned(client):
 
 def test_two_close_voices_are_not_guessed_between(client):
     """Above the threshold for both but with no clear lead: no match."""
-    _enroll(client, "jeremiah")
-    VOICES["leo"] = [x + random.Random(7).gauss(0, 0.05) for x in VOICES["jeremiah"]]
+    _enroll(client, "alex")
+    VOICES["leo"] = [x + random.Random(7).gauss(0, 0.05) for x in VOICES["alex"]]
     try:
         _enroll(client, "leo")
-        body = client.post("/api/voice/identify", json={"embedding": _take("jeremiah", 50)}).json()
+        body = client.post("/api/voice/identify", json={"embedding": _take("alex", 50)}).json()
         assert body["score"] >= voice.MATCH_THRESHOLD and body["margin"] < voice.MATCH_MARGIN
         assert body["matched"] is False
     finally:
@@ -145,28 +145,28 @@ def test_two_close_voices_are_not_guessed_between(client):
 
 
 def test_identify_before_anyone_enrolled_is_404(client):
-    _say(client, _take("jeremiah", 0))  # one take is not a profile yet
-    assert client.post("/api/voice/identify", json={"embedding": _take("jeremiah", 1)}).status_code == 404
+    _say(client, _take("alex", 0))  # one take is not a profile yet
+    assert client.post("/api/voice/identify", json={"embedding": _take("alex", 1)}).status_code == 404
 
 
 def test_identify_refuses_a_malformed_signature(client):
-    _enroll(client, "jeremiah")
+    _enroll(client, "alex")
     assert client.post("/api/voice/identify", json={"embedding": [1.0, 2.0]}).status_code == 422
-    other_model = {"embedding": _take("jeremiah", 1), "model": "openvoice"}
+    other_model = {"embedding": _take("alex", 1), "model": "openvoice"}
     assert client.post("/api/voice/identify", json=other_model).status_code == 422
 
 
 def test_checking_my_voice_scores_against_everyone(client):
-    _enroll(client, "michele")
-    _enroll(client, "jeremiah")
-    me = _say(client, _take("jeremiah", 77), "/api/users/me/voice/check").json()
+    _enroll(client, "sam")
+    _enroll(client, "alex")
+    me = _say(client, _take("alex", 77), "/api/users/me/voice/check").json()
     assert me["is_me"] is True
-    not_me = _say(client, _take("michele", 77), "/api/users/me/voice/check").json()
-    assert not_me["is_me"] is False and not_me["matched_username"] == "michele"
+    not_me = _say(client, _take("sam", 77), "/api/users/me/voice/check").json()
+    assert not_me["is_me"] is False and not_me["matched_username"] == "sam"
 
 
 def test_checking_before_enrolling_says_what_to_do(client):
-    resp = _say(client, _take("jeremiah", 0), "/api/users/me/voice/check")
+    resp = _say(client, _take("alex", 0), "/api/users/me/voice/check")
     assert resp.status_code == 409 and "samples" in resp.json()["detail"]
 
 
@@ -180,61 +180,61 @@ def _learn(client, who: str, embedding=None):
 
 
 def test_learning_adds_a_confident_take_to_an_enrolled_profile(client, session):
-    _enroll(client, "jeremiah")
-    body = _learn(client, "jeremiah").json()
+    _enroll(client, "alex")
+    body = _learn(client, "alex").json()
 
     assert body["status"] == "STORED"
     assert body["samples"] == voice.MIN_SAMPLES + 1
-    row = session.get(VoiceSignature, "jeremiah")
+    row = session.get(VoiceSignature, "alex")
     assert voice.load_samples(row.samples)[-1]["source"] == "learned"
-    assert client.post("/api/voice/identify", json={"embedding": _take("jeremiah", 101)}).json()["matched"] is True
+    assert client.post("/api/voice/identify", json={"embedding": _take("alex", 101)}).json()["matched"] is True
 
 
 def test_learning_refuses_a_take_from_someone_else(client):
-    _enroll(client, "jeremiah")
-    refused = _learn(client, "jeremiah", _take("michele", 5))
+    _enroll(client, "alex")
+    refused = _learn(client, "alex", _take("sam", 5))
 
     assert refused.status_code == 422 and "does not sound like" in refused.json()["detail"]
     assert client.get("/api/users/me/voice").json()["samples"] == voice.MIN_SAMPLES
 
 
 def test_learning_needs_an_enrolled_profile(client):
-    assert _learn(client, "jeremiah").status_code == 409
+    assert _learn(client, "alex").status_code == 409
 
 
 def test_learning_skips_a_recording_the_profile_already_has(client):
-    _enroll(client, "jeremiah")
-    body = _learn(client, "jeremiah", _take("jeremiah", 0)).json()
+    _enroll(client, "alex")
+    body = _learn(client, "alex", _take("alex", 0)).json()
 
     assert body["status"] == "SKIPPED" and body["samples"] == voice.MIN_SAMPLES
 
 
 def test_learning_keeps_the_newest_samples(client):
-    _enroll(client, "jeremiah", takes=voice.MAX_SAMPLES)
+    _enroll(client, "alex", takes=voice.MAX_SAMPLES)
     for n in range(voice.MAX_SAMPLES):
-        assert _learn(client, "jeremiah", _take("jeremiah", 90 + n)).status_code == 200
+        assert _learn(client, "alex", _take("alex", 90 + n)).status_code == 200
 
     assert client.get("/api/users/me/voice").json()["samples"] == voice.MAX_SAMPLES
 
 
 def test_forgetting_erases_the_profile(client, session):
-    _enroll(client, "jeremiah")
+    _enroll(client, "alex")
     assert client.delete("/api/users/me/voice").json()["samples"] == 0
-    assert session.get(VoiceSignature, "jeremiah") is None
-    user = session.exec(select(User).where(User.username == "jeremiah")).one()
+    assert session.get(VoiceSignature, "alex") is None
+    user = session.exec(select(User).where(User.username == "alex")).one()
     session.refresh(user)
     assert user.voice_fingerprint is None
 
 
 def test_profiles_lists_who_can_be_recognised_without_signatures(client):
-    _enroll(client, "michele")
-    _enroll(client, "jeremiah", takes=1)
+    _enroll(client, "sam")
+    _enroll(client, "alex", takes=1)
     body = client.get("/api/voice/profiles").json()
-    assert body == {"profiles": [{"username": "michele", "name": "Michele", "samples": voice.MIN_SAMPLES}]}
+    assert body == {"profiles": [{"username": "sam", "name": "Sam", "samples": voice.MIN_SAMPLES}]}
 
 
 def test_the_fingerprint_cannot_be_set_by_hand(client, session):
     client.patch("/api/users/me", json={"voice_fingerprint": "v1:forged"})
-    user = session.exec(select(User).where(User.username == "jeremiah")).one()
+    user = session.exec(select(User).where(User.username == "alex")).one()
     session.refresh(user)
     assert user.voice_fingerprint is None

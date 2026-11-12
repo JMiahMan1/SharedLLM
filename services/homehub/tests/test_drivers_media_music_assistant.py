@@ -14,7 +14,7 @@ from services.homehub.drivers.music_assistant import MAConnection, MusicAssistan
 from services.homehub.tests.conftest import make_hub
 
 TOKEN = "ma-token"
-OFFICE = "media_player.office_jarvis"
+OFFICE = "media_player.den_speaker"
 ROKU = "ROKU_2N0000000001"
 
 
@@ -46,11 +46,11 @@ def queue(qid, **kw):
 class FakeConn:
     def __init__(self, url, token, on_event, on_close):
         self.url, self.token, self.on_event, self.on_close = url, token, on_event, on_close
-        self.server_info = {"base_url": "http://192.168.2.205:8095", "schema_version": 28}
+        self.server_info = {"base_url": "http://192.0.2.205:8095", "schema_version": 28}
         self.connected = False
         self.sent: list[tuple[str, dict]] = []
-        self.players = [player(OFFICE, "Office Jarvis Smart Speaker"),
-                        player(ROKU, "Gracies TV", supported_features=["power", "volume_mute"], powered=False)]
+        self.players = [player(OFFICE, "Den Speaker Smart Speaker"),
+                        player(ROKU, "Taylors TV", supported_features=["power", "volume_mute"], powered=False)]
         self.queues = [queue(OFFICE), queue(ROKU, active=False, state="idle", current_item=None)]
         self.replies: dict[str, object] = {}
 
@@ -76,7 +76,7 @@ def build(options=None):
     hub, entry = make_hub("music_assistant", {"url": "http://d5369777-music-assistant:8094", "token": TOKEN}, [
         {"entity_id": "media_player.office_speaker", "unique_id": OFFICE},
         {"entity_id": "button.office_speaker_favorite_current_song", "unique_id": OFFICE + "_favorite_now_playing"},
-        {"entity_id": "media_player.gracies_tv", "unique_id": ROKU},
+        {"entity_id": "media_player.taylors_tv", "unique_id": ROKU},
         {"entity_id": "media_player.rv_tv_2", "unique_id": "upa4e88d93e22f"},
     ], options=options)
     drv = MusicAssistantDriver(hub, entry)
@@ -94,9 +94,9 @@ def test_url_precedence(monkeypatch):
     monkeypatch.delenv("MUSIC_ASSISTANT_URL", raising=False)
     _, drv, _ = build()
     assert drv.url == "http://d5369777-music-assistant:8094"
-    monkeypatch.setenv("MUSIC_ASSISTANT_URL", "http://192.168.2.205:8095")
+    monkeypatch.setenv("MUSIC_ASSISTANT_URL", "http://192.0.2.205:8095")
     _, drv, _ = build()
-    assert drv.url == "http://192.168.2.205:8095"
+    assert drv.url == "http://192.0.2.205:8095"
     _, drv, _ = build(options={"url": "http://other:8095"})
     assert drv.url == "http://other:8095"
 
@@ -110,14 +110,14 @@ async def test_state_mapping():
     assert a["media_title"] == "Song" and a["media_artist"] == "Band" and a["media_album_name"] == "LP"
     assert a["media_content_id"] == "library://track/7"
     assert a["media_duration"] == 200 and a["media_position"] == 42.0
-    assert a["entity_picture"].startswith("http://192.168.2.205:8095/imageproxy?path=/art/7.jpg&provider=filesystem")
+    assert a["entity_picture"].startswith("http://192.0.2.205:8095/imageproxy?path=/art/7.jpg&provider=filesystem")
     assert a["volume_level"] == 0.35 and a["is_volume_muted"] is False
     assert a["app_id"] == "music_assistant" and a["active_queue"] == OFFICE and a["mass_player_id"] == OFFICE
     assert a["shuffle"] is False and a["repeat"] == "off"
     assert a["supported_features"] == 7796671  # the value HA stored for a powered, volume-capable MA player
-    roku = hub.states.get("media_player.gracies_tv")
+    roku = hub.states.get("media_player.taylors_tv")
     assert roku.state == "off"
-    assert roku.attributes["supported_features"] == 7795643  # HA's value for Gracie's TV
+    assert roku.attributes["supported_features"] == 7795643  # HA's value for Taylor's TV
     assert roku.attributes["active_queue"] is None
     assert hub.states.get("media_player.rv_tv_2").state == "unavailable"
     assert hub.states.get("button.office_speaker_favorite_current_song").state == "unknown"
@@ -137,7 +137,7 @@ async def test_events_update_state():
                 "data": player(OFFICE, "Office", available=False)})
     assert hub.states.get("media_player.office_speaker").state == "unavailable"
     c.on_close()
-    assert hub.states.get("media_player.gracies_tv").state == "unavailable"
+    assert hub.states.get("media_player.taylors_tv").state == "unavailable"
 
 
 async def test_media_player_services():
@@ -245,12 +245,12 @@ async def test_search_get_library_get_queue_transfer():
     assert q["queue_id"] == OFFICE and q["items"] == 12
     assert q["current_item"]["media_item"]["album"]["name"] == "LP"
 
-    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.gracies_tv",
+    await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.taylors_tv",
                                                                  "auto_play": True})
     assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": OFFICE, "target_queue_id": ROKU,
                                                      "auto_play": True})
     await hub.call_service("music_assistant", "transfer_queue", {"entity_id": "media_player.office_speaker",
-                                                                 "source_player": "media_player.gracies_tv"})
+                                                                 "source_player": "media_player.taylors_tv"})
     assert c.sent[-1] == ("player_queues/transfer", {"source_queue_id": ROKU, "target_queue_id": OFFICE})
 
 

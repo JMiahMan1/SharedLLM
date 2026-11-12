@@ -47,8 +47,8 @@ def test_it_names_the_administrator_still_using_the_seeded_password(session, mon
 def test_it_names_every_account_that_cannot_sign_in(session, monkeypatch, caplog):
     monkeypatch.setenv("DEFAULT_ADMIN_PASSWORD", "a-long-enough-passphrase")
     session.add(User(username="default", is_admin=True, is_system_default=True))
-    session.add(User(username="kaleb", api_key="key-kaleb"))
-    session.add(User(username="gracie", api_key="key-gracie"))
+    session.add(User(username="robin", api_key="key-robin"))
+    session.add(User(username="taylor", api_key="key-taylor"))
     session.add(
         User(username="alice", password_hash=hash_password("a-password"), api_key="key-alice")
     )
@@ -59,7 +59,7 @@ def test_it_names_every_account_that_cannot_sign_in(session, monkeypatch, caplog
 
     said = " ".join(record.getMessage() for record in caplog.records)
     assert "2 account(s) have no password" in said
-    assert "gracie" in said and "kaleb" in said
+    assert "taylor" in said and "robin" in said
     # The administrator's own missing hash is not the same problem.
     assert "default" not in said.split("cannot sign in:")[1]
 

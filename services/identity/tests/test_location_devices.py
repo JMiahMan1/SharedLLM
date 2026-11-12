@@ -1,6 +1,6 @@
 """Several devices signed in as one person: only the lead says where they are.
 
-In production a tablet left at home reported Jeremiah's location every ten
+In production a tablet left at home reported Alex's location every ten
 minutes (exactly at home, battery stuck at 72%) while his phone was 17 km
 away; each tablet fix brought him "home" and the next phone fix had him
 "leave" again, five times in one hour.
@@ -15,8 +15,8 @@ from services.identity import location_devices as ld
 from services.identity import main as identity_main
 from services.identity.models import GlobalSetting, User
 
-HOME = (33.1667, -111.5646)
-WORK = (33.2851, -111.6846)   # 17 km away
+HOME = (39.7392, -104.9903)
+WORK = (39.8576, -105.1103)   # 17 km away
 T0 = 1_800_000_000.0
 
 
@@ -92,7 +92,7 @@ def upload(monkeypatch):
     monkeypatch.setattr(identity_main, "engine", engine)
     with Session(engine) as session:
         session.add(User(username="default", is_system_default=True, is_admin=True))
-        session.add(User(username="jeremiah", display_name="Jeremiah"))
+        session.add(User(username="alex", display_name="Alex"))
         session.commit()
     forwarded = []
 
@@ -109,13 +109,13 @@ def upload(monkeypatch):
     def send(device, lat, lon, t, acc=10, name=None):
         body = {"latitude": lat, "longitude": lon, "accuracy": acc, "timestamp": t,
                 "device_id": device, "device_name": name or device}
-        resp = client.post("/api/users/jeremiah/location", headers={"X-Internal-Secret": "test-secret"}, json=body)
+        resp = client.post("/api/users/alex/location", headers={"X-Internal-Secret": "test-secret"}, json=body)
         assert resp.status_code == 200
         return resp.json()
 
     def position():
         with Session(engine) as session:
-            row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "user_location:jeremiah")).first()
+            row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "user_location:alex")).first()
             return json.loads(row.value)
 
     return send, position, forwarded

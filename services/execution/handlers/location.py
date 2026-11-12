@@ -1,7 +1,7 @@
 # services/execution/handlers/location.py
 """
 Handler for Location and Telemetry Queries (Life360 / HA Geo integration).
-Answers queries like "Where is Jeremiah?", "How fast is Jeremiah driving?",
+Answers queries like "Where is Alex?", "How fast is Alex driving?",
 "What was my top speed today?", and "Where do I spend the most time?".
 """
 import logging
@@ -220,7 +220,7 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
         else:
             msg = f"{name} has traveled {dist_miles} miles today. No vehicle is currently designated. You can add and assign your vehicle in Settings > Location & Vehicles to calculate MPG and travel costs."
     else:
-        # Default full query response ("Where is Jeremiah?")
+        # Default full query response ("Where is Alex?")
         msg = default_speech
 
     return ExecutionResult(

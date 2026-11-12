@@ -41,7 +41,7 @@ class FakeLight(Driver):
 @pytest.fixture
 def setup(tmp_path):
     store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
-    hub = Hub(time_zone="America/Phoenix", location={"latitude": 33.4, "longitude": -111.9})
+    hub = Hub(time_zone="Etc/GMT+7", location={"latitude": 39.9725, "longitude": -105.3257})
     hub.store = store
     entry = ConfigEntry("e1", "fake", "Fake lights", data={"host": "10.0.0.1"})
     hub.config_entries["e1"] = entry
@@ -143,7 +143,7 @@ def test_unknown_service_without_target_is_400(client):
 
 def test_config_and_config_entries_hide_credentials(client):
     cfg = client.get("/api/config", headers=H).json()
-    assert cfg["time_zone"] == "America/Phoenix" and cfg["state"] == "RUNNING"
+    assert cfg["time_zone"] == "Etc/GMT+7" and cfg["state"] == "RUNNING"
     entries = client.get("/api/config/config_entries/entry", headers=H).json()
     assert entries[0]["domain"] == "fake"
     assert "data" not in entries[0] and "10.0.0.1" not in json.dumps(entries)
@@ -174,7 +174,7 @@ def test_store_round_trips_and_seals_credentials(tmp_path):
 
 def test_ha_long_lived_tokens_keep_working(setup):
     _hub, store, _r, _d, auth = setup
-    store.set_kv("users", [{"id": "u1", "name": "Jeremiah", "is_owner": True, "is_active": True, "group_ids": []},
+    store.set_kv("users", [{"id": "u1", "name": "Alex", "is_owner": True, "is_active": True, "group_ids": []},
                            {"id": "u2", "name": "Kid", "is_active": True, "group_ids": ["system-users"]}])
     store.save_refresh_token("rt1", {"user_id": "u1", "token_type": "long_lived_access_token"}, "k" * 64)
     store.save_refresh_token("rt2", {"user_id": "u2"}, "j" * 64)
@@ -236,11 +236,11 @@ def test_device_tracker_see_from_the_location_relay(client, setup):
     hub = setup[0]
     builtin.register(hub)
     r = client.post("/api/services/device_tracker/see", headers=H,
-                    json={"dev_id": "michele_s_phone", "gps": [33.4, -111.9], "gps_accuracy": 12, "battery": 80,
+                    json={"dev_id": "sam_s_phone", "gps": [39.9725, -105.3257], "gps_accuracy": 12, "battery": 80,
                           "source_type": "gps", "attributes": {"speed": 3}})
     assert r.status_code == 200
-    st = hub.states.get("device_tracker.michele_s_phone")
-    assert st.attributes["latitude"] == 33.4 and st.attributes["battery_level"] == 80
+    st = hub.states.get("device_tracker.sam_s_phone")
+    assert st.attributes["latitude"] == 39.9725 and st.attributes["battery_level"] == 80
     assert st.attributes["speed"] == 3
     bad = client.post("/api/services/device_tracker/see", headers=H, json={"dev_id": "../x"})
     assert bad.status_code >= 400
@@ -255,10 +255,10 @@ async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
     monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
     main = importlib.import_module("services.homehub.main")
     svc = main.Service.__new__(main.Service)
-    svc.hub = Hub(location={"latitude": 33.4, "longitude": -111.9, "location_name": "Home"})
+    svc.hub = Hub(location={"latitude": 39.9725, "longitude": -105.3257, "location_name": "Home"})
     svc.store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
-    svc.store.set_kv("zones", [{"id": "work", "name": "Work", "latitude": 33.5, "longitude": -112.0, "radius": 200}])
-    svc.store.set_kv("persons", [{"id": "michele", "name": "Michele", "user_id": "u", "device_trackers": []}])
+    svc.store.set_kv("zones", [{"id": "work", "name": "Work", "latitude": 40.0725, "longitude": -105.4257, "radius": 200}])
+    svc.store.set_kv("persons", [{"id": "sam", "name": "Sam", "user_id": "u", "device_trackers": []}])
     errors = []
     monkeypatch.setattr(main.log, "exception", lambda *a, **k: errors.append(a))
     await svc._start_people()
@@ -304,7 +304,9 @@ def test_homehub_refuses_to_start_without_a_time_zone(tmp_path, monkeypatch):
     monkeypatch.setenv("HOMEHUB_DB", str(tmp_path / "hub.db"))
     monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.delenv("TIMEZONE", raising=False)
+    monkeypatch.delenv("IDENTITY_SVC_URL", raising=False)
     sys.modules.pop("services.homehub.main", None)
-    with pytest.raises(SystemExit, match="TZ is not set"):
+    with pytest.raises(SystemExit, match="No household time zone is configured.*TZ"):
         importlib.import_module("services.homehub.main")
     sys.modules.pop("services.homehub.main", None)

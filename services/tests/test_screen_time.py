@@ -10,7 +10,7 @@ from services.common.screen_time import (
     weekly_report,
 )
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 WED = lambda h, m=0: datetime(2026, 10, 21, h, m, tzinfo=TZ)  # noqa: E731 - a Wednesday
 SAT = lambda h, m=0: datetime(2026, 10, 24, h, m, tzinfo=TZ)  # noqa: E731
 

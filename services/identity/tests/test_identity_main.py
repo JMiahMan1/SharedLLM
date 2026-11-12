@@ -59,7 +59,7 @@ def test_coerce_profile_value_keeps_false_and_display_name():
     assert _coerce_profile_value("skylight_enabled", False) is False
     assert _coerce_profile_value("is_admin", False) is False
     assert _coerce_profile_value("display_name", "   ") == ""
-    assert _coerce_profile_value("display_name", " Michele ") == "Michele"
+    assert _coerce_profile_value("display_name", " Sam ") == "Sam"
     assert _coerce_profile_value("ha_url", "  ") is None
     assert _coerce_profile_value("ha_token", " tok ") == "tok"
 

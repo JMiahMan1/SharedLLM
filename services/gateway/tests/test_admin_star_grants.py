@@ -48,7 +48,7 @@ def _patch_upstreams(monkeypatch, ledger_status=200, ledger_body=None,
             if url.startswith(str(gateway_main.GEO_SVC)):
                 calls.append({"svc": "geo", "verb": verb, "url": url, **kwargs})
                 return _Resp(ledger_status, ledger_body if ledger_body is not None else
-                             {"user_id": "michele", "stars": 2, "balance": 3})
+                             {"user_id": "sam", "stars": 2, "balance": 3})
             if url.startswith(str(gateway_main.EXECUTION_SVC)):
                 calls.append({"svc": "execution", "verb": verb, "url": url, **kwargs})
                 return _Resp(
@@ -82,7 +82,7 @@ def _patch_upstreams(monkeypatch, ledger_status=200, ledger_body=None,
 @pytest.fixture
 def admin_client(monkeypatch):
     async def strict(_key):
-        return {"user": "jeremiah", "is_admin": True}
+        return {"user": "alex", "is_admin": True}
 
     monkeypatch.setattr(gateway_main, "_resolve_strict_identity", strict)
     # _acting_identity returns None without a Bearer token, so every request
@@ -93,14 +93,14 @@ def admin_client(monkeypatch):
 @pytest.fixture
 def user_client(monkeypatch):
     async def strict(_key):
-        return {"user": "michele", "is_admin": False}
+        return {"user": "sam", "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_resolve_strict_identity", strict)
     return TestClient(app, headers={"Authorization": "Bearer test-key"})
 
 
 def _post(client, **body):
-    return client.post("/api/admin/users/michele/stars", json=body)
+    return client.post("/api/admin/users/sam/stars", json=body)
 
 
 class TestAdminGrantWithMirror:
@@ -112,7 +112,7 @@ class TestAdminGrantWithMirror:
 
     def test_anonymous_cannot_grant(self, monkeypatch):
         calls = _patch_upstreams(monkeypatch)
-        r = TestClient(app).post("/api/admin/users/michele/stars", json={"stars": 2, "reason": "chore"})
+        r = TestClient(app).post("/api/admin/users/sam/stars", json={"stars": 2, "reason": "chore"})
         assert r.status_code == 403
         assert calls == []
 
@@ -121,7 +121,7 @@ class TestAdminGrantWithMirror:
         r = _post(admin_client, stars=2, reason="chore", note="dishes")
         assert r.status_code == 200
         body = r.json()
-        assert body["user_id"] == "michele"
+        assert body["user_id"] == "sam"
         assert body["ledger"]["balance"] == 3
         assert body["skylight"]["status"] == "SUCCESS"
         # Ledger first, mirror second -- the order is the whole point.
@@ -169,8 +169,8 @@ class TestAdminGrantWithMirror:
         calls = _patch_upstreams(monkeypatch)
         _post(admin_client, stars=2, reason="chore")
         mirror = next(c for c in calls if c["svc"] == "execution")
-        assert mirror["json"]["user"] == "michele"
-        assert mirror["json"]["member"] == "michele"
+        assert mirror["json"]["user"] == "sam"
+        assert mirror["json"]["member"] == "sam"
 
     def test_mirroring_can_be_declined(self, admin_client, monkeypatch):
         calls = _patch_upstreams(monkeypatch)
@@ -181,8 +181,8 @@ class TestAdminGrantWithMirror:
 
     def test_the_target_is_lowercased(self, admin_client, monkeypatch):
         calls = _patch_upstreams(monkeypatch)
-        admin_client.post("/api/admin/users/MiChElE/stars", json={"stars": 1, "reason": "chore"})
-        assert calls[0]["json"]["user_id"] == "michele"
+        admin_client.post("/api/admin/users/Sam/stars", json={"stars": 1, "reason": "chore"})
+        assert calls[0]["json"]["user_id"] == "sam"
 
     def test_a_blank_user_id_is_rejected(self, admin_client, monkeypatch):
         calls = _patch_upstreams(monkeypatch)

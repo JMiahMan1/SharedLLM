@@ -85,7 +85,7 @@ def upstream(monkeypatch):
         yield fake
 
     async def identity(_request):
-        return {"user": "jeremiah", "is_admin": True}
+        return {"user": "alex", "is_admin": True}
 
     monkeypatch.setattr(gateway_main, "shared_http_client", factory)
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: fake)
@@ -101,7 +101,7 @@ def test_creating_an_artifact_forwards_the_owner_and_base64(client, upstream):
     assert response.status_code == 200
     call = upstream.calls[0]
     assert call["url"].endswith(":8005/artifacts")
-    assert call["headers"]["X-User"] == "jeremiah"
+    assert call["headers"]["X-User"] == "alex"
     assert call["headers"]["X-Admin"] == "true"
     assert call["json"]["content_b64"] == "aGVsbG8="
 
@@ -139,7 +139,7 @@ def test_stream_uses_the_signed_token_without_a_gateway_login(client, upstream):
 
 def test_only_an_admin_can_read_system_storage_usage(client, upstream, monkeypatch):
     async def non_admin(_request):
-        return {"user": "michele", "is_admin": False}
+        return {"user": "sam", "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", non_admin)
     assert client.get("/api/storage/usage/system").status_code == 403

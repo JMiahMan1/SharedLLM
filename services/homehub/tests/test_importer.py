@@ -22,39 +22,39 @@ def _storage(d, name, data):
 def ha_dir(tmp_path):
     d = tmp_path / "homeassistant"
     (d / ".storage").mkdir(parents=True)
-    _storage(d, "core.config", {"latitude": 33.4, "longitude": -111.9, "elevation": 360, "time_zone": "America/Phoenix",
+    _storage(d, "core.config", {"latitude": 39.9725, "longitude": -105.3257, "elevation": 360, "time_zone": "Etc/GMT+7",
                                 "location_name": "Home", "unit_system_v2": "us_customary"})
     _storage(d, "core.area_registry", {"areas": [{"id": "kitchen", "name": "Kitchen", "aliases": ["cook room", None]}]})
     _storage(d, "core.floor_registry", {"floors": []})
     _storage(d, "core.device_registry", {"devices": [
         {"id": "dev1", "name": "Kitchen Light 1", "area_id": "kitchen", "config_entry_id": "e_wiz",
-         "identifiers": [["wiz", "d8a011ec7291"]], "connections": [["mac", "d8:a0:11:ec:72:91"]],
+         "identifiers": [["wiz", "02000000010a"]], "connections": [["mac", "02:00:00:00:01:0a"]],
          "manufacturer": "WiZ", "model": "SHRGB", "future_field": 1}]})
     _storage(d, "core.entity_registry", {"entities": [
-        {"id": "reg-uuid-1", "entity_id": "light.kitchen_light_1", "platform": "wiz", "unique_id": "d8a011ec7291",
+        {"id": "reg-uuid-1", "entity_id": "light.demo_light_1", "platform": "wiz", "unique_id": "02000000010a",
          "config_entry_id": "e_wiz", "device_id": "dev1", "has_entity_name": True, "original_name": None,
          "aliases": [], "supported_features": 4, "brand_new_key": True},
         {"id": "reg-uuid-2", "entity_id": "switch.old", "platform": "wiz", "unique_id": "x",
          "config_entry_id": "e_wiz", "disabled_by": "user"}]})
     _storage(d, "core.config_entries", {"entries": [
-        {"entry_id": "e_wiz", "domain": "wiz", "title": "WiZ", "data": {"host": "192.168.2.12"}, "options": {},
+        {"entry_id": "e_wiz", "domain": "wiz", "title": "WiZ", "data": {"host": "192.0.2.12"}, "options": {},
          "source": "dhcp"},
         {"entry_id": "e_ma", "domain": "music_assistant", "title": "MA",
          "data": {"url": "http://d5369777-music-assistant:8094", "token": "MA-TOKEN"}, "options": {}, "source": "hassio"},
         {"entry_id": "e_atv", "domain": "androidtv_remote", "title": "Office TV", "data": {"host": "1.2.3.4"},
          "options": {}, "source": "zeroconf"},
-        {"entry_id": "e_phone", "domain": "mobile_app", "title": "Michele's Phone",
-         "data": {"user_id": "u_m", "device_name": "Michele's Phone"}, "options": {}, "source": "registration"},
+        {"entry_id": "e_phone", "domain": "mobile_app", "title": "Sam's Phone",
+         "data": {"user_id": "u_m", "device_name": "Sam's Phone"}, "options": {}, "source": "registration"},
         {"entry_id": "e_todo", "domain": "local_todo", "title": "Reminders",
          "data": {"storage_key": "reminders", "todo_list_name": "Reminders"}, "options": {}, "source": "user"}]})
-    _storage(d, "auth", {"users": [{"id": "u_m", "name": "Michele Summers", "is_owner": False, "is_active": True,
+    _storage(d, "auth", {"users": [{"id": "u_m", "name": "Sam Rivera", "is_owner": False, "is_active": True,
                                     "group_ids": ["system-admin"]}],
                          "refresh_tokens": [{"id": "rt1", "user_id": "u_m", "jwt_key": "k" * 64,
                                              "token_type": "long_lived_access_token", "token": "secret"}]})
-    _storage(d, "person", {"items": [{"id": "michele", "name": "Michele", "user_id": "u_m",
-                                      "device_trackers": ["device_tracker.michele_s_phone"]}]})
-    _storage(d, "zone", {"items": [{"id": "work", "name": "Work", "latitude": 33.5, "longitude": -112.0, "radius": 200}]})
-    _storage(d, "core.restore_state", [{"state": {"entity_id": "light.kitchen_light_1", "state": "on",
+    _storage(d, "person", {"items": [{"id": "sam", "name": "Sam", "user_id": "u_m",
+                                      "device_trackers": ["device_tracker.sam_s_phone"]}]})
+    _storage(d, "zone", {"items": [{"id": "work", "name": "Work", "latitude": 40.0725, "longitude": -105.4257, "radius": 200}]})
+    _storage(d, "core.restore_state", [{"state": {"entity_id": "light.demo_light_1", "state": "on",
                                                   "attributes": {"brightness": 120},
                                                   "last_changed": "2026-11-11T19:00:00+00:00",
                                                   "last_updated": "2026-11-11T19:00:00+00:00"}}])
@@ -74,7 +74,7 @@ def ha_dir(tmp_path):
                              metadata_id INTEGER, attributes_id INTEGER);
     """)
     now = time.time()
-    db.execute("INSERT INTO states_meta VALUES (1, 'light.kitchen_light_1')")
+    db.execute("INSERT INTO states_meta VALUES (1, 'light.demo_light_1')")
     db.execute("INSERT INTO state_attributes VALUES (1, '{\"brightness\": 5}')")
     db.execute("INSERT INTO states VALUES (1, 'on', NULL, ?, 1, 1)", (now - 3600,))
     db.execute("INSERT INTO states VALUES (2, 'off', ?, ?, 1, NULL)", (now - 600, now - 600))
@@ -96,22 +96,25 @@ def test_import_carries_registry_credentials_and_history(tmp_path, ha_dir):
     assert entries["e_ma"].data["token"] == "MA-TOKEN"
     assert entries["e_ma"].options["url"].startswith("http://127.0.0.1")  # no longer the add-on hostname
     assert entries["e_atv"].data["cert_pem"] == "CERT" and entries["e_atv"].data["key_pem"] == "KEY"
-    assert entries["e_phone"].options["jarvis_user"] == "michele"
+    assert entries["e_phone"].options["jarvis_user"] == "sam"
     assert "BEGIN:VCALENDAR" in entries["e_todo"].data["ics"]
     assert b"MA-TOKEN" not in (tmp_path / "hub.db").read_bytes()
 
-    assert store.get_kv("entity_registry_ids")["reg-uuid-1"] == "light.kitchen_light_1"
+    assert store.get_kv("entity_registry_ids")["reg-uuid-1"] == "light.demo_light_1"
     assert store.load_automations("automation")[0]["alias"] == "Lights Off"
     assert store.load_automations("script")[0]["id"] == "announce"
     assert store.refresh_token("rt1")[1] == "k" * 64
 
-    hub = Hub()
+    hub = Hub(time_zone="Europe/Berlin")
     runtime = Runtime(hub, store)
     runtime.load_registry()
-    assert hub.time_zone == "America/Phoenix"
-    st = hub.states.get("light.kitchen_light_1")
+    # The imported config is kept, but the zone stays the household's
+    # (services/common/household_tz.py): one setting governs Jarvis and the hub.
+    assert hub.location["time_zone"] == "Etc/GMT+7"
+    assert hub.time_zone == "Europe/Berlin"
+    st = hub.states.get("light.demo_light_1")
     assert st.state == "on" and st.last_changed.year == 2026
-    assert hub.area_name("light.kitchen_light_1") == "Kitchen"
+    assert hub.area_name("light.demo_light_1") == "Kitchen"
     assert hub.areas["kitchen"].aliases == ["cook room"]
     assert hub.entities["switch.old"].disabled_by == "user"
 

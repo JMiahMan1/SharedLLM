@@ -42,11 +42,11 @@ def _resp(status=200, data=None):
 
 
 def _session(monkeypatch, *, is_admin=False, rag_stats=None, purge_removed=None, search=None):
-    """Identity says the key is ``jeremiah`` (Nextcloud ``summers``)."""
+    """Identity says the key is ``alex`` (Nextcloud ``rivera``)."""
 
     async def post(url, **kwargs):
         if "resolve" in url and "validate" not in url:
-            return _resp(200, {"user": "jeremiah", "nextcloud_user": "summers", "is_admin": is_admin})
+            return _resp(200, {"user": "alex", "nextcloud_user": "rivera", "is_admin": is_admin})
         if "rag/purge" in url:
             owner = kwargs["json"]["user_id"]
             return _resp(200, {"status": "SUCCESS", "removed": (purge_removed or {}).get(owner, 0)})
@@ -56,7 +56,7 @@ def _session(monkeypatch, *, is_admin=False, rag_stats=None, purge_removed=None,
 
     async def get(url, **kwargs):
         if "validate-api-key" in url:
-            return _resp(200, {"user": "jeremiah", "user_id": 1, "is_admin": is_admin})
+            return _resp(200, {"user": "alex", "user_id": 1, "is_admin": is_admin})
         if "rag/stats" in url:
             owner = url.split("user_id=")[1]
             return _resp(200, (rag_stats or {}).get(owner, {"status": "SUCCESS", "breakdown": {}}))
@@ -90,7 +90,7 @@ def test_anonymous_callers_are_refused(monkeypatch, verb, path):
 
 
 @pytest.mark.parametrize("verb,path", [
-    ("get", "/api/storage/collection/nextcloud_files?user_id=michele"),
+    ("get", "/api/storage/collection/nextcloud_files?user_id=sam"),
     ("patch", "/api/storage/learning/abc"),
     ("delete", "/api/storage/learning/abc"),
 ])
@@ -126,21 +126,21 @@ def test_the_unused_open_applied_route_is_gone(monkeypatch):
 # --- what is sent -------------------------------------------------------------
 
 def test_purge_covers_the_nextcloud_username_too(monkeypatch):
-    sess = _session(monkeypatch, purge_removed={"summers": 2610})
+    sess = _session(monkeypatch, purge_removed={"rivera": 2610})
     resp = client.post("/api/storage/purge/nextcloud_files", json={}, headers=AUTH)
 
     assert resp.status_code == 200, resp.text
     owners = [c[1]["json"]["user_id"] for c in sess.post.call_args_list if "rag/purge" in c[0][0]]
-    assert owners == ["jeremiah", "summers"]
+    assert owners == ["alex", "rivera"]
     assert resp.json()["removed"] == 2610
 
 
 def test_stats_do_not_count_system_collections_twice(monkeypatch):
     shared = {"chunks": 62, "documents": 62}
     _session(monkeypatch, rag_stats={
-        "jeremiah": {"status": "SUCCESS", "total_chunks": 62, "total_documents": 62,
+        "alex": {"status": "SUCCESS", "total_chunks": 62, "total_documents": 62,
                      "breakdown": {"system_capabilities": shared}},
-        "summers": {"status": "SUCCESS", "total_chunks": 2672, "total_documents": 162,
+        "rivera": {"status": "SUCCESS", "total_chunks": 2672, "total_documents": 162,
                     "breakdown": {"system_capabilities": shared,
                                   "nextcloud_files": {"chunks": 2610, "documents": 100}}},
     })
@@ -153,7 +153,7 @@ def test_stats_do_not_count_system_collections_twice(monkeypatch):
 
 
 def test_search_hits_carry_their_own_text_and_collection(monkeypatch):
-    _session(monkeypatch, search={"jeremiah": [
+    _session(monkeypatch, search={"alex": [
         {"content": "Kitchen light is in the kitchen", "score": 0.9,
          "metadata": {"entity_id": "light.kitchen", "friendly_name": "Kitchen", "collection_name": "ha_entities"}},
         {"content": "Budget notes", "score": 0.5,

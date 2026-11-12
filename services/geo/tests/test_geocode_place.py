@@ -53,12 +53,12 @@ def env(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_geocodes_near_the_person_and_caches(env, monkeypatch):
-    client = Client([{"lat": "33.42", "lon": "-111.83"}])
+    client = Client([{"lat": "39.9925", "lon": "-105.2557"}])
     monkeypatch.setattr(geo, "get_client_insecure", lambda: client)
-    hit = await geo._geocode_place("  12 Oak St,   Mesa ", near=(33.4, -111.8))
-    assert hit == {"name": "12 Oak St, Mesa", "latitude": 33.42, "longitude": -111.83, "radius": 100.0}
+    hit = await geo._geocode_place("  12 Oak St,   Springfield ", near=(39.9725, -105.2257))
+    assert hit == {"name": "12 Oak St, Springfield", "latitude": 39.9925, "longitude": -105.2557, "radius": 100.0}
     assert "viewbox" in client.calls[0]
-    again = await geo._geocode_place("12 oak st, mesa")
+    again = await geo._geocode_place("12 oak st, springfield")
     assert again == hit and len(client.calls) == 1  # from the cache
 
 
@@ -82,7 +82,7 @@ async def test_zone_names_win_over_geocoding(env, monkeypatch):
     monkeypatch.setattr(geo, "_zones", zones)
     monkeypatch.setattr(geo, "get_client_insecure", lambda: (_ for _ in ()).throw(AssertionError("no lookup")))
     assert await geo._destination("work") == zone
-    assert (await geo._destination("33.1, -111.2"))["latitude"] == 33.1
+    assert (await geo._destination("39.6725, -104.6257"))["latitude"] == 39.6725
 
 
 class Routed:

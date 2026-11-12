@@ -33,7 +33,7 @@ def rule(**kw):
 
 def test_parse_rules_applies_defaults_and_drops_bad_entries():
     rules = w.parse_rules(json.dumps([
-        {"id": "hay", "kind": "rain", "title": "Cover the hay", "people": [" Jeremiah ", ""], "hours": 99},
+        {"id": "hay", "kind": "rain", "title": "Cover the hay", "people": [" Alex ", ""], "hours": 99},
         {"kind": "freeze"},
         {"kind": "tornado"},
         "nonsense",
@@ -42,7 +42,7 @@ def test_parse_rules_applies_defaults_and_drops_bad_entries():
     ]))
     assert [r["kind"] for r in rules] == ["rain", "freeze", "heat"]
     hay, freeze, heat = rules
-    assert hay["people"] == ["jeremiah"] and hay["hours"] == w.MAX_HOURS and hay["threshold"] == 60
+    assert hay["people"] == ["alex"] and hay["hours"] == w.MAX_HOURS and hay["threshold"] == 60
     assert freeze["title"] == "Freeze coming" and freeze["threshold"] == 32 and len(freeze["id"]) == 12
     assert heat["threshold"] == 95 and heat["location"] is None and heat["id"] != "bad id!"
     assert w.parse_rules("not json") == [] and w.parse_rules(None) == []
@@ -149,15 +149,15 @@ def test_freeze_heat_wind_and_snow_bodies():
 
 def test_heads_up_only_shows_rules_for_that_person():
     rules = w.parse_rules(json.dumps([
-        {"id": "hay", "kind": "rain", "title": "Cover the hay", "people": ["jeremiah"]},
+        {"id": "hay", "kind": "rain", "title": "Cover the hay", "people": ["alex"]},
         {"id": "all", "kind": "rain", "title": "Bring the cushions in"},
         {"id": "off", "kind": "rain", "title": "Off", "enabled": False},
     ]))
     wet = forecast([hour(2, precip_prob=90)])
     titles = lambda user: [i["title"] for i in w.heads_up(rules, {"home": wet}, user, NOW)]  # noqa: E731
-    assert titles("jeremiah") == ["Cover the hay", "Bring the cushions in"]
-    assert titles("gracie") == ["Bring the cushions in"]
-    assert w.heads_up(rules, {}, "jeremiah", NOW) == []  # no forecast for the place
+    assert titles("alex") == ["Cover the hay", "Bring the cushions in"]
+    assert titles("taylor") == ["Bring the cushions in"]
+    assert w.heads_up(rules, {}, "alex", NOW) == []  # no forecast for the place
 
 
 def test_parse_location():
@@ -189,7 +189,7 @@ def round_(monkeypatch):
     from services.common import notify
 
     sent, redis = [], FakeRedis()
-    cfg = {w.SETTING_RULES: json.dumps([{"id": "hay", "kind": "rain", "title": "Cover the hay", "people": ["jeremiah"]},
+    cfg = {w.SETTING_RULES: json.dumps([{"id": "hay", "kind": "rain", "title": "Cover the hay", "people": ["alex"]},
                                         {"id": "all", "kind": "freeze"}])}
     accept = {"ok": True}
 
@@ -204,7 +204,7 @@ def round_(monkeypatch):
         return len(users) if accept["ok"] else 0
 
     async def family(**kw):
-        return ["jeremiah", "gracie"]
+        return ["alex", "taylor"]
 
     async def r():
         return redis
@@ -221,7 +221,7 @@ async def test_a_round_sends_to_the_people_named_or_everyone_then_stays_quiet(ro
     sent, redis, _ = round_
     assert await w.check_reminders(NOW) == 3
     assert [(n["user"], n["title"]) for n in sent] == [
-        ("jeremiah", "Cover the hay"), ("jeremiah", "Freeze coming"), ("gracie", "Freeze coming")]
+        ("alex", "Cover the hay"), ("alex", "Freeze coming"), ("taylor", "Freeze coming")]
     assert set(redis.h[w._RULE_STATE]) == {"hay", "all"}
     assert await w.check_reminders(NOW + 900) == 0
 
@@ -241,7 +241,7 @@ async def test_each_new_episode_is_published_for_other_services(round_):
     events = [(e["type"], json.loads(e["data"])) for e in redis.stream]
     assert [t for t, _ in events] == ["alert.started", "alert.started"]
     hay = events[0][1]
-    assert hay["rule"] == "hay" and hay["kind"] == "rain" and hay["people"] == ["jeremiah"]
+    assert hay["rule"] == "hay" and hay["kind"] == "rain" and hay["people"] == ["alex"]
     assert hay["location"] == {"name": "Home"}
     await w.check_reminders(NOW + 900)
     assert len(redis.stream) == 2  # same episode: nothing new

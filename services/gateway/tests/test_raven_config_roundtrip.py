@@ -12,7 +12,7 @@ from services.gateway.main import app
 
 def test_get_raven_config_returns_saved_mission_lifetime_cap(monkeypatch):
     async def _admin(_request):
-        return {"username": "jeremiah", "is_admin": True}
+        return {"username": "alex", "is_admin": True}
 
     async def _settings():
         return {
@@ -36,7 +36,7 @@ def test_get_raven_config_returns_saved_mission_lifetime_cap(monkeypatch):
 
 def test_get_raven_config_is_admin_only(monkeypatch):
     async def _member(_request):
-        return {"username": "michele", "is_admin": False}
+        return {"username": "sam", "is_admin": False}
 
     monkeypatch.setattr(gateway_main, "_resolve_identity_from_request", _member)
 

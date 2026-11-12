@@ -8,6 +8,7 @@ All runtime settings come from Identity service at runtime.
 Only INTERNAL_SECRET is read from the environment (set by docker-compose).
 Service URLs default to Docker DNS names but are overridable via Identity settings.
 """
+import logging
 import os
 
 # Import runtime-resolved values from services.config (updated by resolve_runtime_config)
@@ -35,13 +36,13 @@ TELEMETRY_SVC = os.getenv("TELEMETRY_SVC_URL", "http://telemetry:11438").rstrip(
 # alpaca Stable Diffusion image backend (exposed to external clients as a tool).
 
 # alpaca Arcade game shelf (JSON cards + playable HTML games, port 5001).
-ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop.local:5001").rstrip("/")
+# No default: unset, arcade routes answer with an error naming this variable.
+ALPACA_ARCADE_URL = (os.getenv("ALPACA_ARCADE_URL") or "").rstrip("/")
 # URL the browser uses to open a game. This is deliberately the public host,
 # not the LAN address: phones and the native app cannot reach the desktop's
 # local name, and an http iframe inside the https app is mixed content.
-ALPACA_ARCADE_PUBLIC_URL = os.getenv(
-    "ALPACA_ARCADE_PUBLIC_URL", "https://games.sumemail.com"
-).rstrip("/")
+# No default: unset, the games shelf reports an error naming this variable.
+ALPACA_ARCADE_PUBLIC_URL = (os.getenv("ALPACA_ARCADE_PUBLIC_URL") or "").rstrip("/")
 # Shared secret the arcade requires for admin actions (publishing Family Games).
 # No default: an unset token makes publish/unpublish fail with a message naming
 # this variable instead of silently doing nothing.
@@ -59,7 +60,18 @@ ALPACA_AUDIO_URL = (os.getenv("ALPACA_AUDIO_URL") or "").rstrip("/")
 # podcast mixer and the OpenVoice voice profiles, so prefer it over talking to
 # the audio server directly. Speaker identification is not alpaca's: it runs
 # on the family's own enrolled signatures (execution's voiceprint + identity).
-ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
+# No default: unset, the desktop health check leaves the dashboard out.
+ALPACA_WEB_URL = (os.getenv("ALPACA_WEB_URL") or "").rstrip("/")
+
+for _name, _value in (
+    ("ALPACA_ARCADE_URL", ALPACA_ARCADE_URL),
+    ("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_PUBLIC_URL),
+    ("ALPACA_WEB_URL", ALPACA_WEB_URL),
+):
+    if not _value:
+        logging.getLogger("gateway.config").warning(
+            "%s is not set: the features that use it are off until it is set in .env", _name
+        )
 
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL

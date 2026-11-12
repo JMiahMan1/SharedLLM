@@ -24,8 +24,8 @@ def family(monkeypatch):
     with Session(engine) as session:
         session.add(User(username="default", is_system_default=True, is_admin=True))
         session.add(User(username="leo", display_name="Leo"))
-        session.add(User(username="michele", display_name="Michele"))
-        session.add(User(username="jeremiah", display_name="Jeremiah"))
+        session.add(User(username="sam", display_name="Sam"))
+        session.add(User(username="alex", display_name="Alex"))
         # Leo shares with the family circle (everyone in the live family does).
         session.add(UserActivitySharing(username="leo", data=json.dumps({"enabled": True, "audience": "circle"})))
         session.add(Device(device_key="leo-phone-0000001", kind="phone", owner_username="leo"))
@@ -45,7 +45,7 @@ def family(monkeypatch):
     client = TestClient(identity_main.app)
 
     def report(battery, charging=None):
-        body = {"latitude": 33.1, "longitude": -111.5, "battery": battery}
+        body = {"latitude": 39.7, "longitude": -105.0, "battery": battery}
         if charging is not None:
             body["charging"] = charging
         assert client.post("/api/users/leo/location", headers=HEADERS, json=body).status_code == 200
@@ -57,7 +57,7 @@ def test_dropping_below_15_tells_the_rest_of_the_family_once(family):
     report, sent = family
     for level in (40, 16, 14, 12, 9):
         report(level)
-    assert sorted(n["user"] for n in sent) == ["jeremiah", "michele"]  # not Leo, not the system account
+    assert sorted(n["user"] for n in sent) == ["alex", "sam"]  # not Leo, not the system account
     notice = sent[0]
     assert notice["category"] == "family_safety" and notice["priority"] == 4
     assert notice["title"] == "Leo's phone is at 14%"
@@ -147,7 +147,7 @@ def test_a_slow_telemetry_does_not_hold_up_the_upload(family, monkeypatch):
     monkeypatch.setattr(battery_alerts, "announce", broken)
     client = TestClient(identity_main.app, raise_server_exceptions=False)
     resp = client.post("/api/users/leo/location", headers=HEADERS,
-                       json={"latitude": 33.1, "longitude": -111.5, "battery": 9})
+                       json={"latitude": 39.7, "longitude": -105.0, "battery": 9})
     assert resp.status_code == 200 and resp.json()["status"] == "SUCCESS"
 
 
@@ -196,12 +196,12 @@ def test_a_late_fix_from_the_phones_backlog_does_not_move_the_current_position(f
 
     monkeypatch.setattr(identity_main, "_forward_location_to_geo", to_geo)
     client = TestClient(identity_main.app)
-    new = {"latitude": 33.5, "longitude": -111.9, "battery": 80, "timestamp": 2_000_000.0}
-    old = {"latitude": 33.1, "longitude": -111.5, "battery": 9, "timestamp": 1_000_000.0}
+    new = {"latitude": 40.1, "longitude": -105.4, "battery": 80, "timestamp": 2_000_000.0}
+    old = {"latitude": 39.7, "longitude": -105.0, "battery": 9, "timestamp": 1_000_000.0}
     assert client.post("/api/users/leo/location", headers=HEADERS, json=new).status_code == 200
     resp = client.post("/api/users/leo/location", headers=HEADERS, json=old)
     assert resp.json()["message"] == "Older fix added to the history"
     held = client.get("/api/users/leo/location", headers=HEADERS).json()
-    assert (held["latitude"], held["battery"]) == (33.5, 80)
+    assert (held["latitude"], held["battery"]) == (40.1, 80)
     assert forwarded == [2_000_000.0, 1_000_000.0]  # both still reach the history
     assert sent == []  # the old 9% reading is not a low-battery alert

@@ -70,11 +70,11 @@ def test_admin_bypasses_without_lookup(monkeypatch):
 def test_own_web_player_is_exempt(monkeypatch):
     lookup = AsyncMock()
     monkeypatch.setattr(ma_scope, "load_entity_permissions", lookup)
-    ma_scope.record_web_player_id("michele", "web-123")
+    ma_scope.record_web_player_id("sam", "web-123")
     result = asyncio.run(
         ma_scope.check_ma_frame_scope(
             _frame(command="player_queues/play_media", queue_id="web-123"),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -86,7 +86,7 @@ def test_frame_without_player_refs_is_untouched(monkeypatch):
     lookup = AsyncMock()
     monkeypatch.setattr(ma_scope, "load_entity_permissions", lookup)
     frame = json.dumps({"message_id": "m9", "command": "music/search", "args": {"search_query": "x"}})
-    assert asyncio.run(ma_scope.check_ma_frame_scope(frame, user="michele", is_admin=False)) is None
+    assert asyncio.run(ma_scope.check_ma_frame_scope(frame, user="sam", is_admin=False)) is None
     lookup.assert_not_called()
 
 
@@ -99,7 +99,7 @@ def test_assigned_player_allowed(monkeypatch):
     result = asyncio.run(
         ma_scope.check_ma_frame_scope(
             _frame(command="player_queues/play_media", queue_id="kitchen"),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -114,7 +114,7 @@ def test_other_players_player_denied(monkeypatch):
     )
     result = asyncio.run(
         ma_scope.check_ma_frame_scope(
-            _frame(message_id="m7", player_id="office"), user="michele", is_admin=False
+            _frame(message_id="m7", player_id="office"), user="sam", is_admin=False
         )
     )
     assert result is not None
@@ -135,7 +135,7 @@ def test_group_with_one_foreign_child_denied(monkeypatch):
                 target_player="kitchen",
                 child_player_ids=["kitchen", "office"],
             ),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -153,7 +153,7 @@ def test_set_members_checks_every_added_and_removed_player(monkeypatch):
         ma_scope.check_ma_frame_scope(
             _frame(command="players/cmd/set_members", target_player="kitchen",
                    player_ids_to_add=["office"], player_ids_to_remove=[]),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -162,7 +162,7 @@ def test_set_members_checks_every_added_and_removed_player(monkeypatch):
         ma_scope.check_ma_frame_scope(
             _frame(command="players/cmd/set_members", message_id="m9", target_player="kitchen",
                    player_ids_to_add=[], player_ids_to_remove=["bedroom"]),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -190,7 +190,7 @@ def test_transfer_checks_both_queues(monkeypatch):
                 source_queue_id="kitchen",
                 target_queue_id="living_room",
             ),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -203,7 +203,7 @@ def test_transfer_checks_both_queues(monkeypatch):
                 source_queue_id="kitchen",
                 target_queue_id="office",
             ),
-            user="michele",
+            user="sam",
             is_admin=False,
         )
     )
@@ -214,7 +214,7 @@ def test_transfer_checks_both_queues(monkeypatch):
 def test_identity_unreachable_fails_open(monkeypatch):
     monkeypatch.setattr(ma_scope, "load_entity_permissions", AsyncMock(return_value=None))
     result = asyncio.run(
-        ma_scope.check_ma_frame_scope(_frame(player_id="office"), user="michele", is_admin=False)
+        ma_scope.check_ma_frame_scope(_frame(player_id="office"), user="sam", is_admin=False)
     )
     assert result is None
 
@@ -258,7 +258,7 @@ class _FakeMaWs:
 
 
 NON_ADMIN = {
-    "user": "michele",
+    "user": "sam",
     "is_admin": False,
     "mass_url": "http://ma:8095",
     "mass_token": "ma-token",

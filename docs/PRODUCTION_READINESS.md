@@ -192,7 +192,7 @@ but never checks who is asking is an open door.
   `usesCleartextTraffic="true"` in the manifest stay. Turning them off would break any phone pointed
   at a plain `http://` LAN server, and Android's network-security-config cannot express "the private
   address ranges are fine", so the choice is a real trade-off rather than an oversight. The household
-  itself uses `https://jarvis.sumemail.com`. The update-URL host check above is the mitigation that
+  itself uses `https://jarvis.example.com`. The update-URL host check above is the mitigation that
   matters most here.
 
 - **LOW - L1: the internal secret is compared in constant time everywhere, and is a header only.**
@@ -233,7 +233,7 @@ renders with no raw-HTML passthrough, so notes and chat are not an XSS surface.
 **Fixed.**
 
 - **BROKEN - A1: anything logged after about 5pm local counted on the next day.** The day boundary
-  was a raw string comparison on `recorded_at`, and the client sends a UTC instant, so a 6pm Phoenix
+  was a raw string comparison on `recorded_at`, and the client sends a UTC instant, so a 6pm local
   glass of water was stored as `...T01:00:00+00:00` on the following date and then counted tomorrow.
   That corrupted today's water ring, the weekly water average, the water streak and the challenge day
   counts, and `_latest_metric` had the same bug for weight and resting heart rate. The service now
@@ -396,7 +396,7 @@ buttons show a busy state instead of inviting a second click.
   sent, which goes away as soon as the real message is in the thread.
 - A phone with the app closed never learned that a call was happening: the in-app banner is a
   client-side poll. Joining a call now sends one push to the room's other members (category `call`,
-  "Michele is on a family call", opening the calls tab), claimed by the first joiner for fifteen
+  "Sam is on a family call", opening the calls tab), claimed by the first joiner for fifteen
   minutes so a group where everybody taps Join does not produce a notice each.
 
 **Open (rough).**
@@ -508,7 +508,7 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     deliberately kept, because the root programs kept it. Verified in the real image and then in the
     running containers after the rebuild: the bundle goes from 148 to 130 certificates,
     `grep -c '^!mozilla/' /etc/ca-certificates.conf` is 18, and TLS still succeeds to github.com,
-    ghcr.io, huggingface.co, pypi.org, cloud.sumemail.com, ha.sumemail.com, jarvis.sumemail.com and
+    ghcr.io, huggingface.co, pypi.org, cloud.example.com, ha.example.com, jarvis.example.com and
     google.com. (The first CI attempt failed because the `RUN` used `$${root}` in a shell loop: Docker
     hands the string to the shell unchanged, so `$$` expanded to the shell's own PID, the `sed` matched
     nothing and the build-time `test` failed silently - a failing `test` prints nothing. It is now one
@@ -526,13 +526,13 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     roots in its shipped `ca-bundle.crt`; that was wrong** - the bundle is generated at install time by
     `update-ca-trust`, so the package does remove them. Verified after the upgrade: `grep -c 'BEGIN
     CERTIFICATE'` is 118 on each host, none of the nineteen distrusted CNs is present, and TLS still
-    succeeds to github.com, ghcr.io, cloud.sumemail.com and jarvis.sumemail.com.
+    succeeds to github.com, ghcr.io, cloud.example.com and jarvis.example.com.
     `scripts/fix_host_trust.sh` remains as the fallback for a host whose package has not caught up (it
     splits the live bundle, matches the same nineteen CNs, blocklists them and rebuilds the store; it
     reports "matched 0 of 19" on both hosts now). Neither host allows passwordless sudo for dnf, so
     these were applied through the docker socket, which is root-equivalent on those boxes anyway:
     `docker run --rm --privileged --pid=host -v /:/host alpine nsenter -t 1 -m -u -i -n -p -- dnf -y
-    upgrade ca-certificates`. The public proxy (192.168.2.30) and Home Assistant (192.168.2.20) are not
+    upgrade ca-certificates`. The public proxy (192.0.2.30) and Home Assistant (192.0.2.20) are not
     reachable over ssh from the dev machine, so their stores are unmeasured.
 15. `pip-audit` on the base image found **18 advisories in three packages** that every Python service
     carried: `filelock 3.32.3` (the `ReadWriteLock`/SQLite symlink issue, `CVE-2026-112940`), `pip 24.0`
@@ -555,20 +555,20 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
 17. The certificate-expiry alert was watching **nothing**: `ALERT_TLS_HOSTS` was empty in the gateway's
     environment and the `alert_tls_hosts` setting was `''`, so the 14-day warning had no hostnames and
     every certificate could have expired unnoticed. It now watches the six the household actually
-    reaches - `jarvis.sumemail.com`, `ha.sumemail.com`, `cloud.sumemail.com`, `abs.sumemail.com`,
-    `search.sumemail.com`, `app.ourskylight.com` - checked live from inside the gateway container:
+    reaches - `jarvis.example.com`, `ha.example.com`, `cloud.example.com`, `abs.example.com`,
+    `search.example.com`, `app.ourskylight.com` - checked live from inside the gateway container:
     `jarvis` 88 days, `ha` **12**, `cloud` **17**, `abs` 88, `search` 76, `app.ourskylight` 40. So the
     alert fired immediately, on the two certificates that were closest.
 
-    **`ha.sumemail.com` really was overdue and is renewed** (2026-10-27): it is a 90-day Let's Encrypt
+    **`ha.example.com` really was overdue and is renewed** (2026-10-27): it is a 90-day Let's Encrypt
     certificate and its renewal window had opened without the renewal happening. Restarting the Home
     Assistant **Let's Encrypt add-on** (`hassio.addon_restart` with `core_letsencrypt`, called through
     the HA API with the household's own token) made certbot run: "Renewing an existing certificate for
-    ha.sumemail.com ... This certificate expires on 2027-01-25". Home Assistant core then needed a
+    ha.example.com ... This certificate expires on 2027-01-25". Home Assistant core then needed a
     restart to serve the new file (`homeassistant.restart`), after which the live check reads **89
     days**.
 
-    **`cloud.sumemail.com` did not need anything**, and an earlier note here was wrong to imply it did:
+    **`cloud.example.com` did not need anything**, and an earlier note here was wrong to imply it did:
     that host issues **45-day** certificates, so 17 days left was mid-life and its own renewal was not
     due for another two days. Measured on the host: the certificate in the Nextcloud AIO apache
     container's Caddy store was issued Sep 29 and expires Nov 13 - exactly 45 days - and Caddy renews at
@@ -577,7 +577,7 @@ Judged as one host, one replica per service, seven users, behind a proxy - not a
     certificate (now 45 days), so nothing is at risk, but the honest conclusion is that this one was
     renewing on schedule.
 
-    `mail.sumemail.com` is deliberately **not** in the list: it does not serve HTTPS on 443 (mailcow
+    `mail.example.com` is deliberately **not** in the list: it does not serve HTTPS on 443 (mailcow
     uses 9443), so it would alert every day and teach everyone to ignore the alert.
 
 A Home Assistant outage used to be invisible too: the two places that hit it on a timer logged at
@@ -907,7 +907,7 @@ Everything here is a deliberate call, not an oversight.
   `usesCleartextTraffic="true"`). Android's network-security-config cannot express "plain HTTP is
   fine for private ranges only", and a phone pointed at a LAN `http://` server URL would stop
   working entirely if it were switched off. The household's own URL is
-  `https://jarvis.sumemail.com`, and the APK updater now refuses any download URL whose host is not
+  `https://jarvis.example.com`, and the APK updater now refuses any download URL whose host is not
   the phone's configured server. **The user-CA half of this is fixed**: the app no longer trusts
   user-installed roots, so only the system store can vouch for a TLS connection.
 - **LOW - the live `.env` holds a GitHub token and a GitLab password.** `.env` is gitignored and

@@ -37,7 +37,7 @@ phones use.
 ## Install (the intended path)
 
 ```
-.\install.ps1   # elevated; asks for the hub URL (default https://ai.sumemail.com),
+.\install.ps1   # elevated; asks for the hub URL (for example https://ai.example.com),
                 # a Jarvis admin/father/mother username + password, and the
                 # child username to assign the PC to
 ```

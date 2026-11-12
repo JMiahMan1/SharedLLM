@@ -88,7 +88,7 @@ DEVICE = {
     "device_key": "abc12345-1234-5678-9012-abcdefabcdef",
     "kind": "phone",
     "registered_by": "self",
-    "owner_username": "jeremiah",
+    "owner_username": "alex",
     "app_build": "25",
 }
 
@@ -118,10 +118,10 @@ class TestRegisterRoute:
         cap = _patch_identity(monkeypatch, payload=DEVICE)
         client.post(
             "/api/user-panel/devices/register",
-            headers={"Authorization": "Bearer jeremiah-token"},
+            headers={"Authorization": "Bearer alex-token"},
             json={"device_key": DEVICE["device_key"]},
         )
-        assert cap["calls"][0]["headers"].get("Authorization") == "Bearer jeremiah-token"
+        assert cap["calls"][0]["headers"].get("Authorization") == "Bearer alex-token"
 
     def test_never_invents_an_identity(self, client, monkeypatch):
         """Inventing one would register the device against the default admin."""
@@ -148,7 +148,7 @@ class TestListingAndAdminRoutes:
 
     def test_assigns_a_device(self, client, monkeypatch):
         cap = _patch_identity(monkeypatch, payload=DEVICE)
-        r = client.patch("/api/user-panel/devices/abc", json={"owner_username": "michele"})
+        r = client.patch("/api/user-panel/devices/abc", json={"owner_username": "sam"})
         assert r.status_code == 200
         assert cap["calls"][0]["verb"] == "patch"
         assert cap["calls"][0]["url"].endswith("/api/user-panel/devices/abc")
@@ -208,7 +208,7 @@ class TestRefusalsAreRelayed:
 def test_battery_history_is_proxied_with_the_callers_token(client, monkeypatch):
     cap = _patch_identity(monkeypatch, payload=[{"at": "2026-10-06T10:00:00", "pct": 80.0}])
     r = client.get("/api/user-panel/devices/esphome:744dbd2c9728/battery?hours=48",
-                   headers={"Authorization": "Bearer jeremiah-token"})
+                   headers={"Authorization": "Bearer alex-token"})
     assert r.status_code == 200
     assert cap["calls"][0]["url"].endswith("/api/user-panel/devices/esphome:744dbd2c9728/battery")
-    assert cap["calls"][0]["headers"].get("Authorization") == "Bearer jeremiah-token"
+    assert cap["calls"][0]["headers"].get("Authorization") == "Bearer alex-token"

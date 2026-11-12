@@ -44,7 +44,7 @@ def targets() -> dict[str, str]:
     abs_url = (os.getenv("AUDIOBOOKSHELF_URL") or "").strip().rstrip("/")
     ma_url = (os.getenv("MA_URL") or os.getenv("MASS_URL") or "").strip().rstrip("/")
     nextcloud_url = (os.getenv("NEXTCLOUD_URL") or "").strip().rstrip("/")
-    gateway_url = (os.getenv("GATEWAY_URL") or "https://jarvis.sumemail.com").strip().rstrip("/")
+    gateway_url = (os.getenv("GATEWAY_URL") or os.getenv("JARVIS_HOST") or "").strip().rstrip("/")
     result: dict[str, str] = {}
     if abs_url:
         result["audiobookshelf"] = f"{abs_url}/ping"
@@ -52,7 +52,8 @@ def targets() -> dict[str, str]:
         result["music_assistant"] = ma_url
     if nextcloud_url:
         result["nextcloud"] = f"{nextcloud_url}/status.php"
-    result["gateway"] = f"{gateway_url}/health"
+    if gateway_url:
+        result["gateway"] = f"{gateway_url}/health"
     return result
 
 

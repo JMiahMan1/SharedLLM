@@ -2,7 +2,7 @@
 
 The same five surfaces as ``test_meal_plan_registry_rows.py``: the allowlist,
 the dispatch map, the single-turn map, the Raven table and the guide, plus the
-capability index. Missing any one makes "give Noah a chore" fail in its own way.
+capability index. Missing any one makes "give Jordan a chore" fail in its own way.
 """
 from __future__ import annotations
 

@@ -156,7 +156,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
     def _make_ctx(self):
         return UserContext(
             user="test",
-            ha_url="http://192.168.2.205:8123",
+            ha_url="http://192.0.2.205:8123",
             ha_token="test_token",
         )
 
@@ -185,7 +185,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
             query="test video",
         )
 
-        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
+        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.0.2.205"):
             await handle_video_play(req)
 
         # Verify the call_service was called with port 8888 URL
@@ -216,7 +216,7 @@ class TestMediaPlaybackRouting(unittest.TestCase):
             query="test video",
         )
 
-        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.168.2.205"):
+        with patch("services.execution.handlers.video.EXECUTION_EXTERNAL_HOST", "192.0.2.205"):
             await handle_video_play(req)
 
         # Verify roku_play_video was called with port 8888 URL
@@ -233,7 +233,7 @@ class TestRokuVideoURL(unittest.TestCase):
         """Roku ECP needs a direct HTTP URL to an MP4 file."""
         from services.config import EXECUTION_EXTERNAL_HOST
         # Even if not set, the format should be correct
-        host = EXECUTION_EXTERNAL_HOST or "192.168.2.205"
+        host = EXECUTION_EXTERNAL_HOST or "192.0.2.205"
         expected = f"http://{host}:8888/media/vid-roku-abc123"
         assert expected.startswith("http://")
         assert ":8888/media/" in expected

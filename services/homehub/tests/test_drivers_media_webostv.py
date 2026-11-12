@@ -51,8 +51,8 @@ class FakeClient:
 
 
 def build(reachable=True, options=None):
-    hub, entry = make_hub("webostv", {"host": "192.168.2.160", "client_secret": "k" * 32},
-                          [{"entity_id": ENT, "unique_id": "0cbb8aba-8c2e-216f-6841-88f0ccffa077"}],
+    hub, entry = make_hub("webostv", {"host": "192.0.2.160", "client_secret": "k" * 32},
+                          [{"entity_id": ENT, "unique_id": "00000000-0000-4000-8000-00000000c003"}],
                           options=options)
     drv = WebOSDriver(hub, entry)
     holder = {}

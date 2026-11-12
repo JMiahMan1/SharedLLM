@@ -361,7 +361,7 @@ class TestUrlAsTitleDetection:
     @pytest.mark.parametrize(
         "value",
         [
-            "1?user=jeremiah&mt=1791056401",
+            "1?user=alex&mt=1791056401",
             "http://abs.local/hls/s/output.m3u8",
             "https://example.com/x.ts?mt=abc",
             "output-0.ts?user=x&mt=y",

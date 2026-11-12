@@ -8,7 +8,7 @@ from services.homehub.drivers.switch_as_x import SwitchAsXDriver
 from services.homehub.tests.conftest import make_hub
 
 SOURCE = "switch.string_lights_front"
-WRAPPER = "light.kauf_plug_d67371_kauf_plug"
+WRAPPER = "light.demo_plug_000001_demo_plug"
 
 
 class FakeSwitchDriver(Driver):
@@ -29,13 +29,13 @@ class FakeSwitchDriver(Driver):
 
 
 def setup_hub(invert: bool = False, target_domain: str = "light", wrapper: str = WRAPPER):
-    hub, entry = make_hub("switch_as_x", {}, [{"entity_id": wrapper, "unique_id": "01KAYEKT4BZJCYGA2NFJMCVBSV"}],
+    hub, entry = make_hub("switch_as_x", {}, [{"entity_id": wrapper, "unique_id": "01J0000000000000000000SWAP"}],
                           options={"entity_id": SOURCE, "invert": invert, "target_domain": target_domain})
     # The wrapped switch belongs to another entry, as it does in the real registry.
     other = ConfigEntry(entry_id="esphome1", domain="esphome")
     hub.config_entries[other.entry_id] = other
     hub.entities[SOURCE] = EntityEntry(entity_id=SOURCE, platform="esphome", config_entry_id="esphome1",
-                                       unique_id="C4:4F:33:D6:73:71/0/switch/Kauf Plug")
+                                       unique_id="02:00:00:00:01:0B/0/switch/Demo Plug")
     switch_driver = FakeSwitchDriver(hub, other)
     hub.drivers[other.entry_id] = switch_driver
     drv = SwitchAsXDriver(hub, entry)

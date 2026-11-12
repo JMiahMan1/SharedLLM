@@ -1,7 +1,7 @@
 """
 Raven Autonomous Agent: Live Integration Tests
 
-These tests hit the actual gateway at http://192.168.2.205:11435 (or localhost:11435)
+These tests hit the actual gateway at JARVIS_LIVE_URL (or localhost:11435)
 and verify the full Raven mission lifecycle works end-to-end with real LLM inference.
 
 User Cases:
@@ -47,10 +47,11 @@ RAVEN_REFLECTION_PROMPT = _env.get(f"PROMPT_{PROMPT_RAVEN_REFLECTION}", "")
 # ============================================================================
 
 # Try multiple gateway endpoints in order: remote → public → Caddy → local
+# JARVIS_LIVE_URL names a deployed gateway (e.g. http://<server>:11435); there is no
+# real default, so without it only a local gateway is tried.
 GATEWAY_ENDPOINTS = [
-    "http://192.168.2.205:11435",
+    *([os.environ["JARVIS_LIVE_URL"].rstrip("/")] if os.getenv("JARVIS_LIVE_URL") else []),
     "http://ai.local:11435",
-    "http://192.168.2.200:11435",
     "http://localhost:11435",
     "http://127.0.0.1:11435",
 ]

@@ -206,7 +206,7 @@ Over-The-Air Updates → **Check Now**, then Download and Install.
 
 ```bash
 # These two SHAs must match.
-curl -s https://jarvis.sumemail.com/api/app-updates/version | python3 -m json.tool
-curl -s -o .tmp/b.zip https://jarvis.sumemail.com/api/app-updates/bundle.zip
+curl -s https://jarvis.example.com/api/app-updates/version | python3 -m json.tool
+curl -s -o .tmp/b.zip https://jarvis.example.com/api/app-updates/bundle.zip
 unzip -p .tmp/b.zip version.json
 ```

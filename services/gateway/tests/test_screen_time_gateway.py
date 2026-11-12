@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from services.gateway import main as gateway_main
 from services.gateway.main import app
 
-NOW = datetime(2026, 10, 21, 16, 0, tzinfo=ZoneInfo("America/Phoenix"))  # a Wednesday
+NOW = datetime(2026, 10, 21, 16, 0, tzinfo=ZoneInfo("Etc/GMT+7"))  # a Wednesday
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
         status = 200
 
         async def json(self, content_type=None):
-            return {"parents": ["dad", "mom"], "display_name": "Zachary", "device": "tablet"}
+            return {"parents": ["dad", "mom"], "display_name": "Morgan", "device": "tablet"}
 
     class _Client:
         async def post(self, url, **kw):
@@ -132,7 +132,7 @@ def test_tamper_reports_tell_the_parents(wired, monkeypatch):
     assert [n["user"] for n in sent] == ["dad", "mom"]
     # Identity names the reporting device's kind: a tablet is never "phone".
     assert sent[0]["title"] == "Tablet protection changed"
-    assert "Zachary's tablet turned off Jarvis's device protection" in sent[0]["body"]
+    assert "Morgan's tablet turned off Jarvis's device protection" in sent[0]["body"]
     assert client.post("/api/guard/tamper", json={"event": "nonsense"}).status_code == 422
     assert client.post("/api/guard/tamper", json={"event": "offline_unlock"}).status_code == 200
     assert "unlocked with a parent's offline code" in sent[-1]["body"]
@@ -150,7 +150,7 @@ def test_ways_around_the_web_filter_are_reported_with_what_they_were(wired, monk
         status = 200
 
         async def json(self, content_type=None):
-            return {"parents": ["dad"], "display_name": "Zachary"}
+            return {"parents": ["dad"], "display_name": "Morgan"}
 
     class _Client:
         async def post(self, url, **kw):

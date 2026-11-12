@@ -15,10 +15,14 @@ import time
 import httpx
 import pytest
 
-SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
+SERVER_IP = os.getenv("SERVER_IP", "")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
 IDENTITY_URL = os.getenv("IDENTITY_URL", f"http://{SERVER_IP}:8001")
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
+
+pytestmark = [
+    pytest.mark.skipif(not SERVER_IP, reason="SERVER_IP is not set (the host running the deployed stack)"),
+]
 
 
 @pytest.fixture

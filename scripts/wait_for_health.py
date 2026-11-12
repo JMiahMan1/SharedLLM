@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import time
@@ -25,7 +26,7 @@ def get_remote_logs():
     print("\nXXX SERVER STARTUP FAILED - FETCHING LOGS XXX")
     try:
         # Fetch last 100 lines to catch startup errors
-        cmd = ["ssh", "jeremiah@ai.local", "docker logs --tail 100 rag"]
+        cmd = ["ssh", os.getenv("DEPLOY_HOST", "ai.local"), "docker logs --tail 100 rag"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         print("--- REMOTE LOGS START ---")
         print(result.stdout)

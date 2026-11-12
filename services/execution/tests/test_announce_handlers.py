@@ -25,7 +25,7 @@ def test_detect_cast_by_app_id():
 
 
 def test_detect_roku_by_entity_id():
-    assert detect_tv_type("media_player.28_tcl_roku_tv", "idle", {}) == "roku"
+    assert detect_tv_type("media_player.bedroom_roku_tv", "idle", {}) == "roku"
 
 
 def test_detect_roku_by_sources():
@@ -35,8 +35,8 @@ def test_detect_roku_by_sources():
 
 
 def test_detect_roku_ma_wrapped_when_off():
-    """When Gracie's Roku TV is off, HA sets app_id=None on the MA entity, leaving active_queue='ROKU_...'."""
-    assert detect_tv_type("media_player.gracies_tv", "off", {
+    """When Taylor's Roku TV is off, HA sets app_id=None on the MA entity, leaving active_queue='ROKU_...'."""
+    assert detect_tv_type("media_player.taylors_tv", "off", {
         "mass_player_type": "player",
         "active_queue": "ROKU_2N0062385487",
     }) == "roku"
@@ -156,7 +156,7 @@ def test_resolve_tv_companions_links_cast_ma_and_satellite():
             "attributes": {"friendly_name": "Office TV Remote"},
         },
         {
-            "entity_id": "assist_satellite.office_jarvis_assist_satellite",
+            "entity_id": "assist_satellite.office_voice_assist_satellite",
             "state": "idle",
             "attributes": {"friendly_name": "Office Jarvis Assist satellite"},
         },
@@ -165,7 +165,7 @@ def test_resolve_tv_companions_links_cast_ma_and_satellite():
     assert comp["cast_sibling"] == "media_player.office_tv_chrome"
     assert comp["ma_sibling"] == "media_player.office_tv_chrome_2"
     assert comp["remote_sibling"] == "remote.office_tv_remote"
-    assert comp["room_assist_satellite"] == "assist_satellite.office_jarvis_assist_satellite"
+    assert comp["room_assist_satellite"] == "assist_satellite.office_voice_assist_satellite"
 
 
 @pytest.mark.asyncio
@@ -197,7 +197,7 @@ async def test_announce_android_tv_routes_audio_to_cast_sibling(monkeypatch):
         "http://ha",
         "token",
         "media_player.office_tv",
-        "http://192.168.2.205:8888/media/test.wav",
+        "http://192.0.2.205:8888/media/test.wav",
         0.6,
         state="on",
         attributes={"supported_features": 153529},
@@ -241,7 +241,7 @@ async def test_announce_webos_sends_toast_and_plays_audio(monkeypatch):
         "http://ha",
         "token",
         "media_player.living_room_tv",
-        "http://192.168.2.205:8888/media/test.wav",
+        "http://192.0.2.205:8888/media/test.wav",
         0.5,
         state="on",
         attributes={},
@@ -290,7 +290,7 @@ async def test_announce_samsung_uses_ma_sibling_even_when_off(monkeypatch):
         "http://ha",
         "token",
         "media_player.loft_tv",
-        "http://192.168.2.205:8888/media/test.wav",
+        "http://192.0.2.205:8888/media/test.wav",
         0.6,
         state="on",
         attributes={},
@@ -347,7 +347,7 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
                 "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv", "supported_features": 153529},
             },
             {
-                "entity_id": "assist_satellite.office_jarvis_assist_satellite",
+                "entity_id": "assist_satellite.office_voice_assist_satellite",
                 "state": "idle",
                 "attributes": {"friendly_name": "Office Jarvis Assist satellite"},
             },
@@ -378,11 +378,11 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
     monkeypatch.setattr("services.execution.handlers.intercom._call_identity", fake_identity)
     monkeypatch.setattr("services.execution.announce_routes.run_announcement", fake_run_ann)
 
-    ctx = UserContext(user="jeremiah", is_admin=True, ha_url="http://ha", ha_token="token")
+    ctx = UserContext(user="alex", is_admin=True, ha_url="http://ha", ha_token="token")
 
-    # Case 1: Office has assist_satellite.office_jarvis_assist_satellite -> 2-way satellite conversation started
+    # Case 1: Office has assist_satellite.office_voice_assist_satellite -> 2-way satellite conversation started
     req_office = SimpleNamespace(
-        caller_user_id="jeremiah",
+        caller_user_id="alex",
         target_user_id=None,
         target_room="office",
         target_entity_ids=["media_player.office_tv"],
@@ -393,12 +393,12 @@ async def test_intercom_start_twoway_uses_room_assist_satellite_and_falls_back_t
     res_office = await handle_intercom_start(req_office, ctx)
     assert res_office.status == "SUCCESS"
     assert res_office.detail["effective_mode"] == "twoway"
-    assert res_office.detail["assist_satellite"] == "assist_satellite.office_jarvis_assist_satellite"
+    assert res_office.detail["assist_satellite"] == "assist_satellite.office_voice_assist_satellite"
     assert any(c[0] == "assist_satellite" and c[1] == "start_conversation" for c in ha_calls)
 
     # Case 2: Living Room TV has no microphone satellite -> automatically falls back to 1-way announcement on TV
     req_lr = SimpleNamespace(
-        caller_user_id="jeremiah",
+        caller_user_id="alex",
         target_user_id=None,
         target_room="living_room",
         target_entity_ids=["media_player.living_room_tv"],
@@ -428,14 +428,14 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
     monkeypatch.setattr("services.execution.announce_handlers._get_device_registry", lambda: None)
     poison = (
         "media_player.id_1_username_default_display_name_shared_default_user_"
-        "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_sumemail_"
-        "com_nextcloud_user_summers_ha_url_https_ha_sumemail_com_github_url_"
-        "github_user_jeremiah_sumemail_com_gitlab_url_git"
+        "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_example_"
+        "com_nextcloud_user_rivera_ha_url_https_ha_example_com_github_url_"
+        "github_user_alex_example_com_gitlab_url_git"
     )
     states = [
         _media_player(poison, '{"username":"default"}\'s Web Player', "unavailable", "speaker", 8320575),
         _media_player("media_player.office_tv", "Office TV Remote", "on", "tv", 153529),
-        _media_player("media_player.office_tv_3", "Office TV", "idle", "speaker", 8320959),
+        _media_player("media_player.den_tv", "Office TV", "idle", "speaker", 8320959),
         _media_player("media_player.office_tv_chrome", "Office TV Cast", "off", None, 152461),
         _media_player("media_player.office_tv_chrome_2", "Office TV", "off", "speaker", 7796671),
         _media_player("media_player.master_bedroom_tv", "Master Bedroom TV", "off", None, 152461),
@@ -444,8 +444,8 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
         _media_player("media_player.master_bedroom_tv_4", "Master Bedroom TV", "unavailable", "speaker", 8320575),
         _media_player("media_player.loft_tv", "Loft TV", "off", "tv", 24381),
         _media_player("media_player.loft_tv_2", "Loft TV", "idle", "speaker", 7796287),
-        _media_player("media_player.gracies_tv", "Gracies TV", "off", "speaker", 7795643),
-        _media_player("media_player.gracies_tv_2", "Gracies TV", "unavailable", "speaker", 7795643),
+        _media_player("media_player.taylors_tv", "Taylors TV", "off", "speaker", 7795643),
+        _media_player("media_player.taylors_tv_2", "Taylors TV", "unavailable", "speaker", 7795643),
         _media_player("media_player.kitchen_speaker", "Kitchen Speaker", "idle", "speaker", 7796287),
     ]
 
@@ -456,18 +456,18 @@ def test_timer_targets_drop_corrupt_and_duplicate_media_players(monkeypatch):
     assert "media_player.office_tv" not in by_id
     assert "media_player.office_tv_chrome" not in by_id
     assert "media_player.office_tv_chrome_2" not in by_id
-    assert "media_player.office_tv_3" in by_id
+    assert "media_player.den_tv" in by_id
     assert "media_player.master_bedroom_tv_2" in by_id
     assert "media_player.master_bedroom_tv_3" not in by_id
     assert "media_player.master_bedroom_tv_4" not in by_id
     assert "media_player.loft_tv_2" in by_id
     assert "media_player.loft_tv" not in by_id
-    assert "media_player.gracies_tv" in by_id
-    assert "media_player.gracies_tv_2" not in by_id
+    assert "media_player.taylors_tv" in by_id
+    assert "media_player.taylors_tv_2" not in by_id
     assert "media_player.kitchen_speaker" in by_id
-    assert by_id["media_player.office_tv_3"]["announce_capable"] is True
-    assert by_id["media_player.office_tv_3"]["supported_features"] == 8320959
+    assert by_id["media_player.den_tv"]["announce_capable"] is True
+    assert by_id["media_player.den_tv"]["supported_features"] == 8320959
     names = [d["name"] for d in devices]
     assert names.count("Office TV") == 1
     assert names.count("Master Bedroom TV") == 1
-    assert names.count("Gracies TV") == 1
+    assert names.count("Taylors TV") == 1

@@ -93,10 +93,10 @@ def test_samsung_without_an_ma_player_keeps_the_tv_path(monkeypatch):
 def test_roku_plays_an_ma_playlist_as_given(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value=None))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.gracies_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
 
-    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.28_tcl_roku_tv", PLAYLIST, "ce-test"))
+    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.bedroom_roku_tv", PLAYLIST, "ce-test"))
 
     assert result.status == "SUCCESS"
     assert [c["service"] for c in recorder.calls] == ["play_media"]
@@ -106,7 +106,7 @@ def test_roku_plays_an_ma_playlist_as_given(monkeypatch):
 def test_roku_with_ip_skips_the_name_search_for_a_uri(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value="192.0.2.10"))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.gracies_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
     monkeypatch.setattr(roku_handler.asyncio, "sleep", AsyncMock())
 
@@ -118,7 +118,7 @@ def test_roku_with_ip_skips_the_name_search_for_a_uri(monkeypatch):
     monkeypatch.setattr(aiohttp, "ClientSession", _NoNetwork)
     monkeypatch.setattr(roku_handler.device_registry, "invalidate_device", AsyncMock())
 
-    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.gracies_tv", PLAYLIST, "ce-test"))
+    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.taylors_tv", PLAYLIST, "ce-test"))
 
     assert result.status == "SUCCESS"
     assert [c["service"] for c in recorder.calls] == ["play_media"]
@@ -135,7 +135,7 @@ def test_ma_uri_type():
 def test_roku_add_to_queue_does_not_relaunch_the_channel(monkeypatch):
     recorder = _CallRecorder()
     monkeypatch.setattr(roku_handler, "get_roku_ip", AsyncMock(return_value="192.0.2.10"))
-    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.gracies_tv"))
+    monkeypatch.setattr(roku_handler, "find_ma_player_sibling", AsyncMock(return_value="media_player.taylors_tv"))
     monkeypatch.setattr(roku_handler.ha_client, "call_service", recorder)
 
     import aiohttp
@@ -145,7 +145,7 @@ def test_roku_add_to_queue_does_not_relaunch_the_channel(monkeypatch):
 
     monkeypatch.setattr(aiohttp, "ClientSession", _launch)
 
-    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.gracies_tv", PLAYLIST, "ce-test", enqueue="add"))
+    result = asyncio.run(roku_handler.roku_play_music(HA_URL, HA_TOKEN, "media_player.taylors_tv", PLAYLIST, "ce-test", enqueue="add"))
 
     assert result.status == "SUCCESS"
     assert recorder.calls[0]["service_data"] == {"media_id": PLAYLIST, "media_type": "playlist", "enqueue": "add"}

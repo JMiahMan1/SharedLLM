@@ -20,7 +20,7 @@ def _owner(session):
 
 
 def test_the_router_login_is_stored_encrypted_and_read_internally(client, session):
-    _seed(client, "router_url", "https://192.168.2.1")
+    _seed(client, "router_url", "https://192.0.2.1")
     _seed(client, "router_user", "jarvis")
     _seed(client, "router_pass", "r0uter-pw")
     owner = _owner(session)
@@ -28,16 +28,16 @@ def test_the_router_login_is_stored_encrypted_and_read_internally(client, sessio
     assert decrypt(owner.router_pass_enc) == "r0uter-pw"
 
     got = client.get("/api/internal/router").json()
-    assert got == {"url": "https://192.168.2.1", "user": "jarvis", "password": "r0uter-pw", "cert_sha256": None}
+    assert got == {"url": "https://192.0.2.1", "user": "jarvis", "password": "r0uter-pw", "cert_sha256": None}
 
     resolved = client.post("/api/resolve", json={"username": "default"}).text
     assert "r0uter-pw" not in resolved and "router_" not in resolved
 
 
 def test_a_new_router_address_drops_the_pinned_certificate(client, session):
-    _seed(client, "router_url", "https://192.168.2.1")
+    _seed(client, "router_url", "https://192.0.2.1")
     _seed(client, "router_cert_sha256", "ab" * 32)
-    _seed(client, "router_url", "https://192.168.2.1")
+    _seed(client, "router_url", "https://192.0.2.1")
     assert _owner(session).router_cert_sha256 == "ab" * 32
     _seed(client, "router_url", "https://10.0.0.1")
     assert _owner(session).router_cert_sha256 is None

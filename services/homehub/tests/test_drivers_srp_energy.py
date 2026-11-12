@@ -10,7 +10,7 @@ from services.homehub.drivers.srp_energy import SrpEnergyDriver, daily_usage
 from services.homehub.tests.conftest import make_hub
 
 # The zone the driver runs in for these tests: the hub's own (conftest's make_hub sets it).
-TZ = __import__("zoneinfo").ZoneInfo("America/Phoenix")
+TZ = __import__("zoneinfo").ZoneInfo("Etc/GMT+7")
 
 ENTRY_ID = "01J5YSDXYK9R57Q5HTQDS96FQK"
 ENTITIES = [{"entity_id": "sensor.srp_energy_home_energy_usage", "unique_id": f"{ENTRY_ID}_total_usage",
@@ -56,7 +56,7 @@ async def test_publishes_last_day_in_kwh():
     assert st.attributes["state_class"] == "total_increasing"
     start, end, is_tou = client.calls[0]
     assert is_tou is True
-    assert (end - start).days == 1 and str(end.tzinfo) == "America/Phoenix"
+    assert (end - start).days == 1 and str(end.tzinfo) == "Etc/GMT+7"
 
 
 async def test_login_failure_raises_on_setup_and_marks_unavailable(caplog):
@@ -121,7 +121,7 @@ def _raw(day: str, hours: range, peak: range) -> list[dict]:
 def test_normalize_builds_totals_from_the_period_columns():
     (row,) = srp.normalize_hourly(tz=TZ, raw=_raw("2026-07-06", range(15, 16), range(14, 20)))
     assert row["kwh"] == 2.0 and row["cost"] == pytest.approx(0.4)
-    assert row["periods"]["on_peak"] == 2.0 and str(row["start"].tzinfo) == "America/Phoenix"
+    assert row["periods"]["on_peak"] == 2.0 and str(row["start"].tzinfo) == "Etc/GMT+7"
 
 
 def test_published_holds_back_unpublished_hours():
@@ -139,7 +139,7 @@ def test_published_holds_back_unpublished_hours():
 async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkeypatch):
     from services.homehub.recorder_statistics import Statistics
 
-    stats = Statistics(str(tmp_path / "s.db"), None, time_zone="America/Phoenix")
+    stats = Statistics(str(tmp_path / "s.db"), None, time_zone="Etc/GMT+7")
     hub, driver = await setup(FakeClient())
     hub.statistics = stats
     raw = _raw("2026-07-06", range(0, 24), range(14, 20)) + _raw("2026-07-07", range(0, 24), range(14, 20))
@@ -196,7 +196,7 @@ async def test_an_account_billed_in_no_period_backfills_once(tmp_path, monkeypat
 
     from services.homehub.recorder_statistics import Statistics
 
-    stats = Statistics(str(tmp_path / "s.db"), None, time_zone="America/Phoenix")
+    stats = Statistics(str(tmp_path / "s.db"), None, time_zone="Etc/GMT+7")
     hub, driver = await setup(FakeClient())
     hub.statistics = stats
     raw = _raw("2026-07-07", range(0, 24), range(0))

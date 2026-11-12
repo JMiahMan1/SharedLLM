@@ -83,7 +83,7 @@ def test_sunday_evening_sends_each_recap_once(wired):
     async def deliver(body):
         sent.append(body)
 
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo("Etc/GMT+7")
     saturday = datetime(2026, 10, 24, 19, 0, tzinfo=tz)
     sunday_noon = datetime(2026, 10, 25, 12, 0, tzinfo=tz)
     sunday_evening = datetime(2026, 10, 25, 18, 5, tzinfo=tz)
@@ -98,15 +98,15 @@ def test_sunday_evening_sends_each_recap_once(wired):
 
 def test_a_tablet_is_called_a_tablet(wired, monkeypatch):
     client, _fake, sent = wired
-    monkeypatch.setitem(KIDS, "kid", {**KIDS["kid"], "display_name": "Noah", "device_kinds": ["tablet"]})
+    monkeypatch.setitem(KIDS, "kid", {**KIDS["kid"], "display_name": "Jordan", "device_kinds": ["tablet"]})
     client.post("/api/telemetry/activity", headers=HEADERS, json=_sms("kid", "i want to die"))
-    assert sent[0]["title"] == "Self-harm or suicide on Noah's tablet"
+    assert sent[0]["title"] == "Self-harm or suicide on Jordan's tablet"
     blocked = guardian._blocked_site_notice("dad", KIDS["kid"], "bad.example", 5, "2026-10-21")
-    assert blocked["title"] == "Blocked site on Noah's tablet"
-    assert blocked["body"].startswith("Noah's tablet tried to open bad.example")
+    assert blocked["title"] == "Blocked site on Jordan's tablet"
+    assert blocked["body"].startswith("Jordan's tablet tried to open bad.example")
     # Nothing known about the child's devices: neither word is guessed.
-    unknown = guardian._blocked_site_notice("dad", {"username": "kid", "display_name": "Noah"}, "x.com", 5, "d")
-    assert unknown["title"] == "Blocked site on Noah's device"
+    unknown = guardian._blocked_site_notice("dad", {"username": "kid", "display_name": "Jordan"}, "x.com", 5, "d")
+    assert unknown["title"] == "Blocked site on Jordan's device"
 
 
 def _with_model(monkeypatch, answer):

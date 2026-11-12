@@ -849,6 +849,15 @@ async def lifespan(app: FastAPI):
     log.info("Gateway initialized with FIFO Inference Queue")
     log.info("Gateway initialized with standardized 45s timeouts")
 
+    # The household time zone: logged once with where it came from. Unset is
+    # not fatal for the whole gateway, but every feature that needs it fails
+    # with the same message naming how to set it.
+    try:
+        from services.common import household_tz as _htz
+        await _htz.refresh("gateway", get_all_settings)
+    except Exception as exc:
+        log.error("gateway: %s", exc)
+
     # Validate critical configuration from Identity
     try:
         settings = await get_all_settings()
@@ -904,7 +913,8 @@ app.add_middleware(
         "http://ai.local:8080",
         "https://ai.local",
         "http://ai.local",
-        "https://jarvis.sumemail.com"
+        # The household's public origin comes from JARVIS_HOST, not from code.
+        *[o for o in ((os.getenv("JARVIS_HOST") or "").strip().rstrip("/"),) if o],
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -1353,17 +1363,16 @@ def is_time_or_date_query(query: str) -> bool:
 
 async def build_time_or_date_response(query: str) -> str:
     """Get timezone from Identity settings at runtime, not hardcoded."""
+    from services.common import household_tz
+    from services.gateway.orchestrator import get_all_settings
+
     try:
-        from services.gateway.orchestrator import get_all_settings
-        settings = await get_all_settings()
-        tz_name = settings.get("timezone", "America/Phoenix")
-    except Exception:
-        tz_name = "America/Phoenix"
-    try:
-        now = datetime.now(ZoneInfo(tz_name))
-    except Exception:
-        now = datetime.now().astimezone()
-        tz_name = str(now.tzinfo or tz_name)
+        tz_name, _source = await household_tz.refresh("gateway", get_all_settings)
+    except household_tz.HouseholdTimeZoneError as exc:
+        log.error("time answer: %s", exc)
+        return ("I don't know the household's time zone yet. An admin can set it in "
+                "Settings > Household time zone, or as TZ in the server's .env.")
+    now = datetime.now(ZoneInfo(tz_name))
 
     q = (query or "").strip().lower()
     wants_time = any(token in q for token in ("time", "clock"))
@@ -2221,8 +2230,8 @@ def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
     """Normalize MA URL for direct connections to the gateway.
 
     Port 8095 is MA's direct HTTP port (never behind Caddy TLS).
-    If the user stored https://ha.sumemail.com:8095, returns ('http', hostname, 8095).
-    If the user stored https://ha.sumemail.com (port 443, through Caddy),
+    If the user stored https://ha.example.com:8095, returns ('http', hostname, 8095).
+    If the user stored https://ha.example.com (port 443, through Caddy),
     returns ('https', hostname, 443).
     """
     parsed = urlparse(mass_url)
@@ -4476,6 +4485,78 @@ async def proxy_update_setting(key: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+# --- Household time zone (docs/CONFIG.md, "Time zone") --------------------------
+
+
+async def _household_tz_status(settings: dict | None) -> dict:
+    from services.common import household_tz
+
+    settings = settings or {}
+    status: dict[str, Any] = {
+        "setting": str(settings.get(household_tz.SETTING_ZONE) or ""),
+        "from_location": str(settings.get(household_tz.SETTING_DERIVE) or "").strip().lower() in ("1", "true", "yes", "on"),
+        "env_tz": (os.getenv("TZ") or os.getenv("TIMEZONE") or ""),
+        "location_set": bool(household_tz._parse_location(settings.get(household_tz.SETTING_LOCATION))),
+        "order": [household_tz.SOURCE_SETTING, household_tz.SOURCE_ENV, household_tz.SOURCE_LOCATION],
+    }
+    try:
+        zone, source = await household_tz.refresh("gateway", lambda: _as_awaitable(settings))
+        status.update({"zone": zone, "source": source, "error": None})
+    except household_tz.HouseholdTimeZoneError as exc:
+        status.update({"zone": None, "source": None, "error": str(exc)})
+    return status
+
+
+async def _as_awaitable(value):
+    return value
+
+
+@app.get("/api/household-timezone")
+async def get_household_timezone(request: Request):
+    """The effective household zone, where it came from, and the admin's inputs."""
+    await _require_admin(request)
+    try:
+        settings = await get_all_settings()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read settings from Identity: {exc}") from exc
+    return await _household_tz_status(settings)
+
+
+@app.put("/api/household-timezone")
+async def put_household_timezone(request: Request):
+    """Set the household zone and/or the derive-from-location option (admin only)."""
+    from services.common import household_tz
+
+    await _require_admin(request)
+    body = await request.json()
+    updates: dict[str, str] = {}
+    if "timezone" in body:
+        zone = str(body.get("timezone") or "").strip()
+        if zone and not household_tz.valid_zone(zone):
+            raise HTTPException(status_code=400, detail=f"{zone!r} is not an IANA time zone (e.g. America/Denver)")
+        updates[household_tz.SETTING_ZONE] = zone
+    if "from_location" in body:
+        updates[household_tz.SETTING_DERIVE] = "true" if body.get("from_location") else "false"
+    if not updates:
+        raise HTTPException(status_code=400, detail="Send timezone and/or from_location")
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        for key, value in updates.items():
+            resp = await client.patch(
+                f"{IDENTITY_SVC}/api/settings/{key}",
+                json={"value": value},
+                headers={"Authorization": auth_header} if auth_header else {},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status >= 400:
+                detail = (await resp.text())[:300]
+                raise HTTPException(status_code=resp.status, detail=f"Identity refused {key}: {detail}")
+    from services.gateway.cache import invalidate_settings
+    invalidate_settings()
+    settings = await get_all_settings()
+    return await _household_tz_status(settings)
+
+
 # --- Arcade (alpaca) game shelf ---------------------------------------------
 
 ARCADE_FEATURED_SETTING_KEY = "arcade_featured_games"
@@ -4555,11 +4636,31 @@ def _rank_arcade_games(games: list, featured_slugs: list, sort: str | None = Non
     }
 
 
+def _arcade_url() -> str:
+    """The arcade's LAN address, or a descriptive error naming the setting."""
+    if not ALPACA_ARCADE_URL:
+        raise RuntimeError(
+            "ALPACA_ARCADE_URL is not set; set it in .env to the alpaca arcade "
+            "(e.g. http://<llm-host>:5001) and restart the gateway"
+        )
+    return ALPACA_ARCADE_URL.rstrip("/")
+
+
+def _arcade_public_url() -> str:
+    """The address browsers open games at, or a descriptive error."""
+    if not ALPACA_ARCADE_PUBLIC_URL:
+        raise RuntimeError(
+            "ALPACA_ARCADE_PUBLIC_URL is not set; set it in .env to the public "
+            "address phones open games at (e.g. https://games.example.com)"
+        )
+    return ALPACA_ARCADE_PUBLIC_URL.rstrip("/")
+
+
 async def _fetch_arcade_games(sort: str | None = None) -> list:
     async with shared_http_client() as client:
         params = {"sort": sort} if sort in ARCADE_SORTS else None
         resp = await client.get(
-            f"{ALPACA_ARCADE_URL}/api/games",
+            f"{_arcade_url()}/api/games",
             params=params,
             timeout=aiohttp.ClientTimeout(total=8.0),
         )
@@ -4577,7 +4678,7 @@ async def _family_published_slugs() -> set[str]:
     is treated as having published none, so nothing unapproved slips through."""
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/family/games", timeout=aiohttp.ClientTimeout(total=8.0))
+            resp = await client.get(f"{_arcade_url()}/api/family/games", timeout=aiohttp.ClientTimeout(total=8.0))
             data = await _safe_json(resp)
     except Exception as exc:
         log.warning("arcade: family states unavailable: %s", exc)
@@ -4635,9 +4736,10 @@ async def proxy_family_games(request: Request):
         "is_admin": is_admin,
     }
     try:
+        _arcade_public_url()
         async with shared_http_client() as client:
             resp = await client.get(
-                f"{ALPACA_ARCADE_URL}/api/family/games",
+                f"{_arcade_url()}/api/family/games",
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
             data = await _safe_json(resp)
@@ -4699,7 +4801,7 @@ async def proxy_family_game_state(slug: str, request: Request):
     try:
         async with shared_http_client() as client:
             resp = await client.post(
-                f"{ALPACA_ARCADE_URL}/api/admin/family/{slug}/state",
+                f"{_arcade_url()}/api/admin/family/{slug}/state",
                 json={"state": state, "by": admin},
                 headers={"X-Arcade-Token": ARCADE_ADMIN_TOKEN},
                 timeout=aiohttp.ClientTimeout(total=8.0),
@@ -4718,7 +4820,7 @@ async def proxy_arcade_live(request: Request):
     await _require_identity_from_request(request)
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/rooms/live", timeout=aiohttp.ClientTimeout(total=6.0))
+            resp = await client.get(f"{_arcade_url()}/api/rooms/live", timeout=aiohttp.ClientTimeout(total=6.0))
             if resp.status != 200:
                 return {"success": False, "arcade_available": True, "rooms": []}
             body = await resp.json()
@@ -4735,7 +4837,7 @@ async def proxy_party_rooms(request: Request):
     await _require_admin(request)
     try:
         async with shared_http_client() as client:
-            resp = await client.get(f"{ALPACA_ARCADE_URL}/api/party/rooms", timeout=aiohttp.ClientTimeout(total=8.0))
+            resp = await client.get(f"{_arcade_url()}/api/party/rooms", timeout=aiohttp.ClientTimeout(total=8.0))
             return await _proxy_json_response(resp)
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=502, detail=f"Arcade unreachable: {exc}") from exc
@@ -4752,7 +4854,7 @@ async def proxy_party_room_end(code: str, request: Request):
     try:
         async with shared_http_client() as client:
             resp = await client.post(
-                f"{ALPACA_ARCADE_URL}/api/party/rooms/{code.upper()}/end",
+                f"{_arcade_url()}/api/party/rooms/{code.upper()}/end",
                 json={},
                 headers={"X-Arcade-Token": ARCADE_ADMIN_TOKEN},
                 timeout=aiohttp.ClientTimeout(total=8.0),
@@ -4813,7 +4915,7 @@ async def proxy_arcade_scoreboard(request: Request):
                 per_game: list[dict] = []
                 try:
                     resp = await client.get(
-                        f"{ALPACA_ARCADE_URL}/api/players/{initials}",
+                        f"{_arcade_url()}/api/players/{initials}",
                         params={"player_id": username, "collection": collection},
                         timeout=aiohttp.ClientTimeout(total=8.0),
                     )
@@ -4839,7 +4941,7 @@ async def proxy_arcade_scoreboard(request: Request):
                         ]
                 except (aiohttp.ClientError, ValueError, TypeError):
                     pass
-                player_url = f"{ALPACA_ARCADE_PUBLIC_URL}/player/{initials}"
+                player_url = f"{_arcade_public_url()}/player/{initials}"
                 if collection == "family":
                     player_url += "?collection=family"
                 return {
@@ -4885,7 +4987,7 @@ async def proxy_arcade_score(slug: str, request: Request):
     try:
         async with shared_http_client() as client:
             resp = await client.post(
-                f"{ALPACA_ARCADE_URL}/api/games/{slug}/scores",
+                f"{_arcade_url()}/api/games/{slug}/scores",
                 json={
                     "initials": initials,
                     "score": score,
@@ -4911,7 +5013,7 @@ async def proxy_arcade_highscores(request: Request):
     try:
         async with shared_http_client() as client:
             resp = await client.get(
-                f"{ALPACA_ARCADE_URL}/api/highscores",
+                f"{_arcade_url()}/api/highscores",
                 params={"collection": _arcade_collection(request)},
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
@@ -4955,6 +5057,7 @@ async def proxy_arcade_games(request: Request = None):
     if sort not in ARCADE_SORTS:
         sort = None
     try:
+        _arcade_public_url()
         games = await _fetch_arcade_games(sort)
         # Benchmark games are shown only once they are published to the family.
         published = await _family_published_slugs()
@@ -5021,7 +5124,7 @@ async def proxy_arcade_rate(slug: str, request: Request):
     try:
         async with shared_http_client() as client:
             resp = await client.post(
-                f"{ALPACA_ARCADE_URL}/api/games/{slug}/rate",
+                f"{_arcade_url()}/api/games/{slug}/rate",
                 json={"stars": stars, "initials": initials},
                 timeout=aiohttp.ClientTimeout(total=8.0),
             )
@@ -5045,7 +5148,7 @@ def _arcade_stage_url(room_code: str, game: str = "") -> str:
     put the arcade's own stage pages on a household TV.
     """
     code = re.sub(r"[^A-Za-z0-9]", "", room_code or "").upper()[:8]
-    base = ALPACA_ARCADE_PUBLIC_URL.rstrip("/")
+    base = _arcade_public_url()
     path = _ARCADE_STAGE_PATHS.get(str(game or "").strip().lower(), "/tv")
     return f"{base}{path}/{code}" if code else f"{base}{path}"
 
@@ -6605,7 +6708,7 @@ async def get_sleep_estimate(request: Request, night: str):
             headers=headers,
         )
         nights = ((await resp.json(content_type=None)) or {}).get("nights") or [] if resp.status == 200 else []
-    estimate = estimate_night(nights, night, os.getenv("TIMEZONE") or "UTC")
+    estimate = estimate_night(nights, night, _household_tz_name())
     return {"status": "SUCCESS", "estimate": estimate, "devices": len(devices)}
 
 
@@ -6801,15 +6904,22 @@ async def get_activity_recommendation(request: Request):
     if await _lane_blocked(user, "activity"):
         return {"status": "SUCCESS", "recommendation": None, "blocked": True}
     usage = await _own_telemetry(user, "usage", {"days": 7})
-    return {"status": "SUCCESS", "recommendation": recommend_activity(usage, os.getenv("TIMEZONE") or "UTC")}
+    return {"status": "SUCCESS", "recommendation": recommend_activity(usage, _household_tz_name())}
 
 
 # --- screen time (Phase 11 step 4): identity owns the rules and who may
 # touch them; the gateway adds the live status and tells people. ---
 
 
+def _household_tz_name() -> str:
+    """The household zone (services/common/household_tz.py); raises with how to set it."""
+    from services.common import household_tz
+
+    return household_tz.zone_name()
+
+
 def _household_now() -> datetime:
-    return datetime.now(ZoneInfo(os.getenv("TIMEZONE") or "UTC"))
+    return datetime.now(ZoneInfo(_household_tz_name()))
 
 
 async def _identity_as_caller(request: Request, method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
@@ -15731,7 +15841,7 @@ async def _active_minutes_week(request: Request, day: str | None = None) -> dict
     health store; this composes them without copying anything into either.
     A source that cannot be reached is named in ``unavailable``.
     """
-    tz = ZoneInfo(os.getenv("TIMEZONE") or "UTC")
+    tz = ZoneInfo(_household_tz_name())
     today = date.fromisoformat(day) if day else _household_now().date()
     target, viewer, is_admin = await _read_target(request, None)
     days_back = (today - _active_minutes.week_start(today)).days + 1
@@ -16271,7 +16381,11 @@ async def get_app_update_version(request: Request):
 
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    if "sumemail.com" in host or request.headers.get("x-forwarded-ssl") == "on":
+    # The configured public host (JARVIS_HOST) is always served over https.
+    _public = urlparse((os.getenv("JARVIS_HOST") or "").strip())
+    _public_host = (_public.hostname or "").lower() if _public.scheme == "https" else ""
+    _req_host = host.split(":", 1)[0].lower()
+    if (_public_host and (_req_host == _public_host or _req_host.endswith("." + _public_host))) or request.headers.get("x-forwarded-ssl") == "on":
         scheme = "https"
     base_url = f"{scheme}://{host}"
 
@@ -17734,7 +17848,7 @@ async def proxy_device_pair(request: Request):
 
 
 def _public_origin(request: Request) -> str:
-    """The address the user reached Jarvis at, e.g. https://jarvis.sumemail.com.
+    """The address the user reached Jarvis at, e.g. https://jarvis.example.com.
 
     A device paired from here is given this same address to call Jarvis on, so
     nothing has to be configured: Caddy forwards the scheme and host the

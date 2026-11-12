@@ -4,15 +4,15 @@ from datetime import UTC, datetime
 from services.control_plane import osrm_map
 
 FILE = """# comment
-https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf
+https://download.geofabrik.de/north-america/us/colorado-latest.osm.pbf
 """
 NM = {"name": "New Mexico", "url": "https://download.geofabrik.de/north-america/us/new-mexico-latest.osm.pbf"}
-AZ = {"name": "Arizona", "url": "https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf"}
+CO = {"name": "Colorado", "url": "https://download.geofabrik.de/north-america/us/colorado-latest.osm.pbf"}
 
 
 def test_only_missing_geofabrik_regions_are_added():
     evil = {"name": "x", "url": "https://evil.example/x.osm.pbf"}
-    assert osrm_map.missing_regions(FILE, [AZ, NM, NM, evil]) == [NM]
+    assert osrm_map.missing_regions(FILE, [CO, NM, NM, evil]) == [NM]
 
 
 def test_extend_commits_the_missing_region(monkeypatch):

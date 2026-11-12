@@ -88,7 +88,7 @@ def get_local_subnet() -> str:
         raise RuntimeError(
             "Could not determine this host's subnet, so device discovery has "
             "nothing to scan. Set SCAN_SUBNET (or LOCAL_SUBNET) to the /24 to "
-            "scan, e.g. 192.168.2.0/24, or fix the host's networking."
+            "scan, e.g. 192.0.2.0/24, or fix the host's networking."
         ) from None
 
 
@@ -525,7 +525,7 @@ async def _discover_via_arp_scan(
         try:
             net = ipaddress.IPv4Network(local_subnet, strict=False)
             subnets = [local_subnet]
-            # The /24s either side (on 192.168.2.0/24: 192.168.1.0/24 and 192.168.3.0/24).
+            # The /24s either side (on 192.0.2.0/24: 192.0.1.0/24 and 192.0.3.0/24).
             base = list(net.network_address.packed)
             for d in (-1, 1):
                 if 0 <= base[2] + d <= 255:
@@ -598,7 +598,7 @@ async def _discover_via_snmp(
 ) -> dict | None:
     """Get MAC/IP from router ARP table via SNMP walk.
 
-    The router used to default to one install's gateway (192.168.2.1), so on any
+    The router used to default to one install's gateway address, so on any
     other network the walk targeted a host that is not a router. ROUTER_IP is the
     configured answer; without it this strategy declines rather than walking a
     stranger's router, and the other discovery paths still run.

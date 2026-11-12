@@ -27,7 +27,7 @@ def _reset_config_tz_cache():
 
 def test_created_at_in_config_tz_converts_utc_to_config_tz():
     # Stored UTC naive -> emitted as offset-aware ISO in configured tz.
-    with patch.object(rt, "get_config_timezone", return_value="America/Phoenix"):
+    with patch.object(rt, "get_config_timezone", return_value="Etc/GMT+7"):
         # 2026-07-18T00:00:00Z should become 2026-07-17T17:00:00-07:00
         utc = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
         out = rt._created_at_in_config_tz(utc)
@@ -37,7 +37,7 @@ def test_created_at_in_config_tz_converts_utc_to_config_tz():
 
 
 def test_created_at_naive_treated_as_utc():
-    with patch.object(rt, "get_config_timezone", return_value="America/Phoenix"):
+    with patch.object(rt, "get_config_timezone", return_value="Etc/GMT+7"):
         naive = datetime(2026, 7, 18, 0, 0, 0)  # no tzinfo -> assumed UTC
         out = rt._created_at_in_config_tz(naive)
         assert out is not None
@@ -50,7 +50,7 @@ def test_created_at_none_returns_none():
 
 
 def test_workspace_to_dict_emits_config_tz_created_at():
-    with patch.object(rt, "get_config_timezone", return_value="America/Phoenix"):
+    with patch.object(rt, "get_config_timezone", return_value="Etc/GMT+7"):
         ws = MagicMock()
         ws.model_dump.return_value = {"id": "t1", "display_name": "T"}
         ws.webhook_token_enc = None

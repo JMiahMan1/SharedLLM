@@ -96,7 +96,7 @@ def timer():
     now = datetime.now(UTC)
     return {
         "id": "timer-1",
-        "user_id": "jeremiah",
+        "user_id": "alex",
         "title": "Monthly power report",
         "expires_at": (now - timedelta(minutes=1)).isoformat(),
         "active": True,
@@ -113,7 +113,7 @@ def client(monkeypatch):
 
 
 def test_default_dispatch_targets_execution_trigger():
-    t = {"id": "x", "user_id": "jeremiah"}
+    t = {"id": "x", "user_id": "alex"}
     method, url, payload = automation._resolve_dispatch(t)
     assert method == "POST"
     assert url == f"{automation.EXECUTION_SVC}/execute/trigger"
@@ -123,7 +123,7 @@ def test_default_dispatch_targets_execution_trigger():
 def test_explicit_target_resolves_allowlisted_service():
     t = {
         "id": "x",
-        "user_id": "jeremiah",
+        "user_id": "alex",
         "target": {
             "service": "geo",
             "path": "/health-reports/run",
@@ -136,7 +136,7 @@ def test_explicit_target_resolves_allowlisted_service():
     assert payload["period"] == "monthly"
     # the timer is always forwarded so the target can attribute the run
     assert payload["timer"] == t
-    assert payload["user_id"] == "jeremiah"
+    assert payload["user_id"] == "alex"
 
 
 def test_target_rejects_unknown_service():
@@ -158,7 +158,7 @@ def test_target_rejects_bad_method():
 
 
 async def test_successful_one_shot_deletes_timer_and_records_history(rc, timer, client):
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     await rc.set(key, json.dumps(timer))
 
     await automation._fire_timer(rc, key, timer)
@@ -171,7 +171,7 @@ async def test_successful_one_shot_deletes_timer_and_records_history(rc, timer, 
 
 async def test_successful_recurring_timer_reschedules(rc, timer, client):
     timer["recurrence"] = "monthly"
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     await rc.set(key, json.dumps(timer))
 
     await automation._fire_timer(rc, key, timer)
@@ -191,7 +191,7 @@ async def test_failure_retries_with_exponential_backoff(rc, timer, monkeypatch):
             return FakeResponse(status=503, text="unavailable")
 
     monkeypatch.setattr(automation, "_get_client", lambda timeout=10.0: FailingClient())
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     await rc.set(key, json.dumps(timer))
 
     await automation._fire_timer(rc, key, timer)
@@ -214,7 +214,7 @@ async def test_failure_exhaustion_parks_timer(rc, timer, monkeypatch):
             return FakeResponse(status=500, text="boom")
 
     monkeypatch.setattr(automation, "_get_client", lambda timeout=10.0: FailingClient())
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     timer["max_attempts"] = 2
     await rc.set(key, json.dumps(timer))
 
@@ -238,7 +238,7 @@ async def test_network_error_is_retried_not_lost(rc, timer, monkeypatch):
             raise ConnectionResetError("alpaca went away")
 
     monkeypatch.setattr(automation, "_get_client", lambda timeout=10.0: BoomClient())
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     await rc.set(key, json.dumps(timer))
 
     await automation._fire_timer(rc, key, timer)
@@ -251,7 +251,7 @@ async def test_network_error_is_retried_not_lost(rc, timer, monkeypatch):
 
 async def test_invalid_target_parks_immediately_without_retry(rc, timer):
     timer["target"] = {"service": "not-allowed", "path": "/x"}
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     await rc.set(key, json.dumps(timer))
 
     await automation._fire_timer(rc, key, timer)
@@ -263,7 +263,7 @@ async def test_invalid_target_parks_immediately_without_retry(rc, timer):
 
 
 async def test_run_history_is_capped(rc, timer, client):
-    key = "timer:jeremiah:timer-1"
+    key = "timer:alex:timer-1"
     timer["recurrence"] = "daily"
     for _ in range(automation.HISTORY_MAX_ENTRIES + 5):
         await automation._fire_timer(rc, key, timer)
@@ -323,7 +323,7 @@ async def test_collect_status_counts_due_and_failed(rc, timer):
     failed["active"] = False
     failed["failed"] = True
     for t in (due, future, failed):
-        await rc.set(f"timer:jeremiah:{t['id']}", json.dumps(t))
+        await rc.set(f"timer:alex:{t['id']}", json.dumps(t))
 
     status = await automation._collect_status(rc)
     assert status["active_timers"] == 2
@@ -382,17 +382,17 @@ async def _run_one_scheduler_pass(rc, monkeypatch):
 
 async def test_scheduler_loop_actually_fires_a_due_timer(rc, timer, monkeypatch):
     for t in (timer,):
-        await rc.set(f"timer:jeremiah:{t['id']}", json.dumps(t))
+        await rc.set(f"timer:alex:{t['id']}", json.dumps(t))
 
     fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
 
-    assert fired == [f"timer:jeremiah:{timer['id']}"]
+    assert fired == [f"timer:alex:{timer['id']}"]
 
 
 async def test_scheduler_loop_leaves_a_future_timer_alone(rc, timer, monkeypatch):
     future = dict(timer)
     future["expires_at"] = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-    await rc.set(f"timer:jeremiah:{future['id']}", json.dumps(future))
+    await rc.set(f"timer:alex:{future['id']}", json.dumps(future))
 
     fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
 
@@ -403,7 +403,7 @@ async def test_scheduler_loop_sleeps_until_the_next_due_timer(rc, timer, monkeyp
     """A future timer must shorten the sleep, or the loop polls at the cap."""
     soon = dict(timer)
     soon["expires_at"] = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
-    await rc.set(f"timer:jeremiah:{soon['id']}", json.dumps(soon))
+    await rc.set(f"timer:alex:{soon['id']}", json.dumps(soon))
 
     _fired, sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
 
@@ -431,10 +431,10 @@ async def test_scheduler_loop_iterates_timer_keys_asynchronously(rc, timer, monk
 
 async def test_a_malformed_timer_does_not_stop_the_others_firing(rc, timer, monkeypatch):
     """One bad row (bad JSON / no expires_at) used to abort every pass."""
-    await rc.set("timer:jeremiah:aaa-broken", "{not json")
-    await rc.set("timer:jeremiah:bbb-noexpiry", json.dumps({"id": "x", "active": True}))
-    await rc.set(f"timer:jeremiah:{timer['id']}", json.dumps(timer))
+    await rc.set("timer:alex:aaa-broken", "{not json")
+    await rc.set("timer:alex:bbb-noexpiry", json.dumps({"id": "x", "active": True}))
+    await rc.set(f"timer:alex:{timer['id']}", json.dumps(timer))
 
     fired, _sleeps = await _run_one_scheduler_pass(rc, monkeypatch)
 
-    assert fired == [f"timer:jeremiah:{timer['id']}"]
+    assert fired == [f"timer:alex:{timer['id']}"]

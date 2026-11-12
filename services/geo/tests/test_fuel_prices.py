@@ -47,7 +47,7 @@ async def test_daily_refresh_updates_regular_and_diesel(monkeypatch):
 
     async def prices(location, *, use_cache=True):
         calls.append((location, use_cache))
-        return {"source": "Phoenix metro daily average", "prices": {"regular": 3.49, "diesel": 4.29}}
+        return {"source": "Springfield metro daily average", "prices": {"regular": 3.49, "diesel": 4.29}}
 
     monkeypatch.setattr(geo, "_fuel_prices_for_location", prices)
     result = await geo._refresh_fuel_prices(redis, now=datetime(2026, 10, 20, 5, 0))
@@ -58,7 +58,7 @@ async def test_daily_refresh_updates_regular_and_diesel(monkeypatch):
     truck = json.loads(redis.hashes["geo:vehicles"]["truck"])
     assert car["cost_per_gallon"] == 3.49
     assert truck["cost_per_gallon"] == 4.29
-    assert car["fuel_price_source"] == "Phoenix metro daily average"
+    assert car["fuel_price_source"] == "Springfield metro daily average"
     assert car["fuel_price_updated_at"].startswith("2026-10-20T05:00")
     assert redis.data[geo._FUEL_PRICE_DAILY_KEY] == "2026-10-20"
 
@@ -72,18 +72,18 @@ async def test_daily_refresh_uses_the_home_zone_without_a_saved_zip(monkeypatch)
     seen = []
 
     async def home():
-        return "33.1667,-111.5646"
+        return "39.7392,-104.9903"
 
     async def prices(location, *, use_cache=True):
         seen.append(location)
-        return {"source": "Arizona state average", "prices": {"regular": 3.25}}
+        return {"source": "Colorado state average", "prices": {"regular": 3.25}}
 
     monkeypatch.setattr(geo, "_home_fuel_location", home)
     monkeypatch.setattr(geo, "_fuel_prices_for_location", prices)
     result = await geo._refresh_fuel_prices(redis, now=datetime(2026, 10, 20, 5, 0))
 
     assert result["updated"] == 1
-    assert seen == ["33.1667,-111.5646"]
+    assert seen == ["39.7392,-104.9903"]
     assert json.loads(redis.hashes["geo:vehicles"]["car"])["cost_per_gallon"] == 3.25
 
 
@@ -116,7 +116,7 @@ async def test_daily_refresh_runs_only_once_per_day(monkeypatch):
 
     async def prices(location, *, use_cache=True):
         calls.append(location)
-        return {"source": "Arizona state average", "prices": {"regular": 3.25}}
+        return {"source": "Colorado state average", "prices": {"regular": 3.25}}
 
     monkeypatch.setattr(geo, "_fuel_prices_for_location", prices)
     first = await geo._refresh_fuel_prices(redis, now=datetime(2026, 10, 20, 5, 0))

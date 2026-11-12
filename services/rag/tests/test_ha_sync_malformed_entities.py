@@ -26,9 +26,9 @@ POISON_ID = "media_player." + ("id_1_username_default_display_name_" * 34)
 # still carries this serialized user record in that truncated form.
 TRUNCATED_POISON_ID = (
     "media_player.id_1_username_default_display_name_shared_default_user_"
-    "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_sumemail_"
-    "com_nextcloud_user_summers_ha_url_https_ha_sumemail_com_github_url_"
-    "github_user_jeremiah_sumemail_com_gitlab_url_git"
+    "is_admin_true_is_system_default_true_nextcloud_url_https_cloud_example_"
+    "com_nextcloud_user_rivera_ha_url_https_ha_example_com_github_url_"
+    "github_user_alex_example_com_gitlab_url_git"
 )
 
 

@@ -14,8 +14,8 @@ def session_fixture():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        session.add(User(username="jeremiah"))
-        session.add(User(username="michele"))
+        session.add(User(username="alex"))
+        session.add(User(username="sam"))
         session.commit()
         yield session
 
@@ -30,7 +30,7 @@ def _act_as(username: str) -> None:
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     identity_main.engine = session.bind
-    _act_as("jeremiah")
+    _act_as("alex")
     yield TestClient(app)
     app.dependency_overrides = {}
 
@@ -64,7 +64,7 @@ def test_the_list_is_per_workspace_and_newest_first(client):
 
 def test_someone_elses_chat_does_not_exist_for_you(client):
     chat = client.post("/api/users/me/workspace-chats", json={"workspace_id": "sermon"}).json()
-    _act_as("michele")
+    _act_as("sam")
     assert client.get(f"/api/users/me/workspace-chats/{chat['id']}").status_code == 404
     assert client.post(f"/api/users/me/workspace-chats/{chat['id']}/messages",
                        json={"role": "user", "parts": []}).status_code == 404

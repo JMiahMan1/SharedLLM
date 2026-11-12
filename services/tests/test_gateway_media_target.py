@@ -9,7 +9,7 @@ def test_resolve_media_target_prefers_same_name_music_assistant_queue():
             "attributes": {"friendly_name": "Office TV", "device_class": "speaker"},
         },
         {
-            "entity_id": "media_player.office_tv_3",
+            "entity_id": "media_player.den_tv",
             "state": "playing",
             "attributes": {
                 "friendly_name": "Office TV",
@@ -30,7 +30,7 @@ def test_resolve_media_target_prefers_same_name_music_assistant_queue():
 
     target = resolve_media_target("Play Brandon Lake on Office TV", entities)
 
-    assert target == "media_player.office_tv_3"
+    assert target == "media_player.den_tv"
 
 
 def test_resolve_media_target_matches_queue_when_requested_name_contains_suffix():
@@ -41,7 +41,7 @@ def test_resolve_media_target_matches_queue_when_requested_name_contains_suffix(
             "attributes": {"friendly_name": "Office TV Remote", "device_class": "tv"},
         },
         {
-            "entity_id": "media_player.office_tv_3",
+            "entity_id": "media_player.den_tv",
             "state": "idle",
             "attributes": {
                 "friendly_name": "Office TV",
@@ -53,7 +53,7 @@ def test_resolve_media_target_matches_queue_when_requested_name_contains_suffix(
 
     target = resolve_media_target("Play jazz on the Office TV Remote", entities)
 
-    assert target == "media_player.office_tv_3"
+    assert target == "media_player.den_tv"
 
 
 def test_resolve_media_target_rejects_nearby_non_matching_music_assistant_queue():

@@ -333,7 +333,7 @@ class DNSResolver:
                     # flips automatically when the available device changes.
                     # Checked together, not one after another: six candidates
                     # at ~1s each took longer than a resolver waits, so the
-                    # name timed out (seen for jeremiah-home-desktop.local).
+                    # name timed out (seen for a desktop .local host).
                     up = await asyncio.gather(*(self._is_reachable(ip) for ip in ips))
                     reachable = [ip for ip, ok in zip(ips, up, strict=False) if ok]
                     key = name.lower()
@@ -470,7 +470,7 @@ class DNSResolver:
 class _DNSClient:
     """Forwards lookups the resolver cannot answer itself.
 
-    ``server`` may list several upstreams ("192.168.2.1,8.8.8.8"). Each query
+    ``server`` may list several upstreams ("192.0.2.1,8.8.8.8"). Each query
     goes to all of them at once and the first answer wins, so one slow or
     lossy upstream no longer turns into a timeout for the container asking --
     the LAN upstream drops roughly one lookup in ten. Answers are cached for

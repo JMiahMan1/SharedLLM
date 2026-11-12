@@ -102,7 +102,7 @@ async def test_browser_automation_returns_text_and_a_screenshot(monkeypatch):
 
     result = await browser_automation.handle_browser_automation(
         BrowserAutomationRequest(
-            user_context=UserContext(user="jeremiah"),
+            user_context=UserContext(user="alex"),
             url="https://example.test/login",
             actions=[
                 BrowserAction(type="type", selector="#email", text="a@b.test"),
@@ -130,7 +130,7 @@ async def test_browser_automation_explains_a_missing_playwright(monkeypatch):
 
     result = await browser_automation.handle_browser_automation(
         BrowserAutomationRequest(
-            user_context=UserContext(user="jeremiah"),
+            user_context=UserContext(user="alex"),
             url="https://example.test/",
             screenshot=False,
         )

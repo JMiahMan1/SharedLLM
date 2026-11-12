@@ -22,7 +22,7 @@ def session_fixture():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(User(id=1, username="default", display_name="Admin", is_admin=True, is_system_default=True))
-        session.add(User(id=2, username="michele", display_name="Michele"))
+        session.add(User(id=2, username="sam", display_name="Sam"))
         session.commit()
         yield session
 
@@ -38,7 +38,7 @@ def _act_as(username: str) -> None:
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     identity_main.engine = session.bind
-    _act_as("michele")
+    _act_as("sam")
     yield TestClient(app)
     app.dependency_overrides = {}
 
@@ -52,7 +52,7 @@ def test_protected_branches_round_trip_as_a_list(client):
 
 def test_omitting_protected_branches_leaves_them_alone(client):
     client.patch("/api/users/me", json={"forbidden_branches": ["main"]})
-    client.patch("/api/users/me", json={"github_user": "michele"})
+    client.patch("/api/users/me", json={"github_user": "sam"})
     assert client.get("/api/users/me").json()["forbidden_branches"] == ["main"]
 
 
@@ -65,7 +65,7 @@ def test_clear_fields_erases_protected_branches(client):
 def test_resolve_carries_protected_branches_to_the_runtime(client):
     client.patch("/api/users/me", json={"forbidden_branches": ["main", "master"]})
 
-    resp = client.post("/api/resolve", json={"rag_user": "michele"})
+    resp = client.post("/api/resolve", json={"rag_user": "sam"})
 
     assert resp.status_code == 200
     assert resp.json()["forbidden_branches"] == ["main", "master"]

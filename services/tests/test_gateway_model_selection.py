@@ -73,10 +73,11 @@ LIBRARIAN_MODEL = TEST_SETTINGS.get("librarian_model") or "test-librarian-model"
 
 
 # Live gateway detection for integration tests
+# JARVIS_LIVE_URL names a deployed gateway (e.g. http://<server>:11435); there is no
+# real default, so without it only a local gateway is tried.
 LIVE_GATEWAY_ENDPOINTS = [
-    "http://192.168.2.205:11435",
+    *([os.environ["JARVIS_LIVE_URL"].rstrip("/")] if os.getenv("JARVIS_LIVE_URL") else []),
     "http://ai.local:11435",
-    "http://192.168.2.200:11435",
     "http://localhost:11435",
     "http://127.0.0.1:11435",
 ]

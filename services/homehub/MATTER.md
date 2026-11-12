@@ -3,7 +3,7 @@
 homehub does not speak Matter itself. `drivers/matter.py` (`MatterDriver`) is a
 WebSocket client of the Matter Server, the same server Home Assistant used. The
 server holds the fabric (root CA, the controller's credentials, each node's data);
-we run it on the Jarvis host (192.168.2.205) with a copy of Home Assistant's
+we run it on the Jarvis host (192.0.2.205) with a copy of Home Assistant's
 storage, and the 14 bulbs keep working without being re-paired.
 
 ## Which server, which version
@@ -39,8 +39,8 @@ because that means the server made a new, empty fabric.
 
 ## Where to copy the storage from
 
-**The export copy is empty**: `/home/jeremiah/ha-export/2026-11-11/supervisor/apps/data/core_matter_server/`
-on 192.168.2.43 is a root-owned directory with no files in it. Copy from the
+**The export copy is empty**: `/home/<user>/ha-export/2026-11-11/supervisor/apps/data/core_matter_server/`
+on 192.0.2.43 is a root-owned directory with no files in it. Copy from the
 read-only mount instead:
 `/mnt/haos-data/supervisor/apps/data/core_matter_server/` (sudo on .43). Its
 matter.js directories were last written 2026-11-11, i.e. when HA last ran.
@@ -62,9 +62,9 @@ the other one's messages are rejected as replays until it catches up.
   own.
 - Keep one untouched tarball of the copy (below) as the rollback point.
 
-## Host checks on 192.168.2.205 (read-only, done 2026-11-11)
+## Host checks on 192.0.2.205 (read-only, done 2026-11-11)
 
-- `enp1s0` (192.168.2.205/24) has an IPv6 link-local address
+- `enp1s0` (192.0.2.205/24) has an IPv6 link-local address
   (`fe80::f942:4c9b:849c:4bce/64`) and no global IPv6 address; the only IPv6
   route is `fe80::/64`. `disable_ipv6=0`, `forwarding=0`.
 - `accept_ra=0` on enp1s0 is NetworkManager's normal setting (it handles router
@@ -93,13 +93,13 @@ the other one's messages are rejected as replays until it catches up.
 
 ```bash
 # A rollback tarball first, kept off both servers.
-ssh jeremiah@192.168.2.43 'sudo tar -C /mnt/haos-data/supervisor/apps/data -cpzf - core_matter_server' \
+ssh <user>@192.0.2.43 'sudo tar -C /mnt/haos-data/supervisor/apps/data -cpzf - core_matter_server' \
   > ~/matter-storage-2026-11-11.tgz
 tar -tzf ~/matter-storage-2026-11-11.tgz | grep -c . # sanity: a few hundred entries, server-2-134b/ among them
 
 # Then onto the Jarvis host. The container runs as uid 1000.
-ssh jeremiah@192.168.2.205 'sudo mkdir -p /srv/matter-server/data'
-cat ~/matter-storage-2026-11-11.tgz | ssh jeremiah@192.168.2.205 \
+ssh <user>@192.0.2.205 'sudo mkdir -p /srv/matter-server/data'
+cat ~/matter-storage-2026-11-11.tgz | ssh <user>@192.0.2.205 \
   'sudo tar -C /srv/matter-server/data --strip-components=1 -xpzf - \
    && sudo chown -R 1000:1000 /srv/matter-server/data \
    && sudo chmod -R u+rwX,go-rwx /srv/matter-server/data \
@@ -134,7 +134,7 @@ services:
       LISTEN_ADDRESS: "127.0.0.1,172.18.0.1"
       LOG_LEVEL: info
       ENABLE_TIME_SYNC: "true"   # the add-on's time_sync: auto, and this host is NTP-synced
-      TZ: America/Phoenix
+      TZ: ${TZ:-UTC}   # your zone, e.g. America/Denver
 ```
 
 The same settings as CLI flags, if preferred over environment variables:
@@ -150,7 +150,7 @@ which we do not need.
 If homehub itself runs with host networking, `127.0.0.1` alone is enough.
 
 ```bash
-ssh jeremiah@192.168.2.205
+ssh <user>@192.0.2.205
 cd <the compose project that gets the service>
 docker compose pull matter-server
 docker compose up -d matter-server
@@ -158,7 +158,7 @@ docker logs -f matter-server   # wait for the nodes to come online; the first st
 ```
 
 Check the fabric before pointing homehub at it: the dashboard
-(`ssh -L 5580:127.0.0.1:5580 jeremiah@192.168.2.205`, then http://localhost:5580/)
+(`ssh -L 5580:127.0.0.1:5580 <user>@192.0.2.205`, then http://localhost:5580/)
 must show the 14 existing nodes (ids 30, 31, 33, 38, 60-64, 70, 71, 73-75), and the
 server info must say compressed fabric id 2580859529081674720. A server that lists
 no nodes made a new fabric: stop it and fix the storage path or the vendor/fabric

@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from services.geo import main as geo_main
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 HEADERS = {"X-Internal-Secret": geo_main.INTERNAL_SECRET}
 
 
@@ -84,30 +84,30 @@ def fake(client):
 class TestIngest:
     async def test_hours_land_under_their_day_and_hour(self, rc):
         await geo_main._record_hourly_steps(
-            rc, "jeremiah", [{"hour": 9, "steps": 840}, {"hour": 13, "steps": 2100}],
+            rc, "alex", [{"hour": 9, "steps": 840}, {"hour": 13, "steps": 2100}],
             "2026-09-25", "phone",
         )
-        stored = rc.hashes["geo:steps_hourly:jeremiah:phone"]
+        stored = rc.hashes["geo:steps_hourly:alex:phone"]
         assert stored == {"2026-09-25:09": "840", "2026-09-25:13": "2100"}
 
     async def test_an_hour_keeps_the_max_not_the_last_write(self, rc):
         """A re-upload must be idempotent, and a reboot (which shrinks the raw
         counter) must not erase an hour that was already credited."""
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 840}], "2026-09-25", "phone")
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 840}], "2026-09-25", "phone")
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 12}], "2026-09-25", "phone")
-        assert rc.hashes["geo:steps_hourly:jeremiah:phone"]["2026-09-25:09"] == "840"
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 840}], "2026-09-25", "phone")
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 840}], "2026-09-25", "phone")
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 12}], "2026-09-25", "phone")
+        assert rc.hashes["geo:steps_hourly:alex:phone"]["2026-09-25:09"] == "840"
         # ...but a genuinely higher total still lands.
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 900}], "2026-09-25", "phone")
-        assert rc.hashes["geo:steps_hourly:jeremiah:phone"]["2026-09-25:09"] == "900"
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 900}], "2026-09-25", "phone")
+        assert rc.hashes["geo:steps_hourly:alex:phone"]["2026-09-25:09"] == "900"
 
     async def test_sources_keep_separate_hour_buckets(self, rc):
         """A watch and a phone counting the same walk must not be summed -- the
         same rule the daily buckets already follow."""
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 800}], "2026-09-25", "phone")
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 900}], "2026-09-25", "watch")
-        assert rc.hashes["geo:steps_hourly:jeremiah:phone"]["2026-09-25:09"] == "800"
-        assert rc.hashes["geo:steps_hourly:jeremiah:watch"]["2026-09-25:09"] == "900"
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 800}], "2026-09-25", "phone")
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 900}], "2026-09-25", "watch")
+        assert rc.hashes["geo:steps_hourly:alex:phone"]["2026-09-25:09"] == "800"
+        assert rc.hashes["geo:steps_hourly:alex:watch"]["2026-09-25:09"] == "900"
 
     @pytest.mark.parametrize(
         "entry",
@@ -125,61 +125,61 @@ class TestIngest:
         ],
     )
     async def test_an_unusable_bucket_is_dropped_not_stored(self, rc, entry):
-        await geo_main._record_hourly_steps(rc, "jeremiah", [entry], "2026-09-25", "phone")
-        assert rc.hashes.get("geo:steps_hourly:jeremiah:phone", {}) == {}
+        await geo_main._record_hourly_steps(rc, "alex", [entry], "2026-09-25", "phone")
+        assert rc.hashes.get("geo:steps_hourly:alex:phone", {}) == {}
 
     async def test_good_buckets_survive_a_bad_one_in_the_same_upload(self, rc):
         await geo_main._record_hourly_steps(
-            rc, "jeremiah",
+            rc, "alex",
             [{"hour": 9, "steps": 500}, {"hour": 99, "steps": 500}, {"hour": 10, "steps": 300}],
             "2026-09-25", "phone",
         )
-        assert rc.hashes["geo:steps_hourly:jeremiah:phone"] == {
+        assert rc.hashes["geo:steps_hourly:alex:phone"] == {
             "2026-09-25:09": "500",
             "2026-09-25:10": "300",
         }
 
     async def test_a_non_list_is_refused_rather_than_coerced(self, rc):
-        assert await geo_main._record_hourly_steps(rc, "jeremiah", {"9": 500}, "2026-09-25", "phone") == 0
-        assert not rc.hashes.get("geo:steps_hourly:jeremiah:phone")
+        assert await geo_main._record_hourly_steps(rc, "alex", {"9": 500}, "2026-09-25", "phone") == 0
+        assert not rc.hashes.get("geo:steps_hourly:alex:phone")
 
     async def test_string_digits_are_accepted(self, rc):
         """JSON from a phone may well carry "9"/"500"; that is not corruption."""
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": "9", "steps": "500"}], "2026-09-25", "phone")
-        assert rc.hashes["geo:steps_hourly:jeremiah:phone"]["2026-09-25:09"] == "500"
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": "9", "steps": "500"}], "2026-09-25", "phone")
+        assert rc.hashes["geo:steps_hourly:alex:phone"]["2026-09-25:09"] == "500"
 
 
 class TestRead:
     async def test_an_unrecorded_day_is_empty_not_twenty_four_zeros(self, rc):
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 500}], "2026-09-25", "phone")
-        assert await geo_main._get_hourly_steps(rc, "jeremiah", "2026-09-26") == []
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 500}], "2026-09-25", "phone")
+        assert await geo_main._get_hourly_steps(rc, "alex", "2026-09-26") == []
         assert await geo_main._get_hourly_steps(rc, "nobody", "2026-09-25") == []
 
     async def test_buckets_come_back_in_hour_order_with_labels(self, rc):
         await geo_main._record_hourly_steps(
-            rc, "jeremiah",
+            rc, "alex",
             [{"hour": 17, "steps": 90}, {"hour": 6, "steps": 20}, {"hour": 12, "steps": 55}],
             "2026-09-25", "phone",
         )
-        assert await geo_main._get_hourly_steps(rc, "jeremiah", "2026-09-25") == [
+        assert await geo_main._get_hourly_steps(rc, "alex", "2026-09-25") == [
             {"hour": 6, "label": "06:00", "steps": 20},
             {"hour": 12, "label": "12:00", "steps": 55},
             {"hour": 17, "label": "17:00", "steps": 90},
         ]
 
     async def test_another_day_in_the_same_hash_is_not_leaked(self, rc):
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 500}], "2026-09-25", "phone")
-        await geo_main._record_hourly_steps(rc, "jeremiah", [{"hour": 9, "steps": 700}], "2026-09-26", "phone")
-        got = await geo_main._get_hourly_steps(rc, "jeremiah", "2026-09-25")
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 500}], "2026-09-25", "phone")
+        await geo_main._record_hourly_steps(rc, "alex", [{"hour": 9, "steps": 700}], "2026-09-26", "phone")
+        got = await geo_main._get_hourly_steps(rc, "alex", "2026-09-25")
         assert got == [{"hour": 9, "label": "09:00", "steps": 500}]
 
     async def test_a_corrupt_field_is_skipped_not_fatal(self, rc):
-        rc.hashes["geo:steps_hourly:jeremiah:phone"] = {
+        rc.hashes["geo:steps_hourly:alex:phone"] = {
             "2026-09-25:09": "500",
             "2026-09-25:xx": "500",
             "2026-09-25:11": "not-a-number",
         }
-        assert await geo_main._get_hourly_steps(rc, "jeremiah", "2026-09-25") == [
+        assert await geo_main._get_hourly_steps(rc, "alex", "2026-09-25") == [
             {"hour": 9, "label": "09:00", "steps": 500}
         ]
 
@@ -191,21 +191,21 @@ class TestPostStepsRoute:
             "/steps",
             headers=HEADERS,
             json={
-                "user_id": "jeremiah",
+                "user_id": "alex",
                 "steps": 4321,
                 "timestamp": ts_for(day),
-                "timezone": "America/Phoenix",
+                "timezone": "Etc/GMT+7",
                 "hourly": [{"hour": 8, "steps": 100}, {"hour": 9, "steps": 200}],
             },
         )
         assert r.status_code == 200
         assert r.json()["hours_recorded"] == 2
-        assert fake.hashes["geo:steps_hourly:jeremiah:phone"] == {
+        assert fake.hashes["geo:steps_hourly:alex:phone"] == {
             "2026-09-25:08": "100",
             "2026-09-25:09": "200",
         }
         # The daily total is still recorded exactly as before.
-        assert fake.hashes["geo:steps:jeremiah"][day] == "4321"
+        assert fake.hashes["geo:steps:alex"][day] == "4321"
 
     def test_hours_file_under_the_phones_own_day_not_the_servers(self, client, fake):
         """A phone in Tokyo at 23:00 local files its reading under *its* today.
@@ -215,7 +215,7 @@ class TestPostStepsRoute:
             "/steps",
             headers=HEADERS,
             json={
-                "user_id": "jeremiah",
+                "user_id": "alex",
                 "steps": 500,
                 "timestamp": datetime(2026, 9, 25, 23, 0, tzinfo=ZoneInfo("Asia/Tokyo")).timestamp(),
                 "timezone": "Asia/Tokyo",
@@ -223,58 +223,58 @@ class TestPostStepsRoute:
             },
         )
         assert r.status_code == 200
-        assert "2026-09-25:23" in fake.hashes["geo:steps_hourly:jeremiah:phone"]
-        assert fake.hashes["geo:steps:jeremiah"] == {"2026-09-25": "500"}
+        assert "2026-09-25:23" in fake.hashes["geo:steps_hourly:alex:phone"]
+        assert fake.hashes["geo:steps:alex"] == {"2026-09-25": "500"}
 
     def test_a_build_without_hours_still_succeeds(self, client, fake):
         """Older APKs omit the key entirely. That must not 422 -- their day
         totals still have to land, and the hour chart just stays empty."""
-        r = client.post("/steps", headers=HEADERS, json={"user_id": "jeremiah", "steps": 700, "timestamp": ts_for("2026-09-25")})
+        r = client.post("/steps", headers=HEADERS, json={"user_id": "alex", "steps": 700, "timestamp": ts_for("2026-09-25")})
         assert r.status_code == 200
         assert r.json()["hours_recorded"] == 0
-        assert not fake.hashes.get("geo:steps_hourly:jeremiah:phone")
-        assert fake.hashes["geo:steps:jeremiah"]["2026-09-25"] == "700"
+        assert not fake.hashes.get("geo:steps_hourly:alex:phone")
+        assert fake.hashes["geo:steps:alex"]["2026-09-25"] == "700"
 
     def test_an_empty_hourly_list_records_nothing(self, client, fake):
         r = client.post(
             "/steps",
             headers=HEADERS,
-            json={"user_id": "jeremiah", "steps": 700, "timestamp": ts_for("2026-09-25"), "hourly": []},
+            json={"user_id": "alex", "steps": 700, "timestamp": ts_for("2026-09-25"), "hourly": []},
         )
         assert r.json()["hours_recorded"] == 0
-        assert not fake.hashes.get("geo:steps_hourly:jeremiah:phone")
+        assert not fake.hashes.get("geo:steps_hourly:alex:phone")
 
     def test_hours_are_namespaced_per_source(self, client, fake):
         client.post(
             "/steps",
             headers=HEADERS,
             json={
-                "user_id": "jeremiah",
+                "user_id": "alex",
                 "steps": 800,
                 "timestamp": ts_for("2026-09-25"),
                 "source": "watch",
                 "hourly": [{"hour": 9, "steps": 800}],
             },
         )
-        assert "geo:steps_hourly:jeremiah:watch" in fake.hashes
-        assert "geo:steps_hourly:jeremiah:phone" not in fake.hashes
+        assert "geo:steps_hourly:alex:watch" in fake.hashes
+        assert "geo:steps_hourly:alex:phone" not in fake.hashes
 
 
 class TestRangesRouteCarriesHours:
     def _record_today(self, fake, hours):
         day = geo_main._today_date().isoformat()
         for hour, steps in hours:
-            fake.hashes.setdefault("geo:steps_hourly:jeremiah:phone", {})[f"{day}:{hour:02d}"] = str(steps)
+            fake.hashes.setdefault("geo:steps_hourly:alex:phone", {})[f"{day}:{hour:02d}"] = str(steps)
 
     def test_the_day_view_charts_the_hours_it_has(self, client, fake):
         self._record_today(fake, [(7, 120), (8, 640), (13, 310)])
-        r = client.get("/steps/ranges?range=D&user_id=jeremiah", headers=HEADERS)
+        r = client.get("/steps/ranges?range=D&user_id=alex", headers=HEADERS)
         body = r.json()
         assert [b["hour"] for b in body["hourly"]] == [7, 8, 13]
         assert body["peak"] == {"hour": 8, "label": "08:00", "steps": 640}
 
     def test_the_day_view_says_nothing_rather_than_claiming_zero(self, client, fake):
-        r = client.get("/steps/ranges?range=D&user_id=jeremiah", headers=HEADERS)
+        r = client.get("/steps/ranges?range=D&user_id=alex", headers=HEADERS)
         body = r.json()
         # Absent, not `[]`: an empty list renders as a flat, sedentary day.
         assert "hourly" not in body
@@ -285,18 +285,18 @@ class TestRangesRouteCarriesHours:
         aggregation and hours belong to the day view alone."""
         self._record_today(fake, [(7, 120)])
         for rng in ("W", "M", "3M", "Y"):
-            body = client.get(f"/steps/ranges?range={rng}&user_id=jeremiah", headers=HEADERS).json()
+            body = client.get(f"/steps/ranges?range={rng}&user_id=alex", headers=HEADERS).json()
             assert "hourly" not in body, rng
 
     def test_hours_need_the_same_consent_check_as_the_buckets(self, client, fake, monkeypatch):
         """The hourly detail is the same private data one step finer-grained, so
         it must not become a way around `_require_may_view`."""
         async def opted_out():
-            return {"users": [{"username": "jeremiah", "enabled": False, "audience": "circle", "user_ids": []}]}
+            return {"users": [{"username": "alex", "enabled": False, "audience": "circle", "user_ids": []}]}
 
         self._record_today(fake, [(7, 120)])
         monkeypatch.setattr(geo_main, "_fetch_activity_sharing", opted_out)
-        r = client.get("/steps/ranges?range=D&user_id=jeremiah&viewer=michele", headers=HEADERS)
+        r = client.get("/steps/ranges?range=D&user_id=alex&viewer=sam", headers=HEADERS)
         assert r.status_code == 404
 
 class TestDevicesFillEachOthersBlanks:
@@ -311,10 +311,10 @@ class TestDevicesFillEachOthersBlanks:
             "/steps",
             headers=HEADERS,
             json={
-                "user_id": "jeremiah",
+                "user_id": "alex",
                 "steps": total,
                 "timestamp": ts_for(self.DAY),
-                "timezone": "America/Phoenix",
+                "timezone": "Etc/GMT+7",
                 "source": source,
                 "hourly": [{"hour": h, "steps": s} for h, s in hours],
             },
@@ -323,13 +323,13 @@ class TestDevicesFillEachOthersBlanks:
     def test_a_phone_morning_and_a_watch_afternoon_add_up(self, client, fake):
         self._post(client, "phone", 4000, [(8, 1500), (9, 2500)])
         self._post(client, "watch", 5000, [(14, 3000), (15, 2000)])
-        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "9000"
+        assert fake.hashes["geo:steps:alex"][self.DAY] == "9000"
 
     def test_an_hour_both_devices_carried_counts_once(self, client, fake):
         self._post(client, "phone", 3000, [(8, 1000), (9, 2000)])
         self._post(client, "watch", 2600, [(9, 2100), (10, 500)])
         # 08 phone 1000 + 09 the larger 2100 + 10 watch 500
-        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "3600"
+        assert fake.hashes["geo:steps:alex"][self.DAY] == "3600"
 
     def test_a_source_without_hours_is_never_undercut(self, client, fake):
         """Home Assistant (or an old phone build) only has a day total; the day
@@ -338,13 +338,13 @@ class TestDevicesFillEachOthersBlanks:
         client.post(
             "/steps",
             headers=HEADERS,
-            json={"user_id": "jeremiah", "steps": 6000, "timestamp": ts_for(self.DAY), "source": "ha"},
+            json={"user_id": "alex", "steps": 6000, "timestamp": ts_for(self.DAY), "source": "ha"},
         )
-        assert fake.hashes["geo:steps:jeremiah"][self.DAY] == "6000"
+        assert fake.hashes["geo:steps:alex"][self.DAY] == "6000"
 
     def test_the_day_view_shows_the_merged_hours(self, client, fake):
         day = geo_main._today_date().isoformat()
-        fake.hashes["geo:steps_hourly:jeremiah:phone"] = {f"{day}:08": "700", f"{day}:09": "300"}
-        fake.hashes["geo:steps_hourly:jeremiah:watch"] = {f"{day}:09": "450", f"{day}:15": "1200"}
-        body = client.get("/steps/ranges?range=D&user_id=jeremiah", headers=HEADERS).json()
+        fake.hashes["geo:steps_hourly:alex:phone"] = {f"{day}:08": "700", f"{day}:09": "300"}
+        fake.hashes["geo:steps_hourly:alex:watch"] = {f"{day}:09": "450", f"{day}:15": "1200"}
+        body = client.get("/steps/ranges?range=D&user_id=alex", headers=HEADERS).json()
         assert [(b["hour"], b["steps"]) for b in body["hourly"]] == [(8, 700), (9, 450), (15, 1200)]

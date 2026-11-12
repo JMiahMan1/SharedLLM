@@ -44,7 +44,7 @@ def _install(monkeypatch, main, notes, client):
         yield client
 
     monkeypatch.setattr(main, "_proxy_execution_with_identity", fake_proxy)
-    monkeypatch.setattr(main, "_resolve_identity_from_request", AsyncMock(return_value={"user": "Michele"}))
+    monkeypatch.setattr(main, "_resolve_identity_from_request", AsyncMock(return_value={"user": "Sam"}))
     monkeypatch.setattr(main, "shared_http_client", fake_client)
 
 
@@ -68,9 +68,9 @@ async def test_sync_indexes_each_note_under_the_caller(monkeypatch):
     assert "milk" not in resp.body.decode()
     purge, sync = client.calls
     assert purge[0].endswith("/rag/purge/nextcloud_files")
-    assert purge[1] == {"user_id": "michele", "filter": {"path": "/Notes/Groceries.md"}}
+    assert purge[1] == {"user_id": "sam", "filter": {"path": "/Notes/Groceries.md"}}
     assert sync[0].endswith("/rag/sync/files")
-    assert sync[1]["user_id"] == "michele"
+    assert sync[1]["user_id"] == "sam"
     assert sync[1]["collection_name"] == "nextcloud_files"
     assert [c["metadata"]["chunk_index"] for c in sync[1]["chunks"]] == [0, 1]
     assert all(c["metadata"]["path"] == "/Notes/Groceries.md" for c in sync[1]["chunks"])
@@ -274,10 +274,10 @@ async def test_the_share_route_maps_each_action_as_the_caller(monkeypatch):
 
     await main.proxy_note_share(_request({"path": "Notes/A.md"}))
     await main.proxy_note_share(_request({"action": "people", "search": "mi"}))
-    await main.proxy_note_share(_request({"action": "add", "path": "Notes/A.md", "share_with": "michele", "can_edit": True, "as_user": "admin"}))
+    await main.proxy_note_share(_request({"action": "add", "path": "Notes/A.md", "share_with": "sam", "can_edit": True, "as_user": "admin"}))
     await main.proxy_note_share(_request({"action": "remove", "share_id": 11}))
     assert [p["action"] for p, _ in seen] == ["shares", "sharees", "share_add", "share_remove"]
-    assert seen[2][0]["share_with"] == "michele" and seen[2][0]["can_edit"] is True and seen[2][1] == "admin"
+    assert seen[2][0]["share_with"] == "sam" and seen[2][0]["can_edit"] is True and seen[2][1] == "admin"
     assert seen[3][0]["share_id"] == "11"
 
     refused = await main.proxy_note_share(_request({"action": "publish"}))

@@ -36,6 +36,6 @@ def test_anonymous_callers_are_refused(monkeypatch, verb, path, body):
 
 @pytest.mark.parametrize("verb,path,body", CALLS)
 def test_non_admins_are_refused(monkeypatch, verb, path, body):
-    _as(monkeypatch, {"user": "michele", "is_admin": False})
+    _as(monkeypatch, {"user": "sam", "is_admin": False})
     resp = getattr(TestClient(app), verb)(path, **({"json": body} if body else {}))
     assert resp.status_code == 403

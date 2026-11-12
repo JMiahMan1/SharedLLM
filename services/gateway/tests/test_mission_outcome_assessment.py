@@ -78,7 +78,7 @@ class TestMissionOutcomeAssessment:
         # Guard against over-broadening: a real, fully-shipped mission must remain True.
         assert should_persist_learning(
             "Built the tz CLI, all tests pass, committed and pushed to "
-            "https://github.com/JMiahMan1/raven-timezone-cli (main)."
+            "https://github.com/example-owner/raven-timezone-cli (main)."
         ) is True
 
     def test_standalone_status_code_422(self):

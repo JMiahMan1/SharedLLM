@@ -27,7 +27,7 @@ class Env(SimpleNamespace):
 
 
 async def make_env(path: str, *, entities: list[str] = (), automations: list[dict] | None = None,
-                   scheduler: Any = None, start: datetime = START, tz: str = "America/Phoenix") -> Env:
+                   scheduler: Any = None, start: datetime = START, tz: str = "Etc/GMT+7") -> Env:
     store = Store(path)
     hub = Hub(time_zone=tz, location=dict(LOCATION))
     hub.areas["office"] = Area("office", "Office")
@@ -313,7 +313,7 @@ async def test_schedule_crud_keeps_switch_entities(env: Env) -> None:
     assert env.hub.states.get(s.entity_id).state == "on"
     assert env.hub.entities[s.entity_id].platform == "scheduler"
     nxt = s.next_trigger.astimezone(env.engine.tz)
-    assert nxt.date().isoformat() == "2026-11-11" and 17 <= nxt.hour <= 18  # sunset in Phoenix + 15 min
+    assert nxt.date().isoformat() == "2026-11-11" and 17 <= nxt.hour <= 18  # sunset at the hub location + 15 min
     # Turning the switch off works through the scheduler's own config entry.
     await env.hub.call_service("switch", "turn_off", {"entity_id": s.entity_id})
     assert env.hub.states.get(s.entity_id).state == "off"

@@ -123,12 +123,12 @@ async def test_generation_uses_the_context_persona_and_the_installed_edition(
         verse,
         gateway_url="http://gateway:11435",
         internal_secret="s3cret",
-        username="jeremiah",
+        username="alex",
     )
     assert made["body"].startswith("The chapter opens")
     assert made["verses_used"] >= 1
     assert captured["system"] == verse_context.CONTEXT_SYSTEM_PROMPT
-    assert captured["user"] == "jeremiah"
+    assert captured["user"] == "alex"
     assert captured["gateway_url"] == "http://gateway:11435"
     assert "The surrounding passage:" in captured["prompt"]
 

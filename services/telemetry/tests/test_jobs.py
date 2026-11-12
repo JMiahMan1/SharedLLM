@@ -17,7 +17,7 @@ def rc(monkeypatch):
     return fake
 
 
-def make_job(user="jeremiah", report_type="health", period="daily", enabled=True):
+def make_job(user="alex", report_type="health", period="daily", enabled=True):
     return store.make_job(user, report_type, period, "21:00", "UTC", enabled=enabled)
 
 
@@ -51,7 +51,7 @@ def test_monthly_clamps_to_last_valid_day():
 def test_timezone_is_respected():
     # 21:00 in a UTC-7 zone is 04:00 UTC the next day
     after = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
-    nxt = next_run_at("daily", "21:00", "America/Phoenix", after)
+    nxt = next_run_at("daily", "21:00", "Etc/GMT+7", after)
     assert nxt == datetime(2026, 5, 11, 4, 0, tzinfo=UTC)
 
 
@@ -120,10 +120,10 @@ async def test_job_runs_when_alpaca_idle(rc, monkeypatch):
     outcome = await process_job(job["id"])
     assert outcome == "ready"
 
-    report = await store.latest_report(rc, "jeremiah", "health")
+    report = await store.latest_report(rc, "alex", "health")
     assert report["analysis"] == "Solid week."
 
-    notifications = await store.list_notifications(rc, "jeremiah")
+    notifications = await store.list_notifications(rc, "alex")
     assert notifications[-1]["kind"] == "report_ready"
     assert notifications[-1]["data"]["report_id"] == "r1"
 
@@ -160,7 +160,7 @@ async def test_failure_retries_then_disables_and_notifies(rc, monkeypatch):
     assert second["enabled"] is False
     assert second["last_status"] == "failed"
 
-    notifications = await store.list_notifications(rc, "jeremiah")
+    notifications = await store.list_notifications(rc, "alex")
     assert notifications[-1]["kind"] == "report_failed"
 
 
@@ -189,17 +189,17 @@ async def test_no_data_window_reports_no_data_without_analysis(rc, monkeypatch):
 
     outcome = await process_job(job["id"])
     assert outcome == "no_data"
-    notifications = await store.list_notifications(rc, "jeremiah")
+    notifications = await store.list_notifications(rc, "alex")
     assert all(n["kind"] != "report_ready" for n in notifications)
 
 
 # store
 
 async def test_jobs_are_scoped_per_user(rc):
-    await store.save_job(rc, make_job(user="jeremiah"))
+    await store.save_job(rc, make_job(user="alex"))
     await store.save_job(rc, make_job(user="work"))
-    mine = await store.list_jobs(rc, "jeremiah")
-    assert len(mine) == 1 and mine[0]["user"] == "jeremiah"
+    mine = await store.list_jobs(rc, "alex")
+    assert len(mine) == 1 and mine[0]["user"] == "alex"
 
 
 async def test_reports_are_filtered_by_type_and_period(rc):
@@ -235,7 +235,7 @@ async def test_a_daily_health_report_counts_only_todays_workouts(monkeypatch):
         return answers[url[url.rindex("/"):]]
 
     monkeypatch.setattr(reports, "_get_json", fake_get)
-    stats = await reports.collect_health_stats(None, "jeremiah", "daily", "America/Phoenix")
+    stats = await reports.collect_health_stats(None, "alex", "daily", "Etc/GMT+7")
     assert stats["workout_count"] == 1
     assert stats["workout_types"] == ["walking"]
     assert stats["workout_distance_miles"] == 1.0
@@ -245,6 +245,6 @@ def test_report_notices_carry_the_reports_category():
     from services.telemetry.main import _report_notice
 
     note = _report_notice(make_job(), "report_ready", "Ready", "Solid week.", {"report_id": "r1"})
-    assert note["category"] == "reports" and note["user"] == "jeremiah"
+    assert note["category"] == "reports" and note["user"] == "alex"
     assert note["tag"] == "report:health:daily"
     assert note["data"]["report_id"] == "r1" and note["data"]["report_type"] == "health"

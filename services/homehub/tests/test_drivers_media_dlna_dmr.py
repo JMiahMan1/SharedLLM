@@ -11,13 +11,13 @@ from services.homehub.drivers.media_common import F, didl, hms_to_seconds, mime_
 from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.media_fakes import AVT, RC, FakeHttp, device_xml, soap_reply, soap_router
 
-URL = "http://192.168.2.115:9197/dmr"
+URL = "http://192.0.2.115:9197/dmr"
 ENT = "media_player.tv_loft_samsung_q900"
 
 
 def build(state: str = "PLAYING", volume: str = "23", mute: str = "0"):
-    hub, entry = make_hub("dlna_dmr", {"url": URL, "device_id": "uuid:x", "type": "MediaRenderer", "mac": "7a:20:51:0a:1a:88"},
-                          [{"entity_id": ENT, "unique_id": "uuid:fdf567be-3905-46de-89dc-974dd73029de"}])
+    hub, entry = make_hub("dlna_dmr", {"url": URL, "device_id": "uuid:x", "type": "MediaRenderer", "mac": "02:00:00:00:01:06"},
+                          [{"entity_id": ENT, "unique_id": "uuid:00000000-0000-4000-8000-00000000c005"}])
     drv = DlnaDmrDriver(hub, entry)
     http = FakeHttp()
     drv.http = http

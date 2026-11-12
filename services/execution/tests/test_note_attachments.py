@@ -92,7 +92,7 @@ def dav(monkeypatch):
 def request(action, **kwargs):
     from services.execution.schemas import NoteRequest
 
-    return NoteRequest(user_context={"user": "jeremiah"}, action=action, storage="nextcloud", **kwargs)
+    return NoteRequest(user_context={"user": "alex"}, action=action, storage="nextcloud", **kwargs)
 
 
 URL = "http://nextcloud.test/"

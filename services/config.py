@@ -202,8 +202,9 @@ def _csv_env(key: str, default: tuple[str, ...]) -> list[str]:
 # server and the Android WebView call Identity across origins. Never "*":
 # Identity answers with decrypted credentials, and a wildcard lets any site a
 # signed-in browser visits read them.
+# The household's own public origin is not a code default: it comes from
+# JARVIS_HOST (or set IDENTITY_CORS_ORIGINS outright).
 _IDENTITY_CORS_DEFAULTS = (
-    "https://jarvis.sumemail.com",
     "http://localhost",
     "https://localhost",
     "http://localhost:5173",
@@ -213,7 +214,10 @@ _IDENTITY_CORS_DEFAULTS = (
 )
 IDENTITY_CORS_ORIGINS = [
     origin
-    for origin in _csv_env("IDENTITY_CORS_ORIGINS", _IDENTITY_CORS_DEFAULTS)
+    for origin in _csv_env(
+        "IDENTITY_CORS_ORIGINS",
+        tuple(o for o in ((os.getenv("JARVIS_HOST") or "").strip().rstrip("/"),) if o) + _IDENTITY_CORS_DEFAULTS,
+    )
     # A wildcard would re-open the finding this setting exists to close.
     if origin != "*"
 ]
@@ -271,7 +275,9 @@ AUDIOBOOKSHELF_PASS = os.getenv("AUDIOBOOKSHELF_PASS")
 # gateway config. Port 5000 is alpaca's dashboard, which fronts the audio-server
 # (8082) behind /api/audio/* and /api/podcast/*. Speaker identification no
 # longer uses alpaca at all: see services/execution/voiceprint.py.
-ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
+# No default on purpose: unset, the podcast handlers fail naming this variable
+# instead of probing a guessed host.
+ALPACA_WEB_URL = (os.getenv("ALPACA_WEB_URL") or "").rstrip("/")
 
 # --- ntfy push server (docs/PUSH.md) ---
 # Telemetry publishes notices and the gateway proxies phone streams through it

@@ -69,18 +69,18 @@ alarm, even for an admin (`authorize_action` in
 1. Make Home Assistant's Whisper reachable from the Jarvis server: in Home
    Assistant, Settings > Add-ons > Whisper > Configuration > Network, set
    10300.
-2. In `.env`: `VOICE_STT_UPSTREAM=192.168.2.20:10300`, then restart execution.
+2. In `.env`: `VOICE_STT_UPSTREAM=192.0.2.20:10300`, then restart execution.
    The log says "Voice recognition speech-to-text on :10310".
 3. On the Jarvis server, allow only Home Assistant through the firewall. Use
-   Home Assistant's address in place of `192.168.2.20`:
+   Home Assistant's address in place of `192.0.2.20`:
    ```
-   sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.168.2.20 port port=10310 protocol=tcp accept'
+   sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=192.0.2.20 port port=10310 protocol=tcp accept'
    sudo firewall-cmd --reload
    ```
    Without this, Home Assistant reports that it cannot connect even though
    the port is listening.
 4. In Home Assistant: add the Wyoming Protocol integration with host
-   `192.168.2.205`, port `10310`, and choose it as the speech-to-text of the
+   `192.0.2.205`, port `10310`, and choose it as the speech-to-text of the
    voice assistant pipeline the satellites use.
 
 Undo: set the pipeline's speech-to-text back to Whisper.

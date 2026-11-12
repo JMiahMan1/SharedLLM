@@ -58,12 +58,12 @@ def _workout(start, **extra):
 class TestEventsRoute:
     def test_is_not_a_404(self, client, monkeypatch):
         _patch_redis(monkeypatch)
-        r = client.get("/events?viewer=jeremiah&user_id=jeremiah")
+        r = client.get("/events?viewer=alex&user_id=alex")
         assert r.status_code == 200
 
     def test_reports_an_empty_timeline_rather_than_an_error(self, client, monkeypatch):
         _patch_redis(monkeypatch)
-        body = client.get("/events?viewer=jeremiah&user_id=jeremiah").json()
+        body = client.get("/events?viewer=alex&user_id=alex").json()
         assert body["empty"] is True
         assert body["total_events"] == 0
         # An empty list plus an explicit flag, so the client can say
@@ -75,7 +75,7 @@ class TestEventsRoute:
         import time
 
         _patch_redis(monkeypatch, workouts=[_workout(time.time() - 3600)])
-        body = client.get("/events?viewer=jeremiah&user_id=jeremiah").json()
+        body = client.get("/events?viewer=alex&user_id=alex").json()
         assert body["empty"] is False
         assert body["total_events"] == 1
         assert body["groups"][0]["events"][0]["kind"] == "workout"
@@ -90,15 +90,15 @@ class TestEventsRoute:
             return target
 
         monkeypatch.setattr(geo_main, "_require_may_view", _allow)
-        body = client.get("/events?viewer=jeremiah&user_id=michele").json()
-        assert body["user_id"] == "michele"
+        body = client.get("/events?viewer=alex&user_id=sam").json()
+        assert body["user_id"] == "sam"
 
     def test_echoes_the_requested_window(self, client, monkeypatch):
         # The requested window and the number of day groups returned are
         # different facts and must not share a key -- one silently overwrote
         # the other.
         _patch_redis(monkeypatch)
-        body = client.get("/events?viewer=jeremiah&user_id=jeremiah&days=7").json()
+        body = client.get("/events?viewer=alex&user_id=alex&days=7").json()
         assert body["window_days"] == 7
         assert "days" not in body
 
@@ -116,7 +116,7 @@ class TestEventsRoute:
             return _Broken()
 
         monkeypatch.setattr(geo_main, "get_redis", fake_redis)
-        r = client.get("/events?viewer=jeremiah&user_id=jeremiah")
+        r = client.get("/events?viewer=alex&user_id=alex")
         assert r.status_code == 200
         assert r.json()["total_events"] == 0
 
@@ -125,14 +125,14 @@ class TestEventsRoute:
             return None
 
         monkeypatch.setattr(geo_main, "get_redis", fake_redis)
-        r = client.get("/events?viewer=jeremiah&user_id=jeremiah")
+        r = client.get("/events?viewer=alex&user_id=alex")
         assert r.status_code == 200
         assert r.json()["empty"] is True
 
     @pytest.mark.parametrize("q", ["days=0", "days=400", "limit=0", "limit=500"])
     def test_rejects_an_out_of_range_window(self, client, monkeypatch, q):
         _patch_redis(monkeypatch)
-        assert client.get(f"/events?viewer=jeremiah&user_id=jeremiah&{q}").status_code == 422
+        assert client.get(f"/events?viewer=alex&user_id=alex&{q}").status_code == 422
 
 
 class TestEventsConsent:
@@ -140,7 +140,7 @@ class TestEventsConsent:
 
     def test_opted_out_user_is_a_404(self, client, monkeypatch):
         _patch_redis(monkeypatch)
-        r = client.get("/events?viewer=jeremiah&user_id=stranger")
+        r = client.get("/events?viewer=alex&user_id=stranger")
         assert r.status_code == 404
 
     def test_absent_viewer_is_treated_as_internal(self, client, monkeypatch):
@@ -152,7 +152,7 @@ class TestEventsConsent:
     def test_known_viewer_is_still_filtered(self, client, monkeypatch):
         """The permissive internal path must not leak to a named viewer."""
         _patch_redis(monkeypatch)
-        assert client.get("/events?viewer=jeremiah&user_id=nobody").status_code == 404
+        assert client.get("/events?viewer=alex&user_id=nobody").status_code == 404
 
 
 def _trip(start, **extra):
@@ -169,7 +169,7 @@ class TestEventsDomainRoute:
     """Health and Wander are separate views of the same stored events."""
 
     def _kinds(self, client, **params):
-        r = client.get("/events", params={"viewer": "jeremiah", "user_id": "jeremiah", **params})
+        r = client.get("/events", params={"viewer": "alex", "user_id": "alex", **params})
         assert r.status_code == 200, r.text
         return {e["kind"] for g in r.json()["groups"] for e in g["events"]}
 
@@ -199,14 +199,14 @@ class TestEventsDomainRoute:
     def test_echoes_the_domain_it_served(self, client, monkeypatch):
         _patch_redis(monkeypatch, trips=[_trip(time.time() - 7200)])
         r = client.get(
-            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "wander"}
+            "/events", params={"viewer": "alex", "user_id": "alex", "domain": "wander"}
         )
         assert r.json()["domain"] == "wander"
 
     def test_an_unknown_domain_is_422_naming_the_valid_set(self, client, monkeypatch):
         _patch_redis(monkeypatch)
         r = client.get(
-            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "heath"}
+            "/events", params={"viewer": "alex", "user_id": "alex", "domain": "heath"}
         )
         assert r.status_code == 422
         assert "health" in r.json()["detail"] and "wander" in r.json()["detail"]
@@ -218,6 +218,6 @@ class TestEventsDomainRoute:
 
         monkeypatch.setattr(geo_main, "get_redis", boom)
         r = client.get(
-            "/events", params={"viewer": "jeremiah", "user_id": "jeremiah", "domain": "nope"}
+            "/events", params={"viewer": "alex", "user_id": "alex", "domain": "nope"}
         )
         assert r.status_code == 422

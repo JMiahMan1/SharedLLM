@@ -398,7 +398,7 @@ class Device(SQLModel, table=True):  # type: ignore
     id: int | None = Field(default=None, primary_key=True)
     device_key: str = Field(index=True, unique=True)
     kind: str = Field(default="phone", index=True)  # phone | tablet | assistant | light | watch
-    label: str = Field(default="")  # "Jeremiah's Pixel"
+    label: str = Field(default="")  # "Alex's Pixel"
     owner_username: str | None = Field(default=None, index=True, foreign_key="user.username")
     #: self (a phone, on login) | admin | paired (claimed with the code the
     #: device showed) | adopted (claimed without one: the device has no screen)
@@ -629,7 +629,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "skylight_email", "value": "", "description": "Skylight Calendar login email"},
     {"key": "skylight_pass_enc", "value": "", "description": "Skylight Calendar login password (encrypted)"},
     {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
-    {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
+    {"key": "timezone", "value": "", "description": "Household time zone (IANA, e.g. America/Denver). Blank = use TZ from .env; see docs/CONFIG.md, Time zone"},
+    {"key": "timezone_from_location", "value": "false", "description": "Derive the household time zone from the home location when neither this setting nor TZ is set"},
     {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
     {"key": "rag_retention_days", "value": "{\"telemetry_alerts\": 30, \"conversation_memory\": 90}", "description": "Retention in days per time-bound RAG collection (JSON). Blank keeps everything; only collections named here are ever expired by the maintenance purge."},
     {"key": "phrasebook_path", "value": "", "description": "Path to the phrasebook JSON file used by semantic intent routing. Seeded from .env PHRASEBOOK_PATH."},
@@ -663,7 +664,7 @@ class AuditEvent(SQLModel, table=True):  # type: ignore
 
     Never a credential value. ``changes`` is a JSON list of
     ``{"field": name, "change": "set"|"changed"|"cleared"}`` (plus ``"to"`` for
-    plain flags such as is_admin), so the trail answers "who wiped Michele's
+    plain flags such as is_admin), so the trail answers "who wiped Sam's
     Nextcloud login, and when" without itself holding a login.
     """
     __table_args__ = {"extend_existing": True}

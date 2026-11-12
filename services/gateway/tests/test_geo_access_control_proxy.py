@@ -116,7 +116,7 @@ def make_client(monkeypatch):
     string to the default admin.
     """
 
-    def _make(user="michele", is_admin=False, key="test-token"):
+    def _make(user="sam", is_admin=False, key="test-token"):
         async def _resolve(api_key):
             if api_key != key:
                 return None
@@ -151,16 +151,16 @@ def test_a_junk_key_is_rejected_and_never_becomes_the_default_admin(make_client,
 
 def test_trips_forwards_the_authenticated_viewer(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    make_client(user="michele").get("/api/geo/trips", params={"user_id": "jeremiah"})
+    make_client(user="sam").get("/api/geo/trips", params={"user_id": "alex"})
     sent = captured["calls"][-1]["params"]
-    assert sent["viewer"] == "michele"
-    assert sent["user_id"] == "jeremiah", "geo lost the requested target"
+    assert sent["viewer"] == "sam"
+    assert sent["user_id"] == "alex", "geo lost the requested target"
 
 
 def test_trips_defaults_to_the_caller_when_no_user_id(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    make_client(user="michele").get("/api/geo/trips")
-    assert captured["calls"][-1]["params"]["user_id"] == "michele", (
+    make_client(user="sam").get("/api/geo/trips")
+    assert captured["calls"][-1]["params"]["user_id"] == "sam", (
         "omitting user_id must not mean 'everyone'"
     )
 
@@ -168,21 +168,21 @@ def test_trips_defaults_to_the_caller_when_no_user_id(make_client, monkeypatch):
 def test_the_family_scope_reaches_geo_with_the_viewer(make_client, monkeypatch):
     """Wander asks for the family's trips; geo applies each person's consent."""
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    make_client(user="michele").get("/api/geo/trips", params={"scope": "family"})
+    make_client(user="sam").get("/api/geo/trips", params={"scope": "family"})
     sent = captured["calls"][-1]["params"]
     assert sent["scope"] == "family"
-    assert sent["viewer"] == "michele"
+    assert sent["viewer"] == "sam"
 
 
 def test_admin_status_is_forwarded_to_geo(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    make_client(user="jeremiah", is_admin=True).get("/api/geo/trips")
+    make_client(user="alex", is_admin=True).get("/api/geo/trips")
     assert str(captured["calls"][-1]["params"].get("is_admin", "")).lower() in {"1", "true", "yes"}
 
 
 def test_non_admin_is_not_marked_admin(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    make_client(user="michele", is_admin=False).get("/api/geo/trips")
+    make_client(user="sam", is_admin=False).get("/api/geo/trips")
     assert str(captured["calls"][-1]["params"].get("is_admin", "")).lower() not in {"1", "true", "yes"}
 
 
@@ -194,16 +194,16 @@ def test_a_client_supplied_user_id_header_cannot_impersonate(anon_client, monkey
     anyone could simply declare themselves. Nothing in the UI ever sends it.
     """
     _patch_geo(monkeypatch, status=200, payload={"trips": []})
-    r = anon_client.get("/api/geo/trips", headers={"X-User-Id": "jeremiah"})
+    r = anon_client.get("/api/geo/trips", headers={"X-User-Id": "alex"})
     assert r.status_code == 401, "a bare X-User-Id header was trusted as an identity"
 
 
 def test_internal_secret_may_still_assert_an_identity(anon_client, monkeypatch):
     """Service-to-service callers legitimately set both headers."""
     captured = _patch_geo(monkeypatch, payload={"trips": []})
-    r = anon_client.get("/api/geo/trips", headers={"X-User-Id": "jeremiah", **SECRET})
+    r = anon_client.get("/api/geo/trips", headers={"X-User-Id": "alex", **SECRET})
     assert r.status_code == 200
-    assert captured["calls"][-1]["params"]["user_id"] == "jeremiah"
+    assert captured["calls"][-1]["params"]["user_id"] == "alex"
 
 
 # writes
@@ -211,33 +211,33 @@ def test_steps_cannot_be_written_for_another_user(make_client, monkeypatch):
     """POST /steps took the body's user_id unchecked -- that is the orphan
     ``geo:steps_meta:me`` writer, and it let anyone inflate anyone's total."""
     captured = _patch_geo(monkeypatch, payload={"status": "ok"})
-    r = make_client(user="michele").post("/api/geo/steps", json={"user_id": "jeremiah", "steps": 99999})
+    r = make_client(user="sam").post("/api/geo/steps", json={"user_id": "alex", "steps": 99999})
     assert r.status_code in (401, 403), f"cross-user step write accepted ({r.status_code})"
     assert not captured["calls"], "a rejected write was still forwarded to geo"
 
 
 def test_steps_write_for_self_is_allowed(make_client, monkeypatch):
-    _patch_geo(monkeypatch, payload={"status": "ok", "user_id": "michele", "steps": 100})
-    r = make_client(user="michele").post("/api/geo/steps", json={"user_id": "michele", "steps": 100})
+    _patch_geo(monkeypatch, payload={"status": "ok", "user_id": "sam", "steps": 100})
+    r = make_client(user="sam").post("/api/geo/steps", json={"user_id": "sam", "steps": 100})
     assert r.status_code == 200
 
 
 def test_anonymous_step_writes_are_rejected(anon_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"status": "ok"})
-    assert anon_client.post("/api/geo/steps", json={"user_id": "michele", "steps": 1}).status_code == 401
+    assert anon_client.post("/api/geo/steps", json={"user_id": "sam", "steps": 1}).status_code == 401
     assert not captured["calls"], "an unauthenticated write reached geo"
 
 
 def test_goals_cannot_be_rewritten_for_another_user(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"status": "ok"})
-    r = make_client(user="michele").put("/api/geo/goals", json={"user_id": "jeremiah", "goals": {"daily_steps": 1}})
+    r = make_client(user="sam").put("/api/geo/goals", json={"user_id": "alex", "goals": {"daily_steps": 1}})
     assert r.status_code in (401, 403), f"cross-user goal write accepted ({r.status_code})"
     assert not captured["calls"]
 
 
 def test_step_goal_cannot_be_rewritten_for_another_user(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"status": "ok"})
-    r = make_client(user="michele").put("/api/geo/steps/goal", json={"user_id": "jeremiah", "goal": 1})
+    r = make_client(user="sam").put("/api/geo/steps/goal", json={"user_id": "alex", "goal": 1})
     assert r.status_code in (401, 403), f"cross-user goal write accepted ({r.status_code})"
     assert not captured["calls"]
 
@@ -245,21 +245,21 @@ def test_step_goal_cannot_be_rewritten_for_another_user(make_client, monkeypatch
 def test_granting_stars_requires_admin(make_client, monkeypatch):
     """The route docstring claimed Identity enforced this. Nothing did."""
     captured = _patch_geo(monkeypatch, payload={"status": "ok"})
-    r = make_client(user="michele").post("/api/geo/stars", json={"user_id": "michele", "amount": 5})
+    r = make_client(user="sam").post("/api/geo/stars", json={"user_id": "sam", "amount": 5})
     assert r.status_code == 403, f"a non-admin granted stars ({r.status_code})"
     assert not captured["calls"]
 
 
 def test_an_admin_may_grant_stars(make_client, monkeypatch):
     _patch_geo(monkeypatch, payload={"status": "ok"})
-    r = make_client(user="jeremiah", is_admin=True).post("/api/geo/stars", json={"user_id": "michele", "amount": 5})
+    r = make_client(user="alex", is_admin=True).post("/api/geo/stars", json={"user_id": "sam", "amount": 5})
     assert r.status_code == 200
 
 
 def test_reading_your_own_stars_needs_no_admin_rights(make_client, monkeypatch):
     """Star *balances* are personal; only granting them is privileged."""
     _patch_geo(monkeypatch, payload={"stars": 3})
-    assert make_client(user="michele").get("/api/geo/stars").status_code == 200
+    assert make_client(user="sam").get("/api/geo/stars").status_code == 200
 
 
 # activity sharing keeps its explicit viewer contract
@@ -270,8 +270,8 @@ def test_activity_feed_requires_a_viewer(anon_client, monkeypatch):
 
 def test_activity_feed_forwards_the_viewer(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"users": []})
-    make_client(user="michele").get("/api/geo/activity/feed")
-    assert captured["calls"][-1]["params"]["viewer"] == "michele"
+    make_client(user="sam").get("/api/geo/activity/feed")
+    assert captured["calls"][-1]["params"]["viewer"] == "sam"
 
 # the active-workout route
 # Added alongside `GET /workouts/active`. An in-progress session is deliberately
@@ -285,14 +285,14 @@ def test_active_workout_requires_authentication(anon_client, monkeypatch):
 
 def test_active_workout_forwards_the_viewer_and_admin_flag(make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"workout": {"status": "in_progress"}})
-    make_client(user="michele", is_admin=True).get("/api/geo/workouts/active")
+    make_client(user="sam", is_admin=True).get("/api/geo/workouts/active")
     call = captured["calls"][-1]
     assert call["url"].endswith("/workouts/active")
-    assert call["params"]["viewer"] == "michele"
+    assert call["params"]["viewer"] == "sam"
     assert call["params"]["is_admin"] == "true"
     # X-User-Id is the gateway's own transport header; geo needs it to know
     # whose session to read.
-    assert call["headers"].get("X-User-Id") == "michele"
+    assert call["headers"].get("X-User-Id") == "sam"
 
 
 def test_active_workout_passes_the_real_status_through(make_client, monkeypatch):
@@ -302,7 +302,7 @@ def test_active_workout_passes_the_real_status_through(make_client, monkeypatch)
     ``find(w => w.status === 'active')`` could never match.
     """
     _patch_geo(monkeypatch, payload={"workout": {"status": "in_progress"}})
-    resp = make_client(user="michele").get("/api/geo/workouts/active")
+    resp = make_client(user="sam").get("/api/geo/workouts/active")
     assert resp.status_code == 200
     assert resp.json()["workout"]["status"] == "in_progress"
 
@@ -310,7 +310,7 @@ def test_active_workout_passes_the_real_status_through(make_client, monkeypatch)
 def test_no_active_workout_is_reported_as_absent_not_an_error(make_client, monkeypatch):
     """Geo answers 404 for 'nothing running'; the client gets null."""
     _patch_geo(monkeypatch, status=404)
-    resp = make_client(user="michele").get("/api/geo/workouts/active")
+    resp = make_client(user="sam").get("/api/geo/workouts/active")
     assert resp.status_code == 200
     assert resp.json() == {"workout": None}
 
@@ -322,20 +322,20 @@ def test_active_workout_refuses_a_cross_user_request_from_a_non_admin(make_clien
     request is scoped to the *viewer*, never an `all` bucket.
     """
     captured = _patch_geo(monkeypatch, status=404)
-    make_client(user="michele").get(
-        "/api/geo/workouts/active", params={"user_id": "jeremiah"}
+    make_client(user="sam").get(
+        "/api/geo/workouts/active", params={"user_id": "alex"}
     )
     call = captured["calls"][-1]
-    assert call["headers"].get("X-User-Id") == "jeremiah"
-    assert call["params"]["viewer"] == "michele", "consent would be decided against the wrong person"
+    assert call["headers"].get("X-User-Id") == "alex"
+    assert call["params"]["viewer"] == "sam", "consent would be decided against the wrong person"
     assert call["params"]["is_admin"] != "true"
 
 
 def test_active_workout_does_not_leak_another_users_session_to_a_non_admin(make_client, monkeypatch):
     """End-to-end refusal: geo 404s, so the client is told nothing is running."""
     _patch_geo(monkeypatch, status=404)
-    resp = make_client(user="michele").get(
-        "/api/geo/workouts/active", params={"user_id": "jeremiah"}
+    resp = make_client(user="sam").get(
+        "/api/geo/workouts/active", params={"user_id": "alex"}
     )
     assert resp.json() == {"workout": None}
 
@@ -347,7 +347,7 @@ def test_active_workout_does_not_leak_another_users_session_to_a_non_admin(make_
 # so a probe cannot tell "no such user" from "not shared with you". The gateway
 # used to rewrite every non-200 into a blanket 502 "Failed to fetch X", which
 # made a *permission refusal look identical to an outage*. Observed live: with
-# consent withdrawn, `GET /api/geo/steps?user_id=jeremiah` as Michele returned
+# consent withdrawn, `GET /api/geo/steps?user_id=alex` as Sam returned
 # 502 instead of 404.
 #
 # The distinction matters to the client: 404 means "ask the owner to share",
@@ -420,20 +420,20 @@ def test_activity_trends_with_a_user_id_forwards_the_viewer(make_client, monkeyp
     """The Fitness page always passes user_id. The target used to be resolved
     only when it was absent, so every such request failed (UnboundLocalError)."""
     captured = _patch_geo(monkeypatch, payload={"days": []})
-    resp = make_client(user="michele").get("/api/geo/trends/activity", params={"days": 7, "user_id": "jeremiah"})
+    resp = make_client(user="sam").get("/api/geo/trends/activity", params={"days": 7, "user_id": "alex"})
     assert resp.status_code == 200
     sent = captured["calls"][-1]["params"]
-    assert sent["viewer"] == "michele" and sent["user_id"] == "jeremiah"
+    assert sent["viewer"] == "sam" and sent["user_id"] == "alex"
 
 
 def test_eta_requires_a_viewer_and_forwards_it(anon_client, make_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"duration_s": 600})
-    assert anon_client.get("/api/geo/eta", params={"user_id": "michele"}).status_code == 401
-    resp = make_client(user="jeremiah").get("/api/geo/eta", params={"user_id": "michele", "to": "work"})
+    assert anon_client.get("/api/geo/eta", params={"user_id": "sam"}).status_code == 401
+    resp = make_client(user="alex").get("/api/geo/eta", params={"user_id": "sam", "to": "work"})
     assert resp.status_code == 200
     call = captured["calls"][-1]
-    assert call["url"].endswith("/people/michele/eta")
-    assert call["params"]["viewer"] == "jeremiah" and call["params"]["to"] == "work"
+    assert call["url"].endswith("/people/sam/eta")
+    assert call["params"]["viewer"] == "alex" and call["params"]["to"] == "work"
 
 
 def test_closest_and_routes_forward_the_viewer(anon_client, make_client, monkeypatch):
@@ -453,20 +453,20 @@ def test_closest_and_routes_forward_the_viewer(anon_client, make_client, monkeyp
 def test_dismissing_an_auto_workout_is_scoped_to_the_caller(make_client, anon_client, monkeypatch):
     captured = _patch_geo(monkeypatch, payload={"status": "dismissed", "id": "w1"})
 
-    denied = make_client(user="michele").post(
-        "/api/geo/workouts/w1/dismiss", json={"user_id": "jeremiah"}
+    denied = make_client(user="sam").post(
+        "/api/geo/workouts/w1/dismiss", json={"user_id": "alex"}
     )
     assert denied.status_code == 403
 
     assert anon_client.post("/api/geo/workouts/w1/dismiss").status_code == 401
 
-    resp = make_client(user="michele").post("/api/geo/workouts/w1/dismiss", json={})
+    resp = make_client(user="sam").post("/api/geo/workouts/w1/dismiss", json={})
     assert resp.status_code == 200
     assert resp.json()["status"] == "dismissed"
     call = captured["calls"][-1]
     assert call["verb"] == "post"
     assert call["url"].endswith("/workouts/w1/dismiss")
-    assert call["headers"]["X-User-Id"] == "michele"
+    assert call["headers"]["X-User-Id"] == "sam"
     assert call["headers"]["X-Internal-Secret"]
 
 
@@ -478,7 +478,7 @@ def test_imported_workouts_always_belong_to_the_caller(make_client, anon_client,
 
     body = {
         "source": "health_connect",
-        "user_id": "jeremiah",
+        "user_id": "alex",
         "workouts": [{"external_id": "hc:exercise:a", "activity_type": "walking", "start_time": 1, "end_time": 2}],
     }
     resp = make_client(user="kate").post("/api/geo/workouts/import", json=body)

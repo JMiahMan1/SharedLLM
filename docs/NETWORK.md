@@ -127,7 +127,7 @@ Network is for admins only.
 
 ## Limits
 
-- Devices behind the extender (192.168.2.230) are one Wi-Fi client of the
+- Devices behind the extender (192.0.2.230) are one Wi-Fi client of the
   router (its signal and airtime). Whether nlbwmon counts them one by one
   depends on the extender: a bridging one passes their own addresses through,
   one that translates them shows as a single device.

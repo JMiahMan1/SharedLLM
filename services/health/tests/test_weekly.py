@@ -81,7 +81,7 @@ class TestWeeklyRoute:
 
     def test_own_data_only(self, client):
         client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 480})
-        out = client.get("/weekly?end=2026-10-21", headers={"X-User-Id": "michele"}).json()
+        out = client.get("/weekly?end=2026-10-21", headers={"X-User-Id": "sam"}).json()
         assert out["days_logged"] == 0
         assert out["best_sleep"] is None
 

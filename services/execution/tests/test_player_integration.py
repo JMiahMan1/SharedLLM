@@ -733,7 +733,7 @@ class TestGatewayStreamEndpoint:
             is_admin=True,
             ha_url="http://homeassistant.local",
             ha_token="test_token",
-            mass_url="http://ha.sumemail.com:8095",
+            mass_url="http://ha.example.com:8095",
             mass_token="test_jwt_token",
         )
 
@@ -785,7 +785,7 @@ class TestGatewayStreamEndpoint:
             is_admin=True,
             ha_url="http://homeassistant.local",
             ha_token="test_token",
-            mass_url="http://ha.sumemail.com:8095",
+            mass_url="http://ha.example.com:8095",
             mass_token="test_jwt_token",
         )
 

@@ -20,7 +20,7 @@ async def test_execute_single_tool_location(monkeypatch):
     mock_resp.status = 200
     mock_resp.json = AsyncMock(return_value={
         "status": "SUCCESS",
-        "message": "Jeremiah is at Home. Dwell time: 1 hr 30 min.",
+        "message": "Alex is at Home. Dwell time: 1 hr 30 min.",
         "detail": {"current_zone": "Home"}
     })
 
@@ -45,12 +45,12 @@ async def test_execute_single_tool_location(monkeypatch):
     monkeypatch.setattr(orch, "get_all_settings", AsyncMock(return_value={"execution_svc_url": "http://execution:8003"}))
     monkeypatch.setattr(gw_main, "shared_http_client", fake_shared_client)
 
-    creds = ResolvedCredentials(user="jeremiah", role="admin")
+    creds = ResolvedCredentials(user="alex", role="admin")
     result = await _execute_single_tool(
         action="LocationRequest",
-        tool_data={"tool": "LocationRequest", "user": "Jeremiah"},
-        query="where is Jeremiah",
+        tool_data={"tool": "LocationRequest", "user": "Alex"},
+        query="where is Alex",
         creds=creds,
     )
 
-    assert "Jeremiah is at Home" in result
+    assert "Alex is at Home" in result

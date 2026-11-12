@@ -1,4 +1,6 @@
 # test/local/test_auth_identity.py
+# Flags: LIVE_TEST_URL (Identity base URL; skips when unset), INTERNAL_SECRET, HA_URL, HA_TOKEN,
+# NEXTCLOUD_USER, HA_DEFAULT_USER. No real defaults: everything comes from the run or the local .env.
 import os
 
 import httpx
@@ -13,7 +15,7 @@ IDENTITY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:8001"
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 # Expected values from .env for verification
-EXPECTED_USER = os.getenv("HA_DEFAULT_USER", "Summers")
+EXPECTED_USER = os.getenv("HA_DEFAULT_USER", "")
 EXPECTED_HA_URL = os.getenv("HA_URL")
 EXPECTED_HA_TOKEN = os.getenv("HA_TOKEN")
 EXPECTED_NC_USER = os.getenv("NEXTCLOUD_USER")

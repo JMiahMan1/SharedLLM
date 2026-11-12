@@ -49,7 +49,7 @@ def test_entity_search_keeps_climate_control_attributes(mocker):
     """Thermostat controls need dual targets, presets, fan and swing."""
     mocker.patch("services.execution.ha_client.get_states", return_value=[
         {
-            "entity_id": "climate.downstairs",
+            "entity_id": "climate.hallway",
             "state": "heat_cool",
             "attributes": {
                 "friendly_name": "Downstairs",

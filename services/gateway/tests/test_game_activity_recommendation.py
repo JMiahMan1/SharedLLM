@@ -58,8 +58,8 @@ def test_game_suggestion_comes_from_the_members_own_play(client, monkeypatch):
 
 
 def test_activity_suggestion_from_a_late_week(client, monkeypatch):
-    monkeypatch.setenv("TIMEZONE", "America/Phoenix")
-    late = 1792821600000  # 2026-10-23 23:00 in Phoenix
+    monkeypatch.setenv("TIMEZONE", "Etc/GMT+7")
+    late = 1792821600000  # 2026-10-23 23:00 at UTC-7
     _telemetry(monkeypatch, usage=[{"day": "a", "last_use": late}, {"day": "b", "last_use": late - 86400000}])
 
     rec = client.get("/api/recommendations/activity").json()["recommendation"]

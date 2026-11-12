@@ -17,16 +17,16 @@ class _SyncRedis:
 
 @pytest.mark.asyncio
 async def test_the_recognised_speaker_is_used_once(monkeypatch):
-    redis = _SyncRedis({voice_speaker.key("turn on the kitchen lights"): voice_speaker.encode("michele", 0.9)})
+    redis = _SyncRedis({voice_speaker.key("turn on the kitchen lights"): voice_speaker.encode("sam", 0.9)})
     monkeypatch.setattr(gateway_cache, "get_redis", lambda: redis)
 
-    assert await _recognised_speaker("Turn on the kitchen lights") == "michele"
+    assert await _recognised_speaker("Turn on the kitchen lights") == "sam"
     assert await _recognised_speaker("Turn on the kitchen lights") is None
 
 
 @pytest.mark.asyncio
 async def test_other_words_find_nobody(monkeypatch):
-    redis = _SyncRedis({voice_speaker.key("turn on the kitchen lights"): voice_speaker.encode("michele", 0.9)})
+    redis = _SyncRedis({voice_speaker.key("turn on the kitchen lights"): voice_speaker.encode("sam", 0.9)})
     monkeypatch.setattr(gateway_cache, "get_redis", lambda: redis)
 
     assert await _recognised_speaker("unlock the front door") is None

@@ -88,19 +88,19 @@ class TestExposureGatesUnchanged:
         client.post("/cycle/periods", json={"start_day": TODAY})
         # Recorded while off, but the share is still refused until the owner
         # opts in: sharing is an exposure decision, not a recording one.
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 422
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 422
 
         assert client.put("/cycle/settings", json={"enabled": True}).status_code == 200
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 200
 
     def test_turning_tracking_off_still_drops_cycle_grants(self, client):
         _female_profile(client)
         client.post("/cycle/periods", json={"start_day": TODAY})
         client.put("/cycle/settings", json={"enabled": True})
-        assert client.put("/shares", json={"viewer": "michele", "scope": "cycle"}).status_code == 200
+        assert client.put("/shares", json={"viewer": "sam", "scope": "cycle"}).status_code == 200
 
         assert client.put("/cycle/settings", json={"enabled": False}).status_code == 200
-        assert client.get("/family", headers={"X-User-Id": "michele"}).json()["people"] == []
+        assert client.get("/family", headers={"X-User-Id": "sam"}).json()["people"] == []
         # The period itself survives the toggle.
         assert len(client.get("/cycle/periods").json()["periods"]) == 1
 

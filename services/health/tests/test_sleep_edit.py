@@ -34,7 +34,7 @@ class TestSleepEdit:
         saved = client.post("/sleep", json={"night": "2026-10-21", "duration_minutes": 400}).json()
         other = client.put(
             f"/sleep/{saved['id']}", json={"night": "2026-10-21", "duration_minutes": 1},
-            headers={"X-User-Id": "michele"},
+            headers={"X-User-Id": "sam"},
         )
         assert other.status_code == 404
         assert client.put("/sleep/99999", json={"night": "2026-10-21", "duration_minutes": 5}).status_code == 404

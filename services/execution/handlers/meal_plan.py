@@ -22,7 +22,7 @@ from datetime import date, datetime, time, timedelta
 import pytz
 from icalendar import Calendar, Event
 
-from services.config import TIMEZONE
+from services.common import household_tz
 from services.execution.schemas import ExecutionResult, MealPlanRequest, NoteRequest
 
 from .note import handle_note, note_body
@@ -230,7 +230,7 @@ def build_plan_ics(body: str | None, today: date | None = None) -> tuple[str, in
     """
     base = today or date.today()
     monday = base - timedelta(days=base.weekday())
-    tz = pytz.timezone(TIMEZONE)
+    tz = pytz.timezone(household_tz.zone_name())
     calendar = Calendar()
     calendar.add("prodid", "-//Jarvis OS//Meal plan//EN")
     calendar.add("version", "2.0")

@@ -22,24 +22,24 @@ def calls(monkeypatch):
     async def authed(request):
         auth = request.headers.get("Authorization")
         if auth == "Bearer admin-key":
-            return "jeremiah"
+            return "alex"
         if auth == "Bearer kid-key":
-            return "noah"
+            return "jordan"
         raise HTTPException(status_code=401, detail="Authentication required")
 
     async def admin(request):
         user = await authed(request)
-        if user != "jeremiah":
+        if user != "alex":
             raise HTTPException(status_code=403, detail="Admin only")
         return user
 
     async def call(method, path, *, params=None, json=None):
         seen.append((method, path, params, json))
         if path == "/forecast":
-            own = bool(params and params.get("user") == "noah")
+            own = bool(params and params.get("user") == "jordan")
             return {"current": {"temp": 41 if own else 60}, "hourly": [], "daily": [], "personal": own}
         if path == "/heads-up":
-            return {"items": [{"id": "hay", "title": "Cover the hay"}] if params["user"] == "jeremiah" else []}
+            return {"items": [{"id": "hay", "title": "Cover the hay"}] if params["user"] == "alex" else []}
         if path == "/energy":
             return {"days": [], "model": None}
         if path == "/correlations":
@@ -66,9 +66,9 @@ def client():
 def test_the_forecast_needs_a_signed_in_caller_and_carries_their_own_heads_up(client, calls):
     assert client.get("/api/weather").status_code == 401
     kid = client.get("/api/weather", headers=KID).json()
-    assert kid["current"]["temp"] == 41 and kid["heads_up"] == []  # noah's own place
+    assert kid["current"]["temp"] == 41 and kid["heads_up"] == []  # jordan's own place
     assert client.get("/api/weather", headers=ADMIN).json()["heads_up"][0]["title"] == "Cover the hay"
-    assert ("GET", "/heads-up", {"user": "noah"}, None) in calls
+    assert ("GET", "/heads-up", {"user": "jordan"}, None) in calls
 
 
 def test_a_failed_heads_up_still_returns_the_forecast(client, calls, monkeypatch):
@@ -94,7 +94,7 @@ def test_a_reminder_test_goes_to_the_admin_who_asked(client, calls):
     assert client.post("/api/weather/reminders/test", headers=ADMIN, json={}).status_code == 422
     resp = client.post("/api/weather/reminders/test", headers=ADMIN, json={"rule": {"kind": "rain", "title": "Hay"}})
     assert resp.status_code == 200
-    assert calls[-1] == ("POST", "/reminders/test", None, {"rule": {"kind": "rain", "title": "Hay"}, "user": "jeremiah"})
+    assert calls[-1] == ("POST", "/reminders/test", None, {"rule": {"kind": "rain", "title": "Hay"}, "user": "alex"})
 
 
 def test_integrations_and_correlations_are_admin_only(client, calls):
@@ -109,7 +109,7 @@ def test_integrations_and_correlations_are_admin_only(client, calls):
 def test_the_forecast_is_the_callers_own_and_household_asks_for_home(client, calls):
     body = client.get("/api/weather", headers=KID).json()
     assert body["personal"] is True and body["current"]["temp"] == 41
-    assert ("GET", "/forecast", {"user": "noah"}, None) in calls
+    assert ("GET", "/forecast", {"user": "jordan"}, None) in calls
     assert client.get("/api/weather", headers=ADMIN).json()["personal"] is False
 
     home = client.get("/api/weather?household=true", headers=KID).json()

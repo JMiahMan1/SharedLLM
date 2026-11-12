@@ -7,7 +7,7 @@ from services.gateway import cookbook, main, recipe_images
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("url", [
-    "http://127.0.0.1/x.jpg", "http://192.168.2.205:8080/a.png", "http://localhost/a.jpg",
+    "http://127.0.0.1/x.jpg", "http://172.16.2.205:8080/a.png", "http://localhost/a.jpg",
     "file:///etc/passwd", "http://user:pw@example.com/a.jpg", "http://169.254.169.254/latest",
 ])
 async def test_photos_are_only_fetched_from_public_addresses(url):

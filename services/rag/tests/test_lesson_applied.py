@@ -133,7 +133,7 @@ async def test_lesson_edit_and_delete_cannot_reach_other_collections(tmp_path):
     rewrite or delete any row (a file chunk, an HA entity) whose id was sent."""
     conn = _install_fakes(tmp_path)
     resp = await rag_main.ingest(
-        IngestRequest(user_id="summers", content="Budget 2026", collection_name="nextcloud_files", metadata={"path": "/b.md"})
+        IngestRequest(user_id="rivera", content="Budget 2026", collection_name="nextcloud_files", metadata={"path": "/b.md"})
     )
     other_id = resp["id"]
 

@@ -18,19 +18,19 @@ def sub(endpoint: str) -> dict:
 
 
 async def test_subscription_round_trip(rc):
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
-    subs = await push.list_subscriptions("jeremiah")
+    await push.save_subscription("alex", sub("https://push.example/1"))
+    subs = await push.list_subscriptions("alex")
     assert len(subs) == 1
     assert subs[0]["endpoint"] == "https://push.example/1"
 
-    assert await push.remove_subscription("jeremiah", "https://push.example/1") is True
-    assert await push.list_subscriptions("jeremiah") == []
+    assert await push.remove_subscription("alex", "https://push.example/1") is True
+    assert await push.list_subscriptions("alex") == []
 
 
 async def test_duplicate_subscription_is_stored_once(rc):
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
-    assert len(await push.list_subscriptions("jeremiah")) == 1
+    await push.save_subscription("alex", sub("https://push.example/1"))
+    await push.save_subscription("alex", sub("https://push.example/1"))
+    assert len(await push.list_subscriptions("alex")) == 1
 
 
 async def test_vapid_keys_are_generated_once_and_reused(rc):
@@ -51,58 +51,58 @@ async def test_send_without_subscriptions_is_a_noop(rc, monkeypatch):
         raise AssertionError("should not attempt delivery")
 
     monkeypatch.setattr(push, "_send_webpush", fail)
-    result = await push.send_to_user("jeremiah", "Title", "Body")
+    result = await push.send_to_user("alex", "Title", "Body")
     assert result == {"webpush": 0, "fcm": False, "pruned": 0}
 
 
 async def test_successful_webpush_is_counted(rc, monkeypatch):
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
+    await push.save_subscription("alex", sub("https://push.example/1"))
 
     async def ok(_subscription, _payload, _keys):
         return True
 
     monkeypatch.setattr(push, "_send_webpush", ok)
-    result = await push.send_to_user("jeremiah", "Report ready", "You hit your goal")
+    result = await push.send_to_user("alex", "Report ready", "You hit your goal")
     assert result["webpush"] == 1
     assert result["pruned"] == 0
-    assert len(await push.list_subscriptions("jeremiah")) == 1
+    assert len(await push.list_subscriptions("alex")) == 1
 
 
 async def test_dead_subscription_is_pruned_not_retried_forever(rc, monkeypatch):
-    await push.save_subscription("jeremiah", sub("https://push.example/gone"))
+    await push.save_subscription("alex", sub("https://push.example/gone"))
 
     async def gone(_subscription, _payload, _keys):
         return False  # 404/410 from the push service
 
     monkeypatch.setattr(push, "_send_webpush", gone)
-    result = await push.send_to_user("jeremiah", "Report ready", "body")
+    result = await push.send_to_user("alex", "Report ready", "body")
     assert result["pruned"] == 1
-    assert await push.list_subscriptions("jeremiah") == []
+    assert await push.list_subscriptions("alex") == []
 
 
 async def test_fcm_is_inert_without_credentials(rc, monkeypatch):
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.delenv("TELEMETRY_FCM_CREDENTIALS", raising=False)
-    result = await push.send_to_user("jeremiah", "Title", "Body")
+    result = await push.send_to_user("alex", "Title", "Body")
     assert result["fcm"] is False
 
 
 async def test_fcm_uses_registered_token_when_available(rc, monkeypatch):
     monkeypatch.setenv("TELEMETRY_FCM_CREDENTIALS", "/tmp/fake.json")
-    rc.strings["tel:push:fcm_token:jeremiah"] = "device-token"
+    rc.strings["tel:push:fcm_token:alex"] = "device-token"
     # firebase-admin is not installed in tests, so this must degrade quietly
-    result = await push.send_to_user("jeremiah", "Title", "Body")
+    result = await push.send_to_user("alex", "Title", "Body")
     assert result["fcm"] is False
 
 
 async def test_send_never_raises_when_transport_explodes(rc, monkeypatch):
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
+    await push.save_subscription("alex", sub("https://push.example/1"))
 
     async def boom(*_args, **_kwargs):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(push, "_send_webpush", boom)
-    result = await push.send_to_user("jeremiah", "Title", "Body")
+    result = await push.send_to_user("alex", "Title", "Body")
     assert result["webpush"] == 0
 
 
@@ -111,7 +111,7 @@ async def test_missing_pywebpush_degrades_loudly_without_raising(rc, caplog):
     import builtins
     import sys
 
-    await push.save_subscription("jeremiah", sub("https://push.example/1"))
+    await push.save_subscription("alex", sub("https://push.example/1"))
     real_import = builtins.__import__
 
     def blocked(name, *args, **kwargs):
@@ -123,7 +123,7 @@ async def test_missing_pywebpush_degrades_loudly_without_raising(rc, caplog):
         sys.modules.pop("pywebpush", None)
         builtins.__import__ = blocked
         try:
-            result = await push.send_to_user("jeremiah", "Title", "Body")
+            result = await push.send_to_user("alex", "Title", "Body")
         finally:
             builtins.__import__ = real_import
 

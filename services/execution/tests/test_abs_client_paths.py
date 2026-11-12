@@ -20,7 +20,7 @@ fetched 2026-09-27; the router is mounted under ``/api``):
 * ``GET /api/authors/:id?include=items`` (:217; AuthorController.findOne;
   ``libraryItems`` are the author's books)
 
-Live probes of ``https://abs.sumemail.com`` could not discriminate routes:
+Live probes of ``https://abs.example.com`` could not discriminate routes:
 ABS auth runs before routing and returns 401 for every path (including
 nonexistent ones), so the source router above is the authority.
 """

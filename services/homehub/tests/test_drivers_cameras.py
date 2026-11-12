@@ -278,7 +278,7 @@ def reolink_hub(options=None):
     data = {"host": "ReoLink-Hub.local", "port": 443, "use_https": True, "username": "admin", "password": "x",
             "baichuan_port": 9000, "baichuan_connection": "tcp", "baichuan_only": False, "uid": HUB}
     if options is None:
-        options = {"host": "192.168.2.181", "protocol": "rtsp"}
+        options = {"host": "192.0.2.181", "protocol": "rtsp"}
     return make_hub("reolink", data=data, entities=ents, options=options)
 
 
@@ -294,7 +294,7 @@ async def test_reolink_setup_maps_unique_ids_to_channels(fake_host):
     drv = reolink.ReolinkDriver(hub, entry)
     await drv.async_setup()
     host = fake_host.instances[0]
-    assert host.address == "192.168.2.181"  # the options override beats ReoLink-Hub.local
+    assert host.address == "192.0.2.181"  # the options override beats ReoLink-Hub.local
     assert host.kw["bc_port"] == 9000 and host.kw["uid"] == HUB
     assert host.baichuan.subscribed and "homehub" in host.baichuan.callbacks
     assert drv.locate(hub.entities["binary_sensor.backyard_camera_1_motion"]) == (1, "motion")

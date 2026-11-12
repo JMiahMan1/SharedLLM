@@ -49,7 +49,7 @@ def provider(monkeypatch):
 
 def request(action, **kwargs):
     payload = {
-        "user_context": {"user": "jeremiah"},
+        "user_context": {"user": "alex"},
         "action": action,
         "storage": "nextcloud",
         **kwargs,
@@ -548,7 +548,7 @@ async def test_local_append_adds_a_checklist_item(monkeypatch, tmp_path):
     monkeypatch.setattr(note_handler, "LOCAL_NOTES_ROOT", str(tmp_path))
     (tmp_path / "Groceries.md").write_text("# Groceries\n", encoding="utf-8")
     result = await note_handler.handle_note(
-        NoteRequest(user_context={"user": "jeremiah"}, action="append", storage="local", title="Groceries", content="milk")
+        NoteRequest(user_context={"user": "alex"}, action="append", storage="local", title="Groceries", content="milk")
     )
 
     assert result.status == "SUCCESS", result.message
@@ -868,7 +868,7 @@ async def test_new_actions_stay_unavailable_in_local_mode(monkeypatch):
     from services.execution.schemas import NoteRequest
 
     result = await note_handler.handle_note(
-        NoteRequest(user_context={"user": "jeremiah"}, action="meta_read", storage="local")
+        NoteRequest(user_context={"user": "alex"}, action="meta_read", storage="local")
     )
 
     assert result.status == "FAILURE"
@@ -998,7 +998,7 @@ async def test_versions_of_a_missing_note_say_so(provider, monkeypatch):
 
 async def test_shares_lists_the_people_a_note_is_shared_with(provider):
     provider.ocs_answer = (True, [
-        {"id": 7, "share_type": 0, "share_with": "michele", "share_with_displayname": "Michele", "permissions": 3},
+        {"id": 7, "share_type": 0, "share_with": "sam", "share_with_displayname": "Sam", "permissions": 3},
         {"id": 8, "share_type": 0, "share_with": "kid", "share_with_displayname": "Kid", "permissions": 1},
         {"id": 9, "share_type": 3, "share_with": None, "permissions": 1},  # a public link is not a person
     ], "")
@@ -1006,7 +1006,7 @@ async def test_shares_lists_the_people_a_note_is_shared_with(provider):
 
     assert result.status == "SUCCESS"
     assert result.detail["shares"] == [
-        {"id": "7", "with": "michele", "name": "Michele", "can_edit": True},
+        {"id": "7", "with": "sam", "name": "Sam", "can_edit": True},
         {"id": "8", "with": "kid", "name": "Kid", "can_edit": False},
     ]
     method, endpoint, params, _ = provider.ocs_calls[0]
@@ -1015,13 +1015,13 @@ async def test_shares_lists_the_people_a_note_is_shared_with(provider):
 
 
 async def test_share_add_shares_with_one_user_read_only_or_editable(provider):
-    provider.ocs_answer = (True, {"id": 11, "share_type": 0, "share_with": "michele", "permissions": 3}, "")
-    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele", can_edit=True))
+    provider.ocs_answer = (True, {"id": 11, "share_type": 0, "share_with": "sam", "permissions": 3}, "")
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="sam", can_edit=True))
     assert result.status == "SUCCESS"
     assert result.detail["share"]["can_edit"] is True
     _, endpoint, _, data = provider.ocs_calls[0]
     assert endpoint == "/ocs/v2.php/apps/files_sharing/api/v1/shares"
-    assert data == {"path": "/Notes/A.md", "shareType": "0", "shareWith": "michele", "permissions": "3"}
+    assert data == {"path": "/Notes/A.md", "shareType": "0", "shareWith": "sam", "permissions": "3"}
 
     await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="kid"))
     assert provider.ocs_calls[1][3]["permissions"] == "1"
@@ -1046,22 +1046,22 @@ async def test_share_remove_deletes_by_numeric_id_only(provider):
 
 async def test_sharees_offers_other_users_once_and_never_yourself(provider):
     provider.ocs_answer = (True, {
-        "exact": {"users": [{"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}}]},
+        "exact": {"users": [{"label": "Sam", "value": {"shareType": 0, "shareWith": "sam"}}]},
         "users": [
-            {"label": "Michele", "value": {"shareType": 0, "shareWith": "michele"}},
+            {"label": "Sam", "value": {"shareType": 0, "shareWith": "sam"}},
             {"label": "Ada", "value": {"shareType": 0, "shareWith": "ada"}},
             {"label": "Me", "value": {"shareType": 0, "shareWith": "u"}},
         ],
     }, "")
     result = await note_handler.handle_note(request("sharees"))
     assert result.status == "SUCCESS"
-    assert result.detail["people"] == [{"id": "ada", "name": "Ada"}, {"id": "michele", "name": "Michele"}]
+    assert result.detail["people"] == [{"id": "ada", "name": "Ada"}, {"id": "sam", "name": "Sam"}]
     assert provider.ocs_calls[0][2]["itemType"] == "file"
 
 
 async def test_a_refused_share_reports_nextcloud_s_reason(provider):
     provider.ocs_answer = (False, None, "Sharing is disabled for this user")
-    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="michele"))
+    result = await note_handler.handle_note(request("share_add", path="Notes/A.md", share_with="sam"))
     assert result.status == "FAILURE"
     assert result.message == "Sharing is disabled for this user"
 

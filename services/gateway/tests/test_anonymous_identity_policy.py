@@ -121,11 +121,11 @@ async def test_a_validated_key_cannot_be_overridden_by_body_or_query_ids(monkeyp
         "method": "POST",
         "path": "/",
         "headers": [(b"authorization", b"Bearer alice-key")],
-        "query_string": b"user_id=jeremiah",
+        "query_string": b"user_id=alex",
     })
 
     await gateway_main._resolve_identity_allow_anonymous(
-        request, {"user_id": 1, "rag_user": "jeremiah", "voice_id": "jeremiah"}
+        request, {"user_id": 1, "rag_user": "alex", "voice_id": "alex"}
     )
 
     assert seen == {"api_key": "alice-key"}

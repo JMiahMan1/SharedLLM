@@ -49,39 +49,39 @@ def run(client, collection, user, scanned):
 
 def test_only_vanished_paths_are_purged():
     client = FakeClient(listed=["/a.md", "/gone.md", "/b.md"])
-    run(client, "nextcloud_files", "summers", {"/a.md", "/b.md"})
+    run(client, "nextcloud_files", "rivera", {"/a.md", "/b.md"})
     purged = sorted(body["filter"]["path"] for _, body in client.purges)
     assert purged == ["/gone.md"]
 
 
 def test_purge_scopes_to_the_right_user_and_collection():
     client = FakeClient(listed=["/gone.md"])
-    run(client, "nextcloud_files", "summers", set())
+    run(client, "nextcloud_files", "rivera", set())
     url, body = client.purges[0]
     assert url.endswith("/rag/purge/nextcloud_files")
-    assert body["user_id"] == "summers"
+    assert body["user_id"] == "rivera"
     assert body["filter"] == {"path": "/gone.md"}
 
 
 def test_listing_uses_the_indexed_paths_endpoint_not_a_bare_collection_purge():
     client = FakeClient(listed=[])
-    run(client, "nextcloud_files", "summers", {"/a.md"})
+    run(client, "nextcloud_files", "rivera", {"/a.md"})
     url, params = client.gets[0]
     assert url.endswith("/rag/indexed-paths")
     assert params["collection_name"] == "nextcloud_files"
-    assert params["user_id"] == "summers"
+    assert params["user_id"] == "rivera"
 
 
 def test_nothing_purged_when_every_still_present():
     client = FakeClient(listed=["/a.md", "/b.md"])
-    run(client, "nextcloud_files", "summers", {"/a.md", "/b.md"})
+    run(client, "nextcloud_files", "rivera", {"/a.md", "/b.md"})
     assert client.purges == []
 
 
 def test_live_chunks_survive_a_failed_listing():
     """A bookkeeping failure must never escalate into deleting live chunks."""
     client = FakeClient(list_status=500)
-    run(client, "nextcloud_files", "summers", {"/a.md"})
+    run(client, "nextcloud_files", "rivera", {"/a.md"})
     assert client.purges == []
 
 
@@ -91,13 +91,13 @@ def test_live_chunks_survive_a_raising_client():
             raise RuntimeError("connection reset")
 
     client = Exploding()
-    run(client, "nextcloud_files", "summers", {"/a.md"})
+    run(client, "nextcloud_files", "rivera", {"/a.md"})
     assert client.purges == []
 
 
 def test_empty_index_purges_nothing():
     client = FakeClient(listed=[])
-    run(client, "nextcloud_files", "summers", set())
+    run(client, "nextcloud_files", "rivera", set())
     assert client.purges == []
 
 
@@ -109,14 +109,14 @@ def test_one_failing_purge_does_not_abort_the_remainder():
             return FakeResponse(status)
 
     client = Flaky(listed=["/one.md", "/two.md"])
-    run(client, "nextcloud_files", "summers", set())
+    run(client, "nextcloud_files", "rivera", set())
     assert len(client.purges) == 2
 
 def test_sub_folder_scan_leaves_the_rest_of_the_index_alone():
     # Indexing just "Notes" says nothing about files outside it.
     client = FakeClient(listed=["/Notes/a.md", "/Notes/gone.md", "/Photos/x.jpg", "/Notesy.md"])
     asyncio.run(_purge_stale_paths(
-        client, "nextcloud_files", "summers", {"/Notes/a.md"}, scope="Notes", recursive=True,
+        client, "nextcloud_files", "rivera", {"/Notes/a.md"}, scope="Notes", recursive=True,
     ))
     assert [body["filter"]["path"] for _, body in client.purges] == ["/Notes/gone.md"]
 
@@ -124,7 +124,7 @@ def test_sub_folder_scan_leaves_the_rest_of_the_index_alone():
 def test_non_recursive_scan_only_judges_direct_children():
     client = FakeClient(listed=["/Notes/gone.md", "/Notes/Sub/deep.md"])
     asyncio.run(_purge_stale_paths(
-        client, "nextcloud_files", "summers", set(), scope="/Notes/", recursive=False,
+        client, "nextcloud_files", "rivera", set(), scope="/Notes/", recursive=False,
     ))
     assert [body["filter"]["path"] for _, body in client.purges] == ["/Notes/gone.md"]
 
@@ -163,6 +163,6 @@ def test_checkpoint_skipped_files_count_as_present(monkeypatch):
     monkeypatch.setattr(storage_main, "_purge_stale_paths", fake_purge)
     monkeypatch.setattr(storage_main, "get_client", lambda: Client())
 
-    req = IndexScanRequest(provider={"kind": "nextcloud", "settings": {"username": "summers"}})
+    req = IndexScanRequest(provider={"kind": "nextcloud", "settings": {"username": "rivera"}})
     asyncio.run(storage_main._run_full_index_task(req))
     assert seen["scanned"] == {"/a.md", "/b.md"}

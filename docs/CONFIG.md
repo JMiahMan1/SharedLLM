@@ -81,6 +81,50 @@ secrets shared with the ntfy container:
 **Not here:** Music Assistant and per-service logins are per-user credentials
 in Identity, with admin grants for sharing; see `docs/PER_USER_CREDENTIALS.md`.
 
+## Time zone
+
+One household time zone governs Jarvis and the hub. Every service resolves it
+through `services/common/household_tz.py`, in this order:
+
+1. **Household time zone setting**: Identity global setting `timezone` (an IANA
+   name such as `America/Denver`). An admin sets it in Settings > Household time
+   zone (`GET`/`PUT /api/household-timezone` on the gateway). Blank by default.
+2. **`TZ` in the server's `.env`** (docker-compose passes it to every container
+   and refuses to start without it). The older `TIMEZONE` variable is read as an
+   alias when `TZ` is unset.
+3. **Derived from the home location**, only when the admin turns on "Derive from
+   home location" (setting `timezone_from_location`). The point is the
+   `weather_location` setting (Admin > Weather reminders) or, in the hub, the
+   imported Home Assistant `zone.home`. The lookup is offline (`timezonefinder`).
+4. **Otherwise the service fails** with:
+   `No household time zone is configured: ... Set the household time zone in
+   Settings > Household time zone, or TZ in the server's .env (e.g.
+   TZ=America/Denver), or turn on 'Derive from home location' with a home
+   location set ...`. There is no UTC guess: a wrong zone moves every schedule
+   by hours without a word. geo and homehub refuse to start; the gateway,
+   execution and telemetry log the error at startup and fail each feature that
+   needs the zone with the same message.
+
+Each service logs the result once at startup, e.g.
+`gateway: time zone America/Denver (from household setting)`, and the
+Settings control shows the effective zone and its source. A change to the
+setting applies to the gateway at once and to the other services when they
+restart. Settings that cannot be read at startup are reported in the log and
+resolution continues with `TZ`.
+
+Per-person and per-device zones (a phone's reported zone in geo, a person's
+own `timezone`, a report job's `timezone`) are used when present and valid;
+otherwise the household zone is used and the log says so. `APP_TIMEZONE`
+overrides the zone for geo alone (tests pin it).
+
+What depends on it: schedules (telemetry reports, automations, quiet hours and
+screen-time windows), sun times (homehub sunrise/sunset triggers), energy
+time-of-use periods (SRP), reminders (calendar, leave-by, weather), the time
+and date answers, and geo's day summaries (steps, trips, timelines).
+
+The health service still follows the container's own local zone (`TZ`), not
+the household setting; keep the two the same until it moves to the resolver.
+
 ## Paths and stores
 
 | Variable | Value (`docker-compose.yml`) | Where |

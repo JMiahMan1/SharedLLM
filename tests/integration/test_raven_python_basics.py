@@ -36,11 +36,11 @@ import time
 import httpx
 import pytest
 
-SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
+SERVER_IP = os.getenv("SERVER_IP", "")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
-GH_OWNER = os.getenv("GH_OWNER", "JMiahMan1")
+GH_OWNER = os.getenv("GH_OWNER", "")
 GH_USER = os.getenv("GH_USER", GH_OWNER)
 RAVEN_API_KEY = os.getenv("RAVEN_API_KEY", "")
 
@@ -120,6 +120,8 @@ def _live_enabled() -> bool:
 
 
 pytestmark = [
+    pytest.mark.skipif(not SERVER_IP, reason="SERVER_IP is not set (the host running the deployed stack)"),
+    pytest.mark.skipif(not GH_OWNER, reason="GH_OWNER is not set (the GitHub account Raven pushes to)"),
     pytest.mark.local_only,
     pytest.mark.skipif(
         not _live_enabled(),

@@ -111,7 +111,7 @@ async def test_resolve_stream(mocker):
 
     # Temporarily override config value
     import services.config
-    mocker.patch.object(services.config, "EXECUTION_EXTERNAL_HOST", "192.168.2.205")
+    mocker.patch.object(services.config, "EXECUTION_EXTERNAL_HOST", "192.0.2.205")
 
     from services.execution.main import execute_media_resolve_stream
     from services.execution.schemas import ResolveStreamRequest
@@ -127,7 +127,7 @@ async def test_resolve_stream(mocker):
 
     parsed = urlparse(res.detail["stream_url"])
     assert parsed.scheme == "http"
-    assert parsed.netloc == "192.168.2.205:8888"
+    assert parsed.netloc == "192.0.2.205:8888"
     assert parsed.path == "/media/vid-123"
     query = parse_qs(parsed.query)
     assert query.get("user") == ["test_user"]

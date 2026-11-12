@@ -3,3 +3,6 @@ redis
 fastapi
 uvicorn
 pywebpush
+# Offline lookup of the household time zone from the home location
+# (services/common/household_tz.py, "Derive from home location"). Wheels for 3.11.
+timezonefinder>=6.5,<10

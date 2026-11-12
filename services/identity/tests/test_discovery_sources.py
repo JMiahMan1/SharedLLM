@@ -82,7 +82,7 @@ def _configure_mailcow(session: Session):
     from services.identity.main import encrypt
 
     user = session.exec(select(User).where(User.username == "default")).first()
-    user.mailcow_url = "https://mail.sumemail.com"
+    user.mailcow_url = "https://mail.example.com"
     user.mailcow_api_key_enc = encrypt("mailcow-test-key")
     session.add(user)
     session.commit()
@@ -100,7 +100,7 @@ HA_STATES = [
 ]
 
 NC_USERS = {"ocs": {"meta": {"status": "ok"}, "data": {"users": ["mom", "kiddo"]}}}
-NC_MOM = {"ocs": {"data": {"display-name": "Mom", "email": "mom@sumemail.com"}}}
+NC_MOM = {"ocs": {"data": {"display-name": "Mom", "email": "mom@example.com"}}}
 
 ABS_USERS = {
     "users": [
@@ -111,9 +111,9 @@ ABS_USERS = {
 
 MAILBOXES = {
     "items": [
-        {"local_part": "mom", "email": "mom@sumemail.com", "name": "Mom", "active": True},
-        {"local_part": "kiddo", "email": "kiddo@sumemail.com", "name": "Kiddo", "active": True},
-        {"local_part": "admin", "email": "admin@sumemail.com", "name": "Admin", "active": True},
+        {"local_part": "mom", "email": "mom@example.com", "name": "Mom", "active": True},
+        {"local_part": "kiddo", "email": "kiddo@example.com", "name": "Kiddo", "active": True},
+        {"local_part": "admin", "email": "admin@example.com", "name": "Admin", "active": True},
     ]
 }
 
@@ -144,11 +144,11 @@ def test_discovery_merges_all_four_sources(client, monkeypatch, session: Session
     assert mom["ha_person_id"] == "person.mom"
     assert mom["nc_username"] == "mom"
     assert mom["abs_username"] == "mom"
-    assert mom["mail_address"] == "mom@sumemail.com"
+    assert mom["mail_address"] == "mom@example.com"
     # A real display name beats the login handle, and the email comes from
     # Nextcloud when it is there.
     assert mom["display_name"] == "Mom"
-    assert mom["email"] == "mom@sumemail.com"
+    assert mom["email"] == "mom@example.com"
 
 
 def test_discovery_uses_mailcow_address_when_nextcloud_has_no_email(client, monkeypatch, session: Session):
@@ -164,7 +164,7 @@ def test_discovery_uses_mailcow_address_when_nextcloud_has_no_email(client, monk
     users = {u["username"]: u for u in resp.json()["users"]}
 
     assert users["mom"]["source"] == "Mailcow"
-    assert users["mom"]["email"] == "mom@sumemail.com"
+    assert users["mom"]["email"] == "mom@example.com"
     assert users["mom"]["display_name"] == "Mom"
 
 
@@ -209,7 +209,7 @@ def test_mailcow_fields_round_trip_through_creation(client):
         json={
             "username": "sarah",
             "password": "hunter2hunter2",
-            "mailcow_url": "https://mail.sumemail.com",
+            "mailcow_url": "https://mail.example.com",
             "mailcow_api_key": "mc-key-123",
         },
     )

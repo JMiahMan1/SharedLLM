@@ -44,7 +44,7 @@ def test_a_reminder_is_always_set_for_the_caller(proxy):
     client, calls, answer = proxy
     answer["body"] = {"reminder": {"id": "a" * 32}}
     res = client.post("/api/geo/place-reminders", json={
-        "zone": "zone.home", "on": "arrive", "title": "Bins", "url": "/notes", "user": "michele",
+        "zone": "zone.home", "on": "arrive", "title": "Bins", "url": "/notes", "user": "sam",
     })
     assert res.status_code == 200
     method, url, params, body = calls[0]

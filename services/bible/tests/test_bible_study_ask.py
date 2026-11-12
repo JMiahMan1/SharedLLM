@@ -251,7 +251,7 @@ async def test_the_question_goes_to_the_gateway_with_thinking_turned_off(monkeyp
     session = _patch(monkeypatch, _Session(_answer()))
     result = await study_ask.ask(
         prompt="Passage: John 3:16\n\nQuestion: Why?",
-        user="jeremiah",
+        user="alex",
         gateway_url="http://gateway:11435",
         internal_secret="s3cret",
     )
@@ -273,7 +273,7 @@ async def test_a_custom_persona_replaces_the_study_helper(monkeypatch):
     session = _patch(monkeypatch, _Session(_answer()))
     await study_ask.ask(
         prompt="Verse of the Day: Genesis 1:1",
-        user="jeremiah",
+        user="alex",
         gateway_url="http://gateway:11435",
         internal_secret="s3cret",
         system="You explain the passage in its historical setting.",
@@ -286,7 +286,7 @@ async def test_a_custom_persona_replaces_the_study_helper(monkeypatch):
 async def test_a_trailing_slash_on_the_gateway_url_does_not_double_up(monkeypatch):
     session = _patch(monkeypatch, _Session(_answer()))
     await study_ask.ask(
-        prompt="p", user="jeremiah", gateway_url="http://gateway:11435/", internal_secret=""
+        prompt="p", user="alex", gateway_url="http://gateway:11435/", internal_secret=""
     )
     assert session.calls[0][0] == "http://gateway:11435/v1/chat/completions"
 
@@ -294,7 +294,7 @@ async def test_a_trailing_slash_on_the_gateway_url_does_not_double_up(monkeypatc
 async def test_an_unset_gateway_url_names_the_setting(monkeypatch):
     _patch(monkeypatch, _Session(None))
     with pytest.raises(study_ask.StudyAskUnavailable) as exc:
-        await study_ask.ask(prompt="p", user="jeremiah", gateway_url="", internal_secret="")
+        await study_ask.ask(prompt="p", user="alex", gateway_url="", internal_secret="")
     assert "GATEWAY_INTERNAL_URL" in str(exc.value)
 
 
@@ -302,7 +302,7 @@ async def test_a_gateway_error_keeps_the_gateways_own_words(monkeypatch):
     _patch(monkeypatch, _Session(_Response(503, {"detail": "model is loading"})))
     with pytest.raises(study_ask.StudyAskUnavailable) as exc:
         await study_ask.ask(
-            prompt="p", user="jeremiah", gateway_url="http://gateway:11435", internal_secret=""
+            prompt="p", user="alex", gateway_url="http://gateway:11435", internal_secret=""
         )
     assert "503" in str(exc.value)
     assert "model is loading" in str(exc.value)
@@ -312,7 +312,7 @@ async def test_a_reply_that_is_not_json_is_named(monkeypatch):
     _patch(monkeypatch, _Session(_Response(200, ValueError("not json"))))
     with pytest.raises(study_ask.StudyAskUnavailable) as exc:
         await study_ask.ask(
-            prompt="p", user="jeremiah", gateway_url="http://gateway:11435", internal_secret=""
+            prompt="p", user="alex", gateway_url="http://gateway:11435", internal_secret=""
         )
     assert "not JSON" in str(exc.value)
 
@@ -322,7 +322,7 @@ async def test_an_unreachable_gateway_is_reported_not_swallowed(monkeypatch):
     _patch(monkeypatch, _Session(None, boom=boom))
     with pytest.raises(study_ask.StudyAskUnavailable) as exc:
         await study_ask.ask(
-            prompt="p", user="jeremiah", gateway_url="http://gateway:11435", internal_secret=""
+            prompt="p", user="alex", gateway_url="http://gateway:11435", internal_secret=""
         )
     assert "could not reach" in str(exc.value)
 
@@ -331,7 +331,7 @@ async def test_an_empty_answer_is_a_failure_not_an_empty_string(monkeypatch):
     _patch(monkeypatch, _Session(_Response(200, {"choices": [{"message": {"content": "  "}}]})))
     with pytest.raises(study_ask.StudyAskUnavailable) as exc:
         await study_ask.ask(
-            prompt="p", user="jeremiah", gateway_url="http://gateway:11435", internal_secret=""
+            prompt="p", user="alex", gateway_url="http://gateway:11435", internal_secret=""
         )
     assert "empty answer" in str(exc.value)
 
@@ -347,7 +347,7 @@ async def test_no_failure_becomes_an_answer(monkeypatch, failure):
     _patch(monkeypatch, session)
     with pytest.raises(study_ask.StudyAskUnavailable):
         await study_ask.ask(
-            prompt="p", user="jeremiah", gateway_url="http://gateway:11435", internal_secret=""
+            prompt="p", user="alex", gateway_url="http://gateway:11435", internal_secret=""
         )
 
 
@@ -371,7 +371,7 @@ def test_asking_about_a_passage_returns_a_grounded_answer(
 ):
     _patch_gateway(monkeypatch, "God's love for the whole world.")
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah",
+        "/study/ask?username=alex",
         json={"ref": "Gen 1:1", "question": "What is being created?"},
     )
     assert resp.status_code == 200, resp.text
@@ -395,7 +395,7 @@ def test_the_question_is_recorded_but_not_its_text(
 
     _patch_gateway(monkeypatch)
     loaded_client.post(
-        "/study/ask?username=jeremiah",
+        "/study/ask?username=alex",
         json={"ref": "Gen 1:1", "question": "What secret thing did I ask?"},
     )
     rows = reader_db.exec(select(ReadingEvent).where(ReadingEvent.kind == "assistant_ask")).all()
@@ -410,7 +410,7 @@ def test_the_question_is_recorded_but_not_its_text(
 def test_a_bad_reference_is_the_readers_mistake(loaded_client: TestClient, monkeypatch):
     session = _patch_gateway(monkeypatch)
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah", json={"ref": "Foo 1:1", "question": "What is this?"}
+        "/study/ask?username=alex", json={"ref": "Foo 1:1", "question": "What is this?"}
     )
     assert resp.status_code == 400
     assert session.calls == []
@@ -421,7 +421,7 @@ def test_an_empty_question_is_refused_before_the_model_is_called(
 ):
     session = _patch_gateway(monkeypatch)
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah", json={"ref": "Gen 1:1", "question": "   "}
+        "/study/ask?username=alex", json={"ref": "Gen 1:1", "question": "   "}
     )
     assert resp.status_code == 400
     assert "Ask a question" in resp.json()["detail"]
@@ -437,7 +437,7 @@ def test_a_model_that_cannot_answer_is_a_503_not_an_empty_answer(
         lambda **kwargs: _Session(None, boom=study_ask.aiohttp.ClientError("gateway down")),
     )
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?"}
+        "/study/ask?username=alex", json={"ref": "Gen 1:1", "question": "Why?"}
     )
     assert resp.status_code == 503
     assert "could not reach" in resp.json()["detail"]
@@ -446,7 +446,7 @@ def test_a_model_that_cannot_answer_is_a_503_not_an_empty_answer(
 def test_an_unimported_translation_is_refused(loaded_client: TestClient, monkeypatch):
     session = _patch_gateway(monkeypatch)
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah",
+        "/study/ask?username=alex",
         json={"ref": "Gen 1:1", "question": "Why?", "version": "nkjv"},
     )
     assert resp.status_code == 400
@@ -456,7 +456,7 @@ def test_an_unimported_translation_is_refused(loaded_client: TestClient, monkeyp
 
 def test_the_route_requires_the_internal_secret(loaded_client: TestClient):
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah",
+        "/study/ask?username=alex",
         json={"ref": "Gen 1:1", "question": "Why?"},
         headers={"X-Internal-Secret": "wrong"},
     )
@@ -464,7 +464,7 @@ def test_the_route_requires_the_internal_secret(loaded_client: TestClient):
 
 
 def test_the_route_needs_a_question(loaded_client: TestClient):
-    resp = loaded_client.post("/study/ask?username=jeremiah", json={"ref": "Gen 1:1"})
+    resp = loaded_client.post("/study/ask?username=alex", json={"ref": "Gen 1:1"})
     assert resp.status_code == 422
 
 
@@ -494,7 +494,7 @@ def test_only_real_references_become_chips():
 def test_the_route_sends_the_depth_and_returns_the_chips(loaded_client: TestClient, monkeypatch):
     session = _patch_gateway(monkeypatch, "Like Romans 8:28 says, God works for good.")
     resp = loaded_client.post(
-        "/study/ask?username=jeremiah",
+        "/study/ask?username=alex",
         json={"ref": "Gen 1:1", "question": "Why?", "depth": "child"},
     )
     assert resp.status_code == 200, resp.text
@@ -505,7 +505,7 @@ def test_the_route_sends_the_depth_and_returns_the_chips(loaded_client: TestClie
 
 
 def test_an_unknown_depth_is_refused(loaded_client: TestClient):
-    resp = loaded_client.post("/study/ask?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?", "depth": "baby"})
+    resp = loaded_client.post("/study/ask?username=alex", json={"ref": "Gen 1:1", "question": "Why?", "depth": "baby"})
     assert resp.status_code == 422
 
 
@@ -591,7 +591,7 @@ def test_the_stream_route_sends_start_text_and_done(loaded_client: TestClient, m
             yield piece
 
     monkeypatch.setattr(study_ask, "ask_stream", fake_stream)
-    resp = loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?"})
+    resp = loaded_client.post("/study/ask/stream?username=alex", json={"ref": "Gen 1:1", "question": "Why?"})
     assert resp.status_code == 200
     events = _events(resp)
     assert [e["type"] for e in events] == ["start", "text", "text", "done"]
@@ -605,12 +605,12 @@ def test_the_stream_route_reports_a_failure_as_an_event(loaded_client: TestClien
         yield  # pragma: no cover
 
     monkeypatch.setattr(study_ask, "ask_stream", failing)
-    events = _events(loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "Why?"}))
+    events = _events(loaded_client.post("/study/ask/stream?username=alex", json={"ref": "Gen 1:1", "question": "Why?"}))
     assert events[-1] == {"type": "error", "detail": "The model returned an empty answer."}
 
 
 def test_a_bad_stream_request_is_a_plain_400(loaded_client: TestClient):
-    resp = loaded_client.post("/study/ask/stream?username=jeremiah", json={"ref": "Gen 1:1", "question": "  "})
+    resp = loaded_client.post("/study/ask/stream?username=alex", json={"ref": "Gen 1:1", "question": "  "})
     assert resp.status_code == 400
 
 
@@ -677,7 +677,7 @@ async def test_sources_that_fail_are_left_out_and_cited_references_are_looked_up
     monkeypatch.setattr(study_sources, "_related", lambda _s, _v, refs, _shown: looked_up.extend(refs) or [])
     out = await study_sources.gather(
         session=None, version="KJV", reference="Matthew 2:6", question="Which prophet?",
-        verses=[], notes=[{"body": "See Isaiah 9:6."}], context=[], user="jeremiah",
+        verses=[], notes=[{"body": "See Isaiah 9:6."}], context=[], user="alex",
         gateway_url="g", rag_url="r", execution_url="e", internal_secret="s",
     )
     assert out["library"] == [] and out["web"][0]["snippet"] == "Compare Micah 5:2."

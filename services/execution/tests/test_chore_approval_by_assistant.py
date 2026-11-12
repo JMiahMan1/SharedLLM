@@ -1,12 +1,12 @@
-"""A parent answers ticked-off chores through Jarvis: "Noah did the trash
-right", "Gracie needs to redo the dishes", "what chores need checking?"
+"""A parent answers ticked-off chores through Jarvis: "Jordan did the trash
+right", "Taylor needs to redo the dishes", "what chores need checking?"
 (docs/HEALTH_HUB.md, "Earning time and chores first")."""
 import pytest
 
 from services.execution.handlers import chores as handler
 from services.execution.schemas import ChoreRequest
 
-PARENTS = {"noah": ["dad", "mom"], "gracie": ["dad", "mom"]}
+PARENTS = {"jordan": ["dad", "mom"], "taylor": ["dad", "mom"]}
 
 
 @pytest.fixture
@@ -16,9 +16,9 @@ def approvals(monkeypatch):
 
     state = {
         "checks": [
-            {"id": 1, "username": "noah", "display_name": "Noah", "day": "2026-11-04", "chore_id": "51", "title": "Trash", "status": "pending"},
-            {"id": 2, "username": "noah", "display_name": "Noah", "day": "2026-11-04", "chore_id": "52", "title": "Dishes", "status": "pending"},
-            {"id": 3, "username": "gracie", "display_name": "Gracie", "day": "2026-11-04", "chore_id": "60", "title": "Trash", "status": "pending"},
+            {"id": 1, "username": "jordan", "display_name": "Jordan", "day": "2026-11-04", "chore_id": "51", "title": "Trash", "status": "pending"},
+            {"id": 2, "username": "jordan", "display_name": "Jordan", "day": "2026-11-04", "chore_id": "52", "title": "Dishes", "status": "pending"},
+            {"id": 3, "username": "taylor", "display_name": "Taylor", "day": "2026-11-04", "chore_id": "60", "title": "Trash", "status": "pending"},
         ],
         "decided": [], "unticked": [], "sent": [], "parents_of": {"dad", "mom"},
     }
@@ -61,25 +61,25 @@ def ask(user, voice=False, **kw):
 
 async def test_a_parent_hears_what_is_waiting(approvals):
     got = await ask("mom", action="checks")
-    assert got.status == "SUCCESS" and got.message == "3 waiting for your OK: Noah: Trash; Noah: Dishes; Gracie: Trash."
-    only = await ask("mom", action="checks", assignee="Gracie")
-    assert only.message == "1 waiting for your OK: Gracie: Trash."
+    assert got.status == "SUCCESS" and got.message == "3 waiting for your OK: Jordan: Trash; Jordan: Dishes; Taylor: Trash."
+    only = await ask("mom", action="checks", assignee="Taylor")
+    assert only.message == "1 waiting for your OK: Taylor: Trash."
     approvals["parents_of"] = set()
-    assert (await ask("noah", action="checks")).message == "No chores are waiting for your OK."
+    assert (await ask("jordan", action="checks")).message == "No chores are waiting for your OK."
 
 
 async def test_approving_by_name_and_chore_tells_the_child(approvals):
-    got = await ask("dad", action="approve", title="trash", assignee="Noah")
-    assert got.status == "SUCCESS" and got.message == "Approved Noah's \"Trash\". The minutes count now."
+    got = await ask("dad", action="approve", title="trash", assignee="Jordan")
+    assert got.status == "SUCCESS" and got.message == "Approved Jordan's \"Trash\". The minutes count now."
     assert approvals["decided"] == [(1, "dad", True)] and approvals["unticked"] == []
-    assert [(n["user"], n["title"]) for n in approvals["sent"]] == [("noah", "Chore approved")]
+    assert [(n["user"], n["title"]) for n in approvals["sent"]] == [("jordan", "Chore approved")]
 
 
 async def test_a_redo_unticks_it_on_skylight(approvals):
     got = await ask("mom", action="redo", title="dishes")
     assert "back on the list" in got.message
-    assert approvals["unticked"] == [("52", "noah")]
-    assert approvals["sent"][0]["user"] == "noah" and "redo" in approvals["sent"][0]["body"]
+    assert approvals["unticked"] == [("52", "jordan")]
+    assert approvals["sent"][0]["user"] == "jordan" and "redo" in approvals["sent"][0]["body"]
 
 
 async def test_two_matches_ask_which_unless_all(approvals):
@@ -88,7 +88,7 @@ async def test_two_matches_ask_which_unless_all(approvals):
     assert approvals["decided"] == []
     both = await ask("dad", action="approve", title="trash", scope="all")
     assert both.status == "SUCCESS" and [d[0] for d in approvals["decided"]] == [1, 3]
-    everything = await ask("mom", action="approve", assignee="noah", scope="all")
+    everything = await ask("mom", action="approve", assignee="jordan", scope="all")
     assert [d[0] for d in approvals["decided"]] == [1, 3, 2] and "Dishes" in everything.message
 
 
@@ -96,19 +96,19 @@ async def test_by_voice_alone_works_but_the_parents_are_told(approvals):
     got = await ask("mom", voice=True, action="approve", title="dishes")
     assert got.status == "SUCCESS"
     heard = [(n["user"], n["title"]) for n in approvals["sent"]]
-    assert heard == [("noah", "Chore approved"), ("dad", "Chore approved by voice"), ("mom", "Chore approved by voice")]
+    assert heard == [("jordan", "Chore approved"), ("dad", "Chore approved by voice"), ("mom", "Chore approved by voice")]
     assert "approved by voice as mom" in approvals["sent"][1]["body"]
     # Sending one back by voice needs no warning: it only costs the child.
     approvals["sent"].clear()
-    await ask("mom", voice=True, action="redo", title="trash", assignee="gracie")
-    assert [n["user"] for n in approvals["sent"]] == ["gracie"]
+    await ask("mom", voice=True, action="redo", title="trash", assignee="taylor")
+    assert [n["user"] for n in approvals["sent"]] == ["taylor"]
 
 
 async def test_nothing_matching_or_waiting_says_so(approvals):
     missing = await ask("dad", action="approve", title="lawn")
     assert missing.status == "FAILURE" and "called \"lawn\"" in missing.message
     approvals["parents_of"] = set()
-    assert "No ticked-off chores" in (await ask("noah", action="approve", title="trash")).message
+    assert "No ticked-off chores" in (await ask("jordan", action="approve", title="trash")).message
 
 
 async def test_identity_refusing_is_passed_on(approvals):

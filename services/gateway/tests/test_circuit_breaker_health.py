@@ -14,7 +14,7 @@ async def test_circuit_breaker_health_is_admin_only(monkeypatch):
     monkeypatch.setattr(
         gateway_main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "michele", "is_admin": False}),
+        AsyncMock(return_value={"user": "sam", "is_admin": False}),
     )
 
     with pytest.raises(HTTPException) as denied:
@@ -28,7 +28,7 @@ async def test_circuit_breaker_health_lists_break_for_an_admin(monkeypatch):
     monkeypatch.setattr(
         gateway_main,
         "_require_identity_from_request",
-        AsyncMock(return_value={"user": "jeremiah", "is_admin": True}),
+        AsyncMock(return_value={"user": "alex", "is_admin": True}),
     )
 
     payload = await gateway_main.circuit_breaker_health(object())

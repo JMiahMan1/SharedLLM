@@ -233,11 +233,11 @@ cannot reach Ollama to process requests.
 
 Solutions:
 1. Verify Ollama is running at: {_ollama_url}
-2. Check network connectivity between RAG server (ai.local) and Ollama (192.168.1.161)
+2. Check network connectivity between RAG server (ai.local) and Ollama ({_ollama_url})
 3. If Ollama moved to a new server, update LLM_URL in .env
 4. Test from RAG server directly:
-   ssh jeremiah@ai.local
-   curl http://192.168.1.161:11434/api/tags
+   ssh <user>@ai.local
+   curl {_ollama_url}/api/tags
          """)
 
     if not results.get("rag_api") and results.get("ollama"):

@@ -50,38 +50,38 @@ COLOR_ATTRS = {
 }
 
 ENTITIES = [
-    {"entity_id": "light.downstairs_bathroom_1_light", "unique_id": uid(CT_NODE, 1, "MatterLight", 6, 0),
+    {"entity_id": "light.hall_bathroom_1_light", "unique_id": uid(CT_NODE, 1, "MatterLight", 6, 0),
      "capabilities": {"max_color_temp_kelvin": 5000, "min_color_temp_kelvin": 2702,
                       "supported_color_modes": ["color_temp"]}, "supported_features": 32},
     {"entity_id": "light.master_bedroom_lamp_left", "unique_id": uid(COLOR_NODE, 1, "MatterLight", 6, 0),
      "capabilities": {"max_color_temp_kelvin": 6535, "min_color_temp_kelvin": 2702,
                       "supported_color_modes": ["color_temp", "hs", "xy"]}, "supported_features": 32},
-    {"entity_id": "number.downstairs_bathroom_1_off_transition_time",
+    {"entity_id": "number.hall_bathroom_1_off_transition_time",
      "unique_id": uid(CT_NODE, 1, "off_transition_time", 8, 19),
      "capabilities": {"max": 65534, "min": 0, "mode": "box", "step": 0.1}, "unit_of_measurement": "s"},
-    {"entity_id": "number.downstairs_bathroom_1_on_level", "unique_id": uid(CT_NODE, 1, "on_level", 8, 17),
+    {"entity_id": "number.hall_bathroom_1_on_level", "unique_id": uid(CT_NODE, 1, "on_level", 8, 17),
      "capabilities": {"max": 255, "min": 0, "mode": "box", "step": 1}},
-    {"entity_id": "number.downstairs_bathroom_1_power_on_level",
+    {"entity_id": "number.hall_bathroom_1_power_on_level",
      "unique_id": uid(CT_NODE, 1, "power_on_level", 8, 16384),
      "capabilities": {"max": 255, "min": 0, "mode": "box", "step": 1}},
-    {"entity_id": "number.downstairs_bathroom_1_power_on_color_temperature",
+    {"entity_id": "number.hall_bathroom_1_power_on_color_temperature",
      "unique_id": uid(CT_NODE, 1, "power_on_color_temperature", 768, 16400),
      "capabilities": {"max": 5000, "min": 0, "mode": "box", "step": 1}, "unit_of_measurement": "K"},
-    {"entity_id": "select.downstairs_bathroom_1_power_on_behavior_on_startup",
+    {"entity_id": "select.hall_bathroom_1_power_on_behavior_on_startup",
      "unique_id": uid(CT_NODE, 1, "MatterStartUpOnOff", 6, 16387),
      "capabilities": {"options": ["on", "off", "toggle", "previous"]}},
     {"entity_id": "select.master_bedroom_lamp_left_power_on_behavior_on_startup",
      "unique_id": uid(COLOR_NODE, 1, "MatterStartUpOnOff", 6, 16387),
      "capabilities": {"options": ["on", "off", "toggle", "previous"]}},
-    {"entity_id": "button.downstairs_bathroom_1_identify", "unique_id": uid(CT_NODE, 1, "IdentifyButton", 3, 65529),
+    {"entity_id": "button.hall_bathroom_1_identify", "unique_id": uid(CT_NODE, 1, "IdentifyButton", 3, 65529),
      "original_device_class": "identify"},
     {"entity_id": "update.master_bedroom_lamp_left", "unique_id": uid(COLOR_NODE, 0, "MatterUpdate", 40, 9),
      "supported_features": 23},
-    {"entity_id": "sensor.downstairs_bathroom_1_wi_fi_rssi", "unique_id": uid(CT_NODE, 0, "WiFiDiagnosticsRssi", 54, 4),
+    {"entity_id": "sensor.hall_bathroom_1_wi_fi_rssi", "unique_id": uid(CT_NODE, 0, "WiFiDiagnosticsRssi", 54, 4),
      "capabilities": {"state_class": "measurement"}, "unit_of_measurement": "dBm"},
-    {"entity_id": "sensor.downstairs_bathroom_1_reboot_count",
+    {"entity_id": "sensor.hall_bathroom_1_reboot_count",
      "unique_id": uid(CT_NODE, 0, "GeneralDiagnosticsRebootCount", 51, 1)},
-    {"entity_id": "sensor.downstairs_bathroom_1_uptime", "unique_id": uid(CT_NODE, 0, "GeneralDiagnosticsUpTime", 51, 2)},
+    {"entity_id": "sensor.hall_bathroom_1_uptime", "unique_id": uid(CT_NODE, 0, "GeneralDiagnosticsUpTime", 51, 2)},
 ]
 
 
@@ -252,16 +252,16 @@ def test_the_addon_host_name_is_replaced(monkeypatch):
     monkeypatch.delenv("HOMEHUB_MATTER_URL", raising=False)
     _, drv = build("ws://core-matter-server:5580/ws", entities=[])
     assert drv.url == "ws://localhost:5580/ws"
-    monkeypatch.setenv("HOMEHUB_MATTER_URL", "ws://192.168.2.205:5580/ws")
+    monkeypatch.setenv("HOMEHUB_MATTER_URL", "ws://192.0.2.205:5580/ws")
     _, drv = build("ws://core-matter-server:5580/ws", entities=[])
-    assert drv.url == "ws://192.168.2.205:5580/ws"
+    assert drv.url == "ws://192.0.2.205:5580/ws"
 
 
 # -- states ------------------------------------------------------------------
 
 async def test_setup_publishes_lights_as_home_assistant_did(setup):
     hub, _, _ = setup
-    ct = hub.states.get("light.downstairs_bathroom_1_light")
+    ct = hub.states.get("light.hall_bathroom_1_light")
     assert ct.state == "on"
     assert ct.attributes["brightness"] == 255  # level 254 of 1..254
     assert ct.attributes["color_mode"] == "color_temp"
@@ -279,28 +279,28 @@ async def test_setup_publishes_lights_as_home_assistant_did(setup):
 async def test_config_entities_and_diagnostics(setup):
     hub, _, _ = setup
     st = hub.states.get
-    assert st("number.downstairs_bathroom_1_off_transition_time").state == "0.5"
-    assert st("number.downstairs_bathroom_1_off_transition_time").attributes["step"] == 0.1
-    assert st("number.downstairs_bathroom_1_on_level").state == "254"
-    assert st("number.downstairs_bathroom_1_power_on_level").state == "255"  # null = previous level
-    assert st("number.downstairs_bathroom_1_power_on_color_temperature").state == "4000"  # 250 mireds
-    assert st("select.downstairs_bathroom_1_power_on_behavior_on_startup").state == "off"
+    assert st("number.hall_bathroom_1_off_transition_time").state == "0.5"
+    assert st("number.hall_bathroom_1_off_transition_time").attributes["step"] == 0.1
+    assert st("number.hall_bathroom_1_on_level").state == "254"
+    assert st("number.hall_bathroom_1_power_on_level").state == "255"  # null = previous level
+    assert st("number.hall_bathroom_1_power_on_color_temperature").state == "4000"  # 250 mireds
+    assert st("select.hall_bathroom_1_power_on_behavior_on_startup").state == "off"
     assert st("select.master_bedroom_lamp_left_power_on_behavior_on_startup").state == "previous"
-    assert st("button.downstairs_bathroom_1_identify").state == "unknown"
+    assert st("button.hall_bathroom_1_identify").state == "unknown"
     upd = st("update.master_bedroom_lamp_left")
     assert upd.state == "off" and upd.attributes["installed_version"] == "1.1.0"
-    assert st("sensor.downstairs_bathroom_1_wi_fi_rssi").state == "-61"
-    assert st("sensor.downstairs_bathroom_1_wi_fi_rssi").attributes["unit_of_measurement"] == "dBm"
-    assert st("sensor.downstairs_bathroom_1_reboot_count").state == "7"
-    assert "T" in st("sensor.downstairs_bathroom_1_uptime").state  # a boot timestamp
+    assert st("sensor.hall_bathroom_1_wi_fi_rssi").state == "-61"
+    assert st("sensor.hall_bathroom_1_wi_fi_rssi").attributes["unit_of_measurement"] == "dBm"
+    assert st("sensor.hall_bathroom_1_reboot_count").state == "7"
+    assert "T" in st("sensor.hall_bathroom_1_uptime").state  # a boot timestamp
 
 
 async def test_attribute_events_update_the_state(setup):
     hub, _, server = setup
     await server.set_attr(CT_NODE, "1/8/0", 127)
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").attributes["brightness"] == 127)
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").attributes["brightness"] == 127)
     await server.set_attr(CT_NODE, "1/6/0", False)
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").state == "off")
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").state == "off")
 
 
 async def test_unreachable_node_is_unavailable_and_comes_back(setup):
@@ -308,15 +308,15 @@ async def test_unreachable_node_is_unavailable_and_comes_back(setup):
     node = copy.deepcopy(server.nodes[CT_NODE])
     node["available"] = False
     await server.emit("node_updated", node)
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").state == UNAVAILABLE)
-    assert hub.states.get("number.downstairs_bathroom_1_on_level").state == UNAVAILABLE
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").state == UNAVAILABLE)
+    assert hub.states.get("number.hall_bathroom_1_on_level").state == UNAVAILABLE
     assert hub.states.get("light.master_bedroom_lamp_left").state == "off"  # other node untouched
-    entity = hub.entities["light.downstairs_bathroom_1_light"]
+    entity = hub.entities["light.hall_bathroom_1_light"]
     with pytest.raises(DeviceUnavailable):
         await hub.drivers["entry1"].async_call(entity, "light", "turn_on", {})
     node["available"] = True
     await server.emit("node_updated", node)
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").state == "on")
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").state == "on")
 
 
 async def test_node_removed_marks_its_entities_unavailable(setup):
@@ -329,21 +329,21 @@ async def test_node_removed_marks_its_entities_unavailable(setup):
 
 async def test_turn_on_with_colour_temperature_and_brightness(setup):
     hub, _, server = setup
-    await hub.call_service("light", "turn_on", {"entity_id": "light.downstairs_bathroom_1_light",
+    await hub.call_service("light", "turn_on", {"entity_id": "light.hall_bathroom_1_light",
                                                 "color_temp_kelvin": 4000, "brightness_pct": 50, "transition": 2})
     assert device_commands(server) == [
         (768, "MoveToColorTemperature", {"colorTemperatureMireds": 250, "transitionTime": 20,
                                          "optionsMask": 1, "optionsOverride": 1}),
         (8, "MoveToLevelWithOnOff", {"level": 128, "transitionTime": 20, "optionsMask": 0, "optionsOverride": 0}),
     ]
-    st = hub.states.get("light.downstairs_bathroom_1_light")
+    st = hub.states.get("light.hall_bathroom_1_light")
     assert st.attributes["color_temp_kelvin"] == 4000
     assert st.attributes["brightness"] == 129  # level 128 read back: 1..254 -> 1..255
 
 
 async def test_colour_temperature_is_clamped_to_the_bulb(setup):
     hub, _, server = setup
-    await hub.call_service("light", "turn_on", {"entity_id": "light.downstairs_bathroom_1_light",
+    await hub.call_service("light", "turn_on", {"entity_id": "light.hall_bathroom_1_light",
                                                 "color_temp_kelvin": 6500})
     assert device_commands(server)[0][2]["colorTemperatureMireds"] == 200  # 5000 K, its coolest
     assert device_commands(server)[1][:2] == (6, "On")
@@ -371,24 +371,24 @@ async def test_turn_on_hs_and_rgb_colours(setup):
 
 async def test_turn_off_and_toggle(setup):
     hub, _, server = setup
-    await hub.call_service("light", "turn_off", {"entity_id": "light.downstairs_bathroom_1_light"})
+    await hub.call_service("light", "turn_off", {"entity_id": "light.hall_bathroom_1_light"})
     assert device_commands(server) == [(6, "Off", {})]
-    assert hub.states.get("light.downstairs_bathroom_1_light").state == "off"
+    assert hub.states.get("light.hall_bathroom_1_light").state == "off"
 
     server.commands.clear()
-    await hub.call_service("light", "toggle", {"entity_id": "light.downstairs_bathroom_1_light"})
+    await hub.call_service("light", "toggle", {"entity_id": "light.hall_bathroom_1_light"})
     assert device_commands(server) == [(6, "On", {})]
-    assert hub.states.get("light.downstairs_bathroom_1_light").state == "on"
+    assert hub.states.get("light.hall_bathroom_1_light").state == "on"
 
     server.commands.clear()
-    await hub.call_service("light", "turn_off", {"entity_id": "light.downstairs_bathroom_1_light", "transition": 1.5})
+    await hub.call_service("light", "turn_off", {"entity_id": "light.hall_bathroom_1_light", "transition": 1.5})
     assert device_commands(server) == [(8, "MoveToLevelWithOnOff", {"level": 0, "transitionTime": 15,
                                                                     "optionsMask": 0, "optionsOverride": 0})]
 
 
 async def test_brightness_zero_turns_off(setup):
     hub, _, server = setup
-    await hub.call_service("light", "turn_on", {"entity_id": "light.downstairs_bathroom_1_light", "brightness": 0})
+    await hub.call_service("light", "turn_on", {"entity_id": "light.hall_bathroom_1_light", "brightness": 0})
     assert device_commands(server) == [(6, "Off", {})]
 
 
@@ -396,10 +396,10 @@ async def test_unreachable_error_from_the_server_is_device_unavailable(setup):
     hub, drv, server = setup
     server.errors["device_command"] = {"error_code": 3, "details": "Node 30 is not (yet) available"}
     with pytest.raises(DeviceUnavailable):
-        await drv.async_call(hub.entities["light.downstairs_bathroom_1_light"], "light", "turn_on", {})
+        await drv.async_call(hub.entities["light.hall_bathroom_1_light"], "light", "turn_on", {})
     server.errors["device_command"] = {"error_code": 8, "details": "bad payload"}
     with pytest.raises(HubError) as err:
-        await drv.async_call(hub.entities["light.downstairs_bathroom_1_light"], "light", "turn_on", {})
+        await drv.async_call(hub.entities["light.hall_bathroom_1_light"], "light", "turn_on", {})
     assert not isinstance(err.value, DeviceUnavailable)
 
 
@@ -413,45 +413,45 @@ async def test_unsupported_service(setup):
 
 async def test_number_writes_use_device_units(setup):
     hub, _, server = setup
-    await hub.call_service("number", "set_value", {"entity_id": "number.downstairs_bathroom_1_off_transition_time",
+    await hub.call_service("number", "set_value", {"entity_id": "number.hall_bathroom_1_off_transition_time",
                                                    "value": 1.5})
-    await hub.call_service("number", "set_value", {"entity_id": "number.downstairs_bathroom_1_on_level", "value": 255})
-    await hub.call_service("number", "set_value", {"entity_id": "number.downstairs_bathroom_1_power_on_color_temperature",
+    await hub.call_service("number", "set_value", {"entity_id": "number.hall_bathroom_1_on_level", "value": 255})
+    await hub.call_service("number", "set_value", {"entity_id": "number.hall_bathroom_1_power_on_color_temperature",
                                                    "value": 2700})
     writes = [(c["attribute_path"], c["value"]) for c in server.commands if c["command"] == "write_attribute"]
     assert writes == [("1/8/19", 15), ("1/8/17", None), ("1/768/16400", 370)]
-    assert hub.states.get("number.downstairs_bathroom_1_off_transition_time").state == "1.5"
-    assert hub.states.get("number.downstairs_bathroom_1_on_level").state == "255"
+    assert hub.states.get("number.hall_bathroom_1_off_transition_time").state == "1.5"
+    assert hub.states.get("number.hall_bathroom_1_on_level").state == "255"
     with pytest.raises(HubError):
-        await hub.call_service("number", "set_value", {"entity_id": "number.downstairs_bathroom_1_on_level",
+        await hub.call_service("number", "set_value", {"entity_id": "number.hall_bathroom_1_on_level",
                                                        "value": 300})
 
 
 async def test_select_power_on_behaviour(setup):
     hub, _, server = setup
     await hub.call_service("select", "select_option", {
-        "entity_id": "select.downstairs_bathroom_1_power_on_behavior_on_startup", "option": "previous"})
+        "entity_id": "select.hall_bathroom_1_power_on_behavior_on_startup", "option": "previous"})
     assert server.nodes[CT_NODE]["attributes"]["1/6/16387"] is None
-    assert hub.states.get("select.downstairs_bathroom_1_power_on_behavior_on_startup").state == "previous"
+    assert hub.states.get("select.hall_bathroom_1_power_on_behavior_on_startup").state == "previous"
     await hub.call_service("select", "select_option", {
-        "entity_id": "select.downstairs_bathroom_1_power_on_behavior_on_startup", "option": "on"})
+        "entity_id": "select.hall_bathroom_1_power_on_behavior_on_startup", "option": "on"})
     assert server.nodes[CT_NODE]["attributes"]["1/6/16387"] == 1
     with pytest.raises(HubError):
         await hub.call_service("select", "select_option", {
-            "entity_id": "select.downstairs_bathroom_1_power_on_behavior_on_startup", "option": "dim"})
+            "entity_id": "select.hall_bathroom_1_power_on_behavior_on_startup", "option": "dim"})
 
 
 async def test_a_null_startup_value_from_an_event_is_kept(setup):
     hub, _, server = setup
     await server.set_attr(CT_NODE, "1/6/16387", None)
-    await until(lambda: hub.states.get("select.downstairs_bathroom_1_power_on_behavior_on_startup").state == "previous")
+    await until(lambda: hub.states.get("select.hall_bathroom_1_power_on_behavior_on_startup").state == "previous")
 
 
 async def test_identify_button(setup):
     hub, _, server = setup
-    await hub.call_service("button", "press", {"entity_id": "button.downstairs_bathroom_1_identify"})
+    await hub.call_service("button", "press", {"entity_id": "button.hall_bathroom_1_identify"})
     assert device_commands(server) == [(3, "Identify", {"identifyTime": 15})]
-    assert "T" in hub.states.get("button.downstairs_bathroom_1_identify").state
+    assert "T" in hub.states.get("button.hall_bathroom_1_identify").state
 
 
 # -- connection ----------------------------------------------------------------
@@ -460,8 +460,8 @@ async def test_reconnects_after_the_server_drops(setup, monkeypatch):
     monkeypatch.setattr(matter_mod, "RECONNECT_DELAYS", (0.05,))
     hub, _, server = setup
     await server.drop_clients()
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").state == UNAVAILABLE)
-    await until(lambda: hub.states.get("light.downstairs_bathroom_1_light").state == "on")
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").state == UNAVAILABLE)
+    await until(lambda: hub.states.get("light.hall_bathroom_1_light").state == "on")
     assert server.connections == 2
 
 

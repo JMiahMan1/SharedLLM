@@ -131,7 +131,7 @@ def client(engine):
         test_client.headers.update(
             {
                 "X-Internal-Secret": health_main.INTERNAL_SECRET,
-                "X-User-Id": "jeremiah",
+                "X-User-Id": "alex",
             }
         )
         yield test_client

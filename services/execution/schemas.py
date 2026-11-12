@@ -1205,7 +1205,7 @@ class NetworkDeviceScanRequest(BaseRequest):
     Use this to find devices when you don't know their IP or entity_id.
     """
     user_context: UserContext
-    subnet: str | None = Field(None, description="Subnet to scan (e.g. '192.168.2.0/24'). Auto-detected from host network if omitted.")
+    subnet: str | None = Field(None, description="Subnet to scan (e.g. '192.0.2.0/24'). Auto-detected from host network if omitted.")
     device_type: str | None = Field(None, description="Filter by device type: 'roku', 'webos', 'samsung', 'cast', 'androidtv', 'esphome', 'all'")
     include_mac: bool | None = Field(True, description="Include MAC address lookup from ARP cache")
 
@@ -1347,10 +1347,10 @@ class ListVoicesRequest(BaseRequest):
 class LocationRequest(BaseRequest):
     """Request to query family location, HA zone matching, speed, dwell time, and travel telemetry."""
     user_context: UserContext | None = None
-    user: str | None = Field(None, description="Person or user to locate (e.g. 'Jeremiah', 'Michele', 'me')")
+    user: str | None = Field(None, description="Person or user to locate (e.g. 'Alex', 'Sam', 'me')")
     person: str | None = Field(None, description="Alias for user")
     target: str | None = Field(None, description="Alias for user")
-    detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle', 'eta' (how long until they get somewhere, e.g. 'when will Michele be home?'), or 'closest' (who can get to a place soonest, e.g. 'who is closest to the school?')")
+    detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle', 'eta' (how long until they get somewhere, e.g. 'when will Sam be home?'), or 'closest' (who can get to a place soonest, e.g. 'who is closest to the school?')")
     to: str | None = Field(None, description="For detail 'eta' or 'closest': the place, a Home Assistant zone name such as 'home', 'work' or 'school' (eta defaults to 'home')")
     hours: float | None = Field(24.0, description="Hours of history to analyze for telemetry (default: 24.0)")
 

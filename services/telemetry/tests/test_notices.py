@@ -51,7 +51,7 @@ def sent(monkeypatch):
 @pytest.fixture
 def identity(monkeypatch):
     """A fake identity: preferences per user, admins, topics, users/roles."""
-    state = {"prefs": {}, "admins": ["jeremiah"], "users": [], "calls": []}
+    state = {"prefs": {}, "admins": ["alex"], "users": [], "calls": []}
 
     async def get(session, path, params=None):
         state["calls"].append(path)
@@ -76,7 +76,7 @@ def _outbox(client, user):
 
 def test_a_full_notice_reaches_the_outbox_web_push_and_ntfy(client, rc, sent, identity):
     body = {
-        "user": "michele", "category": "chat", "kind": "chat", "title": "Jeremiah", "body": "On my way",
+        "user": "sam", "category": "chat", "kind": "chat", "title": "Alex", "body": "On my way",
         "priority": 4, "tag": "chat:abc123", "data": {"url": "/family?chat=abc123"},
         "actions": [
             {"label": "Reply", "type": "reply", "callback": "chat_reply", "params": {"token": "abc123"}},
@@ -85,11 +85,11 @@ def test_a_full_notice_reaches_the_outbox_web_push_and_ntfy(client, rc, sent, id
     }
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body)
     assert resp.status_code == 200 and resp.json()["ntfy"] is True
-    stored = _outbox(client, "michele")[-1]
+    stored = _outbox(client, "sam")[-1]
     assert stored["category"] == "chat" and stored["priority"] == 4 and stored["tag"] == "chat:abc123"
-    assert sent["webpush"] == ["michele"]
+    assert sent["webpush"] == ["sam"]
     topic, notice = sent["ntfy"][0]
-    assert topic == "jarvis-michele-secret"
+    assert topic == "jarvis-sam-secret"
     assert notice["id"] == stored["id"] and notice["created_at"] == stored["created_at"]
     assert notice["actions"][0] == {"label": "Reply", "type": "reply", "callback": "chat_reply",
                                     "params": {"token": "abc123"}}
@@ -97,9 +97,9 @@ def test_a_full_notice_reaches_the_outbox_web_push_and_ntfy(client, rc, sent, id
 
 
 def test_category_defaults_to_general(client, rc, sent):
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "Hi"})
-    assert _outbox(client, "michele")[-1]["category"] == "general"
-    assert _outbox(client, "michele")[-1]["priority"] == 3
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "Hi"})
+    assert _outbox(client, "sam")[-1]["category"] == "general"
+    assert _outbox(client, "sam")[-1]["priority"] == 3
 
 
 @pytest.mark.parametrize("bad", [
@@ -115,61 +115,61 @@ def test_category_defaults_to_general(client, rc, sent):
     {"actions": [{"label": "x", "type": "reply", "callback": "chat_reply", "params": "token"}]},
 ])
 def test_invalid_notices_are_refused(client, rc, sent, bad):
-    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x", **bad})
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x", **bad})
     assert resp.status_code == 422
     assert sent["webpush"] == [] and sent["ntfy"] == []
 
 
 def test_a_category_turned_off_is_dropped_and_recorded_nowhere(client, rc, sent, identity):
-    identity["prefs"]["michele"] = {"bible": False}
-    body = {"user": "michele", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"}
+    identity["prefs"]["sam"] = {"bible": False}
+    body = {"user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert resp["dropped"] == "preference"
-    assert _outbox(client, "michele") == []
+    assert _outbox(client, "sam") == []
     assert sent == {"webpush": [], "ntfy": []}
     assert not any(k.startswith("telemetry:notify_once") for k in rc.strings)
 
 
 def test_sos_is_delivered_even_with_family_safety_off(client, rc, sent, identity):
-    identity["prefs"]["michele"] = {"family_safety": False}
-    sos = {"user": "michele", "category": "family_safety", "priority": 5, "title": "SOS from Jeremiah"}
+    identity["prefs"]["sam"] = {"family_safety": False}
+    sos = {"user": "sam", "category": "family_safety", "priority": 5, "title": "SOS from Alex"}
     assert "dropped" not in client.post("/api/telemetry/notify", headers=HEADERS, json=sos).json()
     calm = {**sos, "priority": 3, "title": "Battery low"}
     assert client.post("/api/telemetry/notify", headers=HEADERS, json=calm).json()["dropped"] == "preference"
-    assert [n["title"] for n in _outbox(client, "michele")] == ["SOS from Jeremiah"]
+    assert [n["title"] for n in _outbox(client, "sam")] == ["SOS from Alex"]
 
 
 def test_preferences_are_cached_briefly(client, rc, sent, identity):
     for _ in range(3):
-        client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+        client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/preferences") == 1
     assert identity["calls"].count("/api/internal/push/topic") == 1
 
 
 def test_admins_fan_out_to_every_admin(client, rc, sent, identity):
-    identity["admins"] = ["jeremiah", "kate"]
+    identity["admins"] = ["alex", "kate"]
     body = {"user": "@admins", "category": "admin", "title": "Disk nearly full", "once": "disk:root"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
-    assert set(resp["recipients"]) == {"jeremiah", "kate"}
-    assert sent["webpush"] == ["jeremiah", "kate"]
-    assert [t for t, _ in sent["ntfy"]] == ["jarvis-jeremiah-secret", "jarvis-kate-secret"]
+    assert set(resp["recipients"]) == {"alex", "kate"}
+    assert sent["webpush"] == ["alex", "kate"]
+    assert [t for t, _ in sent["ntfy"]] == ["jarvis-alex-secret", "jarvis-kate-secret"]
     again = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert all(r == {"duplicate": True} for r in again["recipients"].values())
 
 
 def test_a_system_notice_never_reaches_a_non_admin(client, rc, sent, identity):
     """Outage, network and error notices are for admins, whoever a sender named."""
-    identity["admins"] = ["jeremiah"]
-    body = {"user": "michele", "category": "admin", "title": "The internet is down"}
+    identity["admins"] = ["alex"]
+    body = {"user": "sam", "category": "admin", "title": "The internet is down"}
     resp = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()
     assert resp["dropped"] == "not_admin"
-    assert sent["webpush"] == [] and sent["ntfy"] == [] and _outbox(client, "michele") == []
-    to_admin = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "Jeremiah"}).json()
-    assert set(to_admin["recipients"]) == {"jeremiah"}
+    assert sent["webpush"] == [] and sent["ntfy"] == [] and _outbox(client, "sam") == []
+    to_admin = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "Alex"}).json()
+    assert set(to_admin["recipients"]) == {"alex"}
     # Other categories still go to the person named.
     family = client.post("/api/telemetry/notify", headers=HEADERS,
-                         json={"user": "michele", "category": "home", "title": "Garage left open"}).json()
-    assert "dropped" not in family and sent["webpush"][-1] == "michele"
+                         json={"user": "sam", "category": "home", "title": "Garage left open"}).json()
+    assert "dropped" not in family and sent["webpush"][-1] == "sam"
 
 
 def test_admins_unresolvable_is_503(client, rc, sent):
@@ -180,7 +180,7 @@ def test_admins_unresolvable_is_503(client, rc, sent):
 def test_a_parents_only_notice_never_reaches_a_minor(client, rc, sent, identity):
     """Updates, system and ops notices are for parents: a minor gets nothing."""
     identity["users"] = [
-        {"username": "michele", "is_minor": False},
+        {"username": "sam", "is_minor": False},
         {"username": "leo", "is_minor": True},
     ]
     body = {"user": "leo", "category": "app_updates", "title": "Jarvis app 2.4.1 is available",
@@ -189,26 +189,26 @@ def test_a_parents_only_notice_never_reaches_a_minor(client, rc, sent, identity)
         "status": "SUCCESS", "dropped": "audience"}
     assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "leo") == []
 
-    to_parent = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "michele"}).json()
-    assert "dropped" not in to_parent and sent["webpush"] == ["michele"]
+    to_parent = client.post("/api/telemetry/notify", headers=HEADERS, json={**body, "user": "sam"}).json()
+    assert "dropped" not in to_parent and sent["webpush"] == ["sam"]
 
 
 def test_a_parents_only_notice_to_admins_skips_a_minor(client, rc, sent, identity):
-    identity["admins"] = ["jeremiah", "teen_admin"]
+    identity["admins"] = ["alex", "teen_admin"]
     identity["users"] = [
-        {"username": "jeremiah", "is_minor": False},
+        {"username": "alex", "is_minor": False},
         {"username": "teen_admin", "is_minor": True},
     ]
     body = {"user": "@admins", "category": "admin", "title": "The internet is down", "audience": "parents"}
     recipients = client.post("/api/telemetry/notify", headers=HEADERS, json=body).json()["recipients"]
     assert recipients["teen_admin"] == {"dropped": "audience"}
-    assert "dropped" not in recipients["jeremiah"]
-    assert sent["webpush"] == ["jeremiah"]
+    assert "dropped" not in recipients["alex"]
+    assert sent["webpush"] == ["alex"]
 
 
 def test_an_unknown_audience_is_refused(client, rc, sent):
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
-                       json={"user": "michele", "title": "x", "audience": "kids"})
+                       json={"user": "sam", "title": "x", "audience": "kids"})
     assert resp.status_code == 422
     assert sent == {"webpush": [], "ntfy": []}
 
@@ -216,15 +216,15 @@ def test_an_unknown_audience_is_refused(client, rc, sent):
 def test_a_parents_only_notice_is_refused_when_identity_cannot_say(client, rc, sent):
     """Never deliver blind: an unreadable role list refuses the notice."""
     resp = client.post("/api/telemetry/notify", headers=HEADERS,
-                       json={"user": "michele", "title": "x", "audience": "parents"})
+                       json={"user": "sam", "title": "x", "audience": "parents"})
     assert resp.status_code == 503
-    assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "michele") == []
+    assert sent == {"webpush": [], "ntfy": []} and _outbox(client, "sam") == []
 
 
 def test_unreachable_identity_still_delivers_to_the_outbox(client, rc, sent):
-    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"}).json()
-    assert resp["ntfy"] is False and sent["webpush"] == ["michele"]
-    assert len(_outbox(client, "michele")) == 1
+    resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"}).json()
+    assert resp["ntfy"] is False and sent["webpush"] == ["sam"]
+    assert len(_outbox(client, "sam")) == 1
 
 
 def test_ntfy_failure_does_not_fail_the_request_and_logs_once(client, rc, identity, monkeypatch, caplog):
@@ -236,10 +236,10 @@ def test_ntfy_failure_does_not_fail_the_request_and_logs_once(client, rc, identi
     monkeypatch.setattr(ntfy, "NTFY_URL", "http://127.0.0.1:9")
     with caplog.at_level(logging.WARNING, logger="telemetry.ntfy"):
         for title in ("one", "two"):
-            resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": title})
+            resp = client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": title})
             assert resp.status_code == 200 and resp.json()["ntfy"] is False
     assert len([r for r in caplog.records if "ntfy publish failed" in r.getMessage()]) == 1
-    assert [n["title"] for n in _outbox(client, "michele")] == ["one", "two"]
+    assert [n["title"] for n in _outbox(client, "sam")] == ["one", "two"]
 
 
 async def test_publish_sends_the_notice_as_the_message(monkeypatch):
@@ -279,12 +279,12 @@ async def test_oversized_notices_are_not_published(monkeypatch):
 def test_the_topic_is_cached_for_ten_minutes(client, rc, sent, identity, monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(notices.time, "monotonic", lambda: now[0])
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
     now[0] += notices.TOPIC_CACHE_SECONDS - 1
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/topic") == 1
     now[0] += 2
-    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "michele", "title": "x"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "x"})
     assert identity["calls"].count("/api/internal/push/topic") == 2
 
 
@@ -302,14 +302,14 @@ def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity,
         await real(rc_, user, notification)
 
     monkeypatch.setattr(notices.store, "push_notification", flaky)
-    fields = notices.parse({"user": "michele", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"})
+    fields = notices.parse({"user": "sam", "category": "bible", "title": "Read Psalm 23", "once": "bible:1"})
 
     async def run():
         with pytest.raises(ConnectionError):
-            await notices.deliver(rc, None, "michele", fields)
+            await notices.deliver(rc, None, "sam", fields)
         assert not any(k.startswith("telemetry:notify_once") for k in rc.strings)
-        retry = await notices.deliver(rc, None, "michele", fields)
-        assert retry.get("duplicate") is None and sent["webpush"] == ["michele"]
-        assert await notices.deliver(rc, None, "michele", fields) == {"duplicate": True}
+        retry = await notices.deliver(rc, None, "sam", fields)
+        assert retry.get("duplicate") is None and sent["webpush"] == ["sam"]
+        assert await notices.deliver(rc, None, "sam", fields) == {"duplicate": True}
 
     asyncio.run(run())

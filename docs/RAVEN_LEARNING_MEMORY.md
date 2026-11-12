@@ -209,16 +209,16 @@ loop recovery (`RavenRecallRequest(only="failed")` → read source → web searc
 
 ```bash
 # Seeded protocol curriculum (19 lesson-proto-* ids). RAG listens on 8004.
-curl -s 'http://192.168.2.205:8004/rag/learning?tag=protocol&user_id=default' \
+curl -s 'http://192.0.2.205:8004/rag/learning?tag=protocol&user_id=default' \
   -H "X-Internal-Secret: $INTERNAL_SECRET" | python3 -m json.tool
 
 # Toolchain inventory (populated when workspace_runtime starts):
-curl -s 'http://192.168.2.205:8004/rag/toolchain' \
+curl -s 'http://192.0.2.205:8004/rag/toolchain' \
   -H "X-Internal-Secret: $INTERNAL_SECRET" | python3 -m json.tool
 
 # A lesson landed after a mission:
 docker logs sharedllm_gateway 2>&1 | grep "Mission reflection"
-curl -s -X POST http://192.168.2.205:8004/rag/search \
+curl -s -X POST http://192.0.2.205:8004/rag/search \
   -H 'Content-Type: application/json' -H "X-Internal-Secret: $INTERNAL_SECRET" \
   -d '{"collection_name":"system_learnings","query":"python cli argparse","k":5}'
 

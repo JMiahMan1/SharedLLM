@@ -13,15 +13,15 @@ from services.execution.schemas import UserContext
 async def test_handle_location_at_home():
     mock_telemetry = {
         "status": "ok",
-        "entity_id": "jeremiah",
-        "friendly_name": "Jeremiah",
+        "entity_id": "alex",
+        "friendly_name": "Alex",
         "current_zone": "Home",
         "current_speed_mph": 0.0,
         "top_speed_mph": 45.0,
         "is_moving": False,
         "dwell_time_formatted": "2 hrs 15 min",
         "battery": 88,
-        "speech": "Jeremiah is at Home. Dwell time: 2 hrs 15 min. Phone battery is at 88%.",
+        "speech": "Alex is at Home. Dwell time: 2 hrs 15 min. Phone battery is at 88%.",
     }
 
     class MockResponse:
@@ -47,13 +47,13 @@ async def test_handle_location_at_home():
             pass
 
     with patch("services.common.http.get_client_insecure", return_value=MockClient()):
-        req = LocationRequest(user="Jeremiah")
-        ctx = UserContext(user="jeremiah", role="admin")
+        req = LocationRequest(user="Alex")
+        ctx = UserContext(user="alex", role="admin")
         req.user_context = ctx
         result = await handle_location(req)
 
         assert result.status == "SUCCESS"
-        assert "Jeremiah is at Home" in result.message
+        assert "Alex is at Home" in result.message
         assert "88%" in result.message
         assert result.detail["current_zone"] == "Home"
 
@@ -62,15 +62,15 @@ async def test_handle_location_at_home():
 async def test_handle_location_speed_query():
     mock_telemetry = {
         "status": "ok",
-        "entity_id": "jeremiah",
-        "friendly_name": "Jeremiah",
+        "entity_id": "alex",
+        "friendly_name": "Alex",
         "current_zone": None,
         "current_speed_mph": 54.2,
         "top_speed_mph": 65.0,
         "is_moving": True,
         "dwell_time_formatted": "1 min",
         "battery": 82,
-        "speech": "Jeremiah is currently traveling at 54.2 mph. Top speed today was 65.0 mph.",
+        "speech": "Alex is currently traveling at 54.2 mph. Top speed today was 65.0 mph.",
     }
 
     class MockResponse:
@@ -96,8 +96,8 @@ async def test_handle_location_speed_query():
             pass
 
     with patch("services.common.http.get_client_insecure", return_value=MockClient()):
-        req = LocationRequest(user="Jeremiah", detail="speed")
-        ctx = UserContext(user="jeremiah", role="admin")
+        req = LocationRequest(user="Alex", detail="speed")
+        ctx = UserContext(user="alex", role="admin")
         req.user_context = ctx
         result = await handle_location(req)
 
@@ -138,12 +138,12 @@ async def test_eta_answers_by_road_time():
     seen = []
     eta = {"to": "Home", "arrived": False, "duration_s": 1080, "distance_m": 19800, "moving": True, "fix_age_s": 20}
     with patch("services.common.http.get_client_insecure", return_value=_client_returning(200, eta, seen)):
-        req = LocationRequest(user="Michele", detail="eta", to="home")
-        req.user_context = UserContext(user="jeremiah", role="user")
+        req = LocationRequest(user="Sam", detail="eta", to="home")
+        req.user_context = UserContext(user="alex", role="user")
         result = await handle_location(req)
-    assert result.message == "Michele is about 18 minutes from Home by road (12.3 miles)."
+    assert result.message == "Sam is about 18 minutes from Home by road (12.3 miles)."
     url, params = seen[0]
-    assert url.endswith("/people/michele/eta") and params["viewer"] == "jeremiah" and params["to"] == "home"
+    assert url.endswith("/people/sam/eta") and params["viewer"] == "alex" and params["to"] == "home"
 
 
 @pytest.mark.asyncio
@@ -152,7 +152,7 @@ async def test_where_is_passes_the_asker_as_viewer():
     seen = []
     with patch("services.common.http.get_client_insecure",
                return_value=_client_returning(404, {"detail": "activity not shared"}, seen)):
-        req = LocationRequest(user="Michele")
+        req = LocationRequest(user="Sam")
         req.user_context = UserContext(user="kate", role="user")
         result = await handle_location(req)
     assert seen[0][1]["viewer"] == "kate"
@@ -165,19 +165,19 @@ async def test_no_target_means_the_asker_not_a_hardcoded_user():
     with patch("services.common.http.get_client_insecure",
                return_value=_client_returning(404, {"detail": "x"}, seen)):
         req = LocationRequest()
-        req.user_context = UserContext(user="michele", role="user")
+        req.user_context = UserContext(user="sam", role="user")
         await handle_location(req)
-    assert "/people/michele/" in seen[0][0]
+    assert "/people/sam/" in seen[0][0]
 
 
 @pytest.mark.asyncio
 async def test_closest_names_the_nearest_by_road():
     seen = []
-    data = {"to": "School", "people": [{"user_id": "michele", "duration_s": 720, "fix_age_s": 30},
-                                       {"user_id": "jeremiah", "duration_s": 1500, "fix_age_s": 60}]}
+    data = {"to": "School", "people": [{"user_id": "sam", "duration_s": 720, "fix_age_s": 30},
+                                       {"user_id": "alex", "duration_s": 1500, "fix_age_s": 60}]}
     with patch("services.common.http.get_client_insecure", return_value=_client_returning(200, data, seen)):
         req = LocationRequest(detail="closest", to="school")
-        req.user_context = UserContext(user="jeremiah", role="user")
+        req.user_context = UserContext(user="alex", role="user")
         result = await handle_location(req)
-    assert result.message == "Michele is closest to School, about 12 minutes away by road. Then Jeremiah 25 minutes."
-    assert seen[0][0].endswith("/closest") and seen[0][1]["viewer"] == "jeremiah"
+    assert result.message == "Sam is closest to School, about 12 minutes away by road. Then Alex 25 minutes."
+    assert seen[0][0].endswith("/closest") and seen[0][1]["viewer"] == "alex"

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Test single query to see entity resolution"""
 import json
+import os
+import sys
 
 import requests
 
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
+
 REMOTE_URL = "http://ai.local:11435/api/chat"
 
-query = "Watch funny cat videos on Gracies TV"
+query = f"Watch funny cat videos on {LIVE_TV_NAME}"
 
 print(f"Testing query: '{query}'")
 print("=" * 80)

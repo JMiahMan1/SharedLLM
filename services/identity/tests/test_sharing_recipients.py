@@ -45,12 +45,12 @@ def client_fixture(session: Session):
     assert main.engine is not None
     SQLModel.metadata.create_all(main.engine)
 
-    _make_user(session, "jeremiah", is_admin=True)
-    _make_user(session, "michele")
+    _make_user(session, "alex", is_admin=True)
+    _make_user(session, "sam")
     session.commit()
 
     app.dependency_overrides[require_api_key] = lambda: session.exec(
-        select(User).where(User.username == "michele")
+        select(User).where(User.username == "sam")
     ).first()
     app.dependency_overrides[require_internal] = lambda: True
 
@@ -64,13 +64,13 @@ def test_a_normal_user_can_list_recipients(client: TestClient):
     resp = client.get("/api/users/sharing-recipients")
     assert resp.status_code == 200
     names = {row["username"] for row in resp.json()}
-    assert "jeremiah" in names
+    assert "alex" in names
 
 
 def test_the_caller_is_excluded(client: TestClient):
     """You cannot grant yourself anything, so you are not a recipient."""
     rows = client.get("/api/users/sharing-recipients").json()
-    assert "michele" not in {row["username"] for row in rows}
+    assert "sam" not in {row["username"] for row in rows}
 
 
 def test_only_identity_fields_are_returned(client: TestClient):
@@ -88,13 +88,13 @@ def test_only_identity_fields_are_returned(client: TestClient):
 def test_admin_can_also_list_them(client: TestClient, session: Session):
     """An admin is an ordinary recipient too -- the carve-out is about reading
     others' *data*, not about this directory."""
-    admin = session.exec(select(User).where(User.username == "jeremiah")).first()
+    admin = session.exec(select(User).where(User.username == "alex")).first()
     app.dependency_overrides[require_api_key] = lambda: admin
     resp = client.get("/api/users/sharing-recipients")
     assert resp.status_code == 200
     names = {row["username"] for row in resp.json()}
-    assert "michele" in names
-    assert "jeremiah" not in names
+    assert "sam" in names
+    assert "alex" not in names
 
 
 def test_unauthenticated_is_rejected(client: TestClient):
@@ -106,12 +106,12 @@ def test_display_name_falls_back_to_username(session: Session):
     """A blank display name must not render as an empty chip."""
     main.engine = session.bind
     SQLModel.metadata.create_all(main.engine)
-    _make_user(session, "michele")
+    _make_user(session, "sam")
     blank = User(username="anon", display_name="")
     session.add(blank)
     session.commit()
 
-    caller = session.exec(select(User).where(User.username == "michele")).first()
+    caller = session.exec(select(User).where(User.username == "sam")).first()
     app.dependency_overrides[require_api_key] = lambda: caller
     app.dependency_overrides[require_internal] = lambda: True
     try:

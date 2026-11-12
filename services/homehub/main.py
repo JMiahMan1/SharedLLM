@@ -36,15 +36,28 @@ PORT = int(os.getenv("HOMEHUB_PORT", "8123"))
 STARTUP_WAIT_S = float(os.getenv("HOMEHUB_STARTUP_WAIT_S", "60"))
 
 
+def _household_time_zone(home: dict | None = None) -> str:
+    """The household zone, or SystemExit naming every way to set it."""
+    from services.common import household_tz
+
+    identity = (os.getenv("IDENTITY_SVC_URL") or "").strip()
+    secret = os.getenv("INTERNAL_SECRET") or ""
+    fetch = (lambda: household_tz.fetch_identity_settings(identity, secret)) if identity else None
+    try:
+        return household_tz.refresh_sync("homehub", fetch, home=home)[0]
+    except household_tz.HouseholdTimeZoneError as exc:
+        raise SystemExit(f"homehub: {exc}") from None
+
+
 class Service:
     def __init__(self) -> None:
         self.store = Store(DB_PATH, os.getenv("FERNET_KEY"))
         self.auth = Auth(self.store, os.getenv("INTERNAL_SECRET"))
-        tz = os.getenv("TZ")
-        if not tz:
-            # No guessed zone: schedules, sun times and energy periods would all be wrong without a word.
-            raise SystemExit("homehub: TZ is not set; set it in .env to the household time zone, e.g. America/Phoenix")
-        self.hub = Hub(time_zone=tz)
+        # One setting governs Jarvis and the hub (services/common/household_tz.py:
+        # the household setting, then TZ, then the home location). No guessed
+        # zone: schedules, sun times and energy periods would all be wrong
+        # without a word. A change applies when the hub restarts.
+        self.hub = Hub(time_zone=_household_time_zone(self.store.get_kv("core_config", {}) or None))
         self.hub.store = self.store  # drivers that keep their own data (to-do lists) use it
         self.runtime = Runtime(self.hub, self.store)
         self._lock = asyncio.Lock()

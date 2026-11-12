@@ -171,11 +171,11 @@ def test_clean_goals_defaults_and_bounds():
 
 async def test_goals_round_trip_and_daily_goal_sync():
     rc = FakeRedis()
-    saved = await ach.save_goals(rc, "jeremiah", {"daily_steps": 12000, "workouts_per_week": 5})
+    saved = await ach.save_goals(rc, "alex", {"daily_steps": 12000, "workouts_per_week": 5})
     assert saved["daily_steps"] == 12000
     assert saved["workouts_per_week"] == 5
 
-    loaded = await ach.load_goals(rc, "jeremiah")
+    loaded = await ach.load_goals(rc, "alex")
     assert loaded == saved
 
 
@@ -183,16 +183,16 @@ async def test_record_awards_is_idempotent():
     rc = FakeRedis()
     defs = definitions()
     first = ach.evaluate(defs, {day(0): 11000}, [], ach.DEFAULT_GOALS, previously_earned={}, today=day(0))
-    await ach.record_awards(rc, "jeremiah", first.earned)
-    ledger_after_first = await ach.load_points_ledger(rc, "jeremiah")
+    await ach.record_awards(rc, "alex", first.earned)
+    ledger_after_first = await ach.load_points_ledger(rc, "alex")
 
     second = ach.evaluate(
         defs, {day(0): 11000}, [], ach.DEFAULT_GOALS,
         previously_earned=ledger_after_first, today=day(1),
     )
     newly = [e for e in second.earned if e.achievement.id not in ledger_after_first]
-    await ach.record_awards(rc, "jeremiah", newly)
-    assert await ach.load_points_ledger(rc, "jeremiah") == ledger_after_first
+    await ach.record_awards(rc, "alex", newly)
+    assert await ach.load_points_ledger(rc, "alex") == ledger_after_first
 
 def test_next_up_is_ranked_by_completion_not_raw_units():
     """1,360 steps to go must rank above 1 workout to go.

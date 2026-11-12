@@ -5,7 +5,7 @@ shown as (``target_domain``) and whether its sense is inverted (``invert``).
 Nothing here talks to a device: the state mirrors the wrapped switch through
 the hub's ``state_changed`` events, and commands become ``switch.turn_on`` /
 ``turn_off`` / ``toggle`` calls on it, so whichever driver owns the switch does
-the work. The household has one: ``light.kauf_plug_d67371_kauf_plug`` wrapping
+the work. A typical one: ``light.smart_plug_kauf_plug`` wrapping
 ``switch.string_lights_front`` (an ESPHome Kauf plug).
 """
 from __future__ import annotations

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from services.gateway import main as gateway_main
 from services.gateway.main import app
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 NOW = datetime(2026, 10, 21, 16, 0, tzinfo=TZ)  # a Wednesday; the week began Monday the 19th
 RULES = {"daily_limit_min": 60, "chores_first": True,
          "earn": {"steps_every": 1000, "steps_min": 5, "exercise_every": 15, "exercise_min": 10, "chore_min": 10}}

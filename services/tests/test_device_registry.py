@@ -27,19 +27,19 @@ def use_tmp_db(monkeypatch):
 async def test_set_and_get_device():
     result = await device_registry.set_device(
         "media_player.test_tv",
-        ip="192.168.1.100",
+        ip="198.51.100.100",
         mac="aa:bb:cc:dd:ee:ff",
         friendly_name="Test TV",
         integration="roku",
     )
     assert result is not None
     assert result["entity_id"] == "media_player.test_tv"
-    assert result["ip"] == "192.168.1.100"
+    assert result["ip"] == "198.51.100.100"
     assert result["mac"] == "aa:bb:cc:dd:ee:ff"
 
     fetched = await device_registry.get_device("media_player.test_tv")
     assert fetched is not None
-    assert fetched["ip"] == "192.168.1.100"
+    assert fetched["ip"] == "198.51.100.100"
     assert fetched["friendly_name"] == "Test TV"
 
 
@@ -47,24 +47,24 @@ async def test_set_and_get_device():
 async def test_update_device():
     await device_registry.set_device(
         "media_player.test_tv",
-        ip="192.168.1.100",
+        ip="198.51.100.100",
         friendly_name="Test TV",
     )
     await device_registry.set_device(
         "media_player.test_tv",
-        ip="192.168.1.200",
+        ip="198.51.100.200",
         mac="aa:bb:cc:dd:ee:ff",
     )
     result = await device_registry.get_device("media_player.test_tv")
     assert result is not None
-    assert result["ip"] == "192.168.1.200"
+    assert result["ip"] == "198.51.100.200"
     assert result["mac"] == "aa:bb:cc:dd:ee:ff"
     assert result["friendly_name"] == "Test TV"
 
 
 @pytest.mark.asyncio
 async def test_invalidate_and_clear_stale():
-    await device_registry.set_device("media_player.test_tv", ip="192.168.1.100")
+    await device_registry.set_device("media_player.test_tv", ip="198.51.100.100")
     await device_registry.invalidate_device("media_player.test_tv", "timeout")
     result = await device_registry.get_device("media_player.test_tv")
     assert result is not None
@@ -79,10 +79,10 @@ async def test_invalidate_and_clear_stale():
 
 @pytest.mark.asyncio
 async def test_find_by_ip():
-    await device_registry.set_device("media_player.tv1", ip="192.168.1.100")
-    await device_registry.set_device("media_player.tv2", ip="192.168.1.101")
-    assert await device_registry.find_by_ip("192.168.1.100") == "media_player.tv1"
-    assert await device_registry.find_by_ip("192.168.1.999") is None
+    await device_registry.set_device("media_player.tv1", ip="198.51.100.100")
+    await device_registry.set_device("media_player.tv2", ip="198.51.100.101")
+    assert await device_registry.find_by_ip("198.51.100.100") == "media_player.tv1"
+    assert await device_registry.find_by_ip("198.51.100.999") is None
 
 
 @pytest.mark.asyncio
@@ -94,8 +94,8 @@ async def test_find_by_mac():
 
 @pytest.mark.asyncio
 async def test_list_devices():
-    await device_registry.set_device("media_player.tv1", ip="192.168.1.1")
-    await device_registry.set_device("media_player.tv2", ip="192.168.1.2")
+    await device_registry.set_device("media_player.tv1", ip="198.51.100.1")
+    await device_registry.set_device("media_player.tv2", ip="198.51.100.2")
     result = await device_registry.list_devices()
     assert len(result) == 2
     assert "media_player.tv1" in result
@@ -104,7 +104,7 @@ async def test_list_devices():
 
 @pytest.mark.asyncio
 async def test_remove_device():
-    await device_registry.set_device("media_player.test_tv", ip="192.168.1.100")
+    await device_registry.set_device("media_player.test_tv", ip="198.51.100.100")
     assert await device_registry.remove_device("media_player.test_tv") is True
     assert await device_registry.get_device("media_player.test_tv") is None
     assert await device_registry.remove_device("media_player.nonexistent") is False
@@ -113,7 +113,7 @@ async def test_remove_device():
 @pytest.mark.asyncio
 async def test_needs_rediscovery():
     assert await device_registry.needs_rediscovery("media_player.new_tv") is True
-    await device_registry.set_device("media_player.known_tv", ip="192.168.1.100")
+    await device_registry.set_device("media_player.known_tv", ip="198.51.100.100")
     assert await device_registry.needs_rediscovery("media_player.known_tv") is False
     await device_registry.invalidate_device("media_player.known_tv")
     assert await device_registry.needs_rediscovery("media_player.known_tv") is True
@@ -121,11 +121,11 @@ async def test_needs_rediscovery():
 
 @pytest.mark.asyncio
 async def test_search_devices():
-    await device_registry.set_device("media_player.gracies_tv", ip="192.168.1.100", friendly_name="Gracies TV")
-    await device_registry.set_device("media_player.office_tv", ip="192.168.1.101", friendly_name="Office TV")
-    results = await device_registry.search_devices("gracie")
+    await device_registry.set_device("media_player.taylors_tv", ip="198.51.100.100", friendly_name="Taylors TV")
+    await device_registry.set_device("media_player.office_tv", ip="198.51.100.101", friendly_name="Office TV")
+    results = await device_registry.search_devices("taylor")
     assert len(results) == 1
-    assert results[0]["entity_id"] == "media_player.gracies_tv"
+    assert results[0]["entity_id"] == "media_player.taylors_tv"
 
     results = await device_registry.search_devices("tv")
     assert len(results) == 2
@@ -135,7 +135,7 @@ async def test_search_devices():
 async def test_metadata_merge():
     await device_registry.set_device(
         "media_player.test_tv",
-        ip="192.168.1.100",
+        ip="198.51.100.100",
         metadata={"serial": "ABC123"},
     )
     await device_registry.set_device(

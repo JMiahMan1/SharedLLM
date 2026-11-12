@@ -11,25 +11,31 @@ import dateparser
 import pytz
 from icalendar import Calendar
 
-from services.config import TIMEZONE
+from services.common import household_tz
 from services.execution.schemas import CalendarRequest, ExecutionResult
 
 from ..personal_data import resolve_personal_data_provider
 
 log = logging.getLogger("execution.calendar")
 
-LOCAL_TZ_NAME = TIMEZONE
+# Tests may pin a zone here; otherwise the household zone
+# (services/common/household_tz.py), which raises with how to set it.
+LOCAL_TZ_NAME: str | None = None
+
+
+def _local_tz_name() -> str:
+    return LOCAL_TZ_NAME or household_tz.zone_name()
 
 
 def _get_local_tz():
-    return pytz.timezone(LOCAL_TZ_NAME)
+    return pytz.timezone(_local_tz_name())
 
 
 def _localize(dt: datetime) -> datetime:
     """A naive wall-clock time in the household's zone, made aware.
 
     pytz zones must be attached with ``localize``: ``replace(tzinfo=...)``
-    picks the zone's local mean time (-07:28 for America/Phoenix), which put
+    picks the zone's local mean time (e.g. -07:28), which put
     every event added from the app 28 minutes late and turned all-day events
     into 12:28 AM appointments.
     """
@@ -346,14 +352,14 @@ async def _read_skylight(req: CalendarRequest, lo, hi) -> list[dict]:
     params = {
         "date_min": lo.date().isoformat(),
         "date_max": hi.date().isoformat(),
-        "timezone": LOCAL_TZ_NAME,
+        "timezone": _local_tz_name(),
     }
     result = await _skylight_request(session, "GET", "/calendar_events", params=params)
     if not result:
         return []
     data = result.get("data", []) if isinstance(result, dict) else []
     # Skylight files each event under a category: a family member's name
-    # ("Michele"), the household, or an account. Its label says whose it is.
+    # ("Sam"), the household, or an account. Its label says whose it is.
     categories = {
         inc.get("id"): (inc.get("attributes") or {}).get("label")
         for inc in (result.get("included") or [] if isinstance(result, dict) else [])

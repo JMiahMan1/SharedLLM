@@ -26,11 +26,11 @@ class _Client:
         return _Resp(200, {"results": [{"content": "Lent is a journey", "metadata": {"title": "Great Lent", "chapter": "1"}}]})
 
 
-def _setup(monkeypatch, user="jeremiah"):
+def _setup(monkeypatch, user="alex"):
     client = _Client()
 
     async def ident(request):
-        return {"user": user, "nextcloud_user": "jeremiah"} if user else {}
+        return {"user": user, "nextcloud_user": "alex"} if user else {}
 
     monkeypatch.setattr(main, "_resolve_identity_from_request", ident)
     monkeypatch.setattr(main, "get_http_client", lambda: client)
@@ -43,7 +43,7 @@ def test_resources_list_the_topic_and_search_only_within_it(monkeypatch):
     assert body["topic"] == "fasting" and body["books"][0]["title"] == "Great Lent"
     assert body["passages"][0]["title"] == "Great Lent"
     listing = next(c for c in client.calls if c[0] == "GET")
-    assert listing[2]["tag"] == "fasting" and listing[2]["user_id"] == "jeremiah"
+    assert listing[2]["tag"] == "fasting" and listing[2]["user_id"] == "alex"
     search = next(c for c in client.calls if c[0] == "POST")
     assert search[2]["tags"] == ["fasting"]
 

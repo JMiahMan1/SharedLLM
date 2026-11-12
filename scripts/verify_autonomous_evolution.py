@@ -51,7 +51,7 @@ def run_verification():
         try:
             resp = httpx.post(
                 GATEWAY_URL,
-                json={"query": query, "stream": False, "rag_user": "jeremiah"},
+                json={"query": query, "stream": False, "rag_user": os.getenv("RAG_USER", "admin")},
                 headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
                 timeout=120.0
             )

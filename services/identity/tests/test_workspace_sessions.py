@@ -54,7 +54,7 @@ def client_fixture(session: Session, actor: dict):
     app.dependency_overrides = {}
 
 
-def another_user(session: Session, username: str = "michele") -> User:
+def another_user(session: Session, username: str = "sam") -> User:
     user = User(username=username, display_name=username.title())
     session.add(user)
     session.commit()

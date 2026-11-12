@@ -14,7 +14,7 @@ Alpaca router's OpenAI-compatible API) can be pointed at directly:
 
 Run them with the model up (``--run-local`` is what un-skips ``local_only``):
 
-    VISION_OCR_URL=http://192.168.2.43:11434 \\
+    VISION_OCR_URL=http://<llm-host>:11434 \\
         .venv/bin/python -m pytest test/local/test_recipe_ocr_live.py -m local_only --run-local -v
 """
 import os

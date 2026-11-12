@@ -64,7 +64,7 @@ def test_a_family_members_key_is_not_enough(monkeypatch):
 
 
 def test_an_admins_key_opens_the_stream(monkeypatch):
-    _identity(monkeypatch, {"admin-key": _Resp(200, {"user": "jeremiah", "is_admin": True})})
+    _identity(monkeypatch, {"admin-key": _Resp(200, {"user": "alex", "is_admin": True})})
     assert _authorized("admin-key") is True
 
 

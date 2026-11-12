@@ -6,7 +6,7 @@
 #
 # Usage: rvcurl.sh [curl args...]
 #   All args are passed straight to curl. The wrapper adds --max-time, retries,
-#   and connects via the gateway (192.168.2.205:11435) unless a URL is given.
+#   and talks to whatever gateway URL you pass (e.g. http://192.0.2.10:11435/...).
 set -uo pipefail
 
 MAX_ATTEMPTS=5

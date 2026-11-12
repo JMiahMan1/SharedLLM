@@ -125,7 +125,7 @@ def _is_ma_player(attrs: dict, entity_id: str = "") -> bool:
 
 
 def _room_slug_from_entity(entity_id: str, friendly_name: str = "") -> str:
-    """Extract normalized room prefix (e.g. 'office', 'living_room', 'master_bedroom', 'loft', 'gracies', 'rv')."""
+    """Extract normalized room prefix (e.g. 'office', 'living_room', 'master_bedroom', 'loft', 'kids_room', 'rv')."""
     raw = entity_id.split(".")[-1].lower()
     for suffix in (
         "_assist_satellite", "_s3_box_media_player", "_jarvis_smart_speaker",
@@ -547,7 +547,7 @@ async def announce_roku(
         except Exception as e:
             log.warning(f"[announce.roku] ECP launch failed: {e}")
 
-    # 3. Fallback: check Music Assistant sibling (e.g., media_player.gracies_tv)
+    # 3. Fallback: check Music Assistant sibling (e.g., media_player.kids_room_tv)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
         companions = resolve_tv_companions(entity_id, all_states)
@@ -1258,7 +1258,7 @@ async def classify_communication_devices(
         primary_ent = companions.get("primary_entity")
         if primary_ent and primary_ent != eid and primary_ent in {s.get("entity_id") for s in states}:
             # Keep the wrapper when the primary is unavailable (for example
-            # Gracie's Roku TV) or cannot announce. A TV entity often exposes
+            # a child's Roku TV) or cannot announce. A TV entity often exposes
             # only power/volume, while its Cast or MA sibling is the one that
             # can speak a timer alert.
             primary_state = next((s for s in states if s.get("entity_id") == primary_ent), {})

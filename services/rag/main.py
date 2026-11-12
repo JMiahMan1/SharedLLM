@@ -2170,7 +2170,7 @@ def _ha_item_id(user_id: str, entity_id: str) -> str:
     """The ``rag_items`` id of one user's copy of one HA entity.
 
     It used to be ``ha:{entity_id}`` for everyone. ``id`` is the table's primary
-    key, so each user's sync (default, then michele, then jeremiah, every five
+    key, so each user's sync (default, then each family member in turn, every five
     minutes) replaced the previous user's rows: no user ever found their own
     copy as "unchanged", all ~700 entities were re-embedded on every sync
     (RAG busy roughly half of every hour), and at any moment only the last

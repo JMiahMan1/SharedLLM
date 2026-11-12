@@ -16,7 +16,7 @@ from services.gateway.main import app
 
 RECIPIENTS = [
     {"username": "default", "display_name": "Default"},
-    {"username": "jeremiah", "display_name": "Jeremiah"},
+    {"username": "alex", "display_name": "Alex"},
 ]
 
 
@@ -122,7 +122,7 @@ def make_client(monkeypatch):
     junk string to the default admin, so tests would pass for the wrong reason
     and the "viewer is not trusted from the caller" case would be vacuous."""
 
-    def _make(user="jeremiah", is_admin=False, key="test-token"):
+    def _make(user="alex", is_admin=False, key="test-token"):
         async def _resolve(api_key):
             if api_key != key:
                 return None
@@ -141,55 +141,55 @@ def client(make_client):
 
 class TestEventsProxy:
     def test_reaching_the_endpoint_is_not_a_404(self, client, monkeypatch):
-        cap = _patch_geo(monkeypatch, payload={"user_id": "jeremiah", "groups": [], "empty": True})
-        r = client.get("/api/geo/events?user_id=jeremiah")
+        cap = _patch_geo(monkeypatch, payload={"user_id": "alex", "groups": [], "empty": True})
+        r = client.get("/api/geo/events?user_id=alex")
         assert r.status_code == 200
         assert len(cap["calls"]) == 1
 
     def test_forwards_to_geo(self, client, monkeypatch):
         cap = _patch_geo(monkeypatch, payload={"empty": True})
-        client.get("/api/geo/events?user_id=jeremiah")
+        client.get("/api/geo/events?user_id=alex")
         assert cap["calls"][0]["url"] == f"{gateway_main.GEO_SVC}/events"
 
     def test_forwards_the_requested_window(self, client, monkeypatch):
         cap = _patch_geo(monkeypatch, payload={"empty": True})
-        client.get("/api/geo/events?user_id=jeremiah&days=90&limit=100")
+        client.get("/api/geo/events?user_id=alex&days=90&limit=100")
         params = cap["calls"][0]["params"]
         assert params.get("days") == 90
         assert params.get("limit") == 100
 
     def test_sends_the_internal_secret(self, client, monkeypatch):
         cap = _patch_geo(monkeypatch, payload={"empty": True})
-        client.get("/api/geo/events?user_id=jeremiah")
+        client.get("/api/geo/events?user_id=alex")
         assert cap["calls"][0]["headers"].get("X-Internal-Secret") == gateway_main.INTERNAL_SECRET
 
     def test_resolves_the_viewer_rather_than_trusting_the_caller(self, client, monkeypatch):
         # A client-supplied viewer must not be able to name someone else.
         cap = _patch_geo(monkeypatch, payload={"empty": True})
-        client.get("/api/geo/events?user_id=jeremiah&viewer=admin&is_admin=true")
+        client.get("/api/geo/events?user_id=alex&viewer=admin&is_admin=true")
         params = cap["calls"][0]["params"]
         assert not params.get("is_admin")
         assert params.get("viewer") != "admin"
 
     def test_relays_an_empty_timeline_unchanged(self, client, monkeypatch):
-        payload = {"user_id": "jeremiah", "groups": [], "empty": True, "day_count": 0}
+        payload = {"user_id": "alex", "groups": [], "empty": True, "day_count": 0}
         _patch_geo(monkeypatch, payload=payload)
-        assert client.get("/api/geo/events?user_id=jeremiah").json() == payload
+        assert client.get("/api/geo/events?user_id=alex").json() == payload
 
     def test_relays_geo_refusals_rather_than_laundering_them(self, client, monkeypatch):
         """A 404 from geo is a consent refusal; turning it into a 200 with an
         empty timeline would tell the user they have no history."""
         _patch_geo(monkeypatch, status=404, payload={"detail": "Not Found"})
-        assert client.get("/api/geo/events?user_id=jeremiah").status_code == 404
+        assert client.get("/api/geo/events?user_id=alex").status_code == 404
 
     def test_relays_a_bad_window_rather_than_reporting_an_outage(self, client, monkeypatch):
         _patch_geo(monkeypatch, status=422, payload={"detail": "range must be one of D, W, M, 3M, Y"})
-        r = client.get("/api/geo/events?user_id=jeremiah&days=999")
+        r = client.get("/api/geo/events?user_id=alex&days=999")
         assert r.status_code == 422
 
     def test_does_not_capture_the_path_as_a_parameter(self, client, monkeypatch):
         """A sibling /api/geo/{x} route must not swallow the literal 'events'."""
         cap = _patch_geo(monkeypatch, payload={"empty": True})
-        client.get("/api/geo/events?user_id=jeremiah")
+        client.get("/api/geo/events?user_id=alex")
         assert len(cap["calls"]) == 1
         assert cap["calls"][0]["url"].endswith("/events")

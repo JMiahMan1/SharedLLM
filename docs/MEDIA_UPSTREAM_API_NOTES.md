@@ -19,7 +19,7 @@ service.
     `sendJsonRpc` in `maWebPlayer.ts` already parses.
 - **Live verification 2026-10-05:** fetched
   `http://<mass_url>/api-docs/commands.json` from the running MA instance
-  (reachable at `http://ha.sumemail.com:8095`). It lists 310 commands. All 47
+  (reachable at `http://ha.example.com:8095`). It lists 310 commands. All 47
   allowlisted names exist upstream (`missing upstream: []`), every one is
   `authenticated: true`, and MA marks them with the expected scopes
   (`players.read|control`, `queues.read|control`, `library.read|write`).
@@ -69,7 +69,7 @@ service.
 
 - The original BUG-05 fix (hard 400 for any full URL whose host ∉ configured
   mass/abs/ha hosts) was verified against production and **broke real cover
-  art**: `path=http://192.168.2.20:8095/imageproxy/...` (the actual MA
+  art**: `path=http://192.0.2.20:8095/imageproxy/...` (the actual MA
   image host, probed live → 400) plus Nabu Casa / docker-alias HA
   `entity_picture` URLs. Deviation approved by the owner on 2026-09-27
   (no change may break player functionality), same precedent as the BUG-08 `.part` decision; plan row amended.
@@ -160,7 +160,7 @@ service.
 
 - **Authority:** ABS server source `advplyr/audiobookshelf`
   `server/routers/ApiRouter.js` @ master (fetched this day; router mounted
-  under `/api`). Live probes of `https://abs.sumemail.com` are useless for
+  under `/api`). Live probes of `https://abs.example.com` are useless for
   route discovery: ABS auth runs before routing and 401s every path
   (including nonexistent `/api/v1/...` ones).
 - Verified YES: `GET /api/items/:id` (L108), `GET /api/me/progress/:id`
@@ -453,7 +453,7 @@ passed / 1 failed (pre-existing, unrelated family_games) / 59 skipped**.
 
 ## ABS 2.x session-based playback (P2-T17 / BUG-26, 2026-09-28)
 
-Live probes against `https://abs.sumemail.com` (the `/audiobookshelf`
+Live probes against `https://abs.example.com` (the `/audiobookshelf`
 prefix base and the root base serve the same instance; the prefix works for
 every route below).
 
@@ -532,7 +532,7 @@ the playback registry):
 
 * TV `media_player` and `remote` entities are **not** named alike:
   `media_player.office_tv` ↔ `remote.office_tv_remote`,
-  `media_player.gracies_tv` ↔ `remote.28_tcl_roku_tv`
+  `media_player.taylors_tv` ↔ `remote.demo_roku_tv`
   (`loft_tv` and `master_bedroom_samsung` happen to match). The Android TV and
   Roku handlers built the remote name by string replacement, so their keys went
   to entities that do not exist. `ha_client.find_companion_remote` asks HA's
@@ -540,7 +540,7 @@ the playback registry):
   (`device_entities(device_id('<media_player>'))`), then falls back to a name
   match, then to the same-named entity; results are cached 10 min.
 * Live MA players mostly have an HA twin; `/execute/media/status` exposes the
-  link as `ma_player_id` (`up309587157251` → `media_player.office_tv_3`). The
+  link as `ma_player_id` (`up000000000001` → `media_player.den_tv`). The
   Media page uses it to list each speaker once.
 * The registry held `web_player playing "Hey"` for ~18 h after the app was
   closed (the only heartbeat lived on the Media page). Status now ignores a

@@ -102,30 +102,30 @@ def test_shared_trips_grouping():
     trips = [
         {
             "id": "t1",
-            "user_id": "jeremiah",
-            "user_name": "Jeremiah",
+            "user_id": "alex",
+            "user_name": "Alex",
             "start_time": now,
             "end_time": now + 1800,
-            "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-            "end_location": {"name": "Mall", "latitude": 33.2500, "longitude": -111.6300},
+            "start_location": {"name": "Home", "latitude": 39.7392, "longitude": -104.9903},
+            "end_location": {"name": "Mall", "latitude": 39.8225, "longitude": -105.0557},
             "distance_miles": 12.0,
             "vehicle_name": "2011 Ford F-250 Super Duty",
         },
         {
             "id": "t2",
-            "user_id": "michele",
-            "user_name": "Michele",
+            "user_id": "pat",
+            "user_name": "Pat",
             "start_time": now + 60, # 1 minute later
             "end_time": now + 1820,
-            "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-            "end_location": {"name": "Mall", "latitude": 33.2500, "longitude": -111.6300},
+            "start_location": {"name": "Home", "latitude": 39.7392, "longitude": -104.9903},
+            "end_location": {"name": "Mall", "latitude": 39.8225, "longitude": -105.0557},
             "distance_miles": 12.0,
             "vehicle_name": "2012 Chevrolet Equinox FWD",
         },
         {
             "id": "t3",
-            "user_id": "jeremiah",
-            "user_name": "Jeremiah",
+            "user_id": "alex",
+            "user_name": "Alex",
             "start_time": now - 36000,
             "end_time": now - 34000,
             "start_location": {"name": "Work", "latitude": 32.7800, "longitude": -96.8000},
@@ -137,9 +137,9 @@ def test_shared_trips_grouping():
 
     grouped = geo.group_shared_trips(trips)
     assert grouped[0]["is_shared"] is True
-    assert grouped[0]["shared_with"][0]["user_id"] == "michele"
+    assert grouped[0]["shared_with"][0]["user_id"] == "pat"
     assert grouped[1]["is_shared"] is True
-    assert grouped[1]["shared_with"][0]["user_id"] == "jeremiah"
+    assert grouped[1]["shared_with"][0]["user_id"] == "alex"
     assert grouped[0]["shared_group_id"] == grouped[1]["shared_group_id"]
 
     # t3 was a solo trip in a completely different time/location
@@ -163,8 +163,8 @@ def _sample_trip(trip_id: str, user_id: str, user_name: str, start: float) -> di
         "duration_seconds": 1800,
         "distance_miles": 12.0,
         "top_speed_mph": 55.0,
-        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-        "end_location": {"name": "Mall", "latitude": 33.2500, "longitude": -111.6300},
+        "start_location": {"name": "Home", "latitude": 39.7392, "longitude": -104.9903},
+        "end_location": {"name": "Mall", "latitude": 39.8225, "longitude": -105.0557},
         "vehicle_id": "test_truck",
         "vehicle_name": "Test Truck",
         "fuel_type": "gasoline",
@@ -179,8 +179,8 @@ def _sample_trip(trip_id: str, user_id: str, user_name: str, start: float) -> di
 def test_get_trips_seed_and_filter(client, fake_redis):
     """Trips are retrieved per user, and the all-users view is admin-only."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
-    _insert_trip(fake_redis, _sample_trip("t_m1", "michele", "Michele", now - 1800))
+    _insert_trip(fake_redis, _sample_trip("t_j1", "alex", "Alex", now - 3600))
+    _insert_trip(fake_redis, _sample_trip("t_m1", "pat", "Pat", now - 1800))
 
     # The all-users view is an admin capability.
     r = client.get("/trips", params={"is_admin": "true"})
@@ -188,39 +188,39 @@ def test_get_trips_seed_and_filter(client, fake_redis):
     data = r.json()
     assert data["total_trips"] >= 2
     users = {t["user_id"] for t in data["trips"]}
-    assert "jeremiah" in users
-    assert "michele" in users
+    assert "alex" in users
+    assert "pat" in users
 
-    # Filter per login (Jeremiah)
-    r_j = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
+    # Filter per login (Alex)
+    r_j = client.get("/trips", params={"user_id": "alex", "viewer": "alex"})
     assert r_j.status_code == 200
     assert r_j.json()["trips"]
     for t in r_j.json()["trips"]:
-        assert t["user_id"] == "jeremiah"
+        assert t["user_id"] == "alex"
 
-    # Filter per login (Michele)
-    r_m = client.get("/trips", params={"user_id": "michele", "viewer": "michele"})
+    # Filter per login (Pat)
+    r_m = client.get("/trips", params={"user_id": "pat", "viewer": "pat"})
     assert r_m.status_code == 200
     for t in r_m.json()["trips"]:
-        assert t["user_id"] == "michele"
+        assert t["user_id"] == "pat"
 
 
 def test_phantom_zero_duration_trips_are_not_listed(client, fake_redis):
     """Older phantom records (a fast fix, then a stop) stay in Redis but must
     not appear as 60-second trips in Wander."""
     now = time.time()
-    real = _sample_trip("t_real", "jeremiah", "Jeremiah", now - 3600)
-    phantom = _sample_trip("t_phantom", "jeremiah", "Jeremiah", now - 1800)
+    real = _sample_trip("t_real", "alex", "Alex", now - 3600)
+    phantom = _sample_trip("t_phantom", "alex", "Alex", now - 1800)
     phantom.update({
         "end_time": phantom["start_time"],
         "duration_seconds": 60,
         "distance_miles": 2.15,
-        "start_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
-        "end_location": {"name": "East Riggs Road", "latitude": 33.2195743, "longitude": -111.6486112},
+        "start_location": {"name": "East Riggs Road", "latitude": 39.7920743, "longitude": -105.0743112},
+        "end_location": {"name": "East Riggs Road", "latitude": 39.7920743, "longitude": -105.0743112},
     })
     _insert_trip(fake_redis, real)
     _insert_trip(fake_redis, phantom)
-    r = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
+    r = client.get("/trips", params={"user_id": "alex", "viewer": "alex"})
     assert r.status_code == 200
     assert [t["id"] for t in r.json()["trips"]] == ["t_real"]
 
@@ -229,13 +229,13 @@ def test_a_slice_of_a_longer_drive_is_not_listed_twice(client, fake_redis):
     """A second active trip started mid-drive used to survive as a short
     overlapping record; Wander should show the drive once."""
     now = time.time()
-    long = _sample_trip("t_long", "jeremiah", "Jeremiah", now - 3600)
+    long = _sample_trip("t_long", "alex", "Alex", now - 3600)
     long.update({"end_time": long["start_time"] + 2517, "duration_seconds": 2517, "distance_miles": 30.55})
-    slice_ = _sample_trip("t_slice", "jeremiah", "Jeremiah", now - 3600 + 2019)
+    slice_ = _sample_trip("t_slice", "alex", "Alex", now - 3600 + 2019)
     slice_.update({"end_time": slice_["start_time"] + 179, "duration_seconds": 179, "distance_miles": 1.91})
     _insert_trip(fake_redis, long)
     _insert_trip(fake_redis, slice_)
-    r = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
+    r = client.get("/trips", params={"user_id": "alex", "viewer": "alex"})
     assert r.status_code == 200
     assert [t["id"] for t in r.json()["trips"]] == ["t_long"]
 
@@ -247,7 +247,7 @@ def test_trips_all_bucket_is_not_open_to_everyone(client, fake_redis):
     geo served `geo:trips:all` to any authenticated caller.
     """
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
+    _insert_trip(fake_redis, _sample_trip("t_j1", "alex", "Alex", now - 3600))
     assert client.get("/trips").status_code == 401
     assert client.get("/trips", params={"is_admin": "false"}).status_code == 401
 
@@ -255,27 +255,27 @@ def test_trips_all_bucket_is_not_open_to_everyone(client, fake_redis):
 def test_trips_require_opt_in_to_read_another_users(client, fake_redis, monkeypatch):
     """Reading another person's trips needs their sharing consent."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
+    _insert_trip(fake_redis, _sample_trip("t_j1", "alex", "Alex", now - 3600))
 
-    # Michele has not opted in -> not shared.
+    # Pat has not opted in -> not shared.
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
     assert client.get(
-        "/trips", params={"user_id": "jeremiah", "viewer": "michele"}
+        "/trips", params={"user_id": "alex", "viewer": "pat"}
     ).status_code == 404
 
     # Opted in to the circle -> readable.
     monkeypatch.setattr(
         geo,
         "_fetch_activity_sharing",
-        _sharing({"jeremiah": {"enabled": True, "audience": "circle"}}),
+        _sharing({"alex": {"enabled": True, "audience": "circle"}}),
     )
-    ok = client.get("/trips", params={"user_id": "jeremiah", "viewer": "michele"})
+    ok = client.get("/trips", params={"user_id": "alex", "viewer": "pat"})
     assert ok.status_code == 200
     assert ok.json()["trips"]
 
     # An admin reads it regardless of consent.
     admin = client.get(
-        "/trips", params={"user_id": "jeremiah", "viewer": "michele", "is_admin": "true"}
+        "/trips", params={"user_id": "alex", "viewer": "pat", "is_admin": "true"}
     )
     assert admin.status_code == 200
     assert admin.json()["trips"]
@@ -304,8 +304,8 @@ def test_get_trips_empty_without_seed(client, fake_redis):
 def test_update_trip_by_owner_allowed(client, fake_redis):
     """Verify owner can update vehicle, MPG, and fuel price, and cost is recalculated."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_owner", "jeremiah", "Jeremiah", now - 7200))
-    trips = client.get("/trips?user_id=jeremiah").json()["trips"]
+    _insert_trip(fake_redis, _sample_trip("t_owner", "alex", "Alex", now - 7200))
+    trips = client.get("/trips?user_id=alex").json()["trips"]
     target_trip = trips[0]
     trip_id = target_trip["id"]
     orig_miles = target_trip["distance_miles"]
@@ -322,7 +322,7 @@ def test_update_trip_by_owner_allowed(client, fake_redis):
     resp = client.patch(
         f"/trips/{trip_id}",
         json=update_payload,
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"},
     )
     assert resp.status_code == 200
     updated = resp.json()
@@ -342,15 +342,15 @@ def test_update_trip_by_owner_allowed(client, fake_redis):
 def test_update_trip_by_other_user_forbidden(client, fake_redis):
     """Verify updating a trip by another user is strictly rejected with 403."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_forbid", "jeremiah", "Jeremiah", now - 7200))
-    trips = client.get("/trips?user_id=jeremiah").json()["trips"]
+    _insert_trip(fake_redis, _sample_trip("t_forbid", "alex", "Alex", now - 7200))
+    trips = client.get("/trips?user_id=alex").json()["trips"]
     target_trip = trips[0]
     trip_id = target_trip["id"]
 
     resp = client.patch(
         f"/trips/{trip_id}",
         json={"vehicle_name": "Hacked Vehicle"},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "michele"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "pat"},
     )
     assert resp.status_code == 403
     assert "Only the user who took this trip" in resp.json()["detail"]
@@ -359,13 +359,13 @@ def test_update_trip_by_other_user_forbidden(client, fake_redis):
 def test_update_trip_activity_type(client, fake_redis):
     """Verify owner can tag a trip with an activity type (e.g. horseback riding)."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_act", "jeremiah", "Jeremiah", now - 7200))
-    trip_id = client.get("/trips?user_id=jeremiah").json()["trips"][0]["id"]
+    _insert_trip(fake_redis, _sample_trip("t_act", "alex", "Alex", now - 7200))
+    trip_id = client.get("/trips?user_id=alex").json()["trips"][0]["id"]
 
     resp = client.patch(
         f"/trips/{trip_id}",
         json={"activity_type": "horseback_riding", "notes": "Trail ride with Daisy"},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"},
     )
     assert resp.status_code == 200
     updated = resp.json()
@@ -376,7 +376,7 @@ def test_update_trip_activity_type(client, fake_redis):
     resp_bad = client.patch(
         f"/trips/{trip_id}",
         json={"activity_type": "skateboarding"},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"},
     )
     assert resp_bad.status_code == 422
 
@@ -384,28 +384,28 @@ def test_update_trip_activity_type(client, fake_redis):
 def test_manual_shared_rider_assignment(client, fake_redis):
     """Verify trip owner can manually assign/clear shared riders."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_share", "jeremiah", "Jeremiah", now - 7200))
-    trip_id = client.get("/trips?user_id=jeremiah").json()["trips"][0]["id"]
+    _insert_trip(fake_redis, _sample_trip("t_share", "alex", "Alex", now - 7200))
+    trip_id = client.get("/trips?user_id=alex").json()["trips"][0]["id"]
 
     # Assign riders
     resp = client.patch(
         f"/trips/{trip_id}/share",
-        json={"shared_with": ["person.michele", "Summers"]},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"},
+        json={"shared_with": ["person.pat", "Rivera"]},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"},
     )
     assert resp.status_code == 200
     updated = resp.json()
     assert updated["is_shared"] is True
     assert updated["shared_manually"] is True
     names = {r["user_name"] for r in updated["shared_with"]}
-    assert "Michele" in names
-    assert "Summers" in names
+    assert "Pat" in names
+    assert "Rivera" in names
 
     # Another user cannot edit riders
     resp_forbid = client.patch(
         f"/trips/{trip_id}/share",
         json={"shared_with": []},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "michele"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "pat"},
     )
     assert resp_forbid.status_code == 403
 
@@ -413,7 +413,7 @@ def test_manual_shared_rider_assignment(client, fake_redis):
     resp_clear = client.patch(
         f"/trips/{trip_id}/share",
         json={"shared_with": []},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"},
     )
     assert resp_clear.status_code == 200
     cleared = resp_clear.json()
@@ -424,7 +424,7 @@ def test_manual_shared_rider_assignment(client, fake_redis):
 @pytest.mark.asyncio
 async def test_workout_start_stop_flow(client, fake_redis):
     """Verify manual workout lifecycle: start, list, stop with computed stats."""
-    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
+    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"}
 
     # Start a horseback ride
     resp = client.post("/workouts/start", json={"activity_type": "horseback_riding"}, headers=headers)
@@ -437,16 +437,16 @@ async def test_workout_start_stop_flow(client, fake_redis):
 
     # Backdate the workout start so breadcrumb timestamps fall inside the window
     base_t = time.time() - 600
-    active = json.loads(await fake_redis.get("geo:active_workout:jeremiah"))
+    active = json.loads(await fake_redis.get("geo:active_workout:alex"))
     active["start_time"] = base_t
-    await fake_redis.set("geo:active_workout:jeremiah", json.dumps(active))
+    await fake_redis.set("geo:active_workout:alex", json.dumps(active))
 
     # Record some breadcrumbs along a path (~0.9 miles of movement)
     for i in range(10):
         await geo.record_point(
-            entity_id="jeremiah",
-            lat=33.1667 + i * 0.0013,
-            lon=-111.5646,
+            entity_id="alex",
+            lat=39.7392 + i * 0.0013,
+            lon=-104.9903,
             speed=2.5,
             timestamp=base_t + i * 60,
         )
@@ -461,7 +461,7 @@ async def test_workout_start_stop_flow(client, fake_redis):
     assert workout["notes"] == "Evening trail ride"
 
     # Listed under workouts
-    resp_list = client.get("/workouts?user_id=jeremiah")
+    resp_list = client.get("/workouts?user_id=alex")
     assert resp_list.status_code == 200
     assert any(w["id"] == workout["id"] for w in resp_list.json()["workouts"])
 
@@ -486,19 +486,19 @@ async def test_trip_detection_over_10_mph(fake_redis):
         "cost_per_gallon": 4.10,
         "fuel_type": "diesel"
     }))
-    await fake_redis.set("geo:user_vehicle:jeremiah", "my_truck")
+    await fake_redis.set("geo:user_vehicle:alex", "my_truck")
 
     now = time.time()
     # Speed of 6.0 m/s = ~13.4 MPH (> 10 MPH threshold)
     await geo.process_trip_point(
-        user_id="jeremiah",
-        lat=33.1667,
-        lon=-111.5646,
+        user_id="alex",
+        lat=39.7392,
+        lon=-104.9903,
         speed_mps=6.0,
         timestamp=now
     )
 
-    active_raw = await fake_redis.get("geo:active_trip:jeremiah")
+    active_raw = await fake_redis.get("geo:active_trip:alex")
     assert active_raw is not None
     active = json.loads(active_raw)
     assert active["status"] == "in_progress"
@@ -518,7 +518,7 @@ def test_estimate_steps_walking_pace():
     now = time.time()
     # 2 km at 1.4 m/s = ~1429s; breadcrumb every 30s -> ~48 segments of 42m
     points = []
-    lat, lon = 33.1667, -111.5646
+    lat, lon = 39.7392, -104.9903
     for i in range(49):
         points.append({"t": now + i * 30, "lat": lat, "lon": lon, "spd": 1.4})
         # 42m north per 30s ~= 1.4 m/s
@@ -534,7 +534,7 @@ def test_estimate_steps_running_faster_cadence():
     """Same distance at running pace should produce fewer steps than walking (longer stride)."""
     now = time.time()
     points = []
-    lat, lon = 33.1667, -111.5646
+    lat, lon = 39.7392, -104.9903
     # 2 km at 3.0 m/s = ~667s; breadcrumb every 20s -> ~34 segments of 60m
     for i in range(35):
         points.append({"t": now + i * 20, "lat": lat, "lon": lon, "spd": 3.0})
@@ -553,7 +553,7 @@ def test_estimate_steps_running_faster_cadence():
 
 def test_estimate_steps_rejects_wheeled_activities():
     """Cycling/dirtbiking/horseback have no bipedal stride, so no step estimate."""
-    points = [{"t": time.time() + i * 10, "lat": 33.16 + i * 0.001, "lon": -111.56, "spd": 5.0} for i in range(30)]
+    points = [{"t": time.time() + i * 10, "lat": 39.7325 + i * 0.001, "lon": -104.9857, "spd": 5.0} for i in range(30)]
     for activity in ("cycling", "mountain_biking", "dirtbiking", "horseback_riding"):
         assert geo._estimate_steps_from_gps(activity, points) is None
 
@@ -562,7 +562,7 @@ def test_estimate_steps_insufficient_data():
     """Too few points or stationary data -> None, never a garbage count."""
     assert geo._estimate_steps_from_gps("walking", []) is None
     now = time.time()
-    stationary = [{"t": now + i * 30, "lat": 33.1667, "lon": -111.5646, "spd": 0.0} for i in range(10)]
+    stationary = [{"t": now + i * 30, "lat": 39.7392, "lon": -104.9903, "spd": 0.0} for i in range(10)]
     assert geo._estimate_steps_from_gps("walking", stationary) is None
 
 
@@ -573,19 +573,19 @@ def test_estimate_steps_insufficient_data():
 def test_daily_steps_via_record_endpoint(client, fake_redis):
     """daily_steps piggybacked on a breadcrumb post is stored per-day."""
     resp = client.post(
-        "/people/jeremiah/record",
-        json={"latitude": 33.1667, "longitude": -111.5646, "daily_steps": 5432},
+        "/people/alex/record",
+        json={"latitude": 39.7392, "longitude": -104.9903, "daily_steps": 5432},
         headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
     )
     assert resp.status_code == 200
 
-    raw = fake_redis.hashes.get("geo:steps:jeremiah", {})
+    raw = fake_redis.hashes.get("geo:steps:alex", {})
     # day bucket written
     assert len(raw) == 1
     assert next(iter(raw.values())) == 5432
 
     # GET /steps returns it (and today's bucket)
-    r = client.get("/steps?user_id=jeremiah")
+    r = client.get("/steps?user_id=alex")
     assert r.status_code == 200
     data = r.json()
     assert data["today"] == 5432
@@ -596,19 +596,19 @@ def test_daily_steps_via_record_endpoint(client, fake_redis):
 def test_daily_steps_max_keeps_highest_reading(client, fake_redis):
     """Cumulative counters only go up; a lower later reading never lowers the day."""
     resp1 = client.post(
-        "/people/jeremiah/record",
-        json={"latitude": 33.1667, "longitude": -111.5646, "daily_steps": 8000},
+        "/people/alex/record",
+        json={"latitude": 39.7392, "longitude": -104.9903, "daily_steps": 8000},
         headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
     )
     assert resp1.status_code == 200
     resp2 = client.post(
-        "/people/jeremiah/record",
-        json={"latitude": 33.1677, "longitude": -111.5646, "daily_steps": 2500},
+        "/people/alex/record",
+        json={"latitude": 39.7402, "longitude": -104.9903, "daily_steps": 2500},
         headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
     )
     assert resp2.status_code == 200
 
-    r = client.get("/steps?user_id=jeremiah")
+    r = client.get("/steps?user_id=alex")
     assert r.json()["today"] == 8000
 
 
@@ -617,10 +617,10 @@ def test_daily_steps_direct_endpoint(client, fake_redis):
     resp = client.post(
         "/steps",
         json={"steps": 12345},
-        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "person.jeremiah"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "person.alex"},
     )
     assert resp.status_code == 200
-    r = client.get("/steps?user_id=jeremiah&days=7")
+    r = client.get("/steps?user_id=alex&days=7")
     assert r.status_code == 200
     data = r.json()
     assert data["today"] >= 12345
@@ -630,7 +630,7 @@ def test_steps_endpoints_require_secret(client):
     from fastapi.testclient import TestClient as _TC
 
     unauthenticated = _TC(geo.app)
-    resp = unauthenticated.post("/steps", json={"steps": 100, "user_id": "jeremiah"})
+    resp = unauthenticated.post("/steps", json={"steps": 100, "user_id": "alex"})
     assert resp.status_code == 403
 
 
@@ -648,34 +648,34 @@ async def test_trends_activity_real_data(client, fake_redis):
     resp = client.post(
         "/steps",
         json={"steps": 9500},
-        headers={**headers, "X-User-Id": "jeremiah"},
+        headers={**headers, "X-User-Id": "alex"},
     )
     assert resp.status_code == 200
 
-    resp_start = client.post("/workouts/start", json={"activity_type": "walking"}, headers={**headers, "X-User-Id": "jeremiah"})
+    resp_start = client.post("/workouts/start", json={"activity_type": "walking"}, headers={**headers, "X-User-Id": "alex"})
     assert resp_start.status_code == 200
     # Backdate start so breadcrumbs fall inside the workout window
-    active = await fake_redis.get("geo:active_workout:jeremiah")
+    active = await fake_redis.get("geo:active_workout:alex")
     active_data = json.loads(active)
     active_data["start_time"] = now - 620
-    await fake_redis.set("geo:active_workout:jeremiah", json.dumps(active_data))
+    await fake_redis.set("geo:active_workout:alex", json.dumps(active_data))
     # Breadcrumbs: ~1.2 km walk
-    lat = 33.1667
+    lat = 39.7392
     for i in range(12):
         await geo.record_point(
-            entity_id="jeremiah",
+            entity_id="alex",
             lat=lat + i * 0.0004,
-            lon=-111.5646,
+            lon=-104.9903,
             speed=1.3,
             timestamp=now - 600 + i * 45,
         )
-    resp_stop = client.post("/workouts/stop", json={}, headers={**headers, "X-User-Id": "jeremiah"})
+    resp_stop = client.post("/workouts/stop", json={}, headers={**headers, "X-User-Id": "alex"})
     assert resp_stop.status_code == 200
     stopped = resp_stop.json()["workout"]
     assert stopped["steps"] is not None  # gps estimate present for walking
     assert stopped["steps_source"] == "gps_estimate"
 
-    resp_trends = client.get("/trends/activity?user_id=jeremiah&days=7", headers=headers)
+    resp_trends = client.get("/trends/activity?user_id=alex&days=7", headers=headers)
     assert resp_trends.status_code == 200
     trends = resp_trends.json()
     assert trends["steps_today"] == 9500
@@ -689,7 +689,7 @@ async def test_trends_activity_real_data(client, fake_redis):
 
 def test_workout_pedometer_override_wins(client, fake_redis):
     """A client-provided pedometer count is stored as-is and marked as pedometer source."""
-    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
+    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"}
     resp_start = client.post("/workouts/start", json={"activity_type": "running"}, headers=headers)
     assert resp_start.status_code == 200
     resp_stop = client.post("/workouts/stop", json={"steps": 3210, "distance_miles": 1.6}, headers=headers)
@@ -708,10 +708,10 @@ def test_workout_pedometer_override_wins(client, fake_redis):
 @pytest.mark.asyncio
 async def test_coarse_fixes_are_not_breadcrumbs(fake_redis):
     now = time.time()
-    await geo.record_point(entity_id="jeremiah", lat=32.26375, lon=-109.85566, accuracy=19, timestamp=now)
-    await geo.record_point(entity_id="jeremiah", lat=32.26362, lon=-109.84696, accuracy=142, timestamp=now + 1)
-    await geo.record_point(entity_id="jeremiah", lat=32.26729, lon=-109.84493, accuracy=600, timestamp=now + 2)
-    kept = [json.loads(p) for p in await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 10)]
+    await geo.record_point(entity_id="alex", lat=38.83625, lon=-103.28136, accuracy=19, timestamp=now)
+    await geo.record_point(entity_id="alex", lat=38.83612, lon=-103.27266, accuracy=142, timestamp=now + 1)
+    await geo.record_point(entity_id="alex", lat=38.83979, lon=-103.27063, accuracy=600, timestamp=now + 2)
+    kept = [json.loads(p) for p in await fake_redis.zrangebyscore("geo:history:alex", 0, now + 10)]
     assert [p["acc"] for p in kept] == [19]
 
 
@@ -719,19 +719,19 @@ async def test_coarse_fixes_are_not_breadcrumbs(fake_redis):
 async def test_a_coarse_jump_cannot_start_a_trip(fake_redis):
     """The network fix 800 m away used to read as a 95 mph drive."""
     now = time.time()
-    await geo.record_point(entity_id="jeremiah", lat=32.26375, lon=-109.85566, accuracy=19, timestamp=now)
-    await geo.record_point(entity_id="jeremiah", lat=32.26362, lon=-109.84696, accuracy=142, timestamp=now + 10)
-    assert await fake_redis.get("geo:active_trip:jeremiah") is None
+    await geo.record_point(entity_id="alex", lat=38.83625, lon=-103.28136, accuracy=19, timestamp=now)
+    await geo.record_point(entity_id="alex", lat=38.83612, lon=-103.27266, accuracy=142, timestamp=now + 10)
+    assert await fake_redis.get("geo:active_trip:alex") is None
 
 
 @pytest.mark.asyncio
 async def test_a_late_fix_does_not_move_a_trip_backwards(fake_redis):
     now = time.time()
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=15.0, timestamp=now)
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1700, lon=-111.5646, speed_mps=15.0, timestamp=now + 30)
-    before = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1680, lon=-111.5646, speed_mps=15.0, timestamp=now + 10)
-    after = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    await geo.process_trip_point(user_id="alex", lat=39.7392, lon=-104.9903, speed_mps=15.0, timestamp=now)
+    await geo.process_trip_point(user_id="alex", lat=39.7425, lon=-104.9903, speed_mps=15.0, timestamp=now + 30)
+    before = json.loads(await fake_redis.get("geo:active_trip:alex"))
+    await geo.process_trip_point(user_id="alex", lat=39.7405, lon=-104.9903, speed_mps=15.0, timestamp=now + 10)
+    after = json.loads(await fake_redis.get("geo:active_trip:alex"))
     assert after["distance_miles"] == before["distance_miles"]
     assert after["last_lat"] == before["last_lat"]
 
@@ -741,15 +741,15 @@ async def test_a_short_stop_does_not_break_a_drive_in_two(fake_redis):
     """A six-minute stop used to finalise the trip at five minutes and start
     a second one when the car moved again."""
     now = time.time()
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=15.0, timestamp=now)
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1700, lon=-111.5646, speed_mps=15.0, timestamp=now + 30)
-    before = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1701, lon=-111.5646, speed_mps=2.0, timestamp=now + 390)
-    after = json.loads(await fake_redis.get("geo:active_trip:jeremiah"))
+    await geo.process_trip_point(user_id="alex", lat=39.7392, lon=-104.9903, speed_mps=15.0, timestamp=now)
+    await geo.process_trip_point(user_id="alex", lat=39.7425, lon=-104.9903, speed_mps=15.0, timestamp=now + 30)
+    before = json.loads(await fake_redis.get("geo:active_trip:alex"))
+    await geo.process_trip_point(user_id="alex", lat=39.7426, lon=-104.9903, speed_mps=2.0, timestamp=now + 390)
+    after = json.loads(await fake_redis.get("geo:active_trip:alex"))
     assert after["id"] == before["id"]
     assert after["last_moving_time"] == before["last_moving_time"]
     assert after["last_point_time"] == now + 390
-    assert after["end_location"]["latitude"] == 33.1701
+    assert after["end_location"]["latitude"] == 39.7426
 
 
 @pytest.mark.asyncio
@@ -763,11 +763,11 @@ async def test_a_single_fast_fix_is_not_a_completed_trip(fake_redis, monkeypatch
     trip["last_point_time"] = now + 30
 
     async def road(points, url):
-        return {"matched": True, "coordinates": [[33.1, -111.5]], "distance_m": 676.0,
+        return {"matched": True, "coordinates": [[39.6725, -104.9257]], "distance_m": 676.0,
                 "confidence": 0.98, "used": 1}
     monkeypatch.setattr(geo.map_match, "match", road)
-    assert await geo._finalize_active_trip(fake_redis, "jeremiah", trip, now + 60) is None
-    assert await fake_redis.get("geo:trip:trip_jeremiah_1") is None
+    assert await geo._finalize_active_trip(fake_redis, "alex", trip, now + 60) is None
+    assert await fake_redis.get("geo:trip:trip_alex_1") is None
 
 
 # ---------------------------------------------------------------------------
@@ -775,18 +775,18 @@ async def test_a_single_fast_fix_is_not_a_completed_trip(fake_redis, monkeypatch
 # ---------------------------------------------------------------------------
 
 def _active_trip(now, miles=1.0):
-    return {"id": "trip_jeremiah_1", "start_time": now - 600, "last_moving_time": now - 400,
-            "distance_miles": miles, "start_location": {"latitude": 33.1, "longitude": -111.5},
-            "end_location": {"latitude": 33.2, "longitude": -111.5}}
+    return {"id": "trip_alex_1", "start_time": now - 600, "last_moving_time": now - 400,
+            "distance_miles": miles, "start_location": {"latitude": 39.6725, "longitude": -104.9257},
+            "end_location": {"latitude": 39.7725, "longitude": -104.9257}}
 
 
 @pytest.mark.asyncio
 async def test_a_trip_takes_its_road_distance(fake_redis, monkeypatch):
     async def road(points, url):
-        return {"matched": True, "coordinates": [[33.1, -111.5], [33.2, -111.5]], "distance_m": 3218.7,
+        return {"matched": True, "coordinates": [[39.6725, -104.9257], [39.7725, -104.9257]], "distance_m": 3218.7,
                 "confidence": 0.9, "used": 5}
     monkeypatch.setattr(geo.map_match, "match", road)
-    done = await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=2.6), time.time())
+    done = await geo._finalize_active_trip(fake_redis, "alex", _active_trip(time.time(), miles=2.6), time.time())
     assert done["distance_miles"] == 2.0 and done["distance_source"] == "road"
 
 
@@ -795,7 +795,7 @@ async def test_a_trail_that_fits_no_road_is_not_a_trip(fake_redis, monkeypatch):
     async def phantom(points, url):
         return {"matched": False, "used": 3}
     monkeypatch.setattr(geo.map_match, "match", phantom)
-    assert await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=5.3), time.time()) is None
+    assert await geo._finalize_active_trip(fake_redis, "alex", _active_trip(time.time(), miles=5.3), time.time()) is None
 
 
 @pytest.mark.asyncio
@@ -803,37 +803,37 @@ async def test_osrm_down_keeps_the_trip(fake_redis, monkeypatch):
     async def down(points, url):
         return None
     monkeypatch.setattr(geo.map_match, "match", down)
-    done = await geo._finalize_active_trip(fake_redis, "jeremiah", _active_trip(time.time(), miles=1.4), time.time())
+    done = await geo._finalize_active_trip(fake_redis, "alex", _active_trip(time.time(), miles=1.4), time.time())
     assert done["distance_miles"] == 1.4 and "distance_source" not in done
 
 
 @pytest.mark.asyncio
 async def test_an_impossible_jump_is_not_a_breadcrumb(fake_redis, monkeypatch):
     now = time.time()
-    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=8, timestamp=now)
+    await geo.record_point(entity_id="alex", lat=39.7392, lon=-104.9903, accuracy=8, timestamp=now)
 
     async def far_by_road(a, b, url, timeout_s=5.0):
         return {"distance_m": 30000.0, "duration_s": 1800.0}
     monkeypatch.setattr(geo.map_match, "route", far_by_road)
     # 4 km away 60 s later: under the speed limit for a straight line, but a
     # 30-minute drive by road
-    await geo.record_point(entity_id="jeremiah", lat=33.2027, lon=-111.5646, accuracy=8, timestamp=now + 60)
+    await geo.record_point(entity_id="alex", lat=39.7752, lon=-104.9903, accuracy=8, timestamp=now + 60)
     # 2 hours later the same place is reachable
-    await geo.record_point(entity_id="jeremiah", lat=33.2027, lon=-111.5646, accuracy=8, timestamp=now + 7200)
-    kept = [json.loads(p)["t"] for p in await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 9999)]
+    await geo.record_point(entity_id="alex", lat=39.7752, lon=-104.9903, accuracy=8, timestamp=now + 7200)
+    kept = [json.loads(p)["t"] for p in await fake_redis.zrangebyscore("geo:history:alex", 0, now + 9999)]
     assert kept == [now, now + 7200]
 
 
 @pytest.mark.asyncio
 async def test_faster_than_any_vehicle_is_dropped_without_asking_osrm(fake_redis, monkeypatch):
     now = time.time()
-    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=8, timestamp=now)
+    await geo.record_point(entity_id="alex", lat=39.7392, lon=-104.9903, accuracy=8, timestamp=now)
 
     async def never(*a, **k):
         raise AssertionError("no road check needed")
     monkeypatch.setattr(geo.map_match, "route", never)
-    await geo.record_point(entity_id="jeremiah", lat=33.30, lon=-111.5646, accuracy=8, timestamp=now + 10)
-    kept = await fake_redis.zrangebyscore("geo:history:jeremiah", 0, now + 99)
+    await geo.record_point(entity_id="alex", lat=39.8725, lon=-104.9903, accuracy=8, timestamp=now + 10)
+    kept = await fake_redis.zrangebyscore("geo:history:alex", 0, now + 99)
     assert len(kept) == 1
 
 
@@ -841,13 +841,13 @@ async def test_faster_than_any_vehicle_is_dropped_without_asking_osrm(fake_redis
 # ETA by road (OSRM) from someone's latest fix
 # ---------------------------------------------------------------------------
 
-HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 33.1667, "longitude": -111.5646, "radius": 100.0}
+HOME = {"entity_id": "zone.home", "name": "Home", "latitude": 39.7392, "longitude": -104.9903, "radius": 100.0}
 
 
 @pytest.mark.asyncio
 async def test_eta_home_by_road(client, fake_redis, monkeypatch):
     now = time.time()
-    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": now - 30, "lat": 33.30, "lon": -111.70, "acc": 8, "spd": 20.0}): now - 30})
+    await fake_redis.zadd("geo:history:pat", {json.dumps({"t": now - 30, "lat": 39.8725, "lon": -105.1257, "acc": 8, "spd": 20.0}): now - 30})
 
     async def zones():
         return [HOME]
@@ -857,7 +857,7 @@ async def test_eta_home_by_road(client, fake_redis, monkeypatch):
         return {"distance_m": 19800.0, "duration_s": 1080.0}
     monkeypatch.setattr(geo, "_zones", zones)
     monkeypatch.setattr(geo.map_match, "route", road)
-    resp = client.get("/people/michele/eta?to=home", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    resp = client.get("/people/pat/eta?to=home", headers={"X-Internal-Secret": INTERNAL_SECRET})
     body = resp.json()
     assert resp.status_code == 200
     assert body["to"] == "Home" and body["duration_s"] == 1080 and body["moving"] is True and body["arrived"] is False
@@ -866,12 +866,12 @@ async def test_eta_home_by_road(client, fake_redis, monkeypatch):
 @pytest.mark.asyncio
 async def test_eta_when_already_there(client, fake_redis, monkeypatch):
     now = time.time()
-    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": now, "lat": 33.1668, "lon": -111.5646, "acc": 8}): now})
+    await fake_redis.zadd("geo:history:pat", {json.dumps({"t": now, "lat": 39.7393, "lon": -104.9903, "acc": 8}): now})
 
     async def zones():
         return [HOME]
     monkeypatch.setattr(geo, "_zones", zones)
-    body = client.get("/people/michele/eta", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
+    body = client.get("/people/pat/eta", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
     assert body["arrived"] is True and body["duration_s"] == 0
 
 
@@ -884,8 +884,8 @@ async def test_eta_for_an_unknown_place_says_so(client, fake_redis, monkeypatch)
         return None
     monkeypatch.setattr(geo, "_zones", zones)
     monkeypatch.setattr(geo, "_geocode_place", no_such_place)
-    await fake_redis.zadd("geo:history:michele", {json.dumps({"t": 1, "lat": 33.3, "lon": -111.7}): 1})
-    resp = client.get("/people/michele/eta?to=narnia", headers={"X-Internal-Secret": INTERNAL_SECRET})
+    await fake_redis.zadd("geo:history:pat", {json.dumps({"t": 1, "lat": 39.8725, "lon": -105.1257}): 1})
+    resp = client.get("/people/pat/eta?to=narnia", headers={"X-Internal-Secret": INTERNAL_SECRET})
     assert resp.status_code == 404 and "narnia" in resp.json()["detail"]
 
 
@@ -894,22 +894,22 @@ def test_eta_and_telemetry_respect_sharing(client, fake_redis, monkeypatch):
         return False
     monkeypatch.setattr(geo, "_viewer_may_see", not_shared)
     h = {"X-Internal-Secret": INTERNAL_SECRET}
-    assert client.get("/people/michele/eta?viewer=kate", headers=h).status_code == 404
-    assert client.get("/people/michele/telemetry?viewer=kate", headers=h).status_code == 404
+    assert client.get("/people/pat/eta?viewer=kate", headers=h).status_code == 404
+    assert client.get("/people/pat/telemetry?viewer=kate", headers=h).status_code == 404
 
 
-SCHOOL = {"entity_id": "zone.school", "name": "School", "latitude": 33.2, "longitude": -111.6, "radius": 150.0}
+SCHOOL = {"entity_id": "zone.school", "name": "School", "latitude": 39.7725, "longitude": -105.0257, "radius": 150.0}
 
 
 @pytest.mark.asyncio
 async def test_closest_ranks_by_road_time_among_those_shared(client, fake_redis, monkeypatch):
     now = time.time()
-    for user, lat in (("jeremiah", 33.10), ("michele", 33.19), ("kate", 33.21), ("old", 33.2)):
+    for user, lat in (("alex", 39.6725), ("pat", 39.7625), ("kate", 39.7825), ("old", 39.7725)):
         t = now - (7200 if user == "old" else 30)
-        await fake_redis.zadd(f"geo:history:{user}", {json.dumps({"t": t, "lat": lat, "lon": -111.6}): t})
+        await fake_redis.zadd(f"geo:history:{user}", {json.dumps({"t": t, "lat": lat, "lon": -105.0257}): t})
 
     async def tracked(r):
-        return ["jeremiah", "kate", "michele", "old"]
+        return ["alex", "kate", "pat", "old"]
 
     async def zones():
         return [SCHOOL]
@@ -918,25 +918,25 @@ async def test_closest_ranks_by_road_time_among_those_shared(client, fake_redis,
         return target != "kate"   # kate does not share with the viewer
 
     async def table(sources, dest, url):
-        return [1500.0 if lat == 33.10 else 400.0 for lat, _ in sources]
+        return [1500.0 if lat == 39.6725 else 400.0 for lat, _ in sources]
     monkeypatch.setattr(geo, "_tracked_users", tracked)
     monkeypatch.setattr(geo, "_zones", zones)
     monkeypatch.setattr(geo, "_viewer_may_see", may_see)
     monkeypatch.setattr(geo.map_match, "table", table)
-    body = client.get("/closest?to=school&viewer=jeremiah", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
+    body = client.get("/closest?to=school&viewer=alex", headers={"X-Internal-Secret": INTERNAL_SECRET}).json()
     assert body["to"] == "School"
-    assert [p["user_id"] for p in body["people"]] == ["michele", "jeremiah"]  # kate unshared, old stale
+    assert [p["user_id"] for p in body["people"]] == ["pat", "alex"]  # kate unshared, old stale
 
 
 async def _a_finished_walk(client, fake_redis):
-    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
+    headers = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "alex"}
     client.post("/workouts/start", json={"activity_type": "walking"}, headers=headers)
     base_t = time.time() - 600
-    active = json.loads(await fake_redis.get("geo:active_workout:jeremiah"))
+    active = json.loads(await fake_redis.get("geo:active_workout:alex"))
     active["start_time"] = base_t
-    await fake_redis.set("geo:active_workout:jeremiah", json.dumps(active))
+    await fake_redis.set("geo:active_workout:alex", json.dumps(active))
     for i in range(10):
-        await geo.record_point(entity_id="jeremiah", lat=33.1667 + i * 0.0003, lon=-111.5646,
+        await geo.record_point(entity_id="alex", lat=39.7392 + i * 0.0003, lon=-104.9903,
                                speed=1.4, timestamp=base_t + i * 30)
     return client.post("/workouts/stop", json={}, headers=headers).json()["workout"]
 
@@ -947,7 +947,7 @@ async def test_a_walk_is_measured_and_drawn_along_the_foot_network(client, fake_
 
     async def foot_match(points, url, profile="driving"):
         calls.append(profile)
-        return {"matched": True, "coordinates": [[33.1667, -111.5646], [33.1690, -111.5640], [33.1694, -111.5646]],
+        return {"matched": True, "coordinates": [[39.7392, -104.9903], [39.7415, -104.9897], [39.7419, -104.9903]],
                 "distance_m": 1609.344, "confidence": 0.8, "used": len(points)}
 
     monkeypatch.setattr(geo.map_match, "match", foot_match)
@@ -979,11 +979,11 @@ async def test_routes_follow_the_owners_sharing_consent(client, fake_redis, monk
     workout = await _a_finished_walk(client, fake_redis)
     url = f"/workouts/{workout['id']}/route"
     assert client.get(url, params={"viewer": "kate"}).status_code == 404
-    assert client.get(url, params={"viewer": "jeremiah"}).status_code == 200
+    assert client.get(url, params={"viewer": "alex"}).status_code == 200
     assert client.get(url, params={"viewer": "kate", "is_admin": "true"}).status_code == 200
-    await fake_redis.set("geo:trip:t1", json.dumps({"id": "t1", "user_id": "jeremiah", "start_time": 1, "end_time": 2}))
+    await fake_redis.set("geo:trip:t1", json.dumps({"id": "t1", "user_id": "alex", "start_time": 1, "end_time": 2}))
     assert client.get("/trips/t1/route", params={"viewer": "kate"}).status_code == 404
-    assert client.get("/trips/t1/route", params={"viewer": "jeremiah"}).status_code == 200
+    assert client.get("/trips/t1/route", params={"viewer": "alex"}).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -992,13 +992,13 @@ async def test_a_trip_is_found_by_its_whole_id_and_for_those_it_is_shared_with(c
         return viewer == target
 
     monkeypatch.setattr(geo, "_viewer_may_see", shares_only_with_self)
-    live = {"id": "trip-abc123", "user_id": "jeremiah", "start_time": 1}
-    await fake_redis.set("geo:active_trip:jeremiah", json.dumps(live))
+    live = {"id": "trip-abc123", "user_id": "alex", "start_time": 1}
+    await fake_redis.set("geo:active_trip:alex", json.dumps(live))
     # A fragment of someone's live trip id (or of any field) is not that trip
-    for probe in ("a", "trip", "jeremiah"):
+    for probe in ("a", "trip", "alex"):
         assert client.get(f"/trips/{probe}").status_code == 404
         assert client.get(f"/trips/{probe}/locations").status_code == 404
-    assert client.get("/trips/trip-abc123", params={"viewer": "jeremiah"}).json()["id"] == "trip-abc123"
+    assert client.get("/trips/trip-abc123", params={"viewer": "alex"}).json()["id"] == "trip-abc123"
     assert client.get("/trips/trip-abc123", params={"viewer": "kate"}).status_code == 404
     assert client.get("/trips/trip-abc123/locations", params={"viewer": "kate"}).status_code == 404
 
@@ -1010,17 +1010,17 @@ def test_family_scope_lists_everyone_sharing_with_the_viewer(client, fake_redis,
     "My Trips" showed the same list and shared rides were never paired (the
     grouping only sees trips that are in the same list)."""
     now = time.time()
-    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
-    _insert_trip(fake_redis, _sample_trip("t_m1", "michele", "Michele", now - 3500))
+    _insert_trip(fake_redis, _sample_trip("t_j1", "alex", "Alex", now - 3600))
+    _insert_trip(fake_redis, _sample_trip("t_m1", "pat", "Pat", now - 3500))
     _insert_trip(fake_redis, _sample_trip("t_s1", "sam", "Sam", now - 1800))
     monkeypatch.setattr(
         geo, "_fetch_activity_sharing",
-        _sharing({"michele": {"enabled": True, "audience": "circle"}, "sam": {"enabled": False}}),
+        _sharing({"pat": {"enabled": True, "audience": "circle"}, "sam": {"enabled": False}}),
     )
-    r = client.get("/trips", params={"scope": "family", "user_id": "jeremiah", "viewer": "jeremiah"})
+    r = client.get("/trips", params={"scope": "family", "user_id": "alex", "viewer": "alex"})
     assert r.status_code == 200
     trips = r.json()["trips"]
-    assert {t["user_id"] for t in trips} == {"jeremiah", "michele"}
+    assert {t["user_id"] for t in trips} == {"alex", "pat"}
     # newest first across people
     assert [t["id"] for t in trips] == ["t_m1", "t_j1"]
     # the same drive at the same time and place is a shared ride
@@ -1028,7 +1028,7 @@ def test_family_scope_lists_everyone_sharing_with_the_viewer(client, fake_redis,
 
     # Sam has not opted in: he sees only his own
     sam = client.get("/trips", params={"scope": "family", "user_id": "sam", "viewer": "sam"})
-    assert {t["user_id"] for t in sam.json()["trips"]} == {"sam", "michele"}
+    assert {t["user_id"] for t in sam.json()["trips"]} == {"sam", "pat"}
 
     # a family listing still needs someone to ask for it
     assert client.get("/trips", params={"scope": "family"}).status_code == 401
@@ -1042,27 +1042,27 @@ async def test_a_parked_phone_that_goes_quiet_still_ends_its_trip(fake_redis, mo
     monkeypatch.setattr(geo.map_match, "match", AsyncMock(return_value=None))
     now = time.time()
     active = {
-        "id": "trip_michele_1", "user_id": "michele", "start_time": now - 1500,
+        "id": "trip_pat_1", "user_id": "pat", "start_time": now - 1500,
         "last_moving_time": now - 1000, "last_point_time": now - 1000,
         "distance_miles": 4.2, "start_location": {"name": "Home"}, "end_location": {"name": "Store"},
         "status": "in_progress",
     }
-    await fake_redis.set("geo:active_trip:michele", json.dumps(active))
-    fresh = {**active, "id": "trip_jeremiah_1", "user_id": "jeremiah", "last_moving_time": now - 30}
-    await fake_redis.set("geo:active_trip:jeremiah", json.dumps(fresh))
+    await fake_redis.set("geo:active_trip:pat", json.dumps(active))
+    fresh = {**active, "id": "trip_alex_1", "user_id": "alex", "last_moving_time": now - 30}
+    await fake_redis.set("geo:active_trip:alex", json.dumps(fresh))
 
     assert await geo._sweep_idle_trips(fake_redis, now) == 1
-    assert await fake_redis.get("geo:active_trip:michele") is None
-    assert json.loads(await fake_redis.get("geo:trip:trip_michele_1"))["status"] == "completed"
-    assert await fake_redis.zcard("geo:trips:user:michele") == 1
+    assert await fake_redis.get("geo:active_trip:pat") is None
+    assert json.loads(await fake_redis.get("geo:trip:trip_pat_1"))["status"] == "completed"
+    assert await fake_redis.zcard("geo:trips:user:pat") == 1
     # a drive still moving is left alone
-    assert await fake_redis.get("geo:active_trip:jeremiah") is not None
+    assert await fake_redis.get("geo:active_trip:alex") is not None
 
 
 def test_trip_share_takes_the_apps_field_name_and_the_old_one():
     """The app sent rider_ids, geo wanted shared_with: every share was a 422."""
-    assert geo.TripSharePayload.model_validate({"shared_with": ["michele"]}).shared_with == ["michele"]
-    assert geo.TripSharePayload.model_validate({"rider_ids": ["michele"]}).shared_with == ["michele"]
+    assert geo.TripSharePayload.model_validate({"shared_with": ["pat"]}).shared_with == ["pat"]
+    assert geo.TripSharePayload.model_validate({"rider_ids": ["pat"]}).shared_with == ["pat"]
 
 
 def test_speed_from_positions_ignores_fixes_too_close_or_too_vague():
@@ -1072,21 +1072,21 @@ def test_speed_from_positions_ignores_fixes_too_close_or_too_vague():
     import math
 
     def at(m_north):
-        return 33.4 + m_north / 111_320.0
+        return 39.9725 + m_north / 111_320.0
 
-    gps = {"t": 0.0, "lat": 33.4, "lon": -111.9, "acc": 10}
+    gps = {"t": 0.0, "lat": 39.9725, "lon": -105.3257, "acc": 10}
     # 180 m in 6 s with a 72 m network fix: too close together to tell.
-    assert geo.derived_speed(gps, at(180), -111.9, 6.0, 72) is None
+    assert geo.derived_speed(gps, at(180), -105.3257, 6.0, 72) is None
     # The same 180 m over 12 s is mostly the fixes' uncertainty: far below
     # the 10 mph a trip starts at.
-    assert geo.derived_speed(gps, at(180), -111.9, 12.0, 72) * 2.23694 < 5.0
+    assert geo.derived_speed(gps, at(180), -105.3257, 12.0, 72) * 2.23694 < 5.0
     # 2 s apart: not worked out at all.
-    assert geo.derived_speed(gps, at(200), -111.9, 2.0, 20) is None
+    assert geo.derived_speed(gps, at(200), -105.3257, 2.0, 20) is None
     # A parked phone's network fixes 190 m apart over 78 s, each ~80 m off.
-    net = {"t": 0.0, "lat": 33.4, "lon": -111.9, "acc": 80}
-    assert geo.derived_speed(net, at(190), -111.9, 78.0, 80) * 2.23694 < 1.0
+    net = {"t": 0.0, "lat": 39.9725, "lon": -105.3257, "acc": 80}
+    assert geo.derived_speed(net, at(190), -105.3257, 78.0, 80) * 2.23694 < 1.0
     # Real driving: 900 m in 30 s on GPS is about 65 mph.
-    mph = geo.derived_speed(gps, at(900), -111.9, 30.0, 5) * 2.23694
+    mph = geo.derived_speed(gps, at(900), -105.3257, 30.0, 5) * 2.23694
     assert math.isclose(mph, 65.0, abs_tol=2.0)
 
 
@@ -1095,16 +1095,16 @@ async def test_a_phone_that_says_it_is_still_does_not_start_a_trip(fake_redis):
     """Its network fixes drift a couple of hundred metres; its motion sensors
     know better."""
     now = time.time()
-    await geo.record_point(entity_id="jeremiah", lat=33.1667, lon=-111.5646, accuracy=20, timestamp=now, activity="still")
-    await geo.record_point(entity_id="jeremiah", lat=33.1700, lon=-111.5646, accuracy=20, timestamp=now + 30, activity="still")
-    assert await fake_redis.get("geo:active_trip:jeremiah") is None
+    await geo.record_point(entity_id="alex", lat=39.7392, lon=-104.9903, accuracy=20, timestamp=now, activity="still")
+    await geo.record_point(entity_id="alex", lat=39.7425, lon=-104.9903, accuracy=20, timestamp=now + 30, activity="still")
+    assert await fake_redis.get("geo:active_trip:alex") is None
 
 
 @pytest.mark.asyncio
 async def test_a_phone_that_says_it_is_driving_starts_a_trip_from_5_mph(fake_redis):
     now = time.time()
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=3.0, timestamp=now)
-    assert await fake_redis.get("geo:active_trip:jeremiah") is None  # 6.7 mph, no word from the phone
-    await geo.process_trip_point(user_id="jeremiah", lat=33.1667, lon=-111.5646, speed_mps=3.0, timestamp=now + 5,
+    await geo.process_trip_point(user_id="alex", lat=39.7392, lon=-104.9903, speed_mps=3.0, timestamp=now)
+    assert await fake_redis.get("geo:active_trip:alex") is None  # 6.7 mph, no word from the phone
+    await geo.process_trip_point(user_id="alex", lat=39.7392, lon=-104.9903, speed_mps=3.0, timestamp=now + 5,
                                  activity="driving")
-    assert await fake_redis.get("geo:active_trip:jeremiah") is not None
+    assert await fake_redis.get("geo:active_trip:alex") is not None

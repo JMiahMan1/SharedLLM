@@ -35,11 +35,11 @@ def _as(monkeypatch, ident):
 
 
 def test_the_location_feed_names_the_viewer(monkeypatch):
-    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "sam", "is_admin": False})
     assert TestClient(app).get("/api/users/location/all").status_code == 200
     url, params = sent[0]
     assert url.endswith("/api/users/location/all")
-    assert params == {"viewer": "michele", "is_admin": "false"}
+    assert params == {"viewer": "sam", "is_admin": "false"}
 
 
 def test_the_location_feed_needs_a_signed_in_user(monkeypatch):
@@ -49,23 +49,23 @@ def test_the_location_feed_needs_a_signed_in_user(monkeypatch):
 
 
 def test_places_are_read_as_the_viewer(monkeypatch):
-    sent = _as(monkeypatch, {"user": "gracie", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "taylor", "is_admin": False})
     assert TestClient(app).get("/api/geo/zones").status_code == 200
     url, params = sent[0]
-    assert url.endswith("/zones") and params == {"viewer": "gracie"}
+    assert url.endswith("/zones") and params == {"viewer": "taylor"}
 
 
 def test_a_days_history_is_read_as_the_viewer(monkeypatch):
-    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "sam", "is_admin": False})
     resp = TestClient(app).get("/api/geo/people/leo/day", params={"day": "2026-10-31"})
     assert resp.status_code == 200
     url, params = sent[0]
     assert url.endswith("/people/leo/day")
-    assert params == {"day": "2026-10-31", "viewer": "michele", "is_admin": ""}
+    assert params == {"day": "2026-10-31", "viewer": "sam", "is_admin": ""}
 
 
 def test_a_days_history_refuses_a_path_in_the_name(monkeypatch):
-    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "sam", "is_admin": False})
     assert TestClient(app).get("/api/geo/people/leo/day", params={"day": "../../x"}).status_code == 422
     assert sent == []
 
@@ -111,7 +111,7 @@ def test_a_driving_event_goes_to_geo_as_the_signed_in_person(monkeypatch):
     posted = []
 
     async def acting(request):
-        return {"user": "zachary", "is_admin": False}
+        return {"user": "morgan", "is_admin": False}
 
     class _Client:
         async def __aenter__(self):
@@ -134,4 +134,4 @@ def test_a_driving_event_goes_to_geo_as_the_signed_in_person(monkeypatch):
     assert TestClient(app).post("/api/activity", json=body).status_code == 200
     url, sent = posted[0]
     assert url.endswith("/driving-events")
-    assert sent == {"user": "zachary", "event": "hard_brake", "detail": {"at": 1, "from_mph": 40, "to_mph": 20}}
+    assert sent == {"user": "morgan", "event": "hard_brake", "detail": {"at": 1, "from_mph": 40, "to_mph": 20}}

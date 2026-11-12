@@ -18,7 +18,11 @@ log = logging.getLogger("execution.media_playback_registry")
 DB_PATH_ENV = "DEVICE_REGISTRY_PATH"
 DB_PATH_DEFAULT = "/data/device_registry.db"
 _db: aiosqlite.Connection | None = None
-AZ_TZ = pytz.timezone("America/Phoenix")
+def _household_tz():
+    """The household zone (services/common/household_tz.py); raises with how to set it."""
+    from services.common import household_tz
+
+    return pytz.timezone(household_tz.zone_name())
 
 async def _get_conn() -> aiosqlite.Connection:
     global _db
@@ -54,8 +58,8 @@ async def _get_conn() -> aiosqlite.Connection:
     return _db
 
 def get_az_timestamp_str() -> str:
-    """Get ISO format timestamp in America/Phoenix timezone."""
-    return datetime.now(AZ_TZ).isoformat()
+    """Get ISO format timestamp in the configured (TZ) time zone."""
+    return datetime.now(_household_tz()).isoformat()
 
 async def get_playback_state(username: str) -> dict[str, Any] | None:
     """Retrieve the persisted media playback state for a user."""
@@ -141,7 +145,7 @@ async def save_playback_state(username: str, data: dict[str, Any]) -> bool:
         )
         await db.execute(query, values)
         await db.commit()
-        log.info(f"[media_playback_registry] Saved state for {username} (America/Phoenix timestamp: {now_str})")
+        log.info(f"[media_playback_registry] Saved state for {username} (local timestamp: {now_str})")
         return True
     except Exception as e:
         log.error(f"[media_playback_registry] Failed to save playback state: {e}", exc_info=True)

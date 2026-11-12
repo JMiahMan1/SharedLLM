@@ -57,7 +57,7 @@ UNSIGNED_CHANNELS = ("1,2,3", "Balance")
 
 
 def parse_unique_id(unique_id: str) -> tuple[str, int, str] | None:
-    """``sensor.emporia_vue.1D.352862-1,2,3`` -> ("1D", 352862, "1,2,3")."""
+    """``sensor.emporia_vue.1D.100001-1,2,3`` -> ("1D", 100001, "1,2,3")."""
     prefix = "sensor.emporia_vue."
     if not unique_id.startswith(prefix):
         return None

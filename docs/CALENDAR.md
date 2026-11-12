@@ -28,7 +28,7 @@ reads the same endpoint.
 - iCal: fetched and parsed per read; read-only.
 - Times are made aware with pytz `localize` in `TIMEZONE` (never
   `replace(tzinfo=…)`, which used local mean time and put events added from
-  the app 28 minutes late in America/Phoenix).
+  the app 28 minutes late in a zone such as America/Denver).
 
 Each source reports `available`/`soft` so the page can say "temporarily
 unreachable" and poll every 30 s instead of every 5 minutes.

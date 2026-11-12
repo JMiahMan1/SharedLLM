@@ -59,15 +59,15 @@ def test_skylight_chores_today_literal():
 
     today = _date.today().isoformat()
     mock_chores = [
-        _raw_chore("1", "Clean Room", "pending", today, assignee="Jeremiah"),
-        _raw_chore("2", "Do Dishes", "pending", "2020-01-01", assignee="Jeremiah"),
+        _raw_chore("1", "Clean Room", "pending", today, assignee="Alex"),
+        _raw_chore("2", "Do Dishes", "pending", "2020-01-01", assignee="Alex"),
     ]
 
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
-        return {"data": mock_chores, "included": [_category_included("Jeremiah")]}
+        return {"data": mock_chores, "included": [_category_included("Alex")]}
 
     with (
         patch("services.execution.main._get_skylight_session", new=mock_get_session),
@@ -76,7 +76,7 @@ def test_skylight_chores_today_literal():
         resp = client.get(
             "/api/integrations/skylight/chores",
             headers={"X-Internal-Secret": "test-secret"},
-            params={"user": "jeremiah", "date": "today"}
+            params={"user": "alex", "date": "today"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -409,7 +409,7 @@ def test_skylight_redeem_reward():
         resp = client.post(
             "/api/integrations/skylight/rewards/1/redeem",
             headers={"X-Internal-Secret": "test-secret"},
-            json={"user_id": "jeremiah"}
+            json={"user_id": "alex"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -432,7 +432,7 @@ def test_skylight_redeem_reward_failure():
         resp = client.post(
             "/api/integrations/skylight/rewards/1/redeem",
             headers={"X-Internal-Secret": "test-secret"},
-            json={"user_id": "jeremiah"}
+            json={"user_id": "alex"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -480,12 +480,12 @@ def test_skylight_chores_user_filter():
 
     today = _date.today().isoformat()
     mock_chores = [
-        _raw_chore("1", "Clean Room", "pending", today, assignee="Jeremiah"),
-        _raw_chore("2", "Do Dishes", "pending", today, assignee="Noah"),
+        _raw_chore("1", "Clean Room", "pending", today, assignee="Alex"),
+        _raw_chore("2", "Do Dishes", "pending", today, assignee="Jordan"),
     ]
     included = [
-        _category_included("Jeremiah", "#ff0000"),
-        _category_included("Noah", "#00ff00"),
+        _category_included("Alex", "#ff0000"),
+        _category_included("Jordan", "#00ff00"),
     ]
 
     async def mock_get_session(*args, **kwargs):
@@ -502,15 +502,15 @@ def test_skylight_chores_user_filter():
         resp = client.get(
             "/api/integrations/skylight/chores",
             headers={"X-Internal-Secret": "test-secret"},
-            params={"user": "jeremiah", "date": "today"},
+            params={"user": "alex", "date": "today"},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "SUCCESS"
         assert len(data["chores"]) == 1
         assert data["chores"][0]["id"] == "1"
-        assert data["chores"][0]["assignees"] == ["Jeremiah"]
-        assert data["assignee_meta"] == {"Jeremiah": "#ff0000"}
+        assert data["chores"][0]["assignees"] == ["Alex"]
+        assert data["assignee_meta"] == {"Alex": "#ff0000"}
 
         # No user (admin) sees every chore in the frame.
         resp = client.get(
@@ -522,7 +522,7 @@ def test_skylight_chores_user_filter():
         data = resp.json()
         assert data["status"] == "SUCCESS"
         assert len(data["chores"]) == 2
-        assert data["assignee_meta"] == {"Jeremiah": "#ff0000", "Noah": "#00ff00"}
+        assert data["assignee_meta"] == {"Alex": "#ff0000", "Jordan": "#00ff00"}
 
 
 def test_skylight_calendar_events():

@@ -1,7 +1,7 @@
 """Device discovery must not invent a network or a router.
 
 Both used to be one install's values: the subnet fallback returned
-192.168.1.0/24 and the SNMP strategy walked 192.168.2.1's ARP table. On another
+198.51.100.0/24 and the SNMP strategy walked 192.0.2.1's ARP table. On another
 network that is a scan of the wrong LAN and a query aimed at a host that is not
 a router.
 """
@@ -73,7 +73,7 @@ def test_calling_detection_with_no_network_is_loud(no_network):
     message = str(err.value)
     # It must name the setting an operator can set, and never hand back a network.
     assert "SCAN_SUBNET" in message
-    assert "192.168.1.0/24" not in message
+    assert "198.51.100.0/24" not in message
 
 
 def test_the_module_refuses_to_import_without_a_known_subnet(reloaded, no_network):

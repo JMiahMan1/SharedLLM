@@ -7,11 +7,11 @@ from services.identity.main import normalize_abs_url
 @pytest.mark.parametrize(
     "given,saved",
     [
-        ("https://abs.sumemail.com", "https://abs.sumemail.com"),
-        ("https://abs.sumemail.com/", "https://abs.sumemail.com"),
-        ("https://abs.sumemail.com/api", "https://abs.sumemail.com"),
-        ("https://abs.sumemail.com/api/", "https://abs.sumemail.com"),
-        ("https://abs.sumemail.com/login", "https://abs.sumemail.com"),
+        ("https://abs.example.com", "https://abs.example.com"),
+        ("https://abs.example.com/", "https://abs.example.com"),
+        ("https://abs.example.com/api", "https://abs.example.com"),
+        ("https://abs.example.com/api/", "https://abs.example.com"),
+        ("https://abs.example.com/login", "https://abs.example.com"),
         (" https://host/audiobookshelf/login ", "https://host/audiobookshelf"),
         ("https://host/audiobookshelf", "https://host/audiobookshelf"),
         ("", ""),

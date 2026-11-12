@@ -9,8 +9,11 @@ of when the previous run actually executed.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+log = logging.getLogger("telemetry.schedule")
 
 PERIODS = ("daily", "weekly", "monthly", "yearly")
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 30, "yearly": 365}
@@ -18,13 +21,19 @@ REPORT_TYPES = ("health", "power")
 
 
 def resolve_timezone(name: str | None) -> ZoneInfo:
-    """Resolve a timezone name, falling back to UTC when unknown or missing."""
-    if not name:
-        return ZoneInfo("UTC")
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError, KeyError):
-        return ZoneInfo("UTC")
+    """A job's own zone, else the household zone (said in the log).
+
+    There is no UTC guess: with neither, services/common/household_tz.py raises
+    an error naming how to set the household zone.
+    """
+    from services.common import household_tz
+
+    if name:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError, KeyError):
+            log.warning("schedule: unknown time zone %r; using the household zone", name)
+    return household_tz.zoneinfo()
 
 
 def window_for(period: str, now: datetime | None = None, tz: str | None = None) -> tuple[datetime, datetime]:

@@ -17,7 +17,12 @@ prints the lingering state for diagnosis.
 Usage:
     python3 services/gateway/tests/git_coding_path_harness.py
 
-Requires network access to the gateway (192.168.2.205:11435) and GitHub.
+Requires network access to the gateway and GitHub. Live values come only from
+the environment, and the harness exits without running when one is missing:
+
+    GATEWAY_URL     the gateway to drive, e.g. http://<host>:11435
+    GITHUB_TOKEN    a token that can create/push/delete the scratch repo
+    GITHUB_OWNER    the GitHub account that owns the scratch repo
 """
 from __future__ import annotations
 
@@ -29,13 +34,13 @@ import time
 import requests  # reliable JSON/Content-Type handling (urllib forced form-urlencoded)
 
 # ---- Config ---------------------------------------------------------------
-GATEWAY = os.getenv("GATEWAY_URL", "http://192.168.2.205:11435")
+GATEWAY = os.getenv("GATEWAY_URL", "")
 # Lesson store is reached via the GATEWAY (the RAG :8003 port is not directly routable).
 RAG = GATEWAY
 DEFAULT_USER = "default"
 DEFAULT_PASS = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GITHUB_OWNER = os.getenv("GITHUB_OWNER", "JMiahMan1")  # resolved at runtime
+GITHUB_OWNER = os.getenv("GITHUB_OWNER", "")
 POLL_INTERVAL = 20
 MISSION_TIMEOUT = 40 * 60  # 40 min hard cap per mission
 
@@ -227,6 +232,11 @@ def cleanup_repo(repo: str) -> None:
 
 
 def main() -> int:
+    missing = [name for name, value in (("GATEWAY_URL", GATEWAY), ("GITHUB_TOKEN", GITHUB_TOKEN),
+                                        ("GITHUB_OWNER", GITHUB_OWNER)) if not value]
+    if missing:
+        print(f"[SKIP] set {', '.join(missing)} to run this live harness.")
+        return 2
     token = login()
     before = capture_new_lessons(0)  # baseline count (store was emptied)
     start_count = len(before)

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from services.geo import main as geo_main
 from services.geo.tests.test_step_hourly import HEADERS, client, fake  # noqa: F401
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 
 
 def at(day: str, hour: int, minute: int = 0) -> float:
@@ -13,7 +13,7 @@ def at(day: str, hour: int, minute: int = 0) -> float:
 
 
 def report(steps, ts, hourly=None, source="watch"):
-    body = {"steps": steps, "source": source, "timestamp": ts, "timezone": "America/Phoenix"}
+    body = {"steps": steps, "source": source, "timestamp": ts, "timezone": "Etc/GMT+7"}
     if hourly is not None:
         body["hourly"] = hourly
     return body
@@ -46,7 +46,7 @@ def test_the_phone_and_future_timestamps():
 
 def test_an_ignored_report_stores_nothing_and_is_not_an_error(client, fake, monkeypatch):  # noqa: F811 - pytest fixtures imported above
     monkeypatch.setattr(geo_main.time, "time", lambda: NOW)
-    body = {**report(2429, NOW, [{"hour": 15, "steps": 900}]), "user_id": "jeremiah"}
+    body = {**report(2429, NOW, [{"hour": 15, "steps": 900}]), "user_id": "alex"}
     resp = client.post("/steps", headers=HEADERS, json=body)
     assert resp.status_code == 200 and resp.json()["status"] == "ignored"
-    assert not fake.hashes.get("geo:steps_src:jeremiah:watch")
+    assert not fake.hashes.get("geo:steps_src:alex:watch")

@@ -14,7 +14,7 @@ import pytest
 from services.execution import esphome_client, hardware_router
 
 CTX = SimpleNamespace(
-    user="jeremiah", is_admin=True, ha_url="http://ha.local:8123", ha_token="tok"
+    user="alex", is_admin=True, ha_url="http://ha.local:8123", ha_token="tok"
 )
 
 UNREACHABLE = {"ok": False, "error": "Home Assistant is unreachable: Connection refused"}
@@ -29,7 +29,7 @@ def one_mapped_device(monkeypatch):
         "_device_cache",
         {
             "office-light": {
-                "host": "192.168.2.87",
+                "host": "192.0.2.87",
                 "port": 6053,
                 "noise_psk": "psk",
                 "ha_entity_id": "light.office_light",
@@ -215,7 +215,7 @@ def test_ha_service_route_uses_router(one_mapped_device):
         resp = client.post(
             "/execute/ha_service",
             json={
-                "user_context": {"user": "jeremiah"},
+                "user_context": {"user": "alex"},
                 "domain": "switch",
                 "service": "turn_on",
                 "entity_id": "switch.plug",

@@ -1,20 +1,22 @@
 """Live test: add an IP to a DNS record then remove it (idempotent, self-restoring).
 
 Run on the host where the gateway is reachable, e.g.:
-  ssh jeremiah@192.168.2.205 "python3 -" < scripts/test_dns_record_upsert.py
+  ssh <user>@<server> "DNS_TEST_DOMAIN=<record> python3 -" < scripts/test_dns_record_upsert.py
 
-It targets the 'jeremiah-home-desktop.local' record, appends TEST_IP if
+It targets the DNS_TEST_DOMAIN record (required), appends TEST_IP if
 missing, verifies it appears, then removes it and verifies the record is
 restored to its original value. Safe to run repeatedly.
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 
 BASE = "http://localhost:11435"
-TARGET_DOMAIN = "jeremiah-home-desktop.local"
-TEST_IP = "192.168.4.179"
+TARGET_DOMAIN = os.environ.get("DNS_TEST_DOMAIN") or sys.exit("Set DNS_TEST_DOMAIN to the record to test (e.g. llm-host.local).")
+# RFC 5737 documentation address: never a real host.
+TEST_IP = os.environ.get("DNS_TEST_IP", "192.0.2.179")
 
 
 def req(method, path, body=None):

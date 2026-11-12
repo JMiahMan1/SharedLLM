@@ -235,10 +235,10 @@ async def test_a_fired_timer_puts_a_notice_on_the_phone(monkeypatch):
 
     _FakeSession.calls, _FakeSession.fail = [], False
     monkeypatch.setattr(http, "get_client", _FakeSession)
-    assert await notify_timer_done("michele", {"id": "t1", "title": "Pasta", "expires_at": "2026-10-15T18:00:00+00:00"})
+    assert await notify_timer_done("sam", {"id": "t1", "title": "Pasta", "expires_at": "2026-10-15T18:00:00+00:00"})
     (url, body), = _FakeSession.calls
     assert url.endswith("/api/telemetry/notify")
-    assert body["user"] == "michele"
+    assert body["user"] == "sam"
     assert body["title"] == "Timer: Pasta" and body["body"] == "Pasta is done"
     assert body["once"] == "timer:t1:2026-10-15T18:00:00+00:00"
     assert body["category"] == "timers" and body["tag"] == "timer:t1"
@@ -254,7 +254,7 @@ async def test_stop_leaves_a_recurring_alarm_scheduled(monkeypatch):
 
     _FakeSession.calls, _FakeSession.fail = [], False
     monkeypatch.setattr(http, "get_client", _FakeSession)
-    await notify_timer_done("michele", {"id": "a1", "title": "Wake up", "type": "alarm", "recurrence": "daily"})
+    await notify_timer_done("sam", {"id": "a1", "title": "Wake up", "type": "alarm", "recurrence": "daily"})
     (_, body), = _FakeSession.calls
     assert body["title"] == "Alarm: Wake up" and body["kind"] == "alarm"
     assert body["actions"][0]["params"] == {}
@@ -266,7 +266,7 @@ async def test_a_notice_failure_does_not_raise(monkeypatch):
 
     _FakeSession.fail = True
     monkeypatch.setattr(http, "get_client", _FakeSession)
-    assert await notify_timer_done("michele", {"title": "Pasta"}) is False
+    assert await notify_timer_done("sam", {"title": "Pasta"}) is False
 
 
 async def test_a_note_reminder_opens_its_note_and_a_snooze_keeps_the_link(monkeypatch):
@@ -277,7 +277,7 @@ async def test_a_note_reminder_opens_its_note_and_a_snooze_keeps_the_link(monkey
     monkeypatch.setattr(http, "get_client", _FakeSession)
     link = "/notes?note=Notes%2FTrip%20ideas.md"
     await notify_timer_done(
-        "michele", {"id": "r1", "title": "📝 Trip ideas", "type": "reminder", "url": link, "expires_at": "x"}
+        "sam", {"id": "r1", "title": "📝 Trip ideas", "type": "reminder", "url": link, "expires_at": "x"}
     )
     (_, body), = _FakeSession.calls
     assert body["data"]["url"] == link
@@ -292,7 +292,7 @@ async def test_a_stored_link_off_the_app_falls_back_to_the_timer_list(monkeypatc
 
     _FakeSession.calls, _FakeSession.fail = [], False
     monkeypatch.setattr(http, "get_client", _FakeSession)
-    await notify_timer_done("michele", {"id": "r2", "title": "x", "type": "reminder", "url": "https://evil.test/"})
+    await notify_timer_done("sam", {"id": "r2", "title": "x", "type": "reminder", "url": "https://evil.test/"})
     (_, body), = _FakeSession.calls
     # The Family page's Announcements tab lists the timers. This used to point
     # at `/communication`, which redirects to the Chat tab.
@@ -444,7 +444,7 @@ async def test_household_timer_notification_fans_out_to_family_and_sets_ring_pho
     monkeypatch.setattr(http, "get_client", _FakeSession)
 
     async def _fake_family():
-        return ["jeremiah", "michele"]
+        return ["alex", "sam"]
 
     monkeypatch.setattr(notify, "family", _fake_family)
 
@@ -455,7 +455,7 @@ async def test_household_timer_notification_fans_out_to_family_and_sets_ring_pho
             "title": "Eggs Ready",
             "type": "timer",
             "scope": "household",
-            "created_by": "jeremiah",
+            "created_by": "alex",
             "emoji": "🥚",
             "sound": "egg_timer",
             "target_devices": ["phone", "esphome:kitchen_display"],
@@ -465,7 +465,7 @@ async def test_household_timer_notification_fans_out_to_family_and_sets_ring_pho
     assert ok is True
     assert len(_FakeSession.calls) == 2
     users_notified = [body["user"] for _, body in _FakeSession.calls]
-    assert users_notified == ["jeremiah", "michele"]
+    assert users_notified == ["alex", "sam"]
     _, body = _FakeSession.calls[0]
     assert "🥚" in body["title"]
     assert body["data"]["ring_phone"] is True

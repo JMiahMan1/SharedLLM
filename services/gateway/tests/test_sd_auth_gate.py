@@ -139,7 +139,7 @@ def test_a_restarting_identity_is_waited_for(monkeypatch):
         status = 200
 
         async def json(self):
-            return {"user": "michele", "is_admin": False}
+            return {"user": "sam", "is_admin": False}
 
     class _Client:
         def get(self, *a, **k):
@@ -154,4 +154,4 @@ def test_a_restarting_identity_is_waited_for(monkeypatch):
     monkeypatch.setattr(main, "get_http_client", lambda: _Client())
     monkeypatch.setattr(main, "STRICT_IDENTITY_RETRY_S", 0)
     ident = asyncio.run(main._resolve_strict_identity("some-key"))
-    assert ident and ident["user"] == "michele" and len(calls) == 3
+    assert ident and ident["user"] == "sam" and len(calls) == 3

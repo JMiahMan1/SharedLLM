@@ -4,6 +4,17 @@
 
 set -euo pipefail
 
+# The whole script is one brace group, closed by "}" and "exit" on the last
+# lines. Bash reads a script incrementally, so a file edited while a deploy is
+# running used to be executed half old, half new: a deploy hit "syntax error
+# near unexpected token" and still printed "[OK] Deployment Verification
+# Successful". A group is parsed in full before any of it runs, and the
+# trailing exit stops bash from reading anything appended later.
+{
+# Any failing command stops the deploy and says where. (set -e alone exits
+# silently, which reads like a hang or, worse, like the last [OK] line.)
+trap 'echo "[FAIL] deploy_remote.sh line $LINENO: command failed (exit $?): $BASH_COMMAND" >&2' ERR
+
 ARG_HOST=$1
 if [ -z "$ARG_HOST" ]; then
     echo "ERROR: No host argument provided."
@@ -11,7 +22,9 @@ if [ -z "$ARG_HOST" ]; then
     exit 1
 fi
 HOST="$ARG_HOST"
-DIR="${2:-/home/jeremiah/SharedLLM}"
+# Unset: DEPLOY_DIR, else "SharedLLM", which ssh resolves in the remote
+# user's home directory.
+DIR="${2:-${DEPLOY_DIR:-SharedLLM}}"
 
 # Which services this deploy is for. Accepts them as extra args; otherwise
 # derives them from the last two commits, same as deploy_local_build.sh.
@@ -70,6 +83,8 @@ wait_for_build() {
         run_conclusion=$(printf '%s' "$run" | jq -r '.conclusion // ""')
 
         if [ "$run_status" = "completed" ] && [ "$run_conclusion" = "success" ]; then
+            # The commit the images carry as org.opencontainers.image.revision.
+            BUILT_SHA=$(printf '%s' "$run" | jq -r '.headSha // ""')
             echo "[OK] Build & Push Images (${expect_sha:0:8}) completed successfully."
             return 0
         fi
@@ -93,6 +108,46 @@ wait_for_build() {
 
     echo "[FAIL] Timeout waiting for Build & Push Images (${expect_sha:0:8})."
     exit 1
+}
+
+# Check that every deployed service runs an image built from the right commit.
+#
+# Arguments: the commit CI built (BUILT_SHA), the remote log, then the services.
+# The server prints one "REVISION <service> <revision>" line per service (or
+# "upstream" for images no commit builds). A service passes when its revision
+# is BUILT_SHA, or an older commit with no change to services/<service> or
+# services/common since (CI only rebuilds changed services, so an unchanged
+# one legitimately keeps the image of the last commit that changed it).
+# Anything else, or no report at all, fails the deploy and names the service.
+verify_deployed_revisions() {
+    local expect="$1" log="$2" service rev bad=0
+    shift 2
+    if [ -z "$expect" ]; then
+        echo "[FAIL] No built commit recorded; cannot verify what was deployed."
+        return 1
+    fi
+    for service in "$@"; do
+        rev=$(sed -n "s/^REVISION ${service} //p" "$log" | tail -1 | tr -d '\r')
+        if [ -z "$rev" ]; then
+            echo "[FAIL] $service: the server reported no image revision (container missing?)"
+            bad=1
+        elif [ "$rev" = "upstream" ]; then
+            echo "[OK] $service: upstream image, no revision to check"
+        elif [ "$rev" = "none" ]; then
+            echo "[FAIL] $service: running image has no org.opencontainers.image.revision label (expected ${expect:0:12})"
+            bad=1
+        elif [ "$rev" = "$expect" ]; then
+            echo "[OK] $service is on ${expect:0:12}"
+        elif git cat-file -e "${rev}^{commit}" 2>/dev/null \
+            && git merge-base --is-ancestor "$rev" "$expect" 2>/dev/null \
+            && [ -z "$(git log --format=%H "${rev}..${expect}" -- "services/${service}" services/common 2>/dev/null)" ]; then
+            echo "[OK] $service is on ${rev:0:12} (unchanged since; CI did not rebuild it)"
+        else
+            echo "[FAIL] $service is running revision ${rev:0:12}, expected ${expect:0:12}"
+            bad=1
+        fi
+    done
+    return "$bad"
 }
 
 # SSH options for robustness: auto-accept new host keys, fail on broken pipe
@@ -462,6 +517,17 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
     fi
     echo "[OK] Execution container (\$EXEC_CONTAINER) is running."
 
+    # Report the revision every deployed service is running, for the local
+    # verify_deployed_revisions check.
+    for service in $SERVICES; do
+        if ! docker compose config --images "\$service" 2>/dev/null | grep -q "/sharedllm-"; then
+            echo "REVISION \$service upstream"
+            continue
+        fi
+        rev=\$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "sharedllm_\$service" 2>/dev/null || true)
+        echo "REVISION \$service \${rev:-none}"
+    done
+
     # Reclaim space from the images this deploy just superseded.
     #
     # Every build on the server leaves the previous image behind as an untagged
@@ -526,8 +592,16 @@ JSON_EOF
     fi
 EOF
 then
+    DEPLOY_STEP="verifying image revisions"
+    # shellcheck disable=SC2086
+    if ! verify_deployed_revisions "${BUILT_SHA:-}" "$REMOTE_LOG" $SERVICES; then
+        echo "[FAIL] Deployment Failed: a service is not running the image CI built (see above)."
+        exit 1
+    fi
     echo "[OK] Deployment Verification Successful."
 else
     echo "[FAIL] Deployment Failed."
     exit 1
 fi
+}
+exit

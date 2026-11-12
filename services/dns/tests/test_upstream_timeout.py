@@ -180,7 +180,7 @@ class TestInternalNamesNeverTouchUpstream:
     def test_static_mapping_is_answered_without_upstream(self, monkeypatch):
         dns = _load_dns({"DNS_UPSTREAM_TIMEOUT": "5.0"})
         resolver = dns.DNSResolver.__new__(dns.DNSResolver)
-        resolver.static_mappings = {"ollama.local": "192.168.2.43"}
+        resolver.static_mappings = {"ollama.local": "192.0.2.43"}
         resolver.health_aware = False
         resolver._health = {}
 
@@ -192,10 +192,10 @@ class TestInternalNamesNeverTouchUpstream:
 
         monkeypatch.setattr(dns._DNSClient, "resolve", _boom)
         record = dns.DNSResolver._make_a_record(
-            resolver, "ollama.local", "192.168.2.43", 300
+            resolver, "ollama.local", "192.0.2.43", 300
         )
         # rdata is the packed 4-byte address, not a dotted string.
-        assert socket.inet_ntoa(record["rdata"]) == "192.168.2.43"
+        assert socket.inet_ntoa(record["rdata"]) == "192.0.2.43"
         assert called == []
 
     def test_host_docker_internal_is_answered_without_upstream(self):

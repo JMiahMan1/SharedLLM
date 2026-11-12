@@ -198,10 +198,10 @@ def test_trivia_roster_aliases_map_to_one_player():
     state = GameRegistry().start_trivia(
         "room",
         question=TRIVIA_QUESTIONS[0],
-        roster={"dad": "dad", "dad summers": "dad", "kiddo": "kiddo"},
+        roster={"dad": "dad", "dad rivera": "dad", "kiddo": "kiddo"},
     )
     apply_trivia_answer(state, "dad", "wrong")
-    duplicate = apply_trivia_answer(state, "Dad Summers", "phoenix")
+    duplicate = apply_trivia_answer(state, "Dad Rivera", "phoenix")
     assert duplicate.get("duplicate") is True
     assert duplicate["stars"] == 0
 
@@ -241,7 +241,7 @@ def test_the_bible_bank_is_deep_and_every_listed_answer_counts():
 @pytest.mark.parametrize(
     ("given", "accepted", "expected"),
     [
-        ("Psalm", ["Psalms"], True),  # Jeremiah's answer, refused before
+        ("Psalm", ["Psalms"], True),  # Alex's answer, refused before
         ("it was Moses", ["Moses"], True),
         ("King Saul", ["Saul"], True),
         ("Zaccheus", ["Zacchaeus"], True),

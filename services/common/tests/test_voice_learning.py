@@ -12,5 +12,5 @@ def test_a_session_is_a_plain_count_that_can_be_decremented():
 
 
 def test_sessions_belong_to_one_person():
-    assert voice_learning.key("jeremiah") == "voice:learning:jeremiah"
-    assert voice_learning.key("michele") != voice_learning.key("jeremiah")
+    assert voice_learning.key("alex") == "voice:learning:alex"
+    assert voice_learning.key("sam") != voice_learning.key("alex")

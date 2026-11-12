@@ -32,8 +32,8 @@ async def _family(client):
 
 
 async def test_everyone_but_the_system_account():
-    users = [{"username": "michele"}, {"username": "default", "is_system_default": True}, {"username": "jeremiah"}, {}]
-    assert await _family(_Client(body=users)) == ["jeremiah", "michele"]
+    users = [{"username": "sam"}, {"username": "default", "is_system_default": True}, {"username": "alex"}, {}]
+    assert await _family(_Client(body=users)) == ["alex", "sam"]
 
 
 async def test_nobody_when_identity_fails():

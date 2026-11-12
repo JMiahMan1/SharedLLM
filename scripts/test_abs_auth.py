@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -62,7 +63,7 @@ async def test():
                 print("\n--- Trying alternative formats ---\n")
 
                 # Try email format
-                email = f"{username}@sumemail.com"
+                email = f"{username}@{os.environ.get('ABS_EMAIL_DOMAIN', 'example.com')}"
                 email_url = f"{base}/api/login"
                 print(f"POST {email_url} with username={email}")
                 resp2 = await client.post(
@@ -72,11 +73,11 @@ async def test():
                 print(f"Status: {resp2.status_code}")
                 print(f"Body: {resp2.text[:500]}")
 
-                # Try with email @ sumemail.com
-                print(f"\nPOST {email_url} with username={username}@abs.sumemail.com")
+                # Try with the ABS host as the email domain
+                print(f"\nPOST {email_url} with username={username}@{urlparse(base).hostname}")
                 resp3 = await client.post(
                     email_url,
-                    json={"username": f"{username}@abs.sumemail.com", "password": password},
+                    json={"username": f"{username}@{urlparse(base).hostname}", "password": password},
                 )
                 print(f"Status: {resp3.status_code}")
                 print(f"Body: {resp3.text[:500]}")

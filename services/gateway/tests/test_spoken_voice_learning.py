@@ -34,15 +34,15 @@ def test_starting_and_stopping_uses_the_shared_redis_key(monkeypatch):
     redis = _FakeRedis()
     monkeypatch.setattr(gateway_cache, "get_redis", lambda: redis)
 
-    assert gateway_main._start_voice_learning("michele") is True
-    key = voice_learning.key("michele")
+    assert gateway_main._start_voice_learning("sam") is True
+    key = voice_learning.key("sam")
     value, ttl = redis.values[key]
     assert value == str(voice_learning.TARGET_SAMPLES)
     assert ttl == voice_learning.TTL_SECONDS
 
-    assert gateway_main._stop_voice_learning("michele") is True
+    assert gateway_main._stop_voice_learning("sam") is True
     assert key not in redis.values
-    assert gateway_main._stop_voice_learning("michele") is False
+    assert gateway_main._stop_voice_learning("sam") is False
 
 
 @pytest.mark.asyncio
@@ -50,13 +50,13 @@ async def test_a_recognised_voice_is_told_how_the_session_works(monkeypatch):
     started = []
     monkeypatch.setattr(gateway_main, "_start_voice_learning", lambda who: started.append(who) or True)
     monkeypatch.setattr(gateway_main, "update_history", _no_history)
-    creds = ResolvedCredentials(user="michele", identified_by="voice")
+    creds = ResolvedCredentials(user="sam", identified_by="voice")
 
     response = await gateway_main._handle_voice_learning(
-        "learn my voice", creds, "michele", "assistant", False
+        "learn my voice", creds, "sam", "assistant", False
     )
 
-    assert started == ["michele"]
+    assert started == ["sam"]
     assert "next three voice commands" in _message(response)
 
 
@@ -64,10 +64,10 @@ async def test_a_recognised_voice_is_told_how_the_session_works(monkeypatch):
 async def test_an_unrecognised_voice_is_sent_to_settings(monkeypatch):
     monkeypatch.setattr(gateway_main, "_start_voice_learning", lambda who: pytest.fail("must not start"))
     monkeypatch.setattr(gateway_main, "update_history", _no_history)
-    creds = ResolvedCredentials(user="michele")
+    creds = ResolvedCredentials(user="sam")
 
     response = await gateway_main._handle_voice_learning(
-        "learn my voice", creds, "michele", "assistant", False
+        "learn my voice", creds, "sam", "assistant", False
     )
 
     reply = _message(response)
@@ -79,10 +79,10 @@ async def test_an_unrecognised_voice_is_sent_to_settings(monkeypatch):
 async def test_stopping_says_whether_a_session_was_open(monkeypatch):
     monkeypatch.setattr(gateway_main, "_stop_voice_learning", lambda who: True)
     monkeypatch.setattr(gateway_main, "update_history", _no_history)
-    creds = ResolvedCredentials(user="michele", identified_by="voice")
+    creds = ResolvedCredentials(user="sam", identified_by="voice")
 
     response = await gateway_main._handle_voice_learning(
-        "stop learning my voice", creds, "michele", "assistant", False
+        "stop learning my voice", creds, "sam", "assistant", False
     )
 
     assert "stopped learning" in _message(response)

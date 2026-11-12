@@ -54,8 +54,10 @@ function initMap() {
   map = new maplibregl.Map({
     container: "map",
     style: OSM_STYLE,
-    center: [-111.56466, 33.1667],
-    zoom: 13
+    // No built-in home: start on a world view and centre on the household's
+    // own zones once they load (centerOnZonesOnce).
+    center: [0, 20],
+    zoom: 1.5
   });
   map.addControl(new maplibregl.NavigationControl(), "bottom-right");
   map.on("load", () => { zoneLayerReady = true; drawAll(); });
@@ -106,6 +108,21 @@ function drawAll() {
   if (!map || !zoneLayerReady) return;
   drawZones(zonesCache);
   drawPeople(peopleCache);
+  centerOnZonesOnce(zonesCache);
+}
+
+let centeredOnZones = false;
+function centerOnZonesOnce(fc) {
+  if (centeredOnZones || !fc || !fc.features || !fc.features.length) return;
+  let b = null;
+  const walk = (c) => {
+    if (typeof c[0] === "number") { b = b ? b.extend(c) : new maplibregl.LngLatBounds(c, c); return; }
+    c.forEach(walk);
+  };
+  fc.features.forEach(f => { if (f.geometry && f.geometry.coordinates) walk(f.geometry.coordinates); });
+  if (!b) return;
+  centeredOnZones = true;
+  map.fitBounds(b, { padding: 60, maxZoom: 14, duration: 0 });
 }
 
 let zonesCache = { type:"FeatureCollection", features:[] };

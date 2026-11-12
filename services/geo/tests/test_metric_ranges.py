@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from services.geo import main as geo_main
 
-TZ = ZoneInfo("America/Phoenix")
+TZ = ZoneInfo("Etc/GMT+7")
 TODAY = datetime.now(TZ).replace(hour=12, minute=0, second=0, microsecond=0)
 
 
@@ -203,14 +203,14 @@ class TestConsent:
         c = make_client(workouts=dict([workout("w1", 0)]), allow=False)
         r = c.get(
             "/metrics/ranges",
-            params={"metric": "workouts", "viewer": "jeremiah", "user_id": "michele"},
+            params={"metric": "workouts", "viewer": "alex", "user_id": "sam"},
         )
         assert r.status_code == 404
 
     def test_gate_runs_before_any_data_is_read(self, make_client):
         """A refusal must not depend on whether the user happens to have data."""
         c = make_client(allow=False)
-        r = c.get("/metrics/ranges", params={"metric": "workouts", "viewer": "jeremiah", "user_id": "michele"})
+        r = c.get("/metrics/ranges", params={"metric": "workouts", "viewer": "alex", "user_id": "sam"})
         assert r.status_code == 404
 
     def test_a_new_route_does_not_become_a_consent_bypass(self, monkeypatch):
@@ -230,8 +230,8 @@ class TestConsent:
         monkeypatch.setattr(geo_main, "get_redis", _get_redis)
         client = TestClient(geo_main.app)
         client.headers.update({"X-Internal-Secret": geo_main.INTERNAL_SECRET})
-        client.get("/metrics/ranges", params={"metric": "workouts", "viewer": "jeremiah", "user_id": "michele"})
-        assert called == [("jeremiah", "michele", None)]
+        client.get("/metrics/ranges", params={"metric": "workouts", "viewer": "alex", "user_id": "sam"})
+        assert called == [("alex", "sam", None)]
 
     def test_every_metric_shares_the_one_gate(self, make_client):
         """One route, many metrics -- all of them gated, none of them opting out."""
@@ -239,6 +239,6 @@ class TestConsent:
         for metric in ("workouts", "workout_minutes", "workout_miles", "drive_miles"):
             r = c.get(
                 "/metrics/ranges",
-                params={"metric": metric, "viewer": "jeremiah", "user_id": "michele"},
+                params={"metric": metric, "viewer": "alex", "user_id": "sam"},
             )
             assert r.status_code == 404, metric

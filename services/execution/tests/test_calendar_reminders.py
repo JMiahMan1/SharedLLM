@@ -5,7 +5,7 @@ import pytz
 
 from services.execution import calendar_reminders as cr
 
-TZ = pytz.timezone("America/Phoenix")
+TZ = pytz.timezone("Etc/GMT+7")
 
 
 def at(hour, minute=0, day=7):
@@ -64,13 +64,13 @@ async def test_a_round_reads_each_persons_events_in_their_zone_and_sends(monkeyp
     import services.execution.main as _main
 
     sent, reads = [], []
-    now_utc = pytz.utc.localize(datetime(2026, 10, 7, 20, 0))  # 1 pm in Phoenix, 4 pm in New York
+    now_utc = pytz.utc.localize(datetime(2026, 10, 7, 20, 0))  # 1 pm at UTC-7, 4 pm in New York
 
     async def fake_family(**_):
-        return ["michele", "jeremiah"]
+        return ["sam", "alex"]
 
     async def fake_resolve(rag_user=None, **_):
-        tz = "America/New_York" if rag_user == "jeremiah" else "America/Phoenix"
+        tz = "America/New_York" if rag_user == "alex" else "Etc/GMT+7"
         return {"user": rag_user, "calendar_settings": {"timezone": tz}}
 
     async def fake_events(user, creds, lo, hi):
@@ -98,7 +98,7 @@ async def test_a_round_reads_each_persons_events_in_their_zone_and_sends(monkeyp
     monkeypatch.setattr(w, "own_forecast", no_own)
 
     assert await cr.remind_once(now_utc) == 2
-    assert [p["user"] for p in sent] == ["michele", "jeremiah"]
+    assert [p["user"] for p in sent] == ["sam", "alex"]
     assert sent[0]["title"] == "Dentist at 1:20 pm"
     assert sent[1]["title"] == "Dentist at 4:20 pm"  # his clock, not the household's
     assert reads[1][1].startswith("2026-10-07T00:00:00-04:00")
@@ -140,10 +140,10 @@ async def test_each_persons_reminder_uses_their_own_forecast(monkeypatch):
 
     async def fake_own(user, *, max_age_s):
         seen.append(user)
-        return (fc(80), True) if user == "jeremiah" else (None, False)
+        return (fc(80), True) if user == "alex" else (None, False)
 
     async def fake_family(**_):
-        return ["household", "jeremiah"]
+        return ["household", "alex"]
 
     async def fake_resolve(rag_user=None, **_):
         return {"user": rag_user, "calendar_settings": {"timezone": "UTC"}}
@@ -165,7 +165,7 @@ async def test_each_persons_reminder_uses_their_own_forecast(monkeypatch):
     monkeypatch.setattr(cr, "events_for", fake_events)
 
     assert await cr.remind_once(now_utc) == 2
-    assert seen == ["household", "jeremiah"]
+    assert seen == ["household", "alex"]
     assert "Rain" not in sent[0]["body"]
     assert sent[1]["body"].endswith("Rain likely (80%), 54°F.")
 
@@ -212,7 +212,7 @@ async def test_the_forecast_route_serves_a_persons_own_place_else_home(monkeypat
     async def fake_forecast_for(loc, cfg, *, max_age_s=w.FRESH_S, units=None):
         return None if loc["latitude"] == 1 else {"where": loc["name"]}
 
-    prefs = {"noah": {"location": {"name": "Grandma's", "latitude": 35.0, "longitude": -85.0}},
+    prefs = {"jordan": {"location": {"name": "Grandma's", "latitude": 35.0, "longitude": -85.0}},
              "eli": {"location": {"name": "Away", "latitude": 1, "longitude": 1}}}
 
     async def fake_prefs(user):
@@ -223,9 +223,9 @@ async def test_the_forecast_route_serves_a_persons_own_place_else_home(monkeypat
     monkeypatch.setattr(w, "forecast_for", fake_forecast_for)
     monkeypatch.setattr(w, "person_prefs", fake_prefs)
 
-    assert await w.forecast_route(user="noah") == {"where": "Grandma's", "personal": True}
+    assert await w.forecast_route(user="jordan") == {"where": "Grandma's", "personal": True}
     assert await w.forecast_route(user="eli") == {"where": "Home", "personal": False}  # their place failed
-    assert await w.forecast_route(user="jeremiah") == {"where": "Home", "personal": False}
+    assert await w.forecast_route(user="alex") == {"where": "Home", "personal": False}
     assert await w.forecast_route() == {"where": "Home", "personal": False}
 
     async def no_home(cfg=None):

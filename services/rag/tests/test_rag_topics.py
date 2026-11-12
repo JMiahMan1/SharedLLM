@@ -33,7 +33,7 @@ def test_search_and_listing_keep_to_the_topic(tmp_path):
     hits = asyncio.run(rag_main.search(SearchRequest(query="fasting", user_id="dad", k=5, collection_name="calibre_files", tags=["fasting"]))).results
     assert [h.metadata["title"] for h in hits] == ["Great Lent"]
 
-    listing = asyncio.run(rag_main.list_tagged_resources(tag="jarvis:fasting", user_id="jeremiah", limit=50))
+    listing = asyncio.run(rag_main.list_tagged_resources(tag="jarvis:fasting", user_id="alex", limit=50))
     # The household library is listed for anyone; another person's files are not.
     assert [b["title"] for b in listing["books"]] == ["Great Lent"]
     assert listing["documents"] == []

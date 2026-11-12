@@ -142,7 +142,7 @@ def identity(monkeypatch):
 
     monkeypatch.setattr(gateway_main, "_identity_as_caller", _as_caller)
     monkeypatch.setattr(gateway_main, "borrow_http_client", fake)
-    monkeypatch.setattr(gateway_main, "_household_now", lambda: datetime(2026, 10, 21, 16, 0, tzinfo=ZoneInfo("America/Phoenix")))
+    monkeypatch.setattr(gateway_main, "_household_now", lambda: datetime(2026, 10, 21, 16, 0, tzinfo=ZoneInfo("Etc/GMT+7")))
     return TestClient(app), answers, calls
 
 

@@ -12,10 +12,10 @@ from services.execution.schemas import CalendarRequest, UserContext
 
 
 @pytest.fixture(autouse=True)
-def _phoenix(monkeypatch):
+def _utc_minus_7(monkeypatch):
     # A real zone with a local-mean-time entry (-07:28) -- the trap a pytz
     # ``replace(tzinfo=...)`` falls into.
-    monkeypatch.setattr(cal_mod, "LOCAL_TZ_NAME", "America/Phoenix")
+    monkeypatch.setattr(cal_mod, "LOCAL_TZ_NAME", "Etc/GMT+7")
 
 
 def _vevent(ics_body: str):
@@ -40,7 +40,7 @@ def test_weekly_event_is_expanded_into_the_window():
     lo = cal_mod._localize(datetime(2026, 10, 1))
     hi = cal_mod._localize(datetime(2026, 10, 22))
     occ = cal_mod._occurrences(ve, lo, hi)
-    assert [s.date().isoformat() for s, _ in occ] == ["2026-10-05", "2026-10-12", "2026-10-19"]  # 01:00Z is 18:00 the evening before in Phoenix
+    assert [s.date().isoformat() for s, _ in occ] == ["2026-10-05", "2026-10-12", "2026-10-19"]  # 01:00Z is 18:00 the evening before at UTC-7
     # Each occurrence keeps the event's hour-long length.
     assert all(e - s == timedelta(hours=1) for s, e in occ)
 

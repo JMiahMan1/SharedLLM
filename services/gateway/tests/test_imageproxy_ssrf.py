@@ -63,11 +63,11 @@ def test_imageproxy_rebases_mismatched_ma_host(client, upstream):
     mock_upstream(upstream, "GET", "http://ma.local:8095/imageproxy", payload="imgbytes")
     resp = client.get(
         "/api/media/imageproxy",
-        params={"path": "http://192.168.2.20:8095/imageproxy?path=art.jpg"},
+        params={"path": "http://172.16.2.20:8095/imageproxy?path=art.jpg"},
     )
     assert resp.status_code == 200
     assert b"img" in resp.content
-    assert not any("192.168.2.20" in u for u in _requested(upstream))
+    assert not any("172.16.2.20" in u for u in _requested(upstream))
     assert any("ma.local" in u for u in _requested(upstream))
 
 
@@ -125,7 +125,7 @@ def test_imageproxy_still_rebases_lan_and_service_paths(client, upstream):
     from services.gateway import main
 
     for url in (
-        "https://192.168.2.20/cover.jpg",
+        "https://172.16.2.20/cover.jpg",
         "https://nas.local/cover.jpg",
         "https://intranet/cover.jpg",
         "http://image-cdn.spotifycdn.com/image/abc",

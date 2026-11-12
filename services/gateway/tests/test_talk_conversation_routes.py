@@ -19,14 +19,14 @@ def _capture(monkeypatch):
 def test_conversation_management_routes(monkeypatch):
     sent = _capture(monkeypatch)
     c = TestClient(app)
-    c.post("/api/communication/talk/conversations/group", json={"name": "Family", "participants": ["michele"]})
+    c.post("/api/communication/talk/conversations/group", json={"name": "Family", "participants": ["sam"]})
     c.delete("/api/communication/talk/conversations", params={"token": "abc"})
     c.get("/api/communication/talk/participants", params={"token": "abc"})
     c.post("/api/communication/talk/participants", json={"token": "abc", "user": "kids"})
     c.delete("/api/communication/talk/participants", params={"token": "abc", "attendee_id": 5})
     c.get("/api/communication/talk/people", params={"search": "mi"})
     assert [p for _, p in sent] == [
-        {"action": "create_group", "message": "Family", "participants": ["michele"]},
+        {"action": "create_group", "message": "Family", "participants": ["sam"]},
         {"action": "delete_conversation", "token": "abc"},
         {"action": "participants", "token": "abc"},
         {"action": "add_participant", "token": "abc", "target_user": "kids"},

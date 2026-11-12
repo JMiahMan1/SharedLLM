@@ -411,7 +411,7 @@ async def test_an_old_answer_long_after_the_question_changed_is_a_normal_guess(t
 
 @pytest.mark.asyncio
 async def test_a_win_lands_on_the_account_not_the_display_name(talk, monkeypatch):
-    """The roster shows "Jeremiah"; the profile is the account "jeremiah"."""
+    """The roster shows "Alex"; the profile is the account "alex"."""
     monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
     from unittest.mock import AsyncMock
 
@@ -421,18 +421,18 @@ async def test_a_win_lands_on_the_account_not_the_display_name(talk, monkeypatch
     monkeypatch.setattr("services.execution.activity.record", recorded)
     monkeypatch.setattr(talk, "_bank_game_stars", AsyncMock())
     state = games.registry.start_trivia("room-1")
-    state.roster = {"jeremiah": "jeremiah"}
-    state.roster_names = {"jeremiah": "Jeremiah"}
+    state.roster = {"alex": "alex"}
+    state.roster_names = {"alex": "Alex"}
 
-    await talk._apply_game_answer(None, "room-1", "jeremiah", state.answers[0])
+    await talk._apply_game_answer(None, "room-1", "alex", state.answers[0])
 
-    assert recorded.await_args.args[:2] == ("jeremiah", "game")
-    assert recorded.await_args.kwargs["detail"] == {"player": "Jeremiah"}
+    assert recorded.await_args.args[:2] == ("alex", "game")
+    assert recorded.await_args.kwargs["detail"] == {"player": "Alex"}
 
 
 @pytest.mark.asyncio
 async def test_the_first_answer_to_arrive_wins_even_if_its_post_is_slower(talk, monkeypatch):
-    """Jeremiah answered "Moses" first; Michele's later post finished first and took the round."""
+    """Alex answered "Moses" first; Sam's later post finished first and took the round."""
     monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
     from services.execution.handlers import family_games as games
 
@@ -442,7 +442,7 @@ async def test_the_first_answer_to_arrive_wins_even_if_its_post_is_slower(talk, 
     posted: list[tuple[str, str]] = []
 
     async def fake_request(provider, method, endpoint, **kwargs):
-        if provider.username == "jeremiah" and (kwargs.get("data") or {}).get("message") == "Moses":
+        if provider.username == "alex" and (kwargs.get("data") or {}).get("message") == "Moses":
             await asyncio.sleep(0.2)  # his post to Nextcloud is the slow one
         posted.append((provider.username, (kwargs.get("data") or {}).get("message", "")))
         return True, {"id": len(posted)}, ""
@@ -456,11 +456,11 @@ async def test_the_first_answer_to_arrive_wins_even_if_its_post_is_slower(talk, 
 
         return talk.handle_talk(TalkRequest(user_context={"user": user}, action="send", token="room-1", message="Moses"))
 
-    await asyncio.gather(send("jeremiah"), send("michele"))
+    await asyncio.gather(send("alex"), send("sam"))
     await asyncio.gather(*list(talk._GAME_TASKS))
 
     verdicts = [m for _, m in posted if "got it" in m]
-    assert len(verdicts) == 1 and verdicts[0].startswith("✅ jeremiah got it!")
+    assert len(verdicts) == 1 and verdicts[0].startswith("✅ alex got it!")
 
 
 @pytest.mark.asyncio

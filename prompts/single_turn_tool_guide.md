@@ -131,10 +131,10 @@ Generic Home Assistant service call.
 
 ### LocationRequest
 Query person/family location, Home Assistant zone presence, speed, dwell time, and travel telemetry (Life360 features).
-- Fields: `tool`, `user` (name or person, e.g. "Jeremiah", "Michele", "me"), optional `detail` ("summary", "speed", "dwell", "frequented", "cost", "vehicle").
+- Fields: `tool`, `user` (name or person, e.g. "Alex", "Sam", "me"), optional `detail` ("summary", "speed", "dwell", "frequented", "cost", "vehicle").
 - Examples:
-  - `{"tool": "LocationRequest", "user": "Jeremiah"}`
-  - `{"tool": "LocationRequest", "user": "Jeremiah", "detail": "speed"}`
+  - `{"tool": "LocationRequest", "user": "Alex"}`
+  - `{"tool": "LocationRequest", "user": "Alex", "detail": "speed"}`
   - `{"tool": "LocationRequest", "user": "me", "detail": "frequented"}`
 
 ### WebSearchRequest

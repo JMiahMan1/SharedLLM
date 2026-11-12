@@ -59,7 +59,7 @@ and control method documentation.
 | `profile_device(entity_id, ha_url, ha_token)` | Full profile for one device |
 | `profile_all_media_devices(ha_url, ha_token)` | Profile all media_player entities |
 | `build_capability_map(ha_url, ha_token)` | Friendly-name → capabilities dict |
-| `resolve_by_friendly_name(cap_map, query)` | Fuzzy match "gracies tv" → entity_id + caps |
+| `resolve_by_friendly_name(cap_map, query)` | Fuzzy match "taylors tv" → entity_id + caps |
 
 ### Supported Device Types & Control Methods
 

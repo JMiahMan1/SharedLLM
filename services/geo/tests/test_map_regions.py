@@ -66,5 +66,5 @@ async def test_an_on_map_point_records_nothing(monkeypatch):
     async def on(lat, lon, url):
         return False
     monkeypatch.setattr(map_regions, "off_map", on)
-    assert await map_regions.note_if_off_map(r, 33.4, -111.9, "http://osrm:5000") is None
+    assert await map_regions.note_if_off_map(r, 39.9725, -105.3257, "http://osrm:5000") is None
     assert await map_regions.needed(r) == []

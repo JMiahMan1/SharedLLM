@@ -22,7 +22,7 @@ H = {"Authorization": f"Bearer {SECRET}"}
 @pytest.fixture
 def env(tmp_path):
     store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
-    hub = Hub(time_zone="America/Phoenix")
+    hub = Hub(time_zone="Etc/GMT+7")
     hub.store = store
     for a in (Area("den", "Den"), Area("porch", "Porch")):
         hub.areas[a.area_id] = a

@@ -59,10 +59,10 @@ def test_an_empty_week_says_so():
 
 
 def test_late_nights_count_in_household_time():
-    # 23:30 Phoenix on the 20th is 06:30 UTC on the 21st.
+    # 23:30 UTC-7 on the 20th is 06:30 UTC on the 21st.
     late = {"day": "2026-10-20", "millis": 60000, "last_use": 1792564200000}
-    early = {"day": "2026-10-21", "millis": 60000, "last_use": 1792627200000}  # 21 Oct 17:00 Phoenix
-    r = build([late, early], [], [], START, END, "America/Phoenix")
+    early = {"day": "2026-10-21", "millis": 60000, "last_use": 1792627200000}  # 21 Oct 17:00 UTC-7
+    r = build([late, early], [], [], START, END, "Etc/GMT+7")
     assert r["screen"]["late_nights"] == 1
 
 
@@ -93,8 +93,8 @@ def test_a_tablet_is_called_a_tablet():
 
     usage = [_usage("2026-10-19", 120, [("com.google.android.youtube", 70)])]
     r = build(usage, [], [], START, END)
-    assert summary_line("Noah", r, "tablet") == "Noah's week: about 2 h 0 min a day on the tablet, most in Youtube."
-    assert spoken("Noah", r, "tablet").startswith("Noah has averaged 2 h 0 min a day on the tablet.")
+    assert summary_line("Jordan", r, "tablet") == "Jordan's week: about 2 h 0 min a day on the tablet, most in Youtube."
+    assert spoken("Jordan", r, "tablet").startswith("Jordan has averaged 2 h 0 min a day on the tablet.")
     empty = build([], [], [], START, END)
-    assert summary_line("Noah", empty, "tablet") == "Nothing was reported from Noah's tablet this week."
-    assert spoken("Noah", empty, "device") == "Nothing has been reported from Noah's device yet this week."
+    assert summary_line("Jordan", empty, "tablet") == "Nothing was reported from Jordan's tablet this week."
+    assert spoken("Jordan", empty, "device") == "Nothing has been reported from Jordan's device yet this week."

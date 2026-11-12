@@ -51,8 +51,8 @@ def test_workspace_lifecycle(api_client):
         "id": workspace_id,
         "display_name": "Audit Test Workspace",
         "local_path": f"tests/{workspace_id}",
-        "repo_url": "https://github.com/JMiahMan1/SharedLLM.git", # Use current repo as test
-        "default_branch": "microservices",
+        "repo_url": os.getenv("TEST_REPO_URL", "https://github.com/octocat/Hello-World.git"),
+        "default_branch": os.getenv("TEST_REPO_BRANCH", "master"),
         "auto_pull_enabled": True,
         "auto_backup_enabled": True,
         "nextcloud_path": f"/Tests/{workspace_id}",

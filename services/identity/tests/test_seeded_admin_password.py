@@ -43,7 +43,7 @@ def session_fixture(monkeypatch):
         session.add(
             User(username="alice", api_key="key-alice", password_hash=hash_password("a-real-one"))
         )
-        session.add(User(username="kaleb", api_key="key-kaleb"))
+        session.add(User(username="robin", api_key="key-robin"))
         session.commit()
         yield session
 
@@ -64,7 +64,7 @@ def test_the_account_list_marks_the_seeded_password(client):
     assert listed["default"] is True
     assert listed["alice"] is False
     # No password at all is a different problem, reported separately.
-    assert listed["kaleb"] is False
+    assert listed["robin"] is False
 
 
 def test_changing_the_password_clears_the_mark(client, session):

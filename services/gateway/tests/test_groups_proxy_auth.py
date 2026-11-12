@@ -52,16 +52,16 @@ def test_reading_groups_needs_a_signed_in_user(monkeypatch):
 
 
 def test_a_signed_in_user_can_read_groups(monkeypatch):
-    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "sam", "is_admin": False})
     assert TestClient(app).get("/api/groups/lights").status_code == 200
     assert sent and sent[0][0] == "GET"
 
 
 def test_only_an_admin_changes_groups(monkeypatch):
-    sent = _as(monkeypatch, {"user": "michele", "is_admin": False})
+    sent = _as(monkeypatch, {"user": "sam", "is_admin": False})
     client = TestClient(app)
     assert client.post("/api/groups/lights", json={"name": "x"}).status_code == 403
     assert client.delete("/api/groups/lights/x").status_code == 403
     assert sent == []
-    _as(monkeypatch, {"user": "jeremiah", "is_admin": True})
+    _as(monkeypatch, {"user": "alex", "is_admin": True})
     assert client.delete("/api/groups/lights/x").status_code == 200

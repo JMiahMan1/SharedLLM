@@ -144,7 +144,7 @@ def get_workspace_root() -> Path:
 
 
 async def _get_config_timezone_async() -> str:
-    """Return the Config DB `timezone` value (e.g. "America/Phoenix"), or UTC."""
+    """Return the Config DB `timezone` value (e.g. "America/Denver"), or UTC."""
     try:
         async with get_client() as client:
             resp = await client.get(

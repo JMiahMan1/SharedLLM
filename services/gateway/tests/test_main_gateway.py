@@ -237,7 +237,7 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
 async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     from services.gateway import main
     # Signed-in caller; the anonymous case is test_presence_embed_auth.py.
-    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "_require_identity_from_request", AsyncMock(return_value="alex"))
     monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={
         "llm_local_url": "http://ollama.local"
     }))
@@ -449,20 +449,20 @@ def test_dns_crud_roundtrip(client, monkeypatch):
     _patch_dns_storage(monkeypatch)
 
     created = client.post("/api/dns", json={
-        "domain": "home.lan", "record_type": "A", "values": ["192.168.1.50"], "ttl": 300,
+        "domain": "home.lan", "record_type": "A", "values": ["198.51.100.50"], "ttl": 300,
     }, headers=ADMIN_HEADERS)
     assert created.status_code == 200
     rec = created.json()
     assert rec["domain"] == "home.lan"
-    assert rec["values"] == ["192.168.1.50"]
+    assert rec["values"] == ["198.51.100.50"]
     record_id = rec["id"]
 
     listed = client.get("/api/dns", headers=ADMIN_HEADERS).json()
     assert len(listed) == 1
 
-    updated = client.put(f"/api/dns/{record_id}", json={"values": ["192.168.1.99"], "ttl": 600}, headers=ADMIN_HEADERS)
+    updated = client.put(f"/api/dns/{record_id}", json={"values": ["198.51.100.99"], "ttl": 600}, headers=ADMIN_HEADERS)
     assert updated.status_code == 200
-    assert updated.json()["values"] == ["192.168.1.99"]
+    assert updated.json()["values"] == ["198.51.100.99"]
     assert updated.json()["ttl"] == 600
 
     deleted = client.delete(f"/api/dns/{record_id}", headers=ADMIN_HEADERS)

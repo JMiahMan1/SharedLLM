@@ -11,8 +11,9 @@
 
 set -euo pipefail
 
-HOST="${1:-jeremiah@192.168.2.205}"
-DIR="/home/jeremiah/SharedLLM"
+HOST="${1:-${DEPLOY_HOST:?pass user@host or set DEPLOY_HOST}}"
+# Relative paths resolve in the remote user's home directory.
+DIR="${DEPLOY_DIR:-SharedLLM}"
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
 
 if [ $# -ge 2 ]; then

@@ -10,10 +10,10 @@ from services.homehub.tests.conftest import make_hub
 from services.homehub.tests.media_fakes import FakeHttp
 
 SERIAL = "2N0000000001"
-MP = "media_player.28_tcl_roku_tv"
-REMOTE = "remote.28_tcl_roku_tv"
+MP = "media_player.bedroom_roku_tv"
+REMOTE = "remote.bedroom_roku_tv"
 
-DEVICE_INFO = f"""<device-info><serial-number>{SERIAL}</serial-number><user-device-name>Gracies TV</user-device-name>
+DEVICE_INFO = f"""<device-info><serial-number>{SERIAL}</serial-number><user-device-name>Taylors TV</user-device-name>
 <power-mode>{{power}}</power-mode><supports-find-remote>true</supports-find-remote><headphones-connected>false</headphones-connected>
 <supports-airplay>true</supports-airplay><supports-ethernet>false</supports-ethernet></device-info>"""
 APPS = """<apps><app id="12" type="appl" version="5">Netflix</app><app id="837" type="appl" version="2">YouTube</app>
@@ -23,13 +23,13 @@ APPS = """<apps><app id="12" type="appl" version="5">Netflix</app><app id="837" 
 def build(power="PowerOn", active='<active-app><app id="12" type="appl">Netflix</app></active-app>',
           player='<player error="false" state="play"><position>61000 ms</position><duration>120000 ms</duration>'
                  '<is_live>false</is_live></player>'):
-    hub, entry = make_hub("roku", {"host": "192.168.2.166"}, [
+    hub, entry = make_hub("roku", {"host": "192.0.2.166"}, [
         {"entity_id": MP, "unique_id": SERIAL},
         {"entity_id": REMOTE, "unique_id": SERIAL},
-        {"entity_id": "binary_sensor.28_tcl_roku_tv_supports_airplay", "unique_id": f"{SERIAL}_supports_airplay"},
-        {"entity_id": "binary_sensor.28_tcl_roku_tv_headphones_connected", "unique_id": f"{SERIAL}_headphones_connected"},
-        {"entity_id": "sensor.28_tcl_roku_tv_active_app", "unique_id": f"{SERIAL}_active_app"},
-        {"entity_id": "sensor.28_tcl_roku_tv_active_app_id", "unique_id": f"{SERIAL}_active_app_id"},
+        {"entity_id": "binary_sensor.bedroom_roku_tv_supports_airplay", "unique_id": f"{SERIAL}_supports_airplay"},
+        {"entity_id": "binary_sensor.bedroom_roku_tv_headphones_connected", "unique_id": f"{SERIAL}_headphones_connected"},
+        {"entity_id": "sensor.bedroom_roku_tv_active_app", "unique_id": f"{SERIAL}_active_app"},
+        {"entity_id": "sensor.bedroom_roku_tv_active_app_id", "unique_id": f"{SERIAL}_active_app_id"},
     ])
     entry.unique_id = SERIAL
     drv = RokuDriver(hub, entry)
@@ -56,10 +56,10 @@ async def test_playing_netflix_state_and_sensors():
     assert st.attributes["media_duration"] == 120
     assert st.attributes["supported_features"] & F.SELECT_SOURCE
     assert hub.states.get(REMOTE).state == "on"
-    assert hub.states.get("binary_sensor.28_tcl_roku_tv_supports_airplay").state == "on"
-    assert hub.states.get("binary_sensor.28_tcl_roku_tv_headphones_connected").state == "off"
-    assert hub.states.get("sensor.28_tcl_roku_tv_active_app").state == "Netflix"
-    assert hub.states.get("sensor.28_tcl_roku_tv_active_app_id").state == "12"
+    assert hub.states.get("binary_sensor.bedroom_roku_tv_supports_airplay").state == "on"
+    assert hub.states.get("binary_sensor.bedroom_roku_tv_headphones_connected").state == "off"
+    assert hub.states.get("sensor.bedroom_roku_tv_active_app").state == "Netflix"
+    assert hub.states.get("sensor.bedroom_roku_tv_active_app_id").state == "12"
     assert ("roku", "search") in hub.services
 
 

@@ -10,7 +10,7 @@ from services.homehub.drivers import homekit
 from services.homehub.drivers.homekit import HomeKitDriver, parse_unique_id, short_type
 from services.homehub.tests.conftest import make_hub
 
-PID = "82:5B:BB:0D:AF:0F"
+PID = "02:00:00:00:01:08"
 HAP = "-0000-1000-8000-0026BB765291"
 
 
@@ -106,15 +106,15 @@ class FakePairing:
 
 
 ECOBEE_ENTITIES = [
-    {"entity_id": "climate.downstairs", "unique_id": f"{PID}_1_16", "supported_features": 399},
-    {"entity_id": "sensor.downstairs_current_temperature", "unique_id": f"{PID}_1_16_19",
+    {"entity_id": "climate.hallway", "unique_id": f"{PID}_1_16", "supported_features": 399},
+    {"entity_id": "sensor.hallway_current_temperature", "unique_id": f"{PID}_1_16_19",
      "unit_of_measurement": "°F", "original_device_class": "temperature",
      "capabilities": {"state_class": "measurement"}},
-    {"entity_id": "sensor.downstairs_current_humidity", "unique_id": f"{PID}_1_16_24",
+    {"entity_id": "sensor.hallway_current_humidity", "unique_id": f"{PID}_1_16_24",
      "unit_of_measurement": "%", "original_device_class": "humidity"},
-    {"entity_id": "select.downstairs_temperature_display_units", "unique_id": f"{PID}_1_16_21",
+    {"entity_id": "select.hallway_temperature_display_units", "unique_id": f"{PID}_1_16_21",
      "capabilities": {"options": ["celsius", "fahrenheit"]}},
-    {"entity_id": "select.downstairs_current_mode", "unique_id": f"{PID}_1_16_33",
+    {"entity_id": "select.hallway_current_mode", "unique_id": f"{PID}_1_16_33",
      "capabilities": {"options": ["home", "sleep", "away"]}},
     {"entity_id": "button.downstairs_identify", "unique_id": f"{PID}_1_1_6"},
     {"entity_id": "button.downstairs_clear_hold", "unique_id": f"{PID}_1_16_48"},
@@ -149,7 +149,7 @@ def test_unique_id_and_type_parsing():
 
 async def test_ecobee_climate_state_matches_ha():
     hub, driver, fake = await setup()
-    st = hub.states.get("climate.downstairs")
+    st = hub.states.get("climate.hallway")
     assert st.state == "cool"
     a = st.attributes
     assert a["hvac_modes"] == ["off", "heat", "cool", "heat_cool"]
@@ -169,20 +169,20 @@ async def test_ecobee_climate_state_matches_ha():
 
 async def test_ecobee_sensors_and_selects():
     hub, _driver, _fake = await setup()
-    t = hub.states.get("sensor.downstairs_current_temperature")
+    t = hub.states.get("sensor.hallway_current_temperature")
     assert t.state == "74.3" and t.attributes["unit_of_measurement"] == "°F"
     assert t.attributes["state_class"] == "measurement"
-    assert hub.states.get("sensor.downstairs_current_humidity").state == "52.0"
-    assert hub.states.get("select.downstairs_temperature_display_units").state == "fahrenheit"
-    assert hub.states.get("select.downstairs_current_mode").state == "sleep"
+    assert hub.states.get("sensor.hallway_current_humidity").state == "52.0"
+    assert hub.states.get("select.hallway_temperature_display_units").state == "fahrenheit"
+    assert hub.states.get("select.hallway_current_mode").state == "sleep"
     assert hub.states.get("button.downstairs_identify").state == "unknown"
 
 
 async def test_heat_cool_shows_the_range():
     hub, _driver, fake = await setup()
     fake.push({(1, 18): {"value": 3}})
-    a = hub.states.get("climate.downstairs").attributes
-    assert hub.states.get("climate.downstairs").state == "heat_cool"
+    a = hub.states.get("climate.hallway").attributes
+    assert hub.states.get("climate.hallway").state == "heat_cool"
     assert a["temperature"] is None
     assert (a["target_temp_low"], a["target_temp_high"]) == (71, 76)
 
@@ -190,63 +190,63 @@ async def test_heat_cool_shows_the_range():
 async def test_events_update_state_and_fan_action():
     hub, _driver, fake = await setup()
     fake.push({(1, 17): {"value": 2}})
-    assert hub.states.get("climate.downstairs").attributes["hvac_action"] == "cooling"
+    assert hub.states.get("climate.hallway").attributes["hvac_action"] == "cooling"
     fake.push({(1, 17): {"value": 0}, (1, 76): {"value": 2}})
-    assert hub.states.get("climate.downstairs").attributes["hvac_action"] == "fan"
+    assert hub.states.get("climate.hallway").attributes["hvac_action"] == "fan"
     fake.push({(1, 18): {"value": 0}, (1, 17): {"value": 1}})
-    st = hub.states.get("climate.downstairs")
+    st = hub.states.get("climate.hallway")
     assert st.state == "off" and st.attributes["hvac_action"] == "idle"
 
 
 async def test_set_temperature_converts_to_celsius():
     hub, _driver, fake = await setup()
-    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 72})
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.hallway", "temperature": 72})
     assert fake.puts[-1] == [(1, 20, 22.2)]
-    assert hub.states.get("climate.downstairs").attributes["temperature"] == 72
+    assert hub.states.get("climate.hallway").attributes["temperature"] == 72
 
 
 async def test_set_temperature_range_with_mode():
     hub, _driver, fake = await setup()
     await hub.call_service("climate", "set_temperature", {
-        "entity_id": "climate.downstairs", "hvac_mode": "heat_cool",
+        "entity_id": "climate.hallway", "hvac_mode": "heat_cool",
         "target_temp_low": 68, "target_temp_high": 78})
     writes = {(a, i): v for a, i, v in fake.puts[-1]}
     assert writes[(1, 18)] == 3
     assert writes[(1, 23)] == 20.0 and writes[(1, 22)] == 25.6
     assert writes[(1, 20)] == pytest.approx(22.8, abs=0.06)
-    a = hub.states.get("climate.downstairs").attributes
+    a = hub.states.get("climate.hallway").attributes
     assert (a["target_temp_low"], a["target_temp_high"]) == (68, 78)
 
 
 async def test_set_temperature_clamps_to_device_limits():
     hub, _driver, fake = await setup()
-    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 120})
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.hallway", "temperature": 120})
     assert fake.puts[-1] == [(1, 20, 33.3)]
 
 
 async def test_modes_fan_and_on_off():
     hub, _driver, fake = await setup()
-    await hub.call_service("climate", "set_hvac_mode", {"entity_id": "climate.downstairs", "hvac_mode": "heat"})
+    await hub.call_service("climate", "set_hvac_mode", {"entity_id": "climate.hallway", "hvac_mode": "heat"})
     assert fake.puts[-1] == [(1, 18, 1)]
-    await hub.call_service("climate", "turn_off", {"entity_id": "climate.downstairs"})
+    await hub.call_service("climate", "turn_off", {"entity_id": "climate.hallway"})
     assert fake.puts[-1] == [(1, 18, 0)]
-    assert hub.states.get("climate.downstairs").state == "off"
-    await hub.call_service("climate", "turn_on", {"entity_id": "climate.downstairs"})
+    assert hub.states.get("climate.hallway").state == "off"
+    await hub.call_service("climate", "turn_on", {"entity_id": "climate.hallway"})
     assert fake.puts[-1] == [(1, 18, 1)]  # back to heat, not HA's first-listed heat_cool
-    await hub.call_service("climate", "set_fan_mode", {"entity_id": "climate.downstairs", "fan_mode": "on"})
+    await hub.call_service("climate", "set_fan_mode", {"entity_id": "climate.hallway", "fan_mode": "on"})
     assert fake.puts[-1] == [(1, 75, 0)]
-    assert hub.states.get("climate.downstairs").attributes["fan_mode"] == "on"
+    assert hub.states.get("climate.hallway").attributes["fan_mode"] == "on"
     with pytest.raises(HubError):
-        await hub.call_service("climate", "set_hvac_mode", {"entity_id": "climate.downstairs", "hvac_mode": "dry"})
+        await hub.call_service("climate", "set_hvac_mode", {"entity_id": "climate.hallway", "hvac_mode": "dry"})
 
 
 async def test_selects_and_buttons_write_the_right_characteristic():
     hub, _driver, fake = await setup()
     await hub.call_service("select", "select_option",
-                           {"entity_id": "select.downstairs_current_mode", "option": "away"})
+                           {"entity_id": "select.hallway_current_mode", "option": "away"})
     assert fake.puts[-1] == [(1, 40, 2)]
     await hub.call_service("select", "select_option",
-                           {"entity_id": "select.downstairs_temperature_display_units", "option": "celsius"})
+                           {"entity_id": "select.hallway_temperature_display_units", "option": "celsius"})
     assert fake.puts[-1] == [(1, 21, 0)]
     await hub.call_service("button", "press", {"entity_id": "button.downstairs_clear_hold"})
     assert fake.puts[-1] == [(1, 48, True)]
@@ -256,12 +256,12 @@ async def test_selects_and_buttons_write_the_right_characteristic():
 
 
 async def test_t5_has_no_range_and_reports_its_target():
-    entities = [{"entity_id": "climate.tstat_3692f3_t5_thermostat", "unique_id": "43:96:C5:87:43:96_1_272",
+    entities = [{"entity_id": "climate.tstat_demo01_t5_thermostat", "unique_id": "02:00:00:00:01:09_1_272",
                  "supported_features": 385},
-                {"entity_id": "sensor.tstat_3692f3_current_temperature",
-                 "unique_id": "43:96:C5:87:43:96_1_272_277", "unit_of_measurement": "°F"}]
+                {"entity_id": "sensor.tstat_demo01_current_temperature",
+                 "unique_id": "02:00:00:00:01:09_1_272_277", "unit_of_measurement": "°F"}]
     hub, driver, _fake = await setup(T5, entities)
-    st = hub.states.get("climate.tstat_3692f3_t5_thermostat")
+    st = hub.states.get("climate.tstat_demo01_t5_thermostat")
     assert st.state == "cool"
     a = st.attributes
     assert a["hvac_modes"] == ["off", "heat", "cool"]
@@ -272,14 +272,14 @@ async def test_t5_has_no_range_and_reports_its_target():
     assert a["hvac_action"] == "cooling"
     with pytest.raises(ServiceNotFound):
         await hub.call_service("climate", "set_fan_mode",
-                               {"entity_id": "climate.tstat_3692f3_t5_thermostat", "fan_mode": "on"})
+                               {"entity_id": "climate.tstat_demo01_t5_thermostat", "fan_mode": "on"})
 
 
 async def test_metric_household_gets_celsius():
     hub, _driver, fake = await setup(unit_system="metric")
-    a = hub.states.get("climate.downstairs").attributes
+    a = hub.states.get("climate.hallway").attributes
     assert a["temperature"] == 23.9 and a["temperature_unit"] == "°C"
-    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 22.5})
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.hallway", "temperature": 22.5})
     assert fake.puts[-1] == [(1, 20, 22.5)]
 
 
@@ -287,13 +287,13 @@ async def test_poll_failure_marks_unavailable_then_recovers():
     hub, driver, fake = await setup()
     fake.fail_reads = True
     await driver.async_poll()
-    assert hub.states.get("climate.downstairs").state == "unavailable"
-    assert hub.states.get("sensor.downstairs_current_temperature").state == "unavailable"
+    assert hub.states.get("climate.hallway").state == "unavailable"
+    assert hub.states.get("sensor.hallway_current_temperature").state == "unavailable"
     fake.fail_reads = False
     fake.values[(1, 19)] = 25.0
     await driver.async_poll()
-    assert hub.states.get("climate.downstairs").state == "cool"
-    assert hub.states.get("sensor.downstairs_current_temperature").state == "77.0"
+    assert hub.states.get("climate.hallway").state == "cool"
+    assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
 
 
 async def test_setup_raises_when_the_accessory_is_silent():
@@ -328,8 +328,8 @@ async def test_set_temperature_rounds_to_the_accessory_step():
     """The T5 steps by 0.5 C and refused 75 F sent as 23.89 C (HAP -70410)."""
     hub, driver, fake = await setup()
     driver.chars[(1, 20)]["step"] = 0.5
-    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 75})
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.hallway", "temperature": 75})
     assert fake.puts[-1] == [(1, 20, 24.0)]
     driver.chars[(1, 20)]["step"] = 0.1
-    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 75})
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.hallway", "temperature": 75})
     assert fake.puts[-1] == [(1, 20, pytest.approx(23.9))]

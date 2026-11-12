@@ -22,7 +22,7 @@ def test_unverified_key_is_refused(monkeypatch):
 
 
 def test_lists_real_docs_with_titles(monkeypatch):
-    _as(monkeypatch, "michele")
+    _as(monkeypatch, "sam")
     body = TestClient(app).get("/api/docs").json()
     names = [d["name"] for d in body["docs"]]
     assert names[0] == "README.md"
@@ -36,5 +36,5 @@ def test_lists_real_docs_with_titles(monkeypatch):
 
 
 def test_traversal_still_blocked(monkeypatch):
-    _as(monkeypatch, "michele")
+    _as(monkeypatch, "sam")
     assert TestClient(app).get("/api/docs/..%2F.env").status_code in (403, 404)

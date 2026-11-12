@@ -42,7 +42,7 @@ async def test_announcement_powers_on_tv_with_longer_timeout():
          patch("services.execution.main.TEMP_AUDIO_CACHE", {}), \
          patch("services.execution.main.verify_playback", return_value={"verified": True}), \
          patch("services.execution.main.detect_tv_type", return_value="generic_tv"), \
-         patch("services.execution.main.get_public_host", return_value="192.168.2.205"):
+         patch("services.execution.main.get_public_host", return_value="192.0.2.205"):
         await execute_announce(req)
 
     # Verify turn_on was called with the target

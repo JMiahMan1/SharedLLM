@@ -13,7 +13,7 @@ def client():
 @pytest.mark.parametrize("verb,path", [
     ("GET", "/api/presence/all"),
     ("GET", "/api/presence/rooms"),
-    ("GET", "/api/presence/jeremiah"),
+    ("GET", "/api/presence/alex"),
     ("POST", "/api/embed"),
     ("POST", "/api/embeddings"),
     ("POST", "/api/show"),

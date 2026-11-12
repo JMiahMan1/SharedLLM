@@ -58,10 +58,10 @@ def login(session: Session, username: str) -> TestClient:
     return TestClient(app)
 
 
-def _client(session: Session, caller: str = "michele") -> TestClient:
+def _client(session: Session, caller: str = "sam") -> TestClient:
     main.engine = session.bind
     SQLModel.metadata.create_all(main.engine)
-    for name, admin in (("jeremiah", True), ("michele", False), ("kate", False)):
+    for name, admin in (("alex", True), ("sam", False), ("kate", False)):
         if session.exec(select(User).where(User.username == name)).first() is None:
             _make_user(session, name, is_admin=admin)
     session.commit()
@@ -71,7 +71,7 @@ def _client(session: Session, caller: str = "michele") -> TestClient:
 
 @pytest.fixture
 def client(session: Session):
-    yield _client(session, "michele")
+    yield _client(session, "sam")
     app.dependency_overrides = {}
 
 
@@ -95,7 +95,7 @@ class TestSelfRegistration:
         assert resp.status_code == 200
         body = resp.json()
         assert body["kind"] == "phone"
-        assert body["owner_username"] == "michele"
+        assert body["owner_username"] == "sam"
         assert body["registered_by"] == "self"
         assert body["model"] == "Pixel 7"
         assert body["app_build"] == "24"
@@ -158,7 +158,7 @@ class TestSelfRegistration:
 
 class TestDeviceReclassification:
     def test_a_phone_cannot_take_over_an_admin_registered_assistant(self, client: TestClient, session: Session):
-        assert login(session, "jeremiah").post(
+        assert login(session, "alex").post(
             "/api/user-panel/devices",
             json={"device_key": "assistant-1", "kind": "assistant", "label": "Kitchen"},
         ).status_code == 200
@@ -168,7 +168,7 @@ class TestDeviceReclassification:
         assert "another kind" in resp.json()["detail"]
 
     def test_the_assistant_is_left_intact_afterwards(self, client: TestClient, session: Session):
-        login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "assistant-1", "kind": "assistant"})
+        login(session, "alex").post("/api/user-panel/devices", json={"device_key": "assistant-1", "kind": "assistant"})
         client.post(REGISTER, json=_phone_payload(device_key="assistant-1"))
 
         device = session.exec(select(Device)).first()
@@ -212,7 +212,7 @@ class TestDeviceReclassification:
             model="SM-P620",
             manufacturer="samsung",
             registered_by="self",
-            owner_username="michele",
+            owner_username="sam",
         )
         session.add(dev)
         session.commit()
@@ -232,10 +232,10 @@ class TestVisibility:
 
     def test_an_admin_sees_every_device(self, session: Session):
         _client(session)
-        login(session, "michele").post(REGISTER, json=_phone_payload())
+        login(session, "sam").post(REGISTER, json=_phone_payload())
         login(session, "kate").post(REGISTER, json=_phone_payload(device_key="phone-kate99"))
 
-        keys = {d["device_key"] for d in login(session, "jeremiah").get("/api/user-panel/devices").json()}
+        keys = {d["device_key"] for d in login(session, "alex").get("/api/user-panel/devices").json()}
         assert keys == {"phone-abc12345", "phone-kate99"}
 
 
@@ -243,20 +243,20 @@ class TestAdminRegistration:
     def test_phones_may_not_be_created_by_an_admin(self, client: TestClient, session: Session):
         """A phone registers itself; an admin creating one would bypass the
         idempotency and let a stale duplicate exist."""
-        resp = login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "p1", "kind": "phone"})
+        resp = login(session, "alex").post("/api/user-panel/devices", json={"device_key": "p1", "kind": "phone"})
         assert resp.status_code == 422
         assert "themselves" in resp.json()["detail"]
 
     def test_tablets_may_not_be_created_by_an_admin(self, session: Session):
         """A tablet self-registers the same way a phone does."""
         _client(session)
-        resp = login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "t1", "kind": "tablet"})
+        resp = login(session, "alex").post("/api/user-panel/devices", json={"device_key": "t1", "kind": "tablet"})
         assert resp.status_code == 422
         assert "themselves" in resp.json()["detail"]
 
     def test_an_unknown_kind_is_rejected(self, session: Session):
         _client(session)
-        resp = login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "x1", "kind": "toaster"})
+        resp = login(session, "alex").post("/api/user-panel/devices", json={"device_key": "x1", "kind": "toaster"})
         assert resp.status_code == 422
 
     def test_a_normal_user_may_not_register_a_light(self, client: TestClient):
@@ -264,7 +264,7 @@ class TestAdminRegistration:
 
     def test_a_light_needs_no_account_of_its_own(self, session: Session):
         _client(session)
-        resp = login(session, "jeremiah").post(
+        resp = login(session, "alex").post(
             "/api/user-panel/devices",
             json={"device_key": "light-1", "kind": "light", "label": "Porch", "capabilities": {"dimmable": True}},
         )
@@ -274,12 +274,12 @@ class TestAdminRegistration:
 
     def test_a_duplicate_key_is_refused(self, session: Session):
         _client(session)
-        login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
-        assert login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"}).status_code == 409
+        login(session, "alex").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
+        assert login(session, "alex").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"}).status_code == 409
 
     def test_assigning_to_a_user_that_does_not_exist_is_refused(self, session: Session):
         _client(session)
-        resp = login(session, "jeremiah").post(
+        resp = login(session, "alex").post(
             "/api/user-panel/devices",
             json={"device_key": "light-2", "kind": "light", "owner_username": "nobody"},
         )
@@ -288,33 +288,33 @@ class TestAdminRegistration:
 
 class TestAssignment:
     def test_assignment_is_admin_only(self, client: TestClient, session: Session):
-        login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
-        login(session, "michele")
-        resp = client.patch("/api/user-panel/devices/light-1", json={"owner_username": "michele"})
+        login(session, "alex").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
+        login(session, "sam")
+        resp = client.patch("/api/user-panel/devices/light-1", json={"owner_username": "sam"})
         assert resp.status_code == 403
 
     def test_an_admin_can_assign(self, session: Session):
         _client(session)
-        login(session, "jeremiah").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
-        resp = login(session, "jeremiah").patch("/api/user-panel/devices/light-1", json={"owner_username": "michele"})
+        login(session, "alex").post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light"})
+        resp = login(session, "alex").patch("/api/user-panel/devices/light-1", json={"owner_username": "sam"})
         assert resp.status_code == 200
-        assert resp.json()["owner_username"] == "michele"
+        assert resp.json()["owner_username"] == "sam"
 
     def test_an_admin_can_unassign(self, session: Session):
         _client(session)
-        admin = login(session, "jeremiah")
-        admin.post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light", "owner_username": "jeremiah"})
+        admin = login(session, "alex")
+        admin.post("/api/user-panel/devices", json={"device_key": "light-1", "kind": "light", "owner_username": "alex"})
         resp = admin.patch("/api/user-panel/devices/light-1", json={"owner_username": ""})
         assert resp.status_code == 200
         assert resp.json()["owner_username"] is None
 
     def test_an_unknown_device_is_404(self, session: Session):
         _client(session)
-        assert login(session, "jeremiah").patch("/api/user-panel/devices/ghost", json={"owner_username": "michele"}).status_code == 404
+        assert login(session, "alex").patch("/api/user-panel/devices/ghost", json={"owner_username": "sam"}).status_code == 404
 
     def test_an_admin_can_reclassify_kind_and_label(self, client: TestClient, session: Session):
         client.post(REGISTER, json=_phone_payload(device_key="mobile-reclass-1"))
-        admin = login(session, "jeremiah")
+        admin = login(session, "alex")
         resp = admin.patch(
             "/api/user-panel/devices/mobile-reclass-1",
             json={"kind": "tablet", "label": "Family Tablet"},
@@ -342,7 +342,7 @@ class TestTelemetryIngest:
         stored = session.exec(select(DeviceEvent)).all()
         assert len(stored) == 1
         assert json.loads(stored[0].extra) == {"from": "widget"}
-        assert stored[0].username == "michele"
+        assert stored[0].username == "sam"
 
     def test_a_battery_reading_is_logged(self, client: TestClient, session: Session):
         """A watch logs its charge each sync, so the discharge curve can be
@@ -357,10 +357,10 @@ class TestTelemetryIngest:
         assert json.loads(session.exec(select(DeviceEvent)).one().extra) == reading
 
     def test_a_low_watch_battery_notifies_the_family(self, client: TestClient, session: Session, monkeypatch):
-        login(session, "jeremiah").post(
+        login(session, "alex").post(
             "/api/user-panel/devices",
             json={"device_key": "esphome:watch", "kind": "watch", "label": "Jarvis Watch",
-                  "owner_username": "michele"},
+                  "owner_username": "sam"},
         )
         sent = []
 
@@ -369,20 +369,20 @@ class TestTelemetryIngest:
             return True
 
         monkeypatch.setattr(notify, "send", send)
-        resp = login(session, "michele").post(
+        resp = login(session, "sam").post(
             "/api/user-panel/devices/telemetry",
             json={"device_key": "esphome:watch",
                   "events": [{"event": "battery", "extra": {"pct": 14, "usb": False}}]},
         )
         assert resp.status_code == 200
-        assert sorted(n["user"] for n in sent) == ["jeremiah", "kate"]
+        assert sorted(n["user"] for n in sent) == ["alex", "kate"]
         notice = sent[0]
         assert notice["title"] == "Jarvis Watch is at 14%"
         assert notice["tag"] == "watch_battery:esphome:watch"
         assert notice["data"]["device_key"] == "esphome:watch"
         assert notice["data"]["url"] == "/identity"
 
-        login(session, "michele").post(
+        login(session, "sam").post(
             "/api/user-panel/devices/telemetry",
             json={"device_key": "esphome:watch",
                   "events": [{"event": "battery", "extra": {"pct": 12, "usb": False}}]},
@@ -426,7 +426,7 @@ class TestTelemetryIngest:
 
     def test_you_cannot_write_to_someone_elses_device(self, session: Session):
         _client(session)
-        login(session, "michele").post(REGISTER, json=_phone_payload())
+        login(session, "sam").post(REGISTER, json=_phone_payload())
         kate = login(session, "kate")
         resp = kate.post(
             "/api/user-panel/devices/telemetry",
@@ -479,8 +479,8 @@ CLAIM = "/api/internal/devices/claim"
 
 def _claim(**over):
     body = {"device_key": "esphome:744dbd2c9728", "kind": "watch", "label": "Jarvis Watch",
-            "owner_username": "michele", "verified": True, "esphome_version": "2026.9.0",
-            "hardware": "esp32s3", "ip_address": "192.168.2.105"}
+            "owner_username": "sam", "verified": True, "esphome_version": "2026.9.0",
+            "hardware": "esp32s3", "ip_address": "192.0.2.105"}
     body.update(over)
     return body
 
@@ -491,9 +491,9 @@ class TestCompanionClaim:
     def test_pairing_links_the_device_to_the_user_who_added_it(self, client: TestClient, session: Session):
         body = client.post(CLAIM, json=_claim()).json()
         assert body["kind"] == "watch"
-        assert body["owner_username"] == "michele"
+        assert body["owner_username"] == "sam"
         assert body["registered_by"] == "paired"
-        assert body["last_ip_address"] == "192.168.2.105"
+        assert body["last_ip_address"] == "192.0.2.105"
         # ...and it shows up in that user's own device list.
         mine = client.get("/api/user-panel/devices").json()
         assert [d["device_key"] for d in mine] == ["esphome:744dbd2c9728"]
@@ -507,12 +507,12 @@ class TestCompanionClaim:
 
     def test_someone_elses_device_moves_only_with_the_code(self, client: TestClient):
         client.post(CLAIM, json=_claim(owner_username="kate"))
-        refused = client.post(CLAIM, json=_claim(owner_username="michele", verified=False))
+        refused = client.post(CLAIM, json=_claim(owner_username="sam", verified=False))
         assert refused.status_code == 409
         assert "kate" in refused.json()["detail"]
-        moved = client.post(CLAIM, json=_claim(owner_username="michele", verified=True))
+        moved = client.post(CLAIM, json=_claim(owner_username="sam", verified=True))
         assert moved.status_code == 200
-        assert moved.json()["owner_username"] == "michele"
+        assert moved.json()["owner_username"] == "sam"
 
     def test_a_phone_cannot_be_claimed(self, client: TestClient):
         assert client.post(REGISTER, json=_phone_payload()).status_code == 200
@@ -533,7 +533,7 @@ class TestCompanionClaim:
         assert client.post(CLAIM, json=_claim(owner_username="nobody")).status_code == 404
 
     def test_claim_requires_the_internal_secret(self, session: Session):
-        client = _client(session, "michele")
+        client = _client(session, "sam")
         app.dependency_overrides.pop(require_internal, None)
         try:
             resp = client.post(CLAIM, json=_claim())
@@ -576,11 +576,11 @@ class TestBatteryReports:
         history = client.get(f"/api/user-panel/devices/{key}/battery?hours=24").json()
         assert [h["pct"] for h in history] == [90.0, 85.0, 80.0]
         assert login(session, "kate").get(f"/api/user-panel/devices/{key}/battery").status_code == 403
-        assert login(session, "jeremiah").get(f"/api/user-panel/devices/{key}/battery").status_code == 200
+        assert login(session, "alex").get(f"/api/user-panel/devices/{key}/battery").status_code == 200
 
     def test_old_reports_are_pruned(self, client: TestClient, session: Session):
         key = self._watch(client)
-        session.add(DeviceEvent(device_key=key, username="michele", event="battery", extra="{}",
+        session.add(DeviceEvent(device_key=key, username="sam", event="battery", extra="{}",
                                 at="2020-01-01T00:00:00"))
         session.commit()
         self._report(client, key, pct=50.0, usb=False)
@@ -592,22 +592,22 @@ class TestBatteryReports:
 def test_internal_owned_devices_lists_a_persons_phones_and_tablets(client: TestClient, session: Session):
     assert client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345")).status_code == 200
     assert client.post(REGISTER, json=_phone_payload(device_key="tablet-xyz98765", form_factor="tablet")).status_code == 200
-    session.add(Device(device_key="assistant-kitchen-1", kind="assistant", registered_by="admin", owner_username="michele"))
+    session.add(Device(device_key="assistant-kitchen-1", kind="assistant", registered_by="admin", owner_username="sam"))
     session.commit()
 
-    owned = client.get("/api/internal/owned-devices/michele").json()["devices"]
+    owned = client.get("/api/internal/owned-devices/sam").json()["devices"]
     assert sorted(owned) == ["phone-abc12345", "tablet-xyz98765"]
     assert client.get("/api/internal/owned-devices/kate").json()["devices"] == []
 
 
 def test_internal_device_registered(client: TestClient, session: Session):
     client.post(REGISTER, json=_phone_payload(device_key="phone-abc12345"))
-    assert client.get("/api/internal/device-registered/phone-abc12345").json() == {"registered": True, "owner": "michele"}
+    assert client.get("/api/internal/device-registered/phone-abc12345").json() == {"registered": True, "owner": "sam"}
     assert client.get("/api/internal/device-registered/never-seen-key-01").json()["registered"] is False
 
 
 def test_a_parent_signing_in_on_a_childs_tablet_does_not_take_it_over(client: TestClient, session: Session):
-    for name, role in (("jeremiah", "father"), ("kid", "child"), ("kate", "adult_child")):
+    for name, role in (("alex", "father"), ("kid", "child"), ("kate", "adult_child")):
         user = session.exec(select(User).where(User.username == name)).first() or _make_user(session, name)
         user.family_role = role
         session.add(user)
@@ -615,7 +615,7 @@ def test_a_parent_signing_in_on_a_childs_tablet_does_not_take_it_over(client: Te
     login(session, "kid").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet"))
 
     # The father signs in on it to set it up: it stays the child's.
-    assert login(session, "jeremiah").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet")).status_code == 200
+    assert login(session, "alex").post(REGISTER, json=_phone_payload(device_key="kid-tablet-00000001", form_factor="tablet")).status_code == 200
     session.expire_all()
     assert session.exec(select(Device).where(Device.device_key == "kid-tablet-00000001")).first().owner_username == "kid"
 

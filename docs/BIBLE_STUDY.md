@@ -556,7 +556,7 @@ Compose entry (`docker-compose.yml`, service `bible`): image
 `STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}` (the Calibre shelf),
 `GEO_SVC_URL=${BRIDGE_GEO_SVC_URL}`,
 `REDIS_URL=${BRIDGE_REDIS_URL}` (passed but unused),
-`GATEWAY_INTERNAL_URL=http://gateway:11435`, `TZ=America/Phoenix`,
+`GATEWAY_INTERNAL_URL=http://gateway:11435`, `TZ=${TZ:-UTC}` (set `TZ` in `.env` to your zone, e.g. America/Denver),
 volume `./data/bible:/data`, `depends_on: redis`.
 `BRIDGE_BIBLE_SVC_URL` is in `.env.example`, `_net_url("BIBLE", …)` in
 `services/config.py` reads it, Identity seeds `bible_svc_url`, and the

@@ -1,7 +1,10 @@
 import logging
+import os
 import sys
 
 import requests
+
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
 
 # Configure Logging
 logging.basicConfig(
@@ -60,7 +63,7 @@ def main():
         # 2. Test "Watch" (Video Search & Stream)
         # User specifically wants to verify the "Search -> Download -> Stream" pipeline
         test_query("Watch funny cat videos on Office TV", expected_device_substr="Office TV")
-        test_query("Watch funny cat videos on Gracies TV", expected_device_substr="Gracies TV")
+        test_query(f"Watch funny cat videos on {LIVE_TV_NAME}", expected_device_substr=f"{LIVE_TV_NAME}")
         # Ideally we'd look for "Downloading" or "streaming" in the response logic,
         # but "Done" or "Playing" is the standard success message.
 
@@ -71,8 +74,8 @@ def main():
         # 4. Test Power (Office TV)
         test_query("Turn off Office TV", expected_device_substr="Office TV")
 
-        # 5. Test Power (Roku - Gracies TV)
-        test_query("Turn off Gracies TV", expected_device_substr="Gracies TV")
+        # 5. Test Power (Roku TV)
+        test_query(f"Turn off {LIVE_TV_NAME}", expected_device_substr=f"{LIVE_TV_NAME}")
 
     finally:
         log.info("\n--- Teardown: Restoring Device State ---")

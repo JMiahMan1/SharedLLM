@@ -10,7 +10,7 @@ from services.gateway import main as gateway_main
 from services.gateway import push_callbacks, push_routes
 from services.gateway.main import app
 
-KEY = {"Authorization": "Bearer michele-key", "X-Device-Id": "pixel-1"}
+KEY = {"Authorization": "Bearer sam-key", "X-Device-Id": "pixel-1"}
 
 
 @pytest.fixture
@@ -23,12 +23,12 @@ def identity(monkeypatch):
     ]}
 
     async def strict(key):
-        return {"user": "michele", "is_admin": False} if key == "michele-key" else None
+        return {"user": "sam", "is_admin": False} if key == "sam-key" else None
 
     async def fake(method, path, *, params=None, json=None, headers=None):
         calls.append((method, path, params, json, headers))
         if path == "/api/internal/push/topic":
-            return {"topic": "jarvis-michele-secret"}
+            return {"topic": "jarvis-sam-secret"}
         if path == "/api/internal/push/up":
             regs = state["registrations"]
             if params.get("device_id"):
@@ -85,9 +85,9 @@ class _FakeSession:
 def ntfy(monkeypatch):
     """A stand-in for ntfy's JSON stream that records what was asked."""
     lines = [
-        b'{"id":"o1","event":"open","topic":"jarvis-michele-secret,upAAA"}\n',
+        b'{"id":"o1","event":"open","topic":"jarvis-sam-secret,upAAA"}\n',
         b'{"id":"m1","event":"message","topic":"upAAA","message":"AAEC","encoding":"base64"}\n',
-        b'{"id":"k1","event":"keepalive","topic":"jarvis-michele-secret,upAAA"}\n',
+        b'{"id":"k1","event":"keepalive","topic":"jarvis-sam-secret,upAAA"}\n',
     ]
     state = {"session": _FakeSession(), "resp": _FakeResp(lines)}
 
@@ -118,18 +118,18 @@ def test_stream_relays_ntfy_for_the_person_and_this_device(client, identity, ntf
     events = [json.loads(line) for line in resp.text.splitlines()]
     assert [e["event"] for e in events] == ["open", "message", "keepalive"]
     assert events[1]["topic"] == "upAAA" and events[1]["encoding"] == "base64"
-    assert ntfy["topics"] == ["jarvis-michele-secret", "upAAA"]  # not the tablet's upBBB
+    assert ntfy["topics"] == ["jarvis-sam-secret", "upAAA"]  # not the tablet's upBBB
     assert ntfy["since"] == "m0"
     assert ntfy["resp"].released and ntfy["session"].closed
 
 
 def test_stream_accepts_the_key_as_x_api_key(client, identity, ntfy):
-    resp = client.get("/api/push/stream", headers={"X-Api-Key": "michele-key", "X-Device-Id": "pixel-1"})
+    resp = client.get("/api/push/stream", headers={"X-Api-Key": "sam-key", "X-Device-Id": "pixel-1"})
     assert resp.status_code == 200
 
 
 def test_stream_needs_a_device_id(client, identity, ntfy):
-    assert client.get("/api/push/stream", headers={"Authorization": "Bearer michele-key"}).status_code == 400
+    assert client.get("/api/push/stream", headers={"Authorization": "Bearer sam-key"}).status_code == 400
 
 
 def test_stream_rejects_a_malformed_since(client, identity, ntfy):
@@ -174,17 +174,17 @@ def test_register_returns_the_public_endpoint(client, identity):
     assert resp.json() == {"endpoint": "https://jarvis.example.com/push/upNEW", "topic": "upNEW"}
     _, path, _, sent, _ = identity[-1]
     assert path == "/api/internal/push/up/register"
-    assert sent == {"username": "michele", "device_id": "pixel-1", "app": "com.nextcloud.talk2", "token": "t9"}
+    assert sent == {"username": "sam", "device_id": "pixel-1", "app": "com.nextcloud.talk2", "token": "t9"}
 
 
 def test_register_needs_a_device_id(client, identity):
-    resp = client.post("/api/push/up/register", headers={"Authorization": "Bearer michele-key"},
+    resp = client.post("/api/push/up/register", headers={"Authorization": "Bearer sam-key"},
                        json={"app": "a", "token": "t"})
     assert resp.status_code == 400
 
 
 def test_unregister_from_the_web_needs_no_device(client, identity):
-    resp = client.post("/api/push/up/unregister", headers={"Authorization": "Bearer michele-key"},
+    resp = client.post("/api/push/up/unregister", headers={"Authorization": "Bearer sam-key"},
                        json={"app": "org.matrix", "token": "t2"})
     assert resp.json() == {"status": "SUCCESS", "removed": 1}
     assert identity[-1][3]["device_id"] == ""
@@ -194,7 +194,7 @@ def test_list_marks_this_device_and_adds_endpoints(client, identity):
     regs = client.get("/api/push/up", headers=KEY).json()["registrations"]
     assert [(r["app"], r["this_device"]) for r in regs] == [("com.nextcloud.talk2", True), ("org.matrix", False)]
     assert regs[0]["endpoint"] == "https://jarvis.example.com/push/upAAA"
-    assert identity[-1][2] == {"username": "michele"}
+    assert identity[-1][2] == {"username": "sam"}
 
 
 def test_action_runs_a_registered_callback_as_the_caller(client, identity, monkeypatch):
@@ -207,7 +207,7 @@ def test_action_runs_a_registered_callback_as_the_caller(client, identity, monke
     monkeypatch.setitem(push_callbacks.PUSH_CALLBACKS, "test_cb", fake)
     resp = client.post("/api/push/action", headers=KEY, json={"callback": "test_cb", "params": {"a": 1}, "reply": "hi"})
     assert resp.json() == {"status": "SUCCESS"}
-    assert seen == {"auth": "Bearer michele-key", "params": {"a": 1}, "reply": "hi"}
+    assert seen == {"auth": "Bearer sam-key", "params": {"a": 1}, "reply": "hi"}
 
 
 def test_action_with_x_api_key_reaches_callbacks_as_a_bearer(client, identity, monkeypatch):
@@ -218,8 +218,8 @@ def test_action_with_x_api_key_reaches_callbacks_as_a_bearer(client, identity, m
         return {"status": "SUCCESS"}
 
     monkeypatch.setitem(push_callbacks.PUSH_CALLBACKS, "test_cb", fake)
-    client.post("/api/push/action", headers={"X-Api-Key": "michele-key"}, json={"callback": "test_cb"})
-    assert seen["auth"] == "Bearer michele-key"
+    client.post("/api/push/action", headers={"X-Api-Key": "sam-key"}, json={"callback": "test_cb"})
+    assert seen["auth"] == "Bearer sam-key"
 
 
 def test_unknown_callbacks_and_bad_params_are_refused(client, identity):
@@ -237,7 +237,7 @@ def test_chat_reply_posts_into_talk_as_the_caller(client, identity, monkeypatch)
     monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
     body = {"callback": "chat_reply", "params": {"token": "abc123"}, "reply": " On my way "}
     assert client.post("/api/push/action", headers=KEY, json=body).json() == {"status": "SUCCESS"}
-    assert sent == [("Bearer michele-key", "/execute/talk", {"action": "send", "token": "abc123", "message": "On my way"})]
+    assert sent == [("Bearer sam-key", "/execute/talk", {"action": "send", "token": "abc123", "message": "On my way"})]
 
 
 @pytest.mark.parametrize("body", [{"params": {"token": "abc"}, "reply": "  "}, {"params": {}, "reply": "hi"}])
@@ -251,7 +251,7 @@ def test_preferences_are_read_and_written_through_identity_as_the_caller(client,
     resp = client.put("/api/users/me/notification-preferences", headers=KEY, json={"bible": False})
     assert resp.json()["preferences"] == {"chat": True, "bible": False}
     method, _path, _, body, headers = identity[-1]
-    assert (method, body, headers) == ("PUT", {"bible": False}, {"Authorization": "Bearer michele-key"})
+    assert (method, body, headers) == ("PUT", {"bible": False}, {"Authorization": "Bearer sam-key"})
 
 
 async def test_open_stream_asks_ntfy_for_the_topics_with_the_server_token(monkeypatch):

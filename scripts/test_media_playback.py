@@ -5,6 +5,9 @@ import time
 import requests
 from dotenv import load_dotenv
 
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
+LIVE_TV_ENTITY = os.environ.get("LIVE_TV_ENTITY") or sys.exit("Set LIVE_TV_ENTITY to the TV media_player entity id to test.")
+
 load_dotenv()
 RAG_ADDRESS = os.getenv("RAG_ADDRESS")
 
@@ -19,7 +22,7 @@ HEADERS = {"X-RAG-User": "admin"}
 DEVICE_MAP = {
     "Office TV": ["media_player.office_tv", "media_player.office_tv_chrome_2"],
     "Master Bedroom TV": ["media_player.master_bedroom_tv", "media_player.master_bedroom_tv_adb"],
-    "Gracies TV": ["media_player.gracies_tv", "media_player.gracie_s_tv"]
+    LIVE_TV_NAME: [LIVE_TV_ENTITY]
 }
 
 def get_ha_state(entity_id):
@@ -150,14 +153,14 @@ def main():
     else:
         fails += 1
 
-    # 3. Gracie
-    if run_test_strict("Play generic music on Gracies TV", "Gracies TV", "play"):
+    # 3. The test TV
+    if run_test_strict(f"Play generic music on {LIVE_TV_NAME}", f"{LIVE_TV_NAME}", "play"):
         passes += 1
     else:
         fails += 1
 
     time.sleep(2)
-    if run_test_strict("Stop Gracies TV", "Gracies TV", "stop"):
+    if run_test_strict(f"Stop {LIVE_TV_NAME}", f"{LIVE_TV_NAME}", "stop"):
         passes += 1
     else:
         fails += 1

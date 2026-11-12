@@ -40,7 +40,7 @@ def proxy(monkeypatch):
 
     class Family:
         async def family(self):
-            return ["dad", "michele", "leo"]
+            return ["dad", "sam", "leo"]
 
     class Client:
         def request(self, method, url, params=None, json=None, **kw):
@@ -71,13 +71,13 @@ def test_adding_a_place_pins_it_to_the_caller(proxy):
     answer["body"] = {"place": {"id": "a" * 32}}
     resp = client.post(
         "/api/geo/saved-places",
-        json={"name": "Gym", "lat": 33.4, "lon": -111.9, "scope": "family", "important": True, "notify": ["michele"]},
+        json={"name": "Gym", "lat": 40.0, "lon": -105.4, "scope": "family", "important": True, "notify": ["sam"]},
     )
     assert resp.status_code == 200
     method, url, params, body = calls[-1]
     assert method == "POST" and url.endswith("/places")
     assert params == {"owner": "leo"}
-    assert body == {"name": "Gym", "lat": 33.4, "lon": -111.9, "scope": "family", "important": True, "notify": ["michele"]}
+    assert body == {"name": "Gym", "lat": 40.0, "lon": -105.4, "scope": "family", "important": True, "notify": ["sam"]}
 
 
 def test_the_notify_list_must_name_family_members(proxy):
@@ -90,7 +90,7 @@ def test_the_notify_list_must_name_family_members(proxy):
 
 def test_only_the_owner_or_an_admin_may_change_a_place(proxy):
     client, calls, answer = proxy
-    answer["body"] = {"places": [{"id": "a" * 32, "name": "Gym", "owner": "michele"}]}
+    answer["body"] = {"places": [{"id": "a" * 32, "name": "Gym", "owner": "sam"}]}
     resp = client.put(f"/api/geo/saved-places/{'a' * 32}", json={"important": True})
     assert resp.status_code == 403
     assert "who added" in resp.json()["detail"]

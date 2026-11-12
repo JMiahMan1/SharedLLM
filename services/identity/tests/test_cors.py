@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from services.config import IDENTITY_CORS_ORIGINS
 from services.identity.main import app
 
-APP_ORIGIN = "https://jarvis.sumemail.com"
+APP_ORIGIN = "https://jarvis.example.com"
 DEV_ORIGIN = "http://localhost:5173"
 FOREIGN_ORIGIN = "https://evil.example"
 

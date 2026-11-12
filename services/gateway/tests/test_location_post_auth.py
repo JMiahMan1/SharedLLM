@@ -36,31 +36,31 @@ def _setup(monkeypatch, ident):
     return sent
 
 
-FIX = {"latitude": 33.1, "longitude": -111.5, "accuracy": 6, "timestamp": 1791000000}
+FIX = {"latitude": 39.7, "longitude": -105.0, "accuracy": 6, "timestamp": 1791000000}
 
 
 def test_anonymous_posts_are_refused(monkeypatch):
     sent = _setup(monkeypatch, None)
     client = TestClient(app)
-    assert client.post("/api/users/michele/location", json=FIX).status_code == 401
-    assert client.post("/api/users/location", json={**FIX, "user_id": "michele"}).status_code == 401
+    assert client.post("/api/users/sam/location", json=FIX).status_code == 401
+    assert client.post("/api/users/location", json={**FIX, "user_id": "sam"}).status_code == 401
     assert sent == []
 
 
 def test_you_may_post_only_your_own(monkeypatch):
-    sent = _setup(monkeypatch, {"user": "jeremiah", "is_admin": False})
+    sent = _setup(monkeypatch, {"user": "alex", "is_admin": False})
     client = TestClient(app)
-    assert client.post("/api/users/michele/location", json=FIX).status_code == 403
-    assert client.post("/api/users/Jeremiah/location", json=FIX).status_code == 200
+    assert client.post("/api/users/sam/location", json=FIX).status_code == 403
+    assert client.post("/api/users/Alex/location", json=FIX).status_code == 200
     # the collection route ignores a user_id a non-admin names
-    assert client.post("/api/users/location", json={**FIX, "user_id": "michele"}).status_code == 200
-    assert sent[-1][0].endswith("/api/users/jeremiah/location")
+    assert client.post("/api/users/location", json={**FIX, "user_id": "sam"}).status_code == 200
+    assert sent[-1][0].endswith("/api/users/alex/location")
 
 
 def test_an_admin_may_post_for_someone(monkeypatch):
-    sent = _setup(monkeypatch, {"user": "jeremiah", "is_admin": True})
-    assert TestClient(app).post("/api/users/michele/location", json=FIX).status_code == 200
-    assert sent[-1][0].endswith("/api/users/michele/location")
+    sent = _setup(monkeypatch, {"user": "alex", "is_admin": True})
+    assert TestClient(app).post("/api/users/sam/location", json=FIX).status_code == 200
+    assert sent[-1][0].endswith("/api/users/sam/location")
 
 
 def test_reading_a_location_needs_a_sign_in(monkeypatch):
@@ -71,5 +71,5 @@ def test_reading_a_location_needs_a_sign_in(monkeypatch):
     async def nobody(request):
         return None
     monkeypatch.setattr(gateway_main, "_user_id_from_request", nobody)
-    assert TestClient(app).get("/api/users/michele/location").status_code == 401
+    assert TestClient(app).get("/api/users/sam/location").status_code == 401
     assert sent == []

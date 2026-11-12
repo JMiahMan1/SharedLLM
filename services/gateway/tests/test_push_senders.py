@@ -83,7 +83,7 @@ def sent(monkeypatch):
         return True
 
     async def family(**kw):
-        return ["jeremiah", "leo", "michele"]
+        return ["alex", "leo", "sam"]
 
     monkeypatch.setattr(notify, "send", send)
     monkeypatch.setattr(notify, "family", family)
@@ -94,11 +94,11 @@ def sent(monkeypatch):
 
 
 def test_a_chat_notice_has_its_category_tag_and_buttons():
-    conv = {"token": "fam", "display_name": "Summers Family", "type": 2, "last_message_id": 7,
-            "last_message": "Dinner at 6", "last_message_actor": "Michele", "last_message_actor_id": "michele",
+    conv = {"token": "fam", "display_name": "Rivera Family", "type": 2, "last_message_id": 7,
+            "last_message": "Dinner at 6", "last_message_actor": "Sam", "last_message_actor_id": "sam",
             "unread_messages": 1}
-    notice = chat_notify.notice_for(conv, "jeremiah", "jeremiah")
-    assert notice["user"] == "jeremiah" and notice["category"] == "chat" and notice["kind"] == "chat"
+    notice = chat_notify.notice_for(conv, "alex", "alex")
+    assert notice["user"] == "alex" and notice["category"] == "chat" and notice["kind"] == "chat"
     assert notice["tag"] == "chat:fam" and notice["once"] == "chat:fam:7"
     assert notice["actions"] == [
         {"label": "Reply", "type": "reply", "callback": "chat_reply", "params": {"token": "fam"}},
@@ -201,7 +201,7 @@ async def test_an_older_build_published_late_does_not_replace_the_newest(sent):
 
 
 async def test_a_finished_mission_tells_its_owner_with_a_summary(sent):
-    await notices.mission_finished("michele", 42, "completed", "Built the site.\n\nAll tests pass.", "ws1")
+    await notices.mission_finished("sam", 42, "completed", "Built the site.\n\nAll tests pass.", "ws1")
     notice = sent[0]
     assert notice["category"] == "raven" and notice["title"] == "Mission #42 finished"
     assert notice["body"] == "Built the site. All tests pass."
@@ -221,7 +221,7 @@ async def test_a_mission_waiting_for_approval_goes_to_admins_with_both_buttons(s
 def test_mission_notices_skip_the_system_account():
     from services.gateway.background_worker import _mission_owner
 
-    assert _mission_owner({"creds": {"user": "michele"}}) == "michele"
+    assert _mission_owner({"creds": {"user": "sam"}}) == "sam"
     assert _mission_owner({"creds": {"user": "default"}}) == ""
     assert _mission_owner({}) == ""
 
@@ -261,7 +261,7 @@ def missions(monkeypatch):
     return store, deleted, dispatched
 
 
-ADMIN = {"user": "jeremiah", "id": 1, "is_admin": True}
+ADMIN = {"user": "alex", "id": 1, "is_admin": True}
 
 
 def test_the_raven_buttons_are_registered():
@@ -271,7 +271,7 @@ def test_the_raven_buttons_are_registered():
 async def test_an_admin_approves_or_rejects_a_waiting_mission(missions):
     store, deleted, dispatched = missions
     assert (await raven_approval.approve(ADMIN, {"mission_id": 7}))["status"] == "SUCCESS"
-    assert dispatched == [(7, "jeremiah")] and store[7]["status"] == "queued"
+    assert dispatched == [(7, "alex")] and store[7]["status"] == "queued"
     store[8] = {"id": 8, "status": "pending", "user_id": 5}
     assert (await raven_approval.reject(ADMIN, {"mission_id": "8"}))["status"] == "SUCCESS"
     assert deleted == [8]
@@ -311,7 +311,7 @@ async def test_a_mission_waits_for_the_one_it_depends_on(missions):
     assert dispatched == [] and store[7]["status"] == "pending"
     store[6] = {"id": 6, "status": "completed"}
     await raven_approval.approve(ADMIN, {"mission_id": 7})
-    assert dispatched == [(7, "jeremiah")]
+    assert dispatched == [(7, "alex")]
 
 
 async def test_two_taps_enqueue_once(missions, monkeypatch):
@@ -331,7 +331,7 @@ async def test_two_taps_enqueue_once(missions, monkeypatch):
                                    raven_approval.approve(ADMIN, {"mission_id": 7}),
                                    return_exceptions=True)
 
-    assert dispatched == [(7, "jeremiah")]
+    assert dispatched == [(7, "alex")]
     assert sum(isinstance(r, HTTPException) and r.status_code == 409 for r in results) == 1
 
 
@@ -360,7 +360,7 @@ def safety_client(sent, monkeypatch):
     async def caller(request):
         return "leo"
 
-    who = {"creds": {"user": "jeremiah", "id": 1, "is_admin": True}}
+    who = {"creds": {"user": "alex", "id": 1, "is_admin": True}}
 
     async def identity(request, body=None):
         return who["creds"]
@@ -399,7 +399,7 @@ def test_on_my_way_tells_everyone_else_with_the_drive_time(safety_client, sent):
     answers["/eta"] = {"arrived": False, "duration_s": 1260, "eta": 1}
     body = client.post("/api/family/on-my-way").json()
     assert body["sent"] == 2 and body["eta_s"] == 1260
-    assert {n["user"] for n in sent} == {"jeremiah", "michele"}
+    assert {n["user"] for n in sent} == {"alex", "sam"}
     assert sent[0]["category"] == "family_safety" and sent[0]["body"] == "Home in about 21 min by road."
 
 
@@ -420,14 +420,14 @@ def test_sos_is_urgent_and_carries_the_last_position(safety_client, sent):
     import time
 
     client, answers = safety_client
-    answers["/location"] = {"latitude": 33.4484, "longitude": -112.074, "timestamp": time.time() - 120}
+    answers["/location"] = {"latitude": 40.0484, "longitude": -105.574, "timestamp": time.time() - 120}
     body = client.post("/api/family/sos", json={"confirm": True}).json()
     assert body == {"status": "SUCCESS", "sent": 2, "family": 2, "located": True}
     notice = sent[0]
     assert notice["priority"] == 5 and notice["category"] == "family_safety"
     assert notice["title"] == "SOS from Leo"
-    assert "Last seen 2 min ago at 33.44840, -112.07400" in notice["body"]
-    assert notice["actions"][1]["url"].startswith("https://www.openstreetmap.org/?mlat=33.44840")
+    assert "Last seen 2 min ago at 40.04840, -105.57400" in notice["body"]
+    assert notice["actions"][1]["url"].startswith("https://www.openstreetmap.org/?mlat=40.04840")
 
 
 def test_sos_text_without_a_position_or_with_an_old_one():
@@ -491,8 +491,8 @@ def test_crash_and_check_in_name_the_device(safety_client, sent):
     answers["/owned-devices/"] = {"details": [{"kind": "tablet"}]}
     assert client.post("/api/family/check-in", json={}).json()["detail"] == (
         "Your tablet could not tell where you are, so nothing was sent")
-    _, body, _ = family_safety.crash_text("Noah", True, None, None, 0.0, "tablet")
-    assert body.startswith("Noah's tablet detected a possible crash")
+    _, body, _ = family_safety.crash_text("Jordan", True, None, None, 0.0, "tablet")
+    assert body.startswith("Jordan's tablet detected a possible crash")
 
 
 def test_ringing_is_refused_when_the_visibility_rule_says_no(safety_client, sent, monkeypatch):
@@ -575,11 +575,11 @@ def test_an_sos_still_goes_out_when_redis_is_down(safety_client, sent, monkeypat
 
 def test_marking_a_place_important_goes_to_geo(safety_client):
     client, answers = safety_client
-    resp = client.put("/api/geo/places/zone.school", json={"important": True, "notify": ["Michele", "leo", "leo"]})
+    resp = client.put("/api/geo/places/zone.school", json={"important": True, "notify": ["Sam", "leo", "leo"]})
     assert resp.status_code == 200
     url, payload = answers["put"]
     assert url.endswith("/place-settings/zone.school")
-    assert payload == {"important": True, "notify": ["michele", "leo"]}
+    assert payload == {"important": True, "notify": ["sam", "leo"]}
 
 
 @pytest.mark.parametrize("body", [
@@ -587,8 +587,8 @@ def test_marking_a_place_important_goes_to_geo(safety_client):
     {"notify": []},
     {"important": "yes"},
     {"important": 1},
-    {"important": True, "notify": "michele"},
-    {"important": True, "notify": ["michele", 3]},
+    {"important": True, "notify": "sam"},
+    {"important": True, "notify": ["sam", 3]},
     {"important": True, "notify": ["stranger"]},
 ])
 def test_place_settings_are_validated(safety_client, body):
@@ -660,15 +660,15 @@ def test_sos_uses_the_position_the_phone_just_took(safety_client, sent):
     client, answers = safety_client
     answers["/location"] = {"latitude": 1.0, "longitude": 1.0, "timestamp": time.time() - 3 * 3600}  # stale
     now_ms = time.time() * 1000
-    body = client.post("/api/family/sos", json={"confirm": True, "position": {"lat": 33.5, "lon": -112.1, "at": now_ms}}).json()
+    body = client.post("/api/family/sos", json={"confirm": True, "position": {"lat": 40.1, "lon": -105.6, "at": now_ms}}).json()
     assert body["located"] is True
-    assert "Last seen just now at 33.50000, -112.10000" in sent[0]["body"]
+    assert "Last seen just now at 40.10000, -105.60000" in sent[0]["body"]
 
 
 def test_a_stale_or_bad_position_is_ignored():
     now = 10_000.0
-    assert family_safety.fresh_position({"position": {"lat": 33.5, "lon": -112.1, "at": (now - 60) * 1000}}, now)["latitude"] == 33.5
-    assert family_safety.fresh_position({"position": {"lat": 33.5, "lon": -112.1, "at": (now - 3600) * 1000}}, now) is None
+    assert family_safety.fresh_position({"position": {"lat": 40.1, "lon": -105.6, "at": (now - 60) * 1000}}, now)["latitude"] == 40.1
+    assert family_safety.fresh_position({"position": {"lat": 40.1, "lon": -105.6, "at": (now - 3600) * 1000}}, now) is None
     assert family_safety.fresh_position({"position": {"lat": 0, "lon": 0}}, now) is None
     assert family_safety.fresh_position({"position": {"lat": 120, "lon": 0}}, now) is None
     assert family_safety.fresh_position({}, now) is None
@@ -679,12 +679,12 @@ def test_check_in_names_the_place_and_tells_everyone_else(safety_client, sent):
 
     client, answers = safety_client
     answers["/place-name"] = {"name": "Lincoln Elementary", "zone": "place.abc"}
-    body = client.post("/api/family/check-in", json={"position": {"lat": 33.3, "lon": -111.6, "at": time.time() * 1000}}).json()
+    body = client.post("/api/family/check-in", json={"position": {"lat": 39.9, "lon": -105.1, "at": time.time() * 1000}}).json()
     assert body == {"status": "SUCCESS", "sent": 2, "place": "Lincoln Elementary"}
-    assert {n["user"] for n in sent} == {"jeremiah", "michele"}
+    assert {n["user"] for n in sent} == {"alex", "sam"}
     assert sent[0]["title"] == "Leo checked in" and sent[0]["body"] == "Leo is at Lincoln Elementary."
     # Again straight away: the family is not told twice.
-    assert client.post("/api/family/check-in", json={"position": {"lat": 33.3, "lon": -111.6, "at": time.time() * 1000}}).status_code == 429
+    assert client.post("/api/family/check-in", json={"position": {"lat": 39.9, "lon": -105.1, "at": time.time() * 1000}}).status_code == 429
 
 
 def test_check_in_without_a_position_sends_nothing(safety_client, sent):
@@ -698,13 +698,13 @@ def test_a_detected_crash_is_the_most_urgent_notice_with_where_and_how_fast(safe
 
     client, _ = safety_client
     body = {"auto": True, "speed_before_mph": 41.6, "peak_g": 5.2,
-            "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000}}
+            "position": {"lat": 40.1, "lon": -105.6, "at": time.time() * 1000}}
     assert client.post("/api/family/crash", json=body).json()["sent"] == 2
     notice = sent[0]
     assert notice["priority"] == 5 and notice["category"] == "family_safety"
     assert notice["title"] == "Possible crash: Leo"
     assert notice["body"].startswith("Leo's phone detected a possible crash at about 42 mph and they did not answer for a minute.")
-    assert "33.50000, -112.10000" in notice["body"]
+    assert "40.10000, -105.60000" in notice["body"]
     # One alert per crash: a retry (its answer was lost) is told it went out.
     again = client.post("/api/family/crash", json=body)
     assert again.status_code == 200 and again.json()["already_sent"] is True
@@ -715,7 +715,7 @@ def test_get_help_after_a_crash_says_they_asked(safety_client, sent):
     import time
 
     client, _ = safety_client
-    body = {"auto": False, "speed_before_mph": 30, "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000}}
+    body = {"auto": False, "speed_before_mph": 30, "position": {"lat": 40.1, "lon": -105.6, "at": time.time() * 1000}}
     client.post("/api/family/crash", json=body)
     assert sent[0]["body"].startswith("Leo asked for help after a possible crash at about 30 mph.")
 
@@ -725,7 +725,7 @@ def as_admin(monkeypatch):
     from services.gateway import main
 
     async def acting(request):
-        return {"user": "jeremiah", "is_admin": True}
+        return {"user": "alex", "is_admin": True}
 
     monkeypatch.setattr(main, "_acting_identity", acting)
 
@@ -741,7 +741,7 @@ def test_a_crash_alert_is_kept_with_what_the_phone_decided_on(safety_client, sen
 
     client, _ = safety_client
     body = {"auto": True, "speed_before_mph": 41.6, "peak_g": 4.8, "detected_at": 1,
-            "position": {"lat": 33.5, "lon": -112.1, "at": time.time() * 1000},
+            "position": {"lat": 40.1, "lon": -105.6, "at": time.time() * 1000},
             "diagnostics": _crash_diagnostics()}
     client.post("/api/family/crash", json=body)
     reports = client.get("/api/family/crash-reports").json()["reports"]

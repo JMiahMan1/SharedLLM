@@ -295,20 +295,20 @@ def test_metadata_vec_table_without_primary_key_is_rebuilt(tmp_path):
     conn.execute(f"CREATE VIRTUAL TABLE vec_rag_items USING vec0(embedding float[{DIM}], "
                  "collection_name text, user_id text, id text)")
     conn.execute("INSERT INTO rag_items(id,collection_name,user_id,content,metadata,created_at,indexed_at) "
-                 "VALUES('ha:light.kitchen','ha_entities','jeremiah','Kitchen light','{}',0,'')")
+                 "VALUES('ha:light.kitchen','ha_entities','alex','Kitchen light','{}',0,'')")
     blob = struct.pack(f"<{DIM}f", *_fake_embed(["Kitchen light"])[0])
     for _ in range(2):
         conn.execute("INSERT INTO vec_rag_items(embedding,collection_name,user_id,id) "
-                     "VALUES(?, 'ha_entities', 'jeremiah', 'ha:light.kitchen')", [blob])
+                     "VALUES(?, 'ha_entities', 'alex', 'ha:light.kitchen')", [blob])
     conn.commit()
 
     db.init_schema(conn, DIM)
     sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='vec_rag_items'").fetchone()[0]
     assert "id text primary key" in sql.lower()
     assert [tuple(r) for r in conn.execute("SELECT id, collection_name, user_id FROM vec_rag_items")] == [
-        ("ha:light.kitchen", "ha_entities", "jeremiah")
+        ("ha:light.kitchen", "ha_entities", "alex")
     ]
     # The upsert path still replaces in place.
     adapter = SqliteVecAdapter(conn)
-    adapter.add("ha:light.kitchen", _fake_embed(["Kitchen light"])[0], "ha_entities", "jeremiah")
+    adapter.add("ha:light.kitchen", _fake_embed(["Kitchen light"])[0], "ha_entities", "alex")
     assert adapter.count() == 1

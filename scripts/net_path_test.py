@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Network path test for the SharedLLM server (192.168.2.205:11435).
+"""Network path test for the SharedLLM gateway (GATEWAY_URL, e.g. http://192.0.2.10:11435).
 
 Hypothesis under test: the intermittent HTTP 000 / latency spikes to the gateway
 are caused by the server's 2.4 GHz Wi-Fi uplink (router AP wl0-ap0, ch 6),
@@ -16,6 +16,7 @@ Run: python3 net_path_test.py [--duration 60] [--concurrency 5] [--url ...]
 """
 import argparse
 import asyncio
+import os
 import statistics
 import time
 from collections import Counter
@@ -25,8 +26,9 @@ try:
 except ImportError:
     aiohttp = None
 
-URL_HEALTH = "http://192.168.2.205:11435/health"
-URL_RAG = "http://192.168.2.205:11435/api/storage/learning?user_id=default&limit=5"
+_BASE = os.getenv("GATEWAY_URL", "http://localhost:11435").rstrip("/")
+URL_HEALTH = f"{_BASE}/health"
+URL_RAG = f"{_BASE}/api/storage/learning?user_id=default&limit=5"
 
 
 async def probe(session, url, timeout):

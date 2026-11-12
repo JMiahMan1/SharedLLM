@@ -15,7 +15,7 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
         "messages": [{"role": "user", "content": description}],
         "stream": False
     }
-    headers = {"X-Internal-Secret": INTERNAL_SECRET, "X-User-ID": "jeremiah"}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET, "X-User-ID": "alex"}
 
     start_time = time.time()
     resp = httpx.post(f"{GATEWAY_URL}/api/chat", json=payload, headers=headers, timeout=120.0)

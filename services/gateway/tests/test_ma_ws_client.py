@@ -33,7 +33,7 @@ from services.gateway.ma_ws_client import (
 
 @pytest.fixture
 def mass_url():
-    return "http://ha.sumemail.com:8095"
+    return "http://ha.example.com:8095"
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ class TestInitialization:
 
     def test_init_sets_ws_url_with_token(self, client):
         # Token is passed as a query parameter; http:// is converted to ws://
-        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
+        assert client.ws_url == "ws://ha.example.com:8095/ws?token=test.jwt.token.abc123"
 
     def test_init_default_reconnect_settings(self, client):
         assert client._reconnect_base_delay == 1.0
@@ -109,7 +109,7 @@ class TestInitialization:
     def test_init_repr_as_disconnected(self, client):
         repr_str = repr(client)
         assert "disconnected" in repr_str
-        assert "ws://ha.sumemail.com:8095/ws" in repr_str
+        assert "ws://ha.example.com:8095/ws" in repr_str
         assert "reconnects=0" in repr_str
 
     def test_msg_id_starts_at_zero(self, client):
@@ -117,13 +117,13 @@ class TestInitialization:
 
     def test_init_ws_url_with_https_port_8095(self):
         """HTTPS URL with port 8095 should use ws:// (MA direct port)."""
-        client = MAWebSocketClient("https://ha.sumemail.com:8095", "test-token")
-        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test-token"
+        client = MAWebSocketClient("https://ha.example.com:8095", "test-token")
+        assert client.ws_url == "ws://ha.example.com:8095/ws?token=test-token"
 
     def test_init_ws_url_with_http_port_8095(self):
         """HTTP URL with port 8095 should use ws://."""
-        client = MAWebSocketClient("http://ha.sumemail.com:8095", "test-token")
-        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test-token"
+        client = MAWebSocketClient("http://ha.example.com:8095", "test-token")
+        assert client.ws_url == "ws://ha.example.com:8095/ws?token=test-token"
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ class TestConnection:
             await client._establish_connection()
             call_args = mock_connect.call_args
             # Token is in the URL, http:// is converted to ws://
-            assert call_args[0][0] == "ws://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
+            assert call_args[0][0] == "ws://ha.example.com:8095/ws?token=test.jwt.token.abc123"
 
     @pytest.mark.asyncio
     async def test_connect_does_not_use_auth_header(self, client, mock_websocket):
@@ -432,7 +432,7 @@ class TestEventHandling:
 class TestStreamURLExtraction:
     @pytest.mark.asyncio
     async def test_extract_stream_url_from_current_item(self, client):
-        stream_url = "http://ha.sumemail.com:8096/flow/abc123/queue1/1/player1.mp3"
+        stream_url = "http://ha.example.com:8096/flow/abc123/queue1/1/player1.mp3"
         data = {
             "state": "playing",
             "current_item": {
@@ -447,7 +447,7 @@ class TestStreamURLExtraction:
 
     @pytest.mark.asyncio
     async def test_extract_stream_url_from_current_item_flat(self, client):
-        stream_url = "http://ha.sumemail.com:8096/flow/abc123/queue1/1/player1.mp3"
+        stream_url = "http://ha.example.com:8096/flow/abc123/queue1/1/player1.mp3"
         data = {
             "state": "playing",
             "current_item": {
@@ -460,7 +460,7 @@ class TestStreamURLExtraction:
 
     @pytest.mark.asyncio
     async def test_extract_stream_url_from_queue_items(self, client):
-        stream_url = "http://ha.sumemail.com:8096/flow/abc123/queue1/2/player1.mp3"
+        stream_url = "http://ha.example.com:8096/flow/abc123/queue1/2/player1.mp3"
         data = {
             "state": "playing",
             "current_item": {"name": "Current"},
@@ -474,7 +474,7 @@ class TestStreamURLExtraction:
 
     @pytest.mark.asyncio
     async def test_extract_stream_url_from_audio_player(self, client):
-        stream_url = "http://ha.sumemail.com:8096/flow/abc123/queue1/1/player1.mp3"
+        stream_url = "http://ha.example.com:8096/flow/abc123/queue1/1/player1.mp3"
         data = {
             "state": "playing",
             "audio_player": {
@@ -491,7 +491,7 @@ class TestStreamURLExtraction:
             "current_item": {
                 "queue_item_id": "queue-item-1",
                 "index": 0,
-                "stream_url": "http://ha.sumemail.com:8096/flow/queue-item-1/player1.mp3",
+                "stream_url": "http://ha.example.com:8096/flow/queue-item-1/player1.mp3",
                 "streamdetails": {
                     "provider": "filesystem_local",
                     "item_id": "filesystem_local--Xk7dNqpq/03 Does Anybody Hear Her.mp3",
@@ -509,7 +509,7 @@ class TestStreamURLExtraction:
 
     @pytest.mark.asyncio
     async def test_clears_stream_url_on_idle(self, client):
-        stream_url = "http://ha.sumemail.com:8096/flow/abc/queue/1/player.mp3"
+        stream_url = "http://ha.example.com:8096/flow/abc/queue/1/player.mp3"
         data = {
             "state": "playing",
             "current_item": {"stream_url": stream_url},
@@ -532,8 +532,8 @@ class TestStreamURLExtraction:
 
     @pytest.mark.asyncio
     async def test_prefers_current_item_over_queue_items(self, client):
-        current_url = "http://ha.sumemail.com:8096/flow/current.mp3"
-        queue_url = "http://ha.sumemail.com:8096/flow/queue.mp3"
+        current_url = "http://ha.example.com:8096/flow/current.mp3"
+        queue_url = "http://ha.example.com:8096/flow/queue.mp3"
         data = {
             "state": "playing",
             "current_item": {"stream_url": current_url},
@@ -928,7 +928,7 @@ class TestIntegration:
 
         # Simulate receiving a queue updated event. queue_id must match the
         # command's queue_id; MA keys queues by player id (BUG-23 filter).
-        stream_url = "http://ha.sumemail.com:8096/flow/session1/queue1/1/player1.mp3"
+        stream_url = "http://ha.example.com:8096/flow/session1/queue1/1/player1.mp3"
         event_data = {
             "state": "playing",
             "queue_id": "player_1",
@@ -1150,7 +1150,7 @@ class TestBug23Hardening:
             "state": "playing",
             "current_item": {
                 "name": "Mine",
-                "stream_url": "http://ha.sumemail.com:8096/flow/q1/1/p.mp3",
+                "stream_url": "http://ha.example.com:8096/flow/q1/1/p.mp3",
             },
         }
         await client._dispatch_event("queue_updated", queue_data)
@@ -1184,7 +1184,7 @@ class TestBug23Hardening:
             "state": "playing",
             "current_item": {
                 "name": "Mine",
-                "stream_url": "http://ha.sumemail.com:8096/flow/q1/1/p.mp3",
+                "stream_url": "http://ha.example.com:8096/flow/q1/1/p.mp3",
             },
         }
         client.ingest_queue_state(mine)
@@ -1197,7 +1197,7 @@ class TestBug23Hardening:
             "state": "stopped",
             "current_item": {
                 "name": "Theirs",
-                "stream_url": "http://ha.sumemail.com:8096/flow/q2/2/p.mp3",
+                "stream_url": "http://ha.example.com:8096/flow/q2/2/p.mp3",
             },
         })
         callback.assert_called_once()
@@ -1209,11 +1209,11 @@ class TestBug23Hardening:
             "state": "paused",
             "current_item": {
                 "name": "Mine",
-                "stream_url": "http://ha.sumemail.com:8096/flow/q1/3/p.mp3",
+                "stream_url": "http://ha.example.com:8096/flow/q1/3/p.mp3",
             },
         })
         assert client.get_queue_state()["state"] == "paused"
-        assert client.get_stream_url() == "http://ha.sumemail.com:8096/flow/q1/3/p.mp3"
+        assert client.get_stream_url() == "http://ha.example.com:8096/flow/q1/3/p.mp3"
 
     @pytest.mark.asyncio
     async def test_send_command_tracks_queue_id_for_filtering(self, client, mock_websocket):

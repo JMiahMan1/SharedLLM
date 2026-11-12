@@ -74,7 +74,7 @@ os.environ.setdefault("TEST_MODE", "true")
 # them ONCE at import into module attributes that ~30 modules capture. A test
 # that then reloads services.config (or another module imports it later) reads a
 # *different* snapshot than the module under test, which is how
-# test_abs_stream_url.py came to compare 192.168.2.205 against localhost: a
+# test_abs_stream_url.py came to compare a LAN address against localhost: a
 # single assertion failure that said nothing about the code it meant to cover.
 #
 # Pinning also stops _load_env_files() from injecting real deployment secrets
@@ -95,7 +95,7 @@ _TEST_ENV_DEFAULTS = {
     "FERNET_KEY": _test_fernet_key,
     # Identity's browser allowlist: deterministic, and never the developer's
     # deployment origins (or "*") leaking into the CORS tests.
-    "IDENTITY_CORS_ORIGINS": "https://jarvis.sumemail.com,http://localhost:5173",
+    "IDENTITY_CORS_ORIGINS": "https://jarvis.example.com,http://localhost:5173",
     # Service topology: localhost everywhere, matching CI, never the docker
     # service aliases (which only resolve inside the compose network).
     "GATEWAY_INTERNAL_URL": "http://gateway:11435",
@@ -194,8 +194,14 @@ _TEST_ENV_DEFAULTS = {
     # audio-server itself; speaker identification needs OpenVoice's reference
     # encoder, and only that container has torch.)
     "ALPACA_WEB_URL": "http://web.test:5000",
+    # The arcade (gateway/config.py): no code default, so tests pin fakes.
+    "ALPACA_ARCADE_URL": "http://arcade.test:5001",
+    "ALPACA_ARCADE_PUBLIC_URL": "https://games.example.com",
     # Presentation
     "TIMEZONE": "UTC",
+    # Geo refuses to start without a household zone. A fixed UTC-7 offset (no
+    # DST), so day-boundary tests stay deterministic without naming a place.
+    "APP_TIMEZONE": "Etc/GMT+7",
     "ANNOUNCEMENT_BLACKLIST": "test-announcement",
 }
 
@@ -263,6 +269,16 @@ def _reset_ha_health():
         mod = sys.modules.get(name)
         if mod is not None:
             mod.reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_household_tz():
+    """The household zone is cached per process once a service refreshes it;
+    a test that set TZ or the setting must not decide the next test's zone."""
+    yield
+    mod = sys.modules.get("services.common.household_tz")
+    if mod is not None:
+        mod.reset_cache()
 
 
 @pytest.fixture(scope="session")

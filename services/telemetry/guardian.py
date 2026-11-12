@@ -20,12 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from services.common import concern_monitor, concern_review, device_noun, guardian_recap
 from services.telemetry import app_updates, llm, notices, store
@@ -46,11 +44,10 @@ Deliver = Callable[[dict[str, Any]], Awaitable[Any]]
 
 
 def household_now() -> datetime:
-    try:
-        tz = ZoneInfo(os.getenv("TIMEZONE") or "UTC")
-    except Exception:
-        tz = ZoneInfo("UTC")
-    return datetime.now(tz)
+    """Now in the household zone (services/common/household_tz.py); raises with how to set it."""
+    from services.common import household_tz
+
+    return datetime.now(household_tz.zoneinfo())
 
 
 async def children(session) -> dict[str, dict[str, Any]]:

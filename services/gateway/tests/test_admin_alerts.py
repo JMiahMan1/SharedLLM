@@ -166,14 +166,14 @@ def test_a_newer_notice_replaces_an_undelivered_one_with_its_tag():
 
 def test_media_targets_build_the_right_liveness_probes():
     targets = admin_alerts.media_targets({
-        "audiobookshelf_url": "https://abs.sumemail.com/",
-        "mass_url": "http://ha.sumemail.com:8095/",
-        "nextcloud_url": "https://cloud.sumemail.com/",
+        "audiobookshelf_url": "https://abs.example.com/",
+        "mass_url": "http://ha.example.com:8095/",
+        "nextcloud_url": "https://cloud.example.com/",
     })
     assert targets == {
-        "audiobookshelf": "https://abs.sumemail.com/ping",
-        "music_assistant": "http://ha.sumemail.com:8095",
-        "nextcloud": "https://cloud.sumemail.com/status.php",
+        "audiobookshelf": "https://abs.example.com/ping",
+        "music_assistant": "http://ha.example.com:8095",
+        "nextcloud": "https://cloud.example.com/status.php",
     }
 
 

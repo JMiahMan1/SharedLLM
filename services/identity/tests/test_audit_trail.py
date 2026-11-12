@@ -1,6 +1,6 @@
 """Account changes leave a trail, and a blank field can no longer wipe a login.
 
-Observed: Michele's Nextcloud and Home Assistant logins were gone and nothing
+Observed: Sam's Nextcloud and Home Assistant logins were gone and nothing
 said who or what removed them. Every form loads secrets blank (they are never
 sent to the browser) and the server read blank as "erase", so saving the form
 for any reason wiped them -- and nothing recorded it.
@@ -26,10 +26,10 @@ def session_fixture():
         session.add(User(username="default", display_name="Admin", is_admin=True, is_system_default=True))
         session.add(
             User(
-                username="michele",
-                display_name="Michele",
+                username="sam",
+                display_name="Sam",
                 nextcloud_url="https://cloud.example",
-                nextcloud_user="michele",
+                nextcloud_user="sam",
                 nextcloud_pass_enc=encrypt("nc-app-password"),
                 ha_url="https://ha.example",
                 ha_token_enc=encrypt("ha-long-lived-token"),
@@ -56,9 +56,9 @@ def client_fixture(session: Session):
     app.dependency_overrides = {}
 
 
-def _michele(session: Session) -> User:
+def _sam(session: Session) -> User:
     session.expire_all()
-    return session.exec(select(User).where(User.username == "michele")).first()
+    return session.exec(select(User).where(User.username == "sam")).first()
 
 
 def _events(session: Session) -> list[AuditEvent]:
@@ -72,49 +72,49 @@ def _events(session: Session) -> list[AuditEvent]:
 def test_saving_the_admin_dialog_with_blank_secrets_keeps_them(client, session):
     """The Admin "Edit user" dialog sends every field, secrets blank."""
     resp = client.patch(
-        "/api/users/michele",
-        json={"display_name": "Michele S", "nextcloud_url": "https://cloud.example", "nextcloud_user": "michele",
+        "/api/users/sam",
+        json={"display_name": "Sam S", "nextcloud_url": "https://cloud.example", "nextcloud_user": "sam",
               "nextcloud_pass": "", "ha_url": "https://ha.example", "ha_token": ""},
     )
     assert resp.status_code == 200, resp.text
-    m = _michele(session)
+    m = _sam(session)
     assert decrypt(m.nextcloud_pass_enc) == "nc-app-password"
     assert decrypt(m.ha_token_enc) == "ha-long-lived-token"
-    assert m.display_name == "Michele S"
+    assert m.display_name == "Sam S"
 
 
 def test_a_blank_url_or_username_does_not_erase_it_either(client, session):
-    client.patch("/api/users/michele", json={"nextcloud_url": "", "nextcloud_user": "  "})
-    m = _michele(session)
+    client.patch("/api/users/sam", json={"nextcloud_url": "", "nextcloud_user": "  "})
+    m = _sam(session)
     assert m.nextcloud_url == "https://cloud.example"
-    assert m.nextcloud_user == "michele"
+    assert m.nextcloud_user == "sam"
 
 
 def test_erasing_a_login_has_to_be_asked_for_by_name(client, session):
-    client.patch("/api/users/michele", json={"clear_fields": ["nextcloud_pass", "nextcloud_user", "nextcloud_url"]})
-    m = _michele(session)
+    client.patch("/api/users/sam", json={"clear_fields": ["nextcloud_pass", "nextcloud_user", "nextcloud_url"]})
+    m = _sam(session)
     assert m.nextcloud_pass_enc is None and m.nextcloud_user is None and m.nextcloud_url is None
     assert decrypt(m.ha_token_enc) == "ha-long-lived-token"
 
 
 def test_clear_fields_cannot_touch_identity_or_privilege(client, session):
-    client.patch("/api/users/michele", json={"clear_fields": ["username", "password_hash", "is_admin"]})
-    assert _michele(session).username == "michele"
+    client.patch("/api/users/sam", json={"clear_fields": ["username", "password_hash", "is_admin"]})
+    assert _sam(session).username == "sam"
 
 
 def test_the_settings_card_blank_save_keeps_the_secret(client, session):
-    _act_as("michele")
+    _act_as("sam")
     client.patch("/api/users/me", json={"ha_url": "https://ha.example", "ha_token": ""})
-    assert decrypt(_michele(session).ha_token_enc) == "ha-long-lived-token"
+    assert decrypt(_sam(session).ha_token_enc) == "ha-long-lived-token"
 
 
 # The trail
 
 
 def test_an_admin_edit_records_who_changed_which_fields_without_values(client, session):
-    client.patch("/api/users/michele", json={"ha_token": "new-token", "display_name": "Mich"})
+    client.patch("/api/users/sam", json={"ha_token": "new-token", "display_name": "Mich"})
     event = _events(session)[-1]
-    assert (event.actor, event.actor_kind, event.action, event.target) == ("default", "user", "user.update", "michele")
+    assert (event.actor, event.actor_kind, event.action, event.target) == ("default", "user", "user.update", "sam")
     changes = {c["field"]: c for c in json.loads(event.changes)}
     assert changes["ha_token"] == {"field": "ha_token", "change": "changed", "secret": True}
     assert changes["display_name"]["change"] == "changed"
@@ -123,13 +123,13 @@ def test_an_admin_edit_records_who_changed_which_fields_without_values(client, s
 
 
 def test_a_cleared_login_is_recorded_as_cleared(client, session):
-    client.patch("/api/users/michele", json={"clear_fields": ["nextcloud_pass"]})
+    client.patch("/api/users/sam", json={"clear_fields": ["nextcloud_pass"]})
     changes = json.loads(_events(session)[-1].changes)
     assert {"field": "nextcloud_pass", "change": "cleared", "secret": True} in changes
 
 
 def test_a_no_op_save_records_no_changes(client, session):
-    client.patch("/api/users/michele", json={"nextcloud_pass": "", "ha_token": ""})
+    client.patch("/api/users/sam", json={"nextcloud_pass": "", "ha_token": ""})
     assert json.loads(_events(session)[-1].changes) == []
 
 
@@ -146,45 +146,45 @@ def test_create_password_reset_grant_and_delete_are_all_recorded(client, session
 
 
 def test_admins_read_the_trail_and_users_read_their_own(client, session):
-    client.patch("/api/users/michele", json={"display_name": "M"})
-    resp = client.get("/api/admin/audit", params={"target": "michele"})
+    client.patch("/api/users/sam", json={"display_name": "M"})
+    resp = client.get("/api/admin/audit", params={"target": "sam"})
     assert resp.status_code == 200
     assert resp.json()["events"][0]["action"] == "user.update"
 
-    _act_as("michele")
+    _act_as("sam")
     assert client.get("/api/admin/audit").status_code == 403
     mine = client.get("/api/users/me/audit").json()["events"]
-    assert mine and all(e["target"] == "michele" for e in mine)
+    assert mine and all(e["target"] == "sam" for e in mine)
 
 
 # Show password
 
 
 def test_the_owner_can_reveal_their_own_secret_and_it_is_audited(client, session):
-    _act_as("michele")
-    resp = client.post("/api/users/michele/reveal", json={"field": "nextcloud_pass"})
+    _act_as("sam")
+    resp = client.post("/api/users/sam/reveal", json={"field": "nextcloud_pass"})
     assert resp.json() == {"field": "nextcloud_pass", "value": "nc-app-password"}
     event = _events(session)[-1]
-    assert event.action == "credential.reveal" and event.actor == "michele"
+    assert event.action == "credential.reveal" and event.actor == "sam"
     assert "nc-app-password" not in event.model_dump_json()
 
 
 def test_an_admin_can_reveal_but_another_user_cannot(client, session):
-    assert client.post("/api/users/michele/reveal", json={"field": "ha_token"}).json()["value"] == "ha-long-lived-token"
-    session.add(User(username="jeremiah"))
+    assert client.post("/api/users/sam/reveal", json={"field": "ha_token"}).json()["value"] == "ha-long-lived-token"
+    session.add(User(username="alex"))
     session.commit()
-    _act_as("jeremiah")
-    assert client.post("/api/users/michele/reveal", json={"field": "ha_token"}).status_code == 403
+    _act_as("alex")
+    assert client.post("/api/users/sam/reveal", json={"field": "ha_token"}).status_code == 403
 
 
 def test_reveal_only_returns_credential_fields(client, session):
-    assert client.post("/api/users/michele/reveal", json={"field": "password_hash"}).status_code == 422
+    assert client.post("/api/users/sam/reveal", json={"field": "password_hash"}).status_code == 422
 
 
 def test_a_user_read_says_which_secrets_are_saved_but_never_their_values(client, session):
     body = client.get("/api/users").json()
-    michele = next(u for u in body if u["username"] == "michele")
-    assert sorted(michele["saved_credentials"]) == ["ha_token", "nextcloud_pass"]
+    sam = next(u for u in body if u["username"] == "sam")
+    assert sorted(sam["saved_credentials"]) == ["ha_token", "nextcloud_pass"]
     assert "nc-app-password" not in json.dumps(body)
 
 
@@ -198,7 +198,7 @@ def test_any_signed_in_user_can_read_the_household_service_urls_but_no_secrets(c
     owner.nextcloud_pass_enc = encrypt("admin-secret")
     session.add(owner)
     session.commit()
-    _act_as("michele")
+    _act_as("sam")
     body = client.get("/api/users/service-defaults").json()
     assert body["nextcloud_url"] == "https://cloud.example"
     assert body["ha_url"] == "https://ha.example"

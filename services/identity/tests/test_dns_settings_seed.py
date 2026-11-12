@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 from services.identity.models import GlobalSetting
 from services.identity.seed import seed_from_env
 
-MAPPINGS = json.dumps({"jeremiah-home-desktop.local": {"values": ["192.168.2.43", "192.168.4.179"]}})
+MAPPINGS = json.dumps({"llm-host.local": {"values": ["192.0.2.43", "203.0.113.179"]}})
 
 
 @pytest.fixture(autouse=True)
@@ -46,9 +46,9 @@ def test_after_that_the_database_wins_over_env():
     with _session() as session:
         seed_from_env(session, force=True)
         row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "dns_mappings")).one()
-        row.value = json.dumps({"jeremiah-home-desktop.local": ["192.168.2.43"]})  # edited in the UI
+        row.value = json.dumps({"llm-host.local": ["192.0.2.43"]})  # edited in the UI
         session.add(row)
         session.commit()
         seed_from_env(session, force=True)  # next restart
         stored = _stored(session)
-    assert json.loads(stored["dns_mappings"]) == {"jeremiah-home-desktop.local": ["192.168.2.43"]}
+    assert json.loads(stored["dns_mappings"]) == {"llm-host.local": ["192.0.2.43"]}

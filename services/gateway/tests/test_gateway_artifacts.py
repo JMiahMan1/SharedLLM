@@ -42,7 +42,7 @@ async def test_generated_bytes_are_uploaded_for_the_speaking_user(monkeypatch):
     monkeypatch.setattr(artifacts, "INTERNAL_SECRET", "secret")
 
     result = await artifacts.create_artifact(
-        user_context=_Context("jeremiah"),
+        user_context=_Context("alex"),
         kind="image",
         name="/tmp/scene.png",
         data=b"\x89PNG",
@@ -54,7 +54,7 @@ async def test_generated_bytes_are_uploaded_for_the_speaking_user(monkeypatch):
 
     assert result == {"id": "abc", "name": "scene.png"}
     assert client.seen["url"] == "http://storage:8005/artifacts"
-    assert client.seen["headers"] == {"X-Internal-Secret": "secret", "X-User": "jeremiah"}
+    assert client.seen["headers"] == {"X-Internal-Secret": "secret", "X-User": "alex"}
     assert client.seen["json"]["name"] == "scene.png"
     assert base64.b64decode(client.seen["json"]["content_b64"]) == b"\x89PNG"
     assert client.seen["json"]["workspace_id"] == "ws-1"
@@ -80,7 +80,7 @@ async def test_a_storage_failure_does_not_lose_the_image(monkeypatch):
     monkeypatch.setattr(artifacts, "get_client", lambda: client)
 
     assert await artifacts.create_artifact(
-        user_context=_Context("jeremiah"),
+        user_context=_Context("alex"),
         kind="image",
         name="scene.png",
         data=b"\x89PNG",

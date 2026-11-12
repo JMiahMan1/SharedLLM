@@ -8,7 +8,7 @@ from services.homehub.core import DeviceUnavailable, ServiceNotFound
 from services.homehub.drivers.tasmota import TasmotaDriver
 from services.homehub.tests.conftest import make_hub
 
-MAC = "A4CF12CC322F"
+MAC = "020000000107"
 
 ENTITIES = [
     {"entity_id": "switch.loft_plug_loft_tv", "unique_id": f"{MAC}_switch_relay_0"},
@@ -32,7 +32,7 @@ def status0() -> dict:
     return {
         "Status": {"DeviceName": "Loft-Plug", "Power": "1010"},
         "StatusPRM": {"RestartReason": "Software/System restart"},
-        "StatusNET": {"IPAddress": "192.168.2.244", "Mac": "A4:CF:12:CC:32:2F"},
+        "StatusNET": {"IPAddress": "192.0.2.244", "Mac": "02:00:00:00:01:07"},
         "StatusSTS": {"UptimeSec": 3600, "POWER1": "ON", "POWER2": "OFF", "POWER3": "ON", "POWER4": "OFF",
                       "MqttCount": 0, "Wifi": {"SSId": "home", "LinkCount": 3, "RSSI": 80, "Signal": -60}},
         "StatusSNS": {"Time": "2026-11-11T10:00:00",
@@ -64,7 +64,7 @@ class FakePlug:
 
 def make_driver(plug: FakePlug | None = None, data=None, options=None):
     hub, entry = make_hub("tasmota", data if data is not None else {"discovery_prefix": "tasmota/discovery"},
-                          ENTITIES, options=options if options is not None else {"host": "192.168.2.244"})
+                          ENTITIES, options=options if options is not None else {"host": "192.0.2.244"})
     drv = TasmotaDriver(hub, entry)
     if plug is not None:
         drv._command = plug  # type: ignore[method-assign]
@@ -84,7 +84,7 @@ async def test_setup_publishes_relays_energy_and_status():
     assert power.state == "61" and power.attributes["unit_of_measurement"] == "W"
     total = hub.states.get("sensor.loft_plug_energy_total")
     assert total.state == "123.456" and total.attributes["state_class"] == "total_increasing"
-    # Tasmota's naive local time gets the hub's offset (America/Phoenix is -07:00 all year).
+    # Tasmota's naive local time gets the hub's offset (Etc/GMT+7 is -07:00 all year).
     assert hub.states.get("sensor.loft_plug_energy_totalstarttime").state == "2023-05-01T12:00:00-07:00"
     assert hub.states.get("sensor.loft_plug_ssid").state == "home"
     assert hub.states.get("sensor.loft_plug_wifi_connect_count").state == "3"
@@ -153,11 +153,11 @@ def test_host_comes_from_options_then_data_then_the_device_configuration_url():
     assert drv.host == "10.0.0.5"
     _, drv = make_driver(options={}, data={"host": "10.0.0.6"})
     assert drv.host == "10.0.0.6"
-    _, drv = make_driver(options={}, data={"hosts": {"a4:cf:12:cc:32:2f": "10.0.0.7"}})
+    _, drv = make_driver(options={}, data={"hosts": {"02:00:00:00:01:07": "10.0.0.7"}})
     assert drv.host == "10.0.0.7"
     hub, entry = make_hub("tasmota", {"discovery_prefix": "tasmota/discovery"}, ENTITIES)
-    hub.devices["dev1"].configuration_url = "http://192.168.2.244/"
-    assert TasmotaDriver(hub, entry).host == "192.168.2.244"
+    hub.devices["dev1"].configuration_url = "http://192.0.2.244/"
+    assert TasmotaDriver(hub, entry).host == "192.0.2.244"
 
 
 async def test_no_address_is_a_clear_setup_error():

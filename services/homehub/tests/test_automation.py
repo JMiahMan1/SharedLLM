@@ -22,12 +22,24 @@ from services.homehub.core import Area, ConfigEntry, DeviceEntry, EntityEntry, H
 # The household's real automations, scripts and a registry slice. They name
 # family members, places and routines, so they live outside git (this repo is
 # public): data/homehub-fixtures, or wherever HOMEHUB_HOUSEHOLD_DIR points.
+# The values those tests check (aliases, entity ids, notify targets) come from
+# expectations.json in the same directory, so none of them is written here.
+# Without the directory or that file the household tests skip.
 FIXTURES = os.getenv("HOMEHUB_HOUSEHOLD_DIR") or os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "data", "homehub-fixtures")
-needs_household = pytest.mark.skipif(not os.path.isdir(FIXTURES), reason="household fixtures are not checked in")
-# Wednesday 2026-11-11, 12:00 in Phoenix (UTC-7, no DST).
+EXPECTATIONS = os.path.join(FIXTURES, "expectations.json")
+needs_household = pytest.mark.skipif(
+    not os.path.isfile(EXPECTATIONS),
+    reason="household fixtures are not checked in (set HOMEHUB_HOUSEHOLD_DIR to a directory with expectations.json)")
+
+
+def household_expectations() -> dict:
+    with open(EXPECTATIONS, encoding="utf-8") as f:
+        return json.load(f)
+
+# Wednesday 2026-11-11, 12:00 at UTC-7 (no DST).
 START = datetime(2026, 11, 11, 19, 0, tzinfo=UTC)
-LOCATION = {"latitude": 33.4484, "longitude": -112.074, "elevation": 331}
+LOCATION = {"latitude": 40.0209, "longitude": -105.4997, "elevation": 331}
 
 
 class FakeStore:
@@ -85,7 +97,7 @@ def names(calls: list[tuple[str, dict]]) -> list[str]:
 
 @pytest.fixture
 def hub() -> Hub:
-    hub = Hub(time_zone="America/Phoenix", location=dict(LOCATION))
+    hub = Hub(time_zone="Etc/GMT+7", location=dict(LOCATION))
     hub.areas["office"] = Area("office", "Office")
     return hub
 
@@ -178,7 +190,7 @@ async def test_sun_trigger_with_offset(hub: Hub, engine: AutomationEngine) -> No
     assert len(calls) == 1
     fired = datetime.fromisoformat(calls[0][1]["t"])
     assert fired == sunset - timedelta(minutes=20)
-    assert 16 <= fired.hour <= 17  # a November evening in Phoenix
+    assert 16 <= fired.hour <= 17  # a November evening at the hub location
 
 
 async def test_state_trigger_from_to_and_for(hub: Hub, engine: AutomationEngine) -> None:
@@ -272,22 +284,22 @@ async def test_numeric_state_attribute(hub: Hub, engine: AutomationEngine) -> No
 
 async def test_zone_trigger_by_gps_and_by_state_name(hub: Hub, engine: AutomationEngine) -> None:
     calls = record(hub, "test.note")
-    hub.states.set("zone.work", "0", {"latitude": 33.30, "longitude": -111.80, "radius": 100,
-                                      "friendly_name": "Kaleb Work"})
-    hub.states.set("person.kaleb", "not_home", {"latitude": 33.0, "longitude": -111.0})
+    hub.states.set("zone.work", "0", {"latitude": 39.8725, "longitude": -105.2257, "radius": 100,
+                                      "friendly_name": "Robin Work"})
+    hub.states.set("person.robin", "not_home", {"latitude": 39.5725, "longitude": -104.4257})
     hub.states.set("device_tracker.phone", "home")
     await run(engine, [
-        auto([{"trigger": "zone", "entity_id": "person.kaleb", "zone": "zone.work", "event": "enter"}],
+        auto([{"trigger": "zone", "entity_id": "person.robin", "zone": "zone.work", "event": "enter"}],
              [{"action": "test.note", "data": {"m": "enter"}}], id="a"),
-        auto([{"trigger": "zone", "entity_id": "person.kaleb", "zone": "zone.work", "event": "leave"}],
+        auto([{"trigger": "zone", "entity_id": "person.robin", "zone": "zone.work", "event": "leave"}],
              [{"action": "test.note", "data": {"m": "leave"}}], id="b"),
         auto([{"platform": "zone", "entity_id": "device_tracker.phone", "zone": "zone.home", "event": "leave"}],
              [{"action": "test.note", "data": {"m": "phone left"}}], id="c"),
     ])
-    hub.states.set("person.kaleb", "Kaleb Work", {"latitude": 33.3001, "longitude": -111.8001,
+    hub.states.set("person.robin", "Robin Work", {"latitude": 39.8726, "longitude": -105.2258,
                                                   "gps_accuracy": 10})
     await settle()
-    hub.states.set("person.kaleb", "not_home", {"latitude": 33.2, "longitude": -111.7})
+    hub.states.set("person.robin", "not_home", {"latitude": 39.7725, "longitude": -105.1257})
     hub.states.set("device_tracker.phone", "not_home")
     await settle()
     assert [c[1]["m"] for c in calls] == ["enter", "leave", "phone left"]
@@ -684,48 +696,48 @@ async def test_modes(hub: Hub, engine: AutomationEngine, mode: str, expected: li
 
 async def test_automation_services_states_and_persistence(hub: Hub) -> None:
     store = FakeStore()
-    hub.entities["automation.lights_off_at_11"] = EntityEntry("automation.lights_off_at_11", "automation",
-                                                              "1724392987089", name="Bedtime Lights")
+    hub.entities["automation.lights_off_late"] = EntityEntry("automation.lights_off_late", "automation",
+                                                              "1700000000001", name="Bedtime Lights")
     eng = AutomationEngine(hub, store, clock=FakeClock(START))
     calls = record(hub, "test.note")
-    conf = [auto([{"trigger": "event", "event_type": "go"}], [NOTE], ["{{ false }}"], id="1724392987089",
-                 alias="Lights Off At 11")]
+    conf = [auto([{"trigger": "event", "event_type": "go"}], [NOTE], ["{{ false }}"], id="1700000000001",
+                 alias="Lights Off Late")]
     try:
         await run(eng, conf)
-        st = hub.states.get("automation.lights_off_at_11")
+        st = hub.states.get("automation.lights_off_late")
         assert st.state == "on"
         assert st.attributes == {"last_triggered": None, "mode": "single", "current": 0,
-                                 "friendly_name": "Bedtime Lights", "id": "1724392987089"}
+                                 "friendly_name": "Bedtime Lights", "id": "1700000000001"}
         hub.bus.fire("go", {})
         await settle()
         assert calls == []  # condition false
-        await hub.call_service("automation", "trigger", {"entity_id": "automation.lights_off_at_11"})
+        await hub.call_service("automation", "trigger", {"entity_id": "automation.lights_off_late"})
         await settle()
         assert len(calls) == 1  # skip_condition defaults to true
-        await hub.call_service("automation", "trigger", {"entity_id": "automation.lights_off_at_11",
+        await hub.call_service("automation", "trigger", {"entity_id": "automation.lights_off_late",
                                                          "skip_condition": False})
         await settle()
         assert len(calls) == 1
-        assert hub.states.get("automation.lights_off_at_11").attributes["last_triggered"] == START.isoformat()
-        await hub.call_service("automation", "turn_off", {"entity_id": "automation.lights_off_at_11"})
-        assert hub.states.get("automation.lights_off_at_11").state == "off"
-        assert store.kv["automation:1724392987089"] == {"enabled": False, "last_triggered": START.isoformat()}
-        await hub.call_service("automation", "toggle", {"entity_id": "automation.lights_off_at_11"})
-        assert hub.states.get("automation.lights_off_at_11").state == "on"
-        await hub.call_service("automation", "turn_off", {"entity_id": "automation.lights_off_at_11"})
+        assert hub.states.get("automation.lights_off_late").attributes["last_triggered"] == START.isoformat()
+        await hub.call_service("automation", "turn_off", {"entity_id": "automation.lights_off_late"})
+        assert hub.states.get("automation.lights_off_late").state == "off"
+        assert store.kv["automation:1700000000001"] == {"enabled": False, "last_triggered": START.isoformat()}
+        await hub.call_service("automation", "toggle", {"entity_id": "automation.lights_off_late"})
+        assert hub.states.get("automation.lights_off_late").state == "on"
+        await hub.call_service("automation", "turn_off", {"entity_id": "automation.lights_off_late"})
     finally:
         await eng.stop()
     # A new engine (a restart) keeps it disabled and remembers last_triggered.
     eng2 = AutomationEngine(hub, store, clock=FakeClock(START))
     try:
         await run(eng2, conf)
-        item = eng2.automations["1724392987089"]
+        item = eng2.automations["1700000000001"]
         assert item.enabled is False and item.last_triggered == START
         hub.bus.fire("go", {})
-        await hub.call_service("automation", "turn_on", {"entity_id": "automation.lights_off_at_11"})
+        await hub.call_service("automation", "turn_on", {"entity_id": "automation.lights_off_late"})
         await hub.call_service("automation", "reload", {})
-        assert eng2.automations["1724392987089"].enabled is True
-        assert {s["id"] for s in eng2.status()} == {"1724392987089"}
+        assert eng2.automations["1700000000001"].enabled is True
+        assert {s["id"] for s in eng2.status()} == {"1700000000001"}
     finally:
         await eng2.stop()
 
@@ -813,11 +825,11 @@ def schedule(**over: Any) -> dict:
          "timeslots": [
              {"start": "05:00:00", "stop": "09:00:00", "conditions": [], "condition_type": None,
               "track_conditions": False, "actions": [{"service": "climate.set_temperature",
-                                                      "entity_id": "climate.downstairs",
+                                                      "entity_id": "climate.hallway",
                                                       "service_data": {"temperature": 85, "hvac_mode": "off"}}]},
              {"start": "17:00:00", "stop": "00:00:00", "conditions": [], "condition_type": None,
               "track_conditions": False, "actions": [{"service": "climate.set_temperature",
-                                                      "entity_id": "climate.downstairs",
+                                                      "entity_id": "climate.hallway",
                                                       "service_data": {"temperature": 73, "hvac_mode": "cool"}}]}]}
     s.update(over)
     return s
@@ -832,7 +844,7 @@ async def test_scheduler_runs_slots_on_workdays_and_publishes_switches(hub: Hub,
     assert st.attributes["timeslots"] == ["05:00:00 - 09:00:00", "17:00:00 - 00:00:00"]
     await advance(engine, 5 * 3600)  # 17:00
     assert calls == [("climate.set_temperature", {"temperature": 73, "hvac_mode": "cool",
-                                                  "entity_id": "climate.downstairs"})]
+                                                  "entity_id": "climate.hallway"})]
     # Thursday 05:00 and 17:00, Friday both, nothing on the weekend, then Monday 05:00
     await advance(engine, 4 * 86400 - 3600 * 5 + 18 * 3600)
     temps = [c[1]["temperature"] for c in calls]
@@ -879,7 +891,7 @@ async def test_scheduler_switch_turn_off_and_conditions(hub: Hub, engine: Automa
     hub.entities["switch.schedule_abc123"] = EntityEntry("switch.schedule_abc123", "scheduler", "abc123",
                                                          config_entry_id="sched")
     hub.states.set("binary_sensor.home", "off")
-    hub.states.set("climate.downstairs", "cool")
+    hub.states.set("climate.hallway", "cool")
     slots = schedule()["timeslots"]
     slots[1]["conditions"] = [{"entity_id": "binary_sensor.home", "value": "on", "match_type": "is"}]
     slots[1]["track_conditions"] = True
@@ -932,7 +944,7 @@ async def test_fake_clock_scheduler_loop_wakes_on_advance() -> None:
 # -- the household's own configuration ----------------------------------------------------------------
 
 def household_hub() -> Hub:
-    hub = Hub(time_zone="America/Phoenix", location=dict(LOCATION))
+    hub = Hub(time_zone="Etc/GMT+7", location=dict(LOCATION))
     with open(os.path.join(FIXTURES, "registry.json"), encoding="utf-8") as f:
         reg = json.load(f)
     for e in reg["entities"]:
@@ -947,6 +959,7 @@ def household_hub() -> Hub:
 
 @needs_household
 async def test_household_configuration_loads_every_item_or_says_why() -> None:
+    exp = household_expectations()
     hub = household_hub()
     eng = AutomationEngine(hub, FakeStore(), clock=FakeClock(START))
     try:
@@ -956,98 +969,99 @@ async def test_household_configuration_loads_every_item_or_says_why() -> None:
         status = eng.status()
         autos = [s for s in status if s["kind"] == "automation"]
         scripts = [s for s in status if s["kind"] == "script"]
-        assert len(autos) == 26 and len(scripts) == 3
-        assert len([s for s in status if s["kind"] == "schedule"]) == 3
+        counts = exp["counts"]
+        assert len(autos) == counts["automation"] and len(scripts) == counts["script"]
+        assert len([s for s in status if s["kind"] == "schedule"]) == counts["schedule"]
         for s in autos + scripts:
             assert s["unsupported_reason"] is None or s["unsupported_reason"].strip(), s
             if s["unsupported_reason"] is None:
                 assert s["enabled"] or s["kind"] == "script", s
         by_alias = {s["alias"]: s for s in autos}
         # The ones that must keep working.
-        for alias in ("Lights Off At 11", "Lights On at Night", "Close Garage if open for more than 15 minutes",
-                      "Kaleb made it to work", "Kaleb Left work", "Kaleb is Home", "Kaleb left Home",
-                      "Michele is Home", "Michele left Home", "Summer - Turn Off ACs if Above 9 KW on-peak",
-                      "Winter - Turn Off ACs if Above 7 KW on-peak", "String Lights On", "String Lights Off",
-                      "CYD Playlists Sync", "CYD Weather Sync"):
+        for alias in exp["enabled_aliases"]:
             assert by_alias[alias]["enabled"], (alias, by_alias[alias]["unsupported_reason"])
         # HA Assist timers and their input_text helpers are gone.
-        timer = next(s for s in autos if s["alias"] == "Assist - TimerReached")
-        assert "timer" in timer["unsupported_reason"]
-        assert "timer.assist_timer1" in by_alias["Assist - TimerFinished"]["unsupported_reason"]
-        assert "input_text" in next(s for s in scripts if s["id"] == "assist_timerstart_2")["unsupported_reason"]
+        for want in exp["unsupported"]:
+            if "alias" in want:
+                item = by_alias[want["alias"]]
+            else:
+                item = next(s for s in scripts if s["id"] == want["script_id"])
+            assert want["contains"] in item["unsupported_reason"], (want, item["unsupported_reason"])
         # Entity ids are HA's, found by unique_id, including user renames.
         ids = {s["entity_id"] for s in status}
-        assert "automation.close_garage_if_open_for_more_than_5_minutes_between_11_and_9_am" in ids
-        assert "automation.turn_on_air" in ids and "script.cyd_media_sync" in ids
-        assert {"switch.schedule_29b0a2", "switch.schedule_71ed4f", "switch.schedule_eeac3f"} <= ids
-        assert hub.states.get("automation.test_announcement").attributes["friendly_name"] == "Bed Time for littles"
+        assert set(exp["entity_ids"]) <= ids
+        for eid, name in exp["friendly_names"].items():
+            assert hub.states.get(eid).attributes["friendly_name"] == name
         # The garage device trigger became a state trigger on the ESPHome door sensor.
-        garage = next(i for i in eng.automations.values() if i.alias.startswith("Close Garage"))
+        g = exp["garage"]
+        garage = next(i for i in eng.automations.values() if i.alias.startswith(g["alias_prefix"]))
         assert garage.triggers[0]["trigger"] == "state"
-        assert garage.triggers[0]["entity_id"] == "binary_sensor.garage_door_sensor"
+        assert garage.triggers[0]["entity_id"] == g["sensor"]
         assert garage.triggers[0]["to"] == "off"
         assert garage.actions[0]["action"] == "switch.turn_on"
-        assert garage.actions[0]["entity_id"] == "switch.garage_door_2"
-        # The winter weekday schedule is in season; summer's ended Oct 31.
-        assert hub.states.get("switch.schedule_29b0a2").attributes["next_trigger"] == "2026-11-11T17:00:00-07:00"
-        assert hub.states.get("switch.schedule_eeac3f").attributes["next_trigger"] is None
-        assert hub.states.get("switch.schedule_71ed4f").state == "off"
+        assert garage.actions[0]["entity_id"] == g["switch"]
+        # Schedules: the one in season has a next trigger, an ended one has none.
+        for eid, nxt in exp["schedules"]["next_trigger"].items():
+            assert hub.states.get(eid).attributes["next_trigger"] == nxt
+        for eid in exp["schedules"]["off"]:
+            assert hub.states.get(eid).state == "off"
     finally:
         await eng.stop()
 
 
 @needs_household
 async def test_household_garage_automation_end_to_end() -> None:
+    g = household_expectations()["garage"]
     hub = household_hub()
-    calls = record(hub, "switch.turn_on", "notify.mobile_app_jeremiahs_phone", "notify.mobile_app_michele_s_phone")
-    hub.states.set("binary_sensor.garage_door_sensor", "on")
+    calls = record(hub, "switch.turn_on", *g["notify"])
+    hub.states.set(g["sensor"], "on")
     eng = AutomationEngine(hub, FakeStore(), clock=FakeClock(START))
     try:
         await eng.load_config_dir(FIXTURES)
         await eng.start()
-        hub.states.set("binary_sensor.garage_door_sensor", "off")
-        await advance(eng, 15 * 60 - 1)
+        hub.states.set(g["sensor"], "off")
+        await advance(eng, g["open_for_s"] - 1)
         assert calls == []
         await advance(eng, 2)
-        assert names(calls) == ["switch.turn_on", "notify.mobile_app_jeremiahs_phone",
-                                "notify.mobile_app_michele_s_phone"]
-        assert calls[0][1] == {"entity_id": "switch.garage_door_2"}
+        assert names(calls) == ["switch.turn_on", *g["notify"]]
+        assert calls[0][1] == {"entity_id": g["switch"]}
     finally:
         await eng.stop()
 
 
 @needs_household
 async def test_household_cyd_scripts_and_syncs() -> None:
+    c = household_expectations()["cyd"]
     hub = household_hub()
     library = {"items": [{"name": f"Playlist number {i}", "uri": f"library://playlist/{i}"} for i in range(8)]}
     record(hub, "music_assistant.get_library", response=library)
-    pushes = record(hub, "esphome.smart_speaker_set_playlists", "esphome.smart_speaker_set_weather")
+    pushes = record(hub, c["playlists_service"], c["weather_service"])
     forecast = {"weather.home": {"forecast": [
         {"datetime": f"2026-11-{11 + i}T12:00:00-07:00", "condition": "sunny", "temperature": 80 + i,
          "templow": 60 + i} for i in range(6)]}}
     record(hub, "weather.get_forecasts", response=forecast)
-    hub.states.set("media_player.office_tv_3", "playing", {"friendly_name": "Office TV", "media_title": "Song",
-                                                            "volume_level": 0.3})
+    hub.states.set(c["media_entity"], "playing", {"friendly_name": c["media_name"], "media_title": "Song",
+                                                  "volume_level": 0.3})
     hub.states.set("media_player.kitchen", "idle", {"friendly_name": "Kitchen Speaker Big Name"})
     eng = AutomationEngine(hub, FakeStore(), clock=FakeClock(START))
     try:
         await eng.load_config_dir(FIXTURES)
         await eng.start()  # both syncs have a homeassistant start trigger
         await settle()
-        sent = {c[0]: c[1] for c in pushes}
-        assert sent["esphome.smart_speaker_set_playlists"]["p1"] == "Playlist number 0"
-        assert sent["esphome.smart_speaker_set_playlists"]["u3"] == "library://playlist/2"
-        assert sent["esphome.smart_speaker_set_weather"]["n1"] == "Thu"
-        assert sent["esphome.smart_speaker_set_weather"]["h2"] == 82
-        res = await hub.call_service("script", "cyd_media_sync", {"media_entity": "media_player.office_tv_3"},
+        sent = {call[0]: call[1] for call in pushes}
+        assert sent[c["playlists_service"]]["p1"] == "Playlist number 0"
+        assert sent[c["playlists_service"]]["u3"] == "library://playlist/2"
+        assert sent[c["weather_service"]]["n1"] == "Thu"
+        assert sent[c["weather_service"]]["h2"] == 82
+        res = await hub.call_service("script", c["script"], {"media_entity": c["media_entity"]},
                                      return_response=True)
         out = res["response"]
-        assert out["devices"][0] == {"e": "media_player.office_tv_3", "n": "Office TV"}
+        assert out["devices"][0] == {"e": c["media_entity"], "n": c["media_name"]}
         assert out["devices"][1]["n"] == "Kitchen Sp.."
         assert out["now"] == {"state": "playing", "title": "Song", "artist": ""}
         assert len(out["playlists"]) == 6 and out["playlists"][0] == "Playlist number 0"
         assert out["vol"] == 0.3 and out["cl"] is False
         await advance(eng, 600)
-        assert len([c for c in pushes if c[0].endswith("playlists")]) == 2  # time_pattern /10
+        assert len([p for p in pushes if p[0] == c["playlists_service"]]) == 2  # time_pattern /10
     finally:
         await eng.stop()

@@ -8,6 +8,16 @@ Treats Raven as a black box:
 - Deliberately blocks port 9099 to trigger, persist, and verify Path D's learning loop.
 - Cleans up all testing assets on success.
 - Aborts cleanup on failure to preserve state for diagnosis.
+
+Run-time flags (no real defaults; the test skips when the required ones are unset):
+    RAVEN_GATEWAY_BASE         Gateway base URL, e.g. http://<server>:11435 (required)
+    RAVEN_IDENTITY_BASE        Identity base URL, e.g. http://<server>:8001 (required)
+    RAVEN_RAG_BASE             RAG base URL (required)
+    RAVEN_REDIS_URL            Redis URL
+    RAVEN_HOST_WORKSPACE_ROOT  Workspace root on the docker host (required)
+    RAVEN_REMOTE_HOST          user@host to verify the workspace over SSH; empty = verify locally
+    RAVEN_GH_USER / RAVEN_GH_TOKEN / RAVEN_ADMIN_PASSWORD  (or GITHUB_USER, GITHUB_TOKEN,
+                               DEFAULT_ADMIN_PASSWORD in the repo .env)
 """
 from __future__ import annotations
 
@@ -27,14 +37,14 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parents[2]
 ENV = dotenv_values(str(ROOT / ".env"))
 
-GATEWAY_BASE = os.getenv("RAVEN_GATEWAY_BASE", "http://192.168.2.205:11435")
-IDENTITY_BASE = os.getenv("RAVEN_IDENTITY_BASE", "http://192.168.2.205:8001")
-RAG_BASE = os.getenv("RAVEN_RAG_BASE", "http://192.168.2.205:8004")
-REDIS_URL = os.getenv("RAVEN_REDIS_URL", "redis://192.168.2.205:6379/0")
+GATEWAY_BASE = os.getenv("RAVEN_GATEWAY_BASE", "")
+IDENTITY_BASE = os.getenv("RAVEN_IDENTITY_BASE", "")
+RAG_BASE = os.getenv("RAVEN_RAG_BASE", "")
+REDIS_URL = os.getenv("RAVEN_REDIS_URL", "")
 
-REMOTE_HOST = os.getenv("RAVEN_REMOTE_HOST", "jeremiah@192.168.2.205")
+REMOTE_HOST = os.getenv("RAVEN_REMOTE_HOST", "")
 HOST_WORKSPACE_ROOT = os.getenv(
-    "RAVEN_HOST_WORKSPACE_ROOT", "/home/jeremiah/workspaces/users/default"
+    "RAVEN_HOST_WORKSPACE_ROOT", ""
 )
 
 GITHUB_TOKEN = os.getenv("RAVEN_GH_TOKEN", ENV.get("GITHUB_TOKEN", ""))
@@ -62,12 +72,18 @@ def _resolve_github_user() -> str:
                 return login
     except Exception:
         pass
-    return os.getenv("RAVEN_GH_USER", ENV.get("GITHUB_USER", "JMiahMan1"))
+    return os.getenv("RAVEN_GH_USER", ENV.get("GITHUB_USER", ""))
 
 
 GITHUB_USER = _resolve_github_user()
 
-pytestmark = pytest.mark.integration
+_REQUIRED = ("RAVEN_GATEWAY_BASE", "RAVEN_IDENTITY_BASE", "RAVEN_RAG_BASE", "RAVEN_HOST_WORKSPACE_ROOT")
+_MISSING = [name for name in _REQUIRED if not os.getenv(name)]
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(bool(_MISSING), reason=f"live Raven run needs {', '.join(_MISSING)}"),
+]
 
 
 # ---------------------------------------------------------------------------

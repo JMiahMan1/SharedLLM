@@ -40,7 +40,11 @@ class Runtime:
         cfg = self.store.get_kv("core_config", {}) or {}
         if cfg:
             hub.location = cfg
-            hub.time_zone = cfg.get("time_zone") or hub.time_zone
+            # The zone is the household's (household_tz), not the imported
+            # Home Assistant config's: one setting governs Jarvis and the hub.
+            imported = cfg.get("time_zone")
+            if imported and imported != hub.time_zone:
+                log.info("homehub: imported config says time zone %s; using the household zone %s", imported, hub.time_zone)
         # Last known states come back first so readers see something while
         # drivers connect; anything a driver cannot reach turns unavailable.
         for st in self.store.load_last_states():

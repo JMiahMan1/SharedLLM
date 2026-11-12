@@ -483,7 +483,7 @@ async def test_media_status_prefers_cast_metadata_when_both_active():
 async def test_media_status_unavailable_non_ma_without_metadata_excluded():
     """Dead non-MA entities without metadata stay out of the picker payload."""
     states = [
-        _make_state("media_player.office_tv_3", "unavailable", {}),
+        _make_state("media_player.den_tv", "unavailable", {}),
         _make_state("media_player.office_tv_chrome", "paused", {"media_title": "Song"}),
     ]
     with (
@@ -493,5 +493,5 @@ async def test_media_status_unavailable_non_ma_without_metadata_excluded():
         result = await handle_media_status(_make_req())
 
     all_ids = [p["entity_id"] for p in (result.detail or {}).get("all_players") or []]
-    assert "media_player.office_tv_3" not in all_ids
+    assert "media_player.den_tv" not in all_ids
     assert "media_player.office_tv_chrome" in all_ids

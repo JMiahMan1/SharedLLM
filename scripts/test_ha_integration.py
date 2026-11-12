@@ -5,7 +5,8 @@ Tests execution service HA endpoints AND full chat interface against real HA ins
 Verifies actual state changes and HA logbook entries (no false positives).
 
 Required environment variables:
-    PROD_HOST        - Production server IP (default: 192.168.2.205)
+    PROD_HOST        - Production server IP or host
+    LIVE_CLIMATE_ENTITY - climate entity for the climate test (skipped if unset)
     INTERNAL_SECRET  - SharedLLM internal secret
     HA_URL           - Home Assistant URL
     HA_TOKEN         - Home Assistant long-lived access token
@@ -17,7 +18,7 @@ import time
 
 import httpx
 
-PROD_HOST = os.getenv("PROD_HOST", "192.168.2.205")
+PROD_HOST = os.environ["PROD_HOST"]
 SECRET = os.environ["INTERNAL_SECRET"]
 HA_URL = os.environ["HA_URL"]
 HA_TOKEN = os.environ["HA_TOKEN"]
@@ -401,7 +402,10 @@ def test_auth_non_admin_blocked():
 # Test 9: Climate Control
 def test_climate_control():
     log("=== Test 9: Climate Control ===")
-    entity = "climate.downstairs"
+    entity = os.getenv("LIVE_CLIMATE_ENTITY")
+    if not entity:
+        log("SKIP: set LIVE_CLIMATE_ENTITY to run the climate test")
+        return
 
     initial = ha_get_state(entity)
     if not initial:

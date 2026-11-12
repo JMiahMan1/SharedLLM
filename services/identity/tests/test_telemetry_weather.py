@@ -43,10 +43,10 @@ def test_a_person_sets_and_clears_their_own_weather_place(client):
 
     http, engine = client
     with S(engine) as s:
-        s.add(User(username="noah", hashed_password="x"))
+        s.add(User(username="jordan", hashed_password="x"))
         s.commit()
-        noah = s.exec(select(User).where(User.username == "noah")).first()
-    app.dependency_overrides[require_api_key] = lambda: noah
+        jordan = s.exec(select(User).where(User.username == "jordan")).first()
+    app.dependency_overrides[require_api_key] = lambda: jordan
     try:
         assert http.get("/api/users/me/weather").json() == {"status": "SUCCESS", "location": None, "units": None,
                                                          "follow": False, "live": False}
@@ -56,7 +56,7 @@ def test_a_person_sets_and_clears_their_own_weather_place(client):
         assert got["units"] == "metric"
         assert http.put("/api/users/me/weather", json={"location": {"latitude": 99, "longitude": 0}}).status_code == 422
         assert http.put("/api/users/me/weather", json={"units": "kelvin"}).status_code == 422
-        internal = http.get("/api/internal/weather/prefs?username=noah", headers=secret()).json()
+        internal = http.get("/api/internal/weather/prefs?username=jordan", headers=secret()).json()
         assert internal["units"] == "metric"
         cleared = http.put("/api/users/me/weather", json={"location": None}).json()
         assert cleared["location"] is None and cleared["units"] == "metric"
@@ -72,20 +72,20 @@ def test_following_the_phone_uses_its_recent_fix_else_the_chosen_place(client):
 
     http, engine = client
     with Session(engine) as s:
-        s.add(User(username="gracie", hashed_password="x"))
+        s.add(User(username="taylor", hashed_password="x"))
         s.commit()
-        gracie = s.exec(select(User).where(User.username == "gracie")).first()
+        taylor = s.exec(select(User).where(User.username == "taylor")).first()
 
     def put_fix(age_s):
         with Session(engine) as s:
-            key = "user_location:gracie"
+            key = "user_location:taylor"
             row = s.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first() or GlobalSetting(key=key)
             row.value = json.dumps({"latitude": 36.16271, "longitude": -86.78159, "timestamp": time.time() - age_s})
             s.add(row)
             s.commit()
 
-    internal = lambda: http.get("/api/internal/weather/prefs?username=gracie", headers=secret()).json()  # noqa: E731
-    app.dependency_overrides[require_api_key] = lambda: gracie
+    internal = lambda: http.get("/api/internal/weather/prefs?username=taylor", headers=secret()).json()  # noqa: E731
+    app.dependency_overrides[require_api_key] = lambda: taylor
     try:
         got = http.put("/api/users/me/weather", json={"follow": True, "location": {"name": "Barn", "latitude": 35,
                                                                                     "longitude": -85}}).json()

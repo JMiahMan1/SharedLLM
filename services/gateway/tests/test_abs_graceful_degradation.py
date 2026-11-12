@@ -169,7 +169,7 @@ async def test_abs_connectivity_status_unreachable(client):
     from services.gateway import main as gateway_main
 
     ping = _PingClient(error=aiohttp.ClientConnectionError("timeout"))
-    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.sumemail.com/"}
+    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.example.com/"}
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=creds)), \
          patch.object(gateway_main, 'shared_http_client', new=lambda: _ctx_for(ping)):
                 resp = client.get("/api/media/audiobookshelf/status")
@@ -326,7 +326,7 @@ async def test_abs_connectivity_status_available(client):
     from services.gateway import main as gateway_main
 
     ping = _PingClient(status=200)
-    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.sumemail.com/"}
+    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.example.com/"}
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=creds)), \
          patch.object(gateway_main, 'shared_http_client', new=lambda: _ctx_for(ping)):
                 resp = client.get("/api/media/audiobookshelf/status")
@@ -335,7 +335,7 @@ async def test_abs_connectivity_status_available(client):
                 data = resp.json()
                 assert data["status"] == "AVAILABLE"
                 assert data["reachable"] is True
-                assert ping.urls == ["https://abs.sumemail.com/ping"]
+                assert ping.urls == ["https://abs.example.com/ping"]
 
 
 @pytest.mark.asyncio

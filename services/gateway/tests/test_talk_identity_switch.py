@@ -28,7 +28,7 @@ def _patch_resolver(monkeypatch, main, creds):
 async def test_default_keeps_callers_own_identity(monkeypatch):
     from services.gateway import main
 
-    mine = {"user": "jeremiah", "is_admin": True}
+    mine = {"user": "alex", "is_admin": True}
     _patch_resolver(monkeypatch, main, mine)
 
     creds = await main._resolve_acting_identity(_request(), None)
@@ -40,7 +40,7 @@ async def test_default_keeps_callers_own_identity(monkeypatch):
 async def test_admin_flag_switches_to_system_default(monkeypatch):
     from services.gateway import main
 
-    _patch_resolver(monkeypatch, main, {"user": "jeremiah", "is_admin": True})
+    _patch_resolver(monkeypatch, main, {"user": "alex", "is_admin": True})
 
     async def fake_first_user():
         return ADMIN_CREDS
@@ -71,7 +71,7 @@ async def test_non_admin_cannot_send_as_admin(monkeypatch):
 async def test_arbitrary_as_user_is_ignored(monkeypatch):
     from services.gateway import main
 
-    mine = {"user": "jeremiah", "is_admin": True}
+    mine = {"user": "alex", "is_admin": True}
     _patch_resolver(monkeypatch, main, mine)
 
     async def fake_first_user():
@@ -90,7 +90,7 @@ async def test_missing_admin_identity_gets_503(monkeypatch):
 
     from services.gateway import main
 
-    _patch_resolver(monkeypatch, main, {"user": "jeremiah", "is_admin": True})
+    _patch_resolver(monkeypatch, main, {"user": "alex", "is_admin": True})
 
     async def fake_first_user():
         return {}

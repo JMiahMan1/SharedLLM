@@ -413,12 +413,12 @@ async def test_companion_remote_falls_back_to_a_matching_name(monkeypatch):
 
     async def states(ha_url, ha_token):
         return [
-            _state("media_player.gracies_tv", {"friendly_name": "Gracies TV"}),
-            _state("remote.28_tcl_roku_tv", {"friendly_name": "Gracies TV Roku"}),
+            _state("media_player.taylors_tv", {"friendly_name": "Taylors TV"}),
+            _state("remote.tcl_roku_tv", {"friendly_name": "Taylors TV Roku"}),
         ]
 
     monkeypatch.setattr(ha_client, "get_states", states)
-    assert await ha_client.find_companion_remote("http://ha.test", "t", "media_player.gracies_tv") == "remote.28_tcl_roku_tv"
+    assert await ha_client.find_companion_remote("http://ha.test", "t", "media_player.taylors_tv") == "remote.tcl_roku_tv"
 
 
 async def test_companion_remote_never_templates_an_unsafe_entity_id(monkeypatch):

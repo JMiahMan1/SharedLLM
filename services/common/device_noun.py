@@ -1,6 +1,6 @@
 """What to call a member's phone or tablet in a sentence.
 
-Some of the family carry tablets, not phones, so a notice that says "Noah's
+Some of the family carry tablets, not phones, so a notice that says "Jordan's
 phone" is wrong for them. Identity knows each member's devices; it answers
 with their kinds (``device_kinds`` on the routes that need it, or the
 ``details`` of ``/api/internal/owned-devices/{username}``), and ``noun()``

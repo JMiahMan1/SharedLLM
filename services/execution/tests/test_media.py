@@ -26,7 +26,7 @@ def test_detect_podcast_keywords():
 
 def test_detect_url_generic():
     assert detect_media_type("https://example.com/stream.mp3") == "url"
-    assert detect_media_type("http://192.168.1.100:8080/audio.wav") == "url"
+    assert detect_media_type("http://198.51.100.100:8080/audio.wav") == "url"
 
 def test_detect_audiobook_keywords():
     assert detect_media_type("audiobook The Hobbit narrated by Andy Serkis") == "audiobook"

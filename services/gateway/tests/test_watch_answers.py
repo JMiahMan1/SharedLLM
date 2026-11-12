@@ -14,7 +14,7 @@ from services.gateway.schemas import ResolvedCredentials
 
 
 def _creds() -> ResolvedCredentials:
-    return ResolvedCredentials(user="jeremiah")
+    return ResolvedCredentials(user="alex")
 
 
 def test_the_watch_phrases_are_recognised():

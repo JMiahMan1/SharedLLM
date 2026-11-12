@@ -97,7 +97,7 @@ async def test_admins_get_the_review_queue_with_reasons(monkeypatch):
 
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
     _client(monkeypatch, main, get_payload={"success": True, "games": GAMES})
-    _as(monkeypatch, main, "jeremiah", True)
+    _as(monkeypatch, main, "alex", True)
 
     payload = await main.proxy_family_games(MagicMock())
 
@@ -143,7 +143,7 @@ async def test_admin_publish_forwards_the_arcade_token(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
-    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="alex"))
     _client(monkeypatch, main, seen=seen)
     request = MagicMock()
     request.json = AsyncMock(return_value={"state": "published"})
@@ -153,7 +153,7 @@ async def test_admin_publish_forwards_the_arcade_token(monkeypatch):
     url, kwargs = seen["post"]
     assert url == f"{main.ALPACA_ARCADE_URL}/api/admin/family/family-cloud-hop/state"
     assert kwargs["headers"] == {"X-Arcade-Token": "tok"}
-    assert kwargs["json"] == {"state": "published", "by": "jeremiah"}
+    assert kwargs["json"] == {"state": "published", "by": "alex"}
     assert response.status_code == 200
 
 
@@ -162,7 +162,7 @@ async def test_publish_fails_loudly_without_the_admin_token(monkeypatch):
     from services.gateway import main
 
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "")
-    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="alex"))
     request = MagicMock()
     request.json = AsyncMock(return_value={"state": "published"})
 
@@ -178,7 +178,7 @@ async def test_publish_rejects_a_bad_state_and_non_admins(monkeypatch):
     from services.gateway import main
 
     monkeypatch.setattr(main, "ARCADE_ADMIN_TOKEN", "tok")
-    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="jeremiah"))
+    monkeypatch.setattr(main, "_require_admin", AsyncMock(return_value="alex"))
     request = MagicMock()
     request.json = AsyncMock(return_value={"state": "featured"})
     with pytest.raises(HTTPException) as exc:
@@ -216,7 +216,7 @@ async def test_a_card_not_marked_mobile_compatible_is_never_shown(monkeypatch):
 
     desktop = {**_game("desktop-thing", "published", average=5.0, votes=9), "mobile_compatible": False}
     _client(monkeypatch, main, get_payload={"success": True, "games": [*GAMES, desktop]})
-    _as(monkeypatch, main, "jeremiah", True)
+    _as(monkeypatch, main, "alex", True)
 
     payload = await main.proxy_family_games(MagicMock())
 

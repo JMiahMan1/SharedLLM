@@ -25,7 +25,7 @@ BEGIN:VTODO\r
 UID:beae3bc4-6b1d-11ef-a339-cc3d8294b015\r
 STATUS:COMPLETED\r
 SUMMARY:Return library books\r
-DUE;TZID=America/Phoenix:20240911T170000\r
+DUE;TZID=Etc/GMT+7:20240911T170000\r
 END:VTODO\r
 END:VCALENDAR\r
 """
@@ -43,7 +43,7 @@ class FakeStore:
 
 
 def test_parse_ics():
-    items = todo.parse_ics(ICS, "America/Phoenix")
+    items = todo.parse_ics(ICS, "Etc/GMT+7")
     assert items[0] == {"uid": "a846c874-6b1d-11ef-a339-cc3d8294b015", "status": "needs_action",
                         "summary": "Call the plumber, about the water heater", "due": "2024-09-10",
                         "description": "Line one\nline two"}

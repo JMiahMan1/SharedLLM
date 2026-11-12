@@ -66,7 +66,7 @@ def test_returns_none_when_no_tool_type():
 def test_settings_update_recovery():
     text = (
         "1. WorkspaceSettingsUpdateRequest workspace_id 'w1' "
-        "repo_url 'https://github.com/JMiahMan1/x.git' default_branch 'main'"
+        "repo_url 'https://github.com/Example-User/x.git' default_branch 'main'"
     )
     batch = extract_action_prose(text)
     assert batch is not None

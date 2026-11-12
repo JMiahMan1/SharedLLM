@@ -29,7 +29,7 @@ def attrs(**kw) -> str:
 @pytest.fixture
 def env(tmp_path):
     store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
-    stats = Statistics(str(tmp_path / "statistics.db"), store.path, time_zone="America/Phoenix")
+    stats = Statistics(str(tmp_path / "statistics.db"), store.path, time_zone="Etc/GMT+7")
     yield store, stats
     stats.close()
     store.close()
@@ -296,7 +296,7 @@ def test_an_import_after_compiling_rebases_the_hubs_sums(env, tmp_path):
 @pytest.fixture
 def api(env, tmp_path, monkeypatch):
     store, stats = env
-    hub = Hub(time_zone="America/Phoenix")
+    hub = Hub(time_zone="Etc/GMT+7")
     hub.store = store
     runtime = Runtime(hub, store)
     runtime.statistics = stats
@@ -426,7 +426,7 @@ def test_period_for_wraps_midnight():
 
 def test_range_for_month_and_year():
     tz = Statistics.__new__(Statistics)
-    tz._tz = "America/Phoenix"
+    tz._tz = "Etc/GMT+7"
     start, end, period = energy.range_for("month", datetime(2026, 2, 10, tzinfo=UTC), tz.tz)
     assert (start.day, end.month, period) == (1, 3, "day")
     start, end, period = energy.range_for("year", datetime(2026, 2, 10, tzinfo=UTC), tz.tz)

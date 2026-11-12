@@ -3,7 +3,7 @@ from math_utils import normalize_username, parse_port
 
 
 def test_normalize_username_basic():
-    assert normalize_username("  Jeremiah Home Desktop  ") == "jeremiah_home_desktop"
+    assert normalize_username("  Alex Home Desktop  ") == "alex_home_desktop"
 
 
 def test_parse_port_accepts_numeric_strings():

@@ -183,10 +183,10 @@ class TestComposeHasNoFoldedOrHardcodedHost:
         The fold we hit looked like::
 
             - SEARXNG_URL=${HOST_SEARXNG_URL}
-             - EXECUTION_EXTERNAL_HOST=192.168.2.205
+             - EXECUTION_EXTERNAL_HOST=192.0.2.205
 
         which YAML reads as ONE value, producing
-        ``SEARXNG_URL=http://... - EXECUTION_EXTERNAL_HOST=192.168.2.205`` and
+        ``SEARXNG_URL=http://... - EXECUTION_EXTERNAL_HOST=192.0.2.205`` and
         never setting EXECUTION_EXTERNAL_HOST at all.
         """
         import re
@@ -215,6 +215,9 @@ class TestComposeHasNoFoldedOrHardcodedHost:
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         with open(os.path.join(root, "docker-compose.yml")) as f:
             text = f.read()
+        # coturn's deny list names whole RFC1918 ranges on purpose (relays must
+        # never reach the LAN); those are not addresses of any one install.
+        text = "\n".join(line for line in text.splitlines() if "--denied-peer-ip=" not in line)
         # 192.168.x.y / 10.x: the RFC1918 ranges that would break other installs.
         assert not re.search(r"\b(?:192\.168|10)\.\d+\.\d+\.\d+\b", text), (
             "docker-compose.yml hardcodes a private address"

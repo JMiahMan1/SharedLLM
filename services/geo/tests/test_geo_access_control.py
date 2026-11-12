@@ -100,7 +100,7 @@ def test_another_users_data_is_refused_without_opt_in(
     client, redis, monkeypatch, path, extra
 ):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
-    r = client.get(path, params={**extra, "user_id": "jeremiah", "viewer": "michele"})
+    r = client.get(path, params={**extra, "user_id": "alex", "viewer": "pat"})
     assert r.status_code == 404, f"{path} leaked another user's data ({r.status_code})"
     assert "not shared" in r.text
 
@@ -110,9 +110,9 @@ def test_opted_in_target_is_readable(client, redis, monkeypatch, path, extra):
     monkeypatch.setattr(
         geo,
         "_fetch_activity_sharing",
-        _sharing({"jeremiah": {"enabled": True, "audience": "circle"}}),
+        _sharing({"alex": {"enabled": True, "audience": "circle"}}),
     )
-    r = client.get(path, params={**extra, "user_id": "jeremiah", "viewer": "michele"})
+    r = client.get(path, params={**extra, "user_id": "alex", "viewer": "pat"})
     assert r.status_code == 200, f"{path} refused a legitimately shared read: {r.text}"
 
 
@@ -120,7 +120,7 @@ def test_opted_in_target_is_readable(client, redis, monkeypatch, path, extra):
 def test_admin_reads_anything_without_opt_in(client, redis, monkeypatch, path, extra):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
     r = client.get(
-        path, params={**extra, "user_id": "jeremiah", "viewer": "michele", "is_admin": "true"}
+        path, params={**extra, "user_id": "alex", "viewer": "pat", "is_admin": "true"}
     )
     assert r.status_code == 200, f"{path} denied the admin carve-out: {r.text}"
 
@@ -129,7 +129,7 @@ def test_own_data_needs_no_opt_in(client, redis, monkeypatch):
     """You always see yourself, with no sharing row configured at all."""
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
     for path in ("/steps", "/goals", "/points", "/achievements", "/steps/goal", "/trips", "/workouts"):
-        r = client.get(path, params={"user_id": "michele", "viewer": "michele"})
+        r = client.get(path, params={"user_id": "pat", "viewer": "pat"})
         assert r.status_code == 200, f"{path} refused self-read: {r.text}"
 
 
@@ -138,11 +138,11 @@ def test_explicit_audience_list_is_honoured(client, redis, monkeypatch):
     monkeypatch.setattr(
         geo,
         "_fetch_activity_sharing",
-        _sharing({"jeremiah": {"enabled": True, "audience": "users", "user_ids": ["sam"]}}),
+        _sharing({"alex": {"enabled": True, "audience": "users", "user_ids": ["sam"]}}),
     )
-    named = client.get("/steps", params={"user_id": "jeremiah", "viewer": "sam"})
+    named = client.get("/steps", params={"user_id": "alex", "viewer": "sam"})
     assert named.status_code == 200
-    other = client.get("/steps", params={"user_id": "jeremiah", "viewer": "michele"})
+    other = client.get("/steps", params={"user_id": "alex", "viewer": "pat"})
     assert other.status_code == 404
 
 
@@ -150,9 +150,9 @@ def test_disabled_sharing_is_not_shared(client, redis, monkeypatch):
     monkeypatch.setattr(
         geo,
         "_fetch_activity_sharing",
-        _sharing({"jeremiah": {"enabled": False, "audience": "circle"}}),
+        _sharing({"alex": {"enabled": False, "audience": "circle"}}),
     )
-    r = client.get("/steps", params={"user_id": "jeremiah", "viewer": "michele"})
+    r = client.get("/steps", params={"user_id": "alex", "viewer": "pat"})
     assert r.status_code == 404
 
 
@@ -168,7 +168,7 @@ def test_identity_outage_fails_closed(client, redis, monkeypatch):
         raise RuntimeError("identity unreachable")
 
     monkeypatch.setattr(geo, "get_client_insecure", _dead)
-    r = client.get("/steps", params={"user_id": "jeremiah", "viewer": "michele"})
+    r = client.get("/steps", params={"user_id": "alex", "viewer": "pat"})
     assert r.status_code == 404, f"identity outage served data ({r.status_code})"
 
 
@@ -191,7 +191,7 @@ def test_the_all_bucket_is_admin_only(client, redis, monkeypatch):
         "/workouts",
         "/trends/activity",
     ):
-        r = client.get(path, params={"viewer": "michele"})
+        r = client.get(path, params={"viewer": "pat"})
         assert r.status_code != 200, f"{path} served the all-bucket to a non-admin"
 
 
@@ -201,7 +201,7 @@ def _ha_state(entity_id, friendly):
     return {
         "entity_id": entity_id,
         "state": "home",
-        "attributes": {"friendly_name": friendly, "latitude": 33.1, "longitude": -111.5},
+        "attributes": {"friendly_name": friendly, "latitude": 39.6725, "longitude": -104.9257},
     }
 
 
@@ -229,8 +229,8 @@ def test_people_hides_entities_with_no_attributable_user(client, redis, monkeypa
         monkeypatch,
         [
             _ha_state("person.mich", "Mich"),
-            _ha_state("person.michele_phone", "Michele's phone"),
-            _ha_state("person.jeremiah", "Jeremiah"),
+            _ha_state("person.pat_phone", "Pat's phone"),
+            _ha_state("person.alex", "Alex"),
         ],
     )
     r = client.get("/people", params={"viewer": "sam", "is_admin": "false"})
@@ -242,24 +242,24 @@ def test_people_shows_only_opted_in_users(client, redis, monkeypatch):
     monkeypatch.setattr(
         geo,
         "_fetch_activity_sharing",
-        _sharing({"michele": {"enabled": True, "audience": "circle"}}),
+        _sharing({"pat": {"enabled": True, "audience": "circle"}}),
     )
     _stub_ha_states(
         monkeypatch,
-        [_ha_state("person.michele", "Michele"), _ha_state("person.jeremiah", "Jeremiah")],
+        [_ha_state("person.pat", "Pat"), _ha_state("person.alex", "Alex")],
     )
     ids = _person_ids(client.get("/people", params={"viewer": "sam"}))
-    assert ids == ["person.michele"], f"unexpected visibility: {ids}"
+    assert ids == ["person.pat"], f"unexpected visibility: {ids}"
 
 
 def test_people_admin_sees_everyone(client, redis, monkeypatch):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
     _stub_ha_states(
         monkeypatch,
-        [_ha_state("person.jeremiah", "Jeremiah"), _ha_state("person.mich", "Mich")],
+        [_ha_state("person.alex", "Alex"), _ha_state("person.mich", "Mich")],
     )
-    ids = _person_ids(client.get("/people", params={"viewer": "jeremiah", "is_admin": "true"}))
-    assert sorted(ids) == ["person.jeremiah", "person.mich"]
+    ids = _person_ids(client.get("/people", params={"viewer": "alex", "is_admin": "true"}))
+    assert sorted(ids) == ["person.alex", "person.mich"]
 
 # edge: no internal secret
 def test_geo_is_unreachable_without_the_internal_secret(redis):
@@ -295,8 +295,8 @@ def test_health_stays_reachable_without_the_secret(redis):
 def test_goal_writes_require_the_internal_secret(redis):
     """PUT /goals and PUT /steps/goal accepted the header and ignored it."""
     anon = TestClient(geo.app, raise_server_exceptions=False)
-    assert anon.put("/goals", json={"user_id": "jeremiah", "goals": {"daily_steps": 1}}).status_code in (401, 403)
-    assert anon.put("/steps/goal", json={"user_id": "jeremiah", "goal": 1}).status_code in (401, 403)
+    assert anon.put("/goals", json={"user_id": "alex", "goals": {"daily_steps": 1}}).status_code in (401, 403)
+    assert anon.put("/steps/goal", json={"user_id": "alex", "goal": 1}).status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +365,7 @@ class _HistoryRedis:
 
         now = time.time()
         self.history = {
-            f"geo:history:{u}": [json.dumps({"t": now - age, "lat": 33.1, "lon": -111.5, "acc": 5, "bat": 80})]
+            f"geo:history:{u}": [json.dumps({"t": now - age, "lat": 39.6725, "lon": -104.9257, "acc": 5, "bat": 80})]
             for u, age in points.items()
         }
         # The entity-id copy of a user's history must not become a second person.
@@ -401,35 +401,35 @@ def _ha_down(monkeypatch, points, zones=None):
 
 def test_people_with_ha_down_come_from_jarvis_breadcrumbs(client, monkeypatch):
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
-    _ha_down(monkeypatch, {"jeremiah": 60, "michele": 120, "old": 3 * 86400}, {"jeremiah": "zone.home"})
-    r = client.get("/people", params={"viewer": "jeremiah", "is_admin": "true"})
+    _ha_down(monkeypatch, {"alex": 60, "pat": 120, "old": 3 * 86400}, {"alex": "zone.home"})
+    r = client.get("/people", params={"viewer": "alex", "is_admin": "true"})
     assert r.status_code == 200
     body = r.json()
     assert body["source"] == "jarvis"
     by_id = {f["properties"]["entity_id"]: f["properties"] for f in body["features"]}
-    assert sorted(by_id) == ["person.jeremiah", "person.michele"], "stale (3-day-old) fixes are not 'where someone is'"
-    assert by_id["person.jeremiah"]["state"] == "home"
-    assert by_id["person.jeremiah"]["source_type"] == "jarvis"
+    assert sorted(by_id) == ["person.alex", "person.pat"], "stale (3-day-old) fixes are not 'where someone is'"
+    assert by_id["person.alex"]["state"] == "home"
+    assert by_id["person.alex"]["source_type"] == "jarvis"
 
 
 def test_people_with_ha_down_still_respect_consent(client, monkeypatch):
-    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({"michele": {"enabled": True, "audience": "circle"}}))
-    _ha_down(monkeypatch, {"jeremiah": 60, "michele": 60})
+    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({"pat": {"enabled": True, "audience": "circle"}}))
+    _ha_down(monkeypatch, {"alex": 60, "pat": 60})
     ids = _person_ids(client.get("/people", params={"viewer": "sam"}))
-    assert ids == ["person.michele"]
+    assert ids == ["person.pat"]
 
 
 def test_people_source_jarvis_never_asks_home_assistant(client, monkeypatch):
     """homehub plays HA's part now; reading its trackers back would only echo them."""
     monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
-    _ha_down(monkeypatch, {"jeremiah": 60})
+    _ha_down(monkeypatch, {"alex": 60})
 
     async def _must_not_call():
         raise AssertionError("source=jarvis must not read Home Assistant")
 
     monkeypatch.setattr(geo, "_ha_get_states", _must_not_call)
-    r = client.get("/people", params={"viewer": "jeremiah", "is_admin": "true", "source": "JARVIS"})
+    r = client.get("/people", params={"viewer": "alex", "is_admin": "true", "source": "JARVIS"})
     assert r.status_code == 200
     body = r.json()
     assert body["source"] == "jarvis"
-    assert [f["properties"]["entity_id"] for f in body["features"]] == ["person.jeremiah"]
+    assert [f["properties"]["entity_id"] for f in body["features"]] == ["person.alex"]

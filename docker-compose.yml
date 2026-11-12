@@ -127,7 +127,7 @@ services:
       - FORCE_RESEED=${FORCE_RESEED:-false}
       - NETWORK_MODE=bridge
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - ./data/identity:/data
       - /etc/localtime:/etc/localtime:ro
@@ -198,7 +198,7 @@ services:
       - ROUTER_IP=${ROUTER_IP:-}
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - FAMILY_GAMES_ENABLED=${FAMILY_GAMES_ENABLED:-1}
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
@@ -220,7 +220,9 @@ services:
       # DNS via the gateway's dnsmasq so .local hostnames (synced by the DNS
       # sync service) resolve inside this host-networked container; resolv.conf
       # cannot be baked at build time (buildkit bind-mounts it read-only).
-      - ./services/execution/resolv.conf:/etc/resolv.conf:ro
+      # EXECUTION_RESOLV_CONF points at a local copy that adds the LAN router
+      # as a fallback nameserver (e.g. ./data/execution-resolv.conf).
+      - ${EXECUTION_RESOLV_CONF:-./services/execution/resolv.conf}:/etc/resolv.conf:ro
 
   rag:
     image: ghcr.io/jmiahman1/sharedllm-rag:latest
@@ -256,11 +258,11 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - HOME=/home/sharedllm
       - RAG_DB_PATH=/data/rag.db
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - HUGGINGFACE_HUB_DISABLE_XET=1
       - EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
-      - ALPACA_BENCHMARKS_PATH=http://192.168.2.43:5000/api/tests
-      - ALPACA_BENCHMARK_RESULTS_DIR=http://192.168.2.43:5000/api/tests
+      # ALPACA_BENCHMARKS_PATH / ALPACA_BENCHMARK_RESULTS_DIR (the alpaca
+      # dashboard's /api/tests on the LAN) come from .env via env_file.
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - chroma_data:/data
@@ -347,7 +349,7 @@ services:
       - CONTROL_PLANE_URL=http://control_plane:8008
       - BRIDGE_HEALTH_SVC_URL=${BRIDGE_HEALTH_SVC_URL:-http://health:8011}
       - REDIS_URL=${BRIDGE_REDIS_URL}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - HOME=/home/sharedllm
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
@@ -397,7 +399,7 @@ services:
       - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - REDIS_URL=${BRIDGE_REDIS_URL}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -441,7 +443,7 @@ services:
       - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - REDIS_URL=${BRIDGE_REDIS_URL}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -486,7 +488,7 @@ services:
       - AUTOMATION_SVC_URL=${BRIDGE_AUTOMATION_SVC_URL}
       - LLM_URL=${LLM_URL}
       - REDIS_URL=${BRIDGE_REDIS_URL}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -540,7 +542,7 @@ services:
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
       - STORAGE_CHECKPOINT_PATH=${STORAGE_CHECKPOINT_PATH:-/data/index_checkpoint.json}
       - ARTIFACTS_ROOT=/artifacts
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/storage:/data
@@ -588,7 +590,7 @@ services:
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspaces
       - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - HOME=/home/raven
       # Host path that /workspaces maps to, so the sandbox can mount the real
       # workspace data (the Docker daemon resolves mount sources on the host).
@@ -632,7 +634,7 @@ services:
     environment:
       # Somewhere writable: with HOME unset a container inherits HOME=/ and any tool that wants a cache fails on the read-only root.
       - HOME=/tmp
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     depends_on:
       - gateway
     dns:
@@ -680,7 +682,7 @@ services:
       - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL:-http://geo:8009}
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - GATEWAY_INTERNAL_URL=http://gateway:11435
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/bible:/data
@@ -722,7 +724,7 @@ services:
       - HOME=/tmp
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - HEALTH_DATABASE_URL=${HEALTH_DATABASE_URL:-sqlite:////data/health.db}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/health:/data
@@ -818,7 +820,7 @@ services:
       - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL:-http://geo:8009}
       - REDIS_URL=${BRIDGE_REDIS_URL}
       - GATEWAY_INTERNAL_URL=http://gateway:11435
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - OSRM_URL=${OSRM_URL:-http://osrm:5000}
       - OSRM_FOOT_URL=${OSRM_FOOT_URL:-http://osrm-foot:5000}
       - NOMINATIM_URL=${NOMINATIM_URL:-http://nominatim:8080}
@@ -873,7 +875,7 @@ services:
       - HOMEHUB_IMPORT_DIR=/import
       - MATTER_SERVER_URL=${MATTER_SERVER_URL:-ws://127.0.0.1:5580/ws}
       - MUSIC_ASSISTANT_URL=${MUSIC_ASSISTANT_URL:-http://127.0.0.1:8095}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./data/homehub:/data
@@ -902,7 +904,7 @@ services:
       - LISTEN_ADDRESS=127.0.0.1
       - LOG_LEVEL=info
       - ENABLE_TIME_SYNC=true
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
 
   go2rtc:
     # Real-time camera video (WebRTC, MSE, MP4) for homehub's Cameras page, as
@@ -931,7 +933,7 @@ services:
     volumes:
       - ./data/go2rtc:/config
     environment:
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
 
   music-assistant:
     # Music Assistant, formerly HA's add-on (services/homehub/MUSIC_ASSISTANT.md).
@@ -948,7 +950,7 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
 
   esphome:
     # ESPHome Device Builder (formerly HA's ESPHome add-on 2026.10.2): edits node
@@ -970,7 +972,7 @@ services:
     volumes:
       - ./data/esphome:/config
     environment:
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - ESPHOME_USERNAME=${ESPHOME_USERNAME:-}
       - ESPHOME_PASSWORD=${ESPHOME_PASSWORD:-}
 
@@ -1028,16 +1030,16 @@ services:
     environment:
       - TURN_SECRET=${TURN_SECRET:-}
       - TURN_PUBLIC_IP=${TURN_PUBLIC_IP:-}
-      - TURN_PRIVATE_IP=${TURN_PRIVATE_IP:-192.168.2.205}
-      - TURN_REALM=${TURN_REALM:-sumemail.com}
+      - TURN_PRIVATE_IP=${TURN_PRIVATE_IP:-}
+      - TURN_REALM=${TURN_REALM:-}
       - TURN_PORT=${TURN_PORT:-3478}
       - TURN_MIN_PORT=${TURN_MIN_PORT:-49160}
       - TURN_MAX_PORT=${TURN_MAX_PORT:-49200}
     entrypoint: ["sh", "-c"]
     command:
       - |
-        if [ -z "$$TURN_SECRET" ] || [ -z "$$TURN_PUBLIC_IP" ]; then
-          echo "coturn: TURN_SECRET and TURN_PUBLIC_IP must be set in .env" >&2; exit 1
+        if [ -z "$$TURN_SECRET" ] || [ -z "$$TURN_PUBLIC_IP" ] || [ -z "$$TURN_PRIVATE_IP" ] || [ -z "$$TURN_REALM" ]; then
+          echo "coturn: TURN_SECRET, TURN_PUBLIC_IP, TURN_PRIVATE_IP and TURN_REALM must be set in .env" >&2; exit 1
         fi
         exec turnserver -n --log-file=stdout --simple-log --no-cli \
           --listening-port="$$TURN_PORT" \
@@ -1070,7 +1072,7 @@ services:
       - NTFY_AUTH_USERS=${NTFY_AUTH_USERS:-}
       - NTFY_AUTH_TOKENS=${NTFY_AUTH_TOKENS:-}
       - NTFY_PROXY_TRUSTED_HOSTS=${PUBLIC_PROXY_IP:-127.0.0.1}
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
     volumes:
       - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
       - ntfy_data:/var/lib/ntfy
@@ -1122,7 +1124,7 @@ services:
       - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Phoenix}
+      - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - GHCR_TOKEN=${GHCR_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     volumes:

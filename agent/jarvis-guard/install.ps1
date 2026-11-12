@@ -17,7 +17,7 @@
 #
 # Uninstall is Admin-only and is reported to the parents as guard_missing.
 param(
-    [string]$HubUrl = 'https://ai.sumemail.com',
+    [string]$HubUrl = '',
     [string]$AdminUsername = '',
     [securestring]$AdminPassword = $null,
     [string]$ChildUsername = '',
@@ -30,6 +30,9 @@ $ErrorActionPreference = 'Stop'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw 'Run this installer from an elevated (administrator) PowerShell.' }
 
+if (-not $HubUrl) { $HubUrl = Read-Host 'Family hub address (e.g. https://jarvis.example.com)' }
+if (-not $HubUrl.Trim()) { throw 'The family hub address is required.' }
+$HubUrl = $HubUrl.Trim().TrimEnd('/')
 if (-not $AdminUsername) { $AdminUsername = Read-Host 'Jarvis admin username (a parent or admin account)' }
 if (-not $AdminPassword) { $AdminPassword = Read-Host "Password for '$AdminUsername' (never written to disk)" -AsSecureString }
 if (-not $ChildUsername) { $ChildUsername = Read-Host 'Child username to assign this PC to' }

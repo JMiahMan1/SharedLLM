@@ -14,7 +14,13 @@ HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
 GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
-QUEUE_ENTITY_ID = "media_player.office_tv_3"
+# The TV under test comes from the run, never from the repo:
+#   LIVE_TV_ENTITY  its Music Assistant queue entity id (e.g. media_player.<room>_tv)
+#   LIVE_TV_NAME    the name you would say to Jarvis (e.g. "Office TV")
+QUEUE_ENTITY_ID = os.getenv("LIVE_TV_ENTITY", "")
+TV_NAME = os.getenv("LIVE_TV_NAME", "")
+if not (QUEUE_ENTITY_ID and TV_NAME and HA_URL and HA_TOKEN):
+    pytest.skip("Set LIVE_TV_ENTITY, LIVE_TV_NAME, HA_URL and HA_TOKEN to run the TV media test.", allow_module_level=True)
 
 HA_HEADERS = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -74,7 +80,7 @@ def test_office_tv_music_controls(client):
     initial = summarize_state(QUEUE_ENTITY_ID)
     print(f"\n[Test] Initial Office TV state: {initial}")
 
-    send_chat(client, "Play Brandon Lake on Office TV")
+    send_chat(client, f"Play Brandon Lake on {TV_NAME}")
     play_state = wait_for(
         lambda: (
             state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") in {"playing", "buffering"}
@@ -84,7 +90,7 @@ def test_office_tv_music_controls(client):
     assert play_state, "Office TV did not start Brandon Lake playback."
     print(f"[Test] After play: {play_state}")
 
-    send_chat(client, "Pause the Office TV")
+    send_chat(client, f"Pause the {TV_NAME}")
     pause_state = wait_for(
         lambda: (
             state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") == "paused" else None
@@ -96,7 +102,7 @@ def test_office_tv_music_controls(client):
     print(f"[Test] After pause: {pause_state}")
 
     previous_title = pause_state.get("media_title")
-    send_chat(client, "Next on Office TV")
+    send_chat(client, f"Next on {TV_NAME}")
     next_state = wait_for(
         lambda: (
             state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") == "playing"
@@ -107,7 +113,7 @@ def test_office_tv_music_controls(client):
     print(f"[Test] After next: {next_state}")
 
     next_title = next_state.get("media_title")
-    send_chat(client, "Back on Office TV")
+    send_chat(client, f"Back on {TV_NAME}")
     back_state = wait_for(
         lambda: (
             state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") == "playing"
@@ -117,8 +123,8 @@ def test_office_tv_music_controls(client):
         interval=1.0,
     )
     if not back_state:
-        send_chat(client, "Back on Office TV")
-        send_chat(client, "Back on Office TV")
+        send_chat(client, f"Back on {TV_NAME}")
+        send_chat(client, f"Back on {TV_NAME}")
         back_state = wait_for(
             lambda: (
                 state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") == "playing"
@@ -130,7 +136,7 @@ def test_office_tv_music_controls(client):
     assert back_state, "Office TV back command did not move away from the current track."
     print(f"[Test] After back: {back_state}")
 
-    send_chat(client, "Stop the music on Office TV")
+    send_chat(client, f"Stop the music on {TV_NAME}")
     stop_state = wait_for(
         lambda: (
             state if (state := summarize_state(QUEUE_ENTITY_ID)).get("state") == "idle" else None

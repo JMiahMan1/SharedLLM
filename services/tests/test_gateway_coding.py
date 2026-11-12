@@ -23,7 +23,7 @@ def test_coding_chat():
 
     headers = {
         "X-Internal-Secret": INTERNAL_SECRET,
-        "X-User-ID": "jeremiah"
+        "X-User-ID": "alex"
     }
 
     start_time = time.time()

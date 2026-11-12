@@ -1,7 +1,7 @@
 # services/geo/main.py
 """SharedLLM `geo` service: Life360-style family location (wraps Home Assistant).
 
-Backend: Home Assistant (https://ha.sumemail.com:8095). Reads `person` /
+Backend: Home Assistant (e.g. https://ha.example.com:8095). Reads `person` /
 `device_tracker` / `zone` entity states via the HA REST API (token resolved at
 boot by services.config.resolve_runtime_config into HA_URL / HA_TOKEN), exposes
 them as GeoJSON for a MapLibre client, and accepts location pushes via the HA
@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import AliasChoices, BaseModel, Field
 
 from services.common import device_noun, notify
+from services.common import household_tz as _household_tz_mod
 from services.common.http import get_client, get_client_insecure
 from services.common.logging_utils import warn_periodically
 from services.common.secrets import secret_matches
@@ -117,6 +118,13 @@ async def lifespan(app: FastAPI):
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
     log.info("[Geo] runtime config resolved (HA_URL=%s)", bool(HA_URL))
+    global APP_TIMEZONE
+    if not (os.environ.get("APP_TIMEZONE") or "").strip():
+        resolved = await _household_tz_mod.startup("geo", required=True)
+        if resolved:
+            APP_TIMEZONE = resolved[0]
+    else:
+        log.info("geo: time zone %s (from APP_TIMEZONE, overriding the household zone)", APP_TIMEZONE)
     await get_redis()
     sweeper = asyncio.create_task(_idle_trip_sweeper())
     notices = asyncio.create_task(_notice_sweeper())
@@ -248,7 +256,7 @@ async def get_people(
     port. It now requires the internal secret, and drops any person whose
     entity does not map to a user who has opted into being visible.
 
-    An entity with no matching user (``person.jeremiah_phone``, say) is kept for
+    An entity with no matching user (``person.alex_phone``, say) is kept for
     admins and dropped otherwise: we cannot prove consent for a row we cannot
     attribute to a user.
     """
@@ -454,8 +462,8 @@ def _entity_belongs_to(entity_id: str, usernames: set[str]) -> bool:
     """True when a HA person/device_tracker entity maps to one of `usernames`.
 
     Matches on any underscore-separated token of the object id so
-    ``person.jeremiah_phone``, ``device_tracker.jeremiah`` and ``person.jeremiah``
-    all attribute to ``jeremiah``. Deliberately does not substring-match, which
+    ``person.alex_phone``, ``device_tracker.alex`` and ``person.alex``
+    all attribute to ``alex``. Deliberately does not substring-match, which
     would let ``person.michelle_phone`` match a user named ``mich``.
     """
     obj = entity_id.split(".", 1)[-1].lower()
@@ -1037,7 +1045,7 @@ async def _replace_resent_fix(r, entity_id: str, clean_id: str, point: dict, enc
 # Each person's current HA zone is kept in geo:zone_state:{user}. Entering a
 # zone, or leaving one (by ZONE_EXIT_MARGIN_M past its edge, so GPS jitter at
 # the boundary does not flap), notifies the family members who may see them
-# (sharing consent): "Jeremiah left Work · home in about 22 min", "Michele
+# (sharing consent): "Alex left Work · home in about 22 min", "Sam
 # arrived at Home". Whether someone wants these is their family_presence
 # notification preference, which telemetry applies.
 
@@ -1053,7 +1061,7 @@ ARRIVE_DWELL_S = 120.0
 #: stale motion estimate ("driving" 1 km east in 48 s, accuracy growing from
 #: 40 to 93 m) before snapping home. In production one phone sitting at home
 #: overnight made 27 of these, each back inside within 2.5 minutes, and each
-#: told the family "Noah left Home". A real departure keeps going.
+#: told the family "Jordan left Home". A real departure keeps going.
 DEPART_DWELL_S = 180.0
 #: Faster than this (m/s, about 9 mph) and the person is still travelling.
 ARRIVE_MAX_SPEED_MPS = 4.0
@@ -1427,7 +1435,13 @@ STEP_SOURCES = ("phone", "watch", "ha", "health_connect", "intervals")
 #: The household's local time zone, in one place. Every day-bucket boundary
 #: resolves through this rather than repeating the literal -- a hardcoded zone
 #: duplicated seven times is a bug waiting for the household to move.
-APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Phoenix")
+#: Resolved by services/common/household_tz.py (setting, then TZ, then the
+#: home location), so geo refuses to start without one rather than bucket a
+#: day's data into the wrong day. APP_TIMEZONE in the environment overrides it
+#: for geo alone (tests pin it). The lifespan re-resolves with the household
+#: setting once Identity is reachable.
+APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or "").strip() or _household_tz_mod.zone_name()
+ZoneInfo(APP_TIMEZONE)  # an invalid override fails here, at startup
 
 
 async def _source_hours(r, clean_id: str, day: str, source: str) -> dict[int, int]:
@@ -3646,7 +3660,7 @@ async def get_trips(
     trips.sort(key=lambda t: float(t.get("start_time") or 0), reverse=True)
     trips = _drop_contained_trips(trips)[:limit]
 
-    # Upgrade street-only stored labels (e.g. "North Green Trail") to the
+    # Upgrade street-only stored labels (e.g. "North Maple Trail") to the
     # closest HA zone or business so the card Destination is useful.
     for trip in trips:
         for loc_key in ("start_location", "end_location"):
@@ -3997,12 +4011,12 @@ def _is_street_only_name(name: str | None) -> bool:
     )
     if not streetish:
         return False
-    # "Home", "Dawson's", "Kaleb Work - Discount Tire" are not street-only.
+    # "Home", "Grandma's", "Robin Work - Acme Hardware" are not street-only.
     if n.lower() in {"home", "work", "school", "church"}:
         return False
     # Has a place-ish qualifier (business words, apostrophe possessives with & etc.)
     # Single capitalized words that aren't street suffixes alone: keep.
-    # Otherwise: pure "North Green Trail" / "30912, North Green Trail" → street.
+    # Otherwise: pure "North Maple Trail" / "12345, North Maple Trail" → street.
     return not re.search(r"\b(store|market|walmart|target|costco|starbucks|subway|"
                          r"pharmacy|clinic|bank|church|school|park|restaurant|cafe|"
                          r"dollar|gas|fuel|auto|tire|dental|vet|gym|salon)\b", n, re.I)
@@ -4501,7 +4515,7 @@ async def post_daily_steps(
     """Ingest a hardware pedometer reading (cumulative daily step counter).
 
     Body: {"user_id": "...", "steps": 12345, "timestamp": 1690000000 (optional),
-           "timezone": "America/Phoenix" (optional; the phone's own zone),
+           "timezone": "America/Denver" (optional; the phone's own zone),
            "hourly": [{"hour": 9, "steps": 840}, ...] (optional)}
     Also accepted via location updates (`daily_steps` field) so the phone can
     piggyback on breadcrumb posts.

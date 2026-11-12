@@ -19,22 +19,22 @@ def provider(monkeypatch):
 def request(action, **kwargs):
     from services.execution.schemas import TalkRequest
 
-    return TalkRequest(user_context={"user": "jeremiah"}, action=action, **kwargs)
+    return TalkRequest(user_context={"user": "alex"}, action=action, **kwargs)
 
 
 def test_a_message_carries_its_reactions_and_the_message_it_replies_to():
     summary = talk_handler._message_summary({
         "id": 5,
-        "actorId": "michele",
-        "actorDisplayName": "Michele",
+        "actorId": "sam",
+        "actorDisplayName": "Sam",
         "message": "Yes!",
         "reactions": {"👍": 2},
         "reactionsSelf": ["👍"],
-        "parent": {"id": 4, "actorDisplayName": "Jeremiah", "message": "Tacos tonight?"},
+        "parent": {"id": 4, "actorDisplayName": "Alex", "message": "Tacos tonight?"},
     })
     assert summary["reactions"] == {"👍": 2}
     assert summary["reactions_self"] == ["👍"]
-    assert summary["parent"] == {"id": 4, "actor_display_name": "Jeremiah", "message": "Tacos tonight?"}
+    assert summary["parent"] == {"id": 4, "actor_display_name": "Alex", "message": "Tacos tonight?"}
 
 
 def test_a_message_without_extras_has_empty_ones():
@@ -46,10 +46,10 @@ def test_a_message_without_extras_has_empty_ones():
 def test_a_conversation_says_who_spoke_last_and_when():
     summary = talk_handler._conversation_summary({
         "token": "t", "displayName": "Family", "type": 2, "unreadMention": True,
-        "lastMessage": {"message": "Dinner at 6", "actorDisplayName": "Michele", "actorId": "michele", "timestamp": 1715000000},
+        "lastMessage": {"message": "Dinner at 6", "actorDisplayName": "Sam", "actorId": "sam", "timestamp": 1715000000},
     })
-    assert summary["last_message_actor"] == "Michele"
-    assert summary["last_message_actor_id"] == "michele"
+    assert summary["last_message_actor"] == "Sam"
+    assert summary["last_message_actor_id"] == "sam"
     assert summary["last_message_timestamp"] == 1715000000
     assert summary["type"] == 2
     assert summary["unread_mention"] is True
@@ -77,7 +77,7 @@ def test_a_shared_file_keeps_what_the_panel_needs_to_draw_it():
         "messageParameters": {
             "file": {"type": "file", "id": "2025198", "name": "photo.jpg", "mimetype": "image/jpeg",
                      "size": "1024", "path": "Talk/photo.jpg", "preview-available": "yes", "etag": "x"},
-            "actor": {"type": "user", "id": "jeremiah", "name": "Jeremiah"},
+            "actor": {"type": "user", "id": "alex", "name": "Alex"},
         },
     })
     assert summary["parameters"]["file"] == {
@@ -161,7 +161,7 @@ async def test_a_file_path_cannot_climb_out_of_the_users_files(monkeypatch):
 
     monkeypatch.setattr(talk_handler, "resolve_personal_data_provider", lambda _ctx: FakeProvider())
     status, _type, _body = await talk_handler.fetch_talk_file(
-        TalkFileRequest(user_context={"user": "jeremiah"}, path="Talk/../../etc/passwd")
+        TalkFileRequest(user_context={"user": "alex"}, path="Talk/../../etc/passwd")
     )
     assert status == 400
 

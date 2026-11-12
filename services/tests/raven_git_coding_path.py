@@ -15,6 +15,14 @@ Endpoints (see services/gateway/main.py:5107):
     POST /api/raven/missions   {query}  -> {"status","mission":{"id",...}}
     GET  /api/raven/missions/{id}        -> mission detail w/ status
 Auth: Bearer <user api_key> obtained from identity /api/auth/login.
+
+Run-time flags (no real defaults; the test skips when the required ones are unset):
+    RAVEN_GATEWAY_BASE         Gateway base URL, e.g. http://<server>:11435 (required)
+    RAVEN_IDENTITY_BASE        Identity base URL, e.g. http://<server>:8001 (required)
+    RAVEN_HOST_WORKSPACE_ROOT  Workspace root on the docker host (required)
+    RAVEN_REMOTE_HOST          user@host to verify the workspace over SSH; empty = verify locally
+    RAVEN_GH_USER / RAVEN_GH_TOKEN / RAVEN_ADMIN_PASSWORD  (or GITHUB_USER, GITHUB_TOKEN,
+                               DEFAULT_ADMIN_PASSWORD in the repo .env)
 """
 from __future__ import annotations
 
@@ -33,17 +41,17 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parents[2]          # repo root
 ENV = dotenv_values(str(ROOT / ".env"))
 
-GATEWAY_BASE = os.getenv("RAVEN_GATEWAY_BASE", "http://192.168.2.205:11435")
-IDENTITY_BASE = os.getenv("RAVEN_IDENTITY_BASE", "http://192.168.2.205:8001")
-# Raven creates workspaces on the DOCKER HOST (192.168.2.205), not on the box
+GATEWAY_BASE = os.getenv("RAVEN_GATEWAY_BASE", "")
+IDENTITY_BASE = os.getenv("RAVEN_IDENTITY_BASE", "")
+# Raven creates workspaces on the DOCKER HOST (RAVEN_REMOTE_HOST), not on the box
 # running this test. So all local-filesystem verification must run over SSH
 # there. Set RAVEN_REMOTE_HOST="" to verify locally instead (e.g. when this
 # script itself runs on the docker host).
-REMOTE_HOST = os.getenv("RAVEN_REMOTE_HOST", "jeremiah@192.168.2.205")
+REMOTE_HOST = os.getenv("RAVEN_REMOTE_HOST", "")
 HOST_WORKSPACE_ROOT = os.getenv(
-    "RAVEN_HOST_WORKSPACE_ROOT", "/home/jeremiah/workspaces/users/default"
+    "RAVEN_HOST_WORKSPACE_ROOT", ""
 )
-GITHUB_USER = os.getenv("RAVEN_GH_USER", ENV.get("GITHUB_USER", "JMiahMan1"))
+GITHUB_USER = os.getenv("RAVEN_GH_USER", ENV.get("GITHUB_USER", ""))
 GITHUB_TOKEN = os.getenv("RAVEN_GH_TOKEN", ENV.get("GITHUB_TOKEN", ""))
 DEFAULT_ADMIN_PASSWORD = os.getenv(
     "RAVEN_ADMIN_PASSWORD", ENV.get("DEFAULT_ADMIN_PASSWORD", "")
@@ -54,7 +62,7 @@ def _resolve_github_user() -> str:
     """Resolve the authenticated GitHub login from the token.
 
     The .env GITHUB_USER value can disagree with the token's actual owner
-    (e.g. 'jeremiah@sumemail.com' vs the token's 'JMiahMan1'), which makes the
+    (e.g. 'alex@example.com' vs the token's 'example-user'), which makes the
     zero-trust GitHub verification check the wrong namespace and fail even when
     the repo was created. Always verify against the token's real login.
     """
@@ -85,7 +93,13 @@ MISSION_TIMEOUT = 25 * 60           # seconds (Raven can be slow)
 # Coding model is intentionally NOT sent in the payload; Raven must rely on its
 # internal configuration (settings.coding_model). We only send `query`.
 
-pytestmark = pytest.mark.integration
+_REQUIRED = ("RAVEN_GATEWAY_BASE", "RAVEN_IDENTITY_BASE", "RAVEN_HOST_WORKSPACE_ROOT")
+_MISSING = [name for name in _REQUIRED if not os.getenv(name)]
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(bool(_MISSING), reason=f"live Raven run needs {', '.join(_MISSING)}"),
+]
 
 
 # ---------------------------------------------------------------------------

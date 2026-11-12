@@ -21,12 +21,12 @@ def client(monkeypatch):
 
     sample = [
         {
-            "entity_id": "person.summers",
+            "entity_id": "person.rivera",
             "state": "home",
             "attributes": {
-                "friendly_name": "Summers",
-                "latitude": 33.1666,
-                "longitude": -111.5646,
+                "friendly_name": "Rivera",
+                "latitude": 39.7391,
+                "longitude": -104.9903,
                 "gps_accuracy": 30,
             },
         },
@@ -35,8 +35,8 @@ def client(monkeypatch):
             "state": "3",
             "attributes": {
                 "friendly_name": "Home",
-                "latitude": 33.1667,
-                "longitude": -111.5646,
+                "latitude": 39.7392,
+                "longitude": -104.9903,
                 "radius": 100,
             },
         },
@@ -66,7 +66,7 @@ def test_people_geojson(client):
     body = r.json()
     assert body["type"] == "FeatureCollection"
     ids = {f["properties"]["entity_id"] for f in body["features"]}
-    assert "person.summers" in ids
+    assert "person.rivera" in ids
     assert "person.noloc" not in ids  # skipped: no coords
 
 
@@ -107,13 +107,13 @@ def test_android_auto_endpoint(client, monkeypatch):
 
     sample = [
         {
-            "entity_id": "binary_sensor.jeremiahs_phone_android_auto_2",
+            "entity_id": "binary_sensor.alexs_phone_android_auto_2",
             "state": "off",
             "attributes": {"connection_type": "Disconnected", "friendly_name": "Android Auto"},
             "last_updated": "2026-09-22T00:00:00+00:00",
         },
         {
-            "entity_id": "sensor.jeremiahs_phone_detected_activity_2",
+            "entity_id": "sensor.alexs_phone_detected_activity_2",
             "state": "in_vehicle",
             "attributes": {"friendly_name": "Detected activity"},
             "last_updated": "2026-09-22T00:00:00+00:00",
@@ -142,12 +142,12 @@ async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
     # The reading must land inside the requested window, so date it relative to
     # now. A hardcoded date silently expires: this test started failing on its
     # own once "today" moved past the fixture's timestamp.
-    fresh = datetime.now(ZoneInfo("America/Phoenix")).strftime("%Y-%m-%dT12:00:00+00:00")
+    fresh = datetime.now(ZoneInfo("Etc/GMT+7")).strftime("%Y-%m-%dT12:00:00+00:00")
 
     async def fake_ha_states():
         return [
             {
-                "entity_id": "sensor.jeremiahs_phone_daily_steps",
+                "entity_id": "sensor.alexs_phone_daily_steps",
                 "state": "4321",
                 "attributes": {},
                 "last_updated": fresh,
@@ -169,33 +169,33 @@ async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
 
     monkeypatch.setattr(geo, "_ha_get_states", fake_ha_states)
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
-    r = await geo._steps_from_ha("jeremiahs_phone", days=7)
+    r = await geo._steps_from_ha("alexs_phone", days=7)
     assert r
     assert max(r.values()) == 4321
 
 
 def test_telemetry_at_zone(client):
-    r = client.get("/people/summers/telemetry")
+    r = client.get("/people/rivera/telemetry")
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
-    assert data["friendly_name"] == "Summers"
+    assert data["friendly_name"] == "Rivera"
     assert data["current_zone"] == "Home"
-    assert "Summers is at Home" in data["speech"]
+    assert "Rivera is at Home" in data["speech"]
 
 
 def test_is_street_only_name():
     import services.geo.main as geo
 
-    assert geo._is_street_only_name("North Green Trail")
-    assert geo._is_street_only_name("30912, North Green Trail")
-    assert geo._is_street_only_name("E Rosebud Drive")
-    assert geo._is_street_only_name("Location (33.1, -111.5)")
+    assert geo._is_street_only_name("North Maple Trail")
+    assert geo._is_street_only_name("12345, North Maple Trail")
+    assert geo._is_street_only_name("E Elm Drive")
+    assert geo._is_street_only_name("Location (39.6725, -104.9257)")
     assert not geo._is_street_only_name("Home")
-    assert not geo._is_street_only_name("Dawson's")
-    assert not geo._is_street_only_name("Kaleb Work - Discount Tire")
-    assert not geo._is_street_only_name("Fry's Food and Drug")
-    assert not geo._is_street_only_name("QCBC Church")
+    assert not geo._is_street_only_name("Murphy's")
+    assert not geo._is_street_only_name("Robin Work - Acme Hardware")
+    assert not geo._is_street_only_name("Corner Grocery")
+    assert not geo._is_street_only_name("Community Church")
     assert not geo._is_street_only_name(None)
 
 
@@ -212,11 +212,11 @@ def test_poi_and_street_labels_from_nominatim():
     # Address POI key + distinct display_name first segment.
     assert geo._poi_label_from_nominatim({
         "address": {"shop": "supermarket"},
-        "display_name": "Safeway, 123 Main, Phoenix",
+        "display_name": "Safeway, 123 Main, Springfield",
     }) == "Safeway"
     assert geo._street_label_from_nominatim({
-        "address": {"road": "North Green Trail", "house_number": "30912"},
-    }) == "30912, North Green Trail"
+        "address": {"road": "North Maple Trail", "house_number": "12345"},
+    }) == "12345, North Maple Trail"
 
 
 async def test_resolve_place_if_better_prefers_zone_over_street(monkeypatch):
@@ -230,50 +230,50 @@ async def test_resolve_place_if_better_prefers_zone_over_street(monkeypatch):
     geo._PLACE_NAME_CACHE.clear()
 
     # Street-only stored name is upgraded to the zone name.
-    name, source = await geo._resolve_place_if_better("North Green Trail", 33.1667, -111.5646)
+    name, source = await geo._resolve_place_if_better("North Maple Trail", 39.7392, -104.9903)
     assert name == "Home"
     assert source == "ha_zone"
 
     # Non-street stored name is kept as-is (no re-resolve).
-    name, source = await geo._resolve_place_if_better("Dawson's", 33.14, -111.43)
-    assert (name, source) == ("Dawson's", "stored")
+    name, source = await geo._resolve_place_if_better("Murphy's", 39.7125, -104.8557)
+    assert (name, source) == ("Murphy's", "stored")
 
 
 async def test_resolve_place_name_zone_then_poi_then_street(monkeypatch):
     import services.geo.main as geo
 
     async def fake_zone(lat, lon):
-        return "QCBC Church"
+        return "Community Church"
 
     monkeypatch.setattr(geo, "_closest_ha_zone", fake_zone)
-    assert await geo._resolve_place_name(33.24, -111.63) == "QCBC Church"
+    assert await geo._resolve_place_name(39.8125, -105.0557) == "Community Church"
 
     async def no_zone(lat, lon):
         return None
 
     async def fake_details(lat, lon):
         return {
-            "name": "Fry's Food and Drug",
+            "name": "Corner Grocery",
             "lat": str(lat),
             "lon": str(lon),
-            "address": {"road": "North Green Trail"},
-            "display_name": "Fry's Food and Drug, Phoenix",
+            "address": {"road": "North Maple Trail"},
+            "display_name": "Corner Grocery, Springfield",
         }
 
     monkeypatch.setattr(geo, "_closest_ha_zone", no_zone)
     monkeypatch.setattr(geo, "_nominatim_reverse_details", fake_details)
-    assert await geo._resolve_place_name(33.16, -111.56) == "Fry's Food and Drug"
+    assert await geo._resolve_place_name(39.7325, -104.9857) == "Corner Grocery"
 
     async def street_only_details(lat, lon):
         return {
             "lat": str(lat),
             "lon": str(lon),
-            "address": {"road": "North Green Trail"},
-            "display_name": "30912 North Green Trail, Phoenix",
+            "address": {"road": "North Maple Trail"},
+            "display_name": "12345 North Maple Trail, Springfield",
         }
 
     monkeypatch.setattr(geo, "_nominatim_reverse_details", street_only_details)
-    assert await geo._resolve_place_name(33.16, -111.56) == "North Green Trail"
+    assert await geo._resolve_place_name(39.7325, -104.9857) == "North Maple Trail"
 
 
 def test_telemetry_moving(client, monkeypatch):
@@ -284,8 +284,8 @@ def test_telemetry_moving(client, monkeypatch):
     # Mock get_points_in_window to return moving points
     t_now = time.time()
     moving_points = [
-        {"t": t_now - 60, "lat": 33.2000, "lon": -111.5000, "acc": 5.0, "spd": 15.0, "brg": 45.0, "bat": 85},
-        {"t": t_now, "lat": 33.2080, "lon": -111.4900, "acc": 5.0, "spd": 22.0, "brg": 45.0, "bat": 85},
+        {"t": t_now - 60, "lat": 39.7725, "lon": -104.9257, "acc": 5.0, "spd": 15.0, "brg": 45.0, "bat": 85},
+        {"t": t_now, "lat": 39.7805, "lon": -104.9157, "acc": 5.0, "spd": 22.0, "brg": 45.0, "bat": 85},
     ]
 
     async def fake_points(*args, **kwargs):
@@ -293,7 +293,7 @@ def test_telemetry_moving(client, monkeypatch):
 
     monkeypatch.setattr(geo, "get_points_in_window", fake_points)
 
-    r = client.get("/people/jeremiah/telemetry")
+    r = client.get("/people/alex/telemetry")
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
@@ -397,13 +397,13 @@ def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):
     # 4. Assign vehicle with header
     r = client.post(
         "/vehicles/assign",
-        json={"user_id": "jeremiah", "vehicle_id": "truck"},
+        json={"user_id": "alex", "vehicle_id": "truck"},
         headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
     )
     assert r.status_code == 200
 
     # 5. Check assigned vehicle
-    r = client.get("/vehicles/assigned/jeremiah")
+    r = client.get("/vehicles/assigned/alex")
     assert r.status_code == 200
     assert r.json()["vehicle_id"] == "truck"
     assert r.json()["vehicle"]["name"] == "Ford F-150"

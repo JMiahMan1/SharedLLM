@@ -25,7 +25,7 @@ PLAYERS = [
 
 
 def _ctx(**over):
-    base = dict(user="madelyn", ha_url=HA, ha_token="t", mass_url="http://192.168.2.20:8095", mass_token="m")
+    base = dict(user="casey", ha_url=HA, ha_token="t", mass_url="http://192.0.2.20:8095", mass_token="m")
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -79,7 +79,7 @@ async def test_with_ha_down_music_goes_straight_to_music_assistant(ma, monkeypat
     _mark_down()
     via_ha = AsyncMock()
     monkeypatch.setattr(media, "_play_music_via_ha", via_ha)
-    req = MediaPlayRequest(user_context={"user": "madelyn"}, query="Hymns", entity_id="media_player.kitchen_speaker")
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", entity_id="media_player.kitchen_speaker")
     result = await media.play_music(req, "media_player.kitchen_speaker", _ctx())
     assert result.status == "SUCCESS", result.message
     assert result.detail["route"] == "mass_direct"
@@ -93,7 +93,7 @@ async def test_ha_failing_mid_request_falls_back_too(ma, monkeypatch):
         return ExecutionResult(status="FAILURE", message="Home Assistant is unreachable: timed out", service="media_play")
 
     monkeypatch.setattr(media, "_play_music_via_ha", ha_goes_down)
-    req = MediaPlayRequest(user_context={"user": "madelyn"}, query="library://album/3", entity_id="media_player.office")
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="library://album/3", entity_id="media_player.office")
     result = await media.play_music(req, "media_player.office", _ctx())
     assert result.status == "SUCCESS"
     assert ma["play"] == ("ma_office", "library://album/3", "replace")
@@ -104,7 +104,7 @@ async def test_an_ha_error_that_is_not_an_outage_does_not_bypass_ha(ma, monkeypa
         media, "_play_music_via_ha",
         AsyncMock(return_value=ExecutionResult(status="FAILURE", message="No match for 'x'.", service="media_play")),
     )
-    req = MediaPlayRequest(user_context={"user": "madelyn"}, query="x", entity_id="media_player.office")
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="x", entity_id="media_player.office")
     result = await media.play_music(req, "media_player.office", _ctx())
     assert result.message == "No match for 'x'."
     assert "play" not in ma
@@ -112,7 +112,7 @@ async def test_an_ha_error_that_is_not_an_outage_does_not_bypass_ha(ma, monkeypa
 
 async def test_no_music_assistant_login_says_so(ma):
     _mark_down()
-    req = MediaPlayRequest(user_context={"user": "madelyn"}, query="Hymns", entity_id="media_player.office")
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", entity_id="media_player.office")
     result = await media.play_music(req, "media_player.office", _ctx(mass_url=None, mass_token=None))
     assert result.status == "FAILURE"
     assert "unreachable" in result.message and "Music Assistant login" in result.message
@@ -120,7 +120,7 @@ async def test_no_music_assistant_login_says_so(ma):
 
 async def test_a_speaker_named_by_device_name_resolves_without_ha():
     _mark_down()
-    req = MediaPlayRequest(user_context={"user": "madelyn"}, query="Hymns", device_name="Kitchen Speaker")
+    req = MediaPlayRequest(user_context={"user": "casey"}, query="Hymns", device_name="Kitchen Speaker")
     assert await media.resolve_entity(req, HA, "t", "music") == "media_player.kitchen_speaker"
 
 
@@ -131,7 +131,7 @@ async def test_climate_goes_through_the_router_and_reports_a_direct_route(monkey
     )
     monkeypatch.setattr(climate.hardware_router, "execute_device_command", router)
     req = climate.ClimateRequest(
-        user_context={"user": "jeremiah", "ha_url": HA, "ha_token": "t"}, entity_id="climate.hall", temperature=70
+        user_context={"user": "alex", "ha_url": HA, "ha_token": "t"}, entity_id="climate.hall", temperature=70
     )
     result = await climate.handle_climate(req)
     assert result.status == "SUCCESS" and "directly" in result.message
@@ -148,14 +148,14 @@ from services.execution import direct_announce  # noqa: E402
 from services.execution.handlers import tv_stage  # noqa: E402
 
 CASTS = [
-    {"name": "Office TV Chromecast", "host": "192.168.2.50", "port": 8009},
-    {"name": "Living Room speaker", "host": "192.168.2.51", "port": 8009},
+    {"name": "Office TV Chromecast", "host": "192.0.2.50", "port": 8009},
+    {"name": "Living Room speaker", "host": "192.0.2.51", "port": 8009},
 ]
 
 
 def test_cast_devices_are_found_by_the_entity_name():
-    assert direct_announce.find_cast(CASTS, "media_player.office_tv")["host"] == "192.168.2.50"
-    assert direct_announce.find_cast(CASTS, "media_player.living_room_speaker")["host"] == "192.168.2.51"
+    assert direct_announce.find_cast(CASTS, "media_player.office_tv")["host"] == "192.0.2.50"
+    assert direct_announce.find_cast(CASTS, "media_player.living_room_speaker")["host"] == "192.0.2.51"
     assert direct_announce.find_cast(CASTS, "media_player.attic") is None
 
 
@@ -187,7 +187,7 @@ async def test_a_speaker_music_assistant_does_not_know_is_reached_over_cast(monk
     monkeypatch.setattr(direct_announce, "_cast_play_sync", fake_cast)
     result = await direct_announce.announce_direct("media_player.office_tv", "http://jarvis/a.wav", 0.5, _ctx())
     assert result["ok"] and result["route"] == "cast_direct"
-    assert played["dev"] == "192.168.2.50"
+    assert played["dev"] == "192.0.2.50"
 
 
 async def test_when_nothing_reaches_the_speaker_the_error_says_why(monkeypatch):
@@ -210,7 +210,7 @@ def trigger(monkeypatch):
 
     rang = []
     monkeypatch.setattr(m, "resolve_internal_user", AsyncMock(return_value={
-        "user": "jeremiah", "ha_url": HA, "ha_token": "t", "mass_url": "http://ma:8095", "mass_token": "m",
+        "user": "alex", "ha_url": HA, "ha_token": "t", "mass_url": "http://ma:8095", "mass_token": "m",
     }))
     monkeypatch.setattr(m.timer, "notify_timer_done", AsyncMock())
     monkeypatch.setattr(m.timer, "get_redis", AsyncMock(side_effect=RuntimeError("no redis in tests")))
@@ -233,7 +233,7 @@ async def test_a_timer_whose_ha_route_failed_rings_on_the_esphome_fallback(trigg
     monkeypatch.setattr(ah, "dispatch_announce", AsyncMock(return_value={"ok": False, "error": "HA returned 500"}))
     monkeypatch.setattr(m.ha_client, "get_state", AsyncMock(return_value=None))
     monkeypatch.setattr(m.ha_client, "call_service", AsyncMock(return_value={"ok": False, "error": "HA returned 500"}))
-    result = await m.execute_trigger({"user_id": "jeremiah", "timer": {"title": "Pasta", "target_device": "media_player.kitchen"}})
+    result = await m.execute_trigger({"user_id": "alex", "timer": {"title": "Pasta", "target_device": "media_player.kitchen"}})
     assert [name for name, media_url in rang if media_url] == ["kitchen_panel"], rang
     assert "esphome:kitchen_panel" in result.message
 
@@ -248,7 +248,7 @@ async def test_with_ha_down_a_timer_skips_ha_and_reaches_a_speaker_directly(trig
     monkeypatch.setattr(m.ha_client, "get_state", get_state)
     direct = AsyncMock(return_value={"ok": True, "route": "mass_direct", "target": "Kitchen"})
     monkeypatch.setattr(direct_announce, "announce_direct", direct)
-    result = await m.execute_trigger({"user_id": "jeremiah", "timer": {"title": "Pasta", "target_device": "media_player.kitchen"}})
+    result = await m.execute_trigger({"user_id": "alex", "timer": {"title": "Pasta", "target_device": "media_player.kitchen"}})
     get_state.assert_not_awaited()
     assert direct.await_args.args[0] == "media_player.kitchen"
     assert "mass_direct:media_player.kitchen" in result.message
@@ -314,7 +314,7 @@ async def test_entity_search_with_ha_down_answers_from_the_last_snapshot(monkeyp
     )
     from services.execution.schemas import EntitySearchRequest
 
-    req = EntitySearchRequest(user_context={"user": "jeremiah", "is_admin": True, "ha_url": HA, "ha_token": "t"}, query="garage")
+    req = EntitySearchRequest(user_context={"user": "alex", "is_admin": True, "ha_url": HA, "ha_token": "t"}, query="garage")
     result = await m.execute_entity_search(req)
     assert result.status == "SUCCESS"
     assert result.detail["stale"] is True and result.detail["entities"][0]["state"] == "closed"
@@ -328,6 +328,6 @@ async def test_entity_search_without_a_snapshot_still_says_it_could_not_reach_ha
     monkeypatch.setattr(ha_snapshot, "recall", AsyncMock(return_value=None))
     from services.execution.schemas import EntitySearchRequest
 
-    req = EntitySearchRequest(user_context={"user": "jeremiah", "is_admin": True, "ha_url": HA, "ha_token": "t"}, query="garage")
+    req = EntitySearchRequest(user_context={"user": "alex", "is_admin": True, "ha_url": HA, "ha_token": "t"}, query="garage")
     result = await m.execute_entity_search(req)
     assert result.status == "FAILURE" and "Could not reach Home Assistant" in result.message

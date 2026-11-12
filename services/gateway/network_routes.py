@@ -79,7 +79,7 @@ async def save_router_settings(request: Request, body: RouterSettings):
     url = body.url.strip().rstrip("/")
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise HTTPException(status_code=400, detail="Use the router's https:// address, e.g. https://192.168.2.1")
+        raise HTTPException(status_code=400, detail="Use the router's https:// address, e.g. https://192.0.2.1")
     if not body.username.strip():
         raise HTTPException(status_code=400, detail="Enter the router username Jarvis signs in with")
     fields = [("router_url", url), ("router_user", body.username.strip())]

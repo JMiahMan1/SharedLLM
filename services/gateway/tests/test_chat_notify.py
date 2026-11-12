@@ -57,7 +57,7 @@ class _Client:
         assert url.endswith("/api/users")
         return _Resp(200, [
             {"username": "default", "nextcloud_user": "jarvis", "is_system_default": True},
-            {"username": "jeremiah", "nextcloud_user": "jeremiah"},
+            {"username": "alex", "nextcloud_user": "alex"},
             {"username": "leo", "nextcloud_user": None},
         ])
 
@@ -73,9 +73,9 @@ class _Client:
         raise AssertionError(url)
 
 
-def _conv(msg_id, *, actor="michele", unread=1, kind=2, text="Dinner at 6", system=False):
+def _conv(msg_id, *, actor="sam", unread=1, kind=2, text="Dinner at 6", system=False):
     return {
-        "token": "fam", "display_name": "Summers Family", "type": kind,
+        "token": "fam", "display_name": "Rivera Family", "type": kind,
         "last_message_id": msg_id, "last_message": text, "last_message_actor": actor.capitalize(),
         "last_message_actor_id": actor, "unread_messages": unread, "last_message_system": system,
     }
@@ -87,42 +87,42 @@ def _run(r, client):
 
 
 def test_history_is_remembered_not_replayed_then_new_messages_notify():
-    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    r, client = _Redis(), _Client({"alex": [_conv(10)]})
     assert _run(r, client) == 0 and client.notified == []
-    client.conversations["jeremiah"] = [_conv(11)]
+    client.conversations["alex"] = [_conv(11)]
     assert _run(r, client) == 1
     n = client.notified[0]
-    assert n["user"] == "jeremiah" and n["kind"] == "chat"
-    assert n["title"] == "Summers Family" and n["body"] == "Michele: Dinner at 6"
+    assert n["user"] == "alex" and n["kind"] == "chat"
+    assert n["title"] == "Rivera Family" and n["body"] == "Sam: Dinner at 6"
     assert n["data"]["token"] == "fam" and n["data"]["url"] == "/family?chat=fam"
     assert n["once"] == "chat:fam:11"
     assert _run(r, client) == 0, "the same message is announced once"
 
 
 def test_a_brand_new_conversation_announces_its_first_message():
-    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    r, client = _Redis(), _Client({"alex": [_conv(10)]})
     _run(r, client)
     dm = {**_conv(3, kind=1, text="Hi Dad"), "token": "newdm"}
-    client.conversations["jeremiah"] = [_conv(10), dm]
+    client.conversations["alex"] = [_conv(10), dm]
     assert _run(r, client) == 1
     assert client.notified[0]["data"]["token"] == "newdm" and client.notified[0]["body"] == "Hi Dad"
 
 
 @pytest.mark.parametrize("conv", [
-    _conv(11, actor="jeremiah"),  # my own message
+    _conv(11, actor="alex"),  # my own message
     _conv(11, unread=0),  # already read on another device
-    _conv(11, system=True),  # "Michele joined"
+    _conv(11, system=True),  # "Sam joined"
 ])
 def test_nothing_to_announce(conv):
-    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    r, client = _Redis(), _Client({"alex": [_conv(10)]})
     _run(r, client)
-    client.conversations["jeremiah"] = [conv]
+    client.conversations["alex"] = [conv]
     assert _run(r, client) == 0
 
 
 def test_a_direct_message_is_titled_with_the_sender():
-    notice = chat_notify.notice_for(_conv(5, kind=1, text="Picking up milk"), "jeremiah")
-    assert notice["title"] == "Michele" and notice["body"] == "Picking up milk"
+    notice = chat_notify.notice_for(_conv(5, kind=1, text="Picking up milk"), "alex")
+    assert notice["title"] == "Sam" and notice["body"] == "Picking up milk"
 
 
 def test_previews_drop_envelopes_and_placeholders():
@@ -132,7 +132,7 @@ def test_previews_drop_envelopes_and_placeholders():
 
 
 def test_one_unreachable_person_does_not_stop_the_rest(monkeypatch):
-    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    r, client = _Redis(), _Client({"alex": [_conv(10)]})
     calls = []
 
     async def flaky(r_, client_, username, **kw):
@@ -140,7 +140,7 @@ def test_one_unreachable_person_does_not_stop_the_rest(monkeypatch):
         raise ConnectionError("execution restarting")
 
     monkeypatch.setattr(chat_notify, "_check_user", flaky)
-    assert _run(r, client) == 0 and calls == ["jeremiah"]
+    assert _run(r, client) == 0 and calls == ["alex"]
 
 
 # ---------------------------------------------------------------- long poll
@@ -151,10 +151,10 @@ def waiting(monkeypatch):
     outbox: list[dict] = []
 
     async def user(_request):
-        return "jeremiah"
+        return "alex"
 
     async def telemetry(method, path, **kw):
-        assert path == "/api/telemetry/notifications/jeremiah"
+        assert path == "/api/telemetry/notifications/alex"
         return {"notifications": list(outbox)}
 
     monkeypatch.setattr(gateway_main, "_user_id_from_request", user)
@@ -197,9 +197,9 @@ def test_the_wait_needs_a_signed_in_user(monkeypatch):
 def test_a_notice_telemetry_refuses_is_retried_next_pass():
     """Marking a message handled before telemetry accepted it lost every
     message that arrived while telemetry was restarting."""
-    r, client = _Redis(), _Client({"jeremiah": [_conv(10)]})
+    r, client = _Redis(), _Client({"alex": [_conv(10)]})
     _run(r, client)
-    client.conversations["jeremiah"] = [_conv(11)]
+    client.conversations["alex"] = [_conv(11)]
     real_post = client.post
 
     def down(url, json=None, **kw):
@@ -219,11 +219,11 @@ def test_jarvis_answer_reaches_the_asker_and_is_signed_jarvis():
     """Jarvis posts with the asker's login, so it is "theirs" and already read --
     yet the person who asked is exactly who is waiting for the answer."""
     answer = 'Tacos tonight.\n\n```jarvis-envelope\n{"kind": "assistant", "title": "Jarvis"}\n```'
-    notice = chat_notify.notice_for(_conv(12, actor="jeremiah", unread=0, text=answer), "jeremiah")
+    notice = chat_notify.notice_for(_conv(12, actor="alex", unread=0, text=answer), "alex")
     assert notice is not None
     assert notice["body"] == "Jarvis: Tacos tonight."
     # An ordinary message of your own still never notifies you.
-    assert chat_notify.notice_for(_conv(13, actor="jeremiah", unread=0, text="ok"), "jeremiah") is None
+    assert chat_notify.notice_for(_conv(13, actor="alex", unread=0, text="ok"), "alex") is None
     # A game card someone else posted is not mistaken for Jarvis.
     game = 'Leo 9/10\n\n```jarvis-envelope\n{"kind": "game", "title": "Trivia"}\n```'
-    assert chat_notify.notice_for(_conv(14, actor="jeremiah", unread=0, text=game), "jeremiah") is None
+    assert chat_notify.notice_for(_conv(14, actor="alex", unread=0, text=game), "alex") is None

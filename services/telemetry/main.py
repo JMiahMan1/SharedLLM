@@ -299,6 +299,8 @@ def _internal_ok(value: str | None) -> bool:
 
 @asynccontextmanager
 async def lifespan(app):
+    from services.common import household_tz
+    await household_tz.startup("telemetry")
     tasks = [
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(worker_loop()),
@@ -350,7 +352,8 @@ def create_app():
         if period not in PERIODS:
             raise HTTPException(status_code=422, detail=f"period must be one of {list(PERIODS)}")
         run_at = str(body.get("run_at") or "21:00")
-        tz = str(body.get("timezone") or "UTC")
+        # Blank = the household zone at run time (schedule.resolve_timezone).
+        tz = str(body.get("timezone") or "")
         enabled = bool(body.get("enabled", True))
         rc = _redis()
         existing = await store.list_jobs(rc, user)
@@ -390,7 +393,7 @@ def create_app():
             report_type,
             period,
             str(body.get("run_at") or "21:00"),
-            str(body.get("timezone") or "UTC"),
+            str(body.get("timezone") or ""),
             enabled=False,
         )
         await store.save_job(rc, job)

@@ -402,6 +402,11 @@ async def lifespan(app: FastAPI):
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
 
+    # Household time zone: logged once with its source; unset is reported and
+    # each feature that needs it fails with the same message.
+    from services.common import household_tz
+    await household_tz.startup("execution")
+
     log.info("Execution Bridge starting up.")
     # Auto-download Kokoro models if missing
     from services.config import MODELS_DIR

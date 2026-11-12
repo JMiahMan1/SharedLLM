@@ -70,12 +70,12 @@ def test_resolve_reporting_tz_rejects_an_unusable_zone():
 
 @pytest.mark.anyio
 async def test_a_late_evening_read_is_filed_under_the_phones_day(redis):
-    """07:00 in Kiritimati (UTC+14) is still the previous day in America/Phoenix.
+    """07:00 in Kiritimati (UTC+14) is still the previous day in Etc/GMT+7.
 
     Filing it under the server's day is the whole bug: the user sees an empty
     "today" and a day that looks impossibly large. Kiritimati is used because
-    Tokyo (UTC+9) is only 16h from Phoenix, so a 23:30 walk there still lands
-    on the same Phoenix day, so a *morning* walk is what crosses the boundary.
+    Tokyo (UTC+9) is only 16h from UTC-7, so a 23:30 walk there still lands
+    on the same UTC-7 day, so a *morning* walk is what crosses the boundary.
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo

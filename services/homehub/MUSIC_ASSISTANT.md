@@ -2,7 +2,7 @@
 
 Music Assistant (MA) ran as the HA add-on `d5369777_music_assistant`, version **2.10.9**, image
 `ghcr.io/music-assistant/server` (both read from the Supervisor's `apps.json`). With HA gone the add-on is
-gone too, so MA moves to a standalone container on **192.168.2.205** with a copy of the add-on's data.
+gone too, so MA moves to a standalone container on **192.0.2.205** with a copy of the add-on's data.
 The homehub `music_assistant` driver then talks to it directly.
 
 ## 1. Compose service
@@ -29,7 +29,7 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      - TZ=America/Phoenix
+      - TZ=${TZ:-UTC}   # your zone, e.g. America/Denver
 ```
 
 Ports (all on the host, nothing to publish):
@@ -45,20 +45,20 @@ the Supervisor network. It does not exist standalone: the API is on **8095**.
 
 ## 2. Copy the add-on data into the volume
 
-The source is `/home/jeremiah/ha-export/2026-11-11/supervisor/apps/data/d5369777_music_assistant/` on
-192.168.2.43. If that copy is still empty (it was while this was written), the same directory is mounted
+The source is `/home/<user>/ha-export/2026-11-11/supervisor/apps/data/d5369777_music_assistant/` on
+192.0.2.43. If that copy is still empty (it was while this was written), the same directory is mounted
 read-only at `/mnt/haos-data/supervisor/apps/data/d5369777_music_assistant/` (sudo).
 
 ```bash
-# on 192.168.2.43
+# on 192.0.2.43
 SRC=/mnt/haos-data/supervisor/apps/data/d5369777_music_assistant   # or the ha-export path once complete
 sudo tar -C "$SRC" \
   --exclude='musicassistant.log*' --exclude='library.db.backup' --exclude='options.json' --exclude='.cache' \
   -czf /tmp/ma-data.tgz .
-sudo chmod 600 /tmp/ma-data.tgz && sudo chown jeremiah /tmp/ma-data.tgz
-scp /tmp/ma-data.tgz jeremiah@192.168.2.205:/tmp/ && rm /tmp/ma-data.tgz
+sudo chmod 600 /tmp/ma-data.tgz && sudo chown <user> /tmp/ma-data.tgz
+scp /tmp/ma-data.tgz <user>@192.0.2.205:/tmp/ && rm /tmp/ma-data.tgz
 
-# on 192.168.2.205
+# on 192.0.2.205
 sudo mkdir -p /opt/music-assistant/data
 sudo tar -C /opt/music-assistant/data -xzf /tmp/ma-data.tgz && rm /tmp/ma-data.tgz
 sudo chmod 700 /opt/music-assistant/data
@@ -83,19 +83,19 @@ The archive holds secrets: keep it 0600 and delete it after unpacking.
 
 Read-only inspection of the copy (secrets not printed):
 
-1. **`providers["hass--emN8MGbB"]`** (domain `hass`, the Home Assistant plugin). In the add-on it connected
+1. **`providers["hass--abcd5678"]`** (domain `hass`, the Home Assistant plugin). In the add-on it connected
    through the Supervisor with no stored URL or token (its `values` are empty), so standalone it has nothing
    to connect to and fails to load.
-2. **`providers["hass_players--Tpp4ngcm"]`** (domain `hass_players`) exposes 7 HA entities as MA players and
+2. **`providers["hass_players--abcd1234"]`** (domain `hass_players`) exposes 7 HA entities as MA players and
    depends on the plugin above:
    `media_player.loft_tv`, `media_player.office_tv_chrome`, `media_player.master_bedroom_tv`,
-   `media_player.28_tcl_roku_tv`, `media_player.watch_watch_speaker`, `media_player.tv_loft_samsung_q900`,
-   `media_player.office_jarvis`.
+   `media_player.bedroom_roku_tv`, `media_player.watch_watch_speaker`, `media_player.tv_loft_samsung_q900`,
+   `media_player.den_speaker`.
    Six of them have a native MA player already (Chromecast `81dfea8f...`, `16b032a3...`; DLNA
    `uuid:fdf567be...` for the Loft Samsung; `ROKU_2N0000000001` from the Roku Media Assistant provider;
-   the `up...` universal players). **`media_player.office_jarvis` (the ESPHome "Office Jarvis Smart
+   the `up...` universal players). **`media_player.den_speaker` (the ESPHome "Den Jarvis Smart
    Speaker") has no other route.**
-3. **`core.players.values.announce_tts_engine = "hass--emN8MGbB/tts.google_en_com"`**: HA's Google TTS,
+3. **`core.players.values.announce_tts_engine = "hass--abcd5678/tts.google_en_com"`**: HA's Google TTS,
    used only when MA itself speaks text. Jarvis sends announcement URLs, so nothing breaks, but MA logs an
    error if the engine is ever used. Clear it or pick another engine (Settings > Core > Players).
 
@@ -109,7 +109,7 @@ Choose one, before or right after the first start:
   import json
   p = "/opt/music-assistant/data/settings.json"
   s = json.load(open(p))
-  for k in ("hass--emN8MGbB", "hass_players--Tpp4ngcm"):
+  for k in ("hass--abcd5678", "hass_players--abcd1234"):
       s["providers"][k]["enabled"] = False
   s["core"].get("players", {}).get("values", {}).pop("announce_tts_engine", None)
   json.dump(s, open(p, "w"), indent=2)
@@ -129,31 +129,31 @@ server (no ingress, its own webserver on 8095, already enabled: `core.webserver.
 
 - **API tokens keep working.** `auth.db` holds the `jwt_secret` and the hashes of all 8 long-lived tokens:
   "Home Assistant Integration" (user `homeassistant_system`; this is the token in the HA config entry, which
-  homehub uses), "SharedLLM" (`summers`), and the per-user "Jarvis" tokens (`michele`, `madelyn`, `gracie`,
-  `zachary`, `noah`, `testuser`). Nothing about them depends on HA, provided `auth.db` and its WAL are copied
+  homehub uses), "SharedLLM" (`arivera`), and the per-user "Jarvis" tokens (`sam`, `casey`, `taylor`,
+  `morgan`, `jordan`, `testuser`). Nothing about them depends on HA, provided `auth.db` and its WAL are copied
   (section 2).
 - **UI logins do not.** Every human user is linked only to the `homeassistant` auth provider (login through
   HA's ingress). Standalone, nobody can sign in to the web UI until an admin has a local password. Set one
-  with an admin token, for example the SharedLLM token (user `summers`, role admin), over the API:
-  `{"command": "auth/user/update", "args": {"user_id": "<summers' user_id>", "password": "<8+ chars>"}}`
+  with an admin token, for example the SharedLLM token (user `arivera`, role admin), over the API:
+  `{"command": "auth/user/update", "args": {"user_id": "<arivera's user_id>", "password": "<8+ chars>"}}`
   (send it on `/ws` after `auth`, or `POST /api` with `Authorization: Bearer <token>`; `auth/users` lists
-  user ids). Then sign in at `http://192.168.2.205:8095` as `summers`.
+  user ids). Then sign in at `http://192.0.2.205:8095` as `arivera`.
 
 ## 5. Pointing homehub and Jarvis at it
 
 - homehub's `music_assistant` driver reads the URL from, in order: the entry's `options["url"]`, the
   environment variable **`MUSIC_ASSISTANT_URL`**, then the imported `data["url"]` (the dead add-on address).
-  Set `MUSIC_ASSISTANT_URL=http://192.168.2.205:8095` in the homehub container's environment. The token
+  Set `MUSIC_ASSISTANT_URL=http://192.0.2.205:8095` in the homehub container's environment. The token
   stays the imported one (`MUSIC_ASSISTANT_TOKEN` or `options["token"]` override it if ever needed).
 - Jarvis's own direct MA client (`mass_url`/`mass_token`, used by `services/execution/handlers/mass_client.py`
-  when HA was down) should point at the same `http://192.168.2.205:8095`.
-- After the first start, check Settings > Core > Streams: the published IP should be 192.168.2.205 (the
-  add-on published 192.168.2.20), or Cast and DLNA players will be told to fetch audio from the old address.
+  when HA was down) should point at the same `http://192.0.2.205:8095`.
+- After the first start, check Settings > Core > Streams: the published IP should be 192.0.2.205 (the
+  add-on published 192.0.2.20), or Cast and DLNA players will be told to fetch audio from the old address.
 
 ## 6. Checks
 
 ```bash
-curl -s http://192.168.2.205:8095/info          # server_version 2.10.9, homeassistant_addon false
+curl -s http://192.0.2.205:8095/info          # server_version 2.10.9, homeassistant_addon false
 docker logs music-assistant 2>&1 | grep -iE "error|hass|webserver" | head
 ```
 

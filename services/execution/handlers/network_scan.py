@@ -55,7 +55,11 @@ def get_local_subnet() -> str:
         network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
         return str(network)
     except Exception:
-        return "192.168.1.0/24"
+        # Guessing a subnet scans a network that is usually not this one.
+        raise RuntimeError(
+            "Could not determine this host's subnet. Set SCAN_SUBNET (or "
+            "LOCAL_SUBNET) to the /24 to scan, e.g. 192.0.2.0/24."
+        ) from None
 
 
 def _get_self_ips() -> set[str]:
@@ -124,7 +128,7 @@ async def scan_network(
     Scan the local network for smart TVs and media devices.
 
     Args:
-        subnet: Subnet to scan (e.g. "192.168.2.0/24"). Auto-detected if None.
+        subnet: Subnet to scan (e.g. "192.0.2.0/24"). Auto-detected if None.
         device_type: Filter by device type. None = scan all.
         include_mac: Include MAC address from ARP cache.
         timeout: Connection timeout per port.

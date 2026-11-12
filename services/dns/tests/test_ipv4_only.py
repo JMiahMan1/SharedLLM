@@ -50,16 +50,16 @@ def _header(reply: bytes) -> tuple[int, int, int]:
 
 def test_an_ipv6_question_is_answered_at_once_with_no_address_and_never_forwarded():
     server, resolver = _server()
-    asyncio.run(server._handle_query(_query("abs.sumemail.com", 28), ("127.0.0.1", 5000)))
+    asyncio.run(server._handle_query(_query("abs.example.com", 28), ("127.0.0.1", 5000)))
     assert resolver.calls == 0, "AAAA must not go upstream"
     tid, rcode, ancount = _header(server.transport.sent[0])
     assert (tid, rcode, ancount) == (0x1234, 0, 0)  # NOERROR, no records
 
 
 def test_an_ipv4_question_still_resolves():
-    record = {"name": "abs.sumemail.com", "rtype": 1, "rclass": 1, "ttl": 60, "rdata": bytes([184, 190, 1, 29])}
+    record = {"name": "abs.example.com", "rtype": 1, "rclass": 1, "ttl": 60, "rdata": bytes([184, 190, 1, 29])}
     server, _ = _server([record])
-    asyncio.run(server._handle_query(_query("abs.sumemail.com", 1), ("127.0.0.1", 5000)))
+    asyncio.run(server._handle_query(_query("abs.example.com", 1), ("127.0.0.1", 5000)))
     reply = server.transport.sent[0]
     _, rcode, ancount = _header(reply)
     assert (rcode, ancount) == (0, 1)

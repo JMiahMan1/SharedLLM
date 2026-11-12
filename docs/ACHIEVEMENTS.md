@@ -212,8 +212,8 @@ tests live in `services/execution/tests/test_skylight_proxy.py`.
 
 ## Managing chores (add, change, remove)
 
-Parents run the Skylight chore chart from Jarvis, by chat or voice ("give Noah
-'feed the chickens' every day at 7am, 2 stars", "take trash off Gracie's
+Parents run the Skylight chore chart from Jarvis, by chat or voice ("give Jordan
+'feed the chickens' every day at 7am, 2 stars", "take trash off Taylor's
 chores") or from the **Guardian** page (each child's chores for today, with
 add and remove). The chores live in Skylight, so they show on the family's
 Skylight screen as well.

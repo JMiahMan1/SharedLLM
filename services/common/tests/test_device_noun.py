@@ -23,7 +23,7 @@ class _Client:
     def get(self, url, headers=None, **_):
         if self.fail:
             raise OSError("identity down")
-        assert url == "http://identity/api/internal/owned-devices/noah" and headers == {"X-Internal-Secret": "s"}
+        assert url == "http://identity/api/internal/owned-devices/jordan" and headers == {"X-Internal-Secret": "s"}
         return _Resp(self.status, self.body)
 
 
@@ -42,7 +42,7 @@ def test_revoked_devices_do_not_count():
 
 
 async def _kinds(client):
-    return await device_noun.kinds("noah", client=client, identity="http://identity/", secret="s")
+    return await device_noun.kinds("jordan", client=client, identity="http://identity/", secret="s")
 
 
 async def test_kinds_come_from_identity():
@@ -53,4 +53,4 @@ async def test_kinds_come_from_identity():
 async def test_nothing_known_when_identity_fails():
     assert await _kinds(_Client(status=500)) == []
     assert await _kinds(_Client(fail=True)) == []
-    assert await device_noun.noun_for("noah", client=_Client(fail=True), identity="http://identity", secret="s") == "device"
+    assert await device_noun.noun_for("jordan", client=_Client(fail=True), identity="http://identity", secret="s") == "device"

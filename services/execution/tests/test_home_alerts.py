@@ -5,7 +5,7 @@ import pytz
 
 from services.execution import home_alerts as ha
 
-TZ = pytz.timezone("America/Phoenix")
+TZ = pytz.timezone("Etc/GMT+7")
 T0 = TZ.localize(datetime(2026, 10, 7, 13, 0)).timestamp()
 
 
@@ -27,10 +27,10 @@ def run(w, entries, states, now, away=None):
 
 
 def test_the_mapping_keeps_only_known_events_on_real_entities():
-    raw = ('[{"entity_id": "binary_sensor.door", "event": "doorbell", "people": ["Michele", " "]},'
+    raw = ('[{"entity_id": "binary_sensor.door", "event": "doorbell", "people": ["Sam", " "]},'
            ' {"entity_id": "nodot", "event": "doorbell"}, {"entity_id": "lock.x", "event": "bogus"}, "junk"]')
     (only,) = ha.parse_mapping(raw)
-    assert only["entity_id"] == "binary_sensor.door" and only["people"] == ["michele"]
+    assert only["entity_id"] == "binary_sensor.door" and only["people"] == ["sam"]
     assert ha.parse_mapping("not json") == []
     assert ha.parse_mapping(None) == []
 
@@ -131,7 +131,7 @@ async def test_a_round_sends_to_the_listed_people_or_everyone(monkeypatch):
 
     sent = []
     mapping = [{"entity_id": "binary_sensor.sink_leak", "event": "water_leak", "people": []},
-               {"entity_id": "binary_sensor.door", "event": "doorbell", "people": ["michele"]}]
+               {"entity_id": "binary_sensor.door", "event": "doorbell", "people": ["sam"]}]
 
     async def fake_entries():
         return ha.parse_mapping(__import__("json").dumps(mapping))
@@ -144,7 +144,7 @@ async def test_a_round_sends_to_the_listed_people_or_everyone(monkeypatch):
         return list(st("binary_sensor.sink_leak", "on", T0).values()) + list(st("binary_sensor.door", "off", T0).values())
 
     async def fake_family(**_):
-        return ["jeremiah", "michele"]
+        return ["alex", "sam"]
 
     async def fake_send(payload, **_):
         sent.append(payload)
@@ -158,7 +158,7 @@ async def test_a_round_sends_to_the_listed_people_or_everyone(monkeypatch):
     monkeypatch.setattr(cal, "_get_local_tz", lambda: TZ)
 
     assert await ha.check_once(ha.Watcher()) == 2
-    assert [(p["user"], p["kind"]) for p in sent] == [("jeremiah", "water_leak"), ("michele", "water_leak")]
+    assert [(p["user"], p["kind"]) for p in sent] == [("alex", "water_leak"), ("sam", "water_leak")]
 
 
 async def test_no_mapping_means_no_home_assistant_call(monkeypatch):
@@ -223,7 +223,7 @@ async def test_with_ha_down_a_leak_on_an_esphome_board_is_still_reported(monkeyp
         return True
 
     async def fake_family(**_):
-        return ["jeremiah"]
+        return ["alex"]
 
     ha_health.record_unreachable("http://ha", "refused")
     ha_health.record_unreachable("http://ha", "refused")
@@ -237,7 +237,7 @@ async def test_with_ha_down_a_leak_on_an_esphome_board_is_still_reported(monkeyp
     monkeypatch.setattr(cal, "_get_local_tz", lambda: TZ)
 
     assert await ha.check_once(ha.Watcher()) == 1
-    assert [(p["user"], p["kind"]) for p in sent] == [("jeremiah", "water_leak")]
+    assert [(p["user"], p["kind"]) for p in sent] == [("alex", "water_leak")]
 
 
 async def test_an_empty_house_with_ha_up_does_not_read_esphome(monkeypatch):

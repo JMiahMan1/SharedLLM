@@ -5,11 +5,11 @@ from services.gateway.location_query import parse_location_query
 
 
 @pytest.mark.parametrize("q,user,detail,to", [
-    ("Where is Michele?", "Michele", None, None),
-    ("how fast is Jeremiah driving", "Jeremiah", "speed", None),
-    ("When will Michele be home?", "Michele", "eta", "home"),
-    ("how long until Jeremiah gets to work?", "Jeremiah", "eta", "work"),
-    ("How far is Michele from home", "Michele", "eta", "home"),
+    ("Where is Sam?", "Sam", None, None),
+    ("how fast is Alex driving", "Alex", "speed", None),
+    ("When will Sam be home?", "Sam", "eta", "home"),
+    ("how long until Alex gets to work?", "Alex", "eta", "work"),
+    ("How far is Sam from home", "Sam", "eta", "home"),
     ("when will I get there", None, "eta", "home"),
     ("what's my fuel cost today", None, "cost", None),
 ])
@@ -19,7 +19,7 @@ def test_questions(q, user, detail, to):
 
 
 def test_the_asker_is_the_default():
-    assert parse_location_query("when will I be home", "jeremiah")["user"] == "jeremiah"
+    assert parse_location_query("when will I be home", "alex")["user"] == "alex"
 
 
 @pytest.mark.parametrize("q,to", [
@@ -27,11 +27,11 @@ def test_the_asker_is_the_default():
     ("who's nearest to work", "work"),
 ])
 def test_closest(q, to):
-    got = parse_location_query(q, "jeremiah")
+    got = parse_location_query(q, "alex")
     assert got["detail"] == "closest" and got["to"] == to
 
 
 def test_an_eta_to_a_street_address_keeps_the_address():
-    q = parse_location_query("How long until I get to 1234 E Main St, Mesa?", "jeremiah")
-    assert q == {"user": "jeremiah", "detail": "eta", "to": "1234 e main st, mesa"}
-    assert parse_location_query("when will michele be home?", "jeremiah")["to"] == "home"
+    q = parse_location_query("How long until I get to 1234 E Main St, Springfield?", "alex")
+    assert q == {"user": "alex", "detail": "eta", "to": "1234 e main st, springfield"}
+    assert parse_location_query("when will sam be home?", "alex")["to"] == "home"

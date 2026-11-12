@@ -1,5 +1,9 @@
 
+import os
 import re
+import sys
+
+LIVE_TV_NAME = os.environ.get("LIVE_TV_NAME") or sys.exit("Set LIVE_TV_NAME to the friendly name of a TV to test (e.g. \"Bedroom TV\").")
 
 
 # Mocking the _clean_query method logic for testing to avoid importing entire app context
@@ -32,8 +36,8 @@ def clean_query_current(query: str, device_name: str = "") -> str:
     return re.sub(r'\s+', ' ', clean).strip()
 
 def test_apostrophe_cleaning():
-    original_query = "Play Reliant Kay on Gracie's TV"
-    device_name = "Gracies TV" # Logic resolves to entity friendly_name which often lacks 's
+    original_query = f"Play Reliant Kay on {LIVE_TV_NAME}"
+    device_name = f"{LIVE_TV_NAME}" # Logic resolves to entity friendly_name which often lacks 's
 
     print(f"Testing Query: '{original_query}'")
     print(f"Device Name: '{device_name}'")
@@ -43,10 +47,10 @@ def test_apostrophe_cleaning():
     print(f"Cleaned Query (Current): '{cleaned}'")
 
     # Case 2: Fuzzy/Misspelled Device Name (User Reported Issue)
-    # User said "Grace's TV", System has "Gracies TV"
+    # User said a near-miss of the TV name; the system has LIVE_TV_NAME
     print("\n--- Testing Fuzzy Mismatch ---")
     query_fuzzy = "Play Reliant K on Grace's TV"
-    device_fuzzy = "Gracies TV"
+    device_fuzzy = f"{LIVE_TV_NAME}"
 
     cleaned_fuzzy = clean_query_current(query_fuzzy, device_fuzzy)
     print(f"Original: '{query_fuzzy}'")

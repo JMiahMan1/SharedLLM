@@ -3,7 +3,7 @@
 Anyone can be signed in to Jarvis on more than one device: a phone that goes
 everywhere and a tablet that never leaves the kitchen. Both upload locations
 as that person, and before uploads named their device the two streams were
-mixed: the tablet's fix every ten minutes put Jeremiah "home" while his phone
+mixed: the tablet's fix every ten minutes put a parent "home" while his phone
 was 17 km away, and the next phone fix had him "leave" again -- five times in
 one hour.
 

@@ -39,8 +39,8 @@ def _jarvis_bot() -> Any | None:
     """Jarvis's own Nextcloud account, when one is configured.
 
     Without it every bot post (a game question, a verdict, an @Jarvis answer)
-    went out under the account of whoever triggered it, so "✅ Michele got it!"
-    was authored by Michele.
+    went out under the account of whoever triggered it, so "✅ Sam got it!"
+    was authored by Sam.
     """
     from services import config
 
@@ -135,12 +135,12 @@ def _conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         "last_activity": conversation.get("lastActivity"),
         "last_message": last_message.get("message"),
         # Who said it and when, so a conversation list can read
-        # "Michele: Dinner at 6 · 5:02 PM" the way every messenger does.
+        # "Sam: Dinner at 6 · 5:02 PM" the way every messenger does.
         "last_message_actor": last_message.get("actorDisplayName"),
         "last_message_actor_id": last_message.get("actorId"),
         "last_message_timestamp": last_message.get("timestamp"),
         # The id lets a notifier tell a new message from one it already
-        # announced; system lines ("Michele joined") are not worth a buzz.
+        # announced; system lines ("Sam joined") are not worth a buzz.
         "last_message_id": last_message.get("id"),
         "last_message_system": bool(last_message.get("systemMessage")),
         # Talk room type: 1 one-to-one, 2 group, 3 public, 4 changelog.
@@ -464,8 +464,8 @@ def _game_wire(text: str, card: dict | None = None) -> str:
     """A family game's post, marked as Jarvis's own.
 
     Game posts go out under the account of whoever triggered them (the bot has
-    no Talk login of its own), so without a mark "✅ Michele got it!" read as
-    Michele's message. A card says ``from: jarvis``; plain text rides the same
+    no Talk login of its own), so without a mark "✅ Sam got it!" read as
+    Sam's message. A card says ``from: jarvis``; plain text rides the same
     ``assistant`` envelope Jarvis's answers use.
     """
     if card:
@@ -729,8 +729,8 @@ def _judge_game_answer(
 
     Every change to the game happens here, synchronously, so answers count in
     the order they reach the server. Judging after the player's own message
-    had been posted let a slower post lose a race it had won: Michele's later
-    "Moses" took the round from Jeremiah's earlier one. ``announce`` only talks.
+    had been posted let a slower post lose a race it had won: Sam's later
+    "Moses" took the round from Alex's earlier one. ``announce`` only talks.
     """
     from services.execution.handlers import family_games as games
 
@@ -786,7 +786,7 @@ def _judge_game_answer(
             posts.append((say_msg, games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐")))
             follow_ups.append(lambda: _bank_game_stars(who, result["stars"], f"Trivia: {question_text}"))
             # Under the account that answered, like the stars: the display
-            # name opened a second, split profile ("Jeremiah" vs "jeremiah").
+            # name opened a second, split profile ("Alex" vs "alex").
             follow_ups.append(
                 lambda: activity.record(who, "game", item=question_text, action="win", detail={"player": result["player"]})
             )
