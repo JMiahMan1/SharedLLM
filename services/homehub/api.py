@@ -17,6 +17,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from services.common.secrets import secret_matches
+from services.homehub import discovery_api
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import DeviceUnavailable, HubError, State
 from services.homehub.runtime import Runtime
@@ -488,6 +489,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         return {"entry_id": entry_id, "options": entry.options}
 
     app.include_router(api)
+    app.include_router(discovery_api.build_router(runtime, auth))
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

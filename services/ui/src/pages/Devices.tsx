@@ -21,6 +21,7 @@ import {
 import SharedFilesPanel from '../components/mdm/SharedFilesPanel';
 import { DeviceDetailSheet } from '../components/settings/DeviceDetailSheet';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
+import NewDevicesPanel from '../components/devices/NewDevicesPanel';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -1474,6 +1475,9 @@ export default function Devices() {
           </div>
         )}
       </Panel>
+
+      {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
+      {user?.is_admin && <NewDevicesPanel />}
 
       {files.isLoading && <p className="text-sm text-slate-500">Loading shared folders…</p>}
       {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}

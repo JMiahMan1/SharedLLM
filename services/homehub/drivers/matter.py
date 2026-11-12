@@ -89,6 +89,8 @@ IDENTIFY_SECONDS = 15
 UNREACHABLE_ERRORS = {3: "NodeNotReady", 4: "NodeNotResolving", 7: "SDKStackError"}
 
 COMMAND_TIMEOUT = 30.0
+#: Commissioning joins the device and interviews it before the server answers.
+COMMISSION_TIMEOUT = 180.0
 LISTEN_TIMEOUT = 120.0  # start_listening dumps every node; the first start can be slow
 RECONNECT_DELAYS = (1, 2, 5, 10, 30, 60)
 
@@ -600,6 +602,9 @@ class MatterDriver(Driver):
             })
         elif domain == "sensor":
             self.publish(entity, *self._sensor_state(entity, ref, a))
+        elif domain == "switch":
+            raw = a.get(ref.path())
+            self.publish(entity, UNKNOWN if raw is None else ("on" if raw else "off"), {})
         elif domain == "binary_sensor":
             conv = BINARY_SENSOR_CONVERTERS.get((ref.cluster, ref.attribute), lambda v: None if v is None else bool(v))
             value = conv(a.get(ref.path()))
@@ -727,8 +732,10 @@ class MatterDriver(Driver):
             ("light", "turn_on"): self._light_on, ("light", "turn_off"): self._light_off,
             ("light", "toggle"): self._light_toggle, ("number", "set_value"): self._number_set,
             ("select", "select_option"): self._select_option, ("button", "press"): self._press,
+            ("switch", "turn_on"): self._switch_on, ("switch", "turn_off"): self._switch_off,
+            ("switch", "toggle"): self._switch_toggle,
         }.get((domain, service))
-        if handler is None or (domain == "light" and entity.domain != "light"):
+        if handler is None or (domain in ("light", "switch") and entity.domain != domain):
             raise ServiceNotFound(f"matter cannot run {domain}.{service} on {entity.entity_id}")
         return await handler(entity, ref, data)
 
@@ -854,6 +861,47 @@ class MatterDriver(Driver):
         await self._command(ref, IDENTIFY, "Identify", {"identifyTime": IDENTIFY_SECONDS})
         self.publish(entity, datetime.now(UTC).isoformat(), {})
 
+    # A plug's OnOff (HA's ``MatterPlug`` switch): the command, then read the state back.
+    async def _switch_on(self, entity: EntityEntry, ref: MatterRef, data: dict[str, Any]) -> None:
+        await self._command(ref, ON_OFF, "On")
+        await self._read_back(ref, [ref.path()])
+
+    async def _switch_off(self, entity: EntityEntry, ref: MatterRef, data: dict[str, Any]) -> None:
+        await self._command(ref, ON_OFF, "Off")
+        await self._read_back(ref, [ref.path()])
+
+    async def _switch_toggle(self, entity: EntityEntry, ref: MatterRef, data: dict[str, Any]) -> None:
+        await self._command(ref, ON_OFF, "Toggle")
+        await self._read_back(ref, [ref.path()])
+
+    # -- adding devices (services/homehub/flows.py) ------------------------------
+    async def commission_with_code(self, code: str, *, network_only: bool = True,
+                                   timeout: float = COMMISSION_TIMEOUT) -> dict[str, Any]:
+        """Commission a new device onto our fabric with its setup code; returns the new node.
+
+        ``network_only`` is for a device already on the LAN (Wi-Fi or Ethernet,
+        in pairing mode). The server answers once the device has joined and
+        been interviewed, which can take a minute or two.
+        """
+        node = await self._send("commission_with_code", timeout=timeout, code=code, network_only=network_only)
+        if not isinstance(node, dict) or "node_id" not in node:
+            raise HubError("the Matter Server did not return the new node")
+        self.nodes[int(node["node_id"])] = node
+        return node
+
+    @property
+    def compressed_fabric_id(self) -> int | None:
+        got = self.server_info.get("compressed_fabric_id")
+        return int(got) if got is not None else self._expected_fabric()
+
+    def reindex(self, node_id: int | None = None) -> None:
+        """Pick up registry entities added while running, and publish them (or one node's)."""
+        self._index_entities()
+        if node_id is None:
+            self._publish_all()
+        else:
+            self._publish_node(int(node_id))
+
 
 def _tenths(seconds: Any) -> int:
     return max(0, min(65534, round(float(seconds or 0) * 10)))
@@ -882,3 +930,157 @@ def _target_brightness(data: dict[str, Any], current: Any) -> float | None:
     if current is not None and current.state == "on":
         base = float(current.attributes.get("brightness") or 0)
     return max(0.0, min(255.0, base + step))
+
+
+# -- registry entries for a newly commissioned node ---------------------------
+# The imported registry has entities for the nodes HA commissioned; a node added
+# later gets its entities here, with HA's unique_id scheme so the driver above
+# serves them like the imported ones.
+
+DESCRIPTOR = 29
+OTA_REQUESTOR = 42
+#: Matter device types that are plugs, not lights (On/Off and Dimmable Plug-in Unit).
+PLUG_DEVICE_TYPES = {0x010A, 0x010B}
+#: Light device types (On/Off, Dimmable, Color Temperature, Extended Color).
+LIGHT_DEVICE_TYPES = {0x0100, 0x0101, 0x010C, 0x010D}
+
+#: (cluster, attribute) -> (domain, key, name, extra registry fields), per endpoint.
+_ENDPOINT_ENTITIES: list[tuple[int, int, str, str, str, dict[str, Any]]] = [
+    (LEVEL_CONTROL, 17, "number", "on_level", "On level",
+     {"capabilities": {"min": 0, "max": 255, "step": 1, "mode": "box"}, "entity_category": "config"}),
+    (LEVEL_CONTROL, 18, "number", "on_transition_time", "On transition time",
+     {"capabilities": {"min": 0, "max": 65534, "step": 0.1, "mode": "box"}, "unit_of_measurement": "s",
+      "entity_category": "config"}),
+    (LEVEL_CONTROL, 19, "number", "off_transition_time", "Off transition time",
+     {"capabilities": {"min": 0, "max": 65534, "step": 0.1, "mode": "box"}, "unit_of_measurement": "s",
+      "entity_category": "config"}),
+    (LEVEL_CONTROL, 16384, "number", "power_on_level", "Power-on level",
+     {"capabilities": {"min": 0, "max": 255, "step": 1, "mode": "box"}, "entity_category": "config"}),
+    (1026, 0, "sensor", "TemperatureSensor", "Temperature",
+     {"original_device_class": "temperature", "unit_of_measurement": "°C",
+      "capabilities": {"state_class": "measurement"}}),
+    (1029, 0, "sensor", "HumiditySensor", "Humidity",
+     {"original_device_class": "humidity", "unit_of_measurement": "%", "capabilities": {"state_class": "measurement"}}),
+    (1027, 0, "sensor", "PressureSensor", "Pressure",
+     {"original_device_class": "pressure", "unit_of_measurement": "hPa",
+      "capabilities": {"state_class": "measurement"}}),
+    (1024, 0, "sensor", "LightSensor", "Illuminance",
+     {"original_device_class": "illuminance", "unit_of_measurement": "lx",
+      "capabilities": {"state_class": "measurement"}}),
+    (144, 8, "sensor", "ElectricalPowerMeasurementWatt", "Power",
+     {"original_device_class": "power", "unit_of_measurement": "W", "capabilities": {"state_class": "measurement"}}),
+    (47, 12, "sensor", "PowerSource", "Battery",
+     {"original_device_class": "battery", "unit_of_measurement": "%", "entity_category": "diagnostic",
+      "capabilities": {"state_class": "measurement"}}),
+    (1030, 0, "binary_sensor", "OccupancySensor", "Occupancy", {"original_device_class": "occupancy"}),
+    (69, 0, "binary_sensor", "ContactSensor", "Door", {"original_device_class": "door"}),
+]
+#: Node-wide diagnostics on endpoint 0.
+_ROOT_ENTITIES: list[tuple[int, int, str, str, str, dict[str, Any]]] = [
+    (WIFI_DIAGNOSTICS, 4, "sensor", "WiFiDiagnosticsRssi", "Wi-Fi RSSI",
+     {"original_device_class": "signal_strength", "unit_of_measurement": "dBm", "entity_category": "diagnostic",
+      "capabilities": {"state_class": "measurement"}}),
+    (GENERAL_DIAGNOSTICS, 1, "sensor", "GeneralDiagnosticsRebootCount", "Reboot count",
+     {"entity_category": "diagnostic"}),
+    (GENERAL_DIAGNOSTICS, 2, "sensor", "GeneralDiagnosticsUpTime", "Uptime",
+     {"original_device_class": "timestamp", "entity_category": "diagnostic"}),
+]
+
+
+def _device_types(attrs: dict[str, Any], ep: int) -> set[int]:
+    out: set[int] = set()
+    for item in attrs.get(f"{ep}/{DESCRIPTOR}/0") or []:
+        if isinstance(item, dict):
+            value = item.get("0", item.get("deviceType"))
+            if value is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    out.add(int(value))
+    return out
+
+
+def node_device_info(fabric: int, node: dict[str, Any]) -> dict[str, Any]:
+    """The DeviceEntry fields HA's Matter integration gives a node (BasicInformation on endpoint 0)."""
+    a = node.get("attributes") or {}
+    node_id = int(node["node_id"])
+
+    def basic(attr: int) -> Any:
+        value = a.get(f"0/{BASIC_INFORMATION}/{attr}")
+        return value if value not in ("", None) else None
+
+    serial = basic(15)
+    identifiers = [["matter", f"deviceid_{fabric:016X}-{node_id:016X}-MatterNodeDevice"]]
+    if serial:
+        identifiers.append(["matter", f"serial_{serial}"])
+    return {
+        "name": basic(5) or basic(3) or f"Matter device {node_id}",
+        "manufacturer": basic(1),
+        "model": basic(3),
+        "sw_version": None if basic(10) is None else str(basic(10)),
+        "hw_version": None if basic(8) is None else str(basic(8)),
+        "serial_number": None if serial is None else str(serial),
+        "identifiers": identifiers,
+    }
+
+
+def node_entity_specs(fabric: int, node: dict[str, Any]) -> list[dict[str, Any]]:
+    """Registry entity specs for one node, in HA's unique_id scheme.
+
+    Each spec has ``domain``, ``unique_id``, ``name`` (the entity's own name,
+    ``None`` for the endpoint's main light or plug) and EntityEntry fields.
+    """
+    a = node.get("attributes") or {}
+    node_id = int(node["node_id"])
+    endpoints = sorted({int(k.split("/", 1)[0]) for k in a if k.split("/", 1)[0].isdigit()})
+    prefix = f"{fabric:016X}-{node_id:016X}-MatterNodeDevice"
+    specs: list[dict[str, Any]] = []
+
+    def add(domain: str, ep: int, key: str, cluster: int, attribute: int, name: str | None, **extra: Any) -> None:
+        specs.append({"domain": domain, "unique_id": f"{prefix}-{ep}-{key}-{cluster}-{attribute}",
+                      "name": name, **extra})
+
+    def has(ep: int, cluster: int, attribute: int | None = None) -> bool:
+        if attribute is not None:
+            return f"{ep}/{cluster}/{attribute}" in a
+        return any(k.startswith(f"{ep}/{cluster}/") for k in a)
+
+    for ep in endpoints:
+        if ep == 0:
+            continue
+        types = _device_types(a, ep)
+        if has(ep, ON_OFF, 0):
+            is_plug = bool(types & PLUG_DEVICE_TYPES) or (
+                not types & LIGHT_DEVICE_TYPES and not has(ep, LEVEL_CONTROL) and not has(ep, COLOR_CONTROL))
+            if is_plug:
+                add("switch", ep, "MatterPlug", ON_OFF, 0, None, original_device_class="outlet")
+            else:
+                modes = ["onoff"]
+                features = a.get(f"{ep}/{COLOR_CONTROL}/65532")
+                if features is not None:
+                    modes = [m for bit, m in ((CC_FEATURE_CT, "color_temp"), (CC_FEATURE_HS, "hs"),
+                                              (CC_FEATURE_XY, "xy")) if int(features) & bit] or ["onoff"]
+                elif has(ep, LEVEL_CONTROL):
+                    modes = ["brightness"]
+                caps: dict[str, Any] = {"supported_color_modes": modes}
+                if "color_temp" in modes:
+                    lo_m = a.get(f"{ep}/{COLOR_CONTROL}/16395") or DEFAULT_MIN_MIREDS
+                    hi_m = a.get(f"{ep}/{COLOR_CONTROL}/16396") or DEFAULT_MAX_MIREDS
+                    caps.update({"min_color_temp_kelvin": mired_to_kelvin(hi_m),
+                                 "max_color_temp_kelvin": mired_to_kelvin(lo_m)})
+                add("light", ep, "MatterLight", ON_OFF, 0, None, capabilities=caps,
+                    supported_features=LIGHT_FEATURE_TRANSITION)
+            if has(ep, ON_OFF, 16387):
+                add("select", ep, "MatterStartUpOnOff", ON_OFF, 16387, "Power-on behavior on startup",
+                    capabilities={"options": ["on", "off", "toggle", "previous"]}, entity_category="config")
+        if has(ep, IDENTIFY):
+            add("button", ep, "IdentifyButton", IDENTIFY, 65529, "Identify",
+                original_device_class="identify", entity_category="config")
+        for cluster, attribute, domain, key, name, extra in _ENDPOINT_ENTITIES:
+            if has(ep, cluster, attribute):
+                add(domain, ep, key, cluster, attribute, name, **extra)
+    for cluster, attribute, domain, key, name, extra in _ROOT_ENTITIES:
+        if has(0, cluster, attribute):
+            add(domain, 0, key, cluster, attribute, name, **extra)
+    if has(0, BASIC_INFORMATION, 9) and any(has(ep, OTA_REQUESTOR) for ep in endpoints):
+        add("update", 0, "MatterUpdate", BASIC_INFORMATION, 9, "Firmware", supported_features=UPDATE_FEATURES,
+            entity_category="config")
+    return specs

@@ -56,6 +56,20 @@ class Service:
         # it has started.
         self._bg.append(asyncio.create_task(self._start_automations_when_ready()))
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
+        await self._start_discovery()
+
+    async def _start_discovery(self) -> None:
+        """New devices on the LAN (services/homehub/discovery.py); ``HOMEHUB_DISCOVERY=0`` turns it off."""
+        if os.getenv("HOMEHUB_DISCOVERY", "1").lower() in ("0", "false", "no", "off"):
+            return
+        try:
+            from services.homehub.discovery import DiscoveryManager
+
+            manager = DiscoveryManager(self.hub, self.store)
+            await manager.start()
+            self.runtime.discovery = manager  # the /hub/discovered API reads it from here
+        except Exception:
+            log.exception("device discovery could not start")
 
     async def _start_people(self) -> None:
         try:
@@ -90,6 +104,10 @@ class Service:
         for t in self._bg:
             t.cancel()
         self._bg.clear()
+        discovery = getattr(self.runtime, "discovery", None)
+        if discovery is not None:
+            self.runtime.discovery = None
+            await discovery.stop()
         if self.runtime.automations is not None:
             await self.runtime.automations.stop()
             self.runtime.automations = None

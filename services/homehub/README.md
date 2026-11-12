@@ -81,6 +81,33 @@ never wakes a battery camera; a live view does, every frame. Live Reolink video
 is snapshots rather than the RTSP/FLV stream, because relaying H.264 to a
 browser would need ffmpeg in the image.
 
+## New devices (discovery)
+
+`discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,
+commissionable Matter, unpaired HomeKit, Cast, Android TV Remote, Tasmota), SSDP
+and a WiZ `getSystemConfig` sweep hourly and on demand. Each finding says whether
+the registry already knows it; admins get one notice per new device. `flows.py`
+adds one (HA's data keys and unique_ids): WiZ, Cast, Roku and Tasmota with no
+input, ESPHome with its key when encrypted, Matter by setup code through the
+Matter Server. HomeKit, Android TV, Samsung and LG are listed but need a pairing
+step that is not built yet. The Devices page's "New devices" panel drives it
+through the gateway (`/api/homehub/...`).
+
+| Route (admin) | What |
+|---|---|
+| `GET /hub/discovered[?new=1]` | Findings: `known`, `new`, `ignored`, `adoptable`, `needs`, `unsupported` |
+| `POST /hub/discovered/scan` | SSDP + WiZ now (at most once a minute) |
+| `POST /hub/discovered/{id}/adopt` | `{"name"?, "area_id"?, "input"?}` -> `status: adopted` or `needs_input` (+ `needs`); 409 already set up, 501 not supported |
+| `POST /hub/discovered/{id}/ignore` | `{"ignored": false}` takes it back |
+| `POST /hub/matter/commission` | `{"code", "name"?, "area_id"?}` |
+
+**Firewall.** A stateful firewall drops the unicast replies to a multicast
+M-SEARCH or a WiZ broadcast, so both scans also probe every address of the /24
+(`HOMEHUB_SCAN_SUBNET` overrides it); those replies are tracked and get through.
+To also accept the broadcast replies, fix the source ports
+(`HOMEHUB_SSDP_PORT`, `HOMEHUB_WIZ_DISCOVERY_PORT`) and open them on the LAN zone.
+`HOMEHUB_DISCOVERY=0` turns discovery off.
+
 ## Known issues
 
 - **Garage door sensor (hardware): needs fixing.** `binary_sensor.garage_door_sensor`
