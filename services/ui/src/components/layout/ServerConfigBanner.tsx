@@ -3,7 +3,9 @@ import { AlertCircle, WifiOff, X, Server, Check } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { checkConnectivity, normalizeServerUrl } from '../../lib/connectivity';
 import { storageGet, storageSet } from '../../lib/storage';
-import { DEFAULT_SERVER_URL } from '../../lib/serverUrl';
+import { DEFAULT_SERVER_URL, SERVER_URL_EXAMPLE } from '../../lib/serverUrl';
+
+const SERVER_URL_HINT = DEFAULT_SERVER_URL || SERVER_URL_EXAMPLE;
 
 const ServerConfigBanner = () => {
   const [status, setStatus] = useState<'checking' | 'disconnected' | 'connected' | 'no-config'>('checking');
@@ -84,13 +86,13 @@ const ServerConfigBanner = () => {
           <WifiOff size={16} className="text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-red-400">Server not configured</p>
-            <p className="text-[11px] text-red-400/70 mt-0.5">Enter your server URL, e.g. {DEFAULT_SERVER_URL}.</p>
+            <p className="text-[11px] text-red-400/70 mt-0.5">Enter your server URL, e.g. {SERVER_URL_HINT}.</p>
             <div className="flex items-center gap-2 mt-2">
               <input
                 value={serverInput}
                 onChange={(e) => setServerInput(e.target.value)}
                 aria-label="Server URL"
-                placeholder={DEFAULT_SERVER_URL}
+                placeholder={SERVER_URL_HINT}
                 className="flex-1 min-w-0 px-2 min-h-11 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
               />
               <button
@@ -122,7 +124,7 @@ const ServerConfigBanner = () => {
               value={serverInput}
               onChange={(e) => setServerInput(e.target.value)}
               aria-label="Server URL"
-              placeholder={serverUrl || DEFAULT_SERVER_URL}
+              placeholder={serverUrl || SERVER_URL_HINT}
               className="flex-1 min-w-0 px-2 min-h-11 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
             />
             <button

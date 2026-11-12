@@ -42,7 +42,7 @@ async function loginAsDefault(page: Page) {
 }
 
 test.describe('@live MA Web Player (Sendspin)', () => {
-  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).');
+  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.0.2.205:8080).');
   test.skip(!TEST_USER, 'Set TEST_USER to the username for Playwright E2E tests.');
   test.skip(!TEST_PASS, 'Set TEST_PASS to the password for Playwright E2E tests.');
 

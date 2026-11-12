@@ -22,11 +22,11 @@ public class PushEventTest {
     public void readsAMessageWithItsIdForTheNextSince() {
         PushEvent e = PushEvent.parse(
             "{\"id\":\"hwQ2YpKdmg\",\"time\":1760000000,\"event\":\"message\","
-            + "\"message\":\"{\\\"title\\\":\\\"Jeremiah\\\",\\\"body\\\":\\\"On my way\\\"}\"}");
+            + "\"message\":\"{\\\"title\\\":\\\"Alex\\\",\\\"body\\\":\\\"On my way\\\"}\"}");
         assertNotNull(e);
         assertTrue(e.isMessage());
         assertEquals("hwQ2YpKdmg", e.id);
-        assertEquals("{\"title\":\"Jeremiah\",\"body\":\"On my way\"}", e.message);
+        assertEquals("{\"title\":\"Alex\",\"body\":\"On my way\"}", e.message);
         assertFalse(e.isUnifiedPush());
     }
 

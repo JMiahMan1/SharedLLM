@@ -69,12 +69,12 @@ const ALL_ON: HealthSummary['profile']['metrics'] = {
 
 function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
   return {
-    user_id: 'jeremiah',
+    user_id: 'alex',
     day: '2026-10-22',
     profile: {
-      user_id: 'jeremiah',
+      user_id: 'alex',
       exists: true,
-      display_name: 'Jeremiah',
+      display_name: 'Alex',
       birth_year: 1985,
       height_cm: 180,
       sex: 'male',
@@ -92,7 +92,7 @@ function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
     sleep: {
       last_night: {
         id: 1,
-        user_id: 'jeremiah',
+        user_id: 'alex',
         night: '2026-10-21',
         bedtime: '2026-10-20T22:30:00-07:00',
         wake_time: '2026-10-21T06:30:00-07:00',
@@ -125,7 +125,7 @@ function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
     },
     checkin: null,
     nutrition: {
-      user_id: 'jeremiah',
+      user_id: 'alex',
       day: '2026-10-22',
       entries_count: 0,
       logged: false,
@@ -158,7 +158,7 @@ function summary(overrides: Partial<HealthSummary> = {}): HealthSummary {
 
 function emptyNutrition(overrides: Partial<NutritionDay> = {}): NutritionDay {
   return {
-    user_id: 'jeremiah',
+    user_id: 'alex',
     day: '2026-10-22',
     entries_count: 0,
     logged: false,
@@ -189,10 +189,10 @@ function renderWithClient(node: React.ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getHealthFamily.mockResolvedValue({ viewer: 'jeremiah', day: '2026-10-22', people: [] });
+  getHealthFamily.mockResolvedValue({ viewer: 'alex', day: '2026-10-22', people: [] });
   getHealthProfile.mockResolvedValue(summary().profile);
   getDailySteps.mockResolvedValue({
-    user_id: 'jeremiah',
+    user_id: 'alex',
     daily_steps: { '2026-10-22': 4200 },
     today: 4200,
     goal: 10000,
@@ -200,7 +200,7 @@ beforeEach(() => {
   });
   saveCheckin.mockResolvedValue({
     id: 1,
-    user_id: 'jeremiah',
+    user_id: 'alex',
     day: '2026-10-22',
     energy: 4,
     mood: null,
@@ -281,13 +281,13 @@ describe('HealthToday', () => {
 
 describe('HealthSleep', () => {
   it('saves a night from bedtime and wake time', async () => {
-    getSleep.mockResolvedValue({ user_id: 'jeremiah', sessions: [] });
+    getSleep.mockResolvedValue({ user_id: 'alex', sessions: [] });
     getHealthSummary.mockResolvedValue(
       summary({ sleep: { last_night: null, score: null, need_minutes: 480, history: [] } }),
     );
     logSleep.mockResolvedValue({
       id: 9,
-      user_id: 'jeremiah',
+      user_id: 'alex',
       night: '2026-10-22',
       bedtime: null,
       wake_time: null,
@@ -449,7 +449,7 @@ describe('HealthToday family sharing', () => {
   it('shows a shared cycle phase with practical partner suggestions', async () => {
     getHealthSummary.mockResolvedValue(summary());
     getHealthFamily.mockResolvedValue({
-      viewer: 'jeremiah',
+      viewer: 'alex',
       day: '2026-10-22',
       people: [
         {
@@ -482,7 +482,7 @@ describe('HealthToday family sharing', () => {
   it('gives every shared scope its own line', async () => {
     getHealthSummary.mockResolvedValue(summary());
     getHealthFamily.mockResolvedValue({
-      viewer: 'jeremiah',
+      viewer: 'alex',
       day: '2026-10-22',
       people: [
         {

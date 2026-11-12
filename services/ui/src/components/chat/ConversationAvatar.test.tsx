@@ -21,9 +21,9 @@ vi.mock('../UserAvatar', () => ({
 }));
 
 const member = (over: Partial<FamilyMember> = {}): FamilyMember => ({
-  username: 'michele',
-  display_name: 'Michele',
-  nextcloud_user: 'michele',
+  username: 'sam',
+  display_name: 'Sam',
+  nextcloud_user: 'sam',
   avatar: 'upload:42',
   ...over,
 });
@@ -33,27 +33,27 @@ describe('ConversationAvatar', () => {
     const people = buildFamilyLookup([member()]);
     render(
       <ConversationAvatar
-        conversation={{ type: 1, name: 'michele', display_name: 'Michele' }}
+        conversation={{ type: 1, name: 'sam', display_name: 'Sam' }}
         people={people}
       />,
     );
 
     const avatar = screen.getByTestId('avatar');
-    expect(avatar).toHaveAttribute('data-username', 'michele');
+    expect(avatar).toHaveAttribute('data-username', 'sam');
     expect(avatar).toHaveAttribute('data-avatar', 'upload:42');
-    expect(avatar).toHaveAttribute('data-name', 'Michele');
+    expect(avatar).toHaveAttribute('data-name', 'Sam');
   });
 
   it('matches a direct message that only carries the display name', () => {
     const people = buildFamilyLookup([member()]);
     render(
       <ConversationAvatar
-        conversation={{ type: 1, name: undefined, display_name: 'Michele' }}
+        conversation={{ type: 1, name: undefined, display_name: 'Sam' }}
         people={people}
       />,
     );
 
-    expect(screen.getByTestId('avatar')).toHaveAttribute('data-username', 'michele');
+    expect(screen.getByTestId('avatar')).toHaveAttribute('data-username', 'sam');
   });
 
   it('leaves UserAvatar to draw initials when the person is not in the directory', () => {

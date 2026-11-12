@@ -13,17 +13,17 @@ vi.mock('../../../services/api', async (orig) => {
 const now = Date.now();
 const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString();
 const EVENTS = [
-  { user: 'gracie', feature: 'sms', item: 'Leo', action: 'message', at: at(5), detail: { direction: 'in', number: '+15555550102', body: 'Are you coming to youth group tonight? ' + 'x'.repeat(300) } },
-  { user: 'gracie', feature: 'calls', item: 'Mom', action: 'call', at: at(30), duration_s: 252, detail: { direction: 'out', number: '+15555550101' } },
-  { user: 'gracie', feature: 'calls', item: 'Unknown', action: 'call', at: at(40), duration_s: 0, detail: { direction: 'missed', number: '+15555550199' } },
-  { user: 'gracie', feature: 'social', item: 'Snapchat', action: 'notification', at: at(50), detail: { sender: 'Ava', body: 'lol see you' } },
-  { user: 'gracie', feature: 'sms', item: 'Leo', action: 'message', at: at(60), detail: { direction: 'out', number: '+15555550102', body: 'ok' } },
+  { user: 'taylor', feature: 'sms', item: 'Leo', action: 'message', at: at(5), detail: { direction: 'in', number: '+15555550102', body: 'Are you coming to youth group tonight? ' + 'x'.repeat(300) } },
+  { user: 'taylor', feature: 'calls', item: 'Mom', action: 'call', at: at(30), duration_s: 252, detail: { direction: 'out', number: '+15555550101' } },
+  { user: 'taylor', feature: 'calls', item: 'Unknown', action: 'call', at: at(40), duration_s: 0, detail: { direction: 'missed', number: '+15555550199' } },
+  { user: 'taylor', feature: 'social', item: 'Snapchat', action: 'notification', at: at(50), detail: { sender: 'Ava', body: 'lol see you' } },
+  { user: 'taylor', feature: 'sms', item: 'Leo', action: 'message', at: at(60), detail: { direction: 'out', number: '+15555550102', body: 'ok' } },
 ];
 
 const renderIt = () =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <CommsSection username="gracie" name="Gracie" />
+      <CommsSection username="taylor" name="Taylor" />
     </QueryClientProvider>,
   );
 

@@ -39,8 +39,8 @@ public class CommsCollectorTest {
         org.junit.Assert.assertEquals("", CommsCollector.groupLabel(java.util.Arrays.asList()));
         org.junit.Assert.assertEquals("Mom", CommsCollector.groupLabel(java.util.Arrays.asList("Mom")));
         org.junit.Assert.assertEquals("Mom and Leo", CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo")));
-        org.junit.Assert.assertEquals("Mom, Leo and 1 other", CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Gracie")));
+        org.junit.Assert.assertEquals("Mom, Leo and 1 other", CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Taylor")));
         org.junit.Assert.assertEquals("Mom, Leo and 2 others",
-                CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Gracie", "+15555550100")));
+                CommsCollector.groupLabel(java.util.Arrays.asList("Mom", "Leo", "Taylor", "+15555550100")));
     }
 }

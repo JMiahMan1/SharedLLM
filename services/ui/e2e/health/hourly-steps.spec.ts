@@ -286,8 +286,8 @@ test.describe('admin bonus stars on a phone', () => {
     await page.route('**/api/users', async (route) =>
       route.fulfill({
         json: [
-          { id: 1, username: 'jeremiah', full_name: 'Jeremiah', is_admin: true, is_system_default: false },
-          { id: 2, username: 'michele', full_name: 'Michele', is_admin: false, is_system_default: false },
+          { id: 1, username: 'alex', full_name: 'Alex', is_admin: true, is_system_default: false },
+          { id: 2, username: 'sam', full_name: 'Sam', is_admin: false, is_system_default: false },
         ],
       }),
     );
@@ -296,8 +296,8 @@ test.describe('admin bonus stars on a phone', () => {
     await expect(page.getByTestId('admin-stars')).toBeVisible();
     // The picker fills in from /api/users; selecting before that lands would be
     // selecting nothing.
-    await expect(page.getByLabel('Star recipient').locator('option', { hasText: '@michele' })).toHaveCount(1);
-    await page.getByLabel('Star recipient').selectOption('michele');
+    await expect(page.getByLabel('Star recipient').locator('option', { hasText: '@sam' })).toHaveCount(1);
+    await page.getByLabel('Star recipient').selectOption('sam');
     await expect(page.getByTestId('star-balance')).toBeVisible();
 
     const m = await measure(page, 'star-balance');

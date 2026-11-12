@@ -18,13 +18,13 @@ const room = {
   last_read: 201,
   last_common_read: 200,
   last_message: '{file}',
-  last_message_actor: 'Michele',
-  last_message_actor_id: 'michele',
+  last_message_actor: 'Sam',
+  last_message_actor_id: 'sam',
   last_message_timestamp: 1715000300,
 };
 
 const messages = [
-  { id: 202, actor_id: 'michele', actor_display_name: 'Michele', timestamp: 1715000300, message_type: 'comment', message: '{file}',
+  { id: 202, actor_id: 'sam', actor_display_name: 'Sam', timestamp: 1715000300, message_type: 'comment', message: '{file}',
     parameters: { file: { type: 'file', id: '300', name: 'pancakes.jpg', mimetype: 'image/jpeg', path: 'Talk/pancakes.jpg', 'preview-available': 'yes' } } },
   { id: 201, actor_id: 'default', actor_display_name: 'Shared/Default User', timestamp: 1715000200, message_type: 'comment',
     message: `Pancakes at 8, and bring syrup.${JARVIS_ENVELOPE}`, parent: { id: 200, actor_display_name: 'Shared/Default User', message: '@Jarvis breakfast?' } },
@@ -62,7 +62,7 @@ describe('family chat features', () => {
         new HttpResponse(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'Content-Type': 'image/jpeg' } }),
       ),
       http.get('/api/communication/talk/mentions', () =>
-        HttpResponse.json({ status: 'SUCCESS', detail: { mentions: [{ id: 'michele', label: 'Michele', mention_id: 'michele' }] } }),
+        HttpResponse.json({ status: 'SUCCESS', detail: { mentions: [{ id: 'sam', label: 'Sam', mention_id: 'sam' }] } }),
       ),
       http.post('/api/communication/talk/messages', async ({ request }) => {
         sent.push((await request.json()) as Record<string, unknown>);
@@ -188,7 +188,7 @@ describe('opening a conversation', () => {
     const limits: number[] = [];
     const history = (n: number) =>
       Array.from({ length: n }, (_, i) => ({
-        id: 1000 - i, actor_id: 'michele', actor_display_name: 'Michele', timestamp: 1715000000 - i * 60,
+        id: 1000 - i, actor_id: 'sam', actor_display_name: 'Sam', timestamp: 1715000000 - i * 60,
         message_type: 'comment', message: `message ${1000 - i}`,
       }));
     server.use(

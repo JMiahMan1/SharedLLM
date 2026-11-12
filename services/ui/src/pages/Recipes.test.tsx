@@ -375,13 +375,13 @@ describe('the shared cookbook', () => {
   it('lets the owner approve a suggested change', async () => {
     m.cookbookSuggestions.mockResolvedValue([{
       id: 's1', path: 'Recipes/Suggestions/s1.md', recipe: CHILI.path, recipe_title: 'Chicken Chili',
-      by: 'gracie', at: '2026-11-01T10:00:00Z', message: 'more beans', content: 'beans', current: 'chicken',
+      by: 'taylor', at: '2026-11-01T10:00:00Z', message: 'more beans', content: 'beans', current: 'chicken',
       owner: 'mom', owner_label: 'Mom', mine: false, can_review: true,
     }]);
     m.cookbookResolve.mockResolvedValue(ok('Change approved.'));
     renderAt();
     fireEvent.click(await screen.findByTestId('recipe-suggestions-toggle'));
-    expect(screen.getByTestId('recipe-suggestions')).toHaveTextContent('from gracie');
+    expect(screen.getByTestId('recipe-suggestions')).toHaveTextContent('from taylor');
     fireEvent.click(screen.getByRole('button', { name: /approve/i }));
     await waitFor(() => expect(m.cookbookResolve).toHaveBeenCalledWith('Recipes/Suggestions/s1.md', 'approve'));
   });

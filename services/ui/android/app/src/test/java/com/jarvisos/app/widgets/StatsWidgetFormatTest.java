@@ -18,8 +18,8 @@ public class StatsWidgetFormatTest {
 
     @Test
     public void findsTheSignedInMembersCard() throws Exception {
-        JSONObject other = new JSONObject().put("username", "kaleb").put("you", false).put("best_score", 9000);
-        JSONObject me = new JSONObject().put("username", "noah").put("you", true).put("submits", 12)
+        JSONObject other = new JSONObject().put("username", "robin").put("you", false).put("best_score", 9000);
+        JSONObject me = new JSONObject().put("username", "jordan").put("you", true).put("submits", 12)
             .put("best_score", 1250).put("crowns", 2)
             .put("per_game", new JSONArray()
                 .put(new JSONObject().put("title", "Checkers").put("my_best", 300))

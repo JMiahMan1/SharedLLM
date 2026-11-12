@@ -40,7 +40,7 @@ describe('Admin page', () => {
   it('api.discoverUsers returns discovered users via MSW', async () => {
     const result = await api.discoverUsers();
     expect(result.users).toHaveLength(2);
-    expect(result.users[0].username).toBe('jeremiah');
+    expect(result.users[0].username).toBe('alex');
   });
 
   it('renders discovery users when no filter is applied', async () => {
@@ -51,11 +51,11 @@ describe('Admin page', () => {
     await screen.findByText('Shared/Default User');
     
     await waitFor(() => {
-      expect(screen.getByText('Jeremiah')).toBeInTheDocument();
+      expect(screen.getByText('Alex')).toBeInTheDocument();
     }, { timeout: 5000 });
     
-    expect(screen.getByText('Jeremiah')).toBeInTheDocument();
-    expect(screen.getByText('Michele')).toBeInTheDocument();
+    expect(screen.getByText('Alex')).toBeInTheDocument();
+    expect(screen.getByText('Sam')).toBeInTheDocument();
   });
   it('renders tab navigation and default users tab', async () => {
     renderWithProviders(<Admin />);
@@ -72,14 +72,14 @@ describe('Admin page', () => {
     renderWithProviders(<Admin />);
 
     fireEvent.click(await screen.findByText('Create User'));
-    fireEvent.change(screen.getByLabelText(/^Username$/i), { target: { value: 'jeremiah' } });
-    fireEvent.change(screen.getByLabelText(/^Display Name$/i), { target: { value: 'Jeremiah Summers' } });
+    fireEvent.change(screen.getByLabelText(/^Username$/i), { target: { value: 'alex' } });
+    fireEvent.change(screen.getByLabelText(/^Display Name$/i), { target: { value: 'Alex Rivera' } });
     // A new account needs a password: one without it cannot sign in at all, so
     // the form refuses it rather than creating a locked-out account.
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'summer-2026' } });
     fireEvent.click(screen.getByText('Save User'));
 
-    expect(await screen.findByText('Jeremiah Summers')).toBeInTheDocument();
+    expect(await screen.findByText('Alex Rivera')).toBeInTheDocument();
   });
 
   it('imports a discovered user into the user list', async () => {
@@ -87,14 +87,14 @@ describe('Admin page', () => {
 
     await screen.findByText('Discovery Import');
     
-    const jeremiahElement = await screen.findByText('Jeremiah');
-    expect(jeremiahElement).toBeInTheDocument();
+    const alexElement = await screen.findByText('Alex');
+    expect(alexElement).toBeInTheDocument();
     
     const importButtons = await screen.findAllByText('Import');
     expect(importButtons.length).toBeGreaterThan(0);
     fireEvent.click(importButtons[0]);
 
-    await waitFor(() => expect(screen.getAllByText('Jeremiah').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('Alex').length).toBeGreaterThan(0));
   });
 
   it('saves a new device assignment and a new setting', async () => {
@@ -216,7 +216,7 @@ describe('Admin page', () => {
     server.use(
       http.get('/api/users', () => HttpResponse.json([
         { id: 2, username: 'leo', full_name: 'Leo', is_admin: false, is_system_default: false, has_password: true },
-        { id: 3, username: 'kaleb', full_name: 'Kaleb', is_admin: false, is_system_default: false, has_password: false },
+        { id: 3, username: 'robin', full_name: 'Robin', is_admin: false, is_system_default: false, has_password: false },
       ])),
     );
     renderWithProviders(<Admin />);
@@ -225,7 +225,7 @@ describe('Admin page', () => {
     const chips = await screen.findAllByText('No password');
     expect(chips).toHaveLength(1);
     const row = chips[0].closest('.glass-card');
-    expect(row?.textContent).toContain('Kaleb');
+    expect(row?.textContent).toContain('Robin');
   });
 
   it('says when an account still uses the seeded administrator password', async () => {

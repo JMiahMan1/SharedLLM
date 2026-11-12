@@ -7,7 +7,7 @@
  * Music Assistant is still holding a player literally named
  *
  *   {"id":1,"username":"default","display_name":"Shared/Default User",…,
- *    "audiobookshelf_api_key":null,"nextcloud_user":"summers",…}'s Web Player (Desktop)
+ *    "audiobookshelf_api_key":null,"nextcloud_user":"rivera",…}'s Web Player (Desktop)
  *
  * Rendering that verbatim dumps 800 characters of somebody's profile (private
  * URLs, email addresses, credential-shaped fields) into the device picker, and
@@ -41,7 +41,7 @@ function usableLabel(value: unknown): string | null {
  * example "'s Web Player (Desktop)") is ordinary text worth keeping. Rather
  * than guessing where the JSON ends, try every closing brace from the right and
  * keep the longest prefix that actually parses: an apostrophe inside a JSON
- * string value ("Jeremiah's Web Player") would otherwise cut the blob in half.
+ * string value ("Alex's Web Player") would otherwise cut the blob in half.
  */
 function nameFromProfileBlob(value: string): { name: string; suffix: string } | null {
   const trimmed = value.trim();

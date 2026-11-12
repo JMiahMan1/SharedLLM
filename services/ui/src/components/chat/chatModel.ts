@@ -103,7 +103,7 @@ export function gameRunning(messages: TalkMessage[]): boolean {
   return false;
 }
 
-/** System lines ("Michele joined the call") are shown as centred notes. */
+/** System lines ("Sam joined the call") are shown as centred notes. */
 export function isSystemMessage(message: TalkMessage): boolean {
   return Boolean(message.system_message) && message.message_type === 'system';
 }
@@ -215,7 +215,7 @@ export function isEmojiOnly(text: string | undefined): boolean {
   return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(trimmed.replace(/\s/g, ''))].length <= 3;
 }
 
-/** "You: …" or "Michele: …" in a group; just the text in a one-to-one. */
+/** "You: …" or "Sam: …" in a group; just the text in a one-to-one. */
 export function previewLine(conversation: TalkConversation, myActorIds: ReadonlySet<string>): string {
   const raw = conversation.last_message || '';
   const fromJarvis = decodeEnvelope(raw).envelope?.kind === 'assistant';

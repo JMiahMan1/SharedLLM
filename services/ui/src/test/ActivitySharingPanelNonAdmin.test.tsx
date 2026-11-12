@@ -18,8 +18,8 @@ vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }));
 
-const JEREMIAH = { username: 'jeremiah', display_name: 'Jeremiah' };
-const MICHELE = { username: 'michele', display_name: 'Michele' };
+const ALEX = { username: 'alex', display_name: 'Alex' };
+const SAM = { username: 'sam', display_name: 'Sam' };
 
 describe('ActivitySharingPanel as a non-admin', () => {
   beforeEach(() => {
@@ -35,7 +35,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
     server.use(
       http.get('/api/users/sharing-recipients', () => {
         calledNarrowEndpoint = true;
-        return HttpResponse.json([JEREMIAH, MICHELE]);
+        return HttpResponse.json([ALEX, SAM]);
       }),
     );
 
@@ -46,8 +46,8 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await user.click(screen.getByTestId('sharing-toggle'));
     await user.click(screen.getByTestId('audience-users'));
 
-    expect(await screen.findByTestId('sharing-user-jeremiah')).toBeInTheDocument();
-    expect(screen.getByTestId('sharing-user-michele')).toBeInTheDocument();
+    expect(await screen.findByTestId('sharing-user-alex')).toBeInTheDocument();
+    expect(screen.getByTestId('sharing-user-sam')).toBeInTheDocument();
     expect(calledNarrowEndpoint).toBe(true);
   });
 
@@ -65,7 +65,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await screen.findByTestId('activity-sharing-panel');
     await user.click(screen.getByTestId('sharing-toggle'));
     await user.click(screen.getByTestId('audience-users'));
-    await screen.findByTestId('sharing-user-jeremiah');
+    await screen.findByTestId('sharing-user-alex');
 
     // If the panel regressed to `getUsers()` this would be true.
     expect(adminRouteCalled).toBe(false);
@@ -90,7 +90,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
   it('excludes the privileged `default` account from the chips', async () => {
     server.use(
       http.get('/api/users/sharing-recipients', () =>
-        HttpResponse.json([JEREMIAH, { username: 'default', display_name: 'Shared' }]),
+        HttpResponse.json([ALEX, { username: 'default', display_name: 'Shared' }]),
       ),
     );
 
@@ -100,7 +100,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await user.click(screen.getByTestId('sharing-toggle'));
     await user.click(screen.getByTestId('audience-users'));
 
-    expect(await screen.findByTestId('sharing-user-jeremiah')).toBeInTheDocument();
+    expect(await screen.findByTestId('sharing-user-alex')).toBeInTheDocument();
     // `default` is a privileged viewer that reads everything anyway, so a
     // grant naming it would imply a control that does not exist.
     expect(screen.queryByTestId('sharing-user-default')).not.toBeInTheDocument();
@@ -109,7 +109,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
   it('saves the chosen person as an explicit, non-Everyone audience', async () => {
     let sent: Record<string, unknown> | null = null;
     server.use(
-      http.get('/api/users/sharing-recipients', () => HttpResponse.json([JEREMIAH, MICHELE])),
+      http.get('/api/users/sharing-recipients', () => HttpResponse.json([ALEX, SAM])),
       http.put('/api/users/me/activity-sharing', async ({ request }) => {
         sent = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ status: 'SUCCESS', ...userActivitySharing });
@@ -121,15 +121,15 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await screen.findByTestId('activity-sharing-panel');
     await user.click(screen.getByTestId('sharing-toggle'));
     await user.click(screen.getByTestId('audience-users'));
-    await user.click(await screen.findByTestId('sharing-user-michele'));
+    await user.click(await screen.findByTestId('sharing-user-sam'));
     await user.click(screen.getByTestId('save-sharing'));
 
     await waitFor(() => expect(sent).not.toBeNull());
-    expect(sent).toMatchObject({ enabled: true, audience: 'users', user_ids: ['michele'] });
+    expect(sent).toMatchObject({ enabled: true, audience: 'users', user_ids: ['sam'] });
   });
 
   it('keeps a 44px touch target on each recipient chip', async () => {
-    server.use(http.get('/api/users/sharing-recipients', () => HttpResponse.json([JEREMIAH])));
+    server.use(http.get('/api/users/sharing-recipients', () => HttpResponse.json([ALEX])));
 
     const user = userEvent.setup();
     renderWithProviders(<ActivitySharingPanel />);
@@ -137,7 +137,7 @@ describe('ActivitySharingPanel as a non-admin', () => {
     await user.click(screen.getByTestId('sharing-toggle'));
     await user.click(screen.getByTestId('audience-users'));
 
-    const chip = await screen.findByTestId('sharing-user-jeremiah');
+    const chip = await screen.findByTestId('sharing-user-alex');
     // Mobile parity (CONTRIBUTING.md): the chip is a primary tap target on a phone.
     expect(chip.className).toMatch(/min-h-11/);
   });

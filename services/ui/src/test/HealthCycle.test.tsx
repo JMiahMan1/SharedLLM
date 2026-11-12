@@ -169,18 +169,18 @@ describe('HealthCycle', () => {
   it('lets an adult share the cycle phase with a chosen family member', async () => {
     getHealthCycle.mockResolvedValue(cycleState({ enabled: true }));
     getFamilyDirectory.mockResolvedValue([
-      { username: 'michele', display_name: 'Michele', is_admin: false },
+      { username: 'sam', display_name: 'Sam', is_admin: false },
     ] as never);
-    updateHealthShare.mockResolvedValue({ owner: 'ada', viewer: 'michele', scope: 'cycle', enabled: true });
+    updateHealthShare.mockResolvedValue({ owner: 'ada', viewer: 'sam', scope: 'cycle', enabled: true });
     renderWithClient(<HealthCycle />);
 
     fireEvent.change(await screen.findByDisplayValue('Choose a person…'), {
-      target: { value: 'michele' },
+      target: { value: 'sam' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^share$/i }));
     await waitFor(() =>
       expect(updateHealthShare).toHaveBeenCalledWith({
-        viewer: 'michele',
+        viewer: 'sam',
         scope: 'cycle',
         enabled: true,
       }),

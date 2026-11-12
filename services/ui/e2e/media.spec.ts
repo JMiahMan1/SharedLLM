@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
+const UI_URL = process.env.UI_URL || '';
+// Live only: never fall back to a real server. Without UI_URL every test here skips.
+test.skip(!UI_URL, 'Live spec: set UI_URL to the server under test (for example http://192.0.2.205:8080).');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
@@ -144,14 +146,14 @@ test.describe('@live Device Selector: Selection', () => {
     page,
   }) => {
     const deviceCard = page.locator(
-      '.glass-panel button:has-text("Gracies TV")',
+      '.glass-panel button:has-text("Taylors TV")',
     ).first();
     if (await deviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await deviceCard.click();
       await page.waitForTimeout(500);
       // Player card should show the selected device name
       const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
-      await expect(playerCard.getByText('Gracies TV')).toBeVisible();
+      await expect(playerCard.getByText('Taylors TV')).toBeVisible();
     }
   });
 

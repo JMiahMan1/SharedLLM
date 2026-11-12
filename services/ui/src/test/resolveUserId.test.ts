@@ -15,7 +15,7 @@ describe('resolveUserId', () => {
   });
 
   it('passes a real username through unchanged', () => {
-    expect(resolveUserId('michele')).toBe('michele');
+    expect(resolveUserId('sam')).toBe('sam');
   });
 
   it('treats a missing or empty user as absent', () => {

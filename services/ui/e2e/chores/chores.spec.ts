@@ -36,9 +36,9 @@ const WIDGETS = ['chores_progress', 'weather', 'climate', 'energy_insights', 'am
 async function mockAll(page: Page): Promise<Board> {
   const board: Board = {
     chores: [
-      { id: '50-today', title: 'Feed the chickens', completed: false, assignees: ['Noah'], reward: 2, recurrence: 'RRULE:FREQ=DAILY', start_time: '07:00', emoji_icon: '🐔' },
-      { id: '51', title: 'Trash and recycling to the curb', completed: true, assignees: ['Noah'] },
-      { id: '52', title: 'Unload the dishwasher', completed: false, assignees: ['Gracie'], recurrence: 'RRULE:FREQ=DAILY', start_time: '18:30' },
+      { id: '50-today', title: 'Feed the chickens', completed: false, assignees: ['Jordan'], reward: 2, recurrence: 'RRULE:FREQ=DAILY', start_time: '07:00', emoji_icon: '🐔' },
+      { id: '51', title: 'Trash and recycling to the curb', completed: true, assignees: ['Jordan'] },
+      { id: '52', title: 'Unload the dishwasher', completed: false, assignees: ['Taylor'], recurrence: 'RRULE:FREQ=DAILY', start_time: '18:30' },
     ],
     added: [], removed: [], errors: [],
   };
@@ -53,7 +53,7 @@ async function mockAll(page: Page): Promise<Board> {
     if (/\/api\/telemetry\//.test(p)) return route.fulfill({ json: { notifications: [], jobs: [] } });
     // The shapes the real server answers with (the Guardian page's other cards read them).
     if (/\/api\/screen-time\/[^/]+\/status/.test(p)) return route.fulfill({ json: {
-      username: 'noah', day: '', rules: { daily_limit_min: 120 }, can_manage: true, technical: false,
+      username: 'jordan', day: '', rules: { daily_limit_min: 120 }, can_manage: true, technical: false,
       limit_min: 120, used_min: 30, bonus_min: 0, remaining_min: 90, locked: false } });
     if (/\/api\/(screen-time|guard)\/requests/.test(p)) return route.fulfill({ json: { requests: [] } });
     // The Guardian and member pages' other cards, empty (shapes from e2e/family-member.spec.ts).
@@ -66,7 +66,7 @@ async function mockAll(page: Page): Promise<Board> {
     if (p.startsWith('/api/guardian/activity/')) return route.fulfill({ json: { status: 'SUCCESS', events: [] } });
     if (p.startsWith('/api/usage/')) return route.fulfill({ json: { status: 'SUCCESS', days: [] } });
     if (p === '/api/guard/offline-code') return route.fulfill({ json: { set: false, updated_at: null, can_set: true } });
-    if (p.startsWith('/api/recommendation-lanes/')) return route.fulfill({ json: { username: 'noah', lanes: {}, can_manage: true } });
+    if (p.startsWith('/api/recommendation-lanes/')) return route.fulfill({ json: { username: 'jordan', lanes: {}, can_manage: true } });
     if (p === '/api/geo/zones') return route.fulfill({ json: { features: [] } });
     if (p === '/api/users/location/all') return route.fulfill({ json: {} });
     return route.fulfill({ json: [] });
@@ -81,12 +81,12 @@ async function mockAll(page: Page): Promise<Board> {
     quick_assistant_enabled: false,
   } }));
   await page.route('**/api/users/family', (route) => route.fulfill({ json: [
-    { username: 'noah', display_name: 'Noah', family_role: 'child', mother_username: null, is_minor: true, sharing_locked: true, is_admin: false, avatar: null },
+    { username: 'jordan', display_name: 'Jordan', family_role: 'child', mother_username: null, is_minor: true, sharing_locked: true, is_admin: false, avatar: null },
   ] }));
 
   // Skylight, as the gateway would answer it.
   await page.route('**/api/integrations/skylight/members', (route) => route.fulfill({ json: { status: 'SUCCESS', members: [
-    { id: '11', label: 'Noah', color: '#f97316' }, { id: '12', label: 'Gracie', color: '#22c55e' },
+    { id: '11', label: 'Jordan', color: '#f97316' }, { id: '12', label: 'Taylor', color: '#22c55e' },
   ] } }));
   await page.route('**/api/integrations/skylight/chores**', async (route) => {
     const req = route.request();
@@ -94,7 +94,7 @@ async function mockAll(page: Page): Promise<Board> {
     if (req.method() === 'GET' && url.pathname.endsWith('/chores')) {
       const scope = (url.searchParams.get('scope') || '').toLowerCase();
       const chores = scope && scope !== 'me' ? board.chores.filter((c) => c.assignees.some((a) => a.toLowerCase() === scope)) : board.chores;
-      return route.fulfill({ json: { status: 'SUCCESS', chores, assignee_meta: { Noah: '#f97316', Gracie: '#22c55e' } } });
+      return route.fulfill({ json: { status: 'SUCCESS', chores, assignee_meta: { Jordan: '#f97316', Taylor: '#22c55e' } } });
     }
     if (req.method() === 'POST' && url.pathname.endsWith('/chores')) {
       const body = req.postDataJSON() as { title: string; assignees: string[]; repeat?: string };
@@ -191,15 +191,15 @@ test.describe('managing chores across form factors', () => {
         await add.scrollIntoViewIfNeeded();
         await add.click();
         const dialog = page.getByRole('dialog');
-        await expect(dialog.getByRole('button', { name: 'Gracie' })).toBeVisible();
+        await expect(dialog.getByRole('button', { name: 'Taylor' })).toBeVisible();
         await dialog.getByLabel('Chore name').fill('Water the garden');
-        await dialog.getByRole('button', { name: 'Gracie' }).click();
+        await dialog.getByRole('button', { name: 'Taylor' }).click();
         await dialog.getByLabel('How often').selectOption('weekends');
         await fits(page, 'add dialog');
         await page.screenshot({ path: shotPath(`chores-${vp.name}-add-dialog`) });
         await dialog.getByRole('button', { name: /Add chore/ }).click();
         await expect(dialog).toHaveCount(0);
-        expect(board.added).toEqual([{ title: 'Water the garden', assignees: ['Gracie'], repeat: 'weekends' }]);
+        expect(board.added).toEqual([{ title: 'Water the garden', assignees: ['Taylor'], repeat: 'weekends' }]);
         await expect(page.getByText('Water the garden').first()).toBeVisible();
         await fits(page, 'dashboard');
         expect(board.errors).toEqual([]);
@@ -215,14 +215,14 @@ test.describe('managing chores across form factors', () => {
         await fits(page, 'full view');
         await page.screenshot({ path: shotPath(`chores-${vp.name}-full`) });
 
-        await page.getByRole('button', { name: 'Add for Gracie' }).click();
+        await page.getByRole('button', { name: 'Add for Taylor' }).click();
         const dialog = page.getByRole('dialog');
-        await expect(dialog).toContainText('New chore for Gracie');
+        await expect(dialog).toContainText('New chore for Taylor');
         await dialog.getByLabel('Chore name').fill('Fold towels');
         await fits(page, 'per-person add over the full view');
         await dialog.getByRole('button', { name: /Add chore/ }).click();
         await expect(dialog).toHaveCount(0);
-        expect(board.added.at(-1)).toEqual({ title: 'Fold towels', assignees: ['Gracie'] });
+        expect(board.added.at(-1)).toEqual({ title: 'Fold towels', assignees: ['Taylor'] });
 
         await page.getByRole('button', { name: 'Remove Feed the chickens' }).last().click();
         await expect(dialog).toContainText('repeats');
@@ -245,12 +245,12 @@ test.describe('managing chores across form factors', () => {
         await expect(card).toContainText('Feed the chickens', { timeout: 15_000 });
         await card.scrollIntoViewIfNeeded();
         await expect(card).toContainText('1 of 2 left today');
-        await expect(card).not.toContainText('Unload the dishwasher'); // Gracie's, not Noah's
+        await expect(card).not.toContainText('Unload the dishwasher'); // Taylor's, not Jordan's
         await card.getByLabel('Chore name').fill('Brush the dog');
         await card.getByLabel('Time (optional)').fill('16:30');
         await card.getByRole('button', { name: /Add chore/ }).click();
         await expect(card).toContainText('Brush the dog');
-        expect(board.added).toEqual([{ title: 'Brush the dog', assignees: ['noah'], time: '16:30' }]);
+        expect(board.added).toEqual([{ title: 'Brush the dog', assignees: ['jordan'], time: '16:30' }]);
         await card.getByRole('button', { name: 'Remove Trash and recycling to the curb' }).click();
         await expect(card).not.toContainText('Trash and recycling');
         expect(board.removed).toEqual([{ id: '51', applyTo: null }]);
@@ -261,7 +261,7 @@ test.describe('managing chores across form factors', () => {
         await card.getByRole('button', { name: 'Keep it' }).click();
         await expect(card.getByTestId('chore-remove-prompt')).toHaveCount(0);
 
-        await page.goto('/family/member/noah?section=time');
+        await page.goto('/family/member/jordan?section=time');
         const memberCard = page.getByTestId('guardian-chores');
         await expect(memberCard).toContainText('Feed the chickens', { timeout: 15_000 });
         await memberCard.scrollIntoViewIfNeeded();

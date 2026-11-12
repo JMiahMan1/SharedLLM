@@ -1,14 +1,19 @@
 const { chromium } = require('@playwright/test');
+const UI_URL = (process.env.UI_URL || '').replace(/\/+$/, '');
+if (!UI_URL) {
+  console.error('debug-media.js: set UI_URL to the server to inspect (for example http://192.0.2.205:8080).');
+  process.exit(2);
+}
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  await page.goto('http://192.168.2.205:8080/login');
+  await page.goto(`${UI_URL}/login`);
   await page.getByPlaceholder('Enter username').fill('default');
   await page.getByPlaceholder('Enter password').fill('admin');
   await page.getByRole('button', { name: /sign in/i }).click();
   await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(2000);
-  await page.goto('http://192.168.2.205:8080/media');
+  await page.goto(`${UI_URL}/media`);
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(3000);
   console.log('URL:', page.url());

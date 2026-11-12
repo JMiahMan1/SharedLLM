@@ -19,7 +19,7 @@ vi.mock('@capacitor/core', async (orig) => ({
   Capacitor: { isNativePlatform: () => h.native },
 }));
 vi.mock('../lib/maWebPlayer', () => ({
-  clientName: () => "Jeremiah's Web Player (Mobile)",
+  clientName: () => "Alex's Web Player (Mobile)",
   useMAWebPlayer: () => {
     // One player for the app's lifetime: counted on first render only. Its
     // state is whatever the test last put in h.player.
@@ -90,7 +90,7 @@ describe('the app-wide web player', () => {
     render(<App page="bible" onState={vi.fn()} />);
     expect(h.update).toHaveBeenCalledWith({
       title: 'Narnia', artist: 'C. S. Lewis', playing: true,
-      playerId: 'player-1', playerName: "Jeremiah's Web Player (Mobile)", volume: 70,
+      playerId: 'player-1', playerName: "Alex's Web Player (Mobile)", volume: 70,
     });
     await act(async () => {});
     h.actionListener?.({ action: 'pause' });

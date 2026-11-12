@@ -12,17 +12,17 @@ describe('AccountAuditPanel', () => {
         HttpResponse.json({
           events: [
             {
-              id: 1, at: '2026-10-08T15:00:00Z', actor: 'jeremiah', actor_kind: 'user', action: 'user.update', target: 'michele',
+              id: 1, at: '2026-10-08T15:00:00Z', actor: 'alex', actor_kind: 'user', action: 'user.update', target: 'sam',
               changes: [{ field: 'nextcloud_pass', change: 'cleared', secret: true }, { field: 'is_admin', change: 'changed', to: false }],
-              source: 'PATCH /api/users/michele', client: '192.168.2.30',
+              source: 'PATCH /api/users/sam', client: '192.0.2.30',
             },
           ],
         }),
       ),
     );
-    renderWithProviders(<AccountAuditPanel users={['jeremiah', 'michele']} />);
-    expect(await screen.findByText('jeremiah edited michele')).toBeInTheDocument();
+    renderWithProviders(<AccountAuditPanel users={['alex', 'sam']} />);
+    expect(await screen.findByText('alex edited sam')).toBeInTheDocument();
     expect(screen.getByText(/Nextcloud password cleared · admin → off/)).toBeInTheDocument();
-    expect(screen.getByText(/PATCH \/api\/users\/michele · 192\.168\.2\.30/)).toBeInTheDocument();
+    expect(screen.getByText(/PATCH \/api\/users\/sam · 192\.0\.2\.30/)).toBeInTheDocument();
   });
 });

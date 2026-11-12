@@ -25,7 +25,7 @@ const getSavedPlaces = vi.mocked(api.getSavedPlaces);
 const getVisitSuggestions = vi.mocked(api.getVisitSuggestions);
 const updateSavedPlace = vi.mocked(api.updateSavedPlace);
 const members = [
-  { username: 'michele', name: 'Michele' },
+  { username: 'sam', name: 'Sam' },
   { username: 'leo', name: 'Leo' },
 ];
 const school: PlaceSetting = { id: 'zone.school', name: 'School', important: false, notify: [] };
@@ -58,9 +58,9 @@ describe('PlacesPanel', () => {
     renderPanel(<PlacesPanel places={[{ ...school, important: true }]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
     const row = screen.getByTestId('place-zone.school');
     expect(row).toHaveTextContent(/alerts go to everyone/i);
-    await userEvent.click(within(row).getByRole('button', { name: 'Michele' }));
+    await userEvent.click(within(row).getByRole('button', { name: 'Sam' }));
     await waitFor(() =>
-      expect(setPlaceSettings).toHaveBeenCalledWith('zone.school', { important: true, notify: ['michele'] }),
+      expect(setPlaceSettings).toHaveBeenCalledWith('zone.school', { important: true, notify: ['sam'] }),
     );
   });
 
@@ -91,7 +91,7 @@ describe('PlacesPanel', () => {
 
   it('offers to save a place someone keeps visiting, ready to alert', async () => {
     getVisitSuggestions.mockResolvedValue([
-      { lat: 33.4, lon: -111.9, count: 3, total_s: 5400, last_since: 1, last_ts: 2, place: 'Corner Cafe' },
+      { lat: 39.69, lon: -104.82, count: 3, total_s: 5400, last_since: 1, last_ts: 2, place: 'Corner Cafe' },
     ]);
     renderPanel(<PlacesPanel places={[]} members={members} canEdit onSaved={vi.fn()} currentUser="dad" isAdmin />);
     await userEvent.click(await screen.findByRole('button', { name: /add as a place/i }));
@@ -120,9 +120,9 @@ describe('PlacesPanel', () => {
   });
 
   it("the owner of a saved place changes its icon, and someone else's has no edit button", async () => {
-    const mine = { id: 'a'.repeat(32), entity_id: `place.${'a'.repeat(32)}`, name: 'Gymnastics', lat: 33.4, lon: -111.9, radius: 150,
+    const mine = { id: 'a'.repeat(32), entity_id: `place.${'a'.repeat(32)}`, name: 'Gymnastics', lat: 39.69, lon: -104.82, radius: 150,
       scope: 'family' as const, owner: 'leo', important: false, notify: [] };
-    const theirs = { ...mine, id: 'b'.repeat(32), entity_id: `place.${'b'.repeat(32)}`, name: 'Office', owner: 'michele' };
+    const theirs = { ...mine, id: 'b'.repeat(32), entity_id: `place.${'b'.repeat(32)}`, name: 'Office', owner: 'sam' };
     getSavedPlaces.mockResolvedValue([mine, theirs]);
     updateSavedPlace.mockResolvedValue({ ...mine, icon: 'gym' });
     const onSaved = vi.fn();

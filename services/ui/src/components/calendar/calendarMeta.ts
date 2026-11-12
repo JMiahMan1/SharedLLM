@@ -1,6 +1,6 @@
 // Per-calendar-account coloring, mirroring OpenSkyLight's model where an
 // occurrence is colored by its assigned person, else its calendar. Events carry
-// a `calendar` field (the source Google account, e.g. "kalebsummers85@gmail.com").
+// a `calendar` field (the source Google account, e.g. "robin@example.com").
 // That account can be assigned to a CalendarPerson (name + color); when it is,
 // we color/label by the person so multiple accounts for the same user share a
 // color. Unassigned accounts fall back to a stable hash of the raw id.

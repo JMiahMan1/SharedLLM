@@ -85,11 +85,11 @@ describe('Settings profile header', () => {
   it("shows the person's own picture and name, not a letter on a gradient", async () => {
     server.use(
       http.get('/api/users/me', () =>
-        HttpResponse.json({ id: 7, username: 'leo', full_name: 'Leo Summers', avatar: 'preset:jonahs-whale', is_admin: false }),
+        HttpResponse.json({ id: 7, username: 'leo', full_name: 'Leo Rivera', avatar: 'preset:jonahs-whale', is_admin: false }),
       ),
     );
     renderWithProviders(<Settings />);
-    await waitFor(() => expect(screen.getByTestId('settings-profile-name')).toHaveTextContent('Leo Summers'));
+    await waitFor(() => expect(screen.getByTestId('settings-profile-name')).toHaveTextContent('Leo Rivera'));
     const header = screen.getByTestId('settings-profile-name').closest('.glass-panel') as HTMLElement;
     expect(header.querySelector('[data-testid="user-avatar-preset"]')).not.toBeNull();
   });

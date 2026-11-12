@@ -66,7 +66,7 @@ async function playFirstMaTrack(page: Page): Promise<boolean> {
 const playerCard = (page: Page) => page.locator('.glass-panel.border-cyan-500\\/20').first();
 
 test.describe('@live Web Player media regressions', () => {
-  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).');
+  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.0.2.205:8080).');
   test.skip(!TEST_USER, 'Set TEST_USER to the username for Playwright E2E tests.');
   test.skip(!TEST_PASS, 'Set TEST_PASS to the password for Playwright E2E tests.');
   test('Album art renders (not just the gradient + music-note fallback)', async ({ page }) => {

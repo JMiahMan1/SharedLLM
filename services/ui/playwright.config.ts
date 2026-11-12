@@ -89,15 +89,21 @@ const projects: PlaywrightTestConfig['projects'] = [
   },
 ];
 
+// The live project runs only against a server named at run time: LIVE=1 and
+// UI_URL=<server>. There is no default address; without UI_URL it is skipped.
 if (process.env.LIVE === '1') {
-  projects.push({
-    name: 'live',
-    grep: /@live/,
-    use: {
-      ...devices['Desktop Chrome'],
-      baseURL: process.env.UI_URL || 'http://192.168.2.205:8080',
-    },
-  });
+  if (process.env.UI_URL) {
+    projects.push({
+      name: 'live',
+      grep: /@live/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: process.env.UI_URL,
+      },
+    });
+  } else {
+    console.warn('[playwright] LIVE=1 but UI_URL is not set: skipping the live project. Set UI_URL to the server under test.');
+  }
 }
 
 export default defineConfig({

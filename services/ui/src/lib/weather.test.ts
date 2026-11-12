@@ -8,14 +8,14 @@ import {
 describe('weather reminders setting', () => {
   it('keeps valid rules and drops the rest', () => {
     const rules = parseReminders(JSON.stringify([
-      { id: 'Hay', kind: 'rain', title: ' Cover the hay ', people: [' Jeremiah ', ''], threshold: '70' },
+      { id: 'Hay', kind: 'rain', title: ' Cover the hay ', people: [' Alex ', ''], threshold: '70' },
       { kind: 'tornado', title: 'nope' },
       'junk',
       { id: 'hay', kind: 'wind' },
       { id: 'pipes', kind: 'freeze', location: { name: 'Barn', latitude: '36.1', longitude: -86.7 }, enabled: false },
     ]));
     expect(rules).toEqual([
-      { id: 'hay', kind: 'rain', title: 'Cover the hay', people: ['jeremiah'], threshold: 70 },
+      { id: 'hay', kind: 'rain', title: 'Cover the hay', people: ['alex'], threshold: 70 },
       {
         id: 'pipes', kind: 'freeze', title: 'Freeze coming', people: [],
         location: { name: 'Barn', latitude: 36.1, longitude: -86.7 }, enabled: false,

@@ -21,8 +21,8 @@ const baseTrip = {
   distance_miles: 12.5,
   top_speed_mph: 55,
   avg_speed_mph: 25,
-  start_location: { name: 'Home', latitude: 33.1667, longitude: -111.5646, address: '1 Main St, Phoenix, AZ' },
-  end_location: { name: 'Mall', latitude: 33.25, longitude: -111.63 },
+  start_location: { name: 'Home', latitude: 39.4567, longitude: -104.4846, address: '1 Main St, Denver, CO' },
+  end_location: { name: 'Mall', latitude: 39.54, longitude: -104.55 },
   fuel_used_gal: 0.52,
   trip_cost_usd: 1.9,
   activity_type: 'driving',
@@ -45,9 +45,9 @@ function useTripHandlers() {
     http.get('/api/geo/locations/suggestions', () =>
       HttpResponse.json({
         status: 'ok',
-        latitude: 33.1667,
-        longitude: -111.5646,
-        current: { name: 'Home', address: '1 Main St, Phoenix, AZ', source: 'ha_zone' },
+        latitude: 39.4567,
+        longitude: -104.4846,
+        current: { name: 'Home', address: '1 Main St, Denver, CO', source: 'ha_zone' },
         candidates: [
           { name: 'Whole Foods Market', kind: 'shop', distance_m: 60 },
           { name: 'Pizzeria Bianco', kind: 'restaurant', distance_m: 120, address: '623 E Adams St' },
@@ -60,16 +60,16 @@ function useTripHandlers() {
     http.get('/api/geo/trips/:id/locations', ({ params }) =>
       HttpResponse.json({
         trip_id: String(params.id),
-        start: { name: 'Home', lat: 33.1667, lon: -111.5646, source: 'stored' },
-        end: { name: 'Mall', lat: 33.25, lon: -111.63, source: 'coords' },
+        start: { name: 'Home', lat: 39.4567, lon: -104.4846, source: 'stored' },
+        end: { name: 'Mall', lat: 39.54, lon: -104.55, source: 'coords' },
       })
     ),
     http.get('/api/geo/trips/:id/route', ({ params }) =>
       HttpResponse.json({
         trip_id: String(params.id),
         points: [
-          { t: 1700000000, lat: 33.1667, lon: -111.5646, spd: 0 },
-          { t: 1700001800, lat: 33.25, lon: -111.63, spd: 22 },
+          { t: 1700000000, lat: 39.4567, lon: -104.4846, spd: 0 },
+          { t: 1700001800, lat: 39.54, lon: -104.55, spd: 22 },
         ],
       })
     ),
@@ -103,7 +103,7 @@ describe('Wander trip location editing', () => {
     expect(startInput).toHaveValue('Home');
 
     // Debris check: stored address is shown, not the raw coordinates
-    expect(screen.getByText('1 Main St, Phoenix, AZ')).toBeInTheDocument();
+    expect(screen.getByText('1 Main St, Denver, CO')).toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /pick nearby place/i })[0]);
 
@@ -119,7 +119,7 @@ describe('Wander trip location editing', () => {
     expect(patchBody?.start_name).toBe('Whole Foods Market');
     expect(patchBody?.end_name).toBe('Mall');
     // The stored address is still preserved on save
-    expect(patchBody?.start_address).toBe('1 Main St, Phoenix, AZ');
+    expect(patchBody?.start_address).toBe('1 Main St, Denver, CO');
   });
 
   it('leaves the destination untouched when only the start is renamed', async () => {

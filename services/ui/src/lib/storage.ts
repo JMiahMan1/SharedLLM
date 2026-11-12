@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import TokenBridge from '../plugins/tokenBridge';
+import { DEFAULT_SERVER_URL } from './serverDefaults';
 
 const isNative = Capacitor.isNativePlatform();
 const _cache: Record<string, string | null> = {};
@@ -23,8 +24,8 @@ export async function storageInit(): Promise<void> {
   if (isNative) {
     const { value: apiKey } = await Preferences.get({ key: 'jarvis_api_key' });
     let { value: serverUrl } = await Preferences.get({ key: 'jarvis_server_url' });
-    if (!serverUrl) {
-      serverUrl = 'https://jarvis.sumemail.com';
+    if (!serverUrl && DEFAULT_SERVER_URL) {
+      serverUrl = DEFAULT_SERVER_URL;
       await Preferences.set({ key: 'jarvis_server_url', value: serverUrl });
     }
     // Clients authenticate with their own API key only. Older builds could

@@ -25,7 +25,7 @@ const bucket = (over: Partial<StepRangeBucket> = {}): StepRangeBucket => ({
 });
 
 const series = (over: Partial<StepRangeResponse> = {}): StepRangeResponse => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   range: 'W',
   label: 'Week',
   buckets: [bucket()],

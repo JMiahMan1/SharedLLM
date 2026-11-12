@@ -47,7 +47,7 @@ describe('MobileMenuPanel', () => {
   it('does not offer admin-only pages to non-admins or keep them pinned', async () => {
     server.use(
       http.get('/api/users/me', () =>
-        HttpResponse.json({ id: 2, username: 'michele', role: 'user', is_admin: false })),
+        HttpResponse.json({ id: 2, username: 'sam', role: 'user', is_admin: false })),
     );
     localStorage.setItem(MOBILE_NAV_STORAGE_KEY, JSON.stringify(['/admin', '/notes', '/calendar']));
 

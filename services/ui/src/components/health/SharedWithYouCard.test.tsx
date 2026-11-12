@@ -4,27 +4,27 @@ import SharedWithYouCard from './SharedWithYouCard';
 import type { HealthFamilyPerson } from '../../types/api';
 
 vi.mock('../chat/familyDirectory', () => ({
-  useFamilyDirectory: () => (id?: string | null) => ({ username: id ?? '', display_name: 'Jeremiah' }),
+  useFamilyDirectory: () => (id?: string | null) => ({ username: id ?? '', display_name: 'Alex' }),
 }));
 
 function person(overrides: Partial<HealthFamilyPerson> = {}): HealthFamilyPerson {
-  return { user_id: 'jeremiah', scopes: ['digital'], ...overrides };
+  return { user_id: 'alex', scopes: ['digital'], ...overrides };
 }
 
 describe('SharedWithYouCard digital scope', () => {
   it('shows the shared screen time for the day', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: true, screen_time_min: 60, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('1h of screen time today');
+    expect(screen.getByTestId('shared-digital-alex')).toHaveTextContent('1h of screen time today');
   });
 
   it('says when the phone reported nothing, never a zero', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: true, screen_time_min: null, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('No screen use reported today');
+    expect(screen.getByTestId('shared-digital-alex')).toHaveTextContent('No screen use reported today');
   });
 
   it('says when the number could not be read', () => {
     render(<SharedWithYouCard people={[person({ digital: { shared: true, available: false, screen_time_min: null, day: '2026-10-25' } })]} />);
-    expect(screen.getByTestId('shared-digital-jeremiah')).toHaveTextContent('Screen use not available right now');
+    expect(screen.getByTestId('shared-digital-alex')).toHaveTextContent('Screen use not available right now');
   });
 });
 

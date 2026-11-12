@@ -5,8 +5,8 @@ import SwipeToDismiss from './SwipeToDismiss';
 function setup() {
   const onDismiss = vi.fn();
   render(
-    <SwipeToDismiss label="Michele left Home" onDismiss={onDismiss}>
-      <p>Michele left Home</p>
+    <SwipeToDismiss label="Sam left Home" onDismiss={onDismiss}>
+      <p>Sam left Home</p>
     </SwipeToDismiss>,
   );
   const row = screen.getByTestId('swipe-row');
@@ -51,7 +51,7 @@ describe('SwipeToDismiss', () => {
 
   it('clears from its button for a mouse, keyboard or screen reader', async () => {
     const { onDismiss } = setup();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Michele left Home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Sam left Home' }));
     await waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(1));
   });
 });

@@ -62,9 +62,9 @@ describe('the family member page arithmetic', () => {
   });
 
   it('finds the family place a position is in', () => {
-    const places = [{ id: 'z', name: 'School', lat: 33.4484, lon: -112.074, radius: 200, important: true, notify: [] }];
-    expect(placeAt(33.4485, -112.0741, places)).toBe('School');
-    expect(placeAt(33.5, -112.0, places)).toBeNull();
+    const places = [{ id: 'z', name: 'School', lat: 39.7384, lon: -104.994, radius: 200, important: true, notify: [] }];
+    expect(placeAt(39.7385, -104.9941, places)).toBe('School');
+    expect(placeAt(39.79, -104.92, places)).toBeNull();
   });
 });
 

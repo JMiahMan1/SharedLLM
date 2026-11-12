@@ -132,7 +132,7 @@ async function mockAll(page: Page, scenario: Scenario, size: Size = 'medium') {
     : route.fulfill({ status: 502, json: {} }));
   await page.route('**/api/settings', (route) => route.fulfill({ json: [
     { key: 'weather_reminders', value: JSON.stringify([
-      { id: 'hay', kind: 'rain', title: 'Cover the hay', note: 'Tarps are in the barn.', people: ['jeremiah'],
+      { id: 'hay', kind: 'rain', title: 'Cover the hay', note: 'Tarps are in the barn.', people: ['alex'],
         location: { name: 'Barn', latitude: 36.1, longitude: -86.7 } },
       { id: 'barn', kind: 'rain', title: 'Close the barn door', notify: false,
         actions: [{ type: 'ha_service', service: 'cover.close_cover', entity_id: 'cover.barn_door' }] },

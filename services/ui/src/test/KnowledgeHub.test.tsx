@@ -5,7 +5,7 @@ import KnowledgeHub from '../pages/KnowledgeHub';
 import { renderWithProviders } from './render';
 import { api } from '../services/api';
 
-const authState = { user: { username: 'jeremiah', is_admin: true } as unknown };
+const authState = { user: { username: 'alex', is_admin: true } as unknown };
 vi.mock('../context/AuthContext', async (importOriginal) => ({
   ...(await importOriginal() as Record<string, unknown>),
   useAuth: () => authState,
@@ -36,7 +36,7 @@ vi.mock('../services/api', async (importOriginal) => {
 
 describe('KnowledgeHub', () => {
   beforeEach(() => {
-    authState.user = { username: 'jeremiah', is_admin: true } as unknown;
+    authState.user = { username: 'alex', is_admin: true } as unknown;
     vi.mocked(api.getRagStats).mockResolvedValue({ total_chunks: 0, total_documents: 0 });
     vi.mocked(api.getStorageFiles).mockResolvedValue([]);
   });
@@ -229,7 +229,7 @@ describe('KnowledgeHub', () => {
         usage_count: 0, applied_count: 0,
       }],
     } as never);
-    authState.user = { username: 'michele', is_admin: false } as unknown;
+    authState.user = { username: 'sam', is_admin: false } as unknown;
     renderWithProviders(<KnowledgeHub />);
     fireEvent.click(await screen.findByText('git'));
     expect(screen.getByText('Rename master to main')).toBeInTheDocument();

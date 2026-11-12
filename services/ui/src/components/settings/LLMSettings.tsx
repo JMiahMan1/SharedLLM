@@ -9,7 +9,6 @@ import {
   Library,
   Globe,
   Key,
-  Clock,
   Eye,
   Wand2,
   Palette,
@@ -19,6 +18,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
+import HouseholdTimezone from './HouseholdTimezone';
 
 const LLMSettings: React.FC = () => {
   const queryClient = useQueryClient();
@@ -184,32 +184,8 @@ const LLMSettings: React.FC = () => {
                 />
               </div>
               <div>
-                <label htmlFor="llm-timezone" className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">System Timezone</label>
-                <div className="relative">
-                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <select id="llm-timezone"
-                    value={getSetting('timezone')}
-                    onChange={e => setDrafts({...drafts, timezone: e.target.value})}
-                    className="glass-input w-full text-xs pl-10 bg-black/40"
-                  >
-                    <option value="">Select Timezone</option>
-                    <option value="America/New_York">Eastern (ET)</option>
-                    <option value="America/Chicago">Central (CT)</option>
-                    <option value="America/Denver">Mountain (MT)</option>
-                    <option value="America/Phoenix">Mountain (MST, no DST)</option>
-                    <option value="America/Los_Angeles">Pacific (PT)</option>
-                    <option value="America/Anchorage">Alaska (AKT)</option>
-                    <option value="Pacific/Honolulu">Hawaii (HST)</option>
-                    <option value="Europe/London">London (GMT/BST)</option>
-                    <option value="Europe/Paris">Paris (CET/CEST)</option>
-                    <option value="Europe/Berlin">Berlin (CET/CEST)</option>
-                    <option value="Asia/Tokyo">Tokyo (JST)</option>
-                    <option value="Asia/Shanghai">Shanghai (CST)</option>
-                    <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
-                    <option value="UTC">UTC</option>
-                  </select>
-                </div>
-                <p className="text-[9px] text-slate-600 mt-1">Used for time/date queries and log timestamps.</p>
+                {/* The one place to set it: same `timezone` setting, via its own endpoint. */}
+                <HouseholdTimezone />
               </div>
             </div>
           </div>

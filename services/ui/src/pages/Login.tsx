@@ -29,6 +29,11 @@ const Login = () => {
         const savedServer = await storageGet('jarvis_server_url');
         const activeServer = savedServer || DEFAULT_SERVER_URL;
         setServerUrl(activeServer);
+        // A build without VITE_DEFAULT_SERVER_URL has no address: say so, never guess one.
+        if (!activeServer) {
+          setConnectivity({ ok: false, error: 'No server configured. Enter your Jarvis server URL.' });
+          return;
+        }
         const result = await checkConnectivity(activeServer);
         setConnectivity(result);
       }

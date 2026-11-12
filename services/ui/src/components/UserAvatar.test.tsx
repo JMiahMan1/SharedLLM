@@ -40,14 +40,14 @@ describe('profile pictures', () => {
     wrap(
       <>
         <UserAvatar username="mia" avatar="preset:jonahs-whale" />
-        <UserAvatar username="sam" name="Sam Summers" />
+        <UserAvatar username="sam" name="Sam Rivera" />
         <UserAvatar username="ben" avatar="upload:123" />
       </>,
     );
     const presetAvatar = screen.getByTestId('user-avatar-preset');
     expect(presetAvatar).toHaveAccessibleName("mia: Jonah's Whale");
     expect(presetAvatar.querySelector('svg')).not.toBeNull();
-    expect(screen.getByRole('img', { name: 'Sam Summers' })).toHaveTextContent('SS');
+    expect(screen.getByRole('img', { name: 'Sam Rivera' })).toHaveTextContent('SR');
     expect(await screen.findByTestId('user-avatar-photo')).toHaveAttribute('src', 'blob:photo');
     expect(apiMock.getAvatarImage).toHaveBeenCalledWith('ben', 'upload:123');
   });

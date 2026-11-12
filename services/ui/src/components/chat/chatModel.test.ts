@@ -16,7 +16,7 @@ import {
   type TalkMessage,
 } from './chatModel';
 
-const me = new Set(['jeremiah']);
+const me = new Set(['alex']);
 const at = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 
 describe('chat model', () => {
@@ -30,18 +30,18 @@ describe('chat model', () => {
   });
 
   it('knows your own messages by Nextcloud actor id, not display name', () => {
-    expect(isMine({ actor_id: 'Jeremiah', actor_display_name: 'Dad' }, me)).toBe(true);
-    expect(isMine({ actor_id: 'michele', actor_display_name: 'Jeremiah' }, me)).toBe(false);
+    expect(isMine({ actor_id: 'Alex', actor_display_name: 'Dad' }, me)).toBe(true);
+    expect(isMine({ actor_id: 'sam', actor_display_name: 'Alex' }, me)).toBe(false);
     expect(isMine({ pending: 'sending' }, new Set())).toBe(true);
   });
 
   it('groups a burst from one sender and splits after a pause or a new sender', () => {
     const t = at('2026-10-07T18:00:00');
     const msgs: TalkMessage[] = [
-      { id: 1, actor_id: 'michele', timestamp: t },
-      { id: 2, actor_id: 'michele', timestamp: t + 30 },
-      { id: 3, actor_id: 'jeremiah', timestamp: t + 60 },
-      { id: 4, actor_id: 'jeremiah', timestamp: t + 60 + 6 * 60 },
+      { id: 1, actor_id: 'sam', timestamp: t },
+      { id: 2, actor_id: 'sam', timestamp: t + 30 },
+      { id: 3, actor_id: 'alex', timestamp: t + 60 },
+      { id: 4, actor_id: 'alex', timestamp: t + 60 + 6 * 60 },
     ];
     const runs = groupIntoRuns(msgs, me);
     expect(runs.map((r) => r.messages.map((m) => m.id))).toEqual([[1, 2], [3], [4]]);
@@ -62,9 +62,9 @@ describe('chat model', () => {
   });
 
   it('prefixes the inbox preview with who said it', () => {
-    expect(previewLine({ token: 'a', display_name: 'Family', type: 2, last_message: 'Dinner?', last_message_actor: 'Michele Summers', last_message_actor_id: 'michele' }, me)).toBe('Michele: Dinner?');
-    expect(previewLine({ token: 'a', display_name: 'Family', type: 2, last_message: 'Yes', last_message_actor_id: 'jeremiah' }, me)).toBe('You: Yes');
-    expect(previewLine({ token: 'b', display_name: 'Michele', type: 1, last_message: 'Hi', last_message_actor: 'Michele', last_message_actor_id: 'michele' }, me)).toBe('Hi');
+    expect(previewLine({ token: 'a', display_name: 'Family', type: 2, last_message: 'Dinner?', last_message_actor: 'Sam Rivera', last_message_actor_id: 'sam' }, me)).toBe('Sam: Dinner?');
+    expect(previewLine({ token: 'a', display_name: 'Family', type: 2, last_message: 'Yes', last_message_actor_id: 'alex' }, me)).toBe('You: Yes');
+    expect(previewLine({ token: 'b', display_name: 'Sam', type: 1, last_message: 'Hi', last_message_actor: 'Sam', last_message_actor_id: 'sam' }, me)).toBe('Hi');
   });
 
   it('counts reactions from every shape Talk returns', () => {
@@ -76,7 +76,7 @@ describe('chat model', () => {
 
   it('fills placeholders: a file becomes an attachment, a mention a chip, a URL a link', () => {
     const parts = splitRichText('Hi {mention-user1}, see {file} at https://example.com/x.', {
-      'mention-user1': { type: 'user', id: 'michele', name: 'Michele' },
+      'mention-user1': { type: 'user', id: 'sam', name: 'Sam' },
       file: { type: 'file', id: '9', name: 'a.jpg', mimetype: 'image/jpeg' },
     });
     expect(parts.map((p) => p.kind)).toEqual(['text', 'mention', 'text', 'file', 'text', 'link', 'text']);
@@ -86,7 +86,7 @@ describe('chat model', () => {
   it('knows a Jarvis answer and a Jarvis question', () => {
     expect(isAssistant({ message: 'Hi\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope' })).toBe(true);
     expect(isAssistant({ message: 'Hi' })).toBe(false);
-    expect(isMine({ actor_id: 'jeremiah', message: 'A\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope' }, me)).toBe(false);
+    expect(isMine({ actor_id: 'alex', message: 'A\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope' }, me)).toBe(false);
     expect(asksJarvis('  @jarvis hi')).toBe(true);
     expect(asksJarvis('hi @Jarvis')).toBe(false);
   });
@@ -98,8 +98,8 @@ describe('chat model', () => {
   });
 
   it('previews attachments and Jarvis answers readably in the inbox', () => {
-    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: '{file}', last_message_actor: 'Michele', last_message_actor_id: 'michele' }, me)).toBe('Michele: 📎 Attachment');
-    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: 'Tacos\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope', last_message_actor_id: 'jeremiah' }, me)).toBe('Jarvis: Tacos');
+    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: '{file}', last_message_actor: 'Sam', last_message_actor_id: 'sam' }, me)).toBe('Sam: 📎 Attachment');
+    expect(previewLine({ token: 'a', display_name: 'Fam', type: 2, last_message: 'Tacos\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope', last_message_actor_id: 'alex' }, me)).toBe('Jarvis: Tacos');
   });
 
   it('tells a running family game from a finished one by the newest game line', () => {
@@ -111,21 +111,21 @@ describe('chat model', () => {
     expect(gameRunning([msg(2, 'Not a pair' + card)])).toBe(true);
     expect(gameRunning([msg(1, 'hello'), msg(2, 'dinner at six')])).toBe(false);
     // Stopped by a player (the Stop game button, or "stop the game" typed): the bar goes.
-    const stopped = '🛑 Game over. jeremiah stopped it. Final board: Kiddo 1 ⭐\n\n```jarvis-envelope\n{"kind":"game","title":"Game over"}\n```jarvis-envelope';
+    const stopped = '🛑 Game over. alex stopped it. Final board: Kiddo 1 ⭐\n\n```jarvis-envelope\n{"kind":"game","title":"Game over"}\n```jarvis-envelope';
     expect(gameRunning([msg(3, stopped), msg(1, '🧠 Trivia - question 4 of 10')])).toBe(false);
   });
 
   it('treats game posts as Jarvis even when a family member account carried them', () => {
-    const game = '\u2705 Michele got it!\n\n```jarvis-envelope\n{"kind":"game","title":"Correct!","from":"jarvis"}\n```jarvis-envelope';
+    const game = '\u2705 Sam got it!\n\n```jarvis-envelope\n{"kind":"game","title":"Correct!","from":"jarvis"}\n```jarvis-envelope';
     const prompt = '\ud83e\udde0 Trivia\n\n```jarvis-envelope\n{"kind":"assistant","title":"Jarvis"}\n```jarvis-envelope';
     const sharedCard = 'I won!\n\n```jarvis-envelope\n{"kind":"game","title":"Trivia champ"}\n```jarvis-envelope';
-    const michele = new Set(['michele']);
-    expect(isFromJarvis({ id: 1, message: game, actor_id: 'michele' })).toBe(true);
-    expect(isMine({ id: 1, message: game, actor_id: 'michele' }, michele)).toBe(false);
-    expect(isFromJarvis({ id: 2, message: prompt, actor_id: 'jeremiah' })).toBe(true);
+    const sam = new Set(['sam']);
+    expect(isFromJarvis({ id: 1, message: game, actor_id: 'sam' })).toBe(true);
+    expect(isMine({ id: 1, message: game, actor_id: 'sam' }, sam)).toBe(false);
+    expect(isFromJarvis({ id: 2, message: prompt, actor_id: 'alex' })).toBe(true);
     expect(isFromJarvis({ id: 3, message: 'hi', actor_id: 'jarvis' })).toBe(true);
     // A card a person shares themselves stays theirs.
-    expect(isFromJarvis({ id: 4, message: sharedCard, actor_id: 'michele' })).toBe(false);
-    expect(groupIntoRuns([{ id: 1, message: game, actor_id: 'michele', timestamp: 1 }], michele)[0].author).toBe('Jarvis');
+    expect(isFromJarvis({ id: 4, message: sharedCard, actor_id: 'sam' })).toBe(false);
+    expect(groupIntoRuns([{ id: 1, message: game, actor_id: 'sam', timestamp: 1 }], sam)[0].author).toBe('Jarvis');
   });
 });

@@ -29,8 +29,8 @@ vi.mock('../services/api', () => ({
 import ChoresProgressWidget from '../components/widgets/ChoresProgressWidget';
 
 const CHORES: ChoreItem[] = [
-  { id: '50-2026-11-03', title: 'Feed the chickens', completed: false, reward: 2, assignees: ['Noah'], recurrence: 'RRULE:FREQ=DAILY' },
-  { id: '51', title: 'Trash', completed: false, assignees: ['Gracie'] },
+  { id: '50-2026-11-03', title: 'Feed the chickens', completed: false, reward: 2, assignees: ['Jordan'], recurrence: 'RRULE:FREQ=DAILY' },
+  { id: '51', title: 'Trash', completed: false, assignees: ['Taylor'] },
 ];
 
 const renderWidget = () =>
@@ -45,8 +45,8 @@ beforeEach(() => {
   authState.user = { username: 'mom', is_admin: false, family_role: 'mother' };
   getSkylightChores.mockResolvedValue({ status: 'SUCCESS', chores: CHORES, assignee_meta: {} });
   getSkylightMembers.mockResolvedValue([
-    { id: '11', label: 'Noah', color: '#f00' },
-    { id: '12', label: 'Gracie', color: null },
+    { id: '11', label: 'Jordan', color: '#f00' },
+    { id: '12', label: 'Taylor', color: null },
   ]);
   addSkylightChore.mockResolvedValue(undefined);
   removeSkylightChore.mockResolvedValue(undefined);
@@ -60,12 +60,12 @@ describe('chores widget for parents', () => {
     await user.click(screen.getByTestId('chore-add'));
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('Chore name'), 'Water the garden');
-    await user.click(await within(dialog).findByRole('button', { name: 'Gracie' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Noah' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Taylor' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Jordan' }));
     await user.selectOptions(within(dialog).getByLabelText('How often'), 'weekends');
     await user.click(within(dialog).getByRole('button', { name: /Add chore/ }));
     await waitFor(() => expect(addSkylightChore).toHaveBeenCalledWith({
-      title: 'Water the garden', assignees: ['Gracie', 'Noah'], repeat: 'weekends',
+      title: 'Water the garden', assignees: ['Taylor', 'Jordan'], repeat: 'weekends',
     }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(getSkylightChores.mock.calls.length).toBeGreaterThan(1); // the list refreshed
@@ -77,7 +77,7 @@ describe('chores widget for parents', () => {
     await screen.findByText('Trash');
     await user.click(screen.getByTestId('chore-add'));
     const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByRole('button', { name: 'Noah' });
+    await within(dialog).findByRole('button', { name: 'Jordan' });
     await user.type(within(dialog).getByLabelText('Chore name'), 'Sweep');
     await user.click(within(dialog).getByRole('button', { name: /Add chore/ }));
     expect(addSkylightChore).not.toHaveBeenCalled();
@@ -89,13 +89,13 @@ describe('chores widget for parents', () => {
     await screen.findByText('Trash');
     await user.click(screen.getByRole('button', { name: 'Expand widget' }));
 
-    const [forNoah] = await screen.findAllByRole('button', { name: /Add for Noah/ });
+    const [forNoah] = await screen.findAllByRole('button', { name: /Add for Jordan/ });
     await user.click(forNoah);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByRole('group', { name: 'Who is it for' })).toBeNull(); // already chosen
     await user.type(within(dialog).getByLabelText('Chore name'), 'Brush the dog');
     await user.click(within(dialog).getByRole('button', { name: /Add chore/ }));
-    await waitFor(() => expect(addSkylightChore).toHaveBeenCalledWith({ title: 'Brush the dog', assignees: ['Noah'] }));
+    await waitFor(() => expect(addSkylightChore).toHaveBeenCalledWith({ title: 'Brush the dog', assignees: ['Jordan'] }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
     const removeTrash = screen.getAllByRole('button', { name: 'Remove Trash' }).at(-1)!;
@@ -110,7 +110,7 @@ describe('chores widget for parents', () => {
   });
 
   it('shows no chore controls to a child', async () => {
-    authState.user = { username: 'noah', is_admin: false, family_role: 'child' };
+    authState.user = { username: 'jordan', is_admin: false, family_role: 'child' };
     const user = userEvent.setup();
     renderWidget();
     await screen.findByText('Trash');

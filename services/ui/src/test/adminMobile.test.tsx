@@ -16,7 +16,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BottomNav from '../components/layout/BottomNav';
 
-const authState = { user: { username: 'jeremiah', is_admin: true } as unknown };
+const authState = { user: { username: 'alex', is_admin: true } as unknown };
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => authState,
@@ -35,7 +35,7 @@ const renderNav = (path = '/') =>
 
 describe('BottomNav admin access', () => {
   beforeEach(() => {
-    authState.user = { username: 'jeremiah', is_admin: true } as unknown;
+    authState.user = { username: 'alex', is_admin: true } as unknown;
   });
 
   it('offers an admin a route to the control panel', async () => {
@@ -46,7 +46,7 @@ describe('BottomNav admin access', () => {
   });
 
   it('hides the admin route from a non-admin', async () => {
-    authState.user = { username: 'michele', is_admin: false } as unknown;
+    authState.user = { username: 'sam', is_admin: false } as unknown;
     renderNav();
     await userEventClick(screen.getByRole('button', { name: /more/i }));
     expect(screen.queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();

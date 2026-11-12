@@ -42,51 +42,51 @@ describe('PresenceWidget', () => {
 
   it('shows "home in N min" for someone driving, by road', async () => {
     useHandlers({
-      michele: { latitude: 33.30, longitude: -111.70, speed: 20, updated_at: at(20) },
-      jeremiah: { latitude: 33.16, longitude: -111.56, speed: 0, updated_at: at(20) },
+      sam: { latitude: 39.59, longitude: -104.62, speed: 20, updated_at: at(20) },
+      alex: { latitude: 39.45, longitude: -104.48, speed: 0, updated_at: at(20) },
     });
     const asked: string[] = [];
     server.use(http.get('/api/geo/eta', ({ request }) => {
       asked.push(new URL(request.url).searchParams.get('user_id') ?? '');
-      return HttpResponse.json({ user_id: 'michele', to: 'Home', arrived: false, duration_s: 1080,
+      return HttpResponse.json({ user_id: 'sam', to: 'Home', arrived: false, duration_s: 1080,
         distance_m: 19800, eta: 0, moving: true, fix_age_s: 20 });
     }));
     renderWithProviders(<PresenceWidget {...props} />);
-    expect(await screen.findByTestId('eta-michele')).toHaveTextContent('home in 18 min');
-    expect(screen.queryByTestId('eta-jeremiah')).not.toBeInTheDocument();  // not moving: no lookup
-    expect(asked).toEqual(['michele']);
+    expect(await screen.findByTestId('eta-sam')).toHaveTextContent('home in 18 min');
+    expect(screen.queryByTestId('eta-alex')).not.toBeInTheDocument();  // not moving: no lookup
+    expect(asked).toEqual(['sam']);
   });
 
   it('counts only genuinely live members', async () => {
     // One fresh (30s), one recent (5min), one stale (2h).
     useHandlers({
-      jeremiah: { latitude: 33.16, longitude: -111.56, updated_at: at(30) },
-      michele: { latitude: 33.17, longitude: -111.57, updated_at: at(300) },
-      default: { latitude: 33.18, longitude: -111.58, updated_at: at(7200) },
+      alex: { latitude: 39.45, longitude: -104.48, updated_at: at(30) },
+      sam: { latitude: 39.46, longitude: -104.49, updated_at: at(300) },
+      default: { latitude: 39.47, longitude: -104.50, updated_at: at(7200) },
     });
     renderWithProviders(<PresenceWidget {...props} />);
 
-    await screen.findByTestId('presence-row-jeremiah');
+    await screen.findByTestId('presence-row-alex');
     expect(screen.getByText('1')).toBeInTheDocument();
     expect(screen.getByText(/person live/)).toBeInTheDocument();
   });
 
   it('says how many are not reporting, so a stopped phone is visible', async () => {
     useHandlers({
-      jeremiah: { latitude: 33.16, longitude: -111.56, updated_at: at(30) },
-      michele: { latitude: 33.17, longitude: -111.57, updated_at: at(7200) },
+      alex: { latitude: 39.45, longitude: -104.48, updated_at: at(30) },
+      sam: { latitude: 39.46, longitude: -104.49, updated_at: at(7200) },
     });
     renderWithProviders(<PresenceWidget {...props} />);
 
-    await screen.findByTestId('presence-row-michele');
+    await screen.findByTestId('presence-row-sam');
     expect(screen.getByText(/1 not reporting/)).toBeInTheDocument();
   });
 
   it('labels each member with its freshness and age', async () => {
-    useHandlers({ jeremiah: { latitude: 33.16, longitude: -111.56, updated_at: at(30) } });
+    useHandlers({ alex: { latitude: 39.45, longitude: -104.48, updated_at: at(30) } });
     renderWithProviders(<PresenceWidget {...props} />);
 
-    const row = await screen.findByTestId('presence-row-jeremiah');
+    const row = await screen.findByTestId('presence-row-alex');
     expect(within(row).getByText(/Live/)).toBeInTheDocument();
   });
 
@@ -104,8 +104,8 @@ describe('PresenceWidget', () => {
       [
         {
           id: 't1',
-          user_id: 'jeremiah',
-          user_name: 'Jeremiah',
+          user_id: 'alex',
+          user_name: 'Alex',
           start_time: at(3600),
           end_time: at(1800),
           distance_miles: 12.4,
@@ -127,7 +127,7 @@ describe('PresenceWidget', () => {
     expect(await screen.findByText('Home → Office')).toBeInTheDocument();
     // formatMiles drops the decimal at >= 10 miles, so this is "12 mi".
     expect(screen.getByText(/^12 mi$/)).toBeInTheDocument();
-    expect(screen.getByText(/Jeremiah/)).toBeInTheDocument();
+    expect(screen.getByText(/Alex/)).toBeInTheDocument();
   });
 
   it('opens Wander on click and from the keyboard', async () => {

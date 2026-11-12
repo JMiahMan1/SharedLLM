@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { App } from '@capacitor/app';
 import { getServerOrigin } from './serverUrl';
+import { DEFAULT_SERVER_URL } from './serverDefaults';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
@@ -76,13 +77,49 @@ async function getNativeBuildNumber(): Promise<number | undefined> {
   }
 }
 
+/** The not-configured error from getServerOrigin, so it is shown instead of a vague one. */
+function noServerMessage(err: unknown): string | undefined {
+  return err instanceof Error && err.message.startsWith('No Jarvis server is configured') ? err.message : undefined;
+}
+
+/** Hosts known to serve https: the server in use and the build's default gateway. */
+function httpsHosts(origin: string): Set<string> {
+  const hosts = new Set<string>();
+  for (const candidate of [origin, DEFAULT_SERVER_URL]) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === 'https:') hosts.add(parsed.hostname);
+    } catch {
+      // Empty or unparseable: contributes no host.
+    }
+  }
+  return hosts;
+}
+
+/** Upgrade an http URL to https when its host is one the app reaches over https. */
+function upgradeToOriginScheme(origin: string, url: string): string {
+  try {
+    const target = new URL(url);
+    if (target.protocol === 'http:' && httpsHosts(origin).has(target.hostname)) {
+      target.protocol = 'https:';
+      if (target.port === '80') target.port = '';
+      return target.toString();
+    }
+  } catch {
+    // Not a parseable URL: hand it back untouched.
+  }
+  return url;
+}
+
 /**
- * Turn a server-relative update path into an absolute, http->https URL.
- * The published metadata can carry the legacy plain-http host.
+ * Turn a server-relative update path into an absolute URL.
+ * The published metadata can carry the server's own host over plain http
+ * (a legacy value); when the app reaches that host over https, upgrade it.
+ * Any other host is left exactly as published.
  */
 function resolveUpdateUrl(origin: string, url: string): string {
   if (url.startsWith('http')) {
-    return url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com');
+    return upgradeToOriginScheme(origin, url);
   }
   return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
 }
@@ -330,10 +367,10 @@ export async function initAppUpdater(): Promise<void> {
  * `set()`, which reloads the app there and then.
  */
 export async function checkForAppUpdates(options: { silent?: boolean } = {}): Promise<CheckUpdateResult> {
-  const origin = getServerOrigin();
-  const updateUrl = `${origin}/api/app-updates/version`;
-
   try {
+    // Inside the try: with no server configured this throws a descriptive error.
+    const origin = getServerOrigin();
+    const updateUrl = `${origin}/api/app-updates/version`;
     const resp = await axios.get<AppVersionInfo>(updateUrl, { timeout: 7000 });
     const remote = resp.data;
 
@@ -427,7 +464,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
   } catch (err) {
     if (!options.silent) {
       console.error('[AppUpdater] Failed to check for updates:', err);
-      toast.error('Unable to reach update server.', { id: 'app-update' });
+      toast.error(noServerMessage(err) ?? 'Unable to reach update server.', { id: 'app-update' });
     }
     // A failed download must not leave a pending marker behind, or the next
     // boot would wrongly blacklist a version we never actually installed.
@@ -663,10 +700,11 @@ export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
  * user presses "Check Now".
  */
 export async function checkApkUpdate(): Promise<ApkUpdateStatus> {
-  const origin = getServerOrigin();
   const nativeBuildNumber = await getNativeBuildNumber();
 
   try {
+    // Inside the try: with no server configured this throws a descriptive error.
+    const origin = getServerOrigin();
     const resp = await axios.get<AppVersionInfo>(`${origin}/api/app-updates/version`, { timeout: 7000 });
     const remote = resp.data;
     const apkUrl = remote.apk_url ? resolveUpdateUrl(origin, remote.apk_url) : null;
@@ -688,7 +726,7 @@ export async function checkApkUpdate(): Promise<ApkUpdateStatus> {
       indeterminate: false,
       apkUrl: null,
       nativeBuildNumber,
-      error: 'Could not reach the update server.',
+      error: noServerMessage(err) ?? 'Could not reach the update server.',
     };
   }
 }

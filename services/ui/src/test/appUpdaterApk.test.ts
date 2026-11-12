@@ -47,12 +47,20 @@ describe('checkApkUpdate', () => {
     expect(status.apkUrl).toBe('https://jarvis.example.com/api/app-updates/app-debug.apk');
   });
 
-  it('upgrades the legacy plain-http host to https', async () => {
+  it('upgrades the server host published over plain http to https', async () => {
     mocks.get.mockResolvedValue({
-      data: remote({ apk_url: 'http://jarvis.sumemail.com/api/app-updates/app-debug.apk' }),
+      data: remote({ apk_url: 'http://jarvis.example.com/api/app-updates/app-debug.apk' }),
     });
     const status = await checkApkUpdate();
-    expect(status.apkUrl).toBe('https://jarvis.sumemail.com/api/app-updates/app-debug.apk');
+    expect(status.apkUrl).toBe('https://jarvis.example.com/api/app-updates/app-debug.apk');
+  });
+
+  it('leaves a plain-http URL on another host as published', async () => {
+    mocks.get.mockResolvedValue({
+      data: remote({ apk_url: 'http://mirror.example.net/api/app-updates/app-debug.apk' }),
+    });
+    const status = await checkApkUpdate();
+    expect(status.apkUrl).toBe('http://mirror.example.net/api/app-updates/app-debug.apk');
   });
 
   it('does not report an update when the published build is the one already installed', async () => {

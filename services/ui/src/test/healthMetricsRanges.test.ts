@@ -21,7 +21,7 @@ const bucket = (over: Partial<MetricRangeBucket> = {}): MetricRangeBucket => ({
 });
 
 const series = (over: Partial<MetricRangeResponse> = {}): MetricRangeResponse => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   metric: 'workouts',
   label: 'Workouts',
   unit: 'count',

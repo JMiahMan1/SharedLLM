@@ -69,8 +69,8 @@ beforeEach(() => {
   apiMock.getBibleLeaderboard.mockResolvedValue({
     day: '2026-10-13',
     entries: [
-      { username: 'michele', correct: 9, total: 10, duration_ms: 50000, you: false },
-      { username: 'jeremiah', correct: 7, total: 10, duration_ms: 61000, you: true },
+      { username: 'sam', correct: 9, total: 10, duration_ms: 50000, you: false },
+      { username: 'alex', correct: 7, total: 10, duration_ms: 61000, you: true },
     ],
   });
   apiMock.submitBibleGame.mockResolvedValue(RESULT);
@@ -81,8 +81,8 @@ describe('Bible games', () => {
     renderGames();
     expect(await screen.findByTestId('bible-game-start-daily')).toBeInTheDocument();
     expect(screen.getByTestId('bible-game-start-verse_race')).toHaveTextContent('60s');
-    expect(await screen.findByText('jeremiah (you)')).toBeInTheDocument();
-    expect(screen.getByText('michele')).toBeInTheDocument();
+    expect(await screen.findByText('alex (you)')).toBeInTheDocument();
+    expect(screen.getByText('sam')).toBeInTheDocument();
   });
 
   it('plays a round, sends only the choices, and reviews the answers', async () => {
@@ -148,10 +148,10 @@ describe('leaderboard answers', () => {
     const user = userEvent.setup();
     apiMock.getBibleLeaderboard.mockResolvedValue({
       day: '2026-10-13',
-      entries: [{ attempt_id: 42, username: 'michele', correct: 7, total: 10, duration_ms: 61000, you: false }],
+      entries: [{ attempt_id: 42, username: 'sam', correct: 7, total: 10, duration_ms: 61000, you: false }],
     });
     apiMock.getBibleGameReview.mockResolvedValue({
-      attempt_id: 42, username: 'michele', mode: 'daily', name: 'Daily Quiz', day: '2026-10-13',
+      attempt_id: 42, username: 'sam', mode: 'daily', name: 'Daily Quiz', day: '2026-10-13',
       correct: 1, total: 2, duration_ms: 61000,
       results: [
         { id: 0, prompt: 'Which book is this verse from?', correct: true, chosen: 'John', answer: 'John', reference: 'John 3:16', text: 'For God so loved…' },
@@ -159,23 +159,23 @@ describe('leaderboard answers', () => {
       ],
     });
     renderGames();
-    await user.click(await screen.findByTestId('bible-leaderboard-michele'));
+    await user.click(await screen.findByTestId('bible-leaderboard-sam'));
     expect(apiMock.getBibleGameReview).toHaveBeenCalledWith(42);
     const review = await screen.findByTestId('bible-game-review');
     expect(review).toHaveTextContent('1 missed');
-    expect(review).toHaveTextContent('michele chose Judges');
-    expect(screen.getByRole('dialog', { name: 'Game answers' })).toHaveTextContent("michele's Daily Quiz · 1/2");
+    expect(review).toHaveTextContent('sam chose Judges');
+    expect(screen.getByRole('dialog', { name: 'Game answers' })).toHaveTextContent("sam's Daily Quiz · 1/2");
   });
 
   it('names why a review is closed', async () => {
     const user = userEvent.setup();
     apiMock.getBibleLeaderboard.mockResolvedValue({
       day: '2026-10-13',
-      entries: [{ attempt_id: 42, username: 'michele', correct: 7, total: 10, duration_ms: 61000, you: false }],
+      entries: [{ attempt_id: 42, username: 'sam', correct: 7, total: 10, duration_ms: 61000, you: false }],
     });
-    apiMock.getBibleGameReview.mockRejectedValue({ response: { data: { detail: "Play today's quiz first; then you can see how michele answered." } } });
+    apiMock.getBibleGameReview.mockRejectedValue({ response: { data: { detail: "Play today's quiz first; then you can see how sam answered." } } });
     renderGames();
-    await user.click(await screen.findByTestId('bible-leaderboard-michele'));
+    await user.click(await screen.findByTestId('bible-leaderboard-sam'));
     expect(await screen.findByRole('alert')).toHaveTextContent("Play today's quiz first");
   });
 });

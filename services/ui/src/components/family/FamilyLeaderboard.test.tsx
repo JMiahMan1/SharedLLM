@@ -61,16 +61,16 @@ describe('FamilyLeaderboard', () => {
       arcade_available: true,
       players: [
         player('kate', { best_score: 99999, crowns: 0, podiums: 1 }),
-        player('michele', { crowns: 2, podiums: 2 }),
-        player('jeremiah', { crowns: 1, podiums: 2, you: true }),
+        player('sam', { crowns: 2, podiums: 2 }),
+        player('alex', { crowns: 1, podiums: 2, you: true }),
         player('grandma', { games_scored: 0, submits: 0, best_score: 0 }),
       ],
     });
     vi.mocked(api.getArcadeHighscores).mockResolvedValue({ success: true, arcade_available: true, players: [], games: [] });
     renderIt();
 
-    expect(await screen.findByTestId('family-podium-1')).toHaveTextContent('Michele');
-    expect(screen.getByTestId('family-podium-2')).toHaveTextContent('Jeremiah');
+    expect(await screen.findByTestId('family-podium-1')).toHaveTextContent('Sam');
+    expect(screen.getByTestId('family-podium-2')).toHaveTextContent('Alex');
     expect(screen.getByTestId('family-podium-2')).toHaveTextContent('You');
     expect(screen.getByTestId('family-podium-3')).toHaveTextContent('Kate');
     expect(screen.getByTestId('family-rank-grandma')).toHaveTextContent("Hasn't played yet");
@@ -80,18 +80,18 @@ describe('FamilyLeaderboard', () => {
     vi.mocked(api.getArcadeScoreboard).mockResolvedValue({
       success: true,
       arcade_available: true,
-      players: [player('michele', { crowns: 1 }), player('jeremiah', { you: true })],
+      players: [player('sam', { crowns: 1 }), player('alex', { you: true })],
     });
     vi.mocked(api.getArcadeHighscores).mockResolvedValue({
       success: true,
       arcade_available: true,
       players: [],
-      games: [{ slug: 'family-petal-swap', title: 'Petal Swap', scores: [{ initials: 'MIC', player_id: 'michele', score: 4200 }] }],
+      games: [{ slug: 'family-petal-swap', title: 'Petal Swap', scores: [{ initials: 'SAM', player_id: 'sam', score: 4200 }] }],
     });
     const onPlay = renderIt();
 
     const card = await screen.findByTestId('family-champion-family-petal-swap');
-    expect(card).toHaveTextContent('Michele');
+    expect(card).toHaveTextContent('Sam');
     expect(card).toHaveTextContent('4,200');
     fireEvent.click(within(card).getByRole('button', { name: /Beat it/ }));
     expect(onPlay).toHaveBeenCalledWith(expect.objectContaining({ slug: 'family-petal-swap' }));
@@ -113,7 +113,7 @@ describe('FamilyLeaderboard', () => {
       success: true,
       arcade_available: true,
       players: [
-        player('michele', {
+        player('sam', {
           crowns: 1,
           podiums: 1,
           games_scored: 2,
@@ -128,14 +128,14 @@ describe('FamilyLeaderboard', () => {
     renderIt();
 
     // The per-game breakdown stays tucked away until a member is tapped.
-    expect(screen.queryByTestId('family-games-michele')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('family-games-sam')).not.toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole('button', { name: /see michele's games/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /see sam's games/i }));
 
-    const panel = await screen.findByTestId('family-games-michele');
+    const panel = await screen.findByTestId('family-games-sam');
     expect(panel).toHaveTextContent('Petal Swap');
     expect(panel).toHaveTextContent('4,200');
-    const telly = within(panel).getByTestId('family-games-michele-family-telly-swing');
+    const telly = within(panel).getByTestId('family-games-sam-family-telly-swing');
     expect(telly).toHaveTextContent('Telly Swing');
     expect(telly).toHaveTextContent('150');
     expect(telly).toHaveTextContent('#2');

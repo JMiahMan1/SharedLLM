@@ -8,6 +8,7 @@ import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { FreshPosition } from '../lib/freshPosition';
+import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type { ActiveCall, DropInSettings, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
@@ -1507,6 +1508,18 @@ export const api = {
 
   async updateSettingsBulk(settings: Record<string, string>): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/settings', settings);
+    return resp.data;
+  },
+
+  /** The household time zone in effect and where it comes from (admin only). */
+  async getHouseholdTimezone(): Promise<HouseholdTimezone> {
+    const resp = await apiClient.get('/api/household-timezone');
+    return resp.data;
+  },
+
+  /** Set or clear ("") the household zone, or switch deriving it from the home location. */
+  async setHouseholdTimezone(update: HouseholdTimezoneUpdate): Promise<HouseholdTimezone> {
+    const resp = await apiClient.put('/api/household-timezone', update);
     return resp.data;
   },
 

@@ -50,7 +50,7 @@ const requestPermissions = vi.fn(async () => ({ location: 'prompt' as string }))
 vi.mock('@capacitor/geolocation', () => ({
   Geolocation: {
     watchPosition: () => watchPosition(),
-    getCurrentPosition: async () => ({ coords: { latitude: 33.16, longitude: -111.56, accuracy: 10, speed: 0 } }),
+    getCurrentPosition: async () => ({ coords: { latitude: 39.45, longitude: -104.48, accuracy: 10, speed: 0 } }),
     clearWatch: vi.fn(),
     checkPermissions: () => checkPermissions(),
     requestPermissions: () => requestPermissions(),

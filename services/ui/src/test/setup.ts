@@ -38,8 +38,8 @@ const resetMockState = () => {
   users = [structuredClone(defaultUser)];
   credentialShares = {};
   discoveredUsers = [
-    { username: 'jeremiah', source: 'Home Assistant', display_name: 'Jeremiah' },
-    { username: 'michele', source: 'Home Assistant', display_name: 'Michele' },
+    { username: 'alex', source: 'Home Assistant', display_name: 'Alex' },
+    { username: 'sam', source: 'Home Assistant', display_name: 'Sam' },
   ];
   devices = [
     { id: 1, device_id: 'media_player.office_speaker', user_id: 1, username: 'default' },
@@ -98,8 +98,8 @@ const resetMockState = () => {
         id: 101,
         token: 'room-alpha',
         actor_type: 'users',
-        actor_id: 'michele',
-        actor_display_name: 'Michele',
+        actor_id: 'sam',
+        actor_display_name: 'Sam',
         timestamp: 1715000000,
         message_type: 'comment',
         system_message: '',
@@ -346,8 +346,8 @@ export const server = setupServer(
   // Narrow, non-admin-reachable recipient list. The caller (`default`) is
   // excluded server-side, so only the other household accounts appear.
   http.get('/api/users/sharing-recipients', () => HttpResponse.json([
-    { username: 'jeremiah', display_name: 'Jeremiah' },
-    { username: 'michele', display_name: 'Michele' },
+    { username: 'alex', display_name: 'Alex' },
+    { username: 'sam', display_name: 'Sam' },
   ])),
   http.put('/api/users/me/activity-sharing', async ({ request }) => {
     const body = await request.json() as Partial<typeof userActivitySharing>;
@@ -530,6 +530,12 @@ export const server = setupServer(
   })),
   http.post('/api/discovery/sync', () => HttpResponse.json({ status: 'SUCCESS', entities_count: devices.length })),
   http.get('/api/settings', () => HttpResponse.json(settings)),
+  // No household zone set and no TZ: the server names all three sources instead of guessing.
+  http.get('/api/household-timezone', () => HttpResponse.json({
+    zone: null, source: null, setting: '', from_location: false, env_tz: '', location_set: false,
+    error: 'No time zone: set the household time zone, TZ in .env, or derive it from the home location.',
+    order: ['household setting', 'TZ in .env', 'home location'],
+  })),
   http.patch('/api/settings/:key', async ({ params, request }) => {
     const body = await request.json() as Record<string, unknown>;
     const key = String(params.key);
@@ -799,8 +805,8 @@ export const server = setupServer(
   http.get('/api/communication/talk/people', ({ request }) => {
     const q = (new URL(request.url).searchParams.get('search') || '').toLowerCase();
     const people = [
-      { id: 'jeremiah', label: 'Jeremiah' },
-      { id: 'michele', label: 'Michele' },
+      { id: 'alex', label: 'Alex' },
+      { id: 'sam', label: 'Sam' },
     ].filter((p) => p.label.toLowerCase().includes(q));
     return HttpResponse.json({ status: 'SUCCESS', message: `${people.length} match(es).`, service: 'talk_people', detail: { people } });
   }),
@@ -897,7 +903,7 @@ export const server = setupServer(
       service: 'talk_reactions',
       detail: {
         reactions: [
-          { reaction: '\u2764\ufe0f', actor_display_name: 'Michele' },
+          { reaction: '\u2764\ufe0f', actor_display_name: 'Sam' },
         ],
       },
     })

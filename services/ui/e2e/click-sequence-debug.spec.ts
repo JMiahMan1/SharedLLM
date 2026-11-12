@@ -1,7 +1,9 @@
 import { test } from '@playwright/test';
 import type { WebSocket } from '@playwright/test';
 
-const UI_URL = 'https://jarvis.sumemail.com';
+const UI_URL = process.env.UI_URL || '';
+// Live only: never fall back to a real server. Without UI_URL every test here skips.
+test.skip(!UI_URL, 'Live spec: set UI_URL to the server under test (for example http://192.0.2.205:8080).');
 const TEST_USER = 'testuser';
 const TEST_PASS = 'changeme';
 

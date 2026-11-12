@@ -17,7 +17,7 @@ import type { FoodEntry, NutritionDay, NutritionTarget } from '../types/api';
 
 const food = (overrides: Partial<FoodEntry> = {}): FoodEntry => ({
   id: 1,
-  user_id: 'jeremiah',
+  user_id: 'alex',
   day: '2026-10-22',
   meal: 'breakfast',
   name: 'Oats',
@@ -57,7 +57,7 @@ const target = (overrides: Partial<NutritionTarget> = {}): NutritionTarget => ({
 });
 
 const day = (overrides: Partial<NutritionDay> = {}): NutritionDay => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   day: '2026-10-22',
   entries_count: 2,
   logged: true,

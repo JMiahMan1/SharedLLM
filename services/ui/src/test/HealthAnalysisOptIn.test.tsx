@@ -130,8 +130,8 @@ describe('auto-detected workouts', () => {
     server.use(
       http.get('/api/geo/workouts', () => HttpResponse.json({
         workouts: [{
-          id: 'auto_workout_jeremiah_1',
-          user_id: 'jeremiah',
+          id: 'auto_workout_alex_1',
+          user_id: 'alex',
           activity_type: 'walking',
           start_time: 1_760_000_000,
           end_time: 1_760_000_900,
@@ -144,9 +144,9 @@ describe('auto-detected workouts', () => {
         }],
         total: 1,
       })),
-      http.post('/api/geo/workouts/auto_workout_jeremiah_1/dismiss', () => {
+      http.post('/api/geo/workouts/auto_workout_alex_1/dismiss', () => {
         dismissed = true;
-        return HttpResponse.json({ status: 'dismissed', id: 'auto_workout_jeremiah_1' });
+        return HttpResponse.json({ status: 'dismissed', id: 'auto_workout_alex_1' });
       }),
     );
 

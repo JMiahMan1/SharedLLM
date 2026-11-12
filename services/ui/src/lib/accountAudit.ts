@@ -31,7 +31,7 @@ const FIELD_LABELS: Record<string, string> = {
   password: 'sign-in password',
 };
 
-/** "jeremiah edited michele" -- the sentence a person would say. */
+/** "alex edited sam" -- the sentence a person would say. */
 export function describeEvent(event: AccountAuditEvent): string {
   const verb = ACTION_LABELS[event.action] ?? event.action;
   const self = event.action === 'user.self_update' || event.actor === event.target;

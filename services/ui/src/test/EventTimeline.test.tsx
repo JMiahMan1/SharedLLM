@@ -24,7 +24,7 @@ const event = (over: Partial<TimelineEvent> = {}): TimelineEvent => ({
 });
 
 const timeline = (over: Partial<TimelineResponse> = {}): TimelineResponse => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   window_days: 30,
   day_count: 1,
   groups: [
@@ -124,9 +124,9 @@ describe('EventTimeline', () => {
   });
 
   it('asks the server for the window it was given', async () => {
-    renderWithProviders(<EventTimeline days={7} userId="michele" />);
+    renderWithProviders(<EventTimeline days={7} userId="sam" />);
     await screen.findByTestId('timeline-day');
-    expect(mocks.getTimeline).toHaveBeenCalledWith('michele', 7);
+    expect(mocks.getTimeline).toHaveBeenCalledWith('sam', 7);
   });
 
   it('forwards the user id through to the api layer', async () => {

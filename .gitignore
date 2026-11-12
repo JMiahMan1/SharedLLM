@@ -53,3 +53,6 @@ docs/DOC_VALIDATION_REPORT.md
 # Local notes: written for the household (its own hosts, accounts and history).
 # Kept on disk, never committed.
 HANDOVER.md
+
+# IDE (Eclipse Buildship) settings carry local paths
+services/ui/android/.settings/

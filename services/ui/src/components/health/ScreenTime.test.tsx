@@ -122,7 +122,7 @@ describe('ScreenTimeControls (a parent): the weekly schedule', () => {
   });
 
   it('shows a row per day with what each day falls back to', async () => {
-    wrap(<ScreenTimeControls username="kid" name="Zachary" />);
+    wrap(<ScreenTimeControls username="kid" name="Morgan" />);
     expect(await screen.findByLabelText('Monday limit in minutes')).toHaveAttribute('placeholder', '120 (2 h)');
     expect(screen.getByLabelText('Saturday limit in minutes')).toHaveAttribute('placeholder', '180 (3 h)');
     expect(screen.getByLabelText('Friday limit in minutes')).toHaveValue(150);
@@ -130,7 +130,7 @@ describe('ScreenTimeControls (a parent): the weekly schedule', () => {
   });
 
   it('saves a day of its own, school days and cleared routines, keeping the rest', async () => {
-    wrap(<ScreenTimeControls username="kid" name="Zachary" />);
+    wrap(<ScreenTimeControls username="kid" name="Morgan" />);
     fireEvent.change(await screen.findByLabelText('Wednesday limit in minutes'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Every day (min)'), { target: { value: '90' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Friday is a school day' }));
@@ -145,7 +145,7 @@ describe('ScreenTimeControls (a parent): the weekly schedule', () => {
 
   it('says so to someone who cannot manage the child', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: false }));
-    wrap(<ScreenTimeControls username="kid" name="Zachary" />);
+    wrap(<ScreenTimeControls username="kid" name="Morgan" />);
     expect(await screen.findByTestId('screen-time-controls-empty')).toHaveTextContent('Only their parents');
   });
 });

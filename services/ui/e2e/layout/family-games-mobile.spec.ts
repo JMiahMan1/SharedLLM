@@ -49,7 +49,7 @@ const FAMILY = {
   unpublished: [card('family-garden-pipes', 'Garden Pipes', '🌻', 'unpublished', { shelf_reason: 'Unpublished' })],
 };
 
-const PLAYERS = ['Jeremiah', 'Michele', 'Kate', 'Samuel', 'Grandma'].map((name, i) => ({
+const PLAYERS = ['Alex', 'Sam', 'Kate', 'Samuel', 'Grandma'].map((name, i) => ({
   username: name.toLowerCase(),
   display_name: name,
   initials: name.slice(0, 3).toUpperCase(),
@@ -80,7 +80,7 @@ async function mockApi(page: Page) {
             slug: g.slug,
             title: g.title,
             scores: [
-              i === 0 ? { initials: 'MIC', player_id: 'michele', score: 4200 } : { initials: 'JER', player_id: 'jeremiah', score: 12840 },
+              i === 0 ? { initials: 'MIC', player_id: 'sam', score: 4200 } : { initials: 'JER', player_id: 'alex', score: 12840 },
               { initials: 'KAT', player_id: 'kate', score: 3100 },
             ],
           })),

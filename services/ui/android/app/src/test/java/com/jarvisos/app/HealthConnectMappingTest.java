@@ -14,7 +14,7 @@ import org.junit.Test;
 /** Health Connect record fields → the health hub's ingestion payloads. */
 public class HealthConnectMappingTest {
 
-    private static final int PHOENIX = -7 * 3600;
+    private static final int UTC_MINUS_7 = -7 * 3600;
     private static final long MIN = 60_000L;
 
     private static long at(String iso) {
@@ -36,7 +36,7 @@ public class HealthConnectMappingTest {
     public void sleepWithStagesCountsTimeAsleepAndEfficiency() throws Exception {
         long bed = at("2026-10-23T22:30:00-07:00");
         long wake = at("2026-10-24T06:30:00-07:00");
-        JSONObject night = HealthConnectMapping.sleep("abc", bed, PHOENIX, wake, PHOENIX, Arrays.asList(
+        JSONObject night = HealthConnectMapping.sleep("abc", bed, UTC_MINUS_7, wake, UTC_MINUS_7, Arrays.asList(
             new HealthConnectMapping.Stage(HealthConnectMapping.STAGE_AWAKE, bed, bed + 20 * MIN),
             new HealthConnectMapping.Stage(HealthConnectMapping.STAGE_LIGHT, bed + 20 * MIN, bed + 260 * MIN),
             new HealthConnectMapping.Stage(HealthConnectMapping.STAGE_DEEP, bed + 260 * MIN, bed + 350 * MIN),
@@ -61,7 +61,7 @@ public class HealthConnectMappingTest {
     @Test
     public void sleepWithoutStagesIsTheWholeSessionAndClaimsNoEfficiency() throws Exception {
         long bed = at("2026-10-23T23:00:00-07:00");
-        JSONObject night = HealthConnectMapping.sleep("x", bed, PHOENIX, bed + 450 * MIN, PHOENIX,
+        JSONObject night = HealthConnectMapping.sleep("x", bed, UTC_MINUS_7, bed + 450 * MIN, UTC_MINUS_7,
             Collections.emptyList());
         assertEquals(450, night.getInt("duration_minutes"));
         assertFalse(night.has("efficiency"));
@@ -87,7 +87,7 @@ public class HealthConnectMappingTest {
     @Test
     public void metricsCarryUnitsSourceAndAStableId() throws Exception {
         long t = at("2026-10-24T07:05:00-07:00");
-        JSONObject rhr = HealthConnectMapping.metric("resting_hr", "resting_hr", "r1", 58, "bpm", t, PHOENIX,
+        JSONObject rhr = HealthConnectMapping.metric("resting_hr", "resting_hr", "r1", 58, "bpm", t, UTC_MINUS_7,
             "com.fitbit.FitbitMobile");
         assertEquals("resting_hr", rhr.getString("metric"));
         assertEquals(58.0, rhr.getDouble("value"), 0.0);

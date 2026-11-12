@@ -69,7 +69,7 @@ public class UnifiedPushRulesTest {
         assertTrue(UnifiedPushRules.isUpTopic("upAbCdEfGhIjKlMnOpQrStUvWxYz012345"));
         assertTrue(UnifiedPushRules.isUpTopic("up_x-1"));
         assertFalse(UnifiedPushRules.isUpTopic("up"));
-        assertFalse(UnifiedPushRules.isUpTopic("jarvis-michele-secret"));
+        assertFalse(UnifiedPushRules.isUpTopic("jarvis-sam-secret"));
         assertFalse(UnifiedPushRules.isUpTopic("up/../admin"));
         assertFalse(UnifiedPushRules.isUpTopic(""));
         assertFalse(UnifiedPushRules.isUpTopic(null));
@@ -86,8 +86,8 @@ public class UnifiedPushRulesTest {
 
     @Test
     public void endpointsMustBeHttpsAndShort() {
-        assertTrue(UnifiedPushRules.validEndpoint("https://jarvis.sumemail.com/push/upabc"));
-        assertFalse(UnifiedPushRules.validEndpoint("http://jarvis.sumemail.com/push/upabc"));
+        assertTrue(UnifiedPushRules.validEndpoint("https://jarvis.example.com/push/upabc"));
+        assertFalse(UnifiedPushRules.validEndpoint("http://jarvis.example.com/push/upabc"));
         assertFalse(UnifiedPushRules.validEndpoint("https://" + repeat('a', 1000)));
         assertFalse(UnifiedPushRules.validEndpoint(null));
     }
@@ -95,13 +95,13 @@ public class UnifiedPushRulesTest {
     @Test
     public void aRegistrationSurvivesStorage() {
         UnifiedPushRegistration r = new UnifiedPushRegistration(
-            "tok-1", "com.nextcloud.talk2", "upabc123", "https://jarvis.sumemail.com/push/upabc123", "Talk");
+            "tok-1", "com.nextcloud.talk2", "upabc123", "https://jarvis.example.com/push/upabc123", "Talk");
         UnifiedPushRegistration back = UnifiedPushRegistration.fromJson(r.toJson());
         assertNotNull(back);
         assertEquals("tok-1", back.token);
         assertEquals("com.nextcloud.talk2", back.app);
         assertEquals("upabc123", back.topic);
-        assertEquals("https://jarvis.sumemail.com/push/upabc123", back.endpoint);
+        assertEquals("https://jarvis.example.com/push/upabc123", back.endpoint);
         assertEquals("Talk", back.description);
     }
 

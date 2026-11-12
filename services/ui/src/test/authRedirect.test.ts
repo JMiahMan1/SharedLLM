@@ -10,7 +10,7 @@ import { apiClient } from '../services/api';
 describe('auth redirect handling', () => {
   beforeEach(() => {
     localStorage.setItem('jarvis_api_key', 'stored-token');
-    localStorage.setItem('jarvis_user', 'jeremiah');
+    localStorage.setItem('jarvis_user', 'alex');
   });
 
   afterEach(() => {
@@ -25,7 +25,7 @@ describe('auth redirect handling', () => {
     await expect(apiClient.get('/api/users/me/theme', { skipAuthRedirect: true })).rejects.toBeTruthy();
 
     expect(localStorage.getItem('jarvis_api_key')).toBe('stored-token');
-    expect(localStorage.getItem('jarvis_user')).toBe('jeremiah');
+    expect(localStorage.getItem('jarvis_user')).toBe('alex');
   });
 
   it('still clears the session when a normal request 401s', async () => {

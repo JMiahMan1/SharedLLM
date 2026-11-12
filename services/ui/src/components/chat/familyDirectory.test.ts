@@ -7,9 +7,9 @@ import {
 } from './familyDirectory';
 
 const member = (over: Partial<FamilyMember> = {}): FamilyMember => ({
-  username: 'michele',
-  display_name: 'Michele',
-  nextcloud_user: 'michele_cloud',
+  username: 'sam',
+  display_name: 'Sam',
+  nextcloud_user: 'sam_cloud',
   avatar: 'upload:7',
   ...over,
 });
@@ -17,21 +17,21 @@ const member = (over: Partial<FamilyMember> = {}): FamilyMember => ({
 describe('family directory lookup', () => {
   const directory = buildFamilyLookup([
     member(),
-    member({ username: 'jeremiah', display_name: 'Jeremiah Summers', nextcloud_user: null, avatar: null }),
+    member({ username: 'alex', display_name: 'Alex Rivera', nextcloud_user: null, avatar: null }),
   ]);
 
   it('finds people by SharedLLM username or Nextcloud account', () => {
-    expect(findFamilyMember(directory, 'michele')?.username).toBe('michele');
-    expect(findFamilyMember(directory, 'MICHELE_CLOUD')?.username).toBe('michele');
+    expect(findFamilyMember(directory, 'sam')?.username).toBe('sam');
+    expect(findFamilyMember(directory, 'SAM_CLOUD')?.username).toBe('sam');
   });
 
   it('finds a direct message by the display name Talk shows when the id is absent', () => {
-    expect(findFamilyMember(directory, null, 'Jeremiah Summers')?.username).toBe('jeremiah');
+    expect(findFamilyMember(directory, null, 'Alex Rivera')?.username).toBe('alex');
   });
 
   it('matches a Home Assistant person entity to the account behind it', () => {
-    expect(findFamilyMember(directory, 'person.michele_phone', 'Michele')?.username).toBe('michele');
-    expect(findFamilyMember(directory, 'user.michele')?.username).toBe('michele');
+    expect(findFamilyMember(directory, 'person.sam_phone', 'Sam')?.username).toBe('sam');
+    expect(findFamilyMember(directory, 'user.sam')?.username).toBe('sam');
   });
 
   it('does not run the match across unrelated words', () => {
@@ -39,10 +39,10 @@ describe('family directory lookup', () => {
   });
 
   it('lists exact keys before entity tokens and drops noise words', () => {
-    const keys = familyLookupKeys('person.michele_phone', 'Michele');
-    expect(keys[0]).toBe('person.michele_phone');
-    expect(keys).toContain('michele_phone');
-    expect(keys).toContain('michele');
+    const keys = familyLookupKeys('person.sam_phone', 'Sam');
+    expect(keys[0]).toBe('person.sam_phone');
+    expect(keys).toContain('sam_phone');
+    expect(keys).toContain('sam');
     expect(keys).not.toContain('phone');
   });
 });

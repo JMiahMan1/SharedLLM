@@ -27,8 +27,8 @@ vi.mock('../../services/api', async (importOriginal) => {
       getLogs: vi.fn().mockResolvedValue([]),
       getTelemetryNotifications: vi.fn().mockResolvedValue({
         notifications: [
-          { id: 'n1', kind: 'presence', title: 'Michele left Home', body: '', created_at: '2026-10-14T21:35:39+00:00', read: false },
-          { id: 'n2', kind: 'presence', title: 'Michele arrived at Home', body: 'Just now', created_at: '2026-10-15T03:20:42+00:00', read: false },
+          { id: 'n1', kind: 'presence', title: 'Sam left Home', body: '', created_at: '2026-10-14T21:35:39+00:00', read: false },
+          { id: 'n2', kind: 'presence', title: 'Sam arrived at Home', body: 'Just now', created_at: '2026-10-15T03:20:42+00:00', read: false },
         ],
       }),
       checkAllUpdates: vi.fn().mockResolvedValue({}),
@@ -60,7 +60,7 @@ function renderHeader() {
 describe('Header profile menu', () => {
   beforeEach(() => {
     logout.mockClear();
-    mockUser = { username: 'jeremiah', is_admin: true };
+    mockUser = { username: 'alex', is_admin: true };
   });
 
   it('does not log out when the avatar is pressed; it opens a menu', () => {
@@ -71,12 +71,12 @@ describe('Header profile menu', () => {
   });
 
   it('shows the signed-in user\u2019s picture in the account button and menu', () => {
-    mockUser = { username: 'jeremiah', is_admin: true, avatar: 'preset:jonahs-whale', full_name: 'Jeremiah' };
+    mockUser = { username: 'alex', is_admin: true, avatar: 'preset:jonahs-whale', full_name: 'Alex' };
     renderHeader();
 
     const button = screen.getByLabelText('Account menu');
     expect(button).toContainElement(screen.getByTestId('user-avatar-preset'));
-    expect(screen.getByTestId('user-avatar-preset')).toHaveAccessibleName("Jeremiah: Jonah's Whale");
+    expect(screen.getByTestId('user-avatar-preset')).toHaveAccessibleName("Alex: Jonah's Whale");
 
     fireEvent.click(button);
     expect(screen.getAllByTestId('user-avatar-preset')).toHaveLength(2);
@@ -130,15 +130,15 @@ describe('Header profile menu', () => {
 describe('Header notifications bell', () => {
   beforeEach(() => {
     localStorage.clear();
-    mockUser = { username: 'michele', is_admin: false };
+    mockUser = { username: 'sam', is_admin: false };
   });
 
   it('shows the user\'s own notices newest first, for non-admins too', async () => {
     renderHeader();
     const bell = await screen.findByRole('button', { name: /notifications, 2 new/i });
     fireEvent.click(bell);
-    const titles = screen.getAllByText(/Michele (left|arrived)/).map((el) => el.textContent);
-    expect(titles).toEqual(['Michele arrived at Home', 'Michele left Home']);
+    const titles = screen.getAllByText(/Sam (left|arrived)/).map((el) => el.textContent);
+    expect(titles).toEqual(['Sam arrived at Home', 'Sam left Home']);
   });
 
   it('shows a notice in full and opens where it points when tapped', async () => {
@@ -165,7 +165,7 @@ describe('Header notifications bell', () => {
     expect(screen.getByRole('button', { name: /^notifications$/i }).getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(screen.getByRole('button', { name: /^notifications$/i }));
     expect(screen.getByText("You're all caught up")).toBeTruthy();
-    expect(screen.queryByText('Michele left Home')).toBeNull();
+    expect(screen.queryByText('Sam left Home')).toBeNull();
 
     first.unmount();
     renderHeader();
@@ -176,27 +176,27 @@ describe('Header notifications bell', () => {
   it('clears one notice with its button and keeps it cleared', async () => {
     const first = renderHeader();
     fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Michele left Home' }));
-    await waitFor(() => expect(screen.queryByText('Michele left Home')).toBeNull());
-    expect(screen.getByText('Michele arrived at Home')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Sam left Home' }));
+    await waitFor(() => expect(screen.queryByText('Sam left Home')).toBeNull());
+    expect(screen.getByText('Sam arrived at Home')).toBeTruthy();
 
     first.unmount();
     renderHeader();
     fireEvent.click(await screen.findByRole('button', { name: /notifications/i }));
-    expect(screen.queryByText('Michele left Home')).toBeNull();
-    expect(screen.getByText('Michele arrived at Home')).toBeTruthy();
+    expect(screen.queryByText('Sam left Home')).toBeNull();
+    expect(screen.getByText('Sam arrived at Home')).toBeTruthy();
   });
 
   it('closes when tapping outside or pressing Escape', async () => {
     renderHeader();
     fireEvent.click(await screen.findByRole('button', { name: /notifications, 2 new/i }));
-    expect(screen.getByText('Michele left Home')).toBeTruthy();
+    expect(screen.getByText('Sam left Home')).toBeTruthy();
     fireEvent.mouseDown(document.body);
-    expect(screen.queryByText('Michele left Home')).toBeNull();
+    expect(screen.queryByText('Sam left Home')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /^notifications$/i }));
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByText('Michele left Home')).toBeNull();
+    expect(screen.queryByText('Sam left Home')).toBeNull();
   });
 
   it('clears the new-notice dot once the bell has been opened', async () => {

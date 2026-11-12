@@ -25,7 +25,7 @@ const inventory = {
     {
       device_key: 'kid-phone-0001', kind: 'phone', label: "Kid's phone", manufacturer: 'Google', model: 'Pixel 7',
       os_version: '14', os_build: 'UQ1A', app_version: '1.9.0', app_build: '42', last_seen_at: '2026-10-25T10:00:00Z',
-      first_seen_at: '2026-10-01T10:00:00Z', last_ip_address: '192.168.2.9', battery: null,
+      first_seen_at: '2026-10-01T10:00:00Z', last_ip_address: '192.0.2.9', battery: null,
       capabilities: { guard: { deviceOwner: true, guardEnabled: true, webFilterActive: true, reportedAt: '2026-10-25T10:00:00Z' } },
       owner_username: 'kid', owner_display_name: 'Kid',
     },
@@ -208,7 +208,7 @@ describe('Devices page', () => {
               device_key: 'kid-tab-0001',
               kind: 'tablet',
               platform: 'android',
-              label: "Madelyn's Galaxy Tab",
+              label: "Casey's Galaxy Tab",
               manufacturer: 'samsung',
               model: 'SM-P620',
               os_version: '16',
@@ -217,11 +217,11 @@ describe('Devices page', () => {
               app_build: '493',
               last_seen_at: '2026-10-25T10:00:00Z',
               first_seen_at: '2026-10-01T10:00:00Z',
-              last_ip_address: '192.168.2.42',
+              last_ip_address: '192.0.2.42',
               battery: { at: '2026-10-25T10:00:00Z', pct: 84, usb: false },
               capabilities: { guard: { deviceOwner: true, guardEnabled: true, webFilterActive: true } },
-              owner_username: 'madelyn',
-              owner_display_name: 'Madelyn',
+              owner_username: 'casey',
+              owner_display_name: 'Casey',
             },
             {
               device_key: 'esphome:744dbd2c9728',
@@ -239,16 +239,16 @@ describe('Devices page', () => {
               hardware: 'esp32-s3-devkitc-1',
               last_seen_at: '2026-10-25T10:05:00Z',
               first_seen_at: '2026-10-01T10:00:00Z',
-              last_ip_address: '192.168.2.105',
+              last_ip_address: '192.0.2.105',
               battery: { at: '2026-10-25T10:05:00Z', pct: 72, usb: false },
               capabilities: {},
-              owner_username: 'jeremiah',
-              owner_display_name: 'Jeremiah',
+              owner_username: 'alex',
+              owner_display_name: 'Alex',
             },
           ],
           members: [
-            { username: 'madelyn', display_name: 'Madelyn', device_count: 1, readable: true, reason: null },
-            { username: 'jeremiah', display_name: 'Jeremiah', device_count: 1, readable: true, reason: null },
+            { username: 'casey', display_name: 'Casey', device_count: 1, readable: true, reason: null },
+            { username: 'alex', display_name: 'Alex', device_count: 1, readable: true, reason: null },
           ],
           generated_at: '2026-10-25T10:05:00Z',
         }),
@@ -332,8 +332,8 @@ describe('Devices page', () => {
               kind: 'screen',
               platform: 'esphome',
               label: 'Kitchen Hub',
-              owner_username: 'jeremiah',
-              owner_display_name: 'Jeremiah',
+              owner_username: 'alex',
+              owner_display_name: 'Alex',
               registered_by: 'adopted',
               model: 'esp32-s3-devkitc-1',
               manufacturer: null,
@@ -343,7 +343,7 @@ describe('Devices page', () => {
               app_build: null,
               esphome_version: '2026.9.0',
               hardware: 'esp32-s3-devkitc-1',
-              last_ip_address: '192.168.2.120',
+              last_ip_address: '192.0.2.120',
               last_seen_at: '2026-10-25T10:02:00Z',
               first_seen_at: '2026-10-01T00:00:00Z',
               capabilities: {},
@@ -351,7 +351,7 @@ describe('Devices page', () => {
             },
           ],
           members: [
-            { username: 'jeremiah', display_name: 'Jeremiah', device_count: 1, readable: true, reason: null },
+            { username: 'alex', display_name: 'Alex', device_count: 1, readable: true, reason: null },
           ],
           generated_at: '2026-10-25T10:05:00Z',
         }),
@@ -374,7 +374,7 @@ describe('Devices page', () => {
               },
               entities: [
                 { domain: 'sensor', object_id: 'wifi_db', name: 'WiFi db', state: -54, unit: 'dBm' },
-                { domain: 'text_sensor', object_id: 'ssid', name: 'SSID', state: 'SummersLAN' },
+                { domain: 'text_sensor', object_id: 'ssid', name: 'SSID', state: 'RiveraLAN' },
                 { domain: 'select', object_id: 'wake_word_engine', name: 'Wake word engine', state: 'On device', options: ['In Home Assistant', 'On device'] },
                 { domain: 'number', object_id: 'screen_brightness', name: 'Screen Brightness', state: 75, min_value: 0, max_value: 100, step: 5 },
                 { domain: 'text', object_id: 'now_playing_title', name: 'Now Playing Title', state: 'Amazing Grace' },
@@ -420,7 +420,7 @@ describe('Devices page', () => {
     // Live telemetry grid shows WiFi db and SSID
     const telemetry = await screen.findByTestId('mdm-esphome-telemetry-esphome:fnk0104b');
     expect(telemetry).toHaveTextContent('-54 dBm');
-    expect(telemetry).toHaveTextContent('SummersLAN');
+    expect(telemetry).toHaveTextContent('RiveraLAN');
 
     // Screen quick actions (show_page & set_rotation) + watch action (find_watch)
     fireEvent.click(screen.getByTestId('mdm-esphome-page-esphome:fnk0104b-2'));

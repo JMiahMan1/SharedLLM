@@ -98,15 +98,15 @@ describe('isInsideGeofence', () => {
   const flat = () => 0;
 
   it('is false with no previous fix', () => {
-    expect(isInsideGeofence(null, 33.4, -112.0, flat)).toBe(false);
+    expect(isInsideGeofence(null, 39.69, -104.92, flat)).toBe(false);
   });
 
   it('is true when the movement is under the radius', () => {
-    expect(isInsideGeofence({ lat: 33.4, lng: -112.0 }, 33.4001, -112.0, () => 50)).toBe(true);
+    expect(isInsideGeofence({ lat: 39.69, lng: -104.92 }, 39.6901, -104.92, () => 50)).toBe(true);
   });
 
   it('is false once the movement exceeds the radius', () => {
-    expect(isInsideGeofence({ lat: 33.4, lng: -112.0 }, 33.4, -112.0, () => 500)).toBe(false);
+    expect(isInsideGeofence({ lat: 39.69, lng: -104.92 }, 39.69, -104.92, () => 500)).toBe(false);
   });
 
   it('treats exactly the radius as outside', () => {

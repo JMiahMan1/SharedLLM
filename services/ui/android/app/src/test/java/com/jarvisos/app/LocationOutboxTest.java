@@ -62,8 +62,8 @@ public class LocationOutboxTest {
     private static JSONObject fix(double timestamp) {
         try {
             JSONObject body = new JSONObject();
-            body.put("latitude", 33.4 + timestamp / 1e6);
-            body.put("longitude", -112.0);
+            body.put("latitude", 39.69 + timestamp / 1e6);
+            body.put("longitude", -104.92);
             body.put("timestamp", timestamp);
             return body;
         } catch (JSONException e) {
@@ -90,12 +90,12 @@ public class LocationOutboxTest {
     @Test
     public void aLiveFixThatCannotBeSentNowIsKeptWithItsOwnTime() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.Sent result = LocationOutbox.sendLive(store, "jeremiah", fix(1000.5),
+        LocationOutbox.Sent result = LocationOutbox.sendLive(store, "alex", fix(1000.5),
             new ScriptedSender().then(LocationOutbox.Sent.RETRY));
         assertEquals(LocationOutbox.Sent.RETRY, result);
         assertEquals(1, store.size());
         assertEquals(1000.5, store.time(0), 0.0);
-        assertEquals("jeremiah", store.load().optJSONObject(0).optString("user"));
+        assertEquals("alex", store.load().optJSONObject(0).optString("user"));
     }
 
     @Test
@@ -103,7 +103,7 @@ public class LocationOutboxTest {
         for (LocationOutbox.Sent refusal : new LocationOutbox.Sent[] {
                 LocationOutbox.Sent.REFUSED, LocationOutbox.Sent.SIGNED_OUT}) {
             MemoryStore store = new MemoryStore();
-            LocationOutbox.Sent result = LocationOutbox.sendLive(store, "jeremiah", fix(1000),
+            LocationOutbox.Sent result = LocationOutbox.sendLive(store, "alex", fix(1000),
                 new ScriptedSender().then(refusal));
             assertEquals(refusal, result);
             assertEquals(0, store.size());
@@ -114,16 +114,16 @@ public class LocationOutboxTest {
     public void aSentLiveFixIsNotKept() {
         MemoryStore store = new MemoryStore();
         assertEquals(LocationOutbox.Sent.OK,
-            LocationOutbox.sendLive(store, "jeremiah", fix(1000), new ScriptedSender()));
+            LocationOutbox.sendLive(store, "alex", fix(1000), new ScriptedSender()));
         assertEquals(0, store.size());
     }
 
     @Test
     public void theSameFixIsKeptOnce() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1000));
-        LocationOutbox.add(store, "jeremiah", fix(1000));
-        LocationOutbox.add(store, "jeremiah", fix(1001));
+        LocationOutbox.add(store, "alex", fix(1000));
+        LocationOutbox.add(store, "alex", fix(1000));
+        LocationOutbox.add(store, "alex", fix(1001));
         assertEquals(2, store.size());
     }
 
@@ -131,7 +131,7 @@ public class LocationOutboxTest {
     public void aFullQueueDropsItsOldestFix() {
         MemoryStore store = new MemoryStore();
         for (int i = 0; i < LocationOutbox.MAX_PENDING + 3; i++) {
-            LocationOutbox.add(store, "jeremiah", fix(i));
+            LocationOutbox.add(store, "alex", fix(i));
         }
         assertEquals(LocationOutbox.MAX_PENDING, store.size());
         assertEquals(3.0, store.time(0), 0.0);
@@ -141,11 +141,11 @@ public class LocationOutboxTest {
     @Test
     public void theBacklogIsSentOldestFirstAndAheadOfTheLiveFix() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1));
-        LocationOutbox.add(store, "jeremiah", fix(2));
-        LocationOutbox.add(store, "jeremiah", fix(3));
+        LocationOutbox.add(store, "alex", fix(1));
+        LocationOutbox.add(store, "alex", fix(2));
+        LocationOutbox.add(store, "alex", fix(3));
         ScriptedSender sender = new ScriptedSender();
-        assertEquals(LocationOutbox.Sent.OK, LocationOutbox.sendLive(store, "jeremiah", fix(4), sender));
+        assertEquals(LocationOutbox.Sent.OK, LocationOutbox.sendLive(store, "alex", fix(4), sender));
         assertEquals(List.of(1.0, 2.0, 3.0, 4.0), sender.sent);
         assertEquals(0, store.size());
     }
@@ -153,11 +153,11 @@ public class LocationOutboxTest {
     @Test
     public void aFlushStopsAtTheFirstFailureAndKeepsTheRestInOrder() {
         MemoryStore store = new MemoryStore();
-        for (int i = 1; i <= 4; i++) LocationOutbox.add(store, "jeremiah", fix(i));
+        for (int i = 1; i <= 4; i++) LocationOutbox.add(store, "alex", fix(i));
         ScriptedSender sender = new ScriptedSender()
             .then(LocationOutbox.Sent.OK, LocationOutbox.Sent.RETRY);
         assertEquals(LocationOutbox.Flushed.RETRY,
-            LocationOutbox.flush(store, "jeremiah", sender, LocationOutbox.FLUSH_LIMIT));
+            LocationOutbox.flush(store, "alex", sender, LocationOutbox.FLUSH_LIMIT));
         // Fix 3 and 4 were never tried; 2 failed and is kept at the front.
         assertEquals(List.of(1.0, 2.0), sender.sent);
         assertEquals(3, store.size());
@@ -168,9 +168,9 @@ public class LocationOutboxTest {
     @Test
     public void aLiveFixWaitsBehindABacklogThatCannotBeSent() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1));
+        LocationOutbox.add(store, "alex", fix(1));
         ScriptedSender sender = new ScriptedSender().then(LocationOutbox.Sent.RETRY);
-        assertEquals(LocationOutbox.Sent.RETRY, LocationOutbox.sendLive(store, "jeremiah", fix(2), sender));
+        assertEquals(LocationOutbox.Sent.RETRY, LocationOutbox.sendLive(store, "alex", fix(2), sender));
         // The live fix was not tried out of order; it joined the queue behind fix 1.
         assertEquals(List.of(1.0), sender.sent);
         assertEquals(2, store.size());
@@ -180,10 +180,10 @@ public class LocationOutboxTest {
     @Test
     public void aRefusedKeyStopsTheFlushAndKeepsEverything() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1));
-        LocationOutbox.add(store, "jeremiah", fix(2));
+        LocationOutbox.add(store, "alex", fix(1));
+        LocationOutbox.add(store, "alex", fix(2));
         ScriptedSender sender = new ScriptedSender().then(LocationOutbox.Sent.SIGNED_OUT);
-        assertEquals(LocationOutbox.Sent.SIGNED_OUT, LocationOutbox.sendLive(store, "jeremiah", fix(3), sender));
+        assertEquals(LocationOutbox.Sent.SIGNED_OUT, LocationOutbox.sendLive(store, "alex", fix(3), sender));
         // One request, not one per fix, and the backlog waits for a key that works.
         assertEquals(1, sender.sent.size());
         assertEquals(2, store.size());
@@ -192,11 +192,11 @@ public class LocationOutboxTest {
     @Test
     public void aFixTheServerRefusesLeavesTheQueueAndTheFlushGoesOn() {
         MemoryStore store = new MemoryStore();
-        for (int i = 1; i <= 3; i++) LocationOutbox.add(store, "jeremiah", fix(i));
+        for (int i = 1; i <= 3; i++) LocationOutbox.add(store, "alex", fix(i));
         ScriptedSender sender = new ScriptedSender()
             .then(LocationOutbox.Sent.OK, LocationOutbox.Sent.REFUSED, LocationOutbox.Sent.OK);
         assertEquals(LocationOutbox.Flushed.EMPTY,
-            LocationOutbox.flush(store, "jeremiah", sender, LocationOutbox.FLUSH_LIMIT));
+            LocationOutbox.flush(store, "alex", sender, LocationOutbox.FLUSH_LIMIT));
         assertEquals(List.of(1.0, 2.0, 3.0), sender.sent);
         assertEquals(0, store.size());
     }
@@ -204,14 +204,14 @@ public class LocationOutboxTest {
     @Test
     public void aFixLeavesTheQueueOnlyAfterTheServerTookIt() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1));
-        LocationOutbox.add(store, "jeremiah", fix(2));
+        LocationOutbox.add(store, "alex", fix(1));
+        LocationOutbox.add(store, "alex", fix(2));
         List<Integer> sizesWhileSending = new ArrayList<>();
         LocationOutbox.Sender sender = body -> {
             sizesWhileSending.add(store.size());
             return LocationOutbox.Sent.OK;
         };
-        LocationOutbox.flush(store, "jeremiah", sender, LocationOutbox.FLUSH_LIMIT);
+        LocationOutbox.flush(store, "alex", sender, LocationOutbox.FLUSH_LIMIT);
         // Still on disk while being sent, so a crash mid-send loses nothing.
         assertEquals(List.of(2, 2), sizesWhileSending);
         assertEquals(0, store.size());
@@ -220,12 +220,12 @@ public class LocationOutboxTest {
     @Test
     public void aFixAddedDuringAFlushIsNotLost() {
         MemoryStore store = new MemoryStore();
-        LocationOutbox.add(store, "jeremiah", fix(1));
+        LocationOutbox.add(store, "alex", fix(1));
         LocationOutbox.Sender sender = body -> {
-            LocationOutbox.add(store, "jeremiah", fix(9));
+            LocationOutbox.add(store, "alex", fix(9));
             return LocationOutbox.Sent.OK;
         };
-        LocationOutbox.flush(store, "jeremiah", sender, LocationOutbox.FLUSH_LIMIT);
+        LocationOutbox.flush(store, "alex", sender, LocationOutbox.FLUSH_LIMIT);
         assertEquals(1, store.size());
         assertEquals(9.0, store.time(0), 0.0);
     }
@@ -233,13 +233,13 @@ public class LocationOutboxTest {
     @Test
     public void oneFlushSendsAtMostItsLimit() {
         MemoryStore store = new MemoryStore();
-        for (int i = 0; i < 5; i++) LocationOutbox.add(store, "jeremiah", fix(i));
+        for (int i = 0; i < 5; i++) LocationOutbox.add(store, "alex", fix(i));
         ScriptedSender sender = new ScriptedSender();
-        assertEquals(LocationOutbox.Flushed.MORE, LocationOutbox.flush(store, "jeremiah", sender, 3));
+        assertEquals(LocationOutbox.Flushed.MORE, LocationOutbox.flush(store, "alex", sender, 3));
         assertEquals(3, sender.sent.size());
         assertEquals(2, store.size());
         assertEquals(3.0, store.time(0), 0.0);
-        assertEquals(LocationOutbox.Flushed.EMPTY, LocationOutbox.flush(store, "jeremiah", sender, 3));
+        assertEquals(LocationOutbox.Flushed.EMPTY, LocationOutbox.flush(store, "alex", sender, 3));
         assertFalse(LocationOutbox.hasPending(store));
     }
 
@@ -248,10 +248,10 @@ public class LocationOutboxTest {
         // Another person signed in on this phone: their history is not this one's.
         MemoryStore store = new MemoryStore();
         LocationOutbox.add(store, "previous", fix(1));
-        LocationOutbox.add(store, "jeremiah", fix(2));
+        LocationOutbox.add(store, "alex", fix(2));
         ScriptedSender sender = new ScriptedSender();
         assertEquals(LocationOutbox.Flushed.EMPTY,
-            LocationOutbox.flush(store, "jeremiah", sender, LocationOutbox.FLUSH_LIMIT));
+            LocationOutbox.flush(store, "alex", sender, LocationOutbox.FLUSH_LIMIT));
         assertEquals(List.of(2.0), sender.sent);
         assertEquals(0, store.size());
     }

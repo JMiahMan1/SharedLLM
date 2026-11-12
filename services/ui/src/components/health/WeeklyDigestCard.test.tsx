@@ -12,7 +12,7 @@ vi.mock('../../services/api', async (importOriginal) => {
 });
 
 const weekly = (overrides: Partial<HealthWeekly> = {}): HealthWeekly => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   start: '2026-10-15',
   end: '2026-10-21',
   metrics: ['sleep_minutes', 'sleep_score', 'calories', 'water_ml', 'energy', 'mood'],

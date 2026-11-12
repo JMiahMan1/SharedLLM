@@ -149,7 +149,7 @@ describe('Media page: poisoned device names', () => {
   /** The exact string Music Assistant still holds for the old web player. */
   const PROFILE_BLOB =
     '{"id":1,"username":"default","display_name":"Shared/Default User","is_admin":true,' +
-    '"nextcloud_user":"summers","ha_url":"https://ha.sumemail.com","skylight_email":"someone@example.com",' +
+    '"nextcloud_user":"rivera","ha_url":"https://ha.example.com","skylight_email":"someone@example.com",' +
     '"audiobookshelf_api_key":null,"api_key":null}' +
     "'s Web Player (Desktop)";
 

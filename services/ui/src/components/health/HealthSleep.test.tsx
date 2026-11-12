@@ -40,7 +40,7 @@ const estimate: SleepEstimate = {
 };
 
 const saved: SleepSession = {
-  id: 7, user_id: 'jeremiah', night: '2026-10-19', bedtime: at('2026-10-18', '23:00'), wake_time: at('2026-10-19', '06:00'),
+  id: 7, user_id: 'alex', night: '2026-10-19', bedtime: at('2026-10-18', '23:00'), wake_time: at('2026-10-19', '06:00'),
   duration_minutes: 420, efficiency: null, quality: 3, stages: {}, source: 'usage_estimate', external_id: null, note: '',
 };
 
@@ -53,7 +53,7 @@ const wakeInput = () => screen.getByLabelText('Wake') as HTMLInputElement;
 describe('HealthSleep: estimate from device use', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.getSleep).mockResolvedValue({ user_id: 'jeremiah', sessions: [saved] });
+    vi.mocked(api.getSleep).mockResolvedValue({ user_id: 'alex', sessions: [saved] });
     vi.mocked(api.getHealthSummary).mockRejectedValue(new Error('not needed'));
     vi.mocked(api.getSleepEstimate).mockResolvedValue({ estimate, devices: 2 });
     vi.mocked(api.logSleep).mockResolvedValue({ ...saved, duplicate: false });

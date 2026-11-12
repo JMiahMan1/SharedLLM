@@ -25,14 +25,14 @@ public class ChatMessageLogTest {
         List<ChatMessageLog.Pending> pending = Arrays.asList(
                 new ChatMessageLog.Pending("Mom", "Dinner at 6", T),          // also an SMS
                 new ChatMessageLog.Pending("Leo", "omw", T + 1000),          // chat only
-                new ChatMessageLog.Pending("Gracie", "k", T + 170_000));     // too new to tell
+                new ChatMessageLog.Pending("Taylor", "k", T + 170_000));     // too new to tell
         List<ChatMessageLog.Stored> stored = Arrays.asList(new ChatMessageLog.Stored("Dinner at 6", T + 2000));
         List<ChatMessageLog.Pending> keep = new ArrayList<>();
         List<ChatMessageLog.Pending> post = ChatMessageLog.settle(pending, stored, T + ChatMessageLog.SETTLE_MS + 5000, keep);
         assertEquals(1, post.size());
         assertEquals("Leo", post.get(0).sender);
         assertEquals(1, keep.size());
-        assertEquals("Gracie", keep.get(0).sender);
+        assertEquals("Taylor", keep.get(0).sender);
     }
 
     @Test

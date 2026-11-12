@@ -30,8 +30,8 @@ beforeEach(() => {
   listing = {
     status: 'SUCCESS',
     chores: [
-      { id: '50-2026-11-03', title: 'Feed the chickens', completed: false, recurrence: 'RRULE:FREQ=DAILY', start_time: '07:00', assignees: ['Noah'] },
-      { id: '51', title: 'Trash', completed: true, assignees: ['Noah'] },
+      { id: '50-2026-11-03', title: 'Feed the chickens', completed: false, recurrence: 'RRULE:FREQ=DAILY', start_time: '07:00', assignees: ['Jordan'] },
+      { id: '51', title: 'Trash', completed: true, assignees: ['Jordan'] },
     ],
   };
   server.use(
@@ -60,15 +60,15 @@ beforeEach(() => {
 
 describe('ChoresCard', () => {
   it("shows the child's chores for today", async () => {
-    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     expect(await screen.findByText('Feed the chickens')).toBeInTheDocument();
     expect(screen.getByText('1 of 2 left today')).toBeInTheDocument();
     expect(screen.getByText('7 am')).toBeInTheDocument();
-    expect(asked[0]).toContain('scope=noah');
+    expect(asked[0]).toContain('scope=jordan');
   });
 
   it('adds a repeating chore for the child', async () => {
-    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     await screen.findByText('Feed the chickens');
     fireEvent.change(screen.getByLabelText('Chore name'), { target: { value: ' Hay the horses ' } });
     fireEvent.change(screen.getByLabelText('How often'), { target: { value: 'weekdays' } });
@@ -76,12 +76,12 @@ describe('ChoresCard', () => {
     fireEvent.change(screen.getByLabelText('Stars (optional)'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Add chore/ }));
     await waitFor(() => expect(added).toHaveLength(1));
-    expect(added[0]).toEqual({ title: 'Hay the horses', assignees: ['noah'], time: '16:30', repeat: 'weekdays', stars: 3 });
+    expect(added[0]).toEqual({ title: 'Hay the horses', assignees: ['jordan'], time: '16:30', repeat: 'weekdays', stars: 3 });
     expect(screen.getByLabelText('Chore name')).toHaveValue('');
   });
 
   it('removes a one-off at once and asks about a repeating chore', async () => {
-    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     await screen.findByText('Trash');
     fireEvent.click(screen.getByRole('button', { name: 'Remove Trash' }));
     await waitFor(() => expect(removed).toEqual([{ id: '51', applyTo: null }]));
@@ -94,14 +94,14 @@ describe('ChoresCard', () => {
 
   it('is not shown when Skylight is not set up', async () => {
     listing = { status: 'FAILURE', message: 'Skylight not configured' };
-    const { container } = renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    const { container } = renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     await waitFor(() => expect(asked).toHaveLength(1));
     await waitFor(() => expect(container.querySelector('[data-testid="guardian-chores"]')).toBeNull());
   });
 
   it('is not shown to someone who does not run the chore chart', async () => {
     auth.user = { username: 'gran', is_admin: false, family_role: 'other' };
-    const { container } = renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    const { container } = renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     await new Promise((r) => setTimeout(r, 50));
     expect(container.querySelector('[data-testid="guardian-chores"]')).toBeNull();
     expect(asked).toEqual([]);
@@ -111,27 +111,27 @@ describe('ChoresCard', () => {
     const today = new Date();
     const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     checks = [
-      { id: 7, username: 'noah', day, chore_id: '51', title: 'Trash', status: 'pending' },
-      { id: 8, username: 'noah', day, chore_id: '52', title: 'Dishes', status: 'pending' },
-      { id: 9, username: 'gracie', day, chore_id: '60', title: 'Laundry', status: 'pending' },
+      { id: 7, username: 'jordan', day, chore_id: '51', title: 'Trash', status: 'pending' },
+      { id: 8, username: 'jordan', day, chore_id: '52', title: 'Dishes', status: 'pending' },
+      { id: 9, username: 'taylor', day, chore_id: '60', title: 'Laundry', status: 'pending' },
     ];
-    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     const box = await screen.findByTestId('chore-checks');
     expect(screen.getAllByTestId('chore-check').map((li) => li.textContent)).toEqual([
       expect.stringContaining('Trash'), expect.stringContaining('Dishes'),
     ]); // only this child's
     expect(screen.getByText('2 to check')).toBeInTheDocument();
-    expect(box).toHaveTextContent('Done right? Noah ticked these off');
+    expect(box).toHaveTextContent('Done right? Jordan ticked these off');
 
     fireEvent.click(screen.getByRole('button', { name: 'Trash was done right' }));
     await waitFor(() => expect(decided).toEqual([{ id: '7', body: { approve: true } }]));
-    fireEvent.click(await screen.findByRole('button', { name: 'Ask Noah to redo Dishes' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Jordan to redo Dishes' }));
     await waitFor(() => expect(decided[1]).toEqual({ id: '8', body: { approve: false } }));
     await waitFor(() => expect(screen.queryByTestId('chore-checks')).toBeNull());
   });
 
   it('shows no approvals box when nothing is waiting', async () => {
-    renderWithProviders(<ChoresCard username="noah" name="Noah" />);
+    renderWithProviders(<ChoresCard username="jordan" name="Jordan" />);
     await screen.findByText('Feed the chickens');
     expect(screen.queryByTestId('chore-checks')).toBeNull();
   });

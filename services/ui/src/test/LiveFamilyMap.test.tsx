@@ -35,8 +35,8 @@ describe('classifyLocation', () => {
 
   it('marks a fresh fix as live', () => {
     const m = classifyLocation(
-      'jeremiah',
-      { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 30 },
+      'alex',
+      { latitude: 39.69, longitude: -104.92, updated_at: nowSec - 30 },
       now
     );
     expect(m?.freshness).toBe('live');
@@ -44,8 +44,8 @@ describe('classifyLocation', () => {
 
   it('marks a few-minutes-old fix as recent', () => {
     const m = classifyLocation(
-      'jeremiah',
-      { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 300 },
+      'alex',
+      { latitude: 39.69, longitude: -104.92, updated_at: nowSec - 300 },
       now
     );
     expect(m?.freshness).toBe('recent');
@@ -53,8 +53,8 @@ describe('classifyLocation', () => {
 
   it('marks an old fix as stale without claiming a cause', () => {
     const m = classifyLocation(
-      'jeremiah',
-      { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 3600 },
+      'alex',
+      { latitude: 39.69, longitude: -104.92, updated_at: nowSec - 3600 },
       now
     );
     expect(m?.freshness).toBe('stale');
@@ -62,8 +62,8 @@ describe('classifyLocation', () => {
 
   it('ages a re-sent fix by when it was taken, not when it arrived', () => {
     const m = classifyLocation(
-      'michele',
-      { latitude: 33.4, longitude: -112.0, timestamp: nowSec - 3600, updated_at: nowSec - 5 },
+      'sam',
+      { latitude: 39.69, longitude: -104.92, timestamp: nowSec - 3600, updated_at: nowSec - 5 },
       now
     );
     expect(m?.freshness).toBe('stale');
@@ -81,54 +81,54 @@ describe('clustering nearby members', () => {
 
   it('measures distance between coordinates', () => {
     // ~111 m per 0.001 degrees of latitude
-    const d = distanceMeters(33.0, -112.0, 33.001, -112.0);
+    const d = distanceMeters(39.29, -104.92, 39.291, -104.92);
     expect(d).toBeGreaterThan(100);
     expect(d).toBeLessThan(125);
   });
 
   it('collapses one phone posting under two keys into a single pin', () => {
     const members = [
-      { userId: 'jeremiah', lat: 33.4484, lon: -112.074, accuracy: 15, ageMs: 20_000, freshness: 'live' as const },
-      { userId: 'default', lat: 33.44845, lon: -112.07403, accuracy: 60, ageMs: 200_000, freshness: 'recent' as const },
+      { userId: 'alex', lat: 39.7384, lon: -104.994, accuracy: 15, ageMs: 20_000, freshness: 'live' as const },
+      { userId: 'default', lat: 39.73845, lon: -104.99403, accuracy: 60, ageMs: 200_000, freshness: 'recent' as const },
     ];
     const clusters = clusterMembers(members);
     expect(clusters).toHaveLength(1);
     // the freshest member leads
-    expect(clusters[0].lead.userId).toBe('jeremiah');
+    expect(clusters[0].lead.userId).toBe('alex');
     expect(clusters[0].members.map((m) => m.userId)).toContain('default');
   });
 
   it('keeps genuinely separate members apart', () => {
     const members = [
-      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
-      { userId: 'b', lat: 33.5, lon: -112.1, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'a', lat: 39.7384, lon: -104.994, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 39.79, lon: -105.02, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
     ];
     expect(clusterMembers(members)).toHaveLength(2);
   });
 
   it('brings people in the same place together however far the fixes scatter', () => {
-    const home = { id: 'zone.home', name: 'Home', lat: 33.45, lon: -112.08, radius: 10000 };
+    const home = { id: 'zone.home', name: 'Home', lat: 39.74, lon: -105.00, radius: 10000 };
     // Same as the "separate" pair above: ~7 km apart, so distance alone would
     // never merge them - but both are inside home.
     const members = [
-      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
-      { userId: 'b', lat: 33.5, lon: -112.1, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'a', lat: 39.7384, lon: -104.994, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 39.79, lon: -105.02, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
     ];
     expect(clusterMembers(members, 60, (m) => placeKeyFor(m, [home]))).toHaveLength(1);
   });
 
   it('names the smallest place a point is standing in', () => {
-    const town = { id: 'zone.town', name: 'Town', lat: 33.45, lon: -112.08, radius: 5000 };
-    const school = { id: 'zone.school', name: 'School', lat: 33.4484, lon: -112.074, radius: 100 };
-    expect(placeKeyFor({ lat: 33.4484, lon: -112.074 }, [town, school])).toBe('zone.school');
-    expect(placeKeyFor({ lat: 34.0, lon: -112.0 }, [town, school])).toBeNull();
+    const town = { id: 'zone.town', name: 'Town', lat: 39.74, lon: -105.00, radius: 5000 };
+    const school = { id: 'zone.school', name: 'School', lat: 39.7384, lon: -104.994, radius: 100 };
+    expect(placeKeyFor({ lat: 39.7384, lon: -104.994 }, [town, school])).toBe('zone.school');
+    expect(placeKeyFor({ lat: 34.0, lon: -104.92 }, [town, school])).toBeNull();
   });
 
   it('groups pins that would overlap on screen, with no place and beyond the metre radius', () => {
     // ~400 m apart and no saved place covers them: metres alone keep them apart.
     const members = [
-      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
-      { userId: 'b', lat: 33.4520, lon: -112.074, accuracy: 10, ageMs: 5_000, freshness: 'live' as const },
+      { userId: 'a', lat: 39.7384, lon: -104.994, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 39.7420, lon: -104.994, accuracy: 10, ageMs: 5_000, freshness: 'live' as const },
     ];
     expect(clusterMembers(members, 150)).toHaveLength(2);
     // Zoomed out, ~10 m to the pixel: 40 px apart, so the avatars would overlap.
@@ -145,9 +145,9 @@ describe('clustering nearby members', () => {
     // a-b and b-c are each ~110 m apart; a-c is ~220 m. A greedy pass that saw
     // a, then c, then b left c on its own pin right next to the group.
     const members = [
-      { userId: 'a', lat: 33.0, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
-      { userId: 'c', lat: 33.002, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
-      { userId: 'b', lat: 33.001, lon: -112.0, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'a', lat: 39.29, lon: -104.92, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'c', lat: 39.292, lon: -104.92, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 39.291, lon: -104.92, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
     ];
     const clusters = clusterMembers(members, 150);
     expect(clusters).toHaveLength(1);
@@ -169,8 +169,8 @@ describe('clustering nearby members', () => {
 
   it('ignores staleness when distance is what matters', () => {
     const m = classifyLocation(
-      'jeremiah',
-      { latitude: 33.4484, longitude: -112.074, updated_at: nowSec - 10 },
+      'alex',
+      { latitude: 39.7384, longitude: -104.994, updated_at: nowSec - 10 },
       now
     );
     expect(m).not.toBeNull();
@@ -183,7 +183,7 @@ describe('buildLiveMembers', () => {
 
   it('keeps a stale member as a dimmed last-seen pin', () => {
     const members = buildLiveMembers(
-      { jeremiah: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 3600 } },
+      { alex: { latitude: 39.69, longitude: -104.92, updated_at: nowSec - 3600 } },
       now
     );
     expect(members).toHaveLength(1);
@@ -192,7 +192,7 @@ describe('buildLiveMembers', () => {
 
   it('drops a member whose last fix is older than the 24 h cap', () => {
     const members = buildLiveMembers(
-      { ghost: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - STALE_MAX_AGE_MS / 1000 - 60 } },
+      { ghost: { latitude: 39.69, longitude: -104.92, updated_at: nowSec - STALE_MAX_AGE_MS / 1000 - 60 } },
       now
     );
     expect(members).toHaveLength(0);
@@ -215,16 +215,16 @@ describe('LiveFamilyMap', () => {
     server.use(
       http.get('/api/users/location/all', () =>
         HttpResponse.json({
-          jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
-          work: { latitude: 33.5, longitude: -112.1, accuracy: 40, updated_at: nowSec - 300 },
+          alex: { latitude: 39.7384, longitude: -104.994, accuracy: 15, updated_at: nowSec - 20 },
+          work: { latitude: 39.79, longitude: -105.02, accuracy: 40, updated_at: nowSec - 300 },
         })
       ),
       http.get('/api/users/family-directory', () =>
         HttpResponse.json([
           {
-            username: 'jeremiah',
-            display_name: 'Jeremiah',
-            nextcloud_user: 'jeremiah',
+            username: 'alex',
+            display_name: 'Alex',
+            nextcloud_user: 'alex',
             avatar: 'preset:jonahs-whale',
           },
         ])
@@ -260,7 +260,7 @@ describe('LiveFamilyMap', () => {
     expect(kinds).toContain('preset');
     expect(kinds).toContain('initials');
     const picture = pins.find((pin) => pin.getAttribute('data-avatar-kind') === 'preset');
-    expect(picture).toHaveAttribute('aria-label', 'Jeremiah');
+    expect(picture).toHaveAttribute('aria-label', 'Alex');
     expect(picture?.textContent).toContain('🐋');
   });
 
@@ -279,8 +279,8 @@ describe('LiveFamilyMap', () => {
       http.get('/api/users/location/all', () =>
         HttpResponse.json({
           offline_user: {
-            latitude: 33.4,
-            longitude: -112.0,
+            latitude: 39.69,
+            longitude: -104.92,
             updated_at: nowSec - 60 * 60,
           },
         })
@@ -301,8 +301,8 @@ describe('LiveFamilyMap', () => {
       http.get('/api/users/location/all', () =>
         HttpResponse.json({
           offline_user: {
-            latitude: 33.4,
-            longitude: -112.0,
+            latitude: 39.69,
+            longitude: -104.92,
             updated_at: nowSec - 60 * 60,
           },
         })
@@ -322,8 +322,8 @@ describe('LiveFamilyMap', () => {
     server.use(
       http.get('/api/users/location/all', () =>
         HttpResponse.json({
-          jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
-          offline_user: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 60 * 60 },
+          alex: { latitude: 39.7384, longitude: -104.994, accuracy: 15, updated_at: nowSec - 20 },
+          offline_user: { latitude: 39.69, longitude: -104.92, updated_at: nowSec - 60 * 60 },
         })
       )
     );
@@ -337,12 +337,12 @@ describe('LiveFamilyMap', () => {
   it('shows both people when they share a location', async () => {
     server.use(
       http.get('/api/users/location/all', () => HttpResponse.json({
-        jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
-        michele: { latitude: 33.4484, longitude: -112.074, accuracy: 12, updated_at: nowSec - 30 },
+        alex: { latitude: 39.7384, longitude: -104.994, accuracy: 15, updated_at: nowSec - 20 },
+        sam: { latitude: 39.7384, longitude: -104.994, accuracy: 12, updated_at: nowSec - 30 },
       })),
       http.get('/api/users/family-directory', () => HttpResponse.json([
-        { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
-        { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: '' },
+        { username: 'alex', display_name: 'Alex', nextcloud_user: 'alex', avatar: 'preset:jonahs-whale' },
+        { username: 'sam', display_name: 'Sam', nextcloud_user: 'sam', avatar: '' },
       ])),
     );
     renderMap();
@@ -359,12 +359,12 @@ describe('LiveFamilyMap', () => {
   it('opens a group into separate pins on tap, and folds it back on zoom', async () => {
     server.use(
       http.get('/api/users/location/all', () => HttpResponse.json({
-        jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
-        michele: { latitude: 33.44842, longitude: -112.07401, accuracy: 12, updated_at: nowSec - 30 },
+        alex: { latitude: 39.7384, longitude: -104.994, accuracy: 15, updated_at: nowSec - 20 },
+        sam: { latitude: 39.73842, longitude: -104.99401, accuracy: 12, updated_at: nowSec - 30 },
       })),
       http.get('/api/users/family-directory', () => HttpResponse.json([
-        { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
-        { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: '' },
+        { username: 'alex', display_name: 'Alex', nextcloud_user: 'alex', avatar: 'preset:jonahs-whale' },
+        { username: 'sam', display_name: 'Sam', nextcloud_user: 'sam', avatar: '' },
       ])),
     );
     renderMap();
@@ -397,8 +397,8 @@ describe('LiveFamilyMap', () => {
   });
 
   describe('saved places', () => {
-    const HOME: MapPlace = { id: 'zone.home', name: 'Home', lat: 33.4484, lon: -112.074, radius: 100 };
-    const SCHOOL: MapPlace = { id: 'place.abc', name: 'Lincoln Elementary', lat: 33.47, lon: -112.05, radius: 150 };
+    const HOME: MapPlace = { id: 'zone.home', name: 'Home', lat: 39.7384, lon: -104.994, radius: 100 };
+    const SCHOOL: MapPlace = { id: 'place.abc', name: 'Lincoln Elementary', lat: 39.76, lon: -104.97, radius: 150 };
 
     it('draws each place as a round pin with an icon for what it is', async () => {
       server.use(http.get('/api/users/location/all', () => HttpResponse.json({})));
@@ -412,14 +412,14 @@ describe('LiveFamilyMap', () => {
       server.use(
         http.get('/api/users/location/all', () => HttpResponse.json({
           // Indoor fixes scattered around the house, and one person elsewhere.
-          jeremiah: { latitude: 33.4486, longitude: -112.0742, accuracy: 15, updated_at: nowSec - 20 },
-          michele: { latitude: 33.4479, longitude: -112.0736, accuracy: 60, updated_at: nowSec - 30 },
-          kaleb: { latitude: 33.6, longitude: -111.9, accuracy: 20, updated_at: nowSec - 40 },
+          alex: { latitude: 39.7386, longitude: -104.9942, accuracy: 15, updated_at: nowSec - 20 },
+          sam: { latitude: 39.7379, longitude: -104.9936, accuracy: 60, updated_at: nowSec - 30 },
+          robin: { latitude: 39.89, longitude: -104.82, accuracy: 20, updated_at: nowSec - 40 },
         })),
         http.get('/api/users/family-directory', () => HttpResponse.json([
-          { username: 'jeremiah', display_name: 'Jeremiah', nextcloud_user: 'jeremiah', avatar: 'preset:jonahs-whale' },
-          { username: 'michele', display_name: 'Michele Parker', nextcloud_user: 'michele', avatar: '' },
-          { username: 'kaleb', display_name: 'Kaleb', nextcloud_user: 'kaleb', avatar: '' },
+          { username: 'alex', display_name: 'Alex', nextcloud_user: 'alex', avatar: 'preset:jonahs-whale' },
+          { username: 'sam', display_name: 'Sam Parker', nextcloud_user: 'sam', avatar: '' },
+          { username: 'robin', display_name: 'Robin', nextcloud_user: 'robin', avatar: '' },
         ])),
       );
       renderMap([HOME]);
@@ -429,29 +429,29 @@ describe('LiveFamilyMap', () => {
         return found as HTMLElement;
       });
       expect(pill.getAttribute('data-avatar-count')).toBe('2');
-      expect(pill.getAttribute('aria-label')).toBe('Jeremiah, Michele Parker at Home');
-      // Each person is their own tile: picture, or initials ("MP").
+      expect(pill.getAttribute('aria-label')).toBe('Alex, Sam Parker at Home');
+      // Each person is their own tile: picture, or initials ("SP").
       const tiles = [...pill.querySelectorAll('[data-testid="map-avatar-marker"]')];
       expect(tiles).toHaveLength(2);
-      expect(tiles.map((t) => t.textContent)).toContain('MP');
+      expect(tiles.map((t) => t.textContent)).toContain('SP');
       // Anchored above the pin, not on top of it.
       const marker = pill.closest('.leaflet-marker-icon') as HTMLElement;
       expect(parseFloat(marker.style.marginTop)).toBeLessThan(-parseFloat(marker.style.height));
-      // Kaleb is not at a place: his own pin, not in the pill.
+      // Robin is not at a place: his own pin, not in the pill.
       expect(document.querySelectorAll('.leaflet-marker-icon [data-testid="map-avatar-marker"]')).toHaveLength(3);
 
       // Tap until the map's first fit has settled (see the group test above).
       await waitFor(() => {
         const content = document.querySelector('.leaflet-popup-content')?.textContent ?? '';
         if (!content) fireEvent.click(document.querySelector('[data-testid="map-place-group"]')!.closest('.leaflet-marker-icon') as HTMLElement);
-        expect(content).toContain('Michele Parker');
+        expect(content).toContain('Sam Parker');
       });
       expect(document.querySelector('.leaflet-popup-content')?.textContent).toContain('Home');
     });
 
     it('folds a crowd beyond five into +N', async () => {
       const crowd = Object.fromEntries(
-        ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7'].map((u) => [u, { latitude: 33.4484, longitude: -112.074, updated_at: nowSec - 10 }]),
+        ['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7'].map((u) => [u, { latitude: 39.7384, longitude: -104.994, updated_at: nowSec - 10 }]),
       );
       server.use(http.get('/api/users/location/all', () => HttpResponse.json(crowd)));
       renderMap([HOME]);
@@ -488,25 +488,25 @@ describe('LiveFamilyMap', () => {
 });
 
 describe('map style', () => {
-  // Phoenix, 2026-06-21: sunrise ~05:20, sunset ~19:42 local (UTC-7).
-  const PHX = { lat: 33.45, lon: -112.07 };
+  // Denver, 2026-06-21: sunrise ~05:32, sunset ~20:31 local (MDT, UTC-6).
+  const CITY = { lat: 39.74, lon: -104.99 };
   const at = (iso: string) => Date.parse(iso);
 
   it('works out sunrise and sunset to within a few minutes', () => {
-    const sun = sunTimes(at('2026-06-21T19:00:00Z'), PHX.lat, PHX.lon)!;
-    expect(Math.abs(sun.sunrise - at('2026-06-21T12:20:00Z'))).toBeLessThan(5 * 60_000);
-    expect(Math.abs(sun.sunset - at('2026-06-22T02:42:00Z'))).toBeLessThan(5 * 60_000);
+    const sun = sunTimes(at('2026-06-21T19:00:00Z'), CITY.lat, CITY.lon)!;
+    expect(Math.abs(sun.sunrise - at('2026-06-21T11:32:00Z'))).toBeLessThan(5 * 60_000);
+    expect(Math.abs(sun.sunset - at('2026-06-22T02:31:00Z'))).toBeLessThan(5 * 60_000);
   });
 
   it('auto is light by day and dark after sunset', () => {
-    expect(resolveMapScheme('auto', at('2026-06-21T20:00:00Z'), PHX)).toBe('light'); // 1 pm
-    expect(resolveMapScheme('auto', at('2026-06-22T03:30:00Z'), PHX)).toBe('dark'); // 8:30 pm
-    expect(resolveMapScheme('auto', at('2026-06-21T11:00:00Z'), PHX)).toBe('dark'); // 4 am
+    expect(resolveMapScheme('auto', at('2026-06-21T20:00:00Z'), CITY)).toBe('light'); // 2 pm
+    expect(resolveMapScheme('auto', at('2026-06-22T03:30:00Z'), CITY)).toBe('dark'); // 9:30 pm
+    expect(resolveMapScheme('auto', at('2026-06-21T11:00:00Z'), CITY)).toBe('dark'); // 5 am
   });
 
   it('a fixed choice wins over the clock', () => {
-    expect(resolveMapScheme('dark', at('2026-06-21T20:00:00Z'), PHX)).toBe('dark');
-    expect(resolveMapScheme('light', at('2026-06-22T03:30:00Z'), PHX)).toBe('light');
+    expect(resolveMapScheme('dark', at('2026-06-21T20:00:00Z'), CITY)).toBe('dark');
+    expect(resolveMapScheme('light', at('2026-06-22T03:30:00Z'), CITY)).toBe('light');
   });
 
   it('falls back to 7 pm - 6 am without a position', () => {

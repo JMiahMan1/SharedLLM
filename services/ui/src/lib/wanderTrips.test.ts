@@ -30,8 +30,8 @@ import type { Trip } from '../types/api';
 
 const trip = (over: Partial<Trip> = {}): Trip => ({
   id: 't1',
-  user_id: 'person.jeremiah',
-  user_name: 'Jeremiah',
+  user_id: 'person.alex',
+  user_name: 'Alex',
   mpg: 25,
   cost_per_gallon: 3.65,
   start_time: 0,
@@ -48,11 +48,11 @@ const trip = (over: Partial<Trip> = {}): Trip => ({
 
 describe('tripOwner', () => {
   it('strips the geo entity prefix', () => {
-    expect(tripOwner({ user_id: 'person.jeremiah' })).toBe('jeremiah');
+    expect(tripOwner({ user_id: 'person.alex' })).toBe('alex');
   });
 
   it('lower-cases', () => {
-    expect(tripOwner({ user_id: 'PERSON.Michele' })).toBe('michele');
+    expect(tripOwner({ user_id: 'PERSON.Sam' })).toBe('sam');
   });
 
   it('is empty for a missing owner', () => {
@@ -62,15 +62,15 @@ describe('tripOwner', () => {
 
 describe('isTripOwner', () => {
   it('matches the owner through the entity prefix', () => {
-    expect(isTripOwner(trip(), 'jeremiah')).toBe(true);
+    expect(isTripOwner(trip(), 'alex')).toBe(true);
   });
 
   it('ignores case on both sides', () => {
-    expect(isTripOwner(trip({ user_id: 'person.Michele' }), 'michele')).toBe(true);
+    expect(isTripOwner(trip({ user_id: 'person.Sam' }), 'sam')).toBe(true);
   });
 
   it('rejects a different user', () => {
-    expect(isTripOwner(trip(), 'michele')).toBe(false);
+    expect(isTripOwner(trip(), 'sam')).toBe(false);
   });
 
   it('denies when nobody is signed in', () => {
@@ -81,12 +81,12 @@ describe('isTripOwner', () => {
   it('does not grant ownership to an admin who is not the owner', () => {
     // Geo's update_trip has no admin bypass, so pretending otherwise produced a
     // dead UI affordance that always 403'd.
-    expect(isTripOwner(trip({ user_id: 'person.michele' }), 'jeremiah')).toBe(false);
+    expect(isTripOwner(trip({ user_id: 'person.sam' }), 'alex')).toBe(false);
   });
 
   it('no longer has a magic username named admin', () => {
-    // The real admin is `jeremiah`; there is no account called `admin`.
-    expect(isTripOwner(trip({ user_id: 'person.michele' }), 'admin')).toBe(false);
+    // The real admin is `alex`; there is no account called `admin`.
+    expect(isTripOwner(trip({ user_id: 'person.sam' }), 'admin')).toBe(false);
   });
 
   it('still lets a genuine owner called admin edit their own trip', () => {
@@ -96,11 +96,11 @@ describe('isTripOwner', () => {
 
 describe('displayName', () => {
   it('prefers the server-supplied name', () => {
-    expect(displayName(trip())).toBe('Jeremiah');
+    expect(displayName(trip())).toBe('Alex');
   });
 
   it('derives a name when the server sent none', () => {
-    expect(displayName({ user_id: 'person.michele', user_name: '' })).toBe('Michele');
+    expect(displayName({ user_id: 'person.sam', user_name: '' })).toBe('Sam');
   });
 
   it('never renders an empty label', () => {
@@ -109,15 +109,15 @@ describe('displayName', () => {
 });
 
 describe('filterTrips', () => {
-  const mine = trip({ id: 'a', user_id: 'person.jeremiah' });
-  const theirs = trip({ id: 'b', user_id: 'person.michele' });
+  const mine = trip({ id: 'a', user_id: 'person.alex' });
+  const theirs = trip({ id: 'b', user_id: 'person.sam' });
 
   it('returns everything on the all tab', () => {
-    expect(filterTrips([mine, theirs], 'all', 'michele')).toHaveLength(2);
+    expect(filterTrips([mine, theirs], 'all', 'sam')).toHaveLength(2);
   });
 
   it('returns only the caller’s own trips on the mine tab', () => {
-    const filtered = filterTrips([mine, theirs], 'mine', 'michele');
+    const filtered = filterTrips([mine, theirs], 'mine', 'sam');
     expect(filtered.map((t) => t.id)).toEqual(['b']);
   });
 
@@ -216,13 +216,13 @@ describe('formatTripLocation', () => {
   });
 
   it('falls back to coordinates', () => {
-    expect(formatTripLocation({ latitude: 33.16, longitude: -111.56 }, 'Start')).toBe(
-      '33.1600, -111.5600',
+    expect(formatTripLocation({ latitude: 39.45, longitude: -104.48 }, 'Start')).toBe(
+      '39.4500, -104.4800',
     );
   });
 
   it('accepts the legacy lat/lon spelling', () => {
-    expect(formatTripLocation({ lat: 33.16, lon: -111.56 }, 'Start')).toBe('33.1600, -111.5600');
+    expect(formatTripLocation({ lat: 39.45, lon: -104.48 }, 'Start')).toBe('39.4500, -104.4800');
   });
 
   it('falls back to the zone, then the generic label', () => {
@@ -318,7 +318,7 @@ describe('groupTrips', () => {
   // Local-time dates: grouping follows the phone's calendar, not UTC.
   const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime() / 1000;
   const t = (id: string, start: number, miles = 10, cost = 1): Trip =>
-    ({ id, user_id: 'person.jeremiah', start_time: start, end_time: start + 600, distance_miles: miles, trip_cost_usd: cost, activity_type: 'driving' }) as Trip;
+    ({ id, user_id: 'person.alex', start_time: start, end_time: start + 600, distance_miles: miles, trip_cost_usd: cost, activity_type: 'driving' }) as Trip;
   const NOW = new Date(2026, 9, 15, 18); // Thu 15 Oct 2026
   const trips = [
     t('today', at(2026, 10, 15, 8)),
@@ -366,7 +366,7 @@ describe('groupTrips', () => {
 describe('tripsForPeriod', () => {
   const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime() / 1000;
   const t = (id: string, start: number): Trip =>
-    ({ id, user_id: 'person.jeremiah', start_time: start, end_time: start + 600, distance_miles: 5, trip_cost_usd: 1, activity_type: 'driving' }) as Trip;
+    ({ id, user_id: 'person.alex', start_time: start, end_time: start + 600, distance_miles: 5, trip_cost_usd: 1, activity_type: 'driving' }) as Trip;
   const NOW = new Date(2026, 9, 15, 18); // Thu 15 Oct 2026
   // The real trips on the server, by local date.
   const trips = [

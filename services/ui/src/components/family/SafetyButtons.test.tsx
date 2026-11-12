@@ -21,7 +21,7 @@ vi.mock('../../services/api', async (importOriginal) => {
 vi.mock('../../lib/freshPosition', () => ({ freshPosition: vi.fn() }));
 import { freshPosition } from '../../lib/freshPosition';
 const position = vi.mocked(freshPosition);
-const HERE = { lat: 33.3, lon: -111.6, accuracy: 8, at: 1_793_000_000_000 };
+const HERE = { lat: 39.59, lon: -104.52, accuracy: 8, at: 1_793_000_000_000 };
 
 const sendOnMyWay = vi.mocked(api.sendOnMyWay);
 const sendSos = vi.mocked(api.sendSos);

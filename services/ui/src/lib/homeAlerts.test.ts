@@ -4,13 +4,13 @@ import { cleanHomeAlert, parseHomeAlerts, removeHomeAlert, upsertHomeAlert } fro
 describe('homeAlerts', () => {
   it('parses the setting and drops anything malformed', () => {
     const raw = JSON.stringify([
-      { entity_id: 'lock.back', event: 'door_unlocked_night', people: ['Michele'], minutes: '10' },
+      { entity_id: 'lock.back', event: 'door_unlocked_night', people: ['Sam'], minutes: '10' },
       { entity_id: 'nodot', event: 'doorbell' },
       { entity_id: 'binary_sensor.x', event: 'bogus' },
       'junk',
     ]);
     expect(parseHomeAlerts(raw)).toEqual([
-      { entity_id: 'lock.back', event: 'door_unlocked_night', people: ['michele'], minutes: 10 },
+      { entity_id: 'lock.back', event: 'door_unlocked_night', people: ['sam'], minutes: 10 },
     ]);
     expect(parseHomeAlerts('not json')).toEqual([]);
     expect(parseHomeAlerts(undefined)).toEqual([]);

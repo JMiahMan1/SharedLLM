@@ -93,8 +93,8 @@ describe('VoiceSignaturePanel', () => {
       http.get('/api/users/me/voice', () => HttpResponse.json(status(3))),
       http.post('/api/users/me/voice/check', () =>
         HttpResponse.json({
-          matched: true, matched_username: 'jeremiah', matched_name: 'Jeremiah', score: 0.93,
-          threshold: 0.8, margin: 0.2, candidates: [{ username: 'jeremiah', name: 'Jeremiah', score: 0.93 }], is_me: true,
+          matched: true, matched_username: 'alex', matched_name: 'Alex', score: 0.93,
+          threshold: 0.8, margin: 0.2, candidates: [{ username: 'alex', name: 'Alex', score: 0.93 }], is_me: true,
         }),
       ),
     );
@@ -111,13 +111,13 @@ describe('VoiceSignaturePanel', () => {
       http.post('/api/users/me/voice/check', () =>
         HttpResponse.json({
           matched: false, matched_username: null, matched_name: null, score: 0.71, threshold: 0.8, margin: 0.1,
-          candidates: [{ username: 'michele', name: 'Michele', score: 0.71 }], is_me: false,
+          candidates: [{ username: 'sam', name: 'Sam', score: 0.71 }], is_me: false,
         }),
       ),
     );
     renderWithProviders(<VoiceSignaturePanel />);
     await recordAndStop(/Test: who am I/);
-    expect(await screen.findByTestId('voice-check')).toHaveTextContent('Closest is Michele at 71%');
+    expect(await screen.findByTestId('voice-check')).toHaveTextContent('Closest is Sam at 71%');
   });
 
   it('erases the profile only after a second, explicit tap', async () => {

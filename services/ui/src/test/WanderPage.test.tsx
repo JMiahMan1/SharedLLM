@@ -38,8 +38,8 @@ import Wander from '../pages/Wander';
 
 const trip = (over: Partial<Trip> = {}): Trip => ({
   id: 't1',
-  user_id: 'person.jeremiah',
-  user_name: 'Jeremiah',
+  user_id: 'person.alex',
+  user_name: 'Alex',
   mpg: 25,
   cost_per_gallon: 3.65,
   start_time: 1750000000,
@@ -97,14 +97,14 @@ describe('Wander page', () => {
 
   it('renders a trip returned by the server without client-side permission guessing', async () => {
     // The server is now the authority on what a caller may see. This trip is
-    // owned by `jeremiah` while the test identity is `default`, and it must
+    // owned by `alex` while the test identity is `default`, and it must
     // still render -- the old page re-derived permission from a client-side
     // assignment list and would have greyed this out.
     useWanderHandlers({ trips: () => HttpResponse.json({ trips: [trip()], total_trips: 1 }) });
     renderWithProviders(<Wander />);
 
     expect(await screen.findByText(/family trips/i)).toBeInTheDocument();
-    expect(screen.getAllByText('Jeremiah').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Alex').length).toBeGreaterThan(0);
   });
 
   it("asks for the family's trips, so My trips and Family trips differ", async () => {
@@ -113,14 +113,14 @@ describe('Wander page', () => {
       http.get('/api/geo/trips', ({ request }) => {
         asked.push(new URL(request.url).search);
         return HttpResponse.json({
-          trips: [trip(), trip({ id: 't2', user_id: 'michele', user_name: 'Michele', start_time: 1750100000 })],
+          trips: [trip(), trip({ id: 't2', user_id: 'sam', user_name: 'Sam', start_time: 1750100000 })],
           total_trips: 2,
         });
       }),
     );
     renderWithProviders(<Wander />);
     await waitFor(() => expect(asked.some((q) => q.includes('scope=family'))).toBe(true));
-    expect(await screen.findAllByText('Michele')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Sam')).not.toHaveLength(0);
   });
 
   it("shows each person's live app position on their card, not HA's stale person", async () => {
@@ -129,21 +129,21 @@ describe('Wander page', () => {
       http.get('/api/geo/people', () =>
         HttpResponse.json({
           features: [
-            { properties: { entity_id: 'person.michele', friendly_name: 'Michele', state: 'home', last_updated: '2026-10-14T18:00:00Z' } },
+            { properties: { entity_id: 'person.sam', friendly_name: 'Sam', state: 'home', last_updated: '2026-10-14T18:00:00Z' } },
           ],
         }),
       ),
       http.get('/api/geo/zones', () =>
         HttpResponse.json({
-          features: [{ properties: { entity_id: 'zone.work', friendly_name: 'Work', latitude: 33.3, longitude: -111.9, radius: 150 } }],
+          features: [{ properties: { entity_id: 'zone.work', friendly_name: 'Work', latitude: 39.59, longitude: -104.82, radius: 150 } }],
         }),
       ),
       http.get('/api/users/location/all', () =>
-        HttpResponse.json({ michele: { latitude: 33.3001, longitude: -111.9001, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
+        HttpResponse.json({ sam: { latitude: 39.5901, longitude: -104.8201, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
       ),
     );
     renderWithProviders(<Wander />);
-    const name = await screen.findAllByText('Michele');
+    const name = await screen.findAllByText('Sam');
     const card = name[0].closest('[role="button"]') ?? name[0].parentElement!.parentElement!;
     await waitFor(() => expect(card.textContent).toContain('Work'));
     expect(card.textContent).not.toContain('Home');
@@ -153,18 +153,18 @@ describe('Wander page', () => {
     const fresh = Date.now() / 1000 - 30;
     server.use(
       http.get('/api/users/location/all', () =>
-        HttpResponse.json({ michele: { latitude: 33.3001, longitude: -111.9001, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
+        HttpResponse.json({ sam: { latitude: 39.5901, longitude: -104.8201, accuracy: 12, timestamp: fresh, updated_at: fresh } }),
       ),
       http.get('/api/users/family-directory', () =>
         HttpResponse.json([
-          { username: 'michele', display_name: 'Michele', nextcloud_user: 'michele', avatar: 'preset:jonahs-whale' },
+          { username: 'sam', display_name: 'Sam', nextcloud_user: 'sam', avatar: 'preset:jonahs-whale' },
         ]),
       ),
     );
     renderWithProviders(<Wander />);
-    const name = await screen.findAllByText('Michele');
+    const name = await screen.findAllByText('Sam');
     const card = (name[0].closest('[role="button"]') ?? name[0].parentElement!.parentElement!) as HTMLElement;
-    expect(await within(card).findByTestId('user-avatar-preset')).toHaveAccessibleName("Michele: Jonah's Whale");
+    expect(await within(card).findByTestId('user-avatar-preset')).toHaveAccessibleName("Sam: Jonah's Whale");
   });
 
   it('lists the five most recent trips, then each period on its own tab', async () => {
@@ -204,14 +204,14 @@ describe('Wander page', () => {
     useWanderHandlers({
       trips: () =>
         HttpResponse.json({
-          trips: [trip({ user_id: 'person.michele', user_name: '' })],
+          trips: [trip({ user_id: 'person.sam', user_name: '' })],
           total_trips: 1,
         }),
     });
     renderWithProviders(<Wander />);
 
-    expect(await screen.findByText('Michele')).toBeInTheDocument();
-    expect(screen.queryByText('person.michele')).not.toBeInTheDocument();
+    expect(await screen.findByText('Sam')).toBeInTheDocument();
+    expect(screen.queryByText('person.sam')).not.toBeInTheDocument();
   });
 
   it('gives filter tabs a touch-sized target and an accessible pressed state', async () => {
@@ -280,7 +280,7 @@ describe('Wander page', () => {
       http.get('/api/geo/people', () =>
         HttpResponse.json({
           features: [
-            { properties: { entity_id: 'person.michele', friendly_name: 'Michele', state: 'school', in_zones: ['zone.school'] } },
+            { properties: { entity_id: 'person.sam', friendly_name: 'Sam', state: 'school', in_zones: ['zone.school'] } },
             { properties: { entity_id: 'person.leo', friendly_name: 'Leo', state: 'school', in_zones: ['zone.school'] } },
           ],
         }),

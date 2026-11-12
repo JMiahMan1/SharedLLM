@@ -43,12 +43,12 @@ public class GamesHubTest {
     @Test
     public void leadersAreTheTopScoresWithMedals() throws Exception {
         JSONObject board = new JSONObject().put("players", new JSONArray()
-            .put(new JSONObject().put("display_name", "Kaleb").put("best_score", 4200))
-            .put(new JSONObject().put("display_name", "Noah").put("best_score", 0))
+            .put(new JSONObject().put("display_name", "Robin").put("best_score", 4200))
+            .put(new JSONObject().put("display_name", "Jordan").put("best_score", 0))
             .put(new JSONObject().put("display_name", "Me").put("best_score", 1250).put("you", true)));
         List<GamesHub.Leader> l = GamesHub.leaders(board, 3);
         assertEquals(2, l.size());
-        assertEquals("🥇 Kaleb", l.get(0).name);
+        assertEquals("🥇 Robin", l.get(0).name);
         assertEquals("1,250", l.get(1).score);
         assertTrue(l.get(1).you);
     }

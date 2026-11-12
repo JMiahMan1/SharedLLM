@@ -87,7 +87,7 @@ describe('EarnTimeControls (a parent)', () => {
   it('saves what steps, exercise and chores earn, keeping the other rules', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: true, rules: { daily_limit_min: 60, bedtime_start: '21:00', bedtime_end: '07:00', paused: true } }));
     vi.mocked(api.setScreenRules).mockResolvedValue({ rules: {} });
-    wrap(<EarnTimeControls username="kid" name="Noah" />);
+    wrap(<EarnTimeControls username="kid" name="Jordan" />);
     fireEvent.change(await screen.findByLabelText('Steps for each block'), { target: { value: '2000' } });
     fireEvent.change(screen.getByLabelText('Minutes each block of steps earns'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('Minutes each approved chore earns'), { target: { value: '15' } });
@@ -102,7 +102,7 @@ describe('EarnTimeControls (a parent)', () => {
 
   it('will not save half a line', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: true, rules: {} }));
-    wrap(<EarnTimeControls username="kid" name="Noah" />);
+    wrap(<EarnTimeControls username="kid" name="Jordan" />);
     fireEvent.change(await screen.findByLabelText('Minutes of exercise for each block'), { target: { value: '15' } });
     expect(screen.getByRole('alert')).toHaveTextContent('Fill in both numbers for exercise');
     expect(screen.getByTestId('earn-save')).toBeDisabled();
@@ -111,7 +111,7 @@ describe('EarnTimeControls (a parent)', () => {
   it('turns earning and chores first off when cleared', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: true, rules: { earn: { chore_min: 10 }, chores_first: true } }));
     vi.mocked(api.setScreenRules).mockResolvedValue({ rules: {} });
-    wrap(<EarnTimeControls username="kid" name="Noah" />);
+    wrap(<EarnTimeControls username="kid" name="Jordan" />);
     fireEvent.change(await screen.findByLabelText('Minutes each approved chore earns'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('earn-chores-first'));
     fireEvent.click(screen.getByTestId('earn-save'));
@@ -120,7 +120,7 @@ describe('EarnTimeControls (a parent)', () => {
 
   it('is read-only for someone who cannot manage the child', async () => {
     vi.mocked(api.getScreenTimeStatus).mockResolvedValue(status({ can_manage: false }));
-    wrap(<EarnTimeControls username="kid" name="Noah" />);
+    wrap(<EarnTimeControls username="kid" name="Jordan" />);
     expect(await screen.findByText('Only their parents can change this.')).toBeInTheDocument();
   });
 });

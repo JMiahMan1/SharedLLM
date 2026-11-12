@@ -42,7 +42,16 @@ jobs:
       run: npx cap add android || true
 
     - name: Build web assets
-      run: npm run build
+      # The app's default server (src/lib/serverDefaults.ts) comes from the
+      # repo variable; without it a new install would have no server.
+      env:
+        VITE_DEFAULT_SERVER_URL: ${{ vars.VITE_DEFAULT_SERVER_URL }}
+      run: |
+        if [ -z "$VITE_DEFAULT_SERVER_URL" ]; then
+          echo "::error::Set the repository variable VITE_DEFAULT_SERVER_URL (the gateway URL new installs use)"
+          exit 1
+        fi
+        npm run build
 
     - name: Sync Capacitor
       run: npx cap sync android

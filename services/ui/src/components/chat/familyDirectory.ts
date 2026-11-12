@@ -44,8 +44,8 @@ const ENTITY_NOISE = new Set(['person', 'user', 'users', 'phone', 'mobile', 'tra
 
 /**
  * Every name a family member might be known by in chat or a map payload.
- * `person.michele_phone` and the app's own `user.michele` key both get back to
- * the account `michele`, so one directory entry covers every spelling.
+ * `person.sam_phone` and the app's own `user.sam` key both get back to
+ * the account `sam`, so one directory entry covers every spelling.
  */
 export function familyLookupKeys(id?: string | null, name?: string | null): string[] {
   const keys = new Set<string>();

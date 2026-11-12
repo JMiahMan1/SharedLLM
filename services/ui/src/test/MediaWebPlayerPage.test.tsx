@@ -136,16 +136,16 @@ describe('Media page: device picker', () => {
           active: null,
           available: [],
           all_players: [
-            { entity_id: 'media_player.office_tv_3', friendly_name: 'Office TV', state: 'idle', ma_player_id: 'up309587157251', icon_kind: 'speaker' },
+            { entity_id: 'media_player.den_tv', friendly_name: 'Office TV', state: 'idle', ma_player_id: 'up100000000001', icon_kind: 'speaker' },
           ],
         },
       })),
     );
     p.state = player({
       listMaPlayers: vi.fn().mockResolvedValue([
-        { player_id: 'up309587157251', name: 'Office TV', available: true, state: 'idle', powered: true },
+        { player_id: 'up100000000001', name: 'Office TV', available: true, state: 'idle', powered: true },
         { player_id: 'upa4e88d93e22f', name: 'RV TV', available: true, state: 'idle', powered: true },
-        { player_id: 'my-web-player', name: "Jeremiah's Web Player (Mobile)", available: true, state: 'idle', powered: true },
+        { player_id: 'my-web-player', name: "Alex's Web Player (Mobile)", available: true, state: 'idle', powered: true },
       ]),
     });
     renderWithProviders(<Media />);
@@ -153,7 +153,7 @@ describe('Media page: device picker', () => {
     expect(await picker.findByRole('button', { name: /RV TV/ })).toBeInTheDocument();
     expect(picker.getAllByRole('button', { name: /Office TV/ })).toHaveLength(1);
     // Our own web player is the "This device" row, not a second entry.
-    expect(picker.queryByRole('button', { name: /Jeremiah's Web Player/ })).not.toBeInTheDocument();
+    expect(picker.queryByRole('button', { name: /Alex's Web Player/ })).not.toBeInTheDocument();
     expect(picker.getByRole('button', { name: /This device/ })).toHaveAttribute('aria-pressed', 'true');
   });
 

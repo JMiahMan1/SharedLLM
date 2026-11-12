@@ -13,11 +13,11 @@ public class SendspinProtocolTest {
 
     @Test
     public void helloAnnouncesTheSamePlayerWithPcmOnly() throws Exception {
-        JSONObject hello = SendspinProtocol.hello("4024", "Jeremiah's Web Player (Mobile)", "Google", "17");
+        JSONObject hello = SendspinProtocol.hello("4024", "Alex's Web Player (Mobile)", "Google", "17");
         assertEquals("client/hello", hello.getString("type"));
         JSONObject p = hello.getJSONObject("payload");
         assertEquals("4024", p.getString("client_id"));
-        assertEquals("Jeremiah's Web Player (Mobile)", p.getString("name"));
+        assertEquals("Alex's Web Player (Mobile)", p.getString("name"));
         assertEquals("player@v1", p.getJSONArray("supported_roles").getString(0));
         JSONObject formats = p.getJSONObject("player@v1_support").getJSONArray("supported_formats").getJSONObject(0);
         assertEquals("pcm", formats.getString("codec"));

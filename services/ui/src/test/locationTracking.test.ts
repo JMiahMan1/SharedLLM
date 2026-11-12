@@ -42,14 +42,14 @@ describe('background location tracking', () => {
   });
 
   it('hands tracking to the native service', async () => {
-    const state = await startBackgroundTracking('michele');
-    expect(p.start).toHaveBeenCalledWith({ username: 'michele', userId: undefined, steps: false });
+    const state = await startBackgroundTracking('sam');
+    expect(p.start).toHaveBeenCalledWith({ username: 'sam', userId: undefined, steps: false });
     expect(state).toEqual({ serviceRunning: true, supported: true });
   });
 
   it('lets the service count steps only when the Steps switch is on', async () => {
-    await startBackgroundTracking('michele', { steps: true });
-    expect(p.start).toHaveBeenLastCalledWith({ username: 'michele', userId: undefined, steps: true });
+    await startBackgroundTracking('sam', { steps: true });
+    expect(p.start).toHaveBeenLastCalledWith({ username: 'sam', userId: undefined, steps: true });
   });
 
   // A web bundle can be newer than the installed APK, so the plugin may simply
@@ -58,7 +58,7 @@ describe('background location tracking', () => {
     mocks.registerPlugin.mockImplementation(() => {
       throw new Error('plugin is not implemented on android');
     });
-    await expect(startBackgroundTracking('michele')).resolves.toEqual({
+    await expect(startBackgroundTracking('sam')).resolves.toEqual({
       serviceRunning: false,
       supported: false,
     });
@@ -66,7 +66,7 @@ describe('background location tracking', () => {
 
   it('never throws when the service refuses to start', async () => {
     p.start.mockRejectedValue(new Error('ForegroundServiceStartNotAllowedException'));
-    await expect(startBackgroundTracking('michele')).resolves.toEqual({
+    await expect(startBackgroundTracking('sam')).resolves.toEqual({
       serviceRunning: false,
       supported: true,
     });
@@ -75,7 +75,7 @@ describe('background location tracking', () => {
   it('does nothing off-device', async () => {
     mocks.isNative.mockReturnValue(false);
     expect(getLocationTracking()).toBeNull();
-    await startBackgroundTracking('michele');
+    await startBackgroundTracking('sam');
     expect(mocks.registerPlugin).not.toHaveBeenCalled();
   });
 
@@ -94,13 +94,13 @@ describe('background location tracking', () => {
   });
 
   it('mirrors the identity natively for the service to attribute uploads', async () => {
-    await mirrorIdentity('michele');
-    expect(mocks.setIdentity).toHaveBeenCalledWith({ username: 'michele', userId: undefined });
+    await mirrorIdentity('sam');
+    expect(mocks.setIdentity).toHaveBeenCalledWith({ username: 'sam', userId: undefined });
   });
 
   it('does not mirror identity off-device', async () => {
     mocks.isNative.mockReturnValue(false);
-    await mirrorIdentity('michele');
+    await mirrorIdentity('sam');
     expect(mocks.setIdentity).not.toHaveBeenCalled();
   });
 });

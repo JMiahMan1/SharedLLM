@@ -125,9 +125,9 @@ describe('the web player connection', () => {
   });
 
   it('names the player after the person, even from a profile stored twice-encoded', async () => {
-    stored.values = { jarvis_user: JSON.stringify(JSON.stringify({ display_name: 'Jeremiah' })) };
+    stored.values = { jarvis_user: JSON.stringify(JSON.stringify({ display_name: 'Alex' })) };
     await connected();
-    expect(FakeSocket.clientNames.at(-1)).toMatch(/^Jeremiah's Web Player/);
+    expect(FakeSocket.clientNames.at(-1)).toMatch(/^Alex's Web Player/);
   });
 
   it('never names the player with a stored blob of data', async () => {

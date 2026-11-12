@@ -11,7 +11,7 @@ import type { Trip, TripLocation } from '../types/api';
 /**
  * The username portion of a trip's owner id.
  *
- * Geo stores `user_id` as a prefixed form (`person.jeremiah`), so comparisons
+ * Geo stores `user_id` as a prefixed form (`person.alex`), so comparisons
  * have to normalise both sides rather than string-compare.
  */
 export function tripOwner(trip: Pick<Trip, 'user_id'>): string {
@@ -23,7 +23,7 @@ export function tripOwner(trip: Pick<Trip, 'user_id'>): string {
  *
  * Only the owner may. The previous version also granted this to a user
  * literally named `admin` -- which does not exist here (the admin is
- * `jeremiah`), so the branch was dead code that only ever produced a 403 toast
+ * `alex`), so the branch was dead code that only ever produced a 403 toast
  * from geo. An admin is still *not* the owner of someone else's trip, so
  * ownership is deliberately not widened to admins: the family circle is for
  * seeing where people went, not for rewriting their trips.

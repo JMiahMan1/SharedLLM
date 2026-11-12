@@ -16,8 +16,8 @@ vi.mock('../components/ui/EntitySearchDropdown', () => ({
 
 const users: UserProfile[] = [
   { id: 1, username: 'default', is_admin: true, is_system_default: true } as UserProfile,
-  { id: 2, username: 'jeremiah' } as UserProfile,
-  { id: 3, username: 'Gracie' } as UserProfile,
+  { id: 2, username: 'alex' } as UserProfile,
+  { id: 3, username: 'Taylor' } as UserProfile,
 ];
 
 let stored: Record<string, string> = {};
@@ -37,7 +37,7 @@ beforeEach(() => {
       return HttpResponse.json({ key: params.key, value: body.value });
     }),
     http.get('/api/geo/saved-places', () => HttpResponse.json({
-      places: [{ id: 'p1', entity_id: 'place.p1', name: 'Barn', lat: 36.1234, lon: -86.7, radius: 50, scope: 'family', owner: 'jeremiah' }],
+      places: [{ id: 'p1', entity_id: 'place.p1', name: 'Barn', lat: 36.1234, lon: -86.7, radius: 50, scope: 'family', owner: 'alex' }],
     })),
     http.post('/api/weather/reminders/test', async ({ request }) => {
       tests.push(await request.json());
@@ -58,17 +58,17 @@ describe('WeatherRemindersPanel', () => {
     fireEvent.change(screen.getByLabelText('Weather reminder threshold'), { target: { value: '50' } });
     await screen.findByRole('option', { name: 'Barn' });
     fireEvent.change(screen.getByLabelText('Weather reminder place'), { target: { value: '36.1234,-86.7000' } });
-    fireEvent.click(screen.getByLabelText('Remind @jeremiah'));
+    fireEvent.click(screen.getByLabelText('Remind @alex'));
     fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }));
 
     await waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0].key).toBe('weather_reminders');
     const [rule] = JSON.parse(saves[0].value);
     expect(rule).toMatchObject({
-      kind: 'rain', title: 'Cover the hay', people: ['jeremiah'], threshold: 50,
+      kind: 'rain', title: 'Cover the hay', people: ['alex'], threshold: 50,
       location: { name: 'Barn', latitude: 36.1234, longitude: -86.7 },
     });
-    expect(await screen.findByText(/Rain · chance 50% · next 12 h · Barn · @jeremiah/)).toBeInTheDocument();
+    expect(await screen.findByText(/Rain · chance 50% · next 12 h · Barn · @alex/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send Cover the hay to my phone now' }));
     await waitFor(() => expect(tests).toHaveLength(1));

@@ -82,8 +82,8 @@ describe('Family hub', () => {
     renderWithProviders(<Family />);
 
     await user.click(await screen.findByRole('button', { name: /new conversation/i }));
-    await user.type(await screen.findByLabelText('Search people'), 'jer');
-    await user.click(await screen.findByRole('button', { name: /Jeremiah/ }));
+    await user.type(await screen.findByLabelText('Search people'), 'ale');
+    await user.click(await screen.findByRole('button', { name: /Alex/ }));
     await user.click(screen.getByTestId('new-chat-start'));
     await waitFor(() => expect(screen.getByTestId('chat-feed')).toBeInTheDocument());
   });

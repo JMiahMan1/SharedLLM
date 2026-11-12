@@ -30,6 +30,16 @@ RUN if [ "${GIT_SHA}" = "unknown" ] || [ -z "${GIT_SHA}" ]; then \
     fi
 
 # Set memory limit for Node to prevent bundler crashes
+# The gateway a freshly installed app talks to (src/lib/serverDefaults.ts). It
+# is baked into the OTA bundle phones install, so refuse to build without it:
+# a bundle with no default would leave every new install asking for a server.
+ARG VITE_DEFAULT_SERVER_URL=""
+RUN if [ -z "${VITE_DEFAULT_SERVER_URL}" ]; then \
+        echo "ERROR: VITE_DEFAULT_SERVER_URL build arg is required (the repo variable of that name in CI)"; \
+        exit 1; \
+    fi
+ENV VITE_DEFAULT_SERVER_URL=${VITE_DEFAULT_SERVER_URL}
+
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 
 RUN npm run build

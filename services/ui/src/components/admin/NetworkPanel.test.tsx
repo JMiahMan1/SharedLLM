@@ -14,7 +14,7 @@ vi.mock('../../services/api', () => ({
     getNetworkUsage: vi.fn(async (hours: number) => ({
       hours,
       source: 'nlbw',
-      devices: [{ mac: 'aa', name: 'server', ip: '192.168.2.205', network: 'devices', down: 5 * 1024 ** 3, up: 1024 ** 2, bytes: 5 * 1024 ** 3 + 1024 ** 2 }],
+      devices: [{ mac: 'aa', name: 'server', ip: '192.0.2.205', network: 'devices', down: 5 * 1024 ** 3, up: 1024 ** 2, bytes: 5 * 1024 ** 3 + 1024 ** 2 }],
       networks: [{ name: 'devices', down: 5 * 1024 ** 3, up: 1024 ** 2 }],
       series: [{ t: '2026-10-16T09', down: 100, up: 10 }, { t: '2026-10-16T10', down: 5 * 1024 ** 3, up: 1024 ** 2 }],
       bucket: 'hour',
@@ -32,8 +32,8 @@ const HOGGED: NetworkStatus = {
   radios: [{
     device: 'wl0-ap0', ssid: 'Home-Devices', band: '2.4 GHz', channel: 4, busy_pct: 82,
     clients: [
-      { mac: 'aa', name: 'server', ip: '192.168.2.205', signal: -45, rx_mbps: 72.2, tx_mbps: 19.5, airtime_pct: 55, connected_s: 100 },
-      { mac: 'bb', name: 'LivingRoomTv', ip: '192.168.2.160', signal: -78, rx_mbps: 65, tx_mbps: 65, airtime_pct: 0.4, connected_s: 100 },
+      { mac: 'aa', name: 'server', ip: '192.0.2.205', signal: -45, rx_mbps: 72.2, tx_mbps: 19.5, airtime_pct: 55, connected_s: 100 },
+      { mac: 'bb', name: 'LivingRoomTv', ip: '192.0.2.160', signal: -78, rx_mbps: 65, tx_mbps: 65, airtime_pct: 0.4, connected_s: 100 },
     ],
   }],
   conntrack: { count: 1200, max: 15360 },
@@ -79,9 +79,12 @@ describe('NetworkPanel', () => {
     renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: 'Router login' }));
     expect(screen.getByLabelText('Router password').getAttribute('placeholder')).toBe('Unchanged');
+    // No router address is assumed: the field starts empty.
+    expect((screen.getByLabelText('Router address') as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('Router address'), { target: { value: 'https://192.0.2.1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save and check' }));
     await waitFor(() => expect(api.saveRouterSettings).toHaveBeenCalledWith({
-      url: 'https://192.168.2.1', username: 'jarvis', password: undefined,
+      url: 'https://192.0.2.1', username: 'jarvis', password: undefined,
     }));
   });
 

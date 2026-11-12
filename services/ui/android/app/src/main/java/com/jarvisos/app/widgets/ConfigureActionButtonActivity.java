@@ -565,7 +565,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private void save() {
         String entity = fieldEntity.getText() != null ? fieldEntity.getText().toString().trim() : "";
         if (entity.isEmpty() || !entity.contains(".")) {
-            Toast.makeText(this, "Enter an entity_id (e.g. switch.garage_door_2)", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Enter an entity_id (e.g. switch.demo_door)", Toast.LENGTH_SHORT).show();
             return;
         }
         String service = serviceKeys.isEmpty() ? "turn_on" : serviceKeys.get(Math.max(0, fieldService.getSelectedItemPosition()));

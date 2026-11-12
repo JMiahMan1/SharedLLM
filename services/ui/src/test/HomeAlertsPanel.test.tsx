@@ -22,8 +22,8 @@ vi.mock('../components/ui/EntitySearchDropdown', () => ({
 
 const users: UserProfile[] = [
   { id: 1, username: 'default', is_admin: true, is_system_default: true } as UserProfile,
-  { id: 2, username: 'Michele' } as UserProfile,
-  { id: 3, username: 'jeremiah' } as UserProfile,
+  { id: 2, username: 'Sam' } as UserProfile,
+  { id: 3, username: 'alex' } as UserProfile,
 ];
 
 let stored = '[]';
@@ -72,17 +72,17 @@ describe('HomeAlertsPanel', () => {
     fireEvent.change(screen.getByLabelText('Home alert event'), { target: { value: 'garage_open' } });
     fireEvent.change(screen.getByLabelText('Alert minutes'), { target: { value: '20' } });
     expect(screen.queryByLabelText('Alert watts')).toBeNull();
-    fireEvent.click(screen.getByLabelText('Notify @Michele'));
+    fireEvent.click(screen.getByLabelText('Notify @Sam'));
     fireEvent.click(screen.getByRole('button', { name: 'Save alert' }));
 
     await waitFor(() => expect(saves).toHaveLength(1));
-    expect(saves[0]).toEqual([{ entity_id: 'cover.garage', event: 'garage_open', people: ['michele'], minutes: 20 }]);
+    expect(saves[0]).toEqual([{ entity_id: 'cover.garage', event: 'garage_open', people: ['sam'], minutes: 20 }]);
   });
 
   it('edits and removes an existing alert', async () => {
     stored = JSON.stringify([
       { entity_id: 'sensor.washer_power', event: 'appliance_done', people: [], watts: 15 },
-      { entity_id: 'binary_sensor.sink_leak', event: 'water_leak', people: ['jeremiah'] },
+      { entity_id: 'binary_sensor.sink_leak', event: 'water_leak', people: ['alex'] },
     ]);
     render();
     expect(await screen.findByText(/Washer or dryer finished · 15 W · everyone/)).toBeInTheDocument();

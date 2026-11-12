@@ -8,7 +8,7 @@ import { server } from './setup';
 
 const users = [
   { id: 1, username: 'default', is_admin: true, role: 'admin', is_me: true },
-  { id: 2, username: 'michele', is_admin: false, role: 'user', is_me: false, role_ids: [] },
+  { id: 2, username: 'sam', is_admin: false, role: 'user', is_me: false, role_ids: [] },
 ] as UserProfile[];
 
 describe('RolesPanel', () => {
@@ -29,14 +29,14 @@ describe('RolesPanel', () => {
     renderWithProviders(<RolesPanel users={users} />);
 
     fireEvent.click(await screen.findByText('Home manager'));
-    // Admins hold everything already, so only michele is offered.
+    // Admins hold everything already, so only sam is offered.
     expect(screen.queryByLabelText('default')).toBeNull();
     // A built-in role cannot be deleted.
     expect(screen.queryByText('Delete')).toBeNull();
-    fireEvent.click(screen.getByLabelText('michele'));
+    fireEvent.click(screen.getByLabelText('sam'));
     fireEvent.click(screen.getByText('Save role'));
 
-    await waitFor(() => expect(memberships).toEqual([{ username: 'michele', role_ids: [1] }]));
+    await waitFor(() => expect(memberships).toEqual([{ username: 'sam', role_ids: [1] }]));
     expect(saved).toEqual([{ name: 'Home manager', description: 'Runs the house.', permissions: ['devices.use_all', 'devices.assign'] }]);
   });
 });

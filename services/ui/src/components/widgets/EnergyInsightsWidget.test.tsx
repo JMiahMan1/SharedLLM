@@ -35,7 +35,7 @@ const settings: UserWidgetSettings = {
 };
 
 const summary = (current: number) => ({
-  entity_id: 'sensor.rosebud_123_1min',
+  entity_id: 'sensor.demo_phone_123_1min',
   summary: {
     current_power_w: current,
     peak_power_w: 9.75,
@@ -72,11 +72,11 @@ describe('EnergyInsightsWidget', () => {
     auth.role = 'admin';
     apiMock.getTelemetryEnrollments.mockClear();
     apiMock.getTelemetryEnrollments.mockResolvedValue([
-      enrolment('sensor.rosebud_123_1min'),
+      enrolment('sensor.demo_phone_123_1min'),
       enrolment('sensor.ac_unit_1min'),
     ]);
     apiMock.getTelemetrySummary.mockImplementation(async (entityId: string) =>
-      summary(entityId === 'sensor.rosebud_123_1min' ? 2.8517875717626 : 2.85),
+      summary(entityId === 'sensor.demo_phone_123_1min' ? 2.8517875717626 : 2.85),
     );
   });
 
@@ -89,7 +89,7 @@ describe('EnergyInsightsWidget', () => {
 
   it('shows each device’s draw as a whole number of watts', async () => {
     renderWidget();
-    const row = (await screen.findByText('rosebud_123_1min')).closest('div');
+    const row = (await screen.findByText('demo_phone_123_1min')).closest('div');
     expect(row).not.toBeNull();
     expect(row!.textContent).toContain('3W');
     expect(row!.textContent).not.toContain('2.8517875717626');
@@ -97,7 +97,7 @@ describe('EnergyInsightsWidget', () => {
 
   it('keeps the share of the total next to it', async () => {
     renderWidget();
-    const row = (await screen.findByText('rosebud_123_1min')).closest('div');
+    const row = (await screen.findByText('demo_phone_123_1min')).closest('div');
     expect(row!.textContent).toContain('50%');
   });
 

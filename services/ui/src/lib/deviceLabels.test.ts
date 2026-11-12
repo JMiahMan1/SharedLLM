@@ -9,8 +9,8 @@ import { formatDeviceLabel, parseMaPlayerList } from './deviceLabels';
  */
 const BLOB_NAME =
   '{"id":1,"username":"default","display_name":"Shared/Default User","is_admin":true,' +
-  '"is_system_default":true,"nextcloud_url":"https://cloud.sumemail.com","nextcloud_user":"summers",' +
-  '"ha_url":"https://ha.sumemail.com","audiobookshelf_url":"https://abs.sumemail.com/",' +
+  '"is_system_default":true,"nextcloud_url":"https://cloud.example.com","nextcloud_user":"rivera",' +
+  '"ha_url":"https://ha.example.com","audiobookshelf_url":"https://abs.example.com/",' +
   '"audiobookshelf_user":"jarvis","audiobookshelf_api_key":null,"skylight_email":"someone@example.com",' +
   '"api_key":null,"role":"admin","voice_id":null}' +
   "'s Web Player (Desktop)";
@@ -34,8 +34,8 @@ describe('formatDeviceLabel', () => {
   });
 
   it('falls back through username when a blob has no display name', () => {
-    expect(formatDeviceLabel('{"username":"jeremiah"}' + "'s Web Player (Mobile)", 'wsp-1')).toBe(
-      "jeremiah's Web Player (Mobile)"
+    expect(formatDeviceLabel('{"username":"alex"}' + "'s Web Player (Mobile)", 'wsp-1')).toBe(
+      "alex's Web Player (Mobile)"
     );
   });
 
@@ -44,7 +44,7 @@ describe('formatDeviceLabel', () => {
   });
 
   it('skips a blob that is not parseable instead of rendering it', () => {
-    const label = formatDeviceLabel('{"username":"jeremiah", oops', 'wsp-2');
+    const label = formatDeviceLabel('{"username":"alex", oops', 'wsp-2');
     expect(label).toBe('wsp-2');
     expect(label).not.toContain('{');
   });
@@ -56,8 +56,8 @@ describe('formatDeviceLabel', () => {
   });
 
   it('is not fooled by an apostrophe inside a JSON value', () => {
-    const blob = '{"display_name":"Jeremiah\'s Speaker"}' + "'s Web Player (Mobile)";
-    expect(formatDeviceLabel(blob, 'wsp-4')).toBe("Jeremiah's Speaker's Web Player (Mobile)");
+    const blob = '{"display_name":"Alex\'s Speaker"}' + "'s Web Player (Mobile)";
+    expect(formatDeviceLabel(blob, 'wsp-4')).toBe("Alex's Speaker's Web Player (Mobile)");
   });
 
   it('reads a name out of a structured value rather than stringifying it', () => {

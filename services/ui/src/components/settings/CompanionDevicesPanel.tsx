@@ -257,7 +257,7 @@ const CompanionDevicesPanel: React.FC<Props> = ({ scope = 'mine' }) => {
                   id="pair-address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Address, e.g. jarvis-watch.local or 192.168.2.105"
+                  placeholder="Address, e.g. jarvis-watch.local or 192.0.2.105"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}

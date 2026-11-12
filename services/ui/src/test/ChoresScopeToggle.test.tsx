@@ -7,7 +7,7 @@ import { choreBelongsTo, hasChoresFor } from '../lib/choreScope';
 import type { ChoreItem } from '../types/widget';
 
 const authState: { user: { username: string; is_admin: boolean } | null } = {
-  user: { username: 'jeremiah', is_admin: true },
+  user: { username: 'alex', is_admin: true },
 };
 
 const getSkylightChores = vi.fn();
@@ -28,19 +28,19 @@ vi.mock('../services/api', () => ({
 
 import ChoresProgressWidget from '../components/widgets/ChoresProgressWidget';
 
-const JEREMIAHS_CHORE: ChoreItem = {
+const ALEXS_CHORE: ChoreItem = {
   id: '1-2026-10-04',
   title: 'Clean Room',
   completed: false,
   reward: 5,
-  assignees: ['Jeremiah'],
+  assignees: ['Alex'],
 };
-const MICHELE_DS_CHORE: ChoreItem = {
+const SAM_DS_CHORE: ChoreItem = {
   id: '2-2026-10-04',
   title: 'Do Dishes',
   completed: false,
   reward: 5,
-  assignees: ['Michele'],
+  assignees: ['Sam'],
 };
 
 function signInAs(username: string, isAdmin: boolean) {
@@ -51,8 +51,8 @@ function signInAs(username: string, isAdmin: boolean) {
 function respondByScope() {
   getSkylightChores.mockImplementation(async (_date?: string, scope?: string) => ({
     status: 'SUCCESS',
-    chores: scope === 'me' ? [JEREMIAHS_CHORE] : [JEREMIAHS_CHORE, MICHELE_DS_CHORE],
-    assignee_meta: { Jeremiah: '#ffcc00', Michele: '#88ccff' },
+    chores: scope === 'me' ? [ALEXS_CHORE] : [ALEXS_CHORE, SAM_DS_CHORE],
+    assignee_meta: { Alex: '#ffcc00', Sam: '#88ccff' },
   }));
 }
 
@@ -71,35 +71,35 @@ const renderWidget = () =>
 
 beforeEach(() => {
   getSkylightChores.mockReset();
-  signInAs('jeremiah', true);
+  signInAs('alex', true);
   respondByScope();
 });
 
 describe('choreBelongsTo', () => {
   it('matches the same name in any casing', () => {
-    expect(choreBelongsTo(['Jeremiah'], 'jeremiah')).toBe(true);
-    expect(choreBelongsTo(['jeremiah'], 'JEREMIAH')).toBe(true);
+    expect(choreBelongsTo(['Alex'], 'alex')).toBe(true);
+    expect(choreBelongsTo(['alex'], 'ALEX')).toBe(true);
   });
 
   it('matches a login name against a longer free-text label, as the server does', () => {
     // Skylight labels are typed by hand in another app; the execution service's
     // filter is lenient in both directions and these two must agree.
-    expect(choreBelongsTo(['Jeremiah S'], 'jeremiah')).toBe(true);
+    expect(choreBelongsTo(['Alex S'], 'alex')).toBe(true);
     expect(choreBelongsTo(['Dad'], 'dad')).toBe(true);
-    expect(choreBelongsTo(['Michele'], 'jeremiah')).toBe(false);
+    expect(choreBelongsTo(['Sam'], 'alex')).toBe(false);
   });
 
   it('ignores blank labels and a blank login name', () => {
-    expect(choreBelongsTo(['', '  '], 'jeremiah')).toBe(false);
-    expect(choreBelongsTo(['Jeremiah'], '')).toBe(false);
-    expect(choreBelongsTo(undefined, 'jeremiah')).toBe(false);
+    expect(choreBelongsTo(['', '  '], 'alex')).toBe(false);
+    expect(choreBelongsTo(['Alex'], '')).toBe(false);
+    expect(choreBelongsTo(undefined, 'alex')).toBe(false);
   });
 
   it('hasChoresFor looks across the whole list', () => {
-    expect(hasChoresFor([MICHELE_DS_CHORE, JEREMIAHS_CHORE], 'jeremiah')).toBe(true);
-    expect(hasChoresFor([MICHELE_DS_CHORE], 'jeremiah')).toBe(false);
-    expect(hasChoresFor([], 'jeremiah')).toBe(false);
-    expect(hasChoresFor(undefined, 'jeremiah')).toBe(false);
+    expect(hasChoresFor([SAM_DS_CHORE, ALEXS_CHORE], 'alex')).toBe(true);
+    expect(hasChoresFor([SAM_DS_CHORE], 'alex')).toBe(false);
+    expect(hasChoresFor([], 'alex')).toBe(false);
+    expect(hasChoresFor(undefined, 'alex')).toBe(false);
   });
 });
 
@@ -142,7 +142,7 @@ describe('chores widget: whose chores', () => {
   });
 
   it('hides the toggle from a non-admin, who only ever sees their own', async () => {
-    signInAs('michele', false);
+    signInAs('sam', false);
     renderWidget();
     await screen.findByText('Clean Room');
     expect(screen.queryByTestId('chores-scope-toggle')).not.toBeInTheDocument();
@@ -152,8 +152,8 @@ describe('chores widget: whose chores', () => {
   it('hides the toggle from an admin with no chores of their own', async () => {
     getSkylightChores.mockResolvedValue({
       status: 'SUCCESS',
-      chores: [MICHELE_DS_CHORE],
-      assignee_meta: { Michele: '#88ccff' },
+      chores: [SAM_DS_CHORE],
+      assignee_meta: { Sam: '#88ccff' },
     });
     renderWidget();
     await screen.findByText('Do Dishes');

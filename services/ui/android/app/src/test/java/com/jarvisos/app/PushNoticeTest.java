@@ -16,7 +16,7 @@ import org.junit.Test;
 public class PushNoticeTest {
 
     private static final String CHAT = "{\"id\":\"n1\",\"category\":\"chat\",\"kind\":\"chat\","
-        + "\"title\":\"Jeremiah\",\"body\":\"On my way\",\"priority\":4,\"tag\":\"chat:abc123\","
+        + "\"title\":\"Alex\",\"body\":\"On my way\",\"priority\":4,\"tag\":\"chat:abc123\","
         + "\"data\":{\"url\":\"/family?chat=abc123\"},"
         + "\"actions\":["
         + "{\"label\":\"Reply\",\"type\":\"reply\",\"callback\":\"chat_reply\",\"params\":{\"token\":\"abc123\"}},"
@@ -26,7 +26,7 @@ public class PushNoticeTest {
     public void readsTheContractExample() {
         PushNotice n = PushNotice.parse(CHAT);
         assertEquals("chat", n.category);
-        assertEquals("Jeremiah", n.title);
+        assertEquals("Alex", n.title);
         assertEquals("On my way", n.body);
         assertEquals(4, n.priority);
         assertEquals("/family?chat=abc123", n.path);
@@ -103,7 +103,7 @@ public class PushNoticeTest {
 
     @Test
     public void viewButtonsOpenAppPagesOrHttpsWebPages() {
-        String directions = "https://www.openstreetmap.org/?mlat=33.16671&mlon=-111.56466#map=17/33.16671/-111.56466";
+        String directions = "https://www.openstreetmap.org/?mlat=39.45671&mlon=-104.48466#map=17/39.45671/-104.48466";
         assertEquals("/wander?person=ana", PushNotice.safeActionUrl("/wander?person=ana"));
         assertEquals(directions, PushNotice.safeActionUrl(directions));
         assertEquals("", PushNotice.safeActionUrl("http://www.openstreetmap.org/"));

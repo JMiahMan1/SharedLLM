@@ -12,7 +12,7 @@ const ok = (detail: Record<string, unknown> = {}, message = 'ok') =>
 
 const conversations = [
   { token: 'room-family', display_name: 'Family', type: 2, can_start_call: true, last_activity: 20 },
-  { token: 'room-michele', display_name: 'Michele', type: 1, can_start_call: true, last_activity: 10 },
+  { token: 'room-sam', display_name: 'Sam', type: 1, can_start_call: true, last_activity: 10 },
   { token: 'room-note', display_name: 'Note to self', type: 6, can_start_call: false },
 ];
 
@@ -34,7 +34,7 @@ describe('family calls', () => {
 
     const calls = await screen.findByTestId('family-calls');
     expect(await within(calls).findByText('Family')).toBeInTheDocument();
-    expect(within(calls).getByText('Michele')).toBeInTheDocument();
+    expect(within(calls).getByText('Sam')).toBeInTheDocument();
     expect(within(calls).queryByText('Note to self')).not.toBeInTheDocument();
     expect(within(calls).queryByText(/microphone or speaker/i)).not.toBeInTheDocument();
 
@@ -75,9 +75,9 @@ describe('family calls', () => {
     const startCall = vi.spyOn(callFallback, 'startCall').mockResolvedValue(undefined);
     server.use(http.get('/api/communication/talk/conversations', () => ok({ conversations })));
 
-    renderWithProviders(<Family />, { route: '/family?tab=calls&answer=room-michele' });
+    renderWithProviders(<Family />, { route: '/family?tab=calls&answer=room-sam' });
 
-    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-michele', 'Family call'));
+    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-sam', 'Family call'));
     expect(startCall).toHaveBeenCalledTimes(1);
   });
 });

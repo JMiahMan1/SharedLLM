@@ -10,24 +10,24 @@ const ZONES = {
   features: [
     {
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [-111.5646, 33.1667] },
+      geometry: { type: 'Point', coordinates: [-104.4846, 39.4567] },
       properties: {
         entity_id: 'zone.home',
         friendly_name: 'Home',
         radius: 100,
-        latitude: 33.1667,
-        longitude: -111.5646,
+        latitude: 39.4567,
+        longitude: -104.4846,
       },
     },
     {
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [-111.80, 33.30] },
+      geometry: { type: 'Point', coordinates: [-104.72, 39.59] },
       properties: {
         entity_id: 'zone.school',
         friendly_name: 'School',
         radius: 150,
-        latitude: 33.30,
-        longitude: -111.80,
+        latitude: 39.59,
+        longitude: -104.72,
       },
     },
   ],

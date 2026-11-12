@@ -20,7 +20,7 @@ describe('credential form rules', () => {
   });
 
   it('counts a saved secret as present', () => {
-    const values = { nextcloud_url: 'https://c', nextcloud_user: 'michele', nextcloud_pass: '' };
+    const values = { nextcloud_url: 'https://c', nextcloud_user: 'sam', nextcloud_pass: '' };
     expect(missingFields(nextcloud, values, new Set(['nextcloud_pass']))).toEqual([]);
   });
 
@@ -39,24 +39,24 @@ describe('prefilled household URLs', () => {
   const defaults = { nextcloud_url: 'https://cloud.example', ha_url: 'https://ha.example' };
 
   it('fills blank addresses and suggests the Nextcloud username, leaving typed values alone', () => {
-    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', ha_url: 'https://mine' }, defaults, 'michele');
-    expect(values).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'michele', ha_url: 'https://mine' });
-    expect(prefilled).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'michele' });
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', ha_url: 'https://mine' }, defaults, 'sam');
+    expect(values).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'sam', ha_url: 'https://mine' });
+    expect(prefilled).toEqual({ nextcloud_url: 'https://cloud.example', nextcloud_user: 'sam' });
   });
 
   it('a prefilled URL alone is not a login anyone asked for', () => {
-    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'michele');
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'sam');
     expect(missingFields(nextcloud, values, none, prefilled)).toEqual([]);
     expect(credentialPayload(values, ['nextcloud_url', 'nextcloud_user', 'nextcloud_pass'], [], { prefilled })).toEqual({});
   });
 
   it('once a password is typed, the prefilled URL and username are saved with it', () => {
-    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'michele');
+    const { values, prefilled } = prefill({ nextcloud_url: '', nextcloud_user: '', nextcloud_pass: '' }, defaults, 'sam');
     const typed = { ...values, nextcloud_pass: 'app-pw' };
     expect(missingFields(nextcloud, typed, none, prefilled)).toEqual([]);
     expect(credentialPayload(typed, ['nextcloud_url', 'nextcloud_user', 'nextcloud_pass'], [], { prefilled })).toEqual({
       nextcloud_url: 'https://cloud.example',
-      nextcloud_user: 'michele',
+      nextcloud_user: 'sam',
       nextcloud_pass: 'app-pw',
     });
   });

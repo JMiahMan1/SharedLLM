@@ -340,7 +340,7 @@ public class CrashDetectorTest {
         assertFalse(detector.isPending());
     }
 
-    // Drops and a GPS that was never steady (Noah's tablet, 2026-11-09).
+    // Drops and a GPS that was never steady (Jordan's tablet, 2026-11-09).
 
     /** {@code ms} of free fall ending just before {@code t}, sampled at 50 Hz. */
     private void fall(long t, long ms) {

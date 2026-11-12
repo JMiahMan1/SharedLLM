@@ -94,7 +94,7 @@ export interface CalendarEvent {
 
 /** A calendar owner (person). Events whose `calendar` is in `accounts` are
  *  colored/labeled by this person. Lets users assign accounts to people and
- *  merge duplicates (e.g. kalebsummers85 + kaleb). Stored in calendar settings. */
+ *  merge duplicates (e.g. robinrivera85 + robin). Stored in calendar settings. */
 export interface CalendarPerson {
   id: string;
   name: string;

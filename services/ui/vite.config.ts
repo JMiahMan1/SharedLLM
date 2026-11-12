@@ -14,6 +14,22 @@ const buildSha: string = process.env.GIT_SHA || (() => {
   }
 })()
 
+// Where `vite` (dev server) forwards /api, /health and /v1: your gateway, from
+// VITE_PROXY_TARGET (e.g. VITE_PROXY_TARGET=http://192.0.2.205:8080 npx vite).
+// Unset means no proxy at all (said once at startup), never a guessed host.
+// The hermetic Playwright suite mocks every request and needs none.
+const proxyTarget: string = (process.env.VITE_PROXY_TARGET || '').trim()
+if (!proxyTarget && !process.env.VITEST) {
+  console.warn('[vite] VITE_PROXY_TARGET is not set: the dev server proxies nothing (/api, /health, /v1 are not forwarded).')
+}
+const devProxy = proxyTarget
+  ? {
+      '/api': { target: proxyTarget, changeOrigin: true, ws: true },
+      '/health': { target: proxyTarget, changeOrigin: true },
+      '/v1': { target: proxyTarget, changeOrigin: true },
+    }
+  : undefined
+
 // https://vite.dev/config/
 export default defineConfig({
   define: {
@@ -92,20 +108,6 @@ export default defineConfig({
     ],
   },
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://192.168.2.205:8080',
-        changeOrigin: true,
-        ws: true,
-      },
-      '/health': {
-        target: 'http://192.168.2.205:8080',
-        changeOrigin: true,
-      },
-      '/v1': {
-        target: 'http://192.168.2.205:8080',
-        changeOrigin: true,
-      },
-    }
+    proxy: devProxy,
   }
 })

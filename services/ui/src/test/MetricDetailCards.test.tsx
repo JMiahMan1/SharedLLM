@@ -27,7 +27,7 @@ const bucket = (i: number, over: Partial<MetricRangeBucket> = {}): MetricRangeBu
 });
 
 const series = (over: Partial<MetricRangeResponse> = {}): MetricRangeResponse => ({
-  user_id: 'jeremiah',
+  user_id: 'alex',
   metric: 'workouts',
   label: 'Workouts',
   unit: 'count',
@@ -148,9 +148,9 @@ describe('MetricDetailCards', () => {
   });
 
   it('asks for a specific user when one is given', async () => {
-    renderWithProviders(<MetricDetailCards range="W" userId="michele" />);
+    renderWithProviders(<MetricDetailCards range="W" userId="sam" />);
     await screen.findByTestId('metric-card-workouts');
-    expect(mocks.getMetricRanges).toHaveBeenCalledWith('workouts', 'michele', 'W');
+    expect(mocks.getMetricRanges).toHaveBeenCalledWith('workouts', 'sam', 'W');
   });
 
   it('leaves the target to the server when the user is "all"', async () => {

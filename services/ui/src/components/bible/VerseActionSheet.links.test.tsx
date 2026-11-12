@@ -95,13 +95,13 @@ describe('sharing to the family chat', () => {
     apiMock.getBibleInterlinear.mockResolvedValue({ ref: 'John 3:16', available: false, attribution: null, verses: [] });
     apiMock.getTalkConversations.mockResolvedValue({
       status: 'SUCCESS',
-      detail: { conversations: [{ token: 'fam', display_name: 'Summers Family', type: 2 }, { token: 'mich', display_name: 'Michele', type: 1 }] },
+      detail: { conversations: [{ token: 'fam', display_name: 'Rivera Family', type: 2 }, { token: 'mich', display_name: 'Sam', type: 1 }] },
     });
     apiMock.sendTalkMessage.mockResolvedValue({ status: 'SUCCESS', message: 'sent' });
     const { onShared } = renderSheet();
     await userEvent.click(screen.getByTestId('bible-action-share-chat'));
     await userEvent.type(screen.getByTestId('bible-share-chat-note'), 'For tonight');
-    await userEvent.click(await screen.findByRole('button', { name: /Summers Family/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Rivera Family/ }));
     await waitFor(() =>
       expect(apiMock.sendTalkMessage).toHaveBeenCalledWith({
         token: 'fam',

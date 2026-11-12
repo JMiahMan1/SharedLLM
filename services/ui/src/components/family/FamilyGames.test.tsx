@@ -60,7 +60,7 @@ function card(slug: string, overrides: Partial<FamilyGameCard> = {}): FamilyGame
 const base: FamilyGamesResponse = {
   success: true,
   arcade_available: true,
-  play_base: 'https://games.sumemail.com',
+  play_base: 'https://games.example.com',
   is_admin: false,
   games: [card('family-cloud-hop')],
   review: [],
@@ -89,7 +89,7 @@ beforeEach(() => {
         username: 'kate',
         display_name: 'Kate',
         initials: 'KAT',
-        player_url: 'https://games.sumemail.com/player/KAT',
+        player_url: 'https://games.example.com/player/KAT',
         you: true,
         best_score: 0,
         total_games: 1,
@@ -188,14 +188,14 @@ describe('FamilyGames', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Play cloud hop' }));
     const frame = (await screen.findByTestId('family-player-frame')) as HTMLIFrameElement;
     const url = new URL(frame.src);
-    expect(url.origin + url.pathname).toBe('https://games.sumemail.com/play/family-cloud-hop');
+    expect(url.origin + url.pathname).toBe('https://games.example.com/play/family-cloud-hop');
     // The Jarvis member plays as themselves; the game is told the insets.
     expect(url.searchParams.get('embed')).toBe('1');
     expect(url.searchParams.get('player')).toBe('KAT');
     expect(url.searchParams.get('name')).toBe('Kate');
     expect(url.searchParams.get('safe')).toMatch(/^\d+,\d+,\d+,\d+$/);
 
-    const post = (data: unknown, origin = 'https://games.sumemail.com') =>
+    const post = (data: unknown, origin = 'https://games.example.com') =>
       window.dispatchEvent(new MessageEvent('message', { data, origin }));
     const run = { source: 'arcade-score', slug: 'family-cloud-hop', score: 420, capture_id: 'family-cloud-hop:r1' };
     post(run, 'https://evil.example');
@@ -233,7 +233,7 @@ describe('FamilyGames', () => {
     expect(await screen.findByTestId('family-player')).toBeInTheDocument();
     expect(screen.getByTestId('family-player-splash')).toBeInTheDocument();
 
-    const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
+    const relay = (data: unknown, origin = 'https://games.example.com') =>
       window.dispatchEvent(new MessageEvent('message', { data, origin }));
     relay({ source: 'arcade-relay', slug: 'family-cloud-hop', type: 'ready' });
     await waitFor(() => expect(screen.getByTestId('family-player-splash')).toHaveAttribute('aria-hidden', 'true'));
@@ -249,10 +249,10 @@ describe('FamilyGames', () => {
     const { unmount } = renderIt();
     await screen.findByTestId('family-game-family-cloud-hop');
     const hrefs = (rel: string) => [...document.head.querySelectorAll(`link[rel="${rel}"]`)].map((l) => l.getAttribute('href'));
-    expect(hrefs('preconnect')).toContain('https://games.sumemail.com');
-    expect(hrefs('prefetch')).toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
+    expect(hrefs('preconnect')).toContain('https://games.example.com');
+    expect(hrefs('prefetch')).toContain('https://games.example.com/game/family-cloud-hop/index.html');
     unmount();
-    expect(hrefs('prefetch')).not.toContain('https://games.sumemail.com/game/family-cloud-hop/index.html');
+    expect(hrefs('prefetch')).not.toContain('https://games.example.com/game/family-cloud-hop/index.html');
   });
 
   it('shows a TV Stage cast link on multiplayer party games', async () => {
@@ -262,7 +262,7 @@ describe('FamilyGames', () => {
     });
     renderIt();
     const tvLink = await screen.findByTestId('family-tv-family-good-word');
-    expect(tvLink).toHaveAttribute('href', 'https://games.sumemail.com/tv');
+    expect(tvLink).toHaveAttribute('href', 'https://games.example.com/tv');
   });
 
   it('relays discovered screens and reports the real cast outcome back to the game', async () => {
@@ -285,7 +285,7 @@ describe('FamilyGames', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Play Parable Party' }));
     await screen.findByTestId('family-player');
 
-    const relay = (data: unknown, origin = 'https://games.sumemail.com') =>
+    const relay = (data: unknown, origin = 'https://games.example.com') =>
       window.dispatchEvent(new MessageEvent('message', { data, origin }));
     relay({ source: 'arcade-relay', slug: 'family-good-word', type: 'list-tvs' });
     await waitFor(() => expect(m.getTvs).toHaveBeenCalledWith(false));
@@ -313,12 +313,12 @@ describe('FamilyGames party rooms (admin)', () => {
     m.getFamilyGames.mockResolvedValue({ ...base, is_admin: true, admin_token_configured: true });
     m.partyRooms.mockResolvedValue({
       success: true,
-      rooms: [{ code: 'ZION', host_name: 'Jeremiah', phase: 'voting', round: 2, total_rounds: 7, player_count: 3, players: [], stage_connected: true }],
+      rooms: [{ code: 'ZION', host_name: 'Alex', phase: 'voting', round: 2, total_rounds: 7, player_count: 3, players: [], stage_connected: true }],
     });
     m.endRoom.mockResolvedValue({ success: true, ended: 'ZION' });
     renderIt();
     const row = await screen.findByTestId('party-room-ZION');
-    expect(row).toHaveTextContent('Jeremiah + 2');
+    expect(row).toHaveTextContent('Alex + 2');
     expect(row).toHaveTextContent('Voting · Round 2/7 · On a TV');
     fireEvent.click(within(row).getByRole('button', { name: /End game/ }));
     expect(m.endRoom).not.toHaveBeenCalled();

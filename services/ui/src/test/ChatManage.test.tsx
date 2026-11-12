@@ -28,11 +28,11 @@ describe('managing family conversations', () => {
     );
     renderWithProviders(<Family />);
     await user.click(await screen.findByTestId('chat-new'));
-    await user.click(await screen.findByRole('button', { name: /Jeremiah/ }));
-    await user.click(await screen.findByRole('button', { name: /Michele/ }));
+    await user.click(await screen.findByRole('button', { name: /Alex/ }));
+    await user.click(await screen.findByRole('button', { name: /Sam/ }));
     await user.type(screen.getByLabelText('Group name'), 'Cousins');
     await user.click(screen.getByTestId('new-chat-start'));
-    await waitFor(() => expect(created).toEqual({ name: 'Cousins', participants: ['jeremiah', 'michele'] }));
+    await waitFor(() => expect(created).toEqual({ name: 'Cousins', participants: ['alex', 'sam'] }));
   });
 
   it('lists members, removes one, saves the default, and deletes with a confirmation', async () => {
@@ -48,7 +48,7 @@ describe('managing family conversations', () => {
         ok({
           participants: [
             { attendee_id: 1, actor_type: 'users', actor_id: 'default', display_name: 'Me', is_moderator: true },
-            { attendee_id: 2, actor_type: 'users', actor_id: 'michele', display_name: 'Michele', is_moderator: false },
+            { attendee_id: 2, actor_type: 'users', actor_id: 'sam', display_name: 'Sam', is_moderator: false },
           ],
         }),
       ),
@@ -68,9 +68,9 @@ describe('managing family conversations', () => {
     renderWithProviders(<Family />);
     await user.click(await screen.findByRole('button', { name: 'Conversation details' }));
     const info = await screen.findByTestId('conversation-info');
-    expect(await within(info).findByText('Michele')).toBeInTheDocument();
+    expect(await within(info).findByText('Sam')).toBeInTheDocument();
     expect(within(info).queryByRole('button', { name: 'Remove Me' })).not.toBeInTheDocument();
-    await user.click(within(info).getByRole('button', { name: 'Remove Michele' }));
+    await user.click(within(info).getByRole('button', { name: 'Remove Sam' }));
     await waitFor(() => expect(removed).toEqual(['2']));
 
     await user.click(within(info).getByTestId('chat-default-toggle'));

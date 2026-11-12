@@ -5,8 +5,8 @@ export type ChoreScope = 'all' | 'me';
  * Whether a Skylight assignee label belongs to a given Jarvis OS login name.
  *
  * The Skylight API labels a chore with a *category* per family member, and that
- * label is free text typed by a human in another app ("Jeremiah", "Dad",
- * "jmsummers"), while this side knows login names ("jeremiah"). Matching is
+ * label is free text typed by a human in another app ("Alex", "Dad",
+ * "arivera"), while this side knows login names ("alex"). Matching is
  * therefore lenient in both directions, exactly as the execution service's
  * `user` filter does -- the two must agree or an admin's "my chores" view would
  * come back empty while the server had matched it.

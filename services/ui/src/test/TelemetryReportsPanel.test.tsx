@@ -90,7 +90,7 @@ describe('TelemetryReportsPanel', () => {
         HttpResponse.json({
           status: 'SUCCESS',
           notifications: [
-            { id: 'n1', kind: 'presence', title: 'Michele arrived at Home', created_at: '2026-10-14T22:00:00Z', read: false },
+            { id: 'n1', kind: 'presence', title: 'Sam arrived at Home', created_at: '2026-10-14T22:00:00Z', read: false },
             { id: 'n2', kind: 'report_ready', title: 'Your weekly health report is ready', created_at: '2026-10-14T23:00:00Z', read: false },
           ],
         })

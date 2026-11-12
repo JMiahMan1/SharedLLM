@@ -116,10 +116,10 @@ async function mockApi(page: Page, viewer: Viewer) {
     if (p === '/api/users/family') return json(ROSTER);
     if (p === '/api/users/family-directory') return json([]);
     if (p === '/api/users/location/all') {
-      return json({ sam: { latitude: 33.4484, longitude: -112.074, accuracy: 10, battery: viewer === 'dad' ? 64 : null, timestamp: Date.now() / 1000 - 120 } });
+      return json({ sam: { latitude: 39.7384, longitude: -104.994, accuracy: 10, battery: viewer === 'dad' ? 64 : null, timestamp: Date.now() / 1000 - 120 } });
     }
     if (p === '/api/geo/zones') {
-      return json({ features: [{ properties: { entity_id: 'zone.school', friendly_name: 'School', latitude: 33.4484, longitude: -112.074, radius: 200, important: true }, geometry: { coordinates: [-112.074, 33.4484] } }] });
+      return json({ features: [{ properties: { entity_id: 'zone.school', friendly_name: 'School', latitude: 39.7384, longitude: -104.994, radius: 200, important: true }, geometry: { coordinates: [-104.994, 39.7384] } }] });
     }
     if (p === '/api/screen-time/requests') {
       return json({ requests: url.searchParams.get('status') === 'pending' ? [{ id: 7, username: 'sam', day: day(), minutes: 30, note: 'finish the level', status: 'pending', granted_minutes: 0, created_at: new Date().toISOString() }] : [] });

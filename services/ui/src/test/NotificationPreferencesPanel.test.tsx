@@ -99,7 +99,7 @@ describe('NotificationPreferencesPanel', () => {
   it('hides system alerts from family members', async () => {
     server.use(
       http.get('/api/users/me', () =>
-        HttpResponse.json({ id: 2, username: 'michele', role: 'user', is_admin: false })),
+        HttpResponse.json({ id: 2, username: 'sam', role: 'user', is_admin: false })),
     );
     renderWithProviders(<NotificationPreferencesPanel />);
     await screen.findByRole('switch', { name: 'Family chat' });

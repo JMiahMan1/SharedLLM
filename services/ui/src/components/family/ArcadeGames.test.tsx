@@ -38,7 +38,7 @@ function renderShelf() {
 const shelf: ArcadeGamesResponse = {
   success: true,
   arcade_available: true,
-  play_base: 'https://games.sumemail.com',
+  play_base: 'https://games.example.com',
   featured_source: 'admin',
   featured: [
     {
@@ -73,10 +73,10 @@ const scoreboard: ArcadeScoreboardResponse = {
   arcade_available: true,
   players: [
     {
-      username: 'jeremiah',
-      display_name: 'Jeremiah',
-      initials: 'JER',
-      player_url: 'https://games.sumemail.com/player/JER',
+      username: 'alex',
+      display_name: 'Alex',
+      initials: 'ALX',
+      player_url: 'https://games.example.com/player/ALX',
       you: true,
       best_score: 62960,
       total_games: 20,
@@ -86,10 +86,10 @@ const scoreboard: ArcadeScoreboardResponse = {
       crowns: 9,
     },
     {
-      username: 'michele',
-      display_name: 'Michele',
-      initials: 'MIC',
-      player_url: 'https://games.sumemail.com/player/MIC',
+      username: 'sam',
+      display_name: 'Sam',
+      initials: 'SAM',
+      player_url: 'https://games.example.com/player/SAM',
       you: false,
       best_score: 0,
       total_games: 20,
@@ -106,8 +106,8 @@ const highscores: ArcadeHighscoresResponse = {
   arcade_available: true,
   players: [
     {
-      player_id: 'jeremiah',
-      initials: 'JER',
+      player_id: 'alex',
+      initials: 'ALX',
       best_score: 62960,
       total_games: 20,
       games_scored: 9,
@@ -122,8 +122,8 @@ const highscores: ArcadeHighscoresResponse = {
       slug: 'space-invaders',
       title: 'Space Invaders',
       scores: [
-        { initials: 'JER', score: 62960, at: '2026-10-20T12:00:00Z', player_id: 'jeremiah' },
-        { initials: 'MIC', score: 1200, at: '2026-10-20T12:05:00Z', player_id: 'michele' },
+        { initials: 'ALX', score: 62960, at: '2026-10-20T12:00:00Z', player_id: 'alex' },
+        { initials: 'SAM', score: 1200, at: '2026-10-20T12:05:00Z', player_id: 'sam' },
       ],
     },
   ],
@@ -151,7 +151,7 @@ describe('ArcadeGames', () => {
 
     const links = screen.getAllByRole('link', { name: /play/i });
     expect(links.length).toBeGreaterThan(0);
-    expect(links[0].getAttribute('href')).toBe('https://games.sumemail.com/play/space-invaders');
+    expect(links[0].getAttribute('href')).toBe('https://games.example.com/play/space-invaders');
   });
 
   it('plays a game inside the family hub', async () => {
@@ -162,7 +162,7 @@ describe('ArcadeGames', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /play/i })[0]);
 
     const frame = await screen.findByTestId('arcade-player-frame');
-    expect(frame.getAttribute('src')).toBe('https://games.sumemail.com/play/space-invaders?embed=1&player=JER');
+    expect(frame.getAttribute('src')).toBe('https://games.example.com/play/space-invaders?embed=1&player=ALX');
 
     fireEvent.click(screen.getByLabelText('Close dialog'));
     await waitFor(() => expect(screen.queryByTestId('arcade-player-frame')).toBeNull());
@@ -181,7 +181,7 @@ describe('ArcadeGames', () => {
     await screen.findByTestId('arcade-player-frame');
     window.dispatchEvent(
       new MessageEvent('message', {
-        origin: 'https://games.sumemail.com',
+        origin: 'https://games.example.com',
         data: {
           source: 'arcade-score',
           slug: 'space-invaders',
@@ -218,7 +218,7 @@ describe('ArcadeGames', () => {
 
     window.dispatchEvent(
       new MessageEvent('message', {
-        origin: 'https://games.sumemail.com',
+        origin: 'https://games.example.com',
         data: { source: 'arcade-score', slug: 'space-invaders', score: 4321 },
       }),
     );

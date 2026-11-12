@@ -361,6 +361,7 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
+            VITE_DEFAULT_SERVER_URL=${{ vars.VITE_DEFAULT_SERVER_URL }}
           platforms: linux/amd64
 
   build-caddy:

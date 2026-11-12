@@ -20,7 +20,7 @@ import type { Workout } from '../types/api';
 
 const workout = (over: Partial<Workout>): Workout => ({
   id: 'w1',
-  user_id: 'jeremiah',
+  user_id: 'alex',
   activity_type: 'walking',
   start_time: 0,
   status: 'completed',

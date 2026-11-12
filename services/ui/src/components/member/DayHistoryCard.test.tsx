@@ -27,13 +27,13 @@ describe('DayHistoryCard', () => {
     vi.mocked(api.getPersonDay).mockImplementation(async (user, day) => ({
       user,
       day,
-      points: [{ t: t(8), lat: 33.1, lon: -111.5 }, { t: t(15), lat: 33.3, lon: -111.5 }],
+      points: [{ t: t(8), lat: 39.39, lon: -104.42 }, { t: t(15), lat: 39.59, lon: -104.42 }],
       stops: [],
       timeline: [
-        { kind: 'stop', at: t(7), lat: 33.1, lon: -111.5, since: t(7), until: t(8, 5), fixes: 40, place: 'Home' },
+        { kind: 'stop', at: t(7), lat: 39.39, lon: -104.42, since: t(7), until: t(8, 5), fixes: 40, place: 'Home' },
         { kind: 'trip', at: t(8, 10), id: 'a', start_time: t(8, 10), end_time: t(8, 25), distance_miles: 4.26, duration_seconds: 900,
           start_location: { name: 'Home' }, end_location: { name: 'Lincoln Elementary' }, activity_type: 'driving', top_speed_mph: 44.6 },
-        { kind: 'stop', at: t(8, 30), lat: 33.3, lon: -111.5, since: t(8, 30), until: t(15), fixes: 90, place: 'Lincoln Elementary' },
+        { kind: 'stop', at: t(8, 30), lat: 39.59, lon: -104.42, since: t(8, 30), until: t(15), fixes: 90, place: 'Lincoln Elementary' },
       ],
     }) as never);
   });

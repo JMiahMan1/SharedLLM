@@ -10,7 +10,7 @@ import FamilyActivityCard from '../components/health/FamilyActivityCard';
 const summaryByWindow: Record<string, JsonBodyType> = {
   week: {
     status: 'SUCCESS',
-    user_id: 'jeremiah',
+    user_id: 'alex',
     window: 'week',
     days: 7,
     steps_total: 32000,
@@ -22,7 +22,7 @@ const summaryByWindow: Record<string, JsonBodyType> = {
   },
   month: {
     status: 'SUCCESS',
-    user_id: 'jeremiah',
+    user_id: 'alex',
     window: 'month',
     days: 30,
     steps_total: 141000,
@@ -47,7 +47,7 @@ function useHandlers(feedUsers: unknown[] = []) {
     http.get('/api/geo/activity/feed', ({ request }) => {
       const window = new URL(request.url).searchParams.get('window') ?? 'week';
       feedWindows.push(window);
-      return HttpResponse.json({ status: 'SUCCESS', viewer: 'jeremiah', window, users: feedUsers });
+      return HttpResponse.json({ status: 'SUCCESS', viewer: 'alex', window, users: feedUsers });
     })
   );
 }
@@ -70,10 +70,10 @@ describe('FamilyActivityCard', () => {
     ]);
     renderWithProviders(<FamilyActivityCard />);
 
-    await waitFor(() => expect(screen.getByTestId('feed-user-jeremiah')).toBeInTheDocument());
-    expect(screen.getByTestId('feed-user-jeremiah').textContent).toContain('32,000 steps');
-    expect(screen.getByTestId('feed-user-jeremiah').textContent).toContain('12 pts');
-    expect(screen.getByTestId('feed-user-jeremiah').textContent).toContain('4 badges');
+    await waitFor(() => expect(screen.getByTestId('feed-user-alex')).toBeInTheDocument());
+    expect(screen.getByTestId('feed-user-alex').textContent).toContain('32,000 steps');
+    expect(screen.getByTestId('feed-user-alex').textContent).toContain('12 pts');
+    expect(screen.getByTestId('feed-user-alex').textContent).toContain('4 badges');
 
     const sam = screen.getByTestId('feed-user-sam');
     expect(sam.textContent).toContain('41,000 steps');
@@ -83,7 +83,7 @@ describe('FamilyActivityCard', () => {
     expect(sam.textContent).not.toContain('badges');
     // You always lead; everyone else ranks by shared steps
     const rows = screen.getAllByTestId(/^feed-user-/);
-    expect(rows[0]).toHaveAttribute('data-testid', 'feed-user-jeremiah');
+    expect(rows[0]).toHaveAttribute('data-testid', 'feed-user-alex');
     expect(rows[1]).toHaveAttribute('data-testid', 'feed-user-sam');
   });
 
@@ -97,7 +97,7 @@ describe('FamilyActivityCard', () => {
 
     await waitFor(() => expect(feedWindows).toContain('month'));
     expect(summaryWindows).toContain('month');
-    expect(screen.getByTestId('feed-user-jeremiah').textContent).toContain('141,000 steps');
+    expect(screen.getByTestId('feed-user-alex').textContent).toContain('141,000 steps');
   });
 
   it('explains opt-in sharing when nobody else shares', async () => {

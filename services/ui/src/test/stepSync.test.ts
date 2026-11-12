@@ -36,8 +36,8 @@ describe('background step sync', () => {
   });
 
   it('hands step sync to the native service', async () => {
-    const state = await startBackgroundSteps('michele', 'user-1');
-    expect(p.start).toHaveBeenCalledWith({ username: 'michele', userId: 'user-1' });
+    const state = await startBackgroundSteps('sam', 'user-1');
+    expect(p.start).toHaveBeenCalledWith({ username: 'sam', userId: 'user-1' });
     expect(state).toEqual({ serviceRunning: true, supported: true });
   });
 
@@ -45,7 +45,7 @@ describe('background step sync', () => {
     mocks.registerPlugin.mockImplementation(() => {
       throw new Error('plugin is not implemented on android');
     });
-    await expect(startBackgroundSteps('michele')).resolves.toEqual({
+    await expect(startBackgroundSteps('sam')).resolves.toEqual({
       serviceRunning: false,
       supported: false,
     });
@@ -53,7 +53,7 @@ describe('background step sync', () => {
 
   it('never throws when the service refuses to start', async () => {
     p.start.mockRejectedValue(new Error('ForegroundServiceStartNotAllowedException'));
-    await expect(startBackgroundSteps('michele')).resolves.toEqual({
+    await expect(startBackgroundSteps('sam')).resolves.toEqual({
       serviceRunning: false,
       supported: true,
     });
@@ -62,7 +62,7 @@ describe('background step sync', () => {
   it('does nothing off-device', async () => {
     mocks.isNative.mockReturnValue(false);
     expect(getStepSync()).toBeNull();
-    await startBackgroundSteps('michele');
+    await startBackgroundSteps('sam');
     expect(mocks.registerPlugin).not.toHaveBeenCalled();
   });
 

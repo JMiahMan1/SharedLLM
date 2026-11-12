@@ -11,7 +11,9 @@ import { test, expect } from '@playwright/test';
  * requires the live UI stack. Run manually with:
  *   LIVE_E2E=1 npx playwright test raven-live.spec.ts
  */
-const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
+const UI_URL = process.env.UI_URL || '';
+// Live only: never fall back to a real server. Without UI_URL every test here skips.
+test.skip(!UI_URL, 'Live spec: set UI_URL to the server under test (for example http://192.0.2.205:8080).');
 const ADMIN_USER = process.env.E2E_USER || 'default';
 const ADMIN_PASS = process.env.E2E_PASS || 'admin';
 

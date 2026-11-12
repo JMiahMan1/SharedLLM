@@ -21,7 +21,7 @@ const mock = () => {
       pairCalls.push(body);
       if (body.step === 'discover') {
         return HttpResponse.json({ status: 'SUCCESS', message: 'Found 1', service: 'esphome_pair',
-          detail: { devices: [{ name: 'jarvis-watch', friendly_name: 'Jarvis Watch', host: '192.168.2.105', port: 6053 }] } });
+          detail: { devices: [{ name: 'jarvis-watch', friendly_name: 'Jarvis Watch', host: '192.0.2.105', port: 6053 }] } });
       }
       if (body.step === 'start') {
         return HttpResponse.json({ status: 'SUCCESS', message: '', service: 'esphome_pair',
@@ -99,7 +99,7 @@ describe('CompanionDevicesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Pair/ }));
     expect(await screen.findByText('Jarvis Watch is now linked to you.')).toBeInTheDocument();
     expect(pairCalls.map((c) => c.step)).toEqual(['discover', 'start', 'finish']);
-    expect(pairCalls[2]).toMatchObject({ host: '192.168.2.105', code: '123456' });
+    expect(pairCalls[2]).toMatchObject({ host: '192.0.2.105', code: '123456' });
     await waitFor(() => expect(screen.getByText(/Paired with its code/)).toBeInTheDocument());
   });
 
