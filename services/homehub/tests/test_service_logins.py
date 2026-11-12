@@ -119,6 +119,10 @@ def test_ha_ws_commands_music_assistant_asks_for(tmp_path):
         ws.receive_json()
         ws.send_json({"type": "auth", "access_token": "s"})
         ws.receive_json()
+        ws.send_json({"id": 99, "type": "config/entity_registry/get_entries",
+                      "entity_ids": ["light.desk", "light.gone"]})
+        got = ws.receive_json()["result"]
+        assert got["light.gone"] is None and got["light.desk"]["entity_id"] == "light.desk"
         for i, cmd in enumerate(["person/list", "network/url", "config/entity_registry/list_for_display",
                                  "config/auth/list"], start=1):
             ws.send_json({"id": i, "type": cmd})

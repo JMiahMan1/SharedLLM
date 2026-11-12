@@ -60,7 +60,19 @@ async def auth_list(conn: Any, mid: int, _msg: dict[str, Any]) -> None:
     } for u in users])
 
 
+async def entity_registry_get_entries(conn: Any, mid: int, msg: dict[str, Any]) -> None:
+    """HA's batch lookup: ``{entity_id: entry or None}`` (Music Assistant's player provider)."""
+    from services.homehub.mobile_app_webhook import registry_view
+
+    out: dict[str, Any] = {}
+    for eid in msg.get("entity_ids") or []:
+        ent = conn.hub.entities.get(str(eid))
+        out[str(eid)] = registry_view(ent, conn.principal) if ent is not None else None
+    await conn.result(mid, out)
+
+
 COMMANDS = {
+    "config/entity_registry/get_entries": entity_registry_get_entries,
     "person/list": person_list,
     "network/url": network_url,
     "config/entity_registry/list_for_display": entity_registry_list_for_display,
