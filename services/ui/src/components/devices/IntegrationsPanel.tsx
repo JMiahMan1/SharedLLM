@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, Pencil, Plug, Settings2, Trash2, Wrench } from 'lucide-react';
+import {
+  ChevronDown, ChevronRight, ExternalLink, Loader2, Pencil, Plug, Power, RefreshCw, RotateCw, Settings2, Trash2, Wrench,
+} from 'lucide-react';
 import Modal from '../ui/Modal';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
 import {
@@ -13,8 +15,11 @@ import {
   getEntries,
   getManualFlows,
   reconfigureEntry,
+  reloadEntry,
   removeEntry,
   removeHubDevice,
+  setEntryDisabled,
+  syncEntry,
   updateHubDevice,
 } from '../../lib/discoveredDevices';
 import type { HubArea, HubDevice, HubEntry } from '../../lib/discoveredDevices';
@@ -61,6 +66,22 @@ export default function IntegrationsPanel() {
     onSuccess: () => refresh(),
     onError: (err) => toast.error(failureText(err)),
   });
+  // HA's entry menu: reload, enable/disable, and (for integrations that find their own devices) sync.
+  const entryAction = useMutation({
+    mutationFn: ({ entry, action }: { entry: HubEntry; action: 'reload' | 'disable' | 'enable' | 'sync' }): Promise<unknown> => (
+      action === 'reload' ? reloadEntry(entry.entry_id)
+        : action === 'sync' ? syncEntry(entry.entry_id)
+          : setEntryDisabled(entry.entry_id, action === 'disable')),
+    onSuccess: (result, { entry, action }) => {
+      const added = action === 'sync' ? (result as { entities?: string[] }).entities?.length ?? 0 : 0;
+      toast.success(action === 'reload' ? `${entry.title} is reconnecting.`
+        : action === 'sync' ? (added ? `${entry.title}: ${added} new entities.` : `${entry.title} has nothing new.`)
+          : `${entry.title} is ${action === 'disable' ? 'disabled' : 'enabled'}.`);
+      refresh();
+      void queryClient.invalidateQueries({ queryKey: ['homehub-hardware'] });
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
 
   const areas = list.data?.areas || [];
   const areaName = (id: string | null) => areas.find((a) => a.area_id === id)?.name || '';
@@ -73,6 +94,7 @@ export default function IntegrationsPanel() {
   const builderFields = builderFlow.data?.find((f) => f.domain === 'esphome_builder')?.fields;
 
   return (
+    <>
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="integrations">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-violet-500/5 px-4 py-3">
         <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-300">
@@ -160,11 +182,39 @@ export default function IntegrationsPanel() {
                     <span className="block truncate text-sm font-semibold text-white">{entry.title}</span>
                     <span className="block text-xs text-slate-400">
                       {entry.label} · {entry.devices.length} device{entry.devices.length === 1 ? '' : 's'} ·{' '}
-                      <span className={stateTone(entry.state)}>{entry.state.replace('_', ' ')}</span>
+                      <span className={stateTone(entry.state)}>{entry.disabled_by ? 'disabled' : entry.state.replace('_', ' ')}</span>
                     </span>
                   </span>
                 </button>
-                <span className="flex gap-2">
+                <span className="flex flex-wrap gap-2">
+                  {!entry.disabled_by && (
+                    <button
+                      type="button"
+                      onClick={() => entryAction.mutate({ entry, action: 'reload' })}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+                      aria-label={`Reload ${entry.title}`}
+                    >
+                      <RotateCw size={14} /> Reload
+                    </button>
+                  )}
+                  {entry.syncs && entry.state === 'loaded' && !entry.disabled_by && (
+                    <button
+                      type="button"
+                      onClick={() => entryAction.mutate({ entry, action: 'sync' })}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+                      aria-label={`Sync devices of ${entry.title}`}
+                    >
+                      <RefreshCw size={14} /> Sync devices
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => entryAction.mutate({ entry, action: entry.disabled_by ? 'enable' : 'disable' })}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+                    aria-label={`${entry.disabled_by ? 'Enable' : 'Disable'} ${entry.title}`}
+                  >
+                    <Power size={14} /> {entry.disabled_by ? 'Enable' : 'Disable'}
+                  </button>
                   {entry.reconfigure.length > 0 && (
                     <button
                       type="button"
@@ -239,6 +289,8 @@ export default function IntegrationsPanel() {
         })}
       </ul>
 
+    </section>
+    {/* Outside the panel: its backdrop blur would otherwise be the fixed dialogs' containing block. */}
       {editing && <ReconfigureDialog entry={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
       {renaming && <RenameDialog device={renaming} onClose={() => setRenaming(null)} onSaved={() => { setRenaming(null); refresh(); }} />}
       {removal && <RemoveDialog removal={removal} onClose={() => setRemoval(null)} onRemoved={() => { setRemoval(null); refresh(); }} />}
@@ -253,7 +305,7 @@ export default function IntegrationsPanel() {
           onClose={() => setBuilderSetup(false)}
         />
       )}
-    </section>
+    </>
   );
 }
 

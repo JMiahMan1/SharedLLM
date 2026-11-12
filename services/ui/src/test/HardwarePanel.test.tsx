@@ -6,8 +6,8 @@ import { renderWithProviders } from './render';
 import { server } from './setup';
 
 const devices = [
-  { name: 'office-light', host: '192.168.2.87', port: 6053, noise_psk: 'secret', ha_entity_id: 'light.office_light' },
-  { name: 'garage-door', host: '192.168.2.88', port: 6053 },
+  { name: 'office-light', host: '192.0.2.87', port: 6053, noise_psk: 'secret', ha_entity_id: 'light.office_light' },
+  { name: 'garage-door', host: '192.0.2.88', port: 6053 },
 ];
 
 let storedDevices = devices;
@@ -67,7 +67,7 @@ describe('HardwarePanel', () => {
     await screen.findByText('office-light');
 
     fireEvent.change(screen.getByLabelText('New device name'), { target: { value: 'attic-fan' } });
-    fireEvent.change(screen.getByLabelText('New device host'), { target: { value: '192.168.2.90' } });
+    fireEvent.change(screen.getByLabelText('New device host'), { target: { value: '192.0.2.90' } });
     fireEvent.click(screen.getByRole('button', { name: /add device/i }));
 
     await waitFor(() => {

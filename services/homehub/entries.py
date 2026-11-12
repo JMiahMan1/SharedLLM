@@ -86,6 +86,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
+        "syncs": entry.domain in _syncers(),
     }
 
 
@@ -96,6 +97,12 @@ def list_entries(runtime: Any) -> dict[str, Any]:
     areas = sorted(({"area_id": a.area_id, "name": a.name} for a in hub.areas.values()),
                    key=lambda a: a["name"].lower())
     return {"entries": entries, "areas": areas}
+
+
+def _syncers() -> dict[str, Any]:
+    from services.homehub import hardware  # hardware imports this module
+
+    return hardware.SYNCERS
 
 
 def _unpair_hooks() -> dict[str, Any]:

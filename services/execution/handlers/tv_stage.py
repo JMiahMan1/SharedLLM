@@ -451,6 +451,12 @@ async def ha_entity_platforms(ha_url: str, ha_token: str) -> dict[str, str]:
     """``{media_player entity: platform}`` from the HA integration that owns each one."""
     if not (ha_url and ha_token):
         return {}
+    from services.execution import capability_index
+
+    idx = await capability_index.load_or_none(ha_url, ha_token, "TV stage platforms")
+    if idx is not None:  # the hub knows each entity's integration: no template needed
+        return {eid: INTEGRATION_PLATFORMS[integ] for eid in idx.with_ability(domain="media_player")
+                if (integ := idx.integration(eid) or "") in INTEGRATION_PLATFORMS}
     parts = "".join(
         f"{{% for e in integration_entities('{integ}') %}}{{% if e.startswith('media_player.') %}}"
         f"{{{{ e }}}}|{integ};{{% endif %}}{{% endfor %}}"

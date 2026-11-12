@@ -149,11 +149,17 @@ def detect_tv_type(
     state: str,
     attributes: dict,
     loaded_components: set[str] | None = None,
+    platform: str | None = None,
 ) -> str:
     """Detect TV platform type using multiple context clues in priority order.
 
+    ``platform`` is the answer from the hub's capability index (the integration
+    that owns the entity, ``capability_index.tv_platform``); when given it wins
+    over every guess below, which remain for a Home Assistant without the index.
     Handles entities even when `state == 'off'` and `app_id` is None.
     """
+    if platform:
+        return platform
     eid = entity_id.lower()
     attrs = attributes or {}
     app_id = (attrs.get("app_id") or "").lower()
@@ -1045,7 +1051,11 @@ async def dispatch_announce(
     message: str = "",
 ) -> dict[str, Any]:
     """Dispatch announcement/alarm/intercom audio to the appropriate TV or speaker handler."""
-    tv_type = detect_tv_type(entity_id, state, attributes, loaded_components)
+    from services.execution import capability_index
+
+    idx = await capability_index.load_or_none(ha_url, ha_token, "announce routing")
+    tv_type = detect_tv_type(entity_id, state, attributes, loaded_components,
+                             platform=idx.tv_platform(entity_id) if idx is not None else None)
 
     # If unknown, try web search fallback
     if tv_type == "unknown":
@@ -1198,6 +1208,12 @@ async def classify_communication_devices(
     """
     ha_client = _get_ha_client()
     device_registry = _get_device_registry()
+    # The hub's capability index says which integration owns each player and what it can do
+    # (announce, show a page); without it (a plain HA) the attribute heuristics below decide.
+    from services.execution import capability_index
+
+    idx = (await capability_index.load_or_none(ha_url, ha_token, "communication device classification")
+           if ha_url and ha_token else None)
 
     states = all_states
     if states is None and ha_url and ha_token:
@@ -1251,7 +1267,7 @@ async def classify_communication_devices(
         if re.match(r"^[0-9.:_ -]+$", friendly) or friendly.startswith("{"):
             continue
 
-        tv_type = detect_tv_type(eid, state_val, attrs)
+        tv_type = detect_tv_type(eid, state_val, attrs, platform=idx.tv_platform(eid) if idx is not None else None)
         companions = resolve_tv_companions(eid, states)
 
         # Avoid duplicate Music Assistant / DLNA wrapper entries when the primary TV entity is already in HA
@@ -1291,9 +1307,14 @@ async def classify_communication_devices(
         # TV remotes and cast wrappers in this house carry the low-bit feature
         # sets but not this bit, so they stop appearing as speakers.
         announce_capable = bool(supported_features & SUPPORT_MEDIA_ANNOUNCE)
+        cap = idx.get(eid) if idx is not None else None
+        if cap is not None:
+            announce_capable = "announce" in (cap.get("abilities") or [])
 
         is_tv = (
-            tv_type in TV_PLATFORMS
+            (cap is not None and ((cap.get("details") or {}).get("device_class") == "tv"
+                                  or {"show_url", "launch_app"} & set(cap.get("abilities") or [])))
+            or tv_type in TV_PLATFORMS
             or device_class == "tv"
             or (attrs.get("icon") or "") == "mdi:television"
             or "tv" in eid.lower()
@@ -1309,7 +1330,9 @@ async def classify_communication_devices(
             elif tv_type == "webos":
                 os_version = "LG webOS"
             elif tv_type == "samsung":
-                os_version = "Samsung Orsay (Legacy)" if "master_bedroom" in eid else "Samsung Tizen"
+                # Pre-2016 (Orsay) Samsungs have no remote browser; only a name or model tells.
+                os_version = ("Samsung Orsay (Legacy)" if "orsay" in f"{eid} {friendly} {meta.get('model', '')}".lower()
+                              else "Samsung Tizen")
             elif tv_type == "android_tv":
                 os_version = "Android TV"
             elif tv_type == "cast":

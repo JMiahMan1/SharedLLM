@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, MonitorCheck } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { failureText } from '../../lib/discoveredDevices';
@@ -34,6 +34,7 @@ const DEFAULT_POLL_MS = 2000;
  *   says so and asks again with the `session` until the hub answers otherwise.
  */
 export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, submitLabel = 'Add', areas = [], onSubmit, onDone, onClose }: Props) {
+  const fieldId = useId();
   const [name, setName] = useState('');
   const [areaId, setAreaId] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
@@ -154,16 +155,29 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
               </label>
             )}
             {needs.map((n) => (
-              <label key={n.key} className="block text-xs text-slate-400">
+              <label key={n.key} htmlFor={`${fieldId}-${n.key}`} className="block text-xs text-slate-400">
                 {n.label}{n.optional ? ' (optional)' : ''}
-                <input
-                  className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
-                  type={n.type === 'password' ? 'password' : 'text'}
-                  value={values[n.key] || ''}
-                  onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                {n.type === 'select' ? (
+                  <select
+                    id={`${fieldId}-${n.key}`}
+                    className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+                    value={values[n.key] ?? ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}
+                  >
+                    {!n.optional && <option value="">Choose</option>}
+                    {(n.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    id={`${fieldId}-${n.key}`}
+                    className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
+                    type={n.type === 'password' ? 'password' : 'text'}
+                    value={values[n.key] || ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [n.key]: e.target.value }))}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                )}
                 {n.help && <span className="mt-1 block text-[11px] text-slate-500">{n.help}</span>}
               </label>
             ))}

@@ -175,3 +175,42 @@ def test_the_builder_link_never_carries_its_login(client, hub):
                                              "password": "leak"})
     body = client.get("/api/homehub/esphome-builder", headers=ADMIN).json()
     assert body == {"configured": True, "url": "http://192.0.2.5:6052/", "state": "loaded"}
+
+
+# -- the hardware list and the capability index -------------------------------------------------
+
+@pytest.mark.parametrize("verb,path", [
+    ("get", "/api/homehub/integrations"), ("get", "/api/homehub/hardware"), ("get", "/api/homehub/hardware/dev1"),
+    ("post", "/api/homehub/hardware/dev1/disable"), ("patch", "/api/homehub/entities/light.porch"),
+    ("post", "/api/homehub/entries/e1/disable"), ("post", "/api/homehub/entries/e1/reload"),
+    ("post", "/api/homehub/entries/e1/sync"), ("post", "/api/homehub/discovered/roku:x1/update-address"),
+    ("get", "/api/homehub/capabilities"),
+])
+def test_only_admins_reach_the_hardware_list(client, hub, verb, path):
+    seen, _ = hub
+    assert getattr(client, verb)(path, headers=KID).status_code == 403
+    assert seen == []
+
+
+def test_hardware_calls_reach_the_hub(client, hub):
+    seen, answers = hub
+    answers["/hub/hardware"] = (200, {"devices": [{"id": "dev1"}], "areas": []})
+    assert client.get("/api/homehub/hardware", headers=ADMIN).json()["devices"] == [{"id": "dev1"}]
+    client.patch("/api/homehub/entities/light.porch", headers=ADMIN, json={"name": "Lamp", "secret": "x"})
+    assert seen[-1] == ("PATCH", "/hub/entities/light.porch", None, {"name": "Lamp"})
+    assert client.patch("/api/homehub/entities/not-an-id", headers=ADMIN, json={}).status_code == 404
+    assert client.post("/api/homehub/entries/e1/disable", headers=ADMIN, json={"disabled": "yes"}).status_code == 400
+    client.post("/api/homehub/entries/e1/disable", headers=ADMIN, json={"disabled": True})
+    assert seen[-1] == ("POST", "/hub/entries/e1/disable", None, {"disabled": True})
+    client.post("/api/homehub/discovered/roku:x1/update-address", headers=ADMIN)
+    assert seen[-1][1] == "/hub/discovered/roku:x1/update-address"
+    answers["/hub/entries/e1/sync"] = (409, {"status": "error", "message": "It is not connected"})
+    resp = client.post("/api/homehub/entries/e1/sync", headers=ADMIN)
+    assert resp.status_code == 409 and resp.json()["detail"] == "It is not connected"
+
+
+def test_capability_queries_pass_only_known_filters(client, hub):
+    seen, _ = hub
+    client.get("/api/homehub/capabilities?ability=announce&ability=volume&area=Den&token=x", headers=ADMIN)
+    assert seen[-1][1] == "/api/homehub/capabilities"
+    assert seen[-1][2] == [("ability", "announce"), ("ability", "volume"), ("area", "Den")]

@@ -120,6 +120,31 @@ through the gateway (`/api/homehub/...`).
 | `POST /hub/discovered/{id}/ignore` | `{"ignored": false}` takes it back |
 | `POST /hub/matter/commission` | `{"code", "name"?, "area_id"?}` |
 
+Discovery also reads the kernel's neighbour table after each sweep (DHCP/ARP: HA's
+manifest MAC prefixes and host names find Reolink, Roborock and Tasmota, and every
+finding gets its MAC), browses `_hap._udp` (HomeKit over Thread, listed as not
+supported yet) and `_mass._tcp` (Music Assistant). A set-up device found at a new
+address is listed with `moved` and offered as an update to its entry
+(`POST /hub/discovered/{id}/update-address`), and admins get one notice per new address.
+
+Every driver can be added by hand (`GET /hub/flows`, grouped as on the network,
+servers, cloud accounts and helpers; `manual_flows.py`); phones add themselves.
+
+| Route (admin) | What (`hardware_api.py`) |
+|---|---|
+| `GET /hub/integrations` | Per integration: entries with state and error, device/entity/unavailable counts, how it is discovered and added |
+| `GET /hub/hardware`, `GET /hub/hardware/{id}` | Devices from the live registry (maker, model, firmware, area, IP/MAC, status, last seen, abilities); one device with its entities and states |
+| `POST /hub/hardware/{id}/disable`, `PATCH /hub/entities/{id}` | Disable a device (its entities follow), rename/move/hide/disable an entity |
+| `POST /hub/entries/{id}/disable`, `/reload`, `/sync` | Unload or start an entry; reconnect it; register devices its driver found (Music Assistant, Roborock, Emporia) |
+
+**Capabilities** (`capabilities.py`, `GET /api/homehub/capabilities?ability=&area=`, any
+hub token): what every entity can do, derived from HA's feature flags and state
+attributes, the registry, the protocol (ESPHome type, HomeKit aid/iid, Matter
+endpoint) and the driver (camera stream types, an optional `entity_abilities`).
+The Rooms page draws controls from it, the automation editor offers only the
+services a device takes, and execution's announce routing and TV stage ask it
+which integration owns a player (`services/execution/capability_index.py`).
+
 **Firewall.** A stateful firewall drops the unicast replies to a multicast
 M-SEARCH or a WiZ broadcast, so both scans also probe every address of the /24
 (`HOMEHUB_SCAN_SUBNET` overrides it); those replies are tracked and get through.

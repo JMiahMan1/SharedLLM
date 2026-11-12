@@ -13,6 +13,18 @@ of findings:
   address of the subnet; those replies are tracked and get through.
 - **WiZ**, on an interval and on demand: ``getSystemConfig`` to UDP 38899, as a
   broadcast and as a unicast sweep of the subnet (same firewall reason).
+- **DHCP/ARP**, with every active scan: the kernel's neighbour table
+  (``/proc/net/arp``, ``HOMEHUB_ARP_TABLE``) gives each live address its MAC,
+  and a reverse lookup its DHCP host name. Both are matched against the
+  ``dhcp`` rules HA's integration manifests carry (``DHCP_MATCHERS``), which is
+  how HA finds Reolink cameras and Roborock vacuums. The same table fills in the
+  MAC of any finding that came without one, so a device set up by MAC is
+  recognised whichever protocol found it.
+
+A finding the registry knows whose address is not the one its entry uses has
+**moved** (the router gave it a new lease). It is listed with ``moved``
+(``entry_id``, ``old_host``, ``new_host``) and the API offers the update, as
+HA's discovery updates an entry's host through its unique_id.
 
 A finding has a stable id (``{integration}:{mac|uuid|serial}``), a name, a
 model, an address, first/last seen, and whether the registry already knows it
@@ -87,16 +99,19 @@ MDNS_TYPES = (
     "_googlecast._tcp.local.",
     "_androidtvremote2._tcp.local.",
     "_http._tcp.local.",
+    "_hap._udp.local.",   # HomeKit over Thread
+    "_mass._tcp.local.",  # Music Assistant servers
 )
 
 LABELS = {
     "esphome": "ESPHome", "wiz": "WiZ", "cast": "Google Cast", "roku": "Roku", "matter": "Matter",
     "homekit_controller": "HomeKit", "androidtv_remote": "Android TV", "samsungtv": "Samsung TV",
     "webostv": "LG webOS TV", "dlna_dmr": "DLNA renderer", "tasmota": "Tasmota", "reolink": "Reolink",
+    "music_assistant": "Music Assistant", "roborock": "Roborock",
 }
 #: Integrations a finding can be added for (services/homehub/flows.py).
 ADOPTABLE = {"esphome", "wiz", "cast", "roku", "matter", "tasmota", "homekit_controller", "androidtv_remote",
-             "samsungtv", "webostv", "dlna_dmr", "reolink"}
+             "samsungtv", "webostv", "dlna_dmr", "reolink", "music_assistant", "roborock"}
 #: Integrations nobody is told about (too many, and nothing to do with them yet).
 QUIET = {"dlna_dmr"}
 
@@ -178,7 +193,17 @@ def parse_mdns(service_type: str, name: str, host: str | None, port: int | None,
             "props": {"commissioning_open": cm in ("1", "2"), "discriminator": props.get("D"),
                       "vendor_id": vendor or None, "product_id": product or None},
         }
-    if stype == "_hap._tcp.local.":
+    if stype == "_mass._tcp.local.":
+        server_id = props.get("server_id") or instance
+        base_url = props.get("base_url") or f"http://{host}:{port or 8095}"
+        return {
+            "id": make_id("music_assistant", server_id), "integration": "music_assistant",
+            "name": f"Music Assistant {props.get('server_version') or ''}".strip(), "model": None,
+            "manufacturer": "Music Assistant", "host": host, "port": port or 8095, "mac": None,
+            "ids": [x for x in (server_id,) if x], "source": "mdns",
+            "props": {"server_id": server_id, "url": base_url, "version": props.get("server_version")},
+        }
+    if stype in ("_hap._tcp.local.", "_hap._udp.local."):
         if props.get("sf") != "1":
             return None  # paired already (with us or another controller): nothing to add
         pairing_id = props.get("id", "").lower()
@@ -191,7 +216,8 @@ def parse_mdns(service_type: str, name: str, host: str | None, port: int | None,
             # What aiohomekit needs to pair without browsing again: feature flags
             # (MFi or software auth), config/state numbers and protocol version.
             "props": {"category": props.get("ci"), "pairing_id": pairing_id, "ff": props.get("ff"),
-                      "c#": props.get("c#"), "s#": props.get("s#"), "pv": props.get("pv")},
+                      "c#": props.get("c#"), "s#": props.get("s#"), "pv": props.get("pv"),
+                      "transport": "thread" if stype == "_hap._udp.local." else "ip"},
         }
     if stype == "_googlecast._tcp.local.":
         raw_id = props.get("id", "")
@@ -341,6 +367,83 @@ def parse_wiz(reply: dict[str, Any], host: str) -> dict[str, Any] | None:
     }
 
 
+# -- DHCP / ARP ---------------------------------------------------------------------
+
+#: The ``dhcp`` rules of HA's integration manifests, for the integrations the hub
+#: has a flow for: a MAC prefix (``macaddress``, upper-case hex with ``*``) or a
+#: DHCP host name pattern (``hostname``, lower case with ``*``). These are the
+#: vendors' own prefixes and default host names, not anything of this household.
+DHCP_MATCHERS: tuple[dict[str, str], ...] = (
+    {"integration": "reolink", "macaddress": "EC71DB*"},
+    {"integration": "reolink", "hostname": "reolink*"},
+    {"integration": "roborock", "hostname": "roborock-*"},
+    {"integration": "wiz", "macaddress": "A8BB50*"},
+    {"integration": "wiz", "macaddress": "D8A011*"},
+    {"integration": "wiz", "macaddress": "444F8E*"},
+    {"integration": "wiz", "macaddress": "6C2990*"},
+    {"integration": "wiz", "macaddress": "6C29D2*"},
+    {"integration": "wiz", "hostname": "wiz_*"},
+    {"integration": "tasmota", "hostname": "tasmota-*"},
+)
+#: Integrations a DHCP match alone is enough to offer (the others are found by
+#: their own protocol, which also tells what the device is).
+DHCP_OFFER = {"reolink", "roborock", "tasmota"}
+#: Reverse lookups for DHCP host names (``HOMEHUB_DHCP_HOSTNAMES=0`` turns them off).
+DHCP_HOSTNAMES = os.getenv("HOMEHUB_DHCP_HOSTNAMES", "1") not in ("0", "false", "no")
+#: One login covers every device of these (a cloud account): a device of one is
+#: set up when the integration is.
+ACCOUNT_WIDE = {"roborock"}
+
+
+def _glob(pattern: str, value: str) -> bool:
+    import fnmatch
+
+    return bool(value) and fnmatch.fnmatchcase(value, pattern)
+
+
+def dhcp_match(mac: str | None, hostname: str | None) -> str | None:
+    """The integration HA's manifest rules name for this MAC / host name, or None."""
+    m = (norm_mac(mac) or "").upper()
+    h = (hostname or "").split(".")[0].lower()
+    for rule in DHCP_MATCHERS:
+        if "macaddress" in rule and m and _glob(rule["macaddress"], m):
+            return rule["integration"]
+        if "hostname" in rule and h and _glob(rule["hostname"], h):
+            return rule["integration"]
+    return None
+
+
+def parse_arp(text: str) -> dict[str, str]:
+    """``/proc/net/arp`` -> ``{ip: mac}`` (complete entries only, no zero MACs)."""
+    out: dict[str, str] = {}
+    for line in text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        ip, flags, mac = parts[0], parts[2], norm_mac(parts[3])
+        try:
+            complete = int(flags, 16) & 0x2
+        except ValueError:
+            continue
+        if complete and mac and mac != "000000000000":
+            out[ip] = mac
+    return out
+
+
+def parse_dhcp(host: str, mac: str, hostname: str | None) -> dict[str, Any] | None:
+    """One neighbour (address, MAC, DHCP host name) -> a finding when a manifest rule names it."""
+    integration = dhcp_match(mac, hostname)
+    if integration is None or integration not in DHCP_OFFER:
+        return None
+    short = (hostname or "").split(".")[0] or None
+    return {
+        "id": make_id(integration, mac), "integration": integration,
+        "name": short or f"{LABELS.get(integration, integration)} at {host}", "model": None,
+        "manufacturer": LABELS.get(integration), "host": host, "port": None, "mac": mac, "ids": [mac],
+        "source": "dhcp", "props": {"hostname": short},
+    }
+
+
 # -- what the registry already knows ----------------------------------------------
 
 class KnownIndex:
@@ -401,12 +504,34 @@ class KnownIndex:
             self.hosts.setdefault(host.lower(), entry_id)
 
     def match(self, finding: dict[str, Any]) -> str | None:
+        return self.match_how(finding)[0]
+
+    def match_how(self, finding: dict[str, Any]) -> tuple[str | None, str | None]:
+        """``(entry_id, "id" | "host")``: by an id the device reports, or only by its address."""
         for value in [finding.get("mac"), *(finding.get("ids") or [])]:
             t = token(value)
             if len(t) >= 6 and t in self.tokens:
-                return self.tokens[t]
+                return self.tokens[t], "id"
         host = str(finding.get("host") or "").lower()
-        return self.hosts.get(host) if host else None
+        entry_id = self.hosts.get(host) if host else None
+        return entry_id, ("host" if entry_id else None)
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def current_host(entry: Any) -> str | None:
+    """The address the driver uses now: an options override wins, as in the drivers."""
+    for src in (entry.options or {}, entry.data or {}):
+        raw = str(src.get("host") or src.get("url") or "")
+        if raw:
+            return (urlparse(raw).hostname if "://" in raw else raw.split(":")[0]) or None
+    return None
 
 
 # -- the manager -------------------------------------------------------------------
@@ -537,10 +662,14 @@ class DiscoveryManager:
 
     def public(self, f: dict[str, Any], index: KnownIndex | None = None) -> dict[str, Any]:
         index = index or KnownIndex(self.hub)
-        entry_id = index.match(f)
+        entry_id, how = index.match_how(f)
         if entry_id is not None and entry_id not in self.hub.config_entries:
             entry_id = None
         integration = f.get("integration") or ""
+        if entry_id is None and integration in ACCOUNT_WIDE:
+            entry_id = next((e.entry_id for e in self.hub.config_entries.values()
+                             if e.domain == integration and e.source != "ignore"), None)
+            how = "account" if entry_id else None
         ignored_by_ha = entry_id is not None and index.sources.get(entry_id) == "ignore"
         known = entry_id is not None and not ignored_by_ha
         ignored = f["id"] in self.ignored or ignored_by_ha
@@ -550,7 +679,16 @@ class DiscoveryManager:
         needs = flows.needs_for(f)
         unsupported = flows.unsupported_reason(f)
         entry = self.hub.config_entries.get(entry_id or "")
+        moved = None
+        new_host = str(f.get("host") or "").lower()
+        if known and entry is not None and how == "id" and new_host:
+            cur = current_host(entry)
+            # Only an IP address goes stale; a host name follows the device by itself.
+            if cur and _is_ip(cur) and _is_ip(new_host) and cur.lower() != new_host:
+                moved = {"entry_id": entry.entry_id, "entry_title": entry.title, "old_host": cur,
+                         "new_host": f.get("host")}
         return {
+            "moved": moved,
             "id": f["id"], "integration": integration, "label": LABELS.get(integration, integration),
             "name": f.get("name") or f.get("host"), "model": f.get("model"), "manufacturer": f.get("manufacturer"),
             "host": f.get("host"), "port": f.get("port"), "mac": f.get("mac"), "source": f.get("source"),
@@ -601,10 +739,15 @@ class DiscoveryManager:
         """Tell the admins about every new finding not told yet; returns how many."""
         index = KnownIndex(self.hub)
         fresh = []
+        moved = []
         for f in list(self.findings.values()):
             pub = self.public(f, index)
             if self._should_notify(pub, f):
                 fresh.append(pub)
+            elif pub.get("moved") and f"moved:{pub['id']}:{pub['moved']['new_host']}" not in self.notified:
+                moved.append(pub)
+        if moved:
+            await self._notify_moved(moved)
         if not fresh:
             return 0
         from services.common import notify
@@ -639,6 +782,26 @@ class DiscoveryManager:
                 self.findings[p["id"]]["notified"] = True
             self.save()
         return len(fresh) if sent else 0
+
+    async def _notify_moved(self, moved: list[dict[str, Any]]) -> None:
+        """One notice per device whose address changed (until it changes again)."""
+        from services.common import notify
+
+        for p in moved:
+            m = p["moved"]
+            key = f"moved:{p['id']}:{m['new_host']}"
+            payload = notify.notice(
+                "@admins", "admin", f"{m['entry_title']} has a new address",
+                f"{m['entry_title']} ({p['label']}) now answers at {m['new_host']} instead of {m['old_host']}. "
+                "Update it on the Devices page so the hub can reach it.",
+                url="/devices", priority=2, tag=f"admin:device-moved:{p['id']}", once=f"homehub:{key}",
+                kind="admin", audience="parents")
+            sent = False
+            with contextlib.suppress(Exception):
+                sent = bool(await self.notifier(payload))
+            if sent:
+                self.notified.append(key)
+                self._dirty = True
 
     def _schedule_notices(self) -> None:
         if self._notify_task is not None and not self._notify_task.done():
@@ -726,7 +889,8 @@ class DiscoveryManager:
             started = time.monotonic()
             before = set(self.findings)
             counts: dict[str, Any] = {}
-            for label, job in (("ssdp", self._scan_ssdp), ("wiz", self._scan_wiz)):
+            # DHCP/ARP last: the sweeps above make the kernel resolve every live address.
+            for label, job in (("ssdp", self._scan_ssdp), ("wiz", self._scan_wiz), ("dhcp", self._scan_dhcp)):
                 try:
                     counts[label] = await job()
                 except Exception as exc:
@@ -837,6 +1001,62 @@ class DiscoveryManager:
         except Exception as exc:
             log.debug("UPnP description %s: %s", url, exc)
             return None
+
+    # DHCP / ARP --------------------------------------------------------------------
+    @staticmethod
+    def read_arp() -> str:
+        path = os.getenv("HOMEHUB_ARP_TABLE", "/proc/net/arp")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read()
+        except OSError as exc:
+            raise RuntimeError(f"the neighbour table {path} cannot be read: {exc}") from exc
+
+    async def reverse_name(self, host: str) -> str | None:
+        """The DHCP host name the LAN's DNS has for an address, or None."""
+        loop = asyncio.get_running_loop()
+        try:
+            name = await asyncio.wait_for(loop.run_in_executor(None, socket.gethostbyaddr, host), 2.0)
+        except (OSError, TimeoutError):
+            return None
+        return str(name[0]) if name and name[0] else None
+
+    async def _scan_dhcp(self) -> int:
+        """Neighbours by MAC and host name -> findings, and MACs for findings that had none."""
+        neighbours = parse_arp(self.read_arp())
+        by_host: dict[str, dict[str, Any]] = {}
+        for f in self.findings.values():
+            if f.get("host"):
+                by_host.setdefault(str(f["host"]), f)
+        filled = 0
+        for host, mac in neighbours.items():
+            f = by_host.get(host)
+            if f is not None and not f.get("mac"):
+                f["mac"] = mac
+                f["ids"] = sorted(set(f.get("ids") or []) | {mac})
+                self._dirty = True
+                filled += 1
+        names: dict[str, str | None] = {}
+        if DHCP_HOSTNAMES:
+            sem = asyncio.Semaphore(16)
+
+            async def one(h: str) -> None:
+                async with sem:
+                    names[h] = await self.reverse_name(h)
+
+            await asyncio.gather(*(one(h) for h in neighbours))
+        found = 0
+        for host, mac in neighbours.items():
+            f = parse_dhcp(host, mac, names.get(host))
+            if f is None:
+                continue
+            other = by_host.get(host)
+            if other is not None and other.get("integration") == f["integration"] and other["id"] != f["id"]:
+                continue  # already found by its own protocol
+            self.record(f)
+            found += 1
+        log.debug("dhcp: %d neighbours, %d matched, %d MACs filled in", len(neighbours), found, filled)
+        return found
 
     # WiZ ---------------------------------------------------------------------------
     async def _scan_wiz(self) -> int:

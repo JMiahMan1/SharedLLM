@@ -164,6 +164,10 @@ test.describe('home pages', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('adopt-dialog')).toBeVisible();
     await expect(dialog.getByLabel(/Room/)).toBeVisible();
+    // The sheet slides up as it opens: measure it once it has come to rest.
+    const height = page.viewportSize()?.height ?? 0;
+    await expect.poll(async () => { const b = await dialog.boundingBox(); return b ? b.y + b.height : height + 99; })
+      .toBeLessThanOrEqual(height + 1);
     await expectFits(page, dialog);
     await snap(page, info, 'devices-add');
     clean(run);

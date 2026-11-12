@@ -10,7 +10,7 @@ import {
   SETPOINT_DEBOUNCE_MS, modeVisual, numberAttr, setpointRange, snap, titleize, type ClimateAttributes,
 } from '../../lib/climate';
 import {
-  binaryLabel, brightnessPct, formatState, isActive, isUnavailable, runService, supportsBrightness, type HubEntity,
+  binaryLabel, brightnessPct, can, formatState, isActive, isUnavailable, runService, supportsBrightness, type HubEntity,
 } from '../../lib/dashboards';
 
 const TOUCH = 'min-h-11 min-w-11';
@@ -121,27 +121,29 @@ export function MediaControl({ entity, onChanged }: { entity: HubEntity; onChang
   return (
     <div>
       <Row entity={shown} detail={title || titleize(shown.state)}>
-        {off ? (
+        {off ? (can(entity, 'power') &&
           <button type="button" aria-label={`Turn on ${entity.name}`} className={`${TOUCH} rounded-lg bg-white/5`}
             disabled={isUnavailable(shown.state)} onClick={() => act('media_player', 'turn_on')}>
             <Power size={16} className="mx-auto text-slate-300" />
           </button>
         ) : (
           <>
+            {(can(entity, 'pause') || can(entity, 'play')) &&
             <button type="button" aria-label={shown.state === 'playing' ? `Pause ${entity.name}` : `Play ${entity.name}`}
               className={`${TOUCH} rounded-lg bg-white/5`}
               onClick={() => act('media_player', 'media_play_pause', undefined,
                 { state: shown.state === 'playing' ? 'paused' : 'playing' })}>
               {shown.state === 'playing' ? <Pause size={16} className="mx-auto" /> : <Play size={16} className="mx-auto" />}
-            </button>
+            </button>}
+            {can(entity, 'next_track') &&
             <button type="button" aria-label={`Next on ${entity.name}`} className={`${TOUCH} rounded-lg bg-white/5`}
               onClick={() => act('media_player', 'media_next_track')}>
               <SkipForward size={16} className="mx-auto" />
-            </button>
+            </button>}
           </>
         )}
       </Row>
-      {!off && vol != null && (
+      {!off && vol != null && can(entity, 'volume') && (
         <label className="flex items-center gap-2">
           <Volume2 size={14} className="text-slate-500" aria-hidden />
           <input type="range" min={0} max={100} value={Math.round((draft ?? vol) * 100)}
@@ -169,17 +171,17 @@ export function CoverLockVacuumControl({ entity, onChanged }: { entity: HubEntit
   );
   let controls: React.ReactNode = null;
   if (entity.domain === 'cover') {
-    controls = <>{btn('Open', 'open_cover', <ChevronUp size={16} className="mx-auto" />, 'opening')}
-      {btn('Close', 'close_cover', <ChevronDown size={16} className="mx-auto" />, 'closing')}</>;
+    controls = <>{can(entity, 'open') && btn('Open', 'open_cover', <ChevronUp size={16} className="mx-auto" />, 'opening')}
+      {can(entity, 'close') && btn('Close', 'close_cover', <ChevronDown size={16} className="mx-auto" />, 'closing')}</>;
   } else if (entity.domain === 'lock') {
     controls = shown.state === 'locked'
       ? btn('Unlock', 'unlock', <LockOpen size={16} className="mx-auto" />, 'unlocking')
       : btn('Lock', 'lock', <Lock size={16} className="mx-auto" />, 'locking');
   } else if (entity.domain === 'vacuum') {
     controls = <>{shown.state === 'cleaning'
-      ? btn('Pause', 'pause', <Pause size={16} className="mx-auto" />, 'paused')
-      : btn('Start', 'start', <Play size={16} className="mx-auto" />, 'cleaning')}
-      {btn('Dock', 'return_to_base', <span className="text-xs">Dock</span>, 'returning')}</>;
+      ? can(entity, 'pause') && btn('Pause', 'pause', <Pause size={16} className="mx-auto" />, 'paused')
+      : can(entity, 'vacuum_start') && btn('Start', 'start', <Play size={16} className="mx-auto" />, 'cleaning')}
+      {can(entity, 'vacuum_return') && btn('Dock', 'return_to_base', <span className="text-xs">Dock</span>, 'returning')}</>;
   }
   const battery = numberAttr(shown.attributes?.battery_level);
   return (

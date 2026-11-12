@@ -24,6 +24,8 @@ export interface HubEntity {
   area_id: string | null;
   device_id: string | null;
   last_changed: string;
+  /** What it can do, from the hub's capability index (homehub capabilities.py); absent from older hubs. */
+  abilities?: string[];
 }
 
 export interface RoomArea {
@@ -375,7 +377,17 @@ export function brightnessPct(e: HubEntity): number | null {
   return Math.round((b / 255) * 100);
 }
 
+/**
+ * Whether an entity can do something, by the hub's capability index. Controls are drawn from
+ * this. An entity from a hub without the index (no `abilities`) gets `fallback`, which callers
+ * set from the state's own attributes.
+ */
+export function can(e: Pick<HubEntity, 'abilities'>, ability: string, fallback = true): boolean {
+  return Array.isArray(e.abilities) ? e.abilities.includes(ability) : fallback;
+}
+
 export function supportsBrightness(e: HubEntity): boolean {
+  if (Array.isArray(e.abilities)) return e.abilities.includes('dim');
   const modes = e.attributes?.supported_color_modes;
   if (Array.isArray(modes)) return modes.some((m) => m !== 'onoff');
   return typeof e.attributes?.brightness === 'number';

@@ -1,5 +1,6 @@
-"""Devices > New devices and Integrations: adding devices (discovered or by address), pairing them,
-and managing what is set up (reconfigure, rename, move, remove/unpair).
+"""Devices > New devices, Integrations and Hardware: adding devices (discovered or by hand), pairing
+them, managing what is set up (reconfigure, rename, move, disable, reload, sync, remove/unpair), the
+device list built from the hub's registry, and the hub's capability index.
 
 Admins only. Everything is homehub's discovery API (``services/homehub/discovery_api.py``),
 reached with the stack's internal secret at ``HOMEHUB_URL`` (default the hub on
@@ -43,7 +44,7 @@ async def _admin(request: Request) -> str:
     return await gateway._require_admin(request)
 
 
-async def _hub(method: str, path: str, *, params: dict[str, str] | None = None, json: Any = None,
+async def _hub(method: str, path: str, *, params: Any = None, json: Any = None,
                timeout: aiohttp.ClientTimeout = _TIMEOUT) -> tuple[int, Any]:
     """One call to the hub; ``(status, body)``. 502 when it does not answer."""
     from services.gateway.main import shared_http_client
@@ -213,3 +214,92 @@ async def esphome_builder(request: Request):
     if status != 200 or not isinstance(body, dict):
         return _answer(status, body)
     return {k: body[k] for k in ("configured", "url", "state", "reason", "title", "entry_id", "login") if k in body}
+
+
+# -- The hardware list: integrations, devices, entities (homehub's hardware_api.py) ------------
+
+_ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+
+
+def _flag(body: dict[str, Any]) -> dict[str, bool]:
+    if not isinstance(body.get("disabled"), bool):
+        raise HTTPException(status_code=400, detail="disabled must be true or false")
+    return {"disabled": body["disabled"]}
+
+
+@router.get("/integrations")
+async def integrations(request: Request):
+    """One row per integration: entries with state and error, counts, how it is discovered and added."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/integrations"))
+
+
+@router.get("/hardware")
+async def hardware(request: Request):
+    """Every device in the hub's registry with its connections, availability and abilities."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/hardware"))
+
+
+@router.get("/hardware/{device_id}")
+async def hardware_device(device_id: str, request: Request):
+    """One device with its entities, their states and capabilities."""
+    await _admin(request)
+    return _answer(*await _hub("GET", f"/hub/hardware/{_rid(device_id, 'device')}"))
+
+
+@router.post("/hardware/{device_id}/disable")
+async def disable_device(device_id: str, request: Request):
+    await _admin(request)
+    body = _flag(await _json(request))
+    return _answer(*await _hub("POST", f"/hub/hardware/{_rid(device_id, 'device')}/disable", json=body,
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.patch("/entities/{entity_id}")
+async def update_entity(entity_id: str, request: Request):
+    """Rename, move, hide or disable an entity: ``{"name"?, "area_id"?, "hidden"?, "disabled"?}``."""
+    await _admin(request)
+    if not _ENTITY_ID.match(entity_id or ""):
+        raise HTTPException(status_code=404, detail="No such entity")
+    body = await _json(request)
+    payload = {k: body[k] for k in ("name", "area_id", "hidden", "disabled") if k in body}
+    return _answer(*await _hub("PATCH", f"/hub/entities/{entity_id}", json=payload, timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/entries/{entry_id}/disable")
+async def disable_entry(entry_id: str, request: Request):
+    await _admin(request)
+    body = _flag(await _json(request))
+    return _answer(*await _hub("POST", f"/hub/entries/{_rid(entry_id, 'integration')}/disable", json=body,
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/entries/{entry_id}/reload")
+async def reload_entry(entry_id: str, request: Request):
+    await _admin(request)
+    return _answer(*await _hub("POST", f"/hub/entries/{_rid(entry_id, 'integration')}/reload"))
+
+
+@router.post("/entries/{entry_id}/sync")
+async def sync_entry(entry_id: str, request: Request):
+    """Register the devices a connected integration found that are not in the registry yet."""
+    await _admin(request)
+    return _answer(*await _hub("POST", f"/hub/entries/{_rid(entry_id, 'integration')}/sync", timeout=_SCAN_TIMEOUT))
+
+
+@router.post("/discovered/{finding_id}/update-address")
+async def update_address(finding_id: str, request: Request):
+    """A set-up device found at a new address: move its entry there."""
+    await _admin(request)
+    return _answer(*await _hub("POST", f"/hub/discovered/{_finding(finding_id)}/update-address",
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.get("/capabilities")
+async def capabilities(request: Request):
+    """The hub's capability index (which devices can do what); filters as the hub's."""
+    await _admin(request)
+    allowed = ("ability", "area", "domain", "device_id", "platform", "available")
+    params = [(k, v) for k, v in request.query_params.multi_items() if k in allowed]
+    return _answer(*await _hub("GET", "/api/homehub/capabilities", params=params or None))

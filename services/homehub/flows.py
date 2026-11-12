@@ -94,9 +94,10 @@ def needs_for(finding: dict[str, Any]) -> list[dict[str, Any]]:
         return [NOISE_PSK]
     if integration == "matter":
         return [SETUP_CODE]
-    from services.homehub import pairing  # pairing imports this module
+    from services.homehub import manual_flows, pairing  # both import this module
 
-    return pairing.needs_for(finding)
+    extra = manual_flows.needs_for(finding)
+    return extra if extra is not None else pairing.needs_for(finding)
 
 
 def unsupported_reason(finding: dict[str, Any]) -> str | None:
@@ -106,6 +107,9 @@ def unsupported_reason(finding: dict[str, Any]) -> str | None:
     if integration == "wiz" and wiz_type_label(str((finding.get("props") or {}).get("module") or "")) in (
             "Socket", "Fan"):
         return "WiZ sockets and fans are not supported yet (the hub drives WiZ lights)."
+    if integration == "homekit_controller" and (finding.get("props") or {}).get("transport") == "thread":
+        return ("HomeKit over Thread pairs over CoAP through a Thread border router, which the hub does not do "
+                "yet. If the accessory also speaks Matter, add it with its Matter setup code.")
     return None
 
 
@@ -280,9 +284,10 @@ async def adopt(runtime: Any, finding: dict[str, Any], body: dict[str, Any]) -> 
     reason = unsupported_reason(finding)
     if reason is not None:
         raise FlowError(reason, 501)
-    from services.homehub import pairing  # pairing imports this module
+    from services.homehub import manual_flows, pairing  # both import this module
 
-    flow = FLOWS.get(integration) or pairing.FLOWS.get(integration)
+    flow = (manual_flows.flow_for(integration, finding.get("source")) or FLOWS.get(integration)
+            or pairing.FLOWS.get(integration))
     if flow is None:
         raise FlowError(f"Adding {integration} devices is not supported yet.", 501)
     hub = runtime.hub

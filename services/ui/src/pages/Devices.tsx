@@ -25,6 +25,7 @@ import NewDevicesPanel from '../components/devices/NewDevicesPanel';
 import PageHeader, { HEADER_ACTION } from '../components/ui/PageHeader';
 import { CardSkeletons } from '../components/ui/StateViews';
 import IntegrationsPanel from '../components/devices/IntegrationsPanel';
+import HardwarePanel from '../components/devices/HardwarePanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
@@ -1438,7 +1439,7 @@ export default function Devices() {
         <nav aria-label="Sections of this page" className="flex gap-2 overflow-x-auto touch-pan-x pb-1" data-testid="devices-sections">
           {[
             ['devices-family', 'Family devices'],
-            ...(user?.is_admin ? [['devices-new', 'Add devices'], ['devices-integrations', 'Integrations'], ['devices-phones', 'Phones']] : []),
+            ...(user?.is_admin ? [['devices-new', 'Add devices'], ['devices-hardware', 'Hardware'], ['devices-integrations', 'Integrations'], ['devices-phones', 'Phones']] : []),
             ['devices-folders', 'Shared folders'],
             ['devices-activity', 'Activity'],
           ].map(([id, label]) => (
@@ -1494,6 +1495,7 @@ export default function Devices() {
 
       {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
       {user?.is_admin && <div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div>}
+      {user?.is_admin && <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel /></div>}
       {user?.is_admin && <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>}
       {user?.is_admin && <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>}
 

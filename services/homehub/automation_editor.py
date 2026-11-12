@@ -36,6 +36,7 @@ from typing import Any
 
 import yaml
 
+from services.homehub import capabilities
 from services.homehub.automation import (
     ALWAYS_KNOWN,
     MODES,
@@ -1085,7 +1086,10 @@ def catalog(hub: Any) -> dict[str, Any]:
         entities.append({"entity_id": st.entity_id, "name": st.attributes.get("friendly_name") or st.entity_id,
                          "domain": st.entity_id.split(".", 1)[0], "area": area,
                          "device_class": st.attributes.get("device_class") or (ent.device_class if ent else None),
-                         "unit": st.attributes.get("unit_of_measurement")})
+                         "unit": st.attributes.get("unit_of_measurement"),
+                         # What it can do (capabilities.py), so an editor offers only the services it takes.
+                         **{k: v for k, v in capabilities.entity_capabilities(hub, st.entity_id).items()
+                            if k in ("abilities", "services")}})
     return {
         "triggers": TRIGGER_SPECS, "conditions": CONDITION_SPECS, "actions": ACTION_SPECS,
         "services": hub.list_services(), "entities": entities,

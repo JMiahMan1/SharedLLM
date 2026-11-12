@@ -7,7 +7,7 @@
 | ``DELETE /hub/entries/{id}[?force=1]`` | Unpair (HomeKit), remove the entry, its entities and devices |
 | ``PATCH /hub/devices/{id}`` | ``{"name_by_user"?, "area_id"?}`` |
 | ``DELETE /hub/devices/{id}[?force=1]`` | Remove one device (its entry too when it was the entry's only device) |
-| ``GET /hub/flows`` | Integrations that can be added by address, with their fields |
+| ``GET /hub/flows`` | Every integration that can be added by hand (by address, login or choice), with its fields and ``kind`` |
 | ``POST /hub/flows/{domain}`` | ``{"host"? or "url"?, "name"?, "area_id"?, "input"?}``; same answers as adopting a finding |
 | ``GET /hub/esphome-builder`` | ``{"configured", "url", "state"}`` (never the login) |
 
@@ -20,7 +20,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from services.homehub import entries, flows, pairing
+from services.homehub import entries, flows
+from services.homehub import manual_flows as by_hand
 from services.homehub.auth import Auth, bearer
 from services.homehub.core import HubError
 
@@ -92,14 +93,14 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     @router.get("/hub/flows")
     async def manual_flows(request: Request) -> dict[str, Any]:
         admin(request)
-        return {"flows": [{"domain": d, **spec} for d, spec in pairing.MANUAL.items()]}
+        return {"flows": by_hand.manual_list(runtime.hub)}
 
     @router.post("/hub/flows/{domain}")
     async def manual_add(domain: str, request: Request) -> Any:
         admin(request)
         body = await body_of(request)
         try:
-            finding = pairing.manual_finding(domain, body)
+            finding = by_hand.manual_finding(domain, body)
         except HubError as exc:
             status = int(getattr(exc, "status", 400) or 400)
             return JSONResponse({"status": "unsupported" if status == 501 else "error", "message": str(exc)},

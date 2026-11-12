@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import { isServerCall } from './serverCalls';
+import { FLOWS, HARDWARE, HARDWARE_DETAIL, MOVED_FINDING } from './hardwareMocks';
 
 /**
  * A made-up house for the home pages (Rooms, Climate, Cameras, Energy, History,
@@ -239,10 +240,12 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       return json({ recordings: [{ start: iso(-120), end: iso(-119), trigger: 'person', id: 'r1' }] });
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
-    if (p === '/api/homehub/discovered') return json(DISCOVERED);
+    if (p === '/api/homehub/discovered') return json({ ...DISCOVERED, devices: [...DISCOVERED.devices, MOVED_FINDING] });
+    if (p === '/api/homehub/hardware') return json(HARDWARE);
+    if (p.startsWith('/api/homehub/hardware/')) return json(HARDWARE_DETAIL);
     if (p === '/api/homehub/entries') return json(ENTRIES);
     if (p === '/api/homehub/esphome-builder') return json({ configured: false });
-    if (p === '/api/homehub/flows') return json({ flows: [] });
+    if (p === '/api/homehub/flows') return json({ flows: FLOWS });
     if (p === '/api/homehub/phones') return json(PHONES);
     if (p === '/api/homehub/phones/settings') return json(PHONES.settings);
     if (p === '/api/mdm/devices') return json({ devices: [], members: [] });

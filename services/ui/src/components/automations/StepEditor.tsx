@@ -5,7 +5,7 @@ import { Chip, EntityPicker, Field, JsonBox } from './FormBits';
 import { BUTTON, DANGER, INPUT } from './styles';
 import {
   actionEntities, actionService, actionType, blankStep, conditionType, describeStep, omit, serviceFields,
-  serviceNames, triggerType, withActionEntities,
+  entityTakesService, serviceNames, servicesForEntities, triggerType, withActionEntities,
   type Catalog, type ServiceField, type Spec, type SpecField, type Step,
 } from '../../lib/automations';
 import { WEEKDAYS, WEEKDAY_LABELS } from '../../lib/schedules';
@@ -325,7 +325,10 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
 }) {
   const [asJson, setAsJson] = useState(false);
   const service = actionService(step);
-  const names = serviceNames(catalog);
+  const chosen = actionEntities(step);
+  // Only what the chosen devices can do (the hub's capability index), when it can tell.
+  const supported = servicesForEntities(catalog, chosen);
+  const names = supported ? serviceNames(catalog).filter((n) => supported.includes(n)) : serviceNames(catalog);
   const domain = service.split('.')[0];
   const fields = serviceFields(catalog, service);
   const data = (step.data && typeof step.data === 'object' ? step.data : {}) as Record<string, unknown>;
@@ -351,7 +354,10 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
         )}
       </Field>
       <Field group label="Devices">
-        <EntityPicker entities={catalog?.entities ?? []} value={actionEntities(step)} multiple domains={domains} disabled={disabled}
+        <EntityPicker
+          entities={(catalog?.entities ?? []).filter((e) => !service || !domains || chosen.includes(e.entity_id)
+            || entityTakesService(e, service))}
+          value={chosen} multiple domains={domains} disabled={disabled}
           label="Devices" onChange={(next) => onChange(withActionEntities(step, next))} />
       </Field>
       {asJson ? (

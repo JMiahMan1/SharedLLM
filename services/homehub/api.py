@@ -19,11 +19,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from services.common.secrets import secret_matches
 from services.homehub import (  # HA companion apps: login, webhooks, pushes
     automation_api,  # automation editor, scheduler, thermostat schedules
+    capabilities_api,  # the capability index: which devices can do what
     dashboard_api,
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
     ha_auth_api,
     ha_ws_compat,
+    hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
     live_video,
     live_video_api,
     mobile_app_api,
@@ -524,6 +526,9 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         entry = hub.config_entries.get(entry_id)
         if entry is None:
             raise HTTPException(404, detail="Config entry not found")
+        if entry.disabled_by:
+            return JSONResponse({"status": "error", "message": f"{entry.title} is disabled; enable it first"},
+                                status_code=409)
         await runtime.stop_entry(entry_id)
         runtime.start_entry(entry)
         return {"entry_id": entry_id, "state": "reloading"}
@@ -552,6 +557,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(discovery_api.build_router(runtime, auth))
     app.include_router(automation_api.build_router(runtime, auth))
     app.include_router(entries_api.build_router(runtime, auth))
+    app.include_router(hardware_api.build_router(runtime, auth))
+    app.include_router(capabilities_api.build_router(runtime, auth))
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
     app.include_router(statistics_api.build_router(runtime, auth))  # long-term statistics, energy
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages

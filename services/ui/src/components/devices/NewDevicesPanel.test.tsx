@@ -7,6 +7,7 @@ import type { DiscoveredDevice } from '../../lib/discoveredDevices';
 
 vi.mock('../../lib/discoveredDevices', async (importOriginal) => ({
   failureText: ((await importOriginal()) as Record<string, unknown>).failureText,
+  groupFlows: ((await importOriginal()) as Record<string, unknown>).groupFlows,
   getDiscovered: vi.fn(),
   scanForDevices: vi.fn(),
   adoptDevice: vi.fn(),

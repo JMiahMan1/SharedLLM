@@ -9,9 +9,19 @@ import { apiClient } from '../services/api';
 export interface DiscoveryInput {
   key: string;
   label: string;
-  type: 'text' | 'password';
+  type: 'text' | 'password' | 'select';
   help?: string;
   optional?: boolean;
+  /** For `select`: the choices, read from the hub's registry (zones, switches...). */
+  options?: { value: string; label: string }[];
+}
+
+/** A set-up device seen at a new address (the same unique id, a new lease). */
+export interface MovedDevice {
+  entry_id: string;
+  entry_title: string;
+  old_host: string | null;
+  new_host: string;
 }
 
 export interface DiscoveredDevice {
@@ -34,6 +44,8 @@ export interface DiscoveredDevice {
   adoptable: boolean;
   unsupported: string | null;
   needs: DiscoveryInput[];
+  /** Set when a device that is set up now answers at another address; offer `updateAddress`. */
+  moved?: MovedDevice | null;
 }
 
 export interface DiscoveredList {
@@ -98,6 +110,55 @@ export interface ManualFlow {
   domain: string;
   label: string;
   fields: DiscoveryInput[];
+  /** local (on the network), service, cloud (an account) or helper. */
+  kind?: 'local' | 'service' | 'cloud' | 'helper' | string;
+  /** One per hub, and already set up. */
+  single?: boolean;
+  configured?: boolean;
+}
+
+export const FLOW_KINDS: Record<string, string> = {
+  local: 'On the network',
+  service: 'Servers and services',
+  cloud: 'Cloud accounts',
+  helper: 'Helpers',
+};
+
+/** The flows grouped by kind in the hub's order, leaving out one-per-hub ones already set up. */
+export function groupFlows(flows: ManualFlow[]): { kind: string; label: string; flows: ManualFlow[] }[] {
+  const out: { kind: string; label: string; flows: ManualFlow[] }[] = [];
+  for (const f of flows) {
+    if (f.single && f.configured) continue;
+    const kind = f.kind || 'local';
+    let group = out.find((g) => g.kind === kind);
+    if (!group) {
+      group = { kind, label: FLOW_KINDS[kind] || kind, flows: [] };
+      out.push(group);
+    }
+    group.flows.push(f);
+  }
+  return out;
+}
+
+export async function updateAddress(findingId: string): Promise<{ status: string; new_host: string; old_host: string | null }> {
+  const resp = await apiClient.post(`${path(findingId)}/update-address`, {}, { timeout: 60_000 });
+  return resp.data;
+}
+
+export async function reloadEntry(entryId: string): Promise<{ entry_id: string; state: string }> {
+  const resp = await apiClient.post(`/api/homehub/entries/${encodeURIComponent(entryId)}/reload`);
+  return resp.data;
+}
+
+export async function setEntryDisabled(entryId: string, disabled: boolean): Promise<HubEntry> {
+  const resp = await apiClient.post(`/api/homehub/entries/${encodeURIComponent(entryId)}/disable`, { disabled },
+    { timeout: 60_000 });
+  return resp.data;
+}
+
+export async function syncEntry(entryId: string): Promise<{ status: string; entities: string[]; devices: string[] }> {
+  const resp = await apiClient.post(`/api/homehub/entries/${encodeURIComponent(entryId)}/sync`, {}, { timeout: 60_000 });
+  return resp.data;
 }
 
 export async function getManualFlows(): Promise<ManualFlow[]> {
@@ -150,6 +211,8 @@ export interface HubEntry {
   unpairs: boolean;
   /** Shared by many devices (Matter, Cast): remove devices, not the entry. */
   shared: boolean;
+  /** Its driver finds devices of its own after setup; "Sync devices" registers new ones. */
+  syncs?: boolean;
 }
 
 export interface HubArea {

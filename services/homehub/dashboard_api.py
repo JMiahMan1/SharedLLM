@@ -23,6 +23,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from services.homehub import capabilities
 from services.homehub.auth import Auth, Principal, bearer
 
 PREFS_KEY = "dashboard_prefs"
@@ -86,6 +87,8 @@ def summarize(hub: Any, entity_id: str) -> dict[str, Any] | None:
         "unit": attrs.get("unit_of_measurement"), "icon": attrs.get("icon"),
         "area_id": hub.entity_area_id(entity_id), "device_id": ent.device_id if ent else None,
         "last_changed": st.last_changed.isoformat(),
+        # What it can do (capabilities.py): the pages draw their controls from these.
+        "abilities": capabilities.abilities_of(hub, entity_id),
     }
 
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2 } from 'lucide-react';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
 import {
   addByAddress,
@@ -11,8 +11,10 @@ import {
   failureText,
   getDiscovered,
   getManualFlows,
+  groupFlows,
   ignoreDevice,
   scanForDevices,
+  updateAddress,
 } from '../../lib/discoveredDevices';
 import type { AdoptResult, DiscoveredDevice, DiscoveryInput, ManualFlow } from '../../lib/discoveredDevices';
 
@@ -69,8 +71,20 @@ export default function NewDevicesPanel() {
     onError: (err) => toast.error(failureText(err)),
   });
 
+  const move = useMutation({
+    mutationFn: (d: DiscoveredDevice) => updateAddress(d.id),
+    onSuccess: (r, d) => {
+      toast.success(`${d.moved?.entry_title || 'The device'} now uses ${r.new_host}.`);
+      void refresh();
+      void queryClient.invalidateQueries({ queryKey: ['homehub-entries'] });
+      void queryClient.invalidateQueries({ queryKey: ['homehub-hardware'] });
+    },
+    onError: (err) => toast.error(failureText(err)),
+  });
+
   const devices = list.data?.devices || [];
   const fresh = devices.filter((d) => d.new);
+  const moved = devices.filter((d) => d.moved);
   const ignored = devices.filter((d) => d.ignored && !d.known);
 
   function added(result: AdoptResult) {
@@ -84,6 +98,7 @@ export default function NewDevicesPanel() {
   }
 
   return (
+    <>
     <section className="glass-panel overflow-hidden rounded-2xl border border-white/10" data-testid="new-devices">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 bg-sky-500/5 px-4 py-3">
         <span className="flex min-w-0 items-center gap-2 text-[10px] font-black uppercase tracking-widest text-sky-400">
@@ -121,18 +136,54 @@ export default function NewDevicesPanel() {
           <p className="mb-2 text-xs text-slate-400">What kind of device?</p>
           {flows.isLoading && <p className="text-xs text-slate-500">Loading…</p>}
           {flows.error && <p className="text-xs text-amber-300/90">{failureText(flows.error)}</p>}
-          <div className="flex flex-wrap gap-2">
-            {(flows.data || []).map((f) => (
-              <button
-                key={f.domain}
-                type="button"
-                onClick={() => { setManual(f); setPickerOpen(false); }}
-                className="min-h-11 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
-              >
-                {f.label}
-              </button>
+          <div className="space-y-3">
+            {groupFlows(flows.data || []).map((g) => (
+              <div key={g.kind}>
+                <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500">{g.label}</p>
+                <div className="flex flex-wrap gap-2">
+                  {g.flows.map((f) => (
+                    <button
+                      key={f.domain}
+                      type="button"
+                      onClick={() => { setManual(f); setPickerOpen(false); }}
+                      className="min-h-11 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {moved.length > 0 && (
+        <div className="space-y-2 border-b border-white/5 bg-amber-500/5 px-4 py-3" data-testid="moved-devices">
+          <p className="text-xs font-semibold text-amber-200">
+            {moved.length === 1 ? 'A device has' : `${moved.length} devices have`} a new address
+          </p>
+          <ul className="space-y-2">
+            {moved.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2" data-testid="moved-device">
+                <span className="min-w-0 text-sm text-slate-200">
+                  <span className="font-semibold">{d.moved?.entry_title}</span>
+                  <span className="block text-xs text-slate-400">
+                    {d.label} · {d.moved?.old_host || 'unknown'} → {d.moved?.new_host}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => move.mutate(d)}
+                  disabled={move.isPending}
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white disabled:opacity-50"
+                  aria-label={`Use the new address for ${d.moved?.entry_title}`}
+                >
+                  <ArrowRightLeft size={14} /> Use new address
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -204,6 +255,8 @@ export default function NewDevicesPanel() {
         </div>
       )}
 
+    </section>
+    {/* Outside the panel: its backdrop blur would otherwise be the fixed dialogs' containing block. */}
       {adopting && (
         <AdoptDeviceDialog
           title={`Add ${adopting.name || adopting.host}`}
@@ -237,6 +290,6 @@ export default function NewDevicesPanel() {
           onClose={() => setMatterOpen(false)}
         />
       )}
-    </section>
+    </>
   );
 }

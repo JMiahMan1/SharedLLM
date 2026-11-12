@@ -103,6 +103,9 @@ export interface CatalogEntity {
   area?: string | null;
   device_class?: string | null;
   unit?: string | null;
+  /** What it can do and the `domain.service` calls it takes (the hub's capability index). */
+  abilities?: string[];
+  services?: string[];
 }
 
 export interface Catalog {
@@ -445,6 +448,31 @@ export function serviceNames(catalog: Catalog | undefined): string[] {
     for (const name of Object.keys(entry.services ?? {})) out.push(`${entry.domain}.${name}`);
   }
   return out.sort();
+}
+
+/**
+ * Whether an entity takes a service. With the hub's capability index (`services`) that is exact;
+ * an entity listed without it takes every service of its own domain.
+ */
+export function entityTakesService(entity: CatalogEntity, service: string): boolean {
+  if (Array.isArray(entity.services)) return entity.services.includes(service);
+  return service.split('.')[0] === (entity.domain ?? entity.entity_id.split('.')[0]);
+}
+
+/**
+ * The services every chosen entity takes, or null when the catalog cannot tell (an entity
+ * without `services`, or none chosen): the editor then offers every service.
+ */
+export function servicesForEntities(catalog: Catalog | undefined, entityIds: string[]): string[] | null {
+  if (!catalog || entityIds.length === 0) return null;
+  let common: string[] | null = null;
+  for (const id of entityIds) {
+    const entity = catalog.entities.find((e) => e.entity_id === id);
+    if (!entity || !Array.isArray(entity.services)) return null;
+    const mine: string[] = entity.services;
+    common = common === null ? [...mine] : (common as string[]).filter((s: string) => mine.includes(s));
+  }
+  return Array.from(new Set<string>(common ?? [])).sort();
 }
 
 /** "light.porch" -> its catalog name, else the id. */
