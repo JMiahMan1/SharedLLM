@@ -44,7 +44,7 @@ from fastapi import APIRouter, HTTPException, Request
 from services.homehub import energy
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import HubError
-from services.homehub.statistics import PERIODS, Statistics, parse_dt
+from services.homehub.recorder_statistics import PERIODS, Statistics, parse_dt
 
 log = logging.getLogger("homehub.statistics_api")
 
@@ -110,7 +110,7 @@ def related_power(hub: Any, statistic_ids: list[str]) -> dict[str, str | None]:
 
 def power_now(hub: Any, entity_ids: list[str | None]) -> dict[str, float | None]:
     """Current draw in W for each power sensor (converted from kW and friends)."""
-    from services.homehub.statistics import convert, convertible
+    from services.homehub.recorder_statistics import convert, convertible
 
     out: dict[str, float | None] = {}
     for eid in entity_ids:

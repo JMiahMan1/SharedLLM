@@ -928,13 +928,15 @@ services:
     container_name: sharedllm_esphome
     restart: unless-stopped
     network_mode: host
-    command: ["dashboard", "/config", "--address", "${ESPHOME_ADDRESS:-127.0.0.1}", "--port", "${ESPHOME_PORT:-6052}"]
+    # esphome-device-builder takes --host (not --address) and reads its login from
+    # ESPHOME_USERNAME/ESPHOME_PASSWORD.
+    command: ["dashboard", "/config", "--host", "${ESPHOME_ADDRESS:-127.0.0.1}", "--port", "${ESPHOME_PORT:-6052}"]
     volumes:
       - ./data/esphome:/config
     environment:
       - TZ=America/Phoenix
-      - USERNAME=${ESPHOME_USERNAME:-}
-      - PASSWORD=${ESPHOME_PASSWORD:-}
+      - ESPHOME_USERNAME=${ESPHOME_USERNAME:-}
+      - ESPHOME_PASSWORD=${ESPHOME_PASSWORD:-}
 
   whisper:
     # Speech-to-text for Jarvis's voice: execution's Wyoming proxy (:10310,

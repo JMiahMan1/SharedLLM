@@ -14,7 +14,7 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import automation_api, builtin, statistics, tts
+from services.homehub import automation_api, builtin, recorder_statistics, tts
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -56,7 +56,7 @@ class Service:
         # it has started.
         self._bg.append(asyncio.create_task(self._start_automations_when_ready()))
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
-        self._bg.append(asyncio.create_task(statistics.start(self.runtime)))  # recorder statistics
+        self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         await self._start_discovery()
 
     async def _start_discovery(self) -> None:

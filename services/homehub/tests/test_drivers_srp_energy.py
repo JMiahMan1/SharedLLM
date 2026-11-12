@@ -134,7 +134,7 @@ def test_published_holds_back_unpublished_hours():
 
 
 async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkeypatch):
-    from services.homehub.statistics import Statistics
+    from services.homehub.recorder_statistics import Statistics
 
     stats = Statistics(str(tmp_path / "s.db"), None, time_zone="America/Phoenix")
     hub, driver = await setup(FakeClient())
@@ -177,7 +177,7 @@ async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkey
 
 
 async def test_statistics_can_be_turned_off(tmp_path, monkeypatch):
-    from services.homehub.statistics import Statistics
+    from services.homehub.recorder_statistics import Statistics
 
     stats = Statistics(str(tmp_path / "s.db"), None)
     hub, driver = await setup(FakeClient())
@@ -191,7 +191,7 @@ async def test_statistics_can_be_turned_off(tmp_path, monkeypatch):
 async def test_an_account_billed_in_no_period_backfills_once(tmp_path, monkeypatch):
     import datetime as dt_mod
 
-    from services.homehub.statistics import Statistics
+    from services.homehub.recorder_statistics import Statistics
 
     stats = Statistics(str(tmp_path / "s.db"), None, time_zone="America/Phoenix")
     hub, driver = await setup(FakeClient())

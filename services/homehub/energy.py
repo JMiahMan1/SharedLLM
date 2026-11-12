@@ -29,7 +29,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from services.homehub.statistics import Statistics, parse_dt
+from services.homehub.recorder_statistics import Statistics, parse_dt
 
 PREFS_KEY = "energy_prefs"
 ENERGY_UNIT = "kWh"

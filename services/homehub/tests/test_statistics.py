@@ -13,8 +13,8 @@ from services.homehub import energy
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Area, DeviceEntry, EntityEntry, Hub
+from services.homehub.recorder_statistics import Statistics, Target, convert, targets_from_states
 from services.homehub.runtime import Runtime
-from services.homehub.statistics import Statistics, Target, convert, targets_from_states
 from services.homehub.store import Store
 
 SECRET = "internal-secret"
@@ -438,7 +438,7 @@ async def test_the_compiler_loop_compiles_and_remembers_where_it_got_to(env, mon
     import asyncio
     import time as time_mod
 
-    from services.homehub import statistics as st_mod
+    from services.homehub import recorder_statistics as st_mod
 
     store, stats = env
     now = T0 + 3600 + 30

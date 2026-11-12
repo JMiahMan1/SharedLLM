@@ -17,4 +17,6 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 COPY . .
 EXPOSE 8123
-CMD ["python", "services/homehub/main.py"]
+# As a module, not a script: a script puts services/homehub/ first on sys.path,
+# where a module named like a library one (statistics.py) shadowed it.
+CMD ["python", "-m", "services.homehub.main"]
