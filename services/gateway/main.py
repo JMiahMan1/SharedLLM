@@ -7093,6 +7093,9 @@ async def screen_time_status(request: Request, username: str, device_key: str | 
         # What the member carries (["tablet"], ["phone", "tablet"]), so the
         # page names it right; not technical.
         "device_kinds": list(body.get("device_kinds") or []),
+        # The parts of Jarvis a parent can leave open while the phone is
+        # locked, for the Guardian editor (the chosen ones are locked_sections).
+        "locked_section_choices": list(body.get("locked_section_choices") or []),
         # The parents' answers on new apps ({pkg: pending|approved|denied}) and
         # app permissions ({"pkg|group": ...}); the phone's guard enforces them.
         "app_approvals": (body.get("approvals") or {}).get("apps") or {},

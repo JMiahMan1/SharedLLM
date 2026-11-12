@@ -50,9 +50,13 @@ public class DropInPlugin extends Plugin {
     public void ended(PluginCall call) {
         new Handler(Looper.getMainLooper()).post(() -> {
             DropInCall.end(getContext());
-            // The call page was allowed over the lock screen for the call only.
+            // The call page was allowed over the lock screen for the call only;
+            // Jarvis opened from the screen-time lock keeps its own hold, so
+            // MainActivity decides what is left (LockedJarvisRules).
             android.app.Activity activity = getActivity();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && activity != null) {
+            if (activity instanceof MainActivity) {
+                ((MainActivity) activity).dropInEnded();
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && activity != null) {
                 activity.setShowWhenLocked(false);
                 activity.setTurnScreenOn(false);
             }

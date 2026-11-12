@@ -9,6 +9,7 @@ import DrawCanvas from '../components/family/DrawCanvas';
 import MakeMusic from '../components/family/MakeMusic';
 import SafetyButtons from '../components/family/SafetyButtons';
 import Recipes from './Recipes';
+import { lockedFamilyTabs, useLockedMode } from '../lib/lockedMode';
 
 type Tab = 'chat' | 'calls' | 'games' | 'create' | 'announce';
 
@@ -40,6 +41,10 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof MessageCircle }> = [
 export default function Family() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = TABS.find((t) => t.id === searchParams.get('tab'))?.id ?? 'chat';
+  // Opened from the screen-time lock: only the tabs a parent left open show.
+  const locked = useLockedMode();
+  const openTabs = locked.active ? lockedFamilyTabs(locked.sections) : null;
+  const tabs = openTabs ? TABS.filter((t) => openTabs.has(t.id)) : TABS;
 
   const changeTab = (next: Tab) => {
     const params = new URLSearchParams(searchParams);
@@ -73,7 +78,7 @@ export default function Family() {
           role="tablist"
           aria-label="Family sections"
         >
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               role="tab"

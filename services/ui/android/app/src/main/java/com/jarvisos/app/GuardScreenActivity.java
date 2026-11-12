@@ -155,11 +155,18 @@ public class GuardScreenActivity extends ComponentActivity {
                         // Jarvis is always allowed; the lock comes back when the
                         // child leaves it. Asking for more time and messaging a
                         // parent stay on this screen, painted over the lock.
-                        GuardService.allowJarvisFromLock();
+                        GuardService.allowJarvisFromLock(GuardScreenActivity.this);
                         startActivity(new Intent(GuardScreenActivity.this, MainActivity.class)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                                 .putExtra(PushNotifier.EXTRA_OPEN_PATH, "/"));
-                        finish();
+                        // In lock-task (kiosk) mode this screen stays under
+                        // Jarvis: Android refuses to finish the root of the
+                        // locked task, and if it did finish, onDestroy would
+                        // release the kiosk and Home would leave Jarvis for
+                        // the rest of the phone. Jarvis joins the lock task
+                        // (same package, so allowlisted), and Back from it
+                        // comes here. Without a kiosk the cover goes as before.
+                        if (!kiosk) finish();
                     }
                 });
         setContentView(content, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));

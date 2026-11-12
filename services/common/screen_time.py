@@ -272,6 +272,45 @@ def kiosk_apps(rules: dict[str, Any] | None) -> list[str]:
     return out
 
 
+# What a child can still use inside Jarvis while the phone is locked (the
+# guard's "Open Jarvis" button opens the app over the lock and leaves the rest
+# of the phone locked). The ids are the web app's locked-mode sections; the
+# labels are what a parent sees in the Guardian editor. Chat is the core: the
+# lock's own button opens it, so a parent's list adds to it and never drops it.
+LOCKED_SECTIONS: dict[str, str] = {
+    "chat": "Chat with Jarvis and the family",
+    "calls": "Calls and Drop In to a parent",
+    "devices": "Their own devices (lights in their room and so on)",
+    "time": "Their time left, and asking for more",
+    "chores": "Checking off chores",
+    "bible": "The Bible",
+    "calendar": "The calendar",
+    "music": "Music",
+}
+LOCKED_SECTIONS_CORE = ("chat",)
+LOCKED_SECTIONS_DEFAULT = ("chat", "calls", "devices", "time", "chores", "bible")
+
+
+def locked_sections(rules: dict[str, Any] | None) -> list[str]:
+    """The parts of Jarvis a locked child can use: the parent's list (or the
+    default when none was saved), always with the core first, unknown ids dropped."""
+    listed = (rules or {}).get("locked_sections")
+    chosen = listed if isinstance(listed, (list, tuple)) else LOCKED_SECTIONS_DEFAULT
+    out = list(LOCKED_SECTIONS_CORE)
+    for section in chosen:
+        if isinstance(section, str) and section in LOCKED_SECTIONS and section not in out:
+            out.append(section)
+    return out
+
+
+def locked_section_choices() -> list[dict[str, Any]]:
+    """Every locked-mode section a parent can pick, for the Guardian editor."""
+    return [
+        {"id": sid, "label": label, "core": sid in LOCKED_SECTIONS_CORE, "default": sid in LOCKED_SECTIONS_DEFAULT}
+        for sid, label in LOCKED_SECTIONS.items()
+    ]
+
+
 OS_UPDATE_POLICIES = ("default", "automatic", "windowed", "postpone")
 
 
@@ -615,6 +654,7 @@ def evaluate(
         "install_apps": install_apps(rules),
         "kiosk_mode": bool(rules.get("kiosk_mode")),
         "kiosk_apps": kiosk_apps(rules),
+        "locked_sections": locked_sections(rules),
         "permission_gating": [g for g in rules.get("permission_gating") or [] if g in PERMISSION_GROUPS],
         "web_allow": active_allow(rules.get("web_filter"), now),
         "web_block": active_block(rules.get("web_filter")),

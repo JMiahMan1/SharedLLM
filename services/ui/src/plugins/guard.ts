@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 export interface GuardStatus {
   /** Device admin: Jarvis cannot be uninstalled while it is on. */
@@ -17,8 +17,21 @@ export interface GuardStatus {
   bypassApps?: string[];
 }
 
+/**
+ * Jarvis opened from the screen-time lock ("Open Jarvis" on the guard's lock):
+ * whether that mode is on, and the sections a parent left open in it (the
+ * server's ``locked_sections``; empty when it has not said).
+ */
+export interface LockedModeState {
+  active: boolean;
+  sections: string[];
+}
+
 export interface GuardPluginInterface {
   status(): Promise<GuardStatus>;
+  /** Locked mode as it is now (APKs with locked mode; older ones reject). */
+  lockedMode(): Promise<LockedModeState>;
+  addListener(event: 'lockedMode', listener: (state: LockedModeState) => void): Promise<PluginListenerHandle>;
   enableAdmin(): Promise<void>;
   openGuardSettings(): Promise<void>;
   openAppInfo(): Promise<void>;
@@ -28,6 +41,8 @@ export interface GuardPluginInterface {
 // Off Android nothing is guarded: report it plainly, never a fake "on".
 const webFallback: GuardPluginInterface = {
   status: async () => ({ adminActive: false, deviceOwner: false, guardEnabled: false }),
+  lockedMode: async () => ({ active: false, sections: [] }),
+  addListener: async () => ({ remove: async () => undefined }),
   enableAdmin: async () => undefined,
   openGuardSettings: async () => undefined,
   openAppInfo: async () => undefined,

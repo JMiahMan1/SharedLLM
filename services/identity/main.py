@@ -30,7 +30,12 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common import device_noun, ha_redirect
 from services.common.http import get_client, get_client_insecure
-from services.common.screen_time import PERMISSION_GROUPS, WEB_FILTER_CATEGORIES
+from services.common.screen_time import (
+    LOCKED_SECTIONS,
+    PERMISSION_GROUPS,
+    WEB_FILTER_CATEGORIES,
+    locked_section_choices,
+)
 from services.common.secrets import secret_matches
 from services.common.sqlite import apply_sqlite_pragmas
 from services.config import IDENTITY_CORS_ORIGINS, IDENTITY_DATABASE_URL, INTERNAL_SECRET
@@ -4761,6 +4766,12 @@ def _clean_screen_rules(body: dict) -> dict:
         if not isinstance(body["kiosk_mode"], bool):
             raise HTTPException(status_code=422, detail="kiosk_mode must be true or false")
         out["kiosk_mode"] = body["kiosk_mode"]
+    # What a locked child can still use inside Jarvis (chat is always in).
+    if body.get("locked_sections") is not None:
+        sections = body["locked_sections"]
+        if not isinstance(sections, list) or any(not isinstance(x, str) or x not in LOCKED_SECTIONS for x in sections):
+            raise HTTPException(status_code=422, detail=f"locked_sections must be among {', '.join(LOCKED_SECTIONS)}")
+        out["locked_sections"] = list(dict.fromkeys(sections))
     # Earned time (docs/HEALTH_HUB.md, "Earning time and chores first"): minutes for steps,
     # exercise and chores, with a daily cap; and "chores first", which locks
     # the phone until today's chores are ticked off.
@@ -5052,6 +5063,8 @@ def get_screen_rules(username: str, day: str = "", session: Session = Depends(ge
         "approvals": _guard_approvals(session, subject.username),
         # What the member carries, so the page says "tablet" for a tablet.
         "device_kinds": _device_kinds(session, subject.username),
+        # The parts of Jarvis a parent can leave open while the phone is locked.
+        "locked_section_choices": locked_section_choices(),
     }
 
 

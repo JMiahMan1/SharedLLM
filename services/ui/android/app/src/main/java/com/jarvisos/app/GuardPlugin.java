@@ -23,6 +23,46 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "JarvisGuard")
 public class GuardPlugin extends Plugin {
 
+    /** The loaded plugin, so native can tell the web app when Jarvis mode changes. */
+    private static volatile GuardPlugin instance;
+
+    @Override
+    public void load() {
+        instance = this;
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (instance == this) instance = null;
+    }
+
+    /**
+     * Jarvis opened from the screen-time lock: whether that mode is on and the
+     * parts of the app a parent left open ({@code locked_sections} from the
+     * guard's status). The web app shows only those while it is on.
+     */
+    static JSObject lockedModeState(Context context) {
+        JSObject out = new JSObject();
+        out.put("active", GuardService.jarvisModeActive(context));
+        com.getcapacitor.JSArray sections = new com.getcapacitor.JSArray();
+        for (String id : GuardApi.lockedSections(context)) sections.put(id);
+        out.put("sections", sections);
+        return out;
+    }
+
+    /** Push the current locked mode to the web app ("lockedMode" event); nothing when it is not loaded. */
+    static void notifyLockedMode(Context context) {
+        GuardPlugin plugin = instance;
+        if (plugin == null || plugin.getBridge() == null) return;
+        plugin.notifyListeners("lockedMode", lockedModeState(context), false);
+    }
+
+    /** The locked mode as it is now, read by the web app when it starts. */
+    @PluginMethod
+    public void lockedMode(PluginCall call) {
+        call.resolve(lockedModeState(getContext()));
+    }
+
     private ComponentName admin() {
         return new ComponentName(getContext(), GuardAdminReceiver.class);
     }

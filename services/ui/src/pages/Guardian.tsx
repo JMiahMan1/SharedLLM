@@ -30,6 +30,7 @@ import GuidanceCard from '../components/guardian/GuidanceCard';
 import JournalCard from '../components/guardian/JournalCard';
 import RequestsCard from '../components/guardian/RequestsCard';
 import ChoresCard from '../components/guardian/ChoresCard';
+import LockedSectionsCard from '../components/guardian/LockedSectionsCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
 import GeofenceAlertsCard from '../components/guardian/GeofenceAlertsCard';
 import NotificationLockCard from '../components/guardian/NotificationLockCard';
@@ -540,6 +541,7 @@ function GuardianChildren() {
             <ChoresCard username={child.username} name={name} />
             <EarnTimeControls username={child.username} name={name} />
             <ScreenTimeControls username={child.username} name={name} />
+            <LockedSectionsCard username={child.username} name={name} />
           </div>
         </section>
       )}

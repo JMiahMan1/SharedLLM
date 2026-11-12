@@ -1,7 +1,14 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from services.common.screen_time import evaluate, weekly_report
+from services.common.screen_time import (
+    LOCKED_SECTIONS,
+    LOCKED_SECTIONS_DEFAULT,
+    evaluate,
+    locked_section_choices,
+    locked_sections,
+    weekly_report,
+)
 
 TZ = ZoneInfo("America/Phoenix")
 WED = lambda h, m=0: datetime(2026, 10, 21, h, m, tzinfo=TZ)  # noqa: E731 - a Wednesday
@@ -261,3 +268,27 @@ def test_os_update_wifi_certs_and_vpn_lockdown_in_evaluate():
     assert s2["vpn_lockdown"] is True
 
 
+
+
+def test_locked_sections_default_to_talking_reading_and_the_childs_own_things():
+    s = evaluate(RULES, used_ms=0, bonus_min=0, now=WED(16))
+    assert s["locked_sections"] == list(LOCKED_SECTIONS_DEFAULT)
+    assert s["locked_sections"][0] == "chat"
+    for wanted in ("chat", "calls", "devices", "time", "chores", "bible"):
+        assert wanted in s["locked_sections"]
+
+
+def test_a_parents_locked_sections_keep_chat_first_and_drop_unknown_ids():
+    s = evaluate({**RULES, "locked_sections": ["bible", "settings", "music", "bible"]}, 0, 0, WED(16))
+    assert s["locked_sections"] == ["chat", "bible", "music"]
+    # An empty list is a parent's choice too: only the core stays.
+    assert locked_sections({"locked_sections": []}) == ["chat"]
+    assert locked_sections(None) == list(LOCKED_SECTIONS_DEFAULT)
+
+
+def test_every_locked_section_choice_is_labelled_and_the_core_is_marked():
+    choices = locked_section_choices()
+    assert [c["id"] for c in choices] == list(LOCKED_SECTIONS)
+    assert all(c["label"] for c in choices)
+    assert [c["id"] for c in choices if c["core"]] == ["chat"]
+    assert {c["id"] for c in choices if c["default"]} == set(LOCKED_SECTIONS_DEFAULT)

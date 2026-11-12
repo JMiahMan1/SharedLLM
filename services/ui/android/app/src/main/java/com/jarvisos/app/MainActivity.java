@@ -18,6 +18,17 @@ import com.jarvisos.app.widgets.WidgetApi;
 import com.jarvisos.app.widgets.WidgetUpdater;
 
 public class MainActivity extends BridgeActivity {
+    /** A Drop In call that arrived on a locked phone is showing over the lock screen. */
+    private boolean dropInOverLock = false;
+    /**
+     * Jarvis mode (opened from the screen-time lock) started or ended: show over
+     * Android's lock screen or stop, and tell the web app which parts are open.
+     */
+    private final Runnable onJarvisModeChange = () -> {
+        applyOverLockScreen();
+        GuardPlugin.notifyLockedMode(this);
+    };
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Capacitor 8: bridge is created inside super.onCreate() via load().
@@ -64,6 +75,8 @@ registerPlugin(CommsPlugin.class);
         configureWebView();
         maybeConfirmGarage(getIntent());
         maybeShowOverLockScreen(getIntent());
+        GuardService.addJarvisModeListener(onJarvisModeChange);
+        applyOverLockScreen();
         SelfUpdate.maybeContinue(this, getIntent());
         maybeOpenPath(getIntent());
         // Signed in already: keep notifications flowing.
@@ -85,6 +98,7 @@ registerPlugin(CommsPlugin.class);
             setIntent(intent);
             maybeConfirmGarage(intent);
             maybeShowOverLockScreen(intent);
+            applyOverLockScreen();
             SelfUpdate.maybeContinue(this, intent);
             maybeOpenPath(intent);
         }
@@ -93,15 +107,32 @@ registerPlugin(CommsPlugin.class);
     /**
      * A drop-in that could not reach a running WebView opens the call page
      * here; it shows over the lock screen and wakes the display for the call
-     * only (DropInPlugin.ended turns this off again).
+     * only (DropInPlugin.ended turns this off again through {@link #dropInEnded}).
      */
     private void maybeShowOverLockScreen(Intent intent) {
         if (intent == null || !intent.getBooleanExtra(DropInCall.EXTRA_DROP_IN, false)) return;
         intent.removeExtra(DropInCall.EXTRA_DROP_IN);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
-        }
+        dropInOverLock = true;
+        applyOverLockScreen();
+    }
+
+    /** The web app's Drop In call ended: only the call's hold on the lock screen goes. */
+    void dropInEnded() {
+        dropInOverLock = false;
+        applyOverLockScreen();
+    }
+
+    /**
+     * Whether this activity shows over Android's lock screen now: during a
+     * Drop In call that arrived while locked, or while Jarvis is open from the
+     * screen-time lock (LockedJarvisRules). It never dismisses the keyguard, so
+     * Home, Recents or another app still meet the lock.
+     */
+    private void applyOverLockScreen() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return;
+        boolean jarvisMode = GuardService.jarvisModeActive(this);
+        setShowWhenLocked(LockedJarvisRules.showWhenLocked(dropInOverLock, jarvisMode));
+        setTurnScreenOn(LockedJarvisRules.turnScreenOn(dropInOverLock));
     }
 
     /**
@@ -173,7 +204,28 @@ registerPlugin(CommsPlugin.class);
         super.onResume();
         configureWebView();
         PushNotifier.appVisible = true;
+        applyOverLockScreen();
+        // The web app may have missed a change while in the background.
+        GuardPlugin.notifyLockedMode(this);
         offerTimeTile();
+    }
+
+    @Override
+    public void onStop() {
+        // Leaving Jarvis (Home, Recents, another app, the screen going off)
+        // ends Jarvis mode: it stops showing over the lock screen, and the
+        // guard's lock or Android's keyguard is what the child meets next.
+        // A Drop In call keeps its own hold until it ends.
+        if (!isChangingConfigurations() && GuardService.jarvisModeActive(this)) {
+            GuardService.endJarvisFromLock(this);
+        }
+        super.onStop();
+    }
+
+    @Override
+    public void onDestroy() {
+        GuardService.removeJarvisModeListener(onJarvisModeChange);
+        super.onDestroy();
     }
 
     /**

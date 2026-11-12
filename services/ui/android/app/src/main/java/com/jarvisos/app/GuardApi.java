@@ -83,7 +83,7 @@ final class GuardApi {
             if (freshPause) {
                 // A parent's explicit pause/lock overrides any remaining 10-minute unlock window
                 ed.remove(KEY_UNLOCKED_UNTIL);
-                GuardService.onFreshLock();
+                GuardService.onFreshLock(context);
             }
             ed.apply();
             showQueuedNotices(context);
@@ -96,7 +96,7 @@ final class GuardApi {
     /** Clear any active parent-unlock window so a new lock takes effect immediately. */
     static void clearUnlock(Context context) {
         prefs(context).edit().remove(KEY_UNLOCKED_UNTIL).apply();
-        GuardService.onFreshLock();
+        GuardService.onFreshLock(context);
     }
 
     /** The user's selected Jarvis theme id from TokenBridge or the server's status. */
@@ -386,6 +386,20 @@ final class GuardApi {
     /** Whether COSU dedicated kiosk mode is enabled for this phone. */
     static boolean kioskMode(Context context) {
         return lastStatus(context).optBoolean("kiosk_mode", false);
+    }
+
+    /**
+     * The parts of Jarvis a child may use while it is open from the lock
+     * ({@code locked_sections}, in the server's order); empty when the server
+     * has not said, and the web app then offers chat alone.
+     */
+    static java.util.List<String> lockedSections(Context context) {
+        JSONArray list = lastStatus(context).optJSONArray("locked_sections");
+        java.util.List<String> raw = new java.util.ArrayList<>();
+        if (list != null) {
+            for (int i = 0; i < list.length(); i++) raw.add(list.optString(i, ""));
+        }
+        return LockedJarvisRules.sections(raw);
     }
 
     /** Apps allowed alongside Jarvis and always_allowed when kiosk mode is on. */

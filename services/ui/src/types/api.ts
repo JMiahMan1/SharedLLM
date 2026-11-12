@@ -408,6 +408,18 @@ export interface ScreenRules {
   earn?: EarnRules;
   /** Locked until today's chores are ticked off. */
   chores_first?: boolean;
+  /** What Jarvis keeps open while the phone is locked (chat is always in). */
+  locked_sections?: string[];
+}
+
+/** One part of Jarvis a parent can leave open while the phone is locked. */
+export interface LockedSectionChoice {
+  id: string;
+  label: string;
+  /** Always open (chat): shown, never switchable. */
+  core: boolean;
+  /** Open when a parent has not chosen. */
+  default: boolean;
 }
 
 /** "Every steps_every steps earns steps_min minutes", and so on; any may be absent. */
@@ -455,6 +467,10 @@ export interface ScreenTimeStatus {
   protected?: boolean;
   /** The kinds of their phones and tablets ("phone", "tablet"), to word the page by. */
   device_kinds?: string[];
+  /** What Jarvis keeps open while the phone is locked, as the server decided (chat first). */
+  locked_sections?: string[];
+  /** Every part a parent can choose from, for the Guardian editor. */
+  locked_section_choices?: LockedSectionChoice[];
   limit_min: number | null;
   used_min: number;
   bonus_min: number;

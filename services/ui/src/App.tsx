@@ -17,6 +17,8 @@ import GuardWatch from './components/layout/GuardWatch';
 import MediaSessionSync from './components/layout/MediaSessionSync';
 import CommsSync from './components/layout/CommsSync';
 import AdminElevation from './components/auth/AdminElevation';
+import LockedShell from './components/layout/LockedShell';
+import { useLockedMode } from './lib/lockedMode';
 // Every page is loaded on demand. The whole app used to be a single chunk, so a
 // phone downloaded all of it - the workspace IDE, the charts, the Bible reader -
 // before it could show the first screen.
@@ -65,6 +67,8 @@ const RouteFallback = () => (
 
 const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { children: React.ReactNode, requireAdmin?: boolean, isMobile?: boolean }) => {
   const { token, user, isLoading, initError } = useAuth();
+  // Opened from the screen-time lock: only the sections a parent left open.
+  const locked = useLockedMode();
   
   if (isLoading) return (
     <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
@@ -79,6 +83,8 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
   
   if (initError || !token) return <Navigate to="/login" replace />;
   
+  if (locked.active) return <LockedShell sections={locked.sections}>{children}</LockedShell>;
+
   if (requireAdmin && !user?.is_admin) {
     console.warn("RBAC Violation: Admin required for this route.");
     return <Navigate to="/" replace />;

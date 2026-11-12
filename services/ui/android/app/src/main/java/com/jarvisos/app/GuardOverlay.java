@@ -127,9 +127,15 @@ final class GuardOverlay {
      * own when the child leaves it (see {@link GuardService}). Asking for more
      * time and messaging a parent never come through here: those are painted
      * over the lock, so the lock itself never goes away for them.
+     *
+     * The guard put Android's own lock screen up when the lock started, and
+     * this overlay sits over it. Jarvis mode starts first, so MainActivity is
+     * allowed over that lock screen ({@link LockedJarvisRules#showWhenLocked})
+     * and comes up in front of it instead of behind it; the keyguard itself is
+     * never dismissed, so the rest of the phone stays locked.
      */
     private void openInJarvis(String path) {
-        GuardService.allowJarvisFromLock();
+        GuardService.allowJarvisFromLock(service);
         hide();
         service.startActivity(new Intent(service, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)

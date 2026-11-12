@@ -105,6 +105,15 @@ public class GuardService extends AccessibilityService {
     private static volatile long jarvisAllowedAt = 0L;
     private static final long JARVIS_LAUNCH_GRACE_MS = 3000L;
     /**
+     * Told on the main thread whenever Jarvis mode starts or ends
+     * ({@link #jarvisModeActive}): MainActivity shows over the lock screen or
+     * stops, and the web app switches its locked mode on or off.
+     */
+    private static final java.util.concurrent.CopyOnWriteArrayList<Runnable> jarvisModeListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** Jarvis mode as last announced, so listeners hear each change once. */
+    private static volatile boolean jarvisModeAnnounced = false;
+    /**
      * A second user or guest was seen on this protected phone (reported once
      * per guard run): that user has no Jarvis and no guard, so it is a way out.
      */
@@ -204,18 +213,63 @@ public class GuardService extends AccessibilityService {
     }
 
     /** Called when a new lock or pause arrives so the lock screen immediately covers Jarvis too. */
-    static void onFreshLock() {
+    static void onFreshLock(Context context) {
         jarvisAllowedFromLock = false;
         GuardService s = instance;
         if (s != null) {
             s.hardLocked = false;
         }
+        final Context app = context.getApplicationContext();
+        new Handler(Looper.getMainLooper()).post(() -> announceJarvisMode(app));
     }
 
-    /** Called when the user explicitly taps "Open Jarvis" on the lock screen. */
-    static void allowJarvisFromLock() {
+    /**
+     * Called when the user explicitly taps "Open Jarvis" on the lock screen,
+     * on the main thread and before Jarvis is started, so MainActivity is
+     * already allowed over Android's lock screen when it comes forward.
+     */
+    static void allowJarvisFromLock(Context context) {
         jarvisAllowedAt = System.currentTimeMillis();
         jarvisAllowedFromLock = true;
+        announceJarvisMode(context);
+    }
+
+    /**
+     * The child left Jarvis while it was open from the lock (MainActivity
+     * stopped): Jarvis mode ends, so the lock (or Android's keyguard) is in
+     * front again and opening Jarvis needs the lock's button once more.
+     */
+    static void endJarvisFromLock(Context context) {
+        jarvisAllowedFromLock = false;
+        announceJarvisMode(context);
+    }
+
+    /** Whether Jarvis is open from the lock now: shown over the lock, the rest of the phone locked. */
+    static boolean jarvisModeActive(Context context) {
+        return LockedJarvisRules.active(jarvisAllowedFromLock, GuardApi.isProtected(context),
+                GuardApi.isLocked(context), GuardApi.isUnlocked(context));
+    }
+
+    static void addJarvisModeListener(Runnable listener) {
+        if (listener != null) jarvisModeListeners.addIfAbsent(listener);
+    }
+
+    static void removeJarvisModeListener(Runnable listener) {
+        jarvisModeListeners.remove(listener);
+    }
+
+    /** Tell the listeners when Jarvis mode changed since the last time. Main thread only. */
+    private static void announceJarvisMode(Context context) {
+        boolean now = jarvisModeActive(context);
+        if (now == jarvisModeAnnounced) return;
+        jarvisModeAnnounced = now;
+        for (Runnable listener : jarvisModeListeners) {
+            try {
+                listener.run();
+            } catch (Exception ignored) {
+                // One listener failing must not keep the others from hearing it.
+            }
+        }
     }
 
     @Override
@@ -391,10 +445,15 @@ public class GuardService extends AccessibilityService {
      */
     private void syncLockOverlay() {
         String front = frontAppPackage();
-        if (!GuardRules.OWN_PACKAGE.equals(front) && !front.isEmpty()
-                && System.currentTimeMillis() - jarvisAllowedAt > JARVIS_LAUNCH_GRACE_MS) {
+        // Jarvis mode ends when the lock does, or when the child goes home or to
+        // another app (not for the system UI, a call, or the keyguard in front).
+        if (jarvisAllowedFromLock && (!LockedJarvisRules.lockInForce(GuardApi.isProtected(this),
+                GuardApi.isLocked(this), GuardApi.isUnlocked(this))
+                || LockedJarvisRules.leftJarvis(front, System.currentTimeMillis() - jarvisAllowedAt,
+                        JARVIS_LAUNCH_GRACE_MS))) {
             jarvisAllowedFromLock = false;
         }
+        announceJarvisMode(this);
         String effectiveFront = (GuardRules.OWN_PACKAGE.equals(front) && !jarvisAllowedFromLock)
                 ? "com.jarvisos.app.locked"
                 : front;

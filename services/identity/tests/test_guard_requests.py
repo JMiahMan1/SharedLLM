@@ -178,3 +178,18 @@ def test_uninstall_install_and_kiosk_rules_are_validated_and_saved(family):
     })
     assert bad.status_code == 422
 
+
+
+def test_locked_sections_are_validated_saved_and_offered_to_the_parent(family):
+    ok = family("dad").put("/api/screen-time/kid/rules", json={"locked_sections": ["chat", "bible", "bible", "chores"]})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["rules"]["locked_sections"] == ["chat", "bible", "chores"]
+    bad = family("dad").put("/api/screen-time/kid/rules", json={"locked_sections": ["settings"]})
+    assert bad.status_code == 422
+    assert family("dad").put("/api/screen-time/kid/rules", json={"locked_sections": "chat"}).status_code == 422
+    # The child cannot widen their own locked mode.
+    assert family("kid").put("/api/screen-time/kid/rules", json={"locked_sections": ["music"]}).status_code == 403
+    read = family("dad").get("/api/screen-time/kid/rules").json()
+    assert read["rules"]["locked_sections"] == ["chat", "bible", "chores"]
+    ids = [c["id"] for c in read["locked_section_choices"]]
+    assert ids[0] == "chat" and "bible" in ids and "devices" in ids

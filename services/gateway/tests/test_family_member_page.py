@@ -210,3 +210,19 @@ def test_guardian_media_scan_proxies_to_telemetry(as_viewer):
     assert resp.json()["status"] == "SUCCESS"
     assert any("/api/telemetry/media/scan" in c for c in calls)
 
+
+
+def test_the_status_carries_locked_mode_and_its_choices(identity):
+    """The phone reads ``locked_sections`` (what Jarvis keeps open while the
+    phone is locked); the Guardian editor reads ``locked_section_choices``."""
+    client, answers, _ = identity
+    choices = [{"id": "chat", "label": "Chat", "core": True, "default": True}]
+    answers["/api/screen-time/kid/rules"] = (200, {"rules": {"locked_sections": ["bible"]}, "technical": True,
+                                                  "locked_section_choices": choices})
+    body = client.get("/api/screen-time/kid/status").json()
+    assert body["locked_sections"] == ["chat", "bible"]
+    assert body["locked_section_choices"] == choices
+    answers["/api/screen-time/kid/rules"] = (200, {"rules": {}, "technical": False})
+    body = client.get("/api/screen-time/kid/status").json()
+    assert body["locked_sections"][0] == "chat" and "time" in body["locked_sections"]
+    assert body["locked_section_choices"] == []
