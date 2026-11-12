@@ -12,6 +12,8 @@ FROM python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78a
 # instead of silently moving the toolchain - bump it deliberately. dnsutils and
 # ssh-client are virtual packages, so the packages that provide them
 # (bind9-dnsutils, openssh-client) carry the pin.
+# 2026-11-11: vim-tiny and xxd bumped to +deb13u2 (Debian's security update
+# replaced 2:9.1.1230-2's vim-common, so the old pin no longer resolved).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git=1:2.47.3-0+deb13u1 \
     curl=8.14.1-2+deb13u7 \
@@ -28,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps=2:4.0.4-9 \
     tcpdump=4.99.5-2 \
     nano=8.4-1+deb13u1 \
-    vim-tiny=2:9.1.1230-2 \
+    vim-tiny=2:9.1.1230-2+deb13u2 \
     openssh-client=1:10.0p1-7+deb13u4 \
     gnupg=2.4.7-21+deb13u1 \
     ca-certificates=20250419+deb13u1 \
@@ -37,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file=1:5.46-5 \
     less=668-1 \
     tree=2.2.1-1 \
-    xxd=2:9.1.1230-2 \
+    xxd=2:9.1.1230-2+deb13u2 \
     ripgrep=14.1.1-1+b4 \
     fd-find=10.2.0-1+b5 \
     fzf=0.60.3-1+b2 \
