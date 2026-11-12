@@ -215,6 +215,7 @@ const BentoBoxDashboard = () => {
           <div
             key={widget.def.key}
             className={`${sizeClass.col} ${sizeClass.row}`}
+            data-widget={widget.def.key}
           >
             <WidgetErrorBoundary widgetKey={widget.def.key}>
               <Suspense fallback={<WidgetSkeletonSelector widgetKey={widget.def.key} />}>

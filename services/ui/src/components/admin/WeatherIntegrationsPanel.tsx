@@ -58,6 +58,11 @@ export const WeatherIntegrationsPanel: FC = () => {
   const metrics = settings.data?.metrics ?? [];
   const hooks = settings.data?.hooks ?? [];
   const services = info.data?.services ?? [];
+  // Read defensively: an older or partial answer must not take Admin down with it.
+  const rawLines: unknown = insights.data?.insights;
+  const rawTracked: unknown = insights.data?.metrics;
+  const insightLines = Array.isArray(rawLines) ? (rawLines as string[]) : [];
+  const trackedMetrics = Array.isArray(rawTracked) ? (rawTracked as NonNullable<typeof insights.data>['metrics']) : [];
 
   const done = (msg: string) => {
     queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
@@ -144,21 +149,21 @@ export const WeatherIntegrationsPanel: FC = () => {
           <TrendingUp size={14} className="text-emerald-300" /> What the weather is doing to things
         </h4>
         {insights.isPending && !unavailable && <p className="text-xs text-slate-500">Reading the last 60 days…</p>}
-        {insights.data && insights.data.insights.length === 0 && (
+        {insights.data && insightLines.length === 0 && (
           <p className="text-xs text-slate-500">
             Nothing clear yet. Insights appear once a few days are recorded with different weather.
           </p>
         )}
-        {insights.data && insights.data.insights.length > 0 && (
+        {insightLines.length > 0 && (
           <ul className="space-y-1" data-testid="weather-insights">
-            {insights.data.insights.map((line) => (
+            {insightLines.map((line) => (
               <li key={line} className="text-xs text-slate-300">{line}</li>
             ))}
           </ul>
         )}
-        {insights.data && insights.data.metrics.length > 0 && (
+        {trackedMetrics.length > 0 && (
           <p className="mt-2 text-[11px] text-slate-500">
-            Tracked: {insights.data.metrics.map((m) => `${m.label} (${m.days} d)`).join(', ')}
+            Tracked: {trackedMetrics.map((m) => `${m.label} (${m.days} d)`).join(', ')}
           </p>
         )}
       </div>

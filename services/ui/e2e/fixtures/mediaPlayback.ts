@@ -135,7 +135,9 @@ export async function goToPage(
   page: Page,
   destination: 'home' | 'calendar' | 'media',
 ): Promise<void> {
-  const mobile = (page.viewportSize()?.width ?? 1440) < 768;
+  // The shell the app chose, not the width: tablets get the phone shell (its
+  // bottom bar and More sheet) at any width.
+  const mobile = (await page.getByTestId('mobile-shell').count()) > 0;
   if (destination === 'calendar' && mobile) {
     await page.getByRole('button', { name: 'More pages' }).click();
     await page.getByTestId('more-sheet').getByRole('link', { name: 'Calendar' }).click();

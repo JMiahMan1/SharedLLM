@@ -17,6 +17,13 @@ import type { DropInPerson, DropInSetting, DropInSettings } from '../../types/ap
  * Per device: whether each of the person's phones and tablets answers an
  * allowed drop-in by itself. A parent can switch a child's devices.
  */
+/** An answer without the per-person list is a failed load, not a page crash. */
+async function loadDropInSettings(): Promise<DropInSettings> {
+  const d = await api.getDropInSettings();
+  if (!d || !Array.isArray(d.settings)) throw new Error('Unexpected drop-in settings answer');
+  return d;
+}
+
 export default function FamilyDropInSettings() {
   const [data, setData] = useState<DropInSettings | null>(null);
   const [error, setError] = useState(false);
@@ -24,7 +31,7 @@ export default function FamilyDropInSettings() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api.getDropInSettings());
+      setData(await loadDropInSettings());
       setError(false);
     } catch {
       setError(true);
@@ -33,7 +40,7 @@ export default function FamilyDropInSettings() {
 
   useEffect(() => {
     let active = true;
-    api.getDropInSettings()
+    loadDropInSettings()
       .then((d) => {
         if (active) setData(d);
       })

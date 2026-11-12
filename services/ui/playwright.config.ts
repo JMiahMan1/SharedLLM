@@ -10,9 +10,6 @@ const HERMETIC_BASE_URL = `http://localhost:${HERMETIC_PORT}`;
 // skips that one spec rather than comparing a Mac render with a Linux one.
 const SKIP_VISUAL = process.env.SKIP_VISUAL === '1' ? '**/visual.spec.ts' : undefined;
 
-/** Specs that check layout at every size; the format projects run only these. */
-const FORMAT_SPECS = ['**/home/**/*.spec.ts', '**/guardian.spec.ts'];
-
 const projects: PlaywrightTestConfig['projects'] = [
   {
     name: 'hermetic-desktop',
@@ -40,12 +37,10 @@ const projects: PlaywrightTestConfig['projects'] = [
   // Every UI change is checked at these sizes too: a small Android phone, and a
   // tablet both ways round. They run in Chromium (the only browser CI installs),
   // with a tablet's user agent so the app picks the shell it would on the device.
-  // They run the specs written for every format (FORMAT_SPECS); older specs
-  // still assume the desktop or Pixel 7 project and join as they are adapted.
+  // Every spec runs on every one of them: each page has to work at each size.
   {
     name: 'hermetic-small-phone',
     grepInvert: /@live/,
-    testMatch: FORMAT_SPECS,
     testIgnore: SKIP_VISUAL,
     fullyParallel: true,
     workers: 4,
@@ -58,7 +53,6 @@ const projects: PlaywrightTestConfig['projects'] = [
   {
     name: 'hermetic-tablet-portrait',
     grepInvert: /@live/,
-    testMatch: FORMAT_SPECS,
     testIgnore: SKIP_VISUAL,
     fullyParallel: true,
     workers: 4,
@@ -72,7 +66,6 @@ const projects: PlaywrightTestConfig['projects'] = [
   {
     name: 'hermetic-tablet-landscape',
     grepInvert: /@live/,
-    testMatch: FORMAT_SPECS,
     testIgnore: SKIP_VISUAL,
     fullyParallel: true,
     workers: 4,

@@ -70,7 +70,9 @@ export default function ProfileHeader({ child }: { child: FamilyRecord }) {
   const seen = where ? fixTimeSeconds(where) : 0;
   const busy = pause.isPending || bonus.isPending;
 
-  const action = 'glass-button flex min-h-14 flex-col items-center justify-center gap-1 px-1 text-[11px] font-semibold disabled:opacity-50 sm:min-h-11 sm:flex-row sm:gap-1.5 sm:px-3 sm:text-xs';
+  // On a short phone (a 360x740 Android) the icon sits beside the word, so the
+  // tabs still start in the top half of the screen; every button stays 44 px.
+  const action = 'glass-button flex min-h-14 flex-col items-center justify-center gap-1 px-1 text-[11px] font-semibold disabled:opacity-50 sm:min-h-11 sm:flex-row sm:gap-1.5 sm:px-3 sm:text-xs [@media(max-height:760px)]:min-h-11 [@media(max-height:760px)]:flex-row [@media(max-height:760px)]:gap-1';
   const now = isLoading
     ? '…'
     : status?.locked
@@ -82,7 +84,7 @@ export default function ProfileHeader({ child }: { child: FamilyRecord }) {
           : `No ${device} use reported today.`;
 
   return (
-    <header className="glass-panel space-y-3 rounded-2xl border border-white/10 p-3.5 sm:p-5" data-testid="member-header">
+    <header className="glass-panel space-y-3 rounded-2xl border border-white/10 p-3.5 sm:p-5 [@media(max-height:760px)]:space-y-2.5 [@media(max-height:760px)]:p-3" data-testid="member-header">
       <div className="flex items-center gap-3">
         <UserAvatar username={username} avatar={child.avatar} name={name} size={48} />
         <div className="min-w-0 flex-1">

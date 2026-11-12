@@ -83,8 +83,9 @@ test('P7-T2 play, open Now Playing, seek, reorder the queue and change output by
     if ((await rowShift()) >= 0) await page.keyboard.press('ArrowUp');
     return rowShift();
   }).toBeLessThan(0);
-  // …and until dnd-kit has settled the new drop target (it announces it).
-  await expect(page.getByText(/was moved over droppable area/).first()).toBeAttached();
+  // …and until dnd-kit has settled the new drop target, the row above (it
+  // announces it; on pick-up it also announces the row's own slot, q3).
+  await expect(page.getByText(/was moved over droppable area q2\b/).first()).toBeAttached();
   await page.keyboard.press('Space');
   await expect.poll(() => ma.sentCommands.find((c) => c.command === 'player_queues/move_item')?.args)
     .toMatchObject({ queue_item_id: 'q3', pos_shift: -1 });

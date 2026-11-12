@@ -53,6 +53,9 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const themeId = useActiveThemeId();
   const theme = useMemo(() => themeRegistry.resolveTheme(themeId), [themeId]);
   const cssVars = useMemo(() => themeRegistry.cssVarsFor(themeId), [themeId]);
+  // Amber pulled toward the theme's own text color: bright on a dark theme,
+  // a dark amber on a light one. Plain amber-500 read at 2:1 on light themes.
+  const staleColor = cssVars['--ht-text'] ? `color-mix(in srgb, #f59e0b 55%, ${cssVars['--ht-text']})` : '#f59e0b';
 
   // Shares one cache entry with the Health page, so the card and the page can
   // never show different numbers for the same day. Previously this used a
@@ -222,7 +225,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
                 data-testid="health-sync-status"
                 data-freshness={sync.freshness}
                 className="text-[10px] leading-tight mt-0.5"
-                style={{ color: sync.stale ? cssVars['--ht-warning'] ?? '#f59e0b' : cssVars['--ht-text-muted'] }}
+                style={{ color: sync.stale ? staleColor : cssVars['--ht-text-muted'] }}
               >
                 {syncHint ?? `Updated ${sync.label}`}
               </div>

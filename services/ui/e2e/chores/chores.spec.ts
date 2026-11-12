@@ -238,6 +238,9 @@ test.describe('managing chores across form factors', () => {
       test('guardian page and member page cards', async ({ page }) => {
         const board = await mockAll(page);
         await page.goto('/guardian');
+        // Phones open on the Overview area; chores live under Time & Chores.
+        await page.getByTestId('guardian-area-time').click();
+        await expect(page.getByTestId('guardian-area-time')).toHaveAttribute('aria-selected', 'true');
         const card = page.getByTestId('guardian-chores');
         await expect(card).toContainText('Feed the chickens', { timeout: 15_000 });
         await card.scrollIntoViewIfNeeded();

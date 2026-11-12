@@ -75,7 +75,8 @@ export default function ListenNowPage() {
   const maProblem = serviceProblem('Music Assistant', errors?.ma);
   const absProblem = serviceProblem('Audiobookshelf', errors?.abs ?? books.data?.notice ?? (books.isError ? 'Audiobookshelf is unreachable' : null));
   const notConnected = /not connected/.test(maProblem ?? '') && (/not connected/.test(absProblem ?? '') || !absProblem);
-  const nothingAtAll = home.data && continueCards.length === 0 && !recent.length && !playlists.length
+  // Books come from their own call: until it answers, "nothing at all" is not known yet.
+  const nothingAtAll = home.data && !books.isLoading && continueCards.length === 0 && !recent.length && !playlists.length
     && !favorites.length && !radio.length;
 
   const card = ({ key, item, progress, label }: CardModel) => {
@@ -99,8 +100,10 @@ export default function ListenNowPage() {
   };
   const items = (list: MediaItem[]) => list.map((item) => card({ key: item.uri, item }));
 
-  const shelf = (title: string, cards: ReactNode[], opts: { seeAll?: string; empty?: ReactNode } = {}) => {
-    if (home.isLoading) return <Shelf title={title}><CardSkeletons label={`Loading ${title.toLowerCase()}`} /></Shelf>;
+  const shelf = (title: string, cards: ReactNode[], opts: { seeAll?: string; empty?: ReactNode; loading?: boolean } = {}) => {
+    // A shelf keeps its skeleton until everything it shows has answered, so a
+    // late answer fills a space already held instead of pushing the page down.
+    if (home.isLoading || (opts.loading && !cards.length)) return <Shelf title={title}><CardSkeletons label={`Loading ${title.toLowerCase()}`} /></Shelf>;
     if (!cards.length && !opts.empty) return null;
     return (
       <Shelf title={title} seeAll={cards.length ? opts.seeAll : undefined}>
@@ -137,7 +140,7 @@ export default function ListenNowPage() {
           {nothingAtAll && !maProblem && !absProblem ? (
             <EmptyState title="Nothing here yet" detail="Music and books you play show up here." />
           ) : null}
-          {shelf('Continue listening', continueCards.map(card), { seeAll: '/media/library/audiobooks' })}
+          {shelf('Continue listening', continueCards.map(card), { seeAll: '/media/library/audiobooks', loading: books.isLoading })}
           {shelf('Recently played', items(recent))}
           {shelf('Your playlists', items(playlists), {
             seeAll: '/media/library/playlists',

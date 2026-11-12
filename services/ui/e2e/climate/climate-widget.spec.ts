@@ -315,6 +315,8 @@ test.describe('climate widget at phone resolution', () => {
   test('rapid taps coalesce into one service call', async ({ page }, info) => {
     const mocks = await (async () => {
       const m = await mockClimateApi(page, { devices: ['climate.living_room'] });
+      // The page's clock, so "rapid" means the same instant however slow the machine is.
+      await page.clock.install();
       await page.goto('/');
       return m;
     })();
@@ -322,11 +324,14 @@ test.describe('climate widget at phone resolution', () => {
     await expect(dial).toBeVisible();
 
     const up = page.getByRole('button', { name: 'Raise target for Living Room' });
+    await page.clock.pauseAt(Date.now() + 60_000);
     await up.click();
     await up.click();
     await up.click();
     await expect(dial).toContainText('23.5');
-    await page.waitForTimeout(700);
+    // Past the debounce (SETPOINT_DEBOUNCE_MS, 400 ms) twice over: every pending send has gone.
+    await page.clock.runFor(1000);
+    await expect.poll(() => mocks.commands.length).toBeGreaterThan(0);
     console.log('ha_service calls:', JSON.stringify(mocks.commands));
     expect(mocks.commands).toHaveLength(1);
     expect(mocks.commands[0]).toMatchObject({
@@ -340,10 +345,13 @@ test.describe('climate widget at phone resolution', () => {
     await boot(page, { devices: ['climate.living_room'] });
     // The default dashboard mounts several climate cells, each with its own
     // options button; one menu is enough to measure.
-    await page.getByRole('button', { name: 'Widget options' }).first().click();
+    // Its own cell's button: the first in the page is whichever widget lays out first.
+    await page.locator('[data-widget^="climate"]').getByRole('button', { name: 'Widget options' }).first().click();
     const menu = page.getByRole('menu', { name: /Climate options/ });
     await expect(menu).toBeVisible();
 
+    // The menu is placed after its first paint (nudged back on screen once it is measured).
+    await expect.poll(() => menu.evaluate((el) => el.getBoundingClientRect().bottom <= window.innerHeight + 1)).toBe(true);
     const m = await menu.evaluate((el) => {
       const b = el.getBoundingClientRect();
       const items = Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"],[role="menuitemradio"]'))

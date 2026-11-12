@@ -20,6 +20,10 @@ test('P5-T5 resume a book, skip, change speed, save progress, jump to a chapter 
   });
   const book = { title: 'Project Hail Mary', artist: 'Andy Weir', uri: 'library://audiobook/book-1', duration: 58320, position: 24494, volume: 70 };
   pushNowPlaying(ma, WEB_PLAYER_ID, book);
+  // The page has seen the book playing (the OS media controls say so) before it
+  // pauses: that pause is what saves the position. Pushed back to back, the two
+  // updates could land in one render and the pause would never be seen.
+  await expect.poll(() => page.evaluate(() => navigator.mediaSession?.playbackState)).toBe('playing');
   // The browser player takes MA's clock while paused (playing, Sendspin runs it).
   pushPlaybackState(ma, 'paused', book);
   pushPosition(ma, 24494, book);

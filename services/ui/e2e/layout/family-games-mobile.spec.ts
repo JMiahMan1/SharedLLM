@@ -108,7 +108,13 @@ async function problems(page: Page, rootSelector: string) {
       const r = el.getBoundingClientRect();
       // A sideways-scrolling row is meant to run past the edge.
       if (el.closest('[data-scroll-x]')) continue;
-      if (r.width > 0 && r.right > limit + 0.5) {
+      // What can be seen: an ancestor that clips its overflow (a card's
+      // decorative glow) cuts the box at its own edge.
+      let right = r.right;
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== 'visible') right = Math.min(right, a.getBoundingClientRect().right);
+      }
+      if (r.width > 0 && right > limit + 0.5) {
         out.push(`overflow ${el.tagName.toLowerCase()}[${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}] right=${Math.round(r.right)} > ${limit}`);
       }
     }
@@ -131,7 +137,9 @@ for (const width of [412, 375, 360]) {
     await expect(page.getByTestId('family-shelf')).toBeVisible();
     await expect(page.getByTestId('family-admin')).toBeVisible();
     await expect(page.getByTestId('family-scoreboard')).toBeVisible();
-    await page.waitForTimeout(600);
+    // Measure once the cards have finished animating in.
+    await page.waitForFunction(() => document.getAnimations()
+      .every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
     expect(await problems(page, '[data-testid="family-games"]')).toEqual([]);
     await page.screenshot({ path: `../../.tmp/family-games-${width}.png`, fullPage: true });
     await page.getByTestId('family-scoreboard').screenshot({ path: `../../.tmp/family-games-${width}-board.png` });
