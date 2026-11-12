@@ -296,6 +296,7 @@ def resolve_tv_companions(
     entity_id: str,
     all_states: list[dict] | None = None,
     services: Any = None,
+    idx: Any = None,
 ) -> dict[str, Any]:
     """Resolve sibling/companion entities for a TV or room media device.
 
@@ -308,7 +309,13 @@ def resolve_tv_companions(
     - webos_notify_service: notify.<service_name> for LG webOS toast banners
     - room_assist_satellite: assist_satellite.* in the same room (for 2-way intercom)
     - room_esphome_speaker: ESPHome speaker media_player.* in the same room
+
+    With the hub's capability index (``idx``) every companion is chosen by the
+    integration that owns it and by being on the same device or in the same
+    area; without it (a plain Home Assistant) room words in entity ids decide.
     """
+    if idx is not None and entity_id in idx:
+        return _companions_from_index(entity_id, all_states or [], services, idx)
     states = all_states or []
     state_by_id = {s.get("entity_id", ""): s for s in states if s.get("entity_id")}
     target_state = state_by_id.get(entity_id, {})
@@ -382,7 +389,23 @@ def resolve_tv_companions(
         if ("dlna" in eid or "q900" in eid or (s_q == primary_entity and not _is_ma_player(s_attrs, eid))) and room_slug and (room_slug in eid or s_q == primary_entity):
             dlna_sibling = eid
 
-    # Discover LG webOS notify service if available
+    webos_notify_service = _webos_notify_service(services)
+
+    return {
+        "primary_entity": primary_entity,
+        "ma_sibling": ma_sibling,
+        "cast_sibling": cast_sibling,
+        "dlna_sibling": dlna_sibling,
+        "remote_sibling": remote_sibling,
+        "webos_notify_service": webos_notify_service,
+        "room_assist_satellite": room_assist_satellite,
+        "room_esphome_speaker": room_esphome_speaker,
+        "room_slug": room_slug,
+    }
+
+
+def _webos_notify_service(services: Any) -> str | None:
+    """The legacy ``notify.<service>`` an LG webOS TV registers (HA names it after the TV), if any."""
     webos_notify_service = None
     if isinstance(services, list):
         for dom_entry in services:
@@ -398,18 +421,86 @@ def resolve_tv_companions(
             if "webos" in svc_name.lower() or "lg_" in svc_name.lower():
                 webos_notify_service = svc_name
                 break
+    return webos_notify_service
 
+
+def _companions_from_index(entity_id: str, states: list[dict], services: Any, idx: Any) -> dict[str, Any]:
+    """``resolve_tv_companions`` from the hub's capability index: same device first, then same area."""
+    state_by_id = {s.get("entity_id", ""): s for s in states if s.get("entity_id")}
+    attrs = (state_by_id.get(entity_id) or {}).get("attributes") or {}
+
+    def queue_of(eid: str) -> str:
+        return str(((state_by_id.get(eid) or {}).get("attributes") or {}).get("active_queue") or "")
+
+    # A Music Assistant player names the player it drives in active_queue (a state attribute, not a name).
+    primary_entity = entity_id
+    active_q = str(attrs.get("active_queue") or "")
+    if active_q in idx and idx.is_media_target(active_q):
+        primary_entity = active_q
+
+    def first(cands: list[str]) -> str | None:
+        return cands[0] if cands else None
+
+    ma_sibling: str | None = entity_id if idx.integration(entity_id) == "music_assistant" else None
+    if ma_sibling is None:
+        ma_all = [e for e in idx.media_targets() if idx.integration(e) == "music_assistant"]
+        ma_sibling = (first([e for e in ma_all if queue_of(e) in (entity_id, primary_entity)])
+                      or first(idx.nearby(entity_id, any_of=("play_media",), integration="music_assistant")))
+    cast_sibling = first([e for e in idx.nearby(entity_id, any_of=("play_media",), integration="cast")])
+    dlna_sibling = first([e for e in idx.nearby(entity_id, any_of=("play_media",), integration="dlna_dmr")]
+                         or [e for e in idx.media_targets() if e != entity_id and primary_entity != entity_id
+                             and queue_of(e) == primary_entity and idx.integration(e) != "music_assistant"])
+    remote_sibling = first(idx.nearby(entity_id, any_of=("remote_command",)))
+    # A voice satellite has no ability of its own in the index yet; its domain names it.
+    room_assist_satellite = first(idx.nearby(entity_id, domain="assist_satellite"))
+    room_esphome_speaker = first([e for e in idx.nearby(entity_id, any_of=("play_media", "tts"), integration="esphome")]
+                                 or ([entity_id] if idx.integration(entity_id) == "esphome" else []))
+    area_id = idx.area_of(entity_id)
     return {
         "primary_entity": primary_entity,
         "ma_sibling": ma_sibling,
         "cast_sibling": cast_sibling,
         "dlna_sibling": dlna_sibling,
         "remote_sibling": remote_sibling,
-        "webos_notify_service": webos_notify_service,
+        "webos_notify_service": _webos_notify_service(services) if idx.integration(entity_id) == "webostv" else None,
         "room_assist_satellite": room_assist_satellite,
         "room_esphome_speaker": room_esphome_speaker,
-        "room_slug": room_slug,
+        "room_slug": area_id or "",
+        "area_id": area_id,
     }
+
+
+async def routing_index(ha_url: str, ha_token: str, purpose: str = "announce routing") -> Any:
+    """The hub's capability index for routing (None for a plain HA, logged; raises when the hub fails)."""
+    if not (ha_url and ha_token):
+        return None
+    from services.execution import capability_index
+
+    return await capability_index.routing_index(ha_url, ha_token, purpose)
+
+
+async def companions_for(ha_url: str, ha_token: str, entity_id: str, all_states: list[dict] | None = None,
+                         services: Any = None) -> dict[str, Any]:
+    """``resolve_tv_companions`` with the hub's index when it has one."""
+    idx = await routing_index(ha_url, ha_token, "companion devices")
+    return resolve_tv_companions(entity_id, all_states, services=services, idx=idx)
+
+
+async def indexed_platform(ha_url: str, ha_token: str, entity_id: str, purpose: str) -> str | None:
+    """The handler platform the hub's index names for an entity: "" when the index has no TV platform
+    for it (or does not know it), None only when there is no index (a plain HA, logged)."""
+    idx = await routing_index(ha_url, ha_token, purpose)
+    if idx is None:
+        return None
+    return idx.tv_platform(entity_id) or ""
+
+
+async def tv_type_for(ha_url: str, ha_token: str, entity_id: str, state: str, attributes: dict,
+                      loaded_components: set[str] | None = None) -> str:
+    """``detect_tv_type`` with the platform the hub's index names for the entity, when it has one."""
+    idx = await routing_index(ha_url, ha_token, "TV platform detection")
+    platform = idx.tv_platform(entity_id) if idx is not None else None
+    return detect_tv_type(entity_id, state, attributes, loaded_components, platform=platform)
 
 
 async def search_device_type(
@@ -554,9 +645,10 @@ async def announce_roku(
             log.warning(f"[announce.roku] ECP launch failed: {e}")
 
     # 3. Fallback: check Music Assistant sibling (e.g., media_player.kids_room_tv)
+    idx = await routing_index(ha_url, ha_token)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
-        companions = resolve_tv_companions(entity_id, all_states)
+        companions = resolve_tv_companions(entity_id, all_states, idx=idx)
         ma_target = companions.get("ma_sibling")
         if ma_target:
             log.info(f"[announce.roku] Trying Music Assistant sibling {ma_target}")
@@ -603,10 +695,11 @@ async def announce_webos(
 
     toast_ok = False
     companions: dict[str, Any] = {}
+    idx = await routing_index(ha_url, ha_token)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
         services = await ha_client.get_services(ha_url, ha_token)
-        companions = resolve_tv_companions(entity_id, all_states, services=services)
+        companions = resolve_tv_companions(entity_id, all_states, services=services, idx=idx)
 
     # 1a. Send onscreen toast via notify.<lg_webos_tv_*> service if registered
     notify_svc = companions.get("webos_notify_service")
@@ -678,9 +771,10 @@ async def announce_android_tv(
     log.info(f"[announce.android_tv] Dispatching to Android TV {entity_id} (state={state}, features={supported_features})")
 
     companions: dict[str, Any] = {}
+    idx = await routing_index(ha_url, ha_token)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
-        companions = resolve_tv_companions(entity_id, all_states)
+        companions = resolve_tv_companions(entity_id, all_states, idx=idx)
 
     # 1. Wake the TV if off
     if state in ("off", "standby", "unavailable"):
@@ -760,9 +854,10 @@ async def announce_samsung(
 
     # Resolve companions (MA player, DLNA renderer, or room Cast companion)
     companions: dict[str, Any] = {}
+    idx = await routing_index(ha_url, ha_token)
     try:
         all_states = await ha_client.get_all_states(ha_url, ha_token)
-        companions = resolve_tv_companions(entity_id, all_states)
+        companions = resolve_tv_companions(entity_id, all_states, idx=idx)
     except Exception as e:
         log.warning(f"[announce.samsung] Failed to resolve Samsung companions: {e}")
 
@@ -961,9 +1056,10 @@ async def announce_generic_tv(
     })
     if res.get("ok"):
         return res
+    idx = await routing_index(ha_url, ha_token)
     with contextlib.suppress(Exception):
         all_states = await ha_client.get_all_states(ha_url, ha_token)
-        companions = resolve_tv_companions(entity_id, all_states)
+        companions = resolve_tv_companions(entity_id, all_states, idx=idx)
         for key in ("cast_sibling", "ma_sibling", "dlna_sibling"):
             sib = companions.get(key)
             if sib and sib != entity_id:
@@ -1051,9 +1147,7 @@ async def dispatch_announce(
     message: str = "",
 ) -> dict[str, Any]:
     """Dispatch announcement/alarm/intercom audio to the appropriate TV or speaker handler."""
-    from services.execution import capability_index
-
-    idx = await capability_index.load_or_none(ha_url, ha_token, "announce routing")
+    idx = await routing_index(ha_url, ha_token, "announce routing")
     tv_type = detect_tv_type(entity_id, state, attributes, loaded_components,
                              platform=idx.tv_platform(entity_id) if idx is not None else None)
 
@@ -1099,8 +1193,10 @@ async def stop_tv_or_media_alert(
     state_obj = next((s for s in states if s.get("entity_id") == entity_id), {})
     attrs = state_obj.get("attributes", {}) if isinstance(state_obj, dict) else {}
     st_val = state_obj.get("state", "unknown") if isinstance(state_obj, dict) else "unknown"
-    tv_type = detect_tv_type(entity_id, st_val, attrs)
-    companions = resolve_tv_companions(entity_id, states)
+    idx = await routing_index(ha_url, ha_token, "stopping an alert")
+    tv_type = detect_tv_type(entity_id, st_val, attrs,
+                             platform=idx.tv_platform(entity_id) if idx is not None else None)
+    companions = resolve_tv_companions(entity_id, states, idx=idx)
 
     stopped_targets: list[str] = []
 
@@ -1128,11 +1224,20 @@ async def stop_tv_or_media_alert(
     ]
     seen: set[str] = set()
     for target in candidate_entities:
-        if not target or target in seen or not str(target).startswith("media_player."):
+        if not target or target in seen:
             continue
         seen.add(target)
+        if idx is not None:
+            # The index lists the services each entity takes: stop whatever accepts a media stop.
+            call = idx.service_for(target, "media_stop")
+            if call is None:
+                continue
+        elif str(target).startswith("media_player."):
+            call = ("media_player", "media_stop")
+        else:
+            continue
         with contextlib.suppress(Exception):
-            res = await ha_client.call_service(ha_url, ha_token, "media_player", "media_stop", target, {})
+            res = await ha_client.call_service(ha_url, ha_token, call[0], call[1], target, {})
             if res.get("ok"):
                 stopped_targets.append(target)
 
@@ -1208,12 +1313,10 @@ async def classify_communication_devices(
     """
     ha_client = _get_ha_client()
     device_registry = _get_device_registry()
-    # The hub's capability index says which integration owns each player and what it can do
-    # (announce, show a page); without it (a plain HA) the attribute heuristics below decide.
-    from services.execution import capability_index
-
-    idx = (await capability_index.load_or_none(ha_url, ha_token, "communication device classification")
-           if ha_url and ha_token else None)
+    # The hub's capability index says which integration owns each player, what it can do
+    # (play sound, announce, show a page) and which area it is in; without it (a plain HA,
+    # logged) the attribute heuristics below decide. Any other index failure raises.
+    idx = await routing_index(ha_url, ha_token, "communication device classification")
 
     states = all_states
     if states is None and ha_url and ha_token:
@@ -1232,7 +1335,7 @@ async def classify_communication_devices(
             continue
         seen_ids.add(eid)
         has_mic = bool(esp.get("has_microphone"))
-        companions = resolve_tv_companions(eid, states)
+        companions = resolve_tv_companions(eid, states, idx=idx)
         if companions.get("room_assist_satellite"):
             has_mic = True
         devices.append({
@@ -1251,7 +1354,10 @@ async def classify_communication_devices(
     # 2. Classify HA media_player entities (TVs & Speakers)
     for st in states:
         eid = st.get("entity_id", "")
-        if not eid.startswith("media_player.") or eid in seen_ids:
+        if eid in seen_ids:
+            continue
+        # A target is whatever the index says can be sent sound; a plain HA has only the domain to go on.
+        if (not idx.is_media_target(eid)) if idx is not None else (not eid.startswith("media_player.")):
             continue
         if not usable_entity_id(eid):
             continue
@@ -1268,7 +1374,7 @@ async def classify_communication_devices(
             continue
 
         tv_type = detect_tv_type(eid, state_val, attrs, platform=idx.tv_platform(eid) if idx is not None else None)
-        companions = resolve_tv_companions(eid, states)
+        companions = resolve_tv_companions(eid, states, idx=idx)
 
         # Avoid duplicate Music Assistant / DLNA wrapper entries when the primary TV entity is already in HA
         primary_ent = companions.get("primary_entity")
@@ -1281,7 +1387,9 @@ async def classify_communication_devices(
             prim_state = primary_state.get("state", "unknown")
             prim_attrs = primary_state.get("attributes") or {}
             prim_features = int(prim_attrs.get("supported_features") or 0)
-            if prim_state != "unavailable" and (prim_features & SUPPORT_MEDIA_ANNOUNCE):
+            prim_announces = (idx.has(primary_ent, "announce") if idx is not None and primary_ent in idx
+                              else bool(prim_features & SUPPORT_MEDIA_ANNOUNCE))
+            if prim_state != "unavailable" and prim_announces:
                 continue
 
         # Look up cached network metadata (IP, OS version, model) if available
@@ -1311,15 +1419,17 @@ async def classify_communication_devices(
         if cap is not None:
             announce_capable = "announce" in (cap.get("abilities") or [])
 
-        is_tv = (
-            (cap is not None and ((cap.get("details") or {}).get("device_class") == "tv"
-                                  or {"show_url", "launch_app"} & set(cap.get("abilities") or [])))
-            or tv_type in TV_PLATFORMS
-            or device_class == "tv"
-            or (attrs.get("icon") or "") == "mdi:television"
-            or "tv" in eid.lower()
-            or "tv" in friendly.lower()
-        )
+        if cap is not None:
+            # The hub says whether it drives a screen (a TV, or it opens pages / launches apps).
+            is_tv = idx.is_screen(eid) or tv_type in TV_PLATFORMS
+        else:
+            is_tv = (
+                tv_type in TV_PLATFORMS
+                or device_class == "tv"
+                or (attrs.get("icon") or "") == "mdi:television"
+                or "tv" in eid.lower()
+                or "tv" in friendly.lower()
+            )
         is_esphome = tv_type == "esphome"
         kind = "esphome" if is_esphome else ("tv" if is_tv else "speaker")
 
@@ -1379,6 +1489,8 @@ async def classify_communication_devices(
             "has_microphone": has_mic,
             "intercom_mode": "twoway" if assist_sat or is_esphome else "oneway",
             "assist_satellite_entity": assist_sat,
+            "area_id": idx.area_of(eid) if idx is not None else None,
+            "area": idx.area_name(idx.area_of(eid)) if idx is not None else None,
             "companions": {
                 k: v for k, v in companions.items()
                 if v and k in ("ma_sibling", "cast_sibling", "dlna_sibling", "remote_sibling", "webos_notify_service")

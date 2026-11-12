@@ -66,13 +66,15 @@ def _session(monkeypatch, status, body):
     return session
 
 
-async def test_load_parses_caches_and_tells_a_plain_ha_from_a_failure(monkeypatch):
-    s = _session(monkeypatch, 200, {"entities": ENTITIES, "abilities": {"dim": "x"}})
+async def test_load_parses_caches_and_tells_a_plain_ha_from_a_failure(monkeypatch, real_capability_index):
+    s = _session(monkeypatch, 200, {"entities": ENTITIES, "abilities": {"dim": "x"},
+                                    "areas": [{"area_id": "den", "name": "Den", "aliases": ["Snug"]}]})
     idx = await capability_index.load(HUB, "tok")
     assert idx.with_ability("announce") == ["media_player.samsung_kitchen_speaker"]
     assert idx.with_ability("power", area_id="den") == ["media_player.box_one"]
     assert idx.with_ability("dim", available_only=True) == []
     assert idx.tv_platform("media_player.box_one") == "roku"
+    assert idx.area_id_for("snug") == "den" and idx.area_name("den") == "Den"
     await capability_index.load(HUB, "tok")
     assert len(s.calls) == 1 and s.calls[0][0] == f"{HUB}/api/homehub/capabilities"
     capability_index.clear_cache()
@@ -82,7 +84,8 @@ async def test_load_parses_caches_and_tells_a_plain_ha_from_a_failure(monkeypatc
     _session(monkeypatch, 500, None)
     with pytest.raises(CapabilityIndexError):
         await capability_index.load(HUB, "tok")
-    assert await capability_index.load_or_none(HUB, "tok", "a test") is None
+    with pytest.raises(CapabilityIndexError):  # routing never falls back on a failure, only on a 404
+        await capability_index.routing_index(HUB, "tok", "a test")
     with pytest.raises(CapabilityIndexError):
         await capability_index.load("", "tok")
 
@@ -98,10 +101,10 @@ def test_the_index_answer_wins_over_name_guesses():
 async def test_classification_uses_the_index_for_owner_announce_and_screen(monkeypatch):
     idx = CapabilityIndex(ENTITIES)
 
-    async def load_or_none(ha_url, ha_token, purpose):
+    async def routing_index(ha_url, ha_token, purpose):
         return idx
 
-    monkeypatch.setattr(capability_index, "load_or_none", load_or_none)
+    monkeypatch.setattr(capability_index, "routing_index", routing_index)
     monkeypatch.setattr(announce_handlers, "_get_device_registry", lambda: None)
     states = [
         {"entity_id": "media_player.box_one", "state": "off", "attributes": {"friendly_name": "Box one"}},
@@ -117,9 +120,9 @@ async def test_classification_uses_the_index_for_owner_announce_and_screen(monke
 
 
 async def test_tv_stage_reads_owners_from_the_index(monkeypatch):
-    async def load_or_none(ha_url, ha_token, purpose):
+    async def routing_index(ha_url, ha_token, purpose):
         return CapabilityIndex(ENTITIES)
 
-    monkeypatch.setattr(capability_index, "load_or_none", load_or_none)
+    monkeypatch.setattr(capability_index, "routing_index", routing_index)
     assert await tv_stage.ha_entity_platforms(HUB, "tok") == {
         "media_player.box_one": "roku", "media_player.samsung_kitchen_speaker": "music_assistant"}

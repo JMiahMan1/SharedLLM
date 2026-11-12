@@ -50,9 +50,28 @@ def _find_assist_satellite_for_room_or_entities(
     all_states: list[dict],
     target_room: str | None,
     target_entities: list[str],
+    idx=None,
 ) -> str | None:
-    """Find an `assist_satellite.*` voice satellite in the target room or paired with target entities."""
+    """Find an `assist_satellite.*` voice satellite in the target room or paired with target entities.
+
+    With the hub's capability index the room is the hub area its name or alias
+    names (``UnknownAreaError`` when there is none) and the satellite is one on
+    the same device or in the same area as a target; a plain HA (no index)
+    matches room words in entity ids.
+    """
     from services.execution.announce_handlers import _room_slug_from_entity, resolve_tv_companions
+
+    if idx is not None:
+        for eid in target_entities:
+            if (idx.get(eid) or {}).get("domain") == "assist_satellite":
+                return eid
+            near = idx.nearby(eid, domain="assist_satellite")
+            if near:
+                return near[0]
+        if target_room:
+            sats = idx.in_area(idx.require_area(target_room), domain="assist_satellite")
+            return sats[0] if sats else None
+        return None
 
     for eid in target_entities:
         if eid.startswith("assist_satellite."):
@@ -99,9 +118,14 @@ async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResu
         ha_url = user_context.ha_url or os.environ.get("HA_URL", "")
         ha_token = user_context.ha_token or os.environ.get("HA_TOKEN", "")
 
+        from services.execution.capability_index import CapabilityIndexError, UnknownAreaError, routing_index
+
         resolved_entities = list(explicit_entities)
-        if not resolved_entities and (target_room or explicit_entities) and ha_url and ha_token:
-            with contextlib.suppress(Exception):
+        try:
+            # Which devices are in which room comes from the hub; a room it does not have, or a
+            # hub that cannot say, is reported rather than guessed around.
+            idx = await routing_index(ha_url, ha_token, "intercom targeting") if ha_url and ha_token else None
+            if not resolved_entities and (target_room or explicit_entities) and ha_url and ha_token:
                 resolved_entities = await resolve_targets(
                     entity_ids=explicit_entities,
                     rooms=[target_room] if target_room else [],
@@ -109,14 +133,17 @@ async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResu
                     ha_token=ha_token,
                 )
 
-        all_states: list[dict] = []
-        if ha_url and ha_token:
-            with contextlib.suppress(Exception):
-                all_states = await ha_client.get_states(ha_url, ha_token) or []
+            all_states: list[dict] = []
+            if ha_url and ha_token:
+                with contextlib.suppress(Exception):
+                    all_states = await ha_client.get_states(ha_url, ha_token) or []
 
-        assist_satellite = _find_assist_satellite_for_room_or_entities(
-            all_states, target_room, resolved_entities
-        )
+            assist_satellite = _find_assist_satellite_for_room_or_entities(
+                all_states, target_room, resolved_entities, idx=idx
+            )
+        except (UnknownAreaError, CapabilityIndexError) as e:
+            return ExecutionResult(status="FAILURE", message=f"Could not find the intercom's devices: {e}",
+                                   service="intercom", detail={"target_room": target_room})
 
         effective_mode = requested_type
         satellite_dispatched = False

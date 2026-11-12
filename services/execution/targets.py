@@ -5,7 +5,13 @@ Precedence:
   1. Explicit entity IDs / target devices
   2. room_speakers map (Identity GlobalSetting)
   3. Media group member_entity_ids
-  4. HA areas (entity area name == room) filtered to media_player
+  4. The hub's areas: every entity in the room's area (matched by area name or
+     alias) that the capability index says can play sound. A device added on
+     the hub in any room is a target on the next index load, with no change here.
+
+Only a plain Home Assistant (no capability index, HTTP 404) falls back to its
+area names and, failing those, to room words inside entity ids; that path is
+logged. A room the hub does not have raises ``UnknownAreaError``.
 """
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ import logging
 
 import aiohttp
 
-from services.execution import ha_client
+from services.execution import capability_index, ha_client
 
 log = logging.getLogger("execution/targets")
 
@@ -86,7 +92,7 @@ async def _speakers_for_rooms(
     ha_url: str,
     ha_token: str,
 ) -> list[str]:
-    """Resolve rooms via config map first, then HA areas (media_player only)."""
+    """Resolve rooms via the config map first, then the hub's areas and capability index."""
     ids: list[str] = []
     unresolved: list[str] = []
     for room in rooms:
@@ -98,35 +104,52 @@ async def _speakers_for_rooms(
             unresolved.append(room)
 
     if unresolved and ha_url and ha_token:
-        target_room_keys = {room_key(r) for r in unresolved}
-        try:
-            areas = await ha_client.get_areas(ha_url, ha_token)
-            # areas: entity_id -> area_name
-            for eid, area in areas.items():
-                if not eid.startswith("media_player."):
-                    continue
-                area_key = room_key(area or "")
-                if area_key in target_room_keys:
-                    ids.append(eid)
-        except Exception as e:
-            log.warning(f"[targets] HA area fallback failed: {e}")
-
-        if not ids:
-            try:
-                from services.execution.announce_handlers import _room_slug_from_entity
-                states = await ha_client.get_states(ha_url, ha_token)
-                for st in states or []:
-                    eid = str(st.get("entity_id") or "")
-                    if not eid.startswith("media_player."):
-                        continue
-                    attrs = st.get("attributes") or {}
-                    slug = _room_slug_from_entity(eid, str(attrs.get("friendly_name") or ""))
-                    if slug in target_room_keys or any(rk in eid.lower() for rk in target_room_keys):
-                        ids.append(eid)
-            except Exception as e:
-                log.warning(f"[targets] HA live state room match failed: {e}")
+        idx = await capability_index.routing_index(ha_url, ha_token, "room targeting")
+        if idx is not None:
+            for room in unresolved:
+                area_id = idx.require_area(room)
+                found = idx.media_targets(area_id)
+                if not found:
+                    log.warning("[targets] area %r has nothing that can play sound", idx.area_name(area_id))
+                ids.extend(found)
+            return _dedupe(ids)
+        ids.extend(await _legacy_speakers_for_rooms(unresolved, ha_url, ha_token))
 
     return _dedupe(ids)
+
+
+async def _legacy_speakers_for_rooms(rooms: list[str], ha_url: str, ha_token: str) -> list[str]:
+    """A plain Home Assistant (no capability index): its area names, else room words in entity ids."""
+    ids: list[str] = []
+    target_room_keys = {room_key(r) for r in rooms}
+    try:
+        areas = await ha_client.get_areas(ha_url, ha_token)
+        # areas: entity_id -> area_name
+        for eid, area in areas.items():
+            if not eid.startswith("media_player."):
+                continue
+            if room_key(area or "") in target_room_keys:
+                ids.append(eid)
+    except Exception as e:
+        log.warning(f"[targets] HA area fallback failed: {e}")
+
+    if not ids:
+        log.warning("[targets] no HA area named %s; matching room words in media_player entity ids "
+                    "(Home Assistant without the hub's capability index)", sorted(target_room_keys))
+        try:
+            from services.execution.announce_handlers import _room_slug_from_entity
+            states = await ha_client.get_states(ha_url, ha_token)
+            for st in states or []:
+                eid = str(st.get("entity_id") or "")
+                if not eid.startswith("media_player."):
+                    continue
+                attrs = st.get("attributes") or {}
+                slug = _room_slug_from_entity(eid, str(attrs.get("friendly_name") or ""))
+                if slug in target_room_keys or any(rk in eid.lower() for rk in target_room_keys):
+                    ids.append(eid)
+        except Exception as e:
+            log.warning(f"[targets] HA live state room match failed: {e}")
+    return ids
 
 
 def _dedupe(ids: list[str]) -> list[str]:

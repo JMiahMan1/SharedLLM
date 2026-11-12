@@ -57,7 +57,14 @@ MEDIA_ASSISTANT_CHANNEL_ID = "782875"
 
 
 async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
-    """Check if a media_player entity is a Roku device."""
+    """Check if a media_player entity is a Roku device (the hub's index answers when it has one)."""
+    try:
+        from services.execution.announce_handlers import indexed_platform
+    except ImportError:
+        from ..announce_handlers import indexed_platform  # type: ignore[no-redef]
+    platform = await indexed_platform(ha_url, ha_token, entity_id, "Roku detection")
+    if platform is not None:
+        return platform == "roku"
     entity_id_lower = entity_id.lower()
     if "roku" in entity_id_lower:
         return True
@@ -96,8 +103,23 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
 
     Only returns MA players that have an active_queue (i.e., are connected to a MA output).
     """
+    try:
+        from services.execution.announce_handlers import resolve_tv_companions, routing_index
+    except ImportError:
+        from ..announce_handlers import resolve_tv_companions, routing_index  # type: ignore[no-redef]
+    idx = await routing_index(ha_url, ha_token, "Roku Music Assistant sibling")
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
+        return None
+
+    if idx is not None:
+        # The MA player whose queue drives this Roku, or one on its device or in its area.
+        ma = resolve_tv_companions(roku_entity, all_states, idx=idx).get("ma_sibling")
+        queues = {s.get("entity_id"): (s.get("attributes") or {}).get("active_queue") for s in all_states}
+        if ma and ma != roku_entity and queues.get(ma):
+            log.info(f"[roku] Found MA player sibling via the capability index: {ma}")
+            return ma
+        log.warning(f"[roku] No MA player sibling with active queue found for {roku_entity} (capability index)")
         return None
 
     roku_friendly = ""
@@ -125,11 +147,7 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
                 log.info(f"[roku] Found MA player sibling: {eid} (queue: {active_queue})")
                 return eid
 
-    try:
-        from services.execution.announce_handlers import resolve_tv_companions
-    except ImportError:
-        from ..announce_handlers import resolve_tv_companions  # type: ignore[no-redef]
-    ma_comp = resolve_tv_companions(roku_entity, all_states).get("ma_entity")
+    ma_comp = resolve_tv_companions(roku_entity, all_states).get("ma_sibling")
     if ma_comp:
         for state in all_states:
             if state.get("entity_id") == ma_comp and state.get("attributes", {}).get("active_queue"):

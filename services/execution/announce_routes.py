@@ -67,12 +67,19 @@ async def run_announcement(
     rooms = getattr(req, "target_rooms", None) or []
     group_id = getattr(req, "group_id", None)
 
-    targets = await _resolve_for_request(
-        entity_ids=entity_ids,
-        rooms=rooms,
-        group_id=group_id,
-        user_context=user_context,
-    )
+    from services.execution.capability_index import CapabilityIndexError, UnknownAreaError
+
+    try:
+        targets = await _resolve_for_request(
+            entity_ids=entity_ids,
+            rooms=rooms,
+            group_id=group_id,
+            user_context=user_context,
+        )
+    except (UnknownAreaError, CapabilityIndexError) as e:
+        # A room the hub does not have, or a hub that did not say which devices are where.
+        return {"status": "FAILURE", "message": f"Could not resolve announcement targets: {e}",
+                "detail": {"resolved": [], "rooms": rooms}}
     if not targets:
         return {
             "status": "FAILURE",

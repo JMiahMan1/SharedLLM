@@ -33,7 +33,14 @@ ANDROID_TV_COMMANDS = {
 
 
 async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
-    """Check if a media_player entity is an Android TV device."""
+    """Check if a media_player entity is an Android TV device (the hub's index answers when it has one)."""
+    try:
+        from services.execution.announce_handlers import indexed_platform
+    except ImportError:
+        from ..announce_handlers import indexed_platform  # type: ignore[no-redef]
+    platform = await indexed_platform(ha_url, ha_token, entity_id, "Android TV detection")
+    if platform is not None:
+        return platform == "android_tv"
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
@@ -119,6 +126,18 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     3. Require Cast signals (entity_id hints, friendly name, cast_type)
     4. Single candidate = confident match
     """
+    try:
+        from services.execution.announce_handlers import routing_index
+    except ImportError:
+        from ..announce_handlers import routing_index  # type: ignore[no-redef]
+    idx = await routing_index(ha_url, ha_token, "Android TV Cast sibling")
+    if idx is not None:
+        # The Cast entity for the same TV: owned by the cast integration, on its device or in its area.
+        near = idx.nearby(atv_entity_id, any_of=("play_media",), integration="cast")
+        if near:
+            log.info(f"[android_tv] Found Cast sibling (capability index) for {atv_entity_id}: {near[0]}")
+        return near[0] if near else None
+
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None

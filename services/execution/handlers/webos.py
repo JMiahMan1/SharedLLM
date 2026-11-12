@@ -43,6 +43,13 @@ def _send_wol(mac: str, ip: str = "255.255.255.255", port: int = 9) -> bool:
 
 async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is an LG WebOS TV (never Samsung)."""
+    try:
+        from services.execution.announce_handlers import indexed_platform
+    except ImportError:
+        from ..announce_handlers import indexed_platform  # type: ignore[no-redef]
+    platform = await indexed_platform(ha_url, ha_token, entity_id, "webOS detection")
+    if platform is not None:  # the integration that owns it, from the hub's index
+        return platform == "webos"
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
@@ -173,6 +180,16 @@ async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> st
     """Find the HomeKit controller sibling for a webostv entity."""
     import aiohttp
     import websockets
+    try:
+        from services.execution.announce_handlers import routing_index
+    except ImportError:
+        from ..announce_handlers import routing_index  # type: ignore[no-redef]
+    idx = await routing_index(ha_url, ha_token, "webOS HomeKit sibling")
+    if idx is not None:
+        # The HomeKit accessory for the same TV: same device, else same area, same domain.
+        domain = (idx.get(entity_id) or {}).get("domain")
+        near = idx.nearby(entity_id, integration="homekit_controller", domain=domain) if domain else []
+        return near[0] if near else None
     headers = {"Authorization": f"Bearer {ha_token}"}
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:

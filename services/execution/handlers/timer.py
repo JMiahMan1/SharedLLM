@@ -627,6 +627,36 @@ async def record_ringing_timer(
         await r.set(f"timer_ringing:{tid}", json.dumps(record), ex=RINGING_TTL_SECONDS)
 
 
+def ring_entities(idx, target: str, index_error: str | None = None) -> tuple[list[str], str | None]:
+    """The entities a timer target rings, and why there are none when there are none.
+
+    With the hub's capability index a target is an entity that can play sound,
+    an area (by name or alias: every device there that can play sound) or a
+    bare object id ("den_speaker") of such an entity. A plain Home Assistant
+    (``idx`` None) keeps the old rule, a media_player of that name. When the
+    index failed (``index_error``) nothing is guessed.
+    """
+    from services.execution import ha_client
+
+    if index_error:
+        return [], f"the hub's capability index failed ({index_error}); not guessing which device {target!r} is"
+    if idx is None:
+        return [ha_client.sanitize_entity_id("media_player", target)], None
+    if target in idx:
+        if idx.is_media_target(target):
+            return [target], None
+        return [], f"{target} cannot play sound (the hub's capability index)"
+    area_id = idx.area_id_for(target)
+    if area_id is not None:
+        found = idx.media_targets(area_id)
+        return found, None if found else f"nothing in {idx.area_name(area_id)} can play sound"
+    slug = target.strip().lower().replace(" ", "_")
+    by_object_id = [e for e in idx.media_targets() if e.split(".", 1)[-1] == slug]
+    if by_object_id:
+        return by_object_id[:1], None
+    return [], f"{target!r} is neither a device that can play sound nor an area on the hub"
+
+
 async def stop_ringing_devices(
     r,
     *,
@@ -644,6 +674,22 @@ async def stop_ringing_devices(
 
     eff_ha_url = ha_url or os.environ.get("HA_URL", "")
     eff_ha_token = ha_token or os.environ.get("HA_TOKEN", "")
+
+    # Whether the named device is a speaker/TV (or a room of them) is the hub's index's answer;
+    # a plain HA (no index, logged) goes by the media_player domain. An index failure raises.
+    named_media: list[str] = []
+    if device_name:
+        idx = None
+        if eff_ha_url and eff_ha_token:
+            from services.execution.capability_index import routing_index
+
+            idx = await routing_index(eff_ha_url, eff_ha_token, "stopping a ringing timer")
+        if idx is not None:
+            area_id = idx.area_id_for(device_name) if device_name not in idx else None
+            named_media = (idx.media_targets(area_id) if area_id is not None
+                           else [device_name] if idx.is_media_target(device_name) else [])
+        elif device_name.startswith("media_player."):
+            named_media = [device_name]
 
     stopped_devices: list[str] = []
     try:
@@ -672,9 +718,8 @@ async def stop_ringing_devices(
         devs = list(rec.get("esphome_devices") or [])
         media_ents = list(rec.get("media_entities") or [])
         if device_name:
-            if device_name.startswith("media_player."):
-                if device_name not in media_ents:
-                    media_ents.append(device_name)
+            if named_media:
+                media_ents.extend(e for e in named_media if e not in media_ents)
             elif device_name not in devs:
                 devs.append(device_name)
         for dev in devs:
@@ -691,10 +736,13 @@ async def stop_ringing_devices(
             await r.delete(key)
 
     if device_name and device_name not in stopped_devices:
-        if device_name.startswith("media_player.") and eff_ha_url and eff_ha_token:
-            with contextlib.suppress(Exception):
-                await stop_tv_or_media_alert(eff_ha_url, eff_ha_token, device_name)
-                stopped_devices.append(device_name)
+        if named_media and eff_ha_url and eff_ha_token:
+            for ment in named_media:
+                if ment in stopped_devices:
+                    continue
+                with contextlib.suppress(Exception):
+                    await stop_tv_or_media_alert(eff_ha_url, eff_ha_token, ment)
+                    stopped_devices.append(ment)
         else:
             with contextlib.suppress(Exception):
                 await esphome_client.stop_device_alert(device_name)

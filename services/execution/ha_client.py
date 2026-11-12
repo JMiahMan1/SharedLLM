@@ -463,6 +463,17 @@ async def find_companion_remote(ha_url: str, ha_token: str, media_entity_id: str
     if hit and now - hit[0] < _REMOTE_CACHE_TTL:
         return hit[1]
 
+    from services.execution import capability_index
+
+    idx = await capability_index.routing_index(ha_url, ha_token, "companion remote")
+    if idx is not None:
+        # The hub's index: an entity that sends remote keys, on the same device, else in the same area.
+        near = idx.nearby(media_entity_id, any_of=("remote_command",))
+        if not near:
+            raise LookupError(f"The hub has no remote control for {media_entity_id} on its device or in its area")
+        _REMOTE_CACHE[key] = (now, near[0])
+        return near[0]
+
     remote: str | None = None
     if _ENTITY_ID_RE.match(media_entity_id):
         rendered = await _render_template(

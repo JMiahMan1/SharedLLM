@@ -453,10 +453,13 @@ async def ha_entity_platforms(ha_url: str, ha_token: str) -> dict[str, str]:
         return {}
     from services.execution import capability_index
 
-    idx = await capability_index.load_or_none(ha_url, ha_token, "TV stage platforms")
-    if idx is not None:  # the hub knows each entity's integration: no template needed
-        return {eid: INTEGRATION_PLATFORMS[integ] for eid in idx.with_ability(domain="media_player")
-                if (integ := idx.integration(eid) or "") in INTEGRATION_PLATFORMS}
+    # The hub knows each entity's integration (no template needed); a plain HA (404) is the
+    # logged fallback below, and any other index failure raises rather than guessing.
+    idx = await capability_index.routing_index(ha_url, ha_token, "TV stage platforms")
+    if idx is not None:
+        return {eid: INTEGRATION_PLATFORMS[integ] for eid in idx.by_entity
+                if (idx.is_media_target(eid) or idx.is_screen(eid))
+                and (integ := idx.integration(eid) or "") in INTEGRATION_PLATFORMS}
     parts = "".join(
         f"{{% for e in integration_entities('{integ}') %}}{{% if e.startswith('media_player.') %}}"
         f"{{{{ e }}}}|{integ};{{% endif %}}{{% endfor %}}"

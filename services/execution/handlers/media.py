@@ -58,12 +58,41 @@ def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
     # Default to music
     return "music"
 
+async def _routing_index(ha_url: str, ha_token: str, purpose: str):
+    """The hub's capability index (None for a plain HA, logged), when HA is configured and up."""
+    if not ha_url or not ha_token or ha_health.is_down(ha_url):
+        return None
+    from services.execution import capability_index
+
+    return await capability_index.routing_index(ha_url, ha_token, purpose)
+
+
 async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, media_type: str | None = None) -> str:
-    """Resolve entity_id from device_name if needed."""
+    """Resolve entity_id from device_name if needed.
+
+    With the hub's capability index a device name that names a room ("the den",
+    "den TV") resolves to the area by its registry name or alias, and the player
+    there that can do the job; with no device named, the choice is among the
+    players the index says can play media. A plain Home Assistant (no index)
+    keeps the old name and domain matching, logged.
+    """
     if req.entity_id:
         return ha_client.sanitize_entity_id("media_player", req.entity_id)
 
+    idx = await _routing_index(ha_url, ha_token, "media player choice")
+    states: list[dict] = []
+    if idx is not None:
+        states = await ha_client.get_states(ha_url, ha_token) or []
+
     if req.device_name:
+        if idx is not None:
+            area_id = idx.area_in_text(req.device_name)
+            if area_id is not None:
+                picked = idx.pick_player(area_id, req.device_name, media_type, states)
+                if picked is None:
+                    raise ValueError(f"Nothing in {idx.area_name(area_id)} can play media")
+                log.info(f"[media/play] '{req.device_name}' -> area {area_id} -> {picked}")
+                return picked
         entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player", media_type)
         if entity_id:
             return entity_id
@@ -71,6 +100,16 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
             # No HA to look the name up in: use the id HA would give it. The
             # direct Music Assistant route matches players on this same slug.
             return ha_client.sanitize_entity_id("media_player", req.device_name)
+
+    if idx is not None:
+        players = idx.media_targets()
+        if not players:
+            raise ValueError("The hub has no device that can play media")
+        from services.execution.capability_index import state_rank
+
+        by_state = {s.get("entity_id"): s.get("state") for s in states}
+        return sorted(players, key=lambda e: (state_rank(by_state.get(e)),
+                                              0 if (idx.get(e) or {}).get("available") else 1, e))[0]
 
     # Fallback to active or available media_player from Home Assistant
     states = await ha_client.get_states(ha_url, ha_token)
@@ -94,11 +133,25 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     """Resolve a media_player entity to its Music Assistant variant.
 
     Returns the original entity if it's already an MA player with active_queue.
-    Otherwise searches for an MA player with a matching friendly name.
-    Falls back to original entity if no match found.
+    With the hub's capability index the MA player is the one whose queue drives
+    this player, else one on the same device or in the same area; a plain HA
+    (no index) matches friendly names. Falls back to the original entity.
     """
+    idx = await _routing_index(ctx.ha_url, ctx.ha_token, "Music Assistant player choice")
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
+        return original_entity
+
+    if idx is not None and original_entity in idx:
+        if idx.integration(original_entity) == "music_assistant":
+            return original_entity
+        queues = {s.get("entity_id"): (s.get("attributes") or {}).get("active_queue") for s in all_states}
+        ma_players = [e for e in idx.media_targets() if idx.integration(e) == "music_assistant"]
+        driving = [e for e in ma_players if queues.get(e) == original_entity]
+        near = idx.nearby(original_entity, any_of=("play_media",), integration="music_assistant")
+        for eid in driving + near:
+            log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (capability index)")
+            return eid
         return original_entity
 
     # Check if original entity is already an MA player with active_queue
@@ -774,6 +827,29 @@ async def _transport_direct(req, why: str) -> ExecutionResult:
     )
 
 
+#: Transport command -> the capability-index ability that means the entity serves it itself.
+_COMMAND_ABILITY = {
+    "pause": "pause", "seek": "seek", "volume_set": "volume", "volume_mute": "mute", "mute": "mute",
+    "previous": "next_track", "next": "next_track", "stop": "stop", "volume_up": "volume_step",
+    "volume_down": "volume_step", "play": "play", "resume": "play", "power_on": "power", "power_off": "power",
+}
+_FEATURE_BITS = {
+    "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
+    "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
+    "volume_down": 1024, "play": 16384, "resume": 16384,
+    "power_on": 128, "power_off": 256,
+}
+
+
+def _standard_supported(idx, entity_id: str, command: str, supported_features: int) -> bool:
+    """Whether the entity serves ``command`` itself: from the index, else HA's feature bits (a plain HA)."""
+    if idx is not None and entity_id in idx:
+        ability = _COMMAND_ABILITY.get(command)
+        return ability is not None and idx.has(entity_id, ability)
+    bit = _FEATURE_BITS.get(command)
+    return bit is not None and bool(supported_features & bit)
+
+
 async def _transport_via_ha(req) -> ExecutionResult:
     """Handle media transport commands with TV-specific handling for Android TV, WebOS, Samsung, and Roku."""
     from ..announce_handlers import detect_tv_type
@@ -785,26 +861,21 @@ async def _transport_via_ha(req) -> ExecutionResult:
     command = req.command.lower()
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
 
-    # Detect TV platform using centralized detection
+    # Detect TV platform using centralized detection (the hub's index names the owner when it has one)
+    idx = await _routing_index(ha_url, ha_token, "media transport")
     state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     attrs = state.get("attributes", {}) if state else {}
-    tv_type = detect_tv_type(full_entity_id, state.get("state", "unknown") if state else "unknown", attrs)
+    tv_type = detect_tv_type(full_entity_id, state.get("state", "unknown") if state else "unknown", attrs,
+                             platform=idx.tv_platform(full_entity_id) if idx is not None else None)
 
     log.info(f"[media/transport] Platform: {tv_type} for {full_entity_id}")
 
-    # Prefer HA's media_player.* services whenever the entity advertises the
-    # matching supported_features bit; brand handlers are the fallback for
-    # devices whose media_player entity cannot serve the command (and for
-    # remote-only actions like home/back/power).
-    feature_bits = {
-        "pause": 1, "seek": 2, "volume_set": 4, "volume_mute": 8, "mute": 8,
-        "previous": 16, "next": 32, "stop": 4096, "volume_up": 1024,
-        "volume_down": 1024, "play": 16384, "resume": 16384,
-        "power_on": 128, "power_off": 256,
-    }
+    # Prefer HA's media_player.* services whenever the entity can serve the
+    # command itself (the index's abilities; a plain HA's supported_features
+    # bits); brand handlers are the fallback for devices whose media_player
+    # entity cannot serve the command (and for remote-only actions like home/back/power).
     supported_features = int(attrs.get("supported_features", 0) or 0)
-    feature_bit = feature_bits.get(command)
-    standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
+    standard_supported = _standard_supported(idx, full_entity_id, command, supported_features)
 
     # A TV or cast speaker playing Music Assistant's stream has its queue on
     # MA's own entity for the same device ("Master Bedroom TV" the Cast entity
@@ -820,7 +891,7 @@ async def _transport_via_ha(req) -> ExecutionResult:
                 attrs = sibling_state.get("attributes", {})
                 tv_type = "music_assistant"
                 supported_features = int(attrs.get("supported_features", 0) or 0)
-                standard_supported = feature_bit is not None and bool(supported_features & feature_bit)
+                standard_supported = _standard_supported(idx, full_entity_id, command, supported_features)
 
     # Shuffle/repeat/grouping are ordinary media_player.* services, not
     # feature-gated and never served by a brand remote fallback.

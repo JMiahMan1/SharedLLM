@@ -20,6 +20,16 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
     ctx = req.user_context
     assert ctx.ha_url is not None and ctx.ha_token is not None
     from ..announce_handlers import detect_tv_type
+    from ..capability_index import CapabilityIndexError, UnknownAreaError, routing_index
+
+    # The hub's capability index says which entities can play media, which drive a screen and
+    # which area each is in; a plain HA (no index, logged) keeps the domain and area-name matching.
+    try:
+        idx = await routing_index(ctx.ha_url, ctx.ha_token, "media status")
+        area_id = idx.require_area(req.area) if idx is not None and req.area else None
+    except (CapabilityIndexError, UnknownAreaError) as e:
+        return ExecutionResult(status="FAILURE", message=f"Could not read the media players: {e}",
+                               service="media_status")
 
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
@@ -30,7 +40,12 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
 
     for state in all_states:
         entity_id = state.get("entity_id", "")
-        if not entity_id.startswith("media_player."):
+        if idx is not None:
+            if not idx.is_media_target(entity_id):
+                continue
+            if area_id is not None and idx.area_of(entity_id) != area_id:
+                continue
+        elif not entity_id.startswith("media_player."):
             continue
 
         st = state.get("state", "")
@@ -60,8 +75,12 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         has_metadata = bool(media_title or media_artist or media_album or entity_picture)
         is_active_state = st in ("playing", "paused", "buffering")
         is_selectable = st not in ("unavailable", "unknown")
-        tv_kind = detect_tv_type(entity_id, st, attrs)
-        icon_kind = "tv" if attrs.get("device_class") == "tv" or tv_kind in _TV_ICON_KINDS else "speaker"
+        tv_kind = detect_tv_type(entity_id, st, attrs,
+                                 platform=idx.tv_platform(entity_id) if idx is not None else None)
+        if idx is not None:
+            icon_kind = "tv" if idx.is_screen(entity_id) else "speaker"
+        else:
+            icon_kind = "tv" if attrs.get("device_class") == "tv" or tv_kind in _TV_ICON_KINDS else "speaker"
         ma_id = ma_player_id(attrs, entity_id) if is_ma else None
 
         # Keep: MA players, anything actively rendering, anything with now-playing
@@ -93,6 +112,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "app_name": app_name,
             "icon_kind": icon_kind,
             "ma_player_id": ma_id,
+            "area_id": idx.area_of(entity_id) if idx is not None else None,
         }
 
         # Anything actively rendering media is "active"; everything else is a
@@ -117,8 +137,9 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
 
     active_players.sort(key=_active_rank)
 
-    # Filter by area if requested
-    if req.area:
+    # Filter by area if requested (the index already did, by the hub's area registry)
+    if req.area and idx is None:
+        log.warning("[media_status] area %r matched by Home Assistant area names (no capability index)", req.area)
         assert ctx.ha_url is not None and ctx.ha_token is not None
         area_map = await ha_client.get_areas(ctx.ha_url, ctx.ha_token)
         area_lower = req.area.lower()

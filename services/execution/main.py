@@ -1412,6 +1412,21 @@ async def execute_trigger(payload: dict[str, Any]):
         esphome_triggered: list[str] = []
         media_triggered: list[str] = []
         dispatched: list[str] = []
+        not_rung: list[str] = []
+
+        # Which hub entities a target rings (a speaker/TV, or every one in a named area) is the
+        # capability index's answer. A plain HA (404) is the logged fallback; any other index
+        # failure is reported for the HA targets instead of guessing (ESPHome targets still ring).
+        ring_idx = None
+        ring_idx_error: str | None = None
+        if ha_url and ha_token and not ha_health.is_down(ha_url):
+            from services.execution.capability_index import CapabilityIndexError, routing_index
+
+            try:
+                ring_idx = await routing_index(ha_url, ha_token, "timer ringing")
+            except CapabilityIndexError as idx_err:
+                ring_idx_error = str(idx_err)
+                log.error(f"Timer alert: {idx_err}")
 
         for target in hw_targets:
             t_clean = target.strip()
@@ -1461,9 +1476,15 @@ async def execute_trigger(payload: dict[str, Any]):
                     if mapped_esp not in esphome_triggered:
                         esphome_triggered.append(mapped_esp)
 
+            delivered = False
+            ring_ids: list[str] = []
             if ha_url and ha_token and not ha_health.is_down(ha_url):
+                ring_ids, why_none = timer.ring_entities(ring_idx, t_clean, ring_idx_error)
+                if why_none:
+                    log.warning(f"Timer alert target {t_clean!r}: {why_none}")
+                    not_rung.append(f"{t_clean} ({why_none})")
+            for full_entity_id in ring_ids:
                 try:
-                    full_entity_id = ha_client.sanitize_entity_id("media_player", t_clean)
                     state_obj = await ha_client.get_state(ha_url, ha_token, full_entity_id)
                     state_str = (state_obj or {}).get("state", "unknown")
                     attrs = (state_obj or {}).get("attributes") or {}
@@ -1482,13 +1503,14 @@ async def execute_trigger(payload: dict[str, Any]):
                         message=banner_msg,
                     )
                     if not (isinstance(result, dict) and result.get("ok")):
+                        own_domain = full_entity_id.split(".", 1)[0]
                         if state_str == "off":
-                            await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
+                            await ha_client.call_service(ha_url, ha_token, own_domain, "turn_on", full_entity_id)
                             await asyncio.sleep(2)
                         result = await ha_client.call_service(
                             ha_url,
                             ha_token,
-                            "media_player",
+                            own_domain,
                             "play_media",
                             full_entity_id,
                             {"media_content_id": media_url, "media_content_type": "audio/wav"},
@@ -1501,10 +1523,13 @@ async def execute_trigger(payload: dict[str, Any]):
                     if isinstance(result, dict) and result.get("ok"):
                         media_triggered.append(full_entity_id)
                         dispatched.append(full_entity_id)
+                        delivered = True
                         continue
                     log.warning(f"HA alert not delivered on {full_entity_id}: {result}; trying direct routes")
                 except Exception as ha_err:
-                    log.warning(f"HA alert failed on {t_clean}: {ha_err}")
+                    log.warning(f"HA alert failed on {full_entity_id}: {ha_err}")
+            if delivered:
+                continue
 
             # 3. Fallback to direct ESPHome if HA credentials are missing or HA call failed
             if mapped_esp and mapped_esp not in esphome_triggered:
@@ -1549,6 +1574,9 @@ async def execute_trigger(payload: dict[str, Any]):
                 )
 
         target_summary = ", ".join(dispatched or hw_targets)
+        if not_rung:
+            return _ok(f"Triggered {timer_data.get('title')} on {target_summary}; not rung: {'; '.join(not_rung)}",
+                       "automation_trigger")
         return _ok(f"Triggered {timer_data.get('title')} on {target_summary}", "automation_trigger")
     except Exception as e:
         log.error(f"Trigger execution error: {e}")
@@ -2083,6 +2111,21 @@ async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
         )
     return {"status": "SUCCESS", "results": results}
 
+def _ma_wrapped_roku(idx, entity_id: str, attrs: dict) -> str | None:
+    """The Roku a Music Assistant player drives, from the capability index (None when it drives none).
+
+    The Roku is the one its ``active_queue`` names, else one on the same device
+    or in the same area. Nothing is matched by name.
+    """
+    if idx.integration(entity_id) != "music_assistant":
+        return None
+    queue = str((attrs or {}).get("active_queue") or "")
+    if queue in idx and idx.tv_platform(queue) == "roku":
+        return queue
+    near = idx.nearby(entity_id, integration="roku")
+    return near[0] if near else None
+
+
 @app.post("/execute/announce", response_model=ExecutionResult)
 async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
@@ -2102,7 +2145,26 @@ async def execute_announce(req: AnnouncementRequest):
                 "announce",
             )
 
+    # The hub's capability index decides which device a room means and which entities belong
+    # together; a plain HA (no index) is the logged fallback, any other index failure is reported.
+    from services.execution.capability_index import CapabilityIndexError, routing_index
+
+    announce_idx = None
+    if ha_url and ha_token and not ha_health.is_down(ha_url):
+        try:
+            announce_idx = await routing_index(ha_url, ha_token, "announcement target")
+        except CapabilityIndexError as e:
+            return _fail(f"Could not choose the announcement device: {e}", "announce")
+
     # Entity resolution: if entity_id is missing, resolve from device_name
+    if not target_player and req.device_name and announce_idx is not None:
+        area_id = announce_idx.area_in_text(req.device_name)
+        if area_id is not None:
+            target_player = announce_idx.pick_player(
+                area_id, req.device_name, "announcement", await ha_client.get_states(ha_url, ha_token) or [])
+            if not target_player:
+                return _fail(f"Nothing in {announce_idx.area_name(area_id)} can play an announcement.", "announce")
+            log.info(f"[announce] device_name='{req.device_name}' -> area {area_id} -> {target_player}")
     if not target_player and req.device_name:
         target_player = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
         if target_player:
@@ -2116,7 +2178,13 @@ async def execute_announce(req: AnnouncementRequest):
     if not target_player:
         return _fail("entity_id or device_name is required for announcements", "announce")
 
-    if not target_player.startswith("media_player."):
+    if announce_idx is not None and target_player not in announce_idx:
+        # A bare object id ("den_speaker"): the device that can play sound with that id.
+        by_object_id = [e for e in announce_idx.media_targets() if e.split(".", 1)[-1] == target_player]
+        if not by_object_id:
+            return _fail(f"{target_player!r} is not a device on the hub that can play sound.", "announce")
+        target_player = by_object_id[0]
+    elif announce_idx is None and not target_player.startswith("media_player."):
         target_player = f"media_player.{target_player}"
 
     log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
@@ -2134,7 +2202,16 @@ async def execute_announce(req: AnnouncementRequest):
     if initial_state:
         attrs = initial_state.get("attributes", {})
         log.info(f"[announce] Checking for MA-wrapped Roku: app_id={attrs.get('app_id')}, mass_player_type={attrs.get('mass_player_type')}, active_queue={attrs.get('active_queue')}")
-        if (attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type") == "player"):
+        index_roku = _ma_wrapped_roku(announce_idx, target_player, attrs) if announce_idx is not None else None
+        if index_roku:
+            # The index says this is a Music Assistant player driving a Roku (by its queue, its device or its area).
+            ma_player_entity = target_player
+            chosen = next((s for s in all_states if s.get("entity_id") == index_roku), None)
+            log.info(f"[announce] MA-wrapped Roku (capability index): MA={ma_player_entity}, Roku={index_roku}")
+            target_player = index_roku
+            initial_state = chosen or {"entity_id": index_roku, "state": "unknown", "attributes": {}}
+        elif announce_idx is None and (
+                attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type") == "player"):
             active_queue = (attrs.get("active_queue") or "").lower()
             if "roku" in active_queue:
                 # This is an MA player wrapping a Roku - store MA entity for audio
@@ -2183,7 +2260,8 @@ async def execute_announce(req: AnnouncementRequest):
         log.info(f"[announce] Device was {initial_state.get('state') if initial_state else 'unknown'}, turning on...")
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
-        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
+        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components,
+                                     platform=announce_idx.tv_platform(target_player) if announce_idx else None)
 
         # Samsung TVs need longer wait time (15-30s to boot)
         if device_type == "samsung":
@@ -2307,7 +2385,8 @@ async def execute_announce(req: AnnouncementRequest):
         log.info(f"[announce] Verifying playback on {target_player}...")
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
-        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
+        device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components,
+                                     platform=announce_idx.tv_platform(target_player) if announce_idx else None)
 
         # TVs need longer verification timeout
         verify_timeout = 30 if device_type in ("samsung", "webos", "roku") else 15
@@ -2344,7 +2423,8 @@ async def execute_announce(req: AnnouncementRequest):
         await asyncio.sleep(10)
 
     # 6. Restore initial state for ALL devices
-    device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
+    device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components,
+                                 platform=announce_idx.tv_platform(target_player) if announce_idx else None)
 
     # For Roku: restore the MA player entity (where volume/source/playback state lives)
     restore_target = target_player
@@ -2454,6 +2534,20 @@ async def execute_entity_search(req: EntitySearchRequest):
         if snapshot is None:
             return _fail(f"Could not reach Home Assistant to search: {type(e).__name__}.", "entity_search")
         all_states, stale_at = snapshot
+
+    # Areas are the hub's registry (name or alias), not text inside entity ids; a plain HA
+    # (no capability index, logged) keeps the old attribute match. Any other index failure is reported.
+    search_idx = None
+    want_area_id: str | None = None
+    if stale_at is None:
+        from services.execution.capability_index import CapabilityIndexError, UnknownAreaError, routing_index
+
+        try:
+            search_idx = await routing_index(ha_url, ha_token, "entity search")
+            if search_idx is not None and req.area:
+                want_area_id = search_idx.require_area(req.area)
+        except (CapabilityIndexError, UnknownAreaError) as e:
+            return _fail(f"Could not search by area: {e}", "entity_search")
     results = []
 
     search_terms = req.query.lower().split()
@@ -2464,6 +2558,8 @@ async def execute_entity_search(req: EntitySearchRequest):
         friendly = attrs.get("friendly_name", "").lower()
         device_class = attrs.get("device_class", "")
         area = attrs.get("area_id", "") or state.get("area_id", "")
+        if search_idx is not None:
+            area = search_idx.area_name(search_idx.area_of(eid)) or ""
         current_state = state.get("state", "")
 
         # Protected entities are hidden outright from anyone not on the permit
@@ -2481,7 +2577,10 @@ async def execute_entity_search(req: EntitySearchRequest):
             entity_domain = eid.split('.')[0] if '.' in eid else ''
             if allowed_domains and entity_domain not in allowed_domains:
                 continue
-        if req.area and req.area.lower() not in area.lower():
+        if want_area_id is not None:
+            if search_idx.area_of(eid) != want_area_id:
+                continue
+        elif req.area and req.area.lower() not in area.lower():
             continue
         if req.state and req.state.lower() != current_state.lower():
             continue
@@ -2512,12 +2611,14 @@ async def execute_entity_search(req: EntitySearchRequest):
             "device_class": device_class,
             # The unit a sensor reads in (°F, %, kWh), for widgets and cards.
             "unit_of_measurement": attrs.get("unit_of_measurement", ""),
-            "area_id": area,
+            "area_id": (search_idx.area_of(eid) or "") if search_idx is not None else area,
+            "area": area,
             "app_id": attrs.get("app_id", ""),
             "source": attrs.get("source", ""),
             "source_list": attrs.get("source_list", [])[:5],
             "supported_features": attrs.get("supported_features", 0),
-            "platform": _detect_media_platform(eid, attrs),
+            "platform": ((search_idx.tv_platform(eid) or "unknown") if search_idx is not None and eid in search_idx
+                         else _detect_media_platform(eid, attrs)),
             "attributes": attributes,
             "last_changed": state.get("last_changed"),
             "last_updated": state.get("last_updated"),

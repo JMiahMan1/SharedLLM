@@ -47,6 +47,13 @@ MEDIA_VERIFY_INTERVAL = 2
 
 async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     """Check if a media_player entity is a Samsung TV (Tizen or Legacy Orsay, never LG webOS)."""
+    try:
+        from services.execution.announce_handlers import indexed_platform
+    except ImportError:
+        from ..announce_handlers import indexed_platform  # type: ignore[no-redef]
+    platform = await indexed_platform(ha_url, ha_token, entity_id, "Samsung detection")
+    if platform is not None:  # the integration that owns it, from the hub's index
+        return platform == "samsung"
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
     if not state:
         return False
