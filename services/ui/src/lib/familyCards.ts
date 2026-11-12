@@ -31,6 +31,14 @@ export interface FamilyMemberStatus {
   /** The position itself, for Navigate and a drive time (absent when only HA's zone is known). */
   lat?: number;
   lon?: number;
+  /**
+   * The room the hub's Bluetooth listeners place the person in (person.*
+   * `room`), with when it was last heard and whether that is too old to be
+   * current. Absent when the hub does not know (or the viewer may not see it).
+   */
+  room?: string;
+  roomLastSeen?: string;
+  roomStale?: boolean;
 }
 
 export interface Place {
@@ -41,6 +49,32 @@ export interface Place {
 }
 
 type HaFeature = { properties?: Record<string, unknown> };
+
+/** The hub's states that are not a room. */
+const NOT_A_ROOM = new Set(['', 'not_home', 'unknown', 'unavailable']);
+
+/** A person's room from person.* attributes, only when the hub named one. */
+function roomOf(props: Record<string, unknown>): Pick<FamilyMemberStatus, 'room' | 'roomLastSeen' | 'roomStale'> {
+  const room = typeof props.room === 'string' ? props.room.trim() : '';
+  if (NOT_A_ROOM.has(room.toLowerCase())) return {};
+  return {
+    room,
+    roomLastSeen: typeof props.room_last_seen === 'string' ? props.room_last_seen : undefined,
+    roomStale: props.room_stale === true,
+  };
+}
+
+/**
+ * The card's room line: "Den" while current, "Last seen in Den, 20 min ago"
+ * once stale (never shown as where they are now), null when unknown.
+ */
+export function roomLabel(member: Pick<FamilyMemberStatus, 'room' | 'roomLastSeen' | 'roomStale' | 'paused'>,
+  ago: (iso: string) => string = () => ''): string | null {
+  if (!member.room || member.paused) return null;
+  if (!member.roomStale) return member.room;
+  const when = member.roomLastSeen ? ago(member.roomLastSeen) : '';
+  return `Last seen in ${member.room}${when ? `, ${when}` : ''}`;
+}
 
 /** Faster than walking pace counts as "in motion". */
 const MOVING_MPS = 1.0;
@@ -101,6 +135,7 @@ export function buildFamilyCards(
       lastUpdated: props.last_updated != null ? String(props.last_updated) : undefined,
       inZones: Array.isArray(props.in_zones) ? (props.in_zones as string[]) : [],
       source: 'home_assistant',
+      ...roomOf(props),
     });
     tokensById.set(entityId, entityTokens(entityId));
   }

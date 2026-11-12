@@ -90,7 +90,19 @@ def _entry(entry_id: str) -> str:
 async def phones(request: Request):
     """Every phone with its sensors, plus the settings."""
     await _admin(request)
-    return _answer(*await _hub("GET", "/hub/mobile_app/phones"))
+    listing = _answer(*await _hub("GET", "/hub/mobile_app/phones"))
+    if not isinstance(listing, dict) or not isinstance(listing.get("phones"), list):
+        return listing
+    # Each phone's last room-beacon report from the Jarvis app (room_presence.py).
+    from services.gateway import room_presence
+
+    users = sorted({str(p.get("jarvis_user") or "").lower() for p in listing["phones"] if p.get("jarvis_user")})
+    try:
+        beacons = await room_presence.load_beacons(users)
+    except Exception as exc:
+        log.warning("[phones] beacon reports unavailable: %s", type(exc).__name__)
+        return {**listing, "beacons_error": "The phones' room beacon reports could not be read"}
+    return {**listing, "phones": room_presence.attach_beacons(listing["phones"], beacons)}
 
 
 @router.post("")

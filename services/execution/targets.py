@@ -6,7 +6,9 @@ Precedence:
   2. room_speakers map (Identity GlobalSetting)
   3. Media group member_entity_ids
   4. The hub's areas: every entity in the room's area (matched by area name or
-     alias) that the capability index says can play sound. A device added on
+     alias) that the capability index says can play sound. A room written
+     ``room_of:<person>`` is the area the hub's Bluetooth room detection hears
+     that person in now (``room_presence``); unknown or stale raises. A device added on
      the hub in any room is a target on the next index load, with no change here.
 
 Only a plain Home Assistant (no capability index, HTTP 404) falls back to its
@@ -187,6 +189,11 @@ async def resolve_targets(
 
     room_list = [r for r in (rooms or []) if r]
     if room_list:
+        # "room_of:<person>": the room the hub's Bluetooth room detection hears them in now.
+        # One that cannot be resolved raises RoomTargetError (unknown or stale is said, not guessed).
+        from services.execution.room_presence import expand_room_targets
+
+        room_list, _ = await expand_room_targets(room_list, ha_url, ha_token)
         room_map = await fetch_room_speakers()
         return _dedupe(await _speakers_for_rooms(room_list, room_map, ha_url, ha_token))
 

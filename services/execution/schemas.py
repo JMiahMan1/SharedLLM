@@ -540,6 +540,7 @@ class TimerRequest(BaseRequest):
     duration_str: str | None = None
     time_str: str | None = None
     recurrence: str | None = None
+    # A device, an area, or "room_of:<person>" (resolved when it rings: the room they are in then).
     target_device: str | None = None
     target_devices: list[str] | None = None
     scope: Literal["user", "household", "family"] | None = None

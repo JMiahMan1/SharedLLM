@@ -325,6 +325,8 @@ public class LocationTrackingService extends Service {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         // A crash countdown or SOS retry the process was killed in the middle of.
         CrashAlert.resume(this);
+        // The room-detection beacon lives as long as this process; a sticky restart brings it back.
+        BleBeacon.ensure(this);
         if (hasPlayServices(this)) {
             fused = LocationServices.getFusedLocationProviderClient(this);
             activityClient = ActivityRecognition.getClient(this);

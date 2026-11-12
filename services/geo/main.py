@@ -208,6 +208,10 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
             "activity": attrs.get("activity"),
             # The phone's charging state and next alarm (Jarvis's own fixes only).
             **{k: attrs.get(k) for k in PHONE_STATUS_ATTRS},
+            # The hub's Bluetooth room detection (person.* only); the gateway keeps it only for
+            # viewers who may see that person's room.
+            **({k: attrs[k] for k in ("room", "room_area_id") if k in attrs}
+               if entity_id.startswith("person.") else {}),
             "last_updated": state.get("last_updated") or state.get("last_changed"),
         },
     }

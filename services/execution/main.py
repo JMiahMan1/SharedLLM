@@ -1430,6 +1430,12 @@ async def execute_trigger(payload: dict[str, Any]):
 
         for target in hw_targets:
             t_clean = target.strip()
+            # "room_of:<person>": the room the hub hears them in when the timer rings (they move).
+            t_clean, room_why = await timer.room_of_ring_target(t_clean, ha_url or "", ha_token or "")
+            if room_why:
+                log.warning(f"Timer alert target {target!r}: {room_why}")
+                not_rung.append(f"{target.strip()} ({room_why})")
+                continue
             t_lower = t_clean.lower()
 
             # 1. Explicit ESPHome target (esphome:<name> or configured ESPHome device key)

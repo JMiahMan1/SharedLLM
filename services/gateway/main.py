@@ -60,7 +60,7 @@ from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
 from services.gateway import calls, camera_live_routes, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
-from services.gateway import phone_routes
+from services.gateway import phone_routes, room_presence
 from services.gateway import automation_routes
 from services.gateway import dashboard_routes
 from services.gateway.agent_loop import (
@@ -935,6 +935,7 @@ app.include_router(camera_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
+app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(automation_routes.router)  # Automations and schedules
 
@@ -13373,7 +13374,9 @@ async def get_geo_people(request: Request, viewer: str | None = None):
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
-            return await resp.json()
+            # A person's room (Bluetooth room detection) only for those who may see it.
+            return await room_presence.filter_people_rooms(await resp.json(), ident["user"],
+                                                           room_presence.identity_allows)
     await _raise_scoped_failure(resp, "Geo people unavailable")
 
 

@@ -627,6 +627,21 @@ async def record_ringing_timer(
         await r.set(f"timer_ringing:{tid}", json.dumps(record), ex=RINGING_TTL_SECONDS)
 
 
+async def room_of_ring_target(target: str, ha_url: str, ha_token: str) -> tuple[str, str | None]:
+    """``(target, None)`` with a ``room_of:<person>`` target replaced by that person's area now,
+    or ``(target, why)`` when the hub cannot say which room they are in (nothing is guessed)."""
+    from services.execution.room_presence import RoomTargetError, resolve_room_target, room_of_target
+
+    person = room_of_target(target)
+    if person is None:
+        return target, None
+    try:
+        p = await resolve_room_target(person, ha_url, ha_token)
+    except RoomTargetError as e:
+        return target, str(e)
+    return p.area_id or p.room or "", None
+
+
 def ring_entities(idx, target: str, index_error: str | None = None) -> tuple[list[str], str | None]:
     """The entities a timer target rings, and why there are none when there are none.
 

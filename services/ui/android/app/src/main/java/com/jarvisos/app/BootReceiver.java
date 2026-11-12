@@ -37,6 +37,7 @@ public class BootReceiver extends BroadcastReceiver {
             LocationTrackingService.resumeIfEnabled(app);
             StepSyncService.resumeIfEnabled(app);
             PushService.start(app);
+            BleBeacon.ensure(app);
         } catch (Exception e) {
             Log.w(TAG, "could not resume background work after " + a, e);
         }

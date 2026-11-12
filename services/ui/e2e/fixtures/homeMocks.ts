@@ -155,10 +155,25 @@ const PHONES = {
       phoneSensor('binary_sensor.robin_s_phone_is_charging', "Robin's Phone Is charging", 'on', null, 'plug'),
       phoneSensor('sensor.robin_s_phone_next_alarm', "Robin's Phone Next alarm", '2030-03-18T13:30:00+00:00', null,
         'timestamp'),
+      { ...phoneSensor('sensor.robin_s_phone_room', "Robin's Phone Room", 'Bedroom'), last_updated: iso(-1) },
     ],
+    beacon: { state: 'advertising', reason: null, uuid: '00000000-0000-4000-8000-0000000000aa', major: 1, minor: 2, tx_power: -59,
+      tx_power_level: 'low', reported_at: iso(-5), hub_registered: true, hub_detail: null },
   }],
   settings: { external_url: '', internal_url: '', companion_fresh_minutes: 10, jarvis_fallback: true, auto_jarvis_phones: true,
     jarvis_phone_name: '{user} phone', push_url_allowlist: [] },
+};
+
+/** The hub's Bluetooth room map (Devices > Room detection). */
+export const ROOM_MAP = {
+  method: 'fingerprint', scanners: [{ id: 'esp-den', name: 'Den listener' }], overall_accuracy: 0.81,
+  stale_reason: 'A listener was added after some rooms were recorded.',
+  confusion: { living: { living: 80, kitchen: 9 }, kitchen: { kitchen: 30, living: 5 } },
+  areas: [
+    { area_id: 'living', name: 'Living room', samples: 89, sessions: 2, last_recorded: iso(-60 * 24), accuracy: 0.9 },
+    { area_id: 'kitchen', name: 'Kitchen with a rather long room name for small phones', samples: 35, sessions: 1,
+      last_recorded: iso(-60 * 48), accuracy: 0.62 },
+  ],
 };
 
 function statsStatus() {
@@ -194,6 +209,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (p === '/api/homehub/bluetooth/map/sessions') {
+        return json({ session_id: 'map-1', area_id: 'bedroom', tracker: 'sensor.robin_s_phone', ends_at: iso(1) });
+      }
       return json({ status: 'ok' });
     }
 
@@ -248,6 +266,10 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/homehub/flows') return json({ flows: FLOWS });
     if (p === '/api/homehub/phones') return json(PHONES);
     if (p === '/api/homehub/phones/settings') return json(PHONES.settings);
+    if (p === '/api/homehub/bluetooth/map') return json(ROOM_MAP);
+    if (p.startsWith('/api/homehub/bluetooth/map/sessions/')) {
+      return json({ status: 'done', samples: 58, scanners_heard: 3, seconds_left: 0 });
+    }
     if (p === '/api/mdm/devices') return json({ devices: [], members: [] });
     if (p === '/api/mdm/files') return json({ folders: [] });
     if (p === '/api/mdm/audit') return json({ events: [] });

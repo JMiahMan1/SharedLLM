@@ -119,6 +119,35 @@ async def _eta(target_name: str, to: str | None, caller: str, is_admin: bool) ->
     return ExecutionResult(status="SUCCESS", message=msg, service="location", detail=data)
 
 
+async def _room_answer(target_name: str, caller: str, ctx: UserContext | None) -> tuple[ExecutionResult | None, str]:
+    """``(answer, note)``: the room answer when room detection knows it, else a note saying
+    why it could not answer (empty when it is not set up, or the asker may not see it)."""
+    from services.execution import room_presence
+
+    ha_url = (ctx.ha_url if ctx else "") or ""
+    ha_token = (ctx.ha_token if ctx else "") or ""
+    if not ha_url or not ha_token:
+        return None, ""
+    if not await room_presence.may_see_room(caller, target_name):
+        # Not theirs to see: no room, and no hint that there is one.
+        return None, ""
+    try:
+        p = await room_presence.person_room(target_name, ha_url, ha_token)
+    except Exception as e:
+        log.warning(f"[location] the hub's room detection could not be read: {type(e).__name__}")
+        return None, "The hub's room detection could not be read."
+    if p.status == "known" and p.room:
+        name = target_name.title()
+        msg = (f"{name} is {room_presence.in_room(p.room)} (Bluetooth room detection, heard "
+               f"{room_presence.ago(p.age_s)}).")
+        return ExecutionResult(status="SUCCESS", message=msg, service="location",
+                               detail={"answered_by": "room", "room": p.as_detail()}), ""
+    if p.status in ("not_set_up", "no_person"):
+        return None, ""
+    reason = room_presence.why_not(p)
+    return None, f"{reason[0].upper()}{reason[1:]}."
+
+
 async def handle_location(req: LocationRequest) -> ExecutionResult:
     ctx = req.user_context
     caller_user = (ctx.user if ctx else "") or ""
@@ -133,6 +162,14 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     log.info(f"[location] target={target_name} detail={req.detail} caller={caller_user}")
     if (req.detail or "").lower() == "eta":
         return await _eta(target_name, req.to, caller_user, is_admin)
+
+    # A plain "where is X?" answers with the room first when the hub's Bluetooth room
+    # detection knows it (and the asker may see it); otherwise geo answers, and says so.
+    room_note = ""
+    if (req.detail or "summary").lower() == "summary":
+        room, room_note = await _room_answer(target_name, caller_user, ctx)
+        if room is not None:
+            return room
 
     from services.common.http import get_client_insecure
     from services.config import GEO_SVC_URL, INTERNAL_SECRET
@@ -158,9 +195,11 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     if not telemetry_data or telemetry_data.get("status") != "ok":
         try:
             from services.execution.presence import get_presence_tracker
+            from services.execution.room_presence import may_see_room
             tracker = get_presence_tracker()
             presence = await tracker.get_user_presence(target_name)
-            if presence:
+            # A room is the same private fact whichever detector found it.
+            if presence and await may_see_room(caller_user, target_name):
                 room = presence.get("room", "home")
                 name_cap = target_name.title()
                 if room in ("home", "not_home", "away"):
@@ -176,9 +215,12 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
         except Exception as pe:
             log.warning(f"[location] Presence fallback check failed: {pe}")
 
+        none_msg = f"I don't have a current location for {target_name.title()} right now."
+        if room_note:
+            none_msg = f"{none_msg} {room_note}"
         return ExecutionResult(
             status="SUCCESS",
-            message=f"I don't have a current location for {target_name.title()} right now.",
+            message=none_msg,
             service="location",
             detail=telemetry_data,
         )
@@ -222,6 +264,10 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
     else:
         # Default full query response ("Where is Alex?")
         msg = default_speech
+        telemetry_data = {**telemetry_data, "answered_by": "geo"}
+        if room_note and msg:
+            # Room detection is set up for them but could not answer: say which source did.
+            msg = f"{msg} (That is from their phone's location; {room_note[0].lower()}{room_note[1:]})"
 
     return ExecutionResult(
         status="SUCCESS",

@@ -51,6 +51,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(HealthConnectPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
         registerPlugin(DropInPlugin.class);
+        registerPlugin(BleBeaconPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

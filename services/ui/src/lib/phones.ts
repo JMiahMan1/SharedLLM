@@ -36,6 +36,22 @@ export interface Phone {
   notify_service: string;
   state: string;
   sensors: PhoneSensor[];
+  /** The Jarvis app's room-detection beacon as the phone last reported it; null or absent when never. */
+  beacon?: PhoneBeacon | null;
+}
+
+/** A phone's room-detection beacon (gateway: the Jarvis app's last report, and whether the hub took it). */
+export interface PhoneBeacon {
+  state: 'advertising' | 'bluetooth_off' | 'disabled' | 'unavailable';
+  reason: string | null;
+  uuid: string | null;
+  major: number | null;
+  minor: number | null;
+  tx_power: number | null;
+  tx_power_level: string | null;
+  reported_at: string | null;
+  hub_registered: boolean;
+  hub_detail: string | null;
 }
 
 export interface PhoneSettings {
@@ -163,4 +179,36 @@ export function phoneStatus(phone: Phone, timeZone?: string): { power: string | 
     else alarm = alarmSensor.reason ? 'Next alarm unavailable' : 'No alarm set';
   }
   return { power, alarm };
+}
+
+/**
+ * The beacon line for a phone: "Room beacon: on", "Room beacon: waiting for
+ * Bluetooth", "Room beacon: off", or "Room detection unavailable: <reason>",
+ * plus a problem when the hub did not take the registration. Null when the
+ * phone never reported a beacon.
+ */
+export function beaconText(phone: Phone): { line: string; ok: boolean; hubProblem: string | null } | null {
+  const b = phone.beacon;
+  if (!b) return null;
+  let line: string;
+  switch (b.state) {
+    case 'advertising': line = 'Room beacon: on'; break;
+    case 'bluetooth_off': line = 'Room beacon: waiting for Bluetooth'; break;
+    case 'disabled': line = 'Room beacon: off'; break;
+    default: line = `Room detection unavailable: ${b.reason || 'the phone did not say why'}`;
+  }
+  const hubProblem = b.hub_registered ? null : `Not registered with the hub: ${b.hub_detail || 'no answer yet'}`;
+  return { line, ok: b.state === 'advertising' && b.hub_registered, hubProblem };
+}
+
+/** The phone's room sensor (sensor.<phone>_room), if the hub has one. */
+export function roomSensor(phone: Phone): PhoneSensor | undefined {
+  return phone.sensors.find((s) => !s.disabled && s.domain === 'sensor' && s.entity_id.endsWith('_room'));
+}
+
+/** "Den", "Away", "Not known" for a room sensor's state. */
+export function roomText(s: PhoneSensor): string {
+  if (s.state == null || s.state === 'unknown' || s.state === 'unavailable') return 'Not known';
+  if (s.state === 'not_home') return 'Away';
+  return s.state;
 }

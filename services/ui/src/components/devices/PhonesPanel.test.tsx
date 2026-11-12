@@ -162,4 +162,35 @@ describe('PhonesPanel', () => {
     expect(phones.lastSeenText(now / 1000 - 3 * 3600, now)).toBe('reported 3 h ago');
     expect(phones.lastSeenText(now / 1000 - 5 * 86400, now)).toBe('reported 5 days ago');
   });
+  it('shows the room beacon, its failure reason, the hub registration and the room sensor', async () => {
+    const beacon = { state: 'advertising' as const, reason: null, uuid: '00000000-0000-4000-8000-000000000001', major: 1, minor: 2,
+      tx_power: -59, tx_power_level: 'low', reported_at: '2030-03-18T13:30:00+00:00', hub_registered: true, hub_detail: null };
+    vi.mocked(phones.getPhones).mockResolvedValue({ ...data, phones: [
+      { ...companion, beacon, sensors: [...companion.sensors,
+        { ...sensor('sensor.robin_s_phone_room', "Robin's Phone Room", 'Den', 'jarvis'), last_updated: new Date().toISOString() }] },
+      { ...jarvisOnly, beacon: { ...beacon, state: 'unavailable', reason: 'Bluetooth advertising is not supported on this phone',
+        hub_registered: false, hub_detail: 'The device hub does not accept beacon registrations yet' } },
+    ] });
+    wrap();
+    const rows = await screen.findAllByTestId('phone');
+    expect(within(rows[0]).getByTestId('phone-beacon')).toHaveTextContent('Room beacon: on');
+    expect(within(rows[0]).getByTestId('phone-room-sensor')).toHaveTextContent('Room: Den (just now)');
+    expect(within(rows[0]).queryByTestId('phone-beacon-hub')).toBeNull();
+    expect(within(rows[1]).getByTestId('phone-beacon'))
+      .toHaveTextContent('Room detection unavailable: Bluetooth advertising is not supported on this phone');
+    expect(within(rows[1]).getByTestId('phone-beacon-hub')).toHaveTextContent('does not accept beacon registrations yet');
+  });
+
+  it('words the beacon states and the room sensor', () => {
+    const base = { reason: null, uuid: null, major: null, minor: null, tx_power: null, tx_power_level: null, reported_at: null,
+      hub_registered: true, hub_detail: null };
+    const ph = (b: Partial<Phone['beacon']> | null) => ({ ...companion, beacon: b === null ? null : { ...base, state: 'advertising', ...b } } as Phone);
+    expect(phones.beaconText(ph(null))).toBeNull();
+    expect(phones.beaconText(ph({ state: 'bluetooth_off' }))?.line).toBe('Room beacon: waiting for Bluetooth');
+    expect(phones.beaconText(ph({ state: 'disabled' }))?.line).toBe('Room beacon: off');
+    expect(phones.beaconText(ph({ state: 'unavailable' }))?.line).toBe('Room detection unavailable: the phone did not say why');
+    expect(phones.roomText(sensor('sensor.x_room', 'x', 'not_home', 'jarvis'))).toBe('Away');
+    expect(phones.roomText(sensor('sensor.x_room', 'x', 'unknown', 'jarvis'))).toBe('Not known');
+    expect(phones.roomSensor({ ...jarvisOnly, sensors: [sensor('sensor.x_room_distance', 'x', '2', 'jarvis')] })).toBeUndefined();
+  });
 });

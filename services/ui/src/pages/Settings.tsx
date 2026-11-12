@@ -16,6 +16,7 @@ import MapStylePanel from '../components/settings/MapStylePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PhoneReportsPanel from '../components/settings/PhoneReportsPanel';
+import RoomDetectionPanel from '../components/settings/RoomDetectionPanel';
 import PushAppsPanel from '../components/settings/PushAppsPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
@@ -132,6 +133,7 @@ const Settings = () => {
         <SensorsSection />
         <LocationPausePanel />
         <PhoneReportsPanel />
+        <RoomDetectionPanel />
         <AppUpdatesSection />
         <AppCleanupPanel />
       </section>

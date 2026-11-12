@@ -10,6 +10,7 @@ class IntercomSessionRequest(BaseModel):
     """Start a one-way or two-way intercom session."""
     caller_user_id: str = ""
     target_user_id: str | None = None
+    # An area, or "room_of:<person>" (the room the hub's room detection hears them in now).
     target_room: str | None = None
     target_entity_ids: list[str] | None = None
     session_type: str = "twoway"  # "twoway", "oneway", "broadcast", "announcement"
@@ -21,6 +22,7 @@ class IntercomBroadcastRequest(BaseModel):
     """One-way broadcast to devices."""
     message: str
     target_entity_ids: list[str] | None = None
+    # Areas; "room_of:<person>" is the room that person is in now (unknown or stale fails).
     target_rooms: list[str] | None = None
     group_id: str | None = None
     volume: float | None = None
@@ -33,6 +35,7 @@ class IntercomAnnouncementRequest(BaseModel):
     message: str
     target_devices: list[str] | None = None
     target_entity_ids: list[str] | None = None
+    # Areas; "room_of:<person>" is the room that person is in now (unknown or stale fails).
     target_rooms: list[str] | None = None
     group_id: str | None = None
     overlay_text: str | None = None

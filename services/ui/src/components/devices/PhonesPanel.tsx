@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlarmClock, BatteryCharging, ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
+import { AlarmClock, BatteryCharging, Bluetooth, ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
 import { failureText } from '../../lib/discoveredDevices';
 import {
   addJarvisPhone,
+  beaconText,
   getPhones,
   keySensors,
   lastSeenText,
   phoneStatus,
   removePhone,
+  roomSensor,
+  roomText,
   savePhoneSettings,
   sensorText,
   updatePhone,
@@ -62,6 +65,8 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
   const shown = keySensors(phone);
   const companion = phone.kind === 'companion';
   const status = phoneStatus(phone);
+  const beacon = beaconText(phone);
+  const room = roomSensor(phone);
 
   return (
     <li className="space-y-2 px-4 py-3" data-testid="phone">
@@ -89,6 +94,21 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
                 </span>
               )}
             </p>
+          )}
+          {(beacon || room) && (
+            <div className="text-xs" data-testid="phone-room">
+              {beacon && (
+                <p className={`inline-flex items-center gap-1 ${beacon.ok ? 'text-slate-300' : 'text-amber-300'}`} data-testid="phone-beacon">
+                  <Bluetooth size={12} aria-hidden /> {beacon.line}
+                </p>
+              )}
+              {beacon?.hubProblem && <p className="text-amber-300" data-testid="phone-beacon-hub">{beacon.hubProblem}</p>}
+              {room && (
+                <p className="text-slate-300" data-testid="phone-room-sensor">
+                  Room: {roomText(room)}{room.last_updated ? ` (${lastSeenText(Date.parse(room.last_updated) / 1000).replace('reported ', '')})` : ''}
+                </p>
+              )}
+            </div>
           )}
           <p className="text-[11px] text-slate-500">{phone.notify_service}</p>
         </div>

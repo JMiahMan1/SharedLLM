@@ -47,7 +47,7 @@ import {
   userLocationsQuery,
   routeQueryKey,
 } from '../lib/wanderQueries';
-import { buildFamilyCards, groupByPlace, motionLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
+import { buildFamilyCards, groupByPlace, motionLabel, roomLabel, type FamilyMemberStatus, type MemberGroup, type Place } from '../lib/familyCards';
 import PlacesPanel from '../components/wander/PlacesPanel';
 import toast from 'react-hot-toast';
 import { errorText } from '../lib/errorText';
@@ -783,6 +783,11 @@ const Wander = () => {
                   </span>
                 )}
               </div>
+              {roomLabel(member, (iso) => relativeTime(iso)) && (
+                <p className={`text-xs ${member.roomStale ? 'text-slate-500' : 'text-emerald-300'}`} data-testid="member-room">
+                  {roomLabel(member, (iso) => relativeTime(iso))}
+                </p>
+              )}
             </div>
           </div>
 

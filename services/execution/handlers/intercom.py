@@ -93,6 +93,40 @@ def _find_assist_satellite_for_room_or_entities(
     return None
 
 
+async def _room_for_intercom(target_room: str | None, target_user_id: str | None, ha_url: str,
+                             ha_token: str) -> tuple[str | None, str | None]:
+    """``(room to use, person whose room it is)``.
+
+    An explicit room is used as given. ``room_of:<person>``, or a target person with no
+    room, is the hub's room detection; a person whose phone has no beacon (or whom the
+    hub does not know) falls back to ESPresense only when no room was named for them.
+    Anything else the hub cannot answer raises ``RoomTargetError``.
+    """
+    from services.execution.room_presence import RoomTargetError, resolve_room_target, room_of_target
+
+    named = room_of_target(target_room or "")
+    if target_room and named is None:
+        return target_room, None
+    person = named or (target_user_id or "").strip().lower() or None
+    if person is None:
+        return None, None
+    try:
+        p = await resolve_room_target(person, ha_url, ha_token)
+    except RoomTargetError as e:
+        status = e.presence.status if e.presence else None
+        if named is None and status in ("not_set_up", "no_person", None):
+            room = await _resolve_user_room(person)
+            if room:
+                log.info(f"[intercom] Resolved {person} -> room {room} (ESPresense)")
+                return room, person
+            if status is None and ha_url and ha_token:
+                raise  # the hub could not be read: say so rather than ring somewhere else
+            return None, None
+        raise
+    log.info(f"[intercom] Resolved {person} -> area {p.area_id or p.room} (hub room detection)")
+    return p.area_id or p.room, person
+
+
 # One-Way & Two-Way Intercom Sessions
 async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResult:
     """Start a two-way or one-way intercom session across voice satellites, TVs, and speakers."""
@@ -109,14 +143,20 @@ async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResu
         custom_message = (getattr(req, "message", None) or "").strip()
         volume = getattr(req, "volume", None)
 
-        # Resolve target room via presence if not explicitly provided
-        if not target_room and target_user_id:
-            target_room = await _resolve_user_room(target_user_id)
-            if target_room:
-                log.info(f"[intercom] Resolved {target_user_id} -> room: {target_room}")
-
         ha_url = user_context.ha_url or os.environ.get("HA_URL", "")
         ha_token = user_context.ha_token or os.environ.get("HA_TOKEN", "")
+
+        # "The room <person> is in" (target_room "room_of:<person>", or a person and no room):
+        # the hub's Bluetooth room detection; unknown or stale is said, never guessed.
+        from services.execution.room_presence import RoomTargetError, may_see_room
+
+        room_person: str | None = None
+        try:
+            target_room, room_person = await _room_for_intercom(target_room, target_user_id, ha_url, ha_token)
+        except RoomTargetError as e:
+            return ExecutionResult(status="FAILURE", message=f"Intercom not started: {e}.", service="intercom",
+                                   detail={"target_user_id": target_user_id})
+        room_visible = room_person is None or await may_see_room(str(user_context.user or ""), room_person)
 
         from services.execution.capability_index import CapabilityIndexError, UnknownAreaError, routing_index
 
@@ -218,6 +258,9 @@ async def handle_intercom_start(req, user_context: UserContext) -> ExecutionResu
             if oneway_result:
                 session_data["announcement"] = oneway_result
 
+        if not room_visible and isinstance(session_data, dict):
+            # The caller may reach the person but not learn which room they are in.
+            session_data["target_room"] = None
         return ExecutionResult(
             status="SUCCESS",
             message=(

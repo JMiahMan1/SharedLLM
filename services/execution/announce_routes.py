@@ -68,6 +68,7 @@ async def run_announcement(
     group_id = getattr(req, "group_id", None)
 
     from services.execution.capability_index import CapabilityIndexError, UnknownAreaError
+    from services.execution.room_presence import RoomTargetError
 
     try:
         targets = await _resolve_for_request(
@@ -76,6 +77,9 @@ async def run_announcement(
             group_id=group_id,
             user_context=user_context,
         )
+    except RoomTargetError as e:
+        # "The room <person> is in" when the hub cannot say (unknown, stale, no beacon): said, not guessed.
+        return {"status": "FAILURE", "message": f"Not announced: {e}.", "detail": {"resolved": [], "rooms": rooms}}
     except (UnknownAreaError, CapabilityIndexError) as e:
         # A room the hub does not have, or a hub that did not say which devices are where.
         return {"status": "FAILURE", "message": f"Could not resolve announcement targets: {e}",
