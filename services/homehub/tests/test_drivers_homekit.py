@@ -322,3 +322,14 @@ async def test_unload_closes_the_session():
     _hub, driver, fake = await setup()
     await driver.async_unload()
     assert fake.closed and not fake.listeners
+
+
+async def test_set_temperature_rounds_to_the_accessory_step():
+    """The T5 steps by 0.5 C and refused 75 F sent as 23.89 C (HAP -70410)."""
+    hub, driver, fake = await setup()
+    driver.chars[(1, 20)]["step"] = 0.5
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 75})
+    assert fake.puts[-1] == [(1, 20, 24.0)]
+    driver.chars[(1, 20)]["step"] = 0.1
+    await hub.call_service("climate", "set_temperature", {"entity_id": "climate.downstairs", "temperature": 75})
+    assert fake.puts[-1] == [(1, 20, pytest.approx(23.9))]

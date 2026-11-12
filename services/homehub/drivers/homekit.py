@@ -212,7 +212,7 @@ class HomeKitDriver(Driver):
                     types.setdefault(t, iid)
                     self.chars[(aid, iid)] = {
                         "type": t, "perms": list(ch.get("perms") or []), "unit": ch.get("unit"),
-                        "min": ch.get("minValue"), "max": ch.get("maxValue"),
+                        "min": ch.get("minValue"), "max": ch.get("maxValue"), "step": ch.get("minStep"),
                         "valid": ch.get("valid-values"), "format": ch.get("format"),
                     }
                     self.service_of[(aid, iid)] = skey
@@ -489,7 +489,13 @@ class HomeKitDriver(Driver):
             celsius = max(celsius, float(meta["min"]))
         if meta.get("max") is not None:
             celsius = min(celsius, float(meta["max"]))
-        return round(celsius, 1)
+        # Accessories refuse a value off their step (HAP -70410, "invalid value"):
+        # 75 F is 23.89 C, which a thermostat stepping by 0.5 C rejects. HA's
+        # aiohomekit rounds to minStep the same way before writing.
+        step = meta.get("step")
+        if step:
+            celsius = round(celsius / float(step)) * float(step)
+        return round(celsius, 2)
 
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         loc = self.locate(entity)

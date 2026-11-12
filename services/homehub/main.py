@@ -14,7 +14,7 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import builtin
+from services.homehub import builtin, tts
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -48,6 +48,7 @@ class Service:
         self.hub.ha_users = {u["id"]: u.get("name") or "" for u in self.store.get_kv("users", []) or []}
         self.runtime.start_recording()
         builtin.register(self.hub)
+        tts.register(self.hub)
         await self._start_people()
         await self.runtime.start_all()
         # Automations wait (in the background, so the API is up at once) for

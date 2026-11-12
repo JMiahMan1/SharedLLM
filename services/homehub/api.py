@@ -267,6 +267,16 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
                 return
         principal(request)
 
+    @api.get("/api/tts_proxy/{name}")
+    async def tts_proxy(name: str) -> Response:
+        """Spoken audio for a speaker; the unguessable token is the credential, as in HA."""
+        from services.homehub import tts
+
+        audio = tts.clip(name.rsplit(".", 1)[0])
+        if audio is None:
+            return _error(404, "Not found")
+        return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
     @api.get("/api/camera_proxy/{entity_id}")
     async def camera_proxy(entity_id: str, request: Request) -> Response:
         _camera_auth(request, entity_id)

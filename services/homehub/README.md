@@ -62,6 +62,16 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | mobile_app | `mobile_app.py` | Locations from geo (`/people?source=jarvis`) and `device_tracker.see`; persons, zones, `notify.mobile_app_*` sent through Jarvis notices |
 | local_todo, shopping_list | `todo.py` | |
 
+## Known issues
+
+- **Garage door sensor (hardware): needs fixing.** `binary_sensor.garage_door_sensor`
+  on the garage ESPHome node has read `on` continuously since at least
+  2026-11-01, through every open and close (under HA too). Until it is
+  repaired: nothing reports whether the door is open, the "Close Garage if
+  open for more than 15 minutes" automation cannot fire, and because the opener
+  is a toggle, "open the garage" closes an open door. Use
+  `camera.garage_door_garage_camera` to see the door.
+
 Not carried over: HA Assist (whisper, piper, wake word, voice satellites'
 pipelines), timers and `input_*` helpers. Automations that need them load
 disabled with the reason in `/hub/status`.
