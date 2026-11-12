@@ -87,7 +87,7 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
     homekit_entry_ids = []
     ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
     try:
-        async with websockets.connect(ws_url, ssl=True) as ws:
+        async with websockets.connect(ws_url, ssl=True if ws_url.startswith("wss://") else None) as ws:
             await ws.send('{"type": "auth", "access_token": "' + ha_token + '"}')
             await ws.recv()
             await ws.send('{"id": 1, "type": "config/device_registry/list"}')
@@ -186,7 +186,7 @@ async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> st
     webos_model = ""
     ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
     try:
-        async with websockets.connect(ws_url, ssl=True) as ws:
+        async with websockets.connect(ws_url, ssl=True if ws_url.startswith("wss://") else None) as ws:
             await ws.send('{"type": "auth", "access_token": "' + ha_token + '"}')
             await ws.recv()
             await ws.send('{"id": 1, "type": "config/device_registry/list"}')

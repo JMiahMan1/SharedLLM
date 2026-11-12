@@ -125,6 +125,13 @@ async def test_select_source_and_play_media():
     await drv.async_call(hub.entities[MP], "media_player", "play_media",
                          {"media_content_id": "http://jarvis/a.mp3", "media_content_type": "music"})
     assert http.posted()[-1]["params"]["t"] == "a"
+    # Jarvis's announcements send a bare URL to a WAV: it must play as audio, in its own format
+    await drv.async_call(hub.entities[MP], "media_player", "play_media",
+                         {"media_content_id": "http://jarvis/announce/a1.wav", "media_content_type": "url"})
+    assert http.posted()[-1]["params"] == {"t": "a", "u": "http://jarvis/announce/a1.wav", "songFormat": "wav"}
+    await drv.async_call(hub.entities[MP], "media_player", "play_media",
+                         {"media_content_id": "http://jarvis/clip", "media_content_type": "url"})
+    assert http.posted()[-1]["params"]["t"] == "v"
     await drv.async_call(hub.entities[MP], "media_player", "play_media",
                          {"media_content_id": "782875", "media_content_type": "app"})
     assert http.posted()[-1]["url"].endswith("/launch/782875")

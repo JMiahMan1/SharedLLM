@@ -14,7 +14,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceCall, ServiceNotFound
-from services.homehub.drivers.media_common import F, Http, clean, send_command_list, utc_iso
+from services.homehub.drivers.media_common import F, Http, clean, mime_for, send_command_list, utc_iso
 
 ECP_PORT = 8060
 PLAY_ON_ROKU = "15985"
@@ -237,10 +237,12 @@ class RokuDriver(Driver):
             await self.launch(media_id, params or None)
         elif mtype == "channel":
             await self._post("launch/tvinput.dtv", {"ch": media_id})
-        elif mtype in ("music", "audio") or mtype.startswith("audio/"):
+        elif mtype in ("music", "audio") or mtype.startswith("audio/") or (
+                mtype in ("url", "") and mime_for(None, media_id).startswith("audio/")):
+            # A bare URL to an audio file (Jarvis's spoken announcements) plays as audio, not as a video.
             params = clean({"t": "a", "u": media_id, "songName": extra.get("name"),
-                            "songFormat": extra.get("format") or "mp3", "artistName": extra.get("artist_name"),
-                            "albumArt": extra.get("thumbnail")})
+                            "songFormat": extra.get("format") or _audio_format(mtype, media_id),
+                            "artistName": extra.get("artist_name"), "albumArt": extra.get("thumbnail")})
             await self._post(f"input/{PLAY_ON_ROKU}", params)
         else:  # url, video or a video MIME type
             params = clean({"t": "v", "u": media_id, "videoName": extra.get("name"),
@@ -303,6 +305,17 @@ class RokuDriver(Driver):
         else:
             raise ServiceNotFound(f"roku cannot run media_player.{service}")
 
+
+
+#: Audio MIME -> the songFormat PlayOnRoku takes.
+_ROKU_AUDIO_FORMATS = {"audio/mpeg": "mp3", "audio/wav": "wav", "audio/aac": "aac", "audio/mp4": "m4a",
+                       "audio/flac": "flac", "audio/ogg": "ogg"}
+
+
+def _audio_format(content_type: str, url: str) -> str:
+    """PlayOnRoku's songFormat for an audio item: from its MIME type or file extension; mp3 when neither says."""
+    mime = content_type if content_type.startswith("audio/") else mime_for(None, url)
+    return _ROKU_AUDIO_FORMATS.get(mime, "mp3")
 
 async def _roku_search(hub, call: ServiceCall) -> None:
     """HA's ``roku.search``: open the Roku search screen for ``keyword`` on each target."""

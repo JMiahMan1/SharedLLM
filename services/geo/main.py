@@ -789,14 +789,15 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
     url = f"{HA_URL}/api/history/period"
-    params = {"filter_entity_id": entity_id, "significant_changes_only": "true", "minimal_response": "true"}
+    # Not minimal_response: HA's REST answer then drops the attributes (the position) after the first row.
+    params = {"filter_entity_id": entity_id, "significant_changes_only": "true"}
     async with get_client_insecure() as client, client.get(url, headers=_ha_headers(), params=params) as resp:
         if resp.status != 200:
             raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
         data = await resp.json()
     points = []
     for row in (data[0] if isinstance(data, list) and data else []):
-        attrs = row.get("a", {})  # minimal_response puts attributes under "a"
+        attrs = row.get("attributes") or row.get("a") or {}
         lat = attrs.get("latitude")
         lon = attrs.get("longitude")
         if lat is not None and lon is not None:
@@ -1823,8 +1824,8 @@ async def post_see(
     await _save_phone_status(r_steps, entity_id, update.status(), update.timestamp)
 
     dev_id = entity_id.split(".")[-1]
-    payload = {
-        "type": "device_tracker.see",
+    # device_tracker.see's own keys only (HA answers 400 to unknown ones); speed and course are attributes.
+    payload: dict[str, object] = {
         "dev_id": dev_id,
         "gps": [update.latitude, update.longitude],
         "gps_accuracy": update.gps_accuracy or 0,
@@ -1832,10 +1833,9 @@ async def post_see(
     }
     if update.battery is not None:
         payload["battery"] = update.battery
-    if update.speed is not None:
-        payload["speed"] = update.speed
-    if update.bearing is not None:
-        payload["course"] = update.bearing
+    extra = {k: v for k, v in (("speed", update.speed), ("course", update.bearing)) if v is not None}
+    if extra:
+        payload["attributes"] = extra
 
     async with get_client_insecure() as client, client.post(
         f"{HA_URL}/api/services/device_tracker/see", headers=_ha_headers(), json=payload

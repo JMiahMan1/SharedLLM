@@ -219,7 +219,10 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
             if items:
                 item = items[0]
                 song_name = item.get("name", item.get("title", query))
-                artist_name = item.get("artist", {}).get("name", "") if isinstance(item.get("artist"), dict) else ""
+                artists = item.get("artists") or []  # HA's music_assistant.search shape: a list of artists
+                artist = item.get("artist") if isinstance(item.get("artist"), dict) else (
+                    artists[0] if artists and isinstance(artists[0], dict) else {})
+                artist_name = artist.get("name", "")
                 uri = item.get("uri", query)
                 # Keep full library:// URI for MA services
                 if uri.startswith("library://"):
@@ -390,9 +393,11 @@ async def roku_launch(ha_url: str, ha_token: str, entity_id: str, app: str) -> E
     """Launch an app on a Roku device."""
     app_id = ROKU_APPS.get(app.lower(), app)
     log.info(f"[roku] Launching app '{app_id}' on {entity_id}")
+    # HA's Roku integration (and homehub) launch an app as play_media with media_content_type "app";
+    # there is no roku.launch service.
     result = await ha_client.call_service(
-        ha_url, ha_token, "roku", "launch", entity_id,
-        {"app_id": app_id}
+        ha_url, ha_token, "media_player", "play_media", entity_id,
+        {"media_content_id": app_id, "media_content_type": "app"}
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Launched '{app}' on {entity_id} (Roku).", service="roku_transport")

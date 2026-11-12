@@ -91,6 +91,7 @@ COMMAND_SETTLE = 1.0  # how long a command waits for the node to push the new st
 SERVICE_TIMEOUT = 5.0
 #: A camera frame (ESP32 cameras send one in well under a second when idle).
 CAMERA_TIMEOUT_S = 10.0
+SATELLITE_ANNOUNCE_TIMEOUT_S = 120.0  # a long announcement plays to the end before the node answers
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 
 # EntityInfo class -> the platform word HA put in the unique_id.
@@ -618,6 +619,8 @@ class ESPHomeDriver(Driver):
         return None  # no stream URL; the API serves frames from async_camera_image
 
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if entity.domain == "assist_satellite" and domain == "assist_satellite":
+            return await self._satellite_call(service, data)
         if entity in self.local_entities or any(e.entity_id == entity.entity_id for e in self.local_entities):
             return self._local_call(entity, domain, service, data)
         info = self._info_for.get(entity.entity_id)
@@ -644,6 +647,37 @@ class ESPHomeDriver(Driver):
         # changed_states (and an immediate read) already show it.
         with contextlib.suppress(TimeoutError, asyncio.CancelledError):
             await asyncio.wait_for(fut, COMMAND_SETTLE)
+        return None
+
+    async def _satellite_call(self, service: str, data: dict[str, Any]) -> Any:
+        """HA's ``assist_satellite.announce`` on a voice satellite: the node's own announcement call.
+
+        The text is spoken by Jarvis's voice (the hub's TTS) and the node plays the clip with its
+        announcement handling (ducking, LED ring). ``start_conversation`` needs an Assist pipeline to
+        hear the answer, which the hub does not run, so it is refused by name and callers fall back.
+        """
+        if service == "start_conversation":
+            raise ServiceNotFound("assist_satellite.start_conversation needs a voice pipeline, which the hub "
+                                  "does not run; use assist_satellite.announce")
+        if service != "announce":
+            raise ServiceNotFound(f"assist_satellite.{service} is not supported")
+        client = self._require_client()
+        media_id = str(data.get("media_id") or "")
+        message = str(data.get("message") or "")
+        if not media_id:
+            if not message:
+                raise HubError("assist_satellite.announce needs a message or a media_id")
+            from services.homehub import tts
+
+            media_id = await tts.make_clip(message)
+        try:
+            await client.send_voice_assistant_announcement_await_response(
+                media_id, SATELLITE_ANNOUNCE_TIMEOUT_S, text=message,
+                preannounce_media_id=str(data.get("preannounce_media_id") or ""))
+        except APIConnectionError as exc:
+            raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
+        except TimeoutError as exc:
+            raise DeviceUnavailable(f"ESPHome {self.device_name} did not finish the announcement") from exc
         return None
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:

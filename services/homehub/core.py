@@ -501,6 +501,12 @@ class Hub:
 
     async def _dispatch_entities(self, call: ServiceCall, by_entity_domain: bool = False) -> None:
         if not call.entity_ids:
+            if not by_entity_domain and call.domain not in ENTITY_SERVICES \
+                    and not any(e.domain == call.domain for e in self.entities.values()):
+                # Not an entity service either: a device's own action whose device has not connected
+                # (ESPHome registers its actions on connect), or a typo. Say so instead of asking for a target.
+                raise ServiceNotFound(f"Service {call.domain}.{call.service} not found (no integration provides it "
+                                      "right now; a device's own actions appear once the device connects)")
             raise ServiceNotFound(f"{call.domain}.{call.service} needs a target entity")
         data = {k: v for k, v in call.data.items() if k not in ("entity_id", "target", "area_id", "device_id")}
         errors: list[str] = []
@@ -554,7 +560,8 @@ ENTITY_SERVICES: dict[str, tuple[str, ...]] = {
     "climate": ("set_temperature", "set_hvac_mode", "set_fan_mode", "set_humidity", "turn_on", "turn_off"),
     "media_player": ("turn_on", "turn_off", "toggle", "play_media", "media_play", "media_pause", "media_stop",
                      "media_play_pause", "media_next_track", "media_previous_track", "volume_set", "volume_up",
-                     "volume_down", "volume_mute", "select_source", "media_seek", "shuffle_set", "repeat_set"),
+                     "volume_down", "volume_mute", "select_source", "media_seek", "shuffle_set", "repeat_set",
+                     "clear_playlist", "join", "unjoin"),
     "remote": ("turn_on", "turn_off", "send_command"),
     "button": ("press",),
     "number": ("set_value",),
@@ -565,4 +572,5 @@ ENTITY_SERVICES: dict[str, tuple[str, ...]] = {
     "time": ("set_value",),
     "todo": ("add_item", "update_item", "remove_item", "remove_completed_items", "get_items"),
     "camera": ("snapshot",),
+    "assist_satellite": ("announce",),
 }

@@ -347,3 +347,38 @@ def test_features_constant_matches_ha():
     assert MusicAssistantDriver._features({"supported_features": ["volume_set", "volume_mute", "set_members"]}) \
         == 8320575
     assert F.GROUPING == 524288
+
+
+async def test_join_and_unjoin_group_players_through_set_members():
+    """media_player.join/unjoin (Jarvis's speaker grouping, MA's own HA player provider) reach MA."""
+    from services.homehub.core import DeviceEntry, EntityEntry
+
+    hub, drv, made = build()
+    hub.devices["dev2"] = DeviceEntry(id="dev2", name="Living Room TV", area_id="office", config_entries=["cast1"])
+    hub.entities["media_player.taylors_tv"].device_id = "dev2"
+    hub.entities["media_player.living_room_cast"] = EntityEntry(
+        entity_id="media_player.living_room_cast", unique_id="02000000-0000-0000-0000-000000000001",
+        platform="cast", config_entry_id="cast1", device_id="dev2")
+    await drv.async_setup()
+    c = made["c"]
+    c.players.append(player("media_player.loft_speaker", "Loft Speaker"))  # MA's HA player provider: id = entity id
+    await drv.refresh()
+    c.sent.clear()
+    await hub.call_service("media_player", "join", {
+        "entity_id": "media_player.office_speaker",
+        # an MA entity, the Cast entity of a device MA also plays on, and an HA-provider player id
+        "group_members": ["media_player.taylors_tv", "media_player.living_room_cast", "media_player.loft_speaker"]})
+    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": OFFICE,
+                                                      "player_ids_to_add": [ROKU, "media_player.loft_speaker"]})
+    with pytest.raises(HubError, match="not a Music Assistant player"):
+        await hub.call_service("media_player", "join", {"entity_id": "media_player.office_speaker",
+                                                        "group_members": ["media_player.nowhere"]})
+    with pytest.raises(HubError, match="other than the leader"):
+        await hub.call_service("media_player", "join", {"entity_id": "media_player.office_speaker",
+                                                        "group_members": "media_player.office_speaker"})
+    # a member leaves its leader's group; a leader dissolves its own
+    drv.players[ROKU]["synced_to"] = OFFICE
+    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.taylors_tv"})
+    assert c.sent[-1] == ("players/cmd/set_members", {"target_player": OFFICE, "player_ids_to_remove": [ROKU]})
+    await hub.call_service("media_player", "unjoin", {"entity_id": "media_player.office_speaker"})
+    assert c.sent[-1] == ("players/cmd/ungroup", {"player_id": OFFICE})

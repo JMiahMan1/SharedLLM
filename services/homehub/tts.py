@@ -41,17 +41,28 @@ def clip(token: str) -> bytes | None:
 
 
 def _base_url() -> str:
+    """The hub's address as a speaker on the LAN sees it (never loopback: the speaker fetches the clip)."""
     explicit = os.getenv("HOMEHUB_EXTERNAL_URL")
     if explicit:
         return explicit.rstrip("/")
-    host = os.getenv("EXECUTION_EXTERNAL_HOST") or "127.0.0.1"
+    host = os.getenv("EXECUTION_EXTERNAL_HOST")
+    if not host:
+        raise HubError("text to speech needs HOMEHUB_EXTERNAL_URL or EXECUTION_EXTERNAL_HOST (this host's LAN "
+                       "address) so a speaker can fetch the spoken audio from the hub")
     return f"http://{host}:{os.getenv('HOMEHUB_PORT', '8123')}"
 
 
+def _required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise HubError(f"text to speech needs {name} (Jarvis's speech engine is reached through execution)")
+    return value
+
+
 async def synthesize(text: str, voice: str | None = None) -> bytes:
-    url = os.getenv("EXECUTION_SVC_URL", "http://127.0.0.1:8003").rstrip("/") + "/execute/tts"
+    url = _required_env("EXECUTION_SVC_URL").rstrip("/") + "/execute/tts"
     body = {"user_context": {"user": "household"}, "text": text, "voice": voice or DEFAULT_VOICE}
-    headers = {"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "")}
+    headers = {"X-Internal-Secret": _required_env("INTERNAL_SECRET")}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=SYNTH_TIMEOUT_S)) as s, \
                 s.post(url, json=body, headers=headers) as r:
@@ -64,15 +75,23 @@ async def synthesize(text: str, voice: str | None = None) -> bytes:
     return base64.b64decode(audio)
 
 
+async def make_clip(message: str, voice: str | None = None) -> str:
+    """Speak ``message`` and keep it behind a fresh proxy URL; returns that URL."""
+    if not message:
+        raise HubError("tts needs a message")
+    base = _base_url()  # before synthesis: a hub that cannot hand out a URL should not spend a minute speaking
+    audio = await synthesize(message, voice)
+    token = secrets.token_urlsafe(24)
+    _clips[token] = (time.monotonic() + KEEP_S, audio)
+    return f"{base}/api/tts_proxy/{token}.wav"
+
+
 async def speak(hub: Hub, players: list[str], message: str, voice: str | None = None) -> str:
     if not message:
         raise HubError("tts needs a message")
     if not players:
         raise HubError("tts needs a media player to speak on")
-    audio = await synthesize(message, voice)
-    token = secrets.token_urlsafe(24)
-    _clips[token] = (time.monotonic() + KEEP_S, audio)
-    url = f"{_base_url()}/api/tts_proxy/{token}.wav"
+    url = await make_clip(message, voice)
     await hub.call_service("media_player", "play_media", {
         "entity_id": players, "media_content_id": url, "media_content_type": "music", "announce": True})
     return url
@@ -104,4 +123,4 @@ def reset() -> None:
     _clips.clear()
 
 
-__all__ = ["clip", "register", "speak", "synthesize"]
+__all__ = ["clip", "make_clip", "register", "speak", "synthesize"]

@@ -86,6 +86,19 @@ never wakes a battery camera; a live view does, every frame. Live Reolink video
 is snapshots rather than the RTSP/FLV stream, because relaying H.264 to a
 browser would need ffmpeg in the image.
 
+## Media and speech notes
+
+- `media_player.join` / `unjoin` group Music Assistant players (MA's `players/cmd/set_members`). A member may be
+  named by its MA entity, by the entity id MA's Home Assistant player provider uses, or by another entity on the
+  same device (a Cast entity and its MA twin).
+- `POST /api/tts_get_url` speaks with Jarvis's voice and returns `{url, path}` (Music Assistant's text
+  announcements use it). Spoken clips are served at `HOMEHUB_EXTERNAL_URL` or `http://$EXECUTION_EXTERNAL_HOST:8123`;
+  with neither set, text to speech fails and says so (a loopback URL is useless to a speaker).
+- `assist_satellite.announce` on an ESPHome voice satellite plays the spoken message through the node's own
+  announcement call. `start_conversation` is refused: it needs an Assist pipeline, which the hub does not run.
+- Not served: `media_player/browse_media` and `media_source/*` (no Jarvis caller uses them), `androidtv.adb_command`
+  (no ADB integration), and the `/api/diagnostics/*` routes.
+
 ## New devices (discovery)
 
 `discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,

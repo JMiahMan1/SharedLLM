@@ -468,6 +468,17 @@ class MusicAssistantDriver(Driver):
             sid = next((s.get("id") for s in (p.get("source_list") or [])
                         if isinstance(s, dict) and source in (s.get("id"), s.get("name"))), source)
             await self.cmd("players/cmd/select_source", player_id=pid, source=sid)
+        elif service == "join":
+            members = [m for m in self.member_player_ids(data.get("group_members")) if m != pid]
+            if not members:
+                raise HubError("media_player.join needs group_members other than the leader")
+            await self.cmd("players/cmd/set_members", target_player=pid, player_ids_to_add=members)
+        elif service == "unjoin":
+            leader = p.get("synced_to")
+            if leader and leader != pid:  # a member leaves its leader's group
+                await self.cmd("players/cmd/set_members", target_player=leader, player_ids_to_remove=[pid])
+            else:  # a leader dissolves its group
+                await self.cmd("players/cmd/ungroup", player_id=pid)
         elif service == "play_media":
             extra = data.get("extra") or {}
             if data.get("announce"):
@@ -478,6 +489,35 @@ class MusicAssistantDriver(Driver):
                     "media_content_type")), enqueue=data.get("enqueue"), radio_mode=extra.get("radio_mode"))
         else:
             raise ServiceNotFound(f"music_assistant cannot run media_player.{service}")
+        return None
+
+    def member_player_ids(self, members: Any) -> list[str]:
+        """``group_members`` entity ids -> MA player ids.
+
+        An MA entity maps by its unique_id (the player id). Any other entity is
+        accepted when MA knows it: MA's Home Assistant player provider uses the
+        entity id itself as the player id, and an entity on the same device as
+        an MA player (a Cast entity and its MA twin) means that player.
+        """
+        out: list[str] = []
+        for eid in [str(m) for m in as_list(members) if str(m).strip()]:
+            pid = self._player_id_for_entity(eid)
+            if pid is None:
+                raise HubError(f"{eid} is not a Music Assistant player, so it cannot join a Music Assistant group")
+            if pid not in out:
+                out.append(pid)
+        return out
+
+    def _player_id_for_entity(self, entity_id: str) -> str | None:
+        ent = self.hub.entities.get(entity_id)
+        if ent is not None and ent.config_entry_id == self.entry.entry_id and ent.domain == "media_player":
+            return ent.unique_id
+        if entity_id in self.players:
+            return entity_id
+        if ent is not None and ent.device_id:
+            twin = next((e for e in self.entities if e.domain == "media_player" and e.device_id == ent.device_id), None)
+            if twin is not None:
+                return twin.unique_id
         return None
 
     # -- the operations both entity and music_assistant.* services use -------------------

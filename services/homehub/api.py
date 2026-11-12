@@ -42,6 +42,8 @@ HA_VERSION = "2026.11.0"
 MAX_RECORDING_RANGE = timedelta(days=7)
 _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
+#: HA's history SIGNIFICANT_DOMAINS: attribute-only changes count as significant for these.
+SIGNIFICANT_DOMAINS = frozenset({"climate", "device_tracker", "humidifier", "thermostat", "water_heater"})
 #: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
 SNAPSHOT_STREAM_MAX_FAILURES = 5
 #: WebSocket commands other modules add (``async fn(conn, id, msg)``), e.g. mobile_app's push channel.
@@ -238,6 +240,18 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         principal(request)
         return [e.public() for e in hub.config_entries.values() if not domain or e.domain == domain]
 
+    # HA serves its registries over the WebSocket only; Jarvis's older lookups ask for them over REST.
+    @api.get("/api/config/device_registry/list")
+    async def device_registry_rest(request: Request) -> list[dict[str, Any]]:
+        principal(request)
+        return [d.public() for d in hub.devices.values()]
+
+    @api.get("/api/config/entity_registry")
+    @api.get("/api/config/entity_registry/list")
+    async def entity_registry_rest(request: Request) -> list[dict[str, Any]]:
+        p = principal(request)
+        return [registry_view(e, p) for e in hub.entities.values()]
+
     @api.post("/api/template")
     async def template(request: Request) -> Response:
         admin(request)
@@ -260,8 +274,17 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         ids = [x.strip() for x in (q.get("filter_entity_id") or "").split(",") if x.strip()]
         minimal = "minimal_response" in q
         no_attrs = "no_attributes" in q
-        rows = await asyncio.to_thread(runtime.store.history, ids or None, start_dt, end_dt,
-                                       changes_only="significant_changes_only" in q)
+        changes_only = "significant_changes_only" in q and q.get("significant_changes_only") not in ("0", "false")
+        # HA keeps every attribute change of these domains as significant: a tracker moving while it stays
+        # "not_home" is a change of position, which is what a trip replay reads.
+        keep_all = [i for i in ids if i.split(".", 1)[0] in SIGNIFICANT_DOMAINS] if changes_only else []
+        rest = [i for i in ids if i not in keep_all]
+        rows = []
+        if keep_all:
+            rows += await asyncio.to_thread(runtime.store.history, keep_all, start_dt, end_dt, changes_only=False)
+        if rest or not ids:
+            rows += await asyncio.to_thread(runtime.store.history, rest or None, start_dt, end_dt,
+                                            changes_only=changes_only)
         by_entity: dict[str, list[dict[str, Any]]] = {}
         for r in rows:
             by_entity.setdefault(r["entity_id"], []).append(r)
@@ -324,6 +347,27 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         if audio is None:
             return _error(404, "Not found")
         return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+    @api.post("/api/tts_get_url")
+    async def tts_get_url(request: Request) -> Response:
+        """HA's "speak this and hand me a URL" (Music Assistant's text announcements use it)."""
+        principal(request)
+        from services.homehub import tts
+
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "Data should be valid JSON.")
+        if not isinstance(body, dict) or not str(body.get("message") or "").strip():
+            return _error(400, "message is required")
+        if not (body.get("engine_id") or body.get("platform")):
+            return _error(400, "Must specify 'engine_id'")
+        options = body.get("options") if isinstance(body.get("options"), dict) else {}
+        try:
+            url = await tts.make_clip(str(body["message"]), options.get("voice"))
+        except HubError as exc:
+            return _error(exc.status, str(exc))
+        return JSONResponse({"url": url, "path": "/api/tts_proxy/" + url.rsplit("/api/tts_proxy/", 1)[1]})
 
     @api.get("/api/camera_proxy/{entity_id}")
     async def camera_proxy(entity_id: str, request: Request) -> Response:

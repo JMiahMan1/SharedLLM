@@ -1057,8 +1057,8 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                       max="100"
                       value={volume}
                       onChange={(e) => setVolume(Number(e.target.value))}
-                      onMouseUp={() => callHAService('media_player', 'set_volume_level', selectedDevice.entity_id, { volume_level: volume / 100 })}
-                      onTouchEnd={() => callHAService('media_player', 'set_volume_level', selectedDevice.entity_id, { volume_level: volume / 100 })}
+                      onMouseUp={() => callHAService('media_player', 'volume_set', selectedDevice.entity_id, { volume_level: volume / 100 })}
+                      onTouchEnd={() => callHAService('media_player', 'volume_set', selectedDevice.entity_id, { volume_level: volume / 100 })}
                       className="w-full accent-purple-500 bg-slate-800 h-1 rounded-lg cursor-pointer"
                     />
                   </div>

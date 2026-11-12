@@ -48,9 +48,11 @@ async def _ws_request(ha_url: str, token: str, message: dict) -> dict:
         return {"error": "websockets package not available"}
 
     ws_url = ha_url.replace("http://", "ws://").replace("https://", "wss://").rstrip("/") + "/api/websocket"
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
+    ssl_ctx = None
+    if ws_url.startswith("wss://"):  # websockets refuses an ssl context on a plain ws:// URL (the hub on :8123)
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
 
     async with websockets.connect(ws_url, ssl=ssl_ctx) as ws:
         hello = json.loads(await ws.recv())

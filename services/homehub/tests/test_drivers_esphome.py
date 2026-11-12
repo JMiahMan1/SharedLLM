@@ -516,3 +516,36 @@ async def test_camera_snapshot_times_out_cleanly(monkeypatch):
         await drv.async_camera_image(hub.entities["camera.garage_door_garage_camera"])
     assert not drv._waiters.get((0, 50))
     await drv.async_unload()
+
+
+async def test_assist_satellite_announce_speaks_on_the_node(driver, monkeypatch):
+    """assist_satellite.announce (Jarvis's intercom) plays Jarvis's voice through the node's announcement call."""
+    from services.homehub import tts
+    from services.homehub.core import EntityEntry
+
+    hub, drv = driver
+    sat = EntityEntry(entity_id="assist_satellite.den_speaker", platform="esphome", unique_id=f"{MAC}-assist_satellite",
+                      config_entry_id=drv.entry.entry_id, device_id="dev1")
+    hub.entities[sat.entity_id] = sat
+    await drv.async_setup()
+    announced = []
+
+    async def announce(media_id, timeout, text="", preannounce_media_id="", start_conversation=False):
+        announced.append((media_id, text, preannounce_media_id))
+
+    drv._client.send_voice_assistant_announcement_await_response = announce
+
+    async def clip(message, voice=None):
+        return f"http://hub.example.com:8123/api/tts_proxy/x.wav#{message}"
+
+    monkeypatch.setattr(tts, "make_clip", clip)
+    await hub.call_service("assist_satellite", "announce", {"entity_id": sat.entity_id, "message": "Dinner time"})
+    assert announced == [("http://hub.example.com:8123/api/tts_proxy/x.wav#Dinner time", "Dinner time", "")]
+    await hub.call_service("assist_satellite", "announce", {"entity_id": sat.entity_id,
+                                                            "media_id": "http://jarvis.example.com/a.wav"})
+    assert announced[-1][0] == "http://jarvis.example.com/a.wav"
+    with pytest.raises(ServiceNotFound, match="voice pipeline"):
+        await hub.call_service("assist_satellite", "start_conversation", {"entity_id": sat.entity_id,
+                                                                          "start_message": "Hi"})
+    with pytest.raises(HubError, match="message or a media_id"):
+        await hub.call_service("assist_satellite", "announce", {"entity_id": sat.entity_id})

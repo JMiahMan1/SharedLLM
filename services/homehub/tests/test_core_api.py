@@ -139,6 +139,14 @@ def test_registered_service_with_response(client, setup):
 def test_unknown_service_without_target_is_400(client):
     r = client.post("/api/services/light/turn_on", headers=H, json={})
     assert r.status_code == 400
+    assert "needs a target entity" in r.json()["message"]
+
+
+def test_a_device_action_that_is_not_registered_says_not_found(client):
+    """An ESPHome node's own action is only a service while the node is connected; say that, not "needs a target"."""
+    r = client.post("/api/services/esphome/kitchen_node_set_weather", headers=H, json={"temp": 70})
+    assert r.status_code == 400
+    assert "esphome.kitchen_node_set_weather not found" in r.json()["message"]
 
 
 def test_config_and_config_entries_hide_credentials(client):
@@ -158,6 +166,31 @@ def test_history_and_logbook_come_from_the_recorder(client, setup):
     assert [s["state"] for s in hist[0]] == ["on", "off"]
     log = client.get("/api/logbook/2020-01-01T00:00:00Z?entity=light.kitchen", headers=H).json()
     assert [e["state"] for e in log] == ["on", "off"]
+
+
+def test_registries_are_also_served_over_rest(client):
+    """HA has these only on the WebSocket; Jarvis's TV lookups ask for them over REST."""
+    devices = client.get("/api/config/device_registry/list", headers=H).json()
+    assert devices[0]["id"] == "d1" and devices[0]["config_entries"] == ["e1"]
+    for path in ("/api/config/entity_registry", "/api/config/entity_registry/list"):
+        ents = client.get(path, headers=H).json()
+        assert {e["entity_id"] for e in ents} == {"light.kitchen", "light.broken"}
+    assert client.get("/api/config/device_registry/list").status_code == 401
+
+
+def test_tracker_history_keeps_moves_that_do_not_change_the_state(client, setup):
+    """HA counts a device_tracker's attribute changes as significant: a trip replay reads them."""
+    hub, _store, runtime, _d, _a = setup
+    runtime.start_recording()
+    hub.states.set("device_tracker.alex_phone", "not_home", {"latitude": 1.0, "longitude": 2.0})
+    hub.states.set("device_tracker.alex_phone", "not_home", {"latitude": 1.5, "longitude": 2.5})
+    hub.states.set("light.kitchen", "on", {"brightness": 1})
+    hub.states.set("light.kitchen", "on", {"brightness": 2})
+    q = "?filter_entity_id=device_tracker.alex_phone,light.kitchen&significant_changes_only=true"
+    hist = client.get("/api/history/period/2020-01-01T00:00:00Z" + q, headers=H).json()
+    by = {rows[0]["entity_id"]: rows for rows in hist}
+    assert [r["attributes"]["latitude"] for r in by["device_tracker.alex_phone"]] == [1.0, 1.5]
+    assert len(by["light.kitchen"]) == 1
 
 
 def test_store_round_trips_and_seals_credentials(tmp_path):
