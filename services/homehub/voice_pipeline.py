@@ -89,6 +89,10 @@ JARVIS_GUARD_S = 5.0
 PENDING_CONTEXT_S = 60.0
 #: HA's "Finished speaking detection" (VadSensitivity) in seconds of silence.
 FINISHED_SPEAKING_S = {"relaxed": 1.25, "default": 0.7, "aggressive": 0.25}
+#: The select option for "listen for no wake word", as HA labels it.
+NO_WAKE_WORD = "No wake word"
+#: How long the node may take to report its wake words.
+WAKE_WORD_TIMEOUT_S = 10.0
 SATELLITE_FEATURE_ANNOUNCE, SATELLITE_FEATURE_START_CONVERSATION = 1, 2  # AssistSatelliteEntityFeature
 #: Audio chunk size and pace when streaming a reply to a node's own speaker.
 STREAM_CHUNK = 1024
@@ -131,6 +135,8 @@ class VoiceSettings:
     jarvis_timeout: float = 90.0
     continue_conversation: bool = True
     vad_min_rms: float = 250.0
+    #: Proves to the gateway that the room context (voice_context) comes from the hub.
+    internal_secret: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> VoiceSettings:
@@ -146,6 +152,7 @@ class VoiceSettings:
             continue_conversation=os.getenv("HOMEHUB_VOICE_CONTINUE", "1").strip().lower()
             not in ("0", "false", "no", "off"),
             vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 250.0),
+            internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
         )
 
     def problems(self) -> list[str]:
@@ -158,6 +165,9 @@ class VoiceSettings:
             out.append(f"HOMEHUB_VOICE_STT must be host:port, not {self.stt!r}")
         if not self.jarvis_url:
             out.append("HOMEHUB_VOICE_JARVIS_URL is not set (the gateway's address, which serves /api/chat)")
+        if not self.internal_secret:
+            out.append("INTERNAL_SECRET is not set: Jarvis still answers, but cannot be told which room the "
+                       "satellite is in (the gateway only trusts voice_context from an internal caller)")
         return out
 
     def public(self) -> dict[str, Any]:
@@ -338,9 +348,10 @@ async def ask_jarvis(settings: VoiceSettings, text: str, context: dict[str, Any]
     """One conversation turn, through the same ``/api/chat`` HA's conversation agent used."""
     url = f"{settings.jarvis_url}/api/chat"
     body = {"query": text, "stream": False, "voice_context": context}
+    headers = {"X-Internal-Secret": settings.internal_secret} if settings.internal_secret else {}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=settings.jarvis_timeout)) as s, \
-                s.post(url, json=body) as r:
+                s.post(url, json=body, headers=headers) as r:
             data = await r.json(content_type=None)
             status = r.status
     except TimeoutError as exc:
@@ -505,6 +516,11 @@ class SatelliteVoice:
         self._audio_settings: Any = None
         self._pending: tuple[float, dict[str, Any]] | None = None
         self._tasks: set[asyncio.Task] = set()
+        #: The node's own wake words: id -> phrase, what is active, and why they could not be read.
+        self.wake_words: dict[str, str] = {}
+        self.active_wake_words: list[str] = []
+        self.max_active_wake_words = 0
+        self.wake_word_error: str | None = None
         self.log = logging.getLogger(f"homehub.voice.{driver.device_name or driver.host}")
 
     # -- what it is -----------------------------------------------------------------
@@ -567,7 +583,68 @@ class SatelliteVoice:
                       ", ".join(feature_names(self.flags)), "the API" if api_audio else "UDP")
         self._publish_vad_select()
         self._publish_satellite("idle")
+        self._spawn(self.load_wake_words(), "wake words")
         return True
+
+    def _spawn(self, coro: Any, what: str) -> None:
+        task = asyncio.get_running_loop().create_task(coro, name=f"voice:{self.name}:{what}")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    # -- wake words (HA's "Wake word" select) ----------------------------------------------------
+    async def load_wake_words(self) -> None:
+        """Read which wake words the node offers and which it listens for, and publish the select.
+
+        The node keeps its active wake word itself (HA used to set it); a node that listens
+        for a phrase nobody says looks like a broken wake word, so this is shown, not assumed.
+        """
+        client = self.client
+        if client is None:
+            return
+        try:
+            cfg = await client.get_voice_assistant_configuration(WAKE_WORD_TIMEOUT_S)
+        except Exception as exc:
+            self.wake_word_error = f"the node did not report its wake words: {exc}"
+            self.log.warning("voice satellite %s: %s", self.name, self.wake_word_error)
+            self._publish_wake_word_select()
+            return
+        self.wake_words = {str(w.id): str(w.wake_word) for w in (cfg.available_wake_words or [])}
+        self.active_wake_words = [str(w) for w in (cfg.active_wake_words or [])]
+        self.max_active_wake_words = int(getattr(cfg, "max_active_wake_words", 0) or 0)
+        self.wake_word_error = None
+        active = [self.wake_words.get(w, w) for w in self.active_wake_words]
+        self.log.info("voice satellite %s: listens for %s (offers %s)", self.name,
+                      ", ".join(repr(a) for a in active) or "no wake word",
+                      ", ".join(repr(w) for w in self.wake_words.values()) or "none")
+        if not active:
+            self.log.warning("voice satellite %s: no wake word is active, so it will never wake; choose one "
+                             "with its Wake word select", self.name)
+        self._publish_wake_word_select()
+
+    def _publish_wake_word_select(self) -> None:
+        sel = self._local("wake_word")
+        if sel is None:
+            return
+        if self.wake_word_error or not self.wake_words:
+            self.hub.publish(sel, UNAVAILABLE, {"reason": self.wake_word_error or "the node offers no wake words"})
+            return
+        active = next((self.wake_words[w] for w in self.active_wake_words if w in self.wake_words), NO_WAKE_WORD)
+        self.hub.publish(sel, active, {"options": [*self.wake_words.values(), NO_WAKE_WORD]})
+
+    async def set_wake_word(self, phrase: str) -> None:
+        """Make the node listen for ``phrase`` (one of its own wake words), or none."""
+        if self.client is None:
+            raise DeviceUnavailable(f"ESPHome {self.name} is not connected")
+        if phrase == NO_WAKE_WORD:
+            ids: list[str] = []
+        else:
+            wid = next((i for i, w in self.wake_words.items() if w == phrase), None)
+            if wid is None:
+                raise HubError(f"{phrase!r} is not one of {self.name}'s wake words: {list(self.wake_words.values())}")
+            ids = [wid]
+        await self.client.set_voice_assistant_configuration(ids)
+        self.log.info("voice satellite %s: wake word set to %r", self.name, phrase)
+        await self.load_wake_words()
 
     def detach(self) -> None:
         """The connection is gone (or the entry unloads): stop any run, show the satellite unavailable."""
@@ -932,6 +1009,9 @@ class SatelliteVoice:
             if self.is_satellite else None,
             "enabled": self.enabled, "subscribed": self.subscribed,
             "finished_speaking_s": self.silence_seconds(),
+            "wake_words": {"available": list(self.wake_words.values()),
+                           "active": [self.wake_words.get(w, w) for w in self.active_wake_words],
+                           "max_active": self.max_active_wake_words, "error": self.wake_word_error},
             "running": self._run.id if self._run is not None else None,
             "runs": self.runs, "last_run": self.last_run.public() if self.last_run else None,
             "last_error": self.last_error,

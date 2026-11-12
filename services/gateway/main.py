@@ -3268,6 +3268,49 @@ def _chat_system_prompt(body: dict) -> str | None:
     return None
 
 
+def _voice_context_from(request: Request, body: dict) -> dict | None:
+    """The room a voice satellite speaks from, trusted only from an internal caller (homehub).
+
+    Anyone could claim a room in a request body, and the room decides what
+    "the lights" means, so the context counts only when the request carries
+    the internal secret; otherwise it is dropped and logged.
+    """
+    raw = body.pop("voice_context", None)
+    if not isinstance(raw, dict):
+        return None
+    if not secret_matches(request.headers.get("X-Internal-Secret") or "", INTERNAL_SECRET):
+        log.warning("[ChatHandler] voice_context ignored: the caller is not internal")
+        return None
+
+    def text(key: str, limit: int = 120) -> str | None:
+        value = raw.get(key)
+        return str(value).strip()[:limit] or None if isinstance(value, (str, int, float)) else None
+
+    out = {k: text(k) for k in ("area", "area_id", "satellite_name", "device_name", "conversation_id")}
+    out["asked"] = text("asked", 500)
+    out["extra_system_prompt"] = text("extra_system_prompt", 1000)
+    return {k: v for k, v in out.items() if v}
+
+
+def _voice_context_note(ctx: dict) -> str:
+    """What the model is told about where a spoken request came from."""
+    lines = []
+    where = ctx.get("area")
+    device = ctx.get("satellite_name") or ctx.get("device_name")
+    if where:
+        lines.append(f"The person is speaking to the voice satellite{f' {device!r}' if device else ''} in the "
+                     f"{where} (area id {ctx.get('area_id') or 'unknown'}). \"Here\", \"this room\" and a device "
+                     f"named without a room mean the {where}.")
+    elif device:
+        lines.append(f"The person is speaking to the voice satellite {device!r}, which has no room assigned; "
+                     "ask which room they mean when it matters.")
+    if ctx.get("asked"):
+        lines.append(f"You had just asked them: {ctx['asked']!r}. Their words answer that.")
+    if ctx.get("extra_system_prompt"):
+        lines.append(ctx["extra_system_prompt"])
+    return ("\n\n[Voice context]\n" + "\n".join(lines)) if lines else ""
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -3280,6 +3323,7 @@ async def chat_handler(request: Request, background_tasks=None):
         body = {}
     if not isinstance(body, dict):
         body = {}
+    voice_context = _voice_context_from(request, body)
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
@@ -3849,7 +3893,8 @@ async def chat_handler(request: Request, background_tasks=None):
     job_payload = {
         "model": selected_model,
         "query": final_query,
-        "system": body.get("system") or default_sys,
+        "system": (body.get("system") or default_sys) + (_voice_context_note(voice_context) if voice_context else ""),
+        "voice_context": voice_context,
         "creds": creds.model_dump(),
         "client": body.get("client"),
         "source": body.get("source"),

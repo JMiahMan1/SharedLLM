@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import colorsys
 import contextlib
+import inspect
 import json
 import math
 import re
@@ -713,7 +714,8 @@ class ESPHomeDriver(Driver):
         if entity.domain == "assist_satellite" and domain == "assist_satellite":
             return await self._satellite_call(service, data)
         if entity in self.local_entities or any(e.entity_id == entity.entity_id for e in self.local_entities):
-            return self._local_call(entity, domain, service, data)
+            result = self._local_call(entity, domain, service, data)
+            return await result if inspect.isawaitable(result) else result
         info = self._info_for.get(entity.entity_id)
         if info is None:
             if self._client is None:
@@ -774,6 +776,8 @@ class ESPHomeDriver(Driver):
         return None
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):
+            return self.voice.set_wake_word(str(data.get("option")))  # the node's own setting (awaited below)
         if entity.domain == "select" and service == "select_option":
             # Not the node's entity (HA's voice pipeline made it): its attributes are whatever was restored,
             # so the choice is remembered without passing them off as the device's (no publish).

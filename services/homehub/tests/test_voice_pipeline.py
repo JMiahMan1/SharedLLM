@@ -32,6 +32,7 @@ VAD_SELECT = "select.test_satellite_finished_speaking_detection"
 ENTITIES = [
     {"entity_id": SAT, "unique_id": f"{MAC}-assist_satellite"},
     {"entity_id": VAD_SELECT, "unique_id": f"{MAC}-vad_sensitivity"},
+    {"entity_id": "select.test_satellite_wake_word", "unique_id": f"{MAC}-wake_word"},
 ]
 FULL = int(F.VOICE_ASSISTANT | F.API_AUDIO | F.ANNOUNCE | F.START_CONVERSATION)
 SECRET = "internal-secret"
@@ -52,7 +53,21 @@ class VoiceClient:
         self.announced: list[dict] = []
         self.audio_out: list[bytes] = []
         self.on_stop = None
+        self.available_wake_words = [("okay_nabu", "Okay Nabu"), ("hey_jarvis", "Hey Jarvis")]
+        self.active_wake_words = ["okay_nabu"]
+        self.config_error: Exception | None = None
         VoiceClient.instances.append(self)
+
+    async def get_voice_assistant_configuration(self, timeout, external_wake_words=None):
+        if self.config_error is not None:
+            raise self.config_error
+        return SimpleNamespace(
+            available_wake_words=[SimpleNamespace(id=i, wake_word=w, trained_languages=["en"])
+                                  for i, w in self.available_wake_words],
+            active_wake_words=list(self.active_wake_words), max_active_wake_words=1)
+
+    async def set_voice_assistant_configuration(self, active_wake_words):
+        self.active_wake_words = list(active_wake_words)
 
     async def connect(self, on_stop=None, login=False):
         self.on_stop = on_stop
@@ -574,3 +589,44 @@ async def test_the_voice_api_lists_satellites_and_turns_one_off(env, monkeypatch
     assert on["subscribed"] is True
     assert client.patch("/hub/voice/none", headers=h, json={"enabled": True}).status_code == 404
     await drv.async_unload()
+
+
+WAKE = "select.test_satellite_wake_word"
+
+
+async def test_the_nodes_wake_word_is_read_shown_and_can_be_changed(env, monkeypatch):
+    """The node keeps its own wake word (HA set it); one nobody says looks like a dead wake word."""
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    await drv.async_setup()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    st = hub.states.get(WAKE)
+    assert st.state == "Okay Nabu" and st.attributes["options"] == ["Okay Nabu", "Hey Jarvis", "No wake word"]
+    assert drv.voice.status()["wake_words"]["active"] == ["Okay Nabu"]
+
+    await drv.async_call(hub.entities[WAKE], "select", "select_option", {"option": "Hey Jarvis"})
+    assert drv._client.active_wake_words == ["hey_jarvis"]
+    assert hub.states.get(WAKE).state == "Hey Jarvis"
+    with pytest.raises(HubError, match="not one of"):
+        await drv.async_call(hub.entities[WAKE], "select", "select_option", {"option": "Hey Mars"})
+
+
+async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch):
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    original = drv._make_client
+
+    def failing(host):
+        c = original(host)
+        c.config_error = RuntimeError("connection reset")
+        return c
+
+    drv._make_client = failing  # type: ignore[method-assign]
+    await drv.async_setup()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    st = hub.states.get(WAKE)
+    assert st.state == UNAVAILABLE and "did not report its wake words" in st.attributes["reason"]
+    assert "connection reset" in drv.voice.status()["wake_words"]["error"]
+
