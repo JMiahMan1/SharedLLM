@@ -82,12 +82,15 @@ from services.homehub.core import (
     ServiceNotFound,
     utcnow,
 )
+from services.homehub.drivers.mjpeg import CameraTokens, camera_attributes
 
 DEFAULT_PORT = 6053
 CONNECT_TIMEOUT = 5.0
 LIST_TIMEOUT = 5.0
 COMMAND_SETTLE = 1.0  # how long a command waits for the node to push the new state
 SERVICE_TIMEOUT = 5.0
+#: A camera frame (ESP32 cameras send one in well under a second when idle).
+CAMERA_TIMEOUT_S = 10.0
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 
 # EntityInfo class -> the platform word HA put in the unique_id.
@@ -204,6 +207,7 @@ class ESPHomeDriver(Driver):
         self._info_for: dict[str, Any] = {}                    # entity_id -> EntityInfo
         self._last: dict[tuple[int, int], Any] = {}            # last EntityState per key
         self._waiters: dict[tuple[int, int], list[asyncio.Future]] = {}
+        self._camera_tokens = CameraTokens()
         self._services: list[tuple[str, str]] = []
         self._ha_subs: dict[str, set[str | None]] = {}        # HA entity_id -> attributes the node wants
         self._unsub_bus = None
@@ -375,7 +379,7 @@ class ESPHomeDriver(Driver):
                 cur = self.hub.states.get(e.entity_id)
                 self.publish(e, cur.state if cur and cur.state != UNAVAILABLE else UNKNOWN, self._attrs(info))
             elif isinstance(info, CameraInfo):
-                self.publish(e, "idle", {})
+                self.publish(e, "idle", camera_attributes(e.entity_id, self._camera_tokens.current(e.entity_id)))
 
     # -- states ---------------------------------------------------------------
     def _on_state(self, state: Any) -> None:
@@ -550,7 +554,10 @@ class ESPHomeDriver(Driver):
             return MEDIA_STATES.get(st.state, "idle"), {"volume_level": round(st.volume, 3),
                                                           "is_volume_muted": bool(st.muted)}
         if isinstance(info, CameraInfo):
-            return "idle", {}
+            # A frame arrives as a state; it changes nothing a reader sees.
+            ent = self._entity_for.get((getattr(st, "device_id", 0) or 0, st.key))
+            token = self._camera_tokens.current(ent.entity_id) if ent is not None else ""
+            return "idle", camera_attributes(ent.entity_id, token) if ent is not None else {}
         return getattr(st, "state", UNKNOWN), {}
 
     def _light_state(self, st: Any) -> tuple[str, dict[str, Any]]:
@@ -582,6 +589,33 @@ class ESPHomeDriver(Driver):
         if self._client is None:
             raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
         return self._client
+
+    # -- the camera contract (see drivers/mjpeg.py) ---------------------------
+    def access_tokens(self, entity_id: str) -> list[str]:
+        return self._camera_tokens.valid(entity_id)
+
+    async def async_camera_image(self, entity: EntityEntry) -> bytes:
+        """One frame from an ESPHome camera: ask for a single image, wait for it to arrive as a state."""
+        key = next((k for k, e in self._entity_for.items() if e.entity_id == entity.entity_id), None)
+        if key is None or not isinstance(self._infos.get(key), CameraInfo):
+            raise ServiceNotFound(f"{entity.entity_id} is not a camera on ESPHome node {self.device_name}")
+        if self._client is None:
+            raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._waiters.setdefault(key, []).append(fut)
+        try:
+            self._client.request_single_image()
+            state = await asyncio.wait_for(fut, CAMERA_TIMEOUT_S)
+        except TimeoutError as exc:
+            raise DeviceUnavailable(f"ESPHome camera {entity.entity_id} sent no image") from exc
+        finally:
+            waiting = self._waiters.get(key, [])
+            if fut in waiting:
+                waiting.remove(fut)
+        return bytes(state.data)
+
+    async def async_camera_stream_url(self, entity: EntityEntry) -> str | None:
+        return None  # no stream URL; the API serves frames from async_camera_image
 
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity in self.local_entities or any(e.entity_id == entity.entity_id for e in self.local_entities):

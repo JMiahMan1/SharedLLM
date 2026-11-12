@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import ClassVar
 
 import pytest
@@ -470,3 +471,48 @@ async def test_options_host_overrides_everything():
 def test_no_mdns_fallback_without_a_device_name():
     _, drv = _driver_with(data={"device_name": ""})
     assert drv.candidates == ["192.168.2.127"]
+
+
+async def test_camera_snapshot_comes_from_a_single_image_request(monkeypatch):
+    from aioesphomeapi import CameraInfo, CameraState
+
+    cam_info = CameraInfo(object_id="garage_camera", key=50, name="Garage Camera")
+    monkeypatch.setattr(sys.modules[__name__], "INFOS", [*INFOS, cam_info])
+
+    class CamClient(FakeClient):
+        def request_single_image(self):
+            asyncio.get_running_loop().call_soon(self.on_state, CameraState(key=50, data=b"\xff\xd8jpeg\xff\xd9"))
+
+    hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
+                                                               "unique_id": f"{MAC}/0/camera/Garage Camera"}])
+    drv = ESPHomeDriver(hub, entry)
+    drv._make_client = lambda host: CamClient()  # type: ignore[method-assign]
+    await drv.async_setup()
+    ent = hub.entities["camera.garage_door_garage_camera"]
+    st = hub.states.get(ent.entity_id)
+    assert st.state == "idle" and st.attributes["entity_picture"].startswith("/api/camera_proxy/")
+    assert await drv.async_camera_image(ent) == b"\xff\xd8jpeg\xff\xd9"
+    assert st.attributes["access_token"] in drv.access_tokens(ent.entity_id)
+    await drv.async_unload()
+
+
+async def test_camera_snapshot_times_out_cleanly(monkeypatch):
+    from aioesphomeapi import CameraInfo
+
+    monkeypatch.setattr(sys.modules[__name__], "INFOS",
+                        [*INFOS, CameraInfo(object_id="garage_camera", key=50, name="Garage Camera")])
+    monkeypatch.setattr(esphome, "CAMERA_TIMEOUT_S", 0.05)
+
+    class Silent(FakeClient):
+        def request_single_image(self):
+            pass
+
+    hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
+                                                               "unique_id": f"{MAC}/0/camera/Garage Camera"}])
+    drv = ESPHomeDriver(hub, entry)
+    drv._make_client = lambda host: Silent()  # type: ignore[method-assign]
+    await drv.async_setup()
+    with pytest.raises(DeviceUnavailable):
+        await drv.async_camera_image(hub.entities["camera.garage_door_garage_camera"])
+    assert not drv._waiters.get((0, 50))
+    await drv.async_unload()
