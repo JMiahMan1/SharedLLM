@@ -484,6 +484,12 @@ class AutomationEngine:
         self._tasks: set[asyncio.Task] = set()
         self._services_registered = False
         self._check_refs = False
+        # Hooks for automation_editor.py (None = off): ``config_hook(kind, id, conf) -> conf`` rewrites a
+        # config before it is parsed (the stored remap of renamed entities), ``tracer`` records runs,
+        # and ``action_filter(schedule, slot_idx, action) -> [actions]`` lets the climate layer apply holds.
+        self.config_hook: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None
+        self.tracer: Any = None
+        self.action_filter: Callable[[Schedule, int, dict[str, Any]], list[dict[str, Any]]] | None = None
         try:
             self.tz = ZoneInfo(getattr(hub, "time_zone", None) or "UTC")
         except Exception:
@@ -680,6 +686,8 @@ class AutomationEngine:
         return eid
 
     def _build_item(self, kind: str, item_id: str, conf: dict[str, Any], used: set[str]) -> Item:
+        if self.config_hook is not None:
+            conf = self.config_hook(kind, item_id, conf)
         alias = str(conf.get("alias") or item_id)
         if kind == "automation":
             entity_id = self._entity_id_for("automation", ("automation",), item_id, alias, used)
@@ -929,6 +937,8 @@ class AutomationEngine:
         try:
             variables.update(self._render_variables(item.variables, variables))
             if not skip_condition and not self.check_conditions(item.conditions, variables):
+                if self.tracer is not None:
+                    self.tracer.not_run(item, variables, "conditions did not pass")
                 return
         except Exception as exc:
             item.last_error = f"condition or variables failed: {exc}"
@@ -954,7 +964,8 @@ class AutomationEngine:
         if item.kind == "script":
             item.last_triggered = self.clock.now()
             self._persist(item)
-        task = asyncio.ensure_future(self._execute(item, variables))
+        run = self._execute(item, variables)
+        task = asyncio.ensure_future(self.tracer.run(item, variables, run) if self.tracer is not None else run)
         item.runs.add(task)
 
         def done(t: asyncio.Task, item: Item = item) -> None:
@@ -1024,6 +1035,8 @@ class AutomationEngine:
         for step in steps:
             if step.get("enabled") is False:
                 continue
+            if self.tracer is not None:
+                self.tracer.step(step)
             try:
                 await self._run_step(step, variables)
             except (_StopScript, _ConditionFail, _WaitTimeout, asyncio.CancelledError):
@@ -2140,7 +2153,10 @@ class AutomationEngine:
             except Exception:
                 log.exception("store write failed for %s", s.entity_id)
         errors = []
-        for act in slot.get("actions") or []:
+        acts = list(slot.get("actions") or [])
+        if self.action_filter is not None:
+            acts = [x for a in acts for x in self.action_filter(s, idx, a)]
+        for act in acts:
             svc = str(act.get("service") or act.get("action"))
             domain, service = svc.split(".", 1)
             data = dict(act.get("service_data") or act.get("data") or {})

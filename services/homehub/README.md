@@ -41,6 +41,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | `importer.py` | Imports an HA config directory (read-only) |
 | `templating.py` | HA's Jinja template API (`/api/template`, automations) |
 | `automation.py` | Automations, scripts, scenes, blueprints and the nielsfaber scheduler |
+| `automation_editor.py`, `automation_api.py`, `climate_schedule.py` | Editing automations/scripts/scenes/schedules while running (one item rebuilt at a time), run traces, the stored entity remap (`/api/homehub/automations/remap`), and thermostat programs with holds, away and an energy rule (`/api/homehub/climate`); routes in `automation_api.py`'s docstring |
 | `builtin.py` | `device_tracker.see` (Jarvis's location relay), `homeassistant.update_entity`, notifications |
 | `statistics.py`, `statistics_api.py`, `energy.py`, `dashboard_api.py` | HA's recorder statistics (5-minute and hourly, `statistics.db`), `recorder/*` and `energy/*` WS commands, the HA statistics importer (`POST /hub/statistics/import`), energy settings and the Rooms/Energy/Climate pages' data; see each module's docstring |
 | `mobile_app_webhook.py`, `mobile_app_api.py`, `ha_auth.py`, `ha_auth_api.py` | The HA companion apps: webhooks, registration, pushes, `/auth/*` login and token refresh. See `MOBILE_APP.md` |

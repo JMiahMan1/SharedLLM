@@ -17,14 +17,20 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from services.common.secrets import secret_matches
-from services.homehub import discovery_api
-from services.homehub import entries_api  # integrations: reconfigure, remove/unpair, add by address
-from services.homehub import live_video, live_video_api
-from services.homehub import dashboard_api, statistics_api
-from services.homehub import ha_auth_api, mobile_app_api  # HA companion apps: login, webhooks, pushes
-from services.homehub.mobile_app_webhook import registry_view  # hides phones' webhook ids from non-admins
+from services.homehub import (  # HA companion apps: login, webhooks, pushes
+    automation_api,  # automation editor, scheduler, thermostat schedules
+    dashboard_api,
+    discovery_api,
+    entries_api,  # integrations: reconfigure, remove/unpair, add by address
+    ha_auth_api,
+    live_video,
+    live_video_api,
+    mobile_app_api,
+    statistics_api,
+)
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import DeviceUnavailable, HubError, State
+from services.homehub.mobile_app_webhook import registry_view  # hides phones' webhook ids from non-admins
 from services.homehub.runtime import Runtime
 
 log = logging.getLogger("homehub.api")
@@ -498,6 +504,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     app.include_router(api)
     app.include_router(discovery_api.build_router(runtime, auth))
+    app.include_router(automation_api.build_router(runtime, auth))
     app.include_router(entries_api.build_router(runtime, auth))
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
     app.include_router(statistics_api.build_router(runtime, auth))  # long-term statistics, energy

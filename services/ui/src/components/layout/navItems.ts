@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { History as HistoryIcon, House, Thermometer, Zap } from 'lucide-react';
+import { CalendarClock, Workflow } from 'lucide-react';
 
 /**
  * The app's pages, in one list for every navigator: the desktop sidebar, the
@@ -63,6 +64,8 @@ export const NAV_PAGES: NavPage[] = [
   { icon: Thermometer, label: 'Climate', path: '/climate', keywords: 'thermostat temperature humidity heating cooling ac air handler' },
   { icon: Zap, label: 'Energy', path: '/energy', keywords: 'energy power electricity usage kwh cost circuits peak utility bill' },
   { icon: HistoryIcon, label: 'History', path: '/history', keywords: 'history graph chart sensor states timeline statistics' },
+  { icon: Workflow, label: 'Automations', path: '/automations', keywords: 'automations scripts scenes rules triggers routines traces' },
+  { icon: CalendarClock, label: 'Schedules', path: '/schedules', keywords: 'schedules thermostat programs hold away vacation energy timers scheduler' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists' },
   // The recipes page had a route but no entry anywhere, so the only way to it

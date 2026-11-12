@@ -45,6 +45,8 @@ const Rooms = lazy(() => import('./pages/Rooms'));
 const Energy = lazy(() => import('./pages/Energy'));
 const HistoryPage = lazy(() => import('./pages/History'));
 const Climate = lazy(() => import('./pages/Climate'));
+const Automations = lazy(() => import('./pages/Automations'));
+const Schedules = lazy(() => import('./pages/Schedules'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Wander = lazy(() => import('./pages/Wander'));
 const Health = lazy(() => import('./pages/Health'));
@@ -197,6 +199,8 @@ function App() {
             <Route path="/energy" element={<ProtectedRoute isMobile={isMobile}><Energy /></ProtectedRoute>} />
             <Route path="/history" element={<ProtectedRoute isMobile={isMobile}><HistoryPage /></ProtectedRoute>} />
             <Route path="/climate" element={<ProtectedRoute isMobile={isMobile}><Climate /></ProtectedRoute>} />
+            <Route path="/automations" element={<ProtectedRoute isMobile={isMobile}><Automations /></ProtectedRoute>} />
+            <Route path="/schedules" element={<ProtectedRoute isMobile={isMobile}><Schedules /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />

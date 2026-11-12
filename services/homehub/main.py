@@ -14,7 +14,7 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import builtin, statistics, tts
+from services.homehub import automation_api, builtin, statistics, tts
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -93,11 +93,13 @@ class Service:
             from services.homehub.automation import AutomationEngine
 
             engine = AutomationEngine(self.hub, self.store)
+            automation_api.prepare(engine, self.store)  # editor, traces, remap, thermostat holds
             scripts = {s["id"]: {k: v for k, v in s.items() if k != "id"} for s in self.store.load_automations("script")}
             await engine.load(self.store.load_automations("automation"), scripts,
                               self.store.load_automations("scene"), self.store.get_kv("scheduler"))
             await engine.start()
             self.runtime.automations = engine
+            await automation_api.start(self.runtime)
         except Exception:
             log.exception("automation engine could not start")
 
@@ -110,6 +112,7 @@ class Service:
             self.runtime.discovery = None
             await discovery.stop()
         if self.runtime.automations is not None:
+            await automation_api.stop(self.runtime.automations)
             await self.runtime.automations.stop()
             self.runtime.automations = None
         await self.runtime.shutdown()
