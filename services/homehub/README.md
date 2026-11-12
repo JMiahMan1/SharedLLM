@@ -122,8 +122,9 @@ through the gateway (`/api/homehub/...`).
 
 Discovery also reads the kernel's neighbour table after each sweep (DHCP/ARP: HA's
 manifest MAC prefixes and host names find Reolink, Roborock and Tasmota, and every
-finding gets its MAC), browses `_hap._udp` (HomeKit over Thread, listed as not
-supported yet) and `_mass._tcp` (Music Assistant). A set-up device found at a new
+finding gets its MAC), browses `_hap._udp` (HomeKit over Thread, paired over
+CoAP through a Thread border router; `homekit_thread.py` says plainly when the host has no route to the
+Thread network) and `_mass._tcp` (Music Assistant). A set-up device found at a new
 address is listed with `moved` and offered as an update to its entry
 (`POST /hub/discovered/{id}/update-address`), and admins get one notice per new address.
 
@@ -144,6 +145,41 @@ endpoint) and the driver (camera stream types, an optional `entity_abilities`).
 The Rooms page draws controls from it, the automation editor offers only the
 services a device takes, and execution's announce routing and TV stage ask it
 which integration owns a player (`services/execution/capability_index.py`).
+
+**What a device is comes from the device, not from Home Assistant.** The
+import is a source of history, statistics, areas, the names people gave, which
+devices to reconnect to and their credentials. It is never the source of what a
+device is or can do. Each registry record keeps `confirmed`: the info fields
+(`ENTITY_INFO_FIELDS`, `DEVICE_INFO_FIELDS` in `core.py`) that a driver or the
+flow that probed the device set, plus `state` once a driver published it.
+
+- A driver states what its device said with `confirm_device` / `confirm_entity`;
+  a published state that carries feature flags, a device class, a unit or HA's
+  capability attributes (colour modes, ranges, options, sources...) confirms
+  them too (`Hub.publish`). Either overwrites the imported value.
+- The registry's values reach a state only when confirmed or chosen by a
+  person (`device_class`, `icon`, a display unit in `options.sensor`);
+  `capabilities.py`, the Rooms page, statistics and the automation editor read
+  only confirmed values (`EntityEntry.trusted`). Restored attributes of an
+  entity no driver has published are ignored.
+- What only the import holds is shown, never used: `info_source`
+  (`device` / `imported`) on registry records and on `/hub/hardware`, and
+  `confirmed`, `source`, `imported_only` and `protocol.registry_imported` on the
+  capability index. `GET /api/homehub/capabilities/provenance` counts them.
+- Where a protocol cannot tell something, it stays unset: an MJPEG stream
+  reports no maker, model or MAC; Cast reports no firmware or MAC; SRP is a
+  utility account with no device. Helpers (sun, weather, to-do, switch_as_x,
+  go2rtc) describe themselves.
+- A hub that never imported anything works the same way: `tests/test_fresh_hub.py`
+  finds WiZ, ESPHome, Cast, Roku and HomeKit devices, adds them with an MJPEG
+  camera and an Emporia account, and drives them with an empty store. Areas
+  are made with `GET|POST /hub/areas`, `PATCH|DELETE /hub/areas/{id}`.
+
+The capability index also lists the live areas (`areas`), gives voice satellites
+`announce` (and `converse` only when the device publishes it and the hub could
+run it; ESPHome satellites never `converse`, the hub runs no Assist pipeline),
+and gives a Music Assistant player with no area of its own the area of the
+player it drives, as `area_source: "inherited"` (never written to the registry).
 
 **Firewall.** A stateful firewall drops the unicast replies to a multicast
 M-SEARCH or a WiZ broadcast, so both scans also probe every address of the /24

@@ -35,7 +35,14 @@ import uuid
 from typing import Any
 from uuid import UUID
 
-from services.homehub.core import ConfigEntry, DeviceEntry, EntityEntry, HubError
+from services.homehub.core import (
+    DEVICE_INFO_FIELDS,
+    ENTITY_INFO_FIELDS,
+    ConfigEntry,
+    DeviceEntry,
+    EntityEntry,
+    HubError,
+)
 from services.homehub.discovery import norm_mac, token, wiz_type_label
 
 log = logging.getLogger("homehub.flows")
@@ -107,9 +114,6 @@ def unsupported_reason(finding: dict[str, Any]) -> str | None:
     if integration == "wiz" and wiz_type_label(str((finding.get("props") or {}).get("module") or "")) in (
             "Socket", "Fan"):
         return "WiZ sockets and fans are not supported yet (the hub drives WiZ lights)."
-    if integration == "homekit_controller" and (finding.get("props") or {}).get("transport") == "thread":
-        return ("HomeKit over Thread pairs over CoAP through a Thread border router, which the hub does not do "
-                "yet. If the accessory also speaks Matter, add it with its Matter setup code.")
     return None
 
 
@@ -154,8 +158,17 @@ def _new_entry_id() -> str:
     return uuid.uuid4().hex
 
 
+def _set_fields(record: Any, names: tuple[str, ...]) -> list[str]:
+    return [n for n in names if getattr(record, n) not in (None, "", [], {})]
+
+
 class Plan:
-    """The records one flow creates, committed together."""
+    """The records one flow creates, committed together.
+
+    A flow fills a device's and an entity's info fields from what it just read from the device (or the
+    account, or its own protocol's knowledge), so every one it sets is marked confirmed: a device added
+    through discovery never depends on, or is described by, Home Assistant's data.
+    """
 
     def __init__(self, hub: Any, entry: ConfigEntry, *, new_entry: bool = True) -> None:
         self.hub = hub
@@ -175,6 +188,7 @@ class Plan:
                    **fields: Any) -> DeviceEntry:
         dev = DeviceEntry(id=uuid.uuid4().hex, name=name, name_by_user=name_by_user or None,
                           area_id=area_id, config_entries=[self.entry.entry_id], **fields)
+        dev.confirmed = _set_fields(dev, DEVICE_INFO_FIELDS)
         self.devices.append(dev)
         if self.device is None:
             self.device = dev
@@ -189,6 +203,7 @@ class Plan:
                           unique_id=unique_id, config_entry_id=self.entry.entry_id,
                           device_id=dev.id if dev else None, original_name=own_name,
                           has_entity_name=True, **fields)
+        ent.confirmed = _set_fields(ent, ENTITY_INFO_FIELDS)
         self.entities.append(ent)
         return ent
 
@@ -358,7 +373,9 @@ async def adopt_cast(runtime: Any, finding: dict[str, Any], name: str | None, ar
         entry.data = {**entry.data, "known_hosts": [*hosts, host]}
     title = finding.get("name") or "Cast device"
     plan = Plan(hub, entry, new_entry=new_entry)
-    plan.set_device(title, name_by_user=name, area_id=area_id, manufacturer=finding.get("manufacturer") or "Google Inc.",
+    # Maker and model as the device announced them (mDNS ``md``); the driver confirms both from the device's
+    # Cast info once it connects. Nothing is guessed.
+    plan.set_device(title, name_by_user=name, area_id=area_id, manufacturer=finding.get("manufacturer") or None,
                     model=finding.get("model"), identifiers=[["cast", cast_uuid]])
     plan.add_entity("media_player", cast_uuid, None)
     return await commit(runtime, plan)
@@ -370,6 +387,8 @@ ROKU_BINARY = {"headphones_connected": "Headphones connected", "supports_airplay
 
 async def adopt_roku(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                      user_input: dict[str, Any]) -> dict[str, Any]:
+    from services.homehub.drivers.roku import device_fields, player_class
+
     hub, host = runtime.hub, str(finding.get("host") or "")
     try:
         info = await roku_device_info(host)
@@ -386,13 +405,10 @@ async def adopt_roku(runtime: Any, finding: dict[str, Any], name: str | None, ar
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="roku", title=title, data={"host": host},
                         source="ssdp", unique_id=serial)
     plan = Plan(hub, entry)
-    macs = [norm_mac(info.get(k)) for k in ("wifi-mac", "ethernet-mac")]
-    plan.set_device(title, name_by_user=name, area_id=area_id, manufacturer=info.get("vendor-name") or "Roku",
-                    model=info.get("model-name") or finding.get("model"), serial_number=serial,
-                    sw_version=info.get("software-version") or None, identifiers=[["roku", serial]],
-                    connections=[["mac", ":".join(m[i:i + 2] for i in range(0, 12, 2))] for m in macs if m])
-    plan.add_entity("media_player", serial, None,
-                    original_device_class="tv" if str(info.get("is-tv")).lower() == "true" else "receiver")
+    plan.set_device(title, name_by_user=name, area_id=area_id,
+                    **{**device_fields(info), "model": info.get("model-name") or finding.get("model"),
+                       "serial_number": serial, "identifiers": [["roku", serial]]})
+    plan.add_entity("media_player", serial, None, original_device_class=player_class(info))
     plan.add_entity("remote", serial, None)
     for key, label in ROKU_BINARY.items():
         plan.add_entity("binary_sensor", f"{serial}_{key}", label, entity_category="diagnostic")
@@ -415,7 +431,7 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
         RequiresEncryptionAPIError,
     )
 
-    from services.homehub.drivers.esphome import platform_of
+    from services.homehub.drivers.esphome import device_registry_fields, entity_registry_fields, platform_of
 
     hub, host = runtime.hub, str(finding.get("host") or "")
     port = int(finding.get("port") or 6053)
@@ -454,30 +470,17 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
                         data={"host": host, "port": port, "password": password, "noise_psk": psk or "",
                               "device_name": device_info.name})
     plan = Plan(hub, entry)
-    version = device_info.esphome_version
-    plan.set_device(title, name_by_user=name, area_id=area_id,
-                    manufacturer=device_info.manufacturer or "Espressif",
-                    model=device_info.project_name or device_info.model or None,
-                    sw_version=f"{device_info.project_version} (ESPHome {version})" if device_info.project_version
-                    else (f"ESPHome {version}" if version else None),
-                    connections=[["mac", mac_lower]],
-                    configuration_url=f"http://{device_info.name}.local/" if device_info.webserver_port else None)
+    plan.set_device(title, name_by_user=name, area_id=area_id, **device_registry_fields(device_info))
     mac_upper = ":".join(mac[i:i + 2] for i in range(0, 12, 2)).upper()
     for info in infos:
         platform = platform_of(info)
         domain = _ESPHOME_DOMAINS.get(platform, platform)
-        category = {1: "config", 2: "diagnostic"}.get(int(getattr(info, "entity_category", 0) or 0))
-        fields: dict[str, Any] = {"entity_category": category}
-        if getattr(info, "device_class", ""):
-            fields["original_device_class"] = info.device_class
-        if getattr(info, "unit_of_measurement", ""):
-            fields["unit_of_measurement"] = info.unit_of_measurement
-        if getattr(info, "icon", ""):
-            fields["original_icon"] = info.icon
+        fields = entity_registry_fields(info)
+        own = fields.pop("original_name", None)
         if getattr(info, "disabled_by_default", False):
             fields["disabled_by"] = "integration"
         uid = f"{mac_upper}/{getattr(info, 'device_id', 0) or 0}/{platform}/{info.name}"
-        plan.add_entity(domain, uid, info.name or None, **fields)
+        plan.add_entity(domain, uid, own, **fields)
     return await commit(runtime, plan)
 
 
@@ -510,11 +513,9 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="tasmota", title=title, data=data, source="zeroconf",
                         unique_id=mac_up)
     plan = Plan(hub, entry)
-    fw = (status.get("StatusFWR") or {}).get("Version")
-    plan.set_device(title, name_by_user=name, area_id=area_id, manufacturer="Tasmota",
-                    model=(status.get("StatusFWR") or {}).get("Hardware"), sw_version=fw,
-                    connections=[["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]],
-                    configuration_url=f"http://{host}/")
+    from services.homehub.drivers.tasmota import ENERGY_META, device_fields
+
+    plan.set_device(title, name_by_user=name, area_id=area_id, **device_fields(status, host))
     sts = status.get("StatusSTS") or {}
     relays = sorted(int(k[5:] or 1) for k in sts if re.fullmatch(r"POWER\d*", k))
     for n in relays:
@@ -523,7 +524,11 @@ async def adopt_tasmota(runtime: Any, finding: dict[str, Any], name: str | None,
     energy = (status.get("StatusSNS") or {}).get("ENERGY") or {}
     for key in TASMOTA_ENERGY:
         if key in energy:
-            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}")
+            meta = ENERGY_META.get(key, {})
+            plan.add_entity("sensor", f"{mac_up}_sensor_sensor_ENERGY_{key}", f"Energy {key}",
+                            original_device_class=meta.get("device_class"),
+                            unit_of_measurement=meta.get("unit_of_measurement"),
+                            capabilities={"state_class": meta["state_class"]} if meta.get("state_class") else None)
     return await commit(runtime, plan)
 
 

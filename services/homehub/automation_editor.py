@@ -1258,7 +1258,7 @@ def suggest_remap(editor: Editor, db_path: str | None) -> dict[str, Any]:
         words = set(old.split(".", 1)[1].split("_"))
         scored = []
         for e in ents:
-            unit = spans.get(e.entity_id, {}).get("unit") or e.unit_of_measurement
+            unit = spans.get(e.entity_id, {}).get("unit") or e.trusted("unit_of_measurement")
             if old_unit and unit and unit != old_unit:
                 continue
             ewords = set(e.entity_id.split(".", 1)[1].split("_"))

@@ -10,6 +10,11 @@ Volume and mute go through UPnP RenderingControl at the entry's
 protocol can read the volume. Power on is Wake-on-LAN to every MAC the
 registry knows (the Q900 wakes on LAN; the 2012 EH5300 generally does not).
 URLs play through the same UPnP device's AVTransport when it has one.
+
+What the TV is comes from the TV: the websocket models' REST ``/api/v2/``
+(model, MAC, firmware) and the UPnP description (maker, model, serial) are
+confirmed onto its device while it is on. The legacy and encrypted protocols
+report nothing about the set, so for those only the UPnP description counts.
 """
 from __future__ import annotations
 
@@ -165,6 +170,8 @@ class WebsocketBridge:
     def __init__(self, host: str, port: int, token: str | None, http: Http) -> None:
         self.host, self.port, self.token, self.http = host, port or 8002, token, http
         self.remote: Any = None
+        #: The TV's own ``/api/v2/`` "device" record (model, MAC, firmware), once it has answered.
+        self.info: dict[str, Any] = {}
 
     async def is_on(self) -> bool:
         try:
@@ -174,7 +181,9 @@ class WebsocketBridge:
         if status >= 400:
             return False
         try:
-            power = (json.loads(text).get("device") or {}).get("PowerState")
+            device = json.loads(text).get("device") or {}
+            self.info = device if isinstance(device, dict) else {}
+            power = self.info.get("PowerState")
         except (ValueError, AttributeError):
             power = None
         # Older Tizen firmware has no PowerState; answering REST at all means on.
@@ -279,7 +288,25 @@ class SamsungTVDriver(Driver):
                 self.muted = await self.upnp.get_mute()
             except HubError:
                 self.volume = self.muted = None
+        if on:
+            self._confirm_info()
         self._publish()
+
+    def _confirm_info(self) -> None:
+        from services.homehub.drivers.media_common import normalize_mac
+
+        ent = self._media()
+        if ent is None:
+            return
+        fields: dict[str, Any] = self.upnp.device_fields() if self.upnp is not None else {}
+        info = getattr(self.bridge, "info", None) or {}
+        mac = normalize_mac(info.get("wifiMac"))
+        fields = {**{k: v for k, v in fields.items() if v}, "manufacturer": fields.get("manufacturer") or "Samsung",
+                  "model": info.get("modelName") or fields.get("model"),
+                  "sw_version": info.get("firmwareVersion") or None}
+        if mac:
+            fields["connections"] = [*fields.get("connections", []), ["mac", mac]]
+        self.confirm_device(ent, **fields)
 
     def _publish(self) -> None:
         sf = self._features()

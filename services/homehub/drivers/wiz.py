@@ -13,6 +13,14 @@ Entities, by unique_id (HA's wiz integration):
 - ``{mac}_effect_speed`` number, the speed of the running scene (10-200)
 - ``{mac}_power``        sensor, watts (only bulbs that meter report it)
 
+What the bulb is comes from the bulb: ``getSystemConfig`` gives its module
+(RGB, tunable white or dimmable only), firmware and MAC, ``getModelConfig`` its
+colour-temperature range, and ``getPower`` whether it meters. Those are
+confirmed onto the device and the entities (``confirm_device`` /
+``confirm_entity``). Nothing is guessed from a name: a bulb that has not
+answered ``getSystemConfig`` yet is driven as tunable white and asked again on
+the next poll.
+
 A bulb switched off at the wall simply stops answering. Setup raises in that
 case so the runtime marks the entry ``setup_retry`` and tries again with
 backoff, which is what HA does; once loaded, a bulb that goes quiet is marked
@@ -178,17 +186,17 @@ class WizDriver(Driver):
         await self._publish_all()
 
     async def _identify(self) -> None:
-        """Model details, read once per bulb; all best effort."""
+        """Model details, read from the bulb until it has answered them; all best effort."""
         if self._identified:
             return
+        cfg: dict[str, Any] = {}
         try:
             cfg = await self._request("getSystemConfig")
             self.module = str(cfg.get("moduleName") or "")
             self.mac = str(cfg.get("mac") or "")
         except DeviceUnavailable:
-            self.log.info("WiZ %s: no system config, assuming tunable white", self.host)
-        if not self.module and self.light is not None and "rgb" in (self.light.entity_id + self.entry.title).lower():
-            self.module = "RGB"
+            self.log.info("WiZ %s: no system config yet, driving it as tunable white until it answers", self.host)
+            return  # _identified stays False: asked again on the next poll
         with contextlib.suppress(DeviceUnavailable):
             model = await self._request("getModelConfig")
             cct = [int(x) for x in model.get("cctRange") or [] if isinstance(x, int | float) and x > 0]
@@ -197,6 +205,29 @@ class WizDriver(Driver):
         if self.kelvin_range == (2700, 6500) and self.is_rgb:
             self.kelvin_range = (2200, 6500)
         self._identified = True
+        self._confirm(cfg)
+
+    def _confirm(self, cfg: dict[str, Any]) -> None:
+        """What the bulb said about itself, onto its registry records."""
+        from services.homehub.discovery import norm_mac, wiz_type_label
+
+        mac = norm_mac(self.mac)
+        anchor = self.light or self.speed or self.power
+        if anchor is not None:
+            self.confirm_device(anchor, manufacturer="WiZ", model=self.module or None,
+                                sw_version=str(cfg["fwVersion"]) if cfg.get("fwVersion") else None,
+                                connections=[["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]] if mac else [])
+        if self.light is not None:
+            self.confirm_entity(self.light, supported_features=FEATURE_EFFECT, capabilities={
+                "supported_color_modes": self._color_modes(), "min_color_temp_kelvin": self.kelvin_range[0],
+                "max_color_temp_kelvin": self.kelvin_range[1]})
+        if self.speed is not None:
+            self.confirm_entity(self.speed, entity_category="config", original_name="Effect speed",
+                                capabilities={"min": 10, "max": 200, "step": 1, "mode": "slider"})
+        if self.power is not None:
+            self.confirm_entity(self.power, original_device_class="power", unit_of_measurement="W",
+                                capabilities={"state_class": "measurement"})
+        self.log.debug("WiZ %s is a %s", self.host, wiz_type_label(self.module))
 
     def _came_online(self) -> None:
         self._online = True

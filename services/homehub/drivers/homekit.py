@@ -24,6 +24,14 @@ State arrives as HAP events (the accessory pushes changes on the open session);
 a 60 s poll reads everything again in case an event was lost or the session
 dropped. If the accessory's address changed, aiohomekit's zeroconf browser
 finds it again by its pairing id and the next reconnect uses the new address.
+
+What each accessory is comes from the accessory on every connect: its
+AccessoryInformation service (maker, model, serial, firmware, hardware) is
+confirmed onto its device, and every entity's class, unit, state class, options
+and event types are recomputed from its services and characteristics
+(``homekit_services.entity_specs``, the same function pairing registers with)
+and confirmed onto the registry. The publishers read those specs
+(``spec_for``), never an imported registry value.
 """
 from __future__ import annotations
 
@@ -136,7 +144,7 @@ async def _shared_zeroconf() -> Any:
                 azc = AsyncZeroconf()
                 # aiohomekit does not browse by itself: it hooks onto a running
                 # browser for _hap._tcp (HA's zeroconf integration provides one).
-                _browser = AsyncServiceBrowser(azc.zeroconf, [HAP_TCP], listener=_Quiet())
+                _browser = AsyncServiceBrowser(azc.zeroconf, [HAP_TCP, "_hap._udp.local."], listener=_Quiet())
                 _zeroconf = azc
             except Exception as exc:  # no multicast in this network namespace
                 log.warning("zeroconf unavailable, HomeKit accessories will not be rediscovered: %s", exc)
@@ -161,12 +169,19 @@ class HomeKitDriver(Driver):
         self._last_on_mode: dict[tuple[int, int], int] = {}
         #: (aid, service iid) -> (ISO time, event type) of a stateless switch's last press.
         self.event_stamps: dict[tuple[int, int], tuple[str, str]] = {}
+        #: (aid, service iid, char iid or None) -> the registry spec the accessory's own layout gives.
+        self.specs: dict[tuple[int, int, int | None], dict[str, Any]] = {}
 
     # -- setup --------------------------------------------------------------
     async def _make_pairing(self) -> Any:
         if IpController is None:
             raise HubError("aiohomekit is not installed")
         zc = await _shared_zeroconf()
+        if self.entry.data.get("Connection") == "CoAP":  # HomeKit over Thread
+            from services.homehub import homekit_thread
+
+            self._controller, pairing = await homekit_thread.load_pairing(self.entry, zc)
+            return pairing
         self._controller = IpController(char_cache=CharacteristicCacheMemory(), zeroconf_instance=zc)
         try:
             await self._controller.async_start()
@@ -182,8 +197,8 @@ class HomeKitDriver(Driver):
 
     async def async_setup(self) -> None:
         data = self.entry.data
-        if data.get("Connection", "IP") != "IP":
-            raise HubError(f"{data.get('Connection')} HomeKit transport is not supported, only IP")
+        if data.get("Connection", "IP") not in ("IP", "CoAP"):
+            raise HubError(f"{data.get('Connection')} HomeKit transport is not supported, only IP and CoAP (Thread)")
         self._pairing = await self._make_pairing()
         try:
             accessories = await asyncio.wait_for(
@@ -191,6 +206,7 @@ class HomeKitDriver(Driver):
         except Exception as exc:
             raise DeviceUnavailable(f"{self.entry.title}: accessory did not answer: {exc}") from exc
         self.index(accessories)
+        self.confirm_from_accessories(accessories)
         self.available = True
         self._unsubs.append(self._pairing.dispatcher_connect(self._on_event))
         with contextlib.suppress(AttributeError):
@@ -226,6 +242,36 @@ class HomeKitDriver(Driver):
                     if "value" in ch and "pr" in (ch.get("perms") or []):
                         self.values[(aid, iid)] = ch["value"]
                 self.services[skey] = types
+
+    def confirm_from_accessories(self, accessories: list[dict[str, Any]]) -> None:
+        """What the accessories say about themselves, onto the registry as the device's own."""
+        pid = str(self.entry.data.get("AccessoryPairingID") or self.entry.unique_id or "")
+        self.specs.clear()
+        for spec in hks.entity_specs(pid, accessories):
+            parsed = parse_unique_id(str(spec["unique_id"]))
+            if parsed is not None:
+                self.specs[parsed[1:]] = spec
+        infos = {int(acc["aid"]): hks.accessory_info(acc) for acc in accessories}
+        for ent in self.entities:
+            parsed = parse_unique_id(ent.unique_id or "")
+            if parsed is None:
+                continue
+            info = infos.get(parsed[1]) or {}
+            if ent.device_id and info:
+                self.confirm_device(ent.device_id, **{k: info.get(k) for k in (
+                    "manufacturer", "model", "serial_number", "sw_version", "hw_version")})
+            spec = self.specs.get(parsed[1:])
+            if spec is not None:
+                fields = {k: spec[k] for k in ("original_device_class", "unit_of_measurement", "capabilities",
+                                               "entity_category") if k in spec}
+                if spec.get("name"):
+                    fields["original_name"] = spec["name"]
+                self.confirm_entity(ent, **fields)
+
+    def spec_for(self, ent: EntityEntry) -> dict[str, Any]:
+        """The registry spec the accessory's layout gives this entity (empty when it models none)."""
+        parsed = parse_unique_id(ent.unique_id or "")
+        return (self.specs.get(parsed[1:]) if parsed is not None else None) or {}
 
     # -- events and polling --------------------------------------------------
     def _on_event(self, event: dict[tuple[int, int], dict[str, Any]]) -> None:
@@ -351,11 +397,15 @@ class HomeKitDriver(Driver):
         value = self.values.get((skey[0], iid))
         t = meta["type"]
         attrs: dict[str, Any] = {}
-        if ent.capabilities and ent.capabilities.get("state_class"):
-            attrs["state_class"] = ent.capabilities["state_class"]
+        spec = self.spec_for(ent)
+        caps = spec.get("capabilities") or {}
+        if caps.get("state_class"):
+            attrs["state_class"] = caps["state_class"]
+        if spec.get("original_device_class"):
+            attrs["device_class"] = spec["original_device_class"]
         if ent.domain == "sensor":
             if t in (CH_CURRENT_TEMP, CH_TARGET_TEMP, CH_HEAT_THRESHOLD, CH_COOL_THRESHOLD):
-                unit = ent.unit_of_measurement or self.temp_unit
+                unit = self.temp_unit
                 attrs["unit_of_measurement"] = unit
                 if value is not None:
                     value = round(c_to_f(float(value)), 1) if unit == "°F" else round(float(value), 1)
@@ -368,8 +418,8 @@ class HomeKitDriver(Driver):
             elif t == ECOBEE_CURRENT_MODE:
                 options, state = list(ECOBEE_MODES.values()), ECOBEE_MODES.get(value)
             else:
-                options, state = (ent.capabilities or {}).get("options", []), value
-            attrs["options"] = (ent.capabilities or {}).get("options") or options
+                options, state = list(meta.get("valid") or caps.get("options") or []), value
+            attrs["options"] = options
             self.publish(ent, state if state is not None else UNKNOWN, attrs)
         elif ent.domain == "button":
             cur = self.hub.states.get(ent.entity_id)
@@ -467,7 +517,7 @@ class HomeKitDriver(Driver):
         if target in MODE_TO_HA and target != 0:
             self._last_on_mode[skey] = target
         attrs = self.climate_attributes(skey)
-        attrs["supported_features"] = ent.supported_features or self.climate_features(skey)
+        attrs["supported_features"] = self.climate_features(skey)
         self.publish(ent, MODE_TO_HA.get(target, UNKNOWN), attrs)
 
     # -- services ------------------------------------------------------------

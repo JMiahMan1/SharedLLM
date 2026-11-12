@@ -178,6 +178,8 @@ def device_view(runtime: Any, dev: DeviceEntry, *, areas: dict[str, str] | None 
         "status": _status(entry.state if entry else None, disabled, total, unavailable),
         "last_seen": _iso(last),
         "abilities": capabilities.device_capabilities(hub, dev.id)["abilities"],
+        # Which of maker/model/firmware/serial/MAC the device itself reported, and which only the import holds.
+        "info_source": dev.info_source(),
     }
 
 
@@ -204,6 +206,7 @@ def entity_view(hub: Any, ent: EntityEntry) -> dict[str, Any]:
         "area_id": ent.area_id, "icon": ent.icon or ent.original_icon,
         "state": st, "capabilities": capabilities.entity_capabilities(hub, ent.entity_id) if not ent.disabled_by
         else None,
+        "info_source": ent.info_source(),
     }
 
 

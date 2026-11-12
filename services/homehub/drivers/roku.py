@@ -6,6 +6,11 @@ binary sensors and sensors (``<serial>_<key>``) and the disabled application
 select. State follows HA's roku integration: standby when the power mode is
 not ``PowerOn``, idle on the home screen or the screensaver, playing/paused
 while the media player reports a stream, on for any other app.
+
+``query/device-info`` describes the Roku on every refresh: maker, model,
+software version, serial and its MACs are confirmed onto the device
+(``device_fields``, shared with the flow that adds one), and ``is-tv`` gives the
+media player's device class.
 """
 from __future__ import annotations
 
@@ -34,6 +39,26 @@ ROKU_KEYS = {
     "rewind": "Rev", "mute": "VolumeMute", "menu": "Info", "next": "Fwd", "previous": "Rev",
 }
 _ECP_NAMES = {v.lower(): v for v in ROKU_KEYS.values()}
+
+def _fmt_mac(raw: Any) -> str | None:
+    from services.homehub.discovery import norm_mac
+
+    m = norm_mac(raw)
+    return ":".join(m[i:i + 2] for i in range(0, 12, 2)) if m else None
+
+
+def device_fields(info: dict[str, str]) -> dict[str, Any]:
+    """The DeviceEntry fields ``query/device-info`` gives."""
+    serial = info.get("serial-number") or None
+    macs = [m for m in (_fmt_mac(info.get(k)) for k in ("wifi-mac", "ethernet-mac")) if m]
+    return {"manufacturer": info.get("vendor-name") or "Roku", "model": info.get("model-name") or None,
+            "serial_number": serial, "sw_version": info.get("software-version") or None,
+            "identifiers": [["roku", serial]] if serial else [], "connections": [["mac", m] for m in macs]}
+
+
+def player_class(info: dict[str, str]) -> str:
+    return "tv" if str(info.get("is-tv")).lower() == "true" else "receiver"
+
 
 BASE_FEATURES = (F.PAUSE | F.VOLUME_MUTE | F.PREVIOUS_TRACK | F.NEXT_TRACK | F.TURN_ON | F.TURN_OFF
                  | F.PLAY_MEDIA | F.VOLUME_STEP | F.SELECT_SOURCE | F.PLAY | F.BROWSE_MEDIA)
@@ -173,10 +198,16 @@ class RokuDriver(Driver):
         on_home = app_name in (None, "", "Roku")
         source_list = ["Home", *sorted(a["name"] for a in self.apps if a["name"])]
         app_id = self.active.get("id")
+        if self.info:
+            fields = device_fields(self.info)
+            for dev_id in {e.device_id for e in self.entities if e.device_id}:
+                self.confirm_device(dev_id, **fields)
         for e in self.entities:
             uid = e.unique_id
             if e.domain == "media_player":
                 attrs: dict[str, Any] = {"source_list": source_list, "supported_features": BASE_FEATURES}
+                if self.info.get("is-tv") is not None:
+                    attrs["device_class"] = player_class(self.info)
                 if self.state not in ("standby",):
                     attrs.update(clean({
                         "source": "Home" if on_home else app_name,

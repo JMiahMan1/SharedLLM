@@ -16,6 +16,10 @@ players and queues as well, so a missed event costs at most one poll.
 Entities map by unique_id: a media_player's unique_id is the MA player_id
 (``media_player.den_speaker``, ``up000000000001``, a cast UUID...), and the
 "favorite current song" button is ``<player_id>_favorite_now_playing``.
+
+What each player is and can do comes from MA: its ``device_info`` (maker,
+model, software version, MAC) is confirmed onto its device, and the feature
+flags from its ``supported_features`` and control types.
 """
 from __future__ import annotations
 
@@ -419,10 +423,23 @@ class MusicAssistantDriver(Driver):
             self.mark_unavailable([ent])
             return
         state, attrs = self.player_state(p)
+        self._confirm_info(ent, p)
         if state == UNAVAILABLE:
             self.mark_unavailable([ent])
         else:
             self.publish(ent, state, attrs)
+
+    def _confirm_info(self, ent: EntityEntry, p: dict[str, Any]) -> None:
+        from services.homehub.drivers.media_common import normalize_mac
+
+        info = p.get("device_info") if isinstance(p.get("device_info"), dict) else {}
+        if not ent.device_id or not info:
+            return
+        mac = normalize_mac(info.get("mac_address"))
+        self.confirm_device(ent, manufacturer=info.get("manufacturer") or None, model=info.get("model") or None,
+                            model_id=info.get("model_id") or None,
+                            sw_version=info.get("software_version") or None,
+                            connections=[["mac", mac]] if mac else [])
 
     # -- entity services ------------------------------------------------------------------
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:

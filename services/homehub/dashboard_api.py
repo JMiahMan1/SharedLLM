@@ -71,8 +71,9 @@ def validate_prefs(body: dict[str, Any], current: dict[str, Any]) -> dict[str, A
 def _device_class(hub: Any, entity_id: str) -> str | None:
     st = hub.states.get(entity_id)
     ent = hub.entities.get(entity_id)
+    # The device's word (its state, or a class it confirmed) or a person's choice; never one only the import held.
     return (st.attributes.get("device_class") if st else None) or (
-        (ent.device_class or ent.original_device_class) if ent else None)
+        (ent.device_class or ent.trusted("original_device_class")) if ent else None)
 
 
 def summarize(hub: Any, entity_id: str) -> dict[str, Any] | None:

@@ -24,6 +24,15 @@ working. With ``allow_service_calls`` in the entry options, actions the node ask
 for (``homeassistant.action``) run on the hub, and states the node subscribes to
 (``homeassistant`` sensors) are sent to it as they change, which is what the
 voice satellites and screens rely on.
+
+Everything about what a node and its entities are comes from the node on every
+connect: ``device_info`` gives the maker, project/model, firmware, MAC and web
+UI (``device_registry_fields``, shared with the flow that adds a node), and
+each entity info its name, device class, unit, state class, category, icon,
+feature flags, colour modes, ranges and options. They are confirmed onto the
+registry (``confirm_device`` / ``confirm_entity``) and published with every
+state. The ``-pipeline``/``-wake_word`` entities HA made for its voice pipeline
+are not on the node, so nothing about them is confirmed.
 """
 from __future__ import annotations
 
@@ -69,6 +78,7 @@ from aioesphomeapi import (
     UserServiceArgType,
     ValveInfo,
     ValveOperation,
+    VoiceAssistantFeature,
 )
 
 from services.homehub.core import (
@@ -125,6 +135,36 @@ VALVE_OPEN, VALVE_CLOSE, VALVE_SET_POSITION, VALVE_STOP = 1, 2, 4, 8
 FAN_SET_SPEED, FAN_OSCILLATE, FAN_DIRECTION, FAN_PRESET, FAN_TURN_OFF, FAN_TURN_ON = 1, 2, 4, 8, 16, 32
 LOCK_OPEN = 1
 SIREN_TURN_ON, SIREN_TURN_OFF, SIREN_TONES, SIREN_VOLUME, SIREN_DURATION = 1, 2, 4, 8, 16
+
+
+def device_registry_fields(device_info: Any) -> dict[str, Any]:
+    """The DeviceEntry fields a node's ``device_info`` gives (the flow and the driver both use this)."""
+    from services.homehub.discovery import norm_mac
+
+    mac = norm_mac(str(getattr(device_info, "mac_address", "") or ""))
+    version = getattr(device_info, "esphome_version", "") or ""
+    project_version = getattr(device_info, "project_version", "") or ""
+    name = getattr(device_info, "name", "") or ""
+    return {
+        "manufacturer": getattr(device_info, "manufacturer", "") or "Espressif",
+        "model": getattr(device_info, "project_name", "") or getattr(device_info, "model", "") or None,
+        "sw_version": f"{project_version} (ESPHome {version})" if project_version
+        else (f"ESPHome {version}" if version else None),
+        "connections": [["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]] if mac else [],
+        "configuration_url": f"http://{name}.local/" if name and getattr(device_info, "webserver_port", 0) else None,
+    }
+
+
+def entity_registry_fields(info: Any) -> dict[str, Any]:
+    """The EntityEntry fields an entity info gives (category, class, unit, icon, its own name)."""
+    out: dict[str, Any] = {
+        "entity_category": {1: "config", 2: "diagnostic"}.get(int(getattr(info, "entity_category", 0) or 0)),
+        "original_device_class": getattr(info, "device_class", "") or None,
+        "unit_of_measurement": getattr(info, "unit_of_measurement", "") or None,
+        "original_icon": getattr(info, "icon", "") or None,
+        "original_name": getattr(info, "name", "") or None,
+    }
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def platform_of(info: Any) -> str:
@@ -199,6 +239,7 @@ class ESPHomeDriver(Driver):
         self.noise_psk: str | None = d.get("noise_psk") or None
         self.allow_service_calls: bool = bool(entry.options.get("allow_service_calls"))
         self._client: Any = None
+        self._device_info: Any = None
         self._api_version: Any = None
         self._closing = False
         self._reconnect_task: asyncio.Task | None = None
@@ -260,6 +301,8 @@ class ESPHomeDriver(Driver):
         self._client = client
         self._api_version = getattr(client, "api_version", None) or APIVersion(1, 10)
         self._index(infos)
+        self._device_info = device_info
+        self._confirm(device_info)
         self._register_services(getattr(device_info, "name", "") or self.device_name, services)
         client.subscribe_home_assistant_states_and_services(
             on_state=self._on_state, on_service_call=self._on_service_call,
@@ -331,6 +374,25 @@ class ESPHomeDriver(Driver):
         if client is not None:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(client.disconnect(), 3)
+
+    def entity_abilities(self, entity: EntityEntry) -> list[str]:
+        """What a voice satellite can do, from the node's own voice-assistant feature flags.
+
+        ``announce`` when the node says it takes announcements. Never ``converse``: starting a
+        conversation needs an Assist pipeline to hear the answer, which the hub does not run.
+        """
+        if entity.domain != "assist_satellite" or self._device_info is None:
+            return []
+        flags = int(getattr(self._device_info, "voice_assistant_feature_flags", 0) or 0)
+        return ["announce"] if flags & int(VoiceAssistantFeature.ANNOUNCE) else []
+
+    def _confirm(self, device_info: Any) -> None:
+        """What the node said about itself and its entities, onto the registry as the device's own."""
+        fields = device_registry_fields(device_info)
+        for dev_id in {e.device_id for e in self.entities if e.device_id}:
+            self.confirm_device(dev_id, **fields)
+        for entity_id, info in self._info_for.items():
+            self.confirm_entity(entity_id, **entity_registry_fields(info))
 
     def _device_entities(self) -> list[EntityEntry]:
         local = {e.entity_id for e in self.local_entities}
@@ -682,8 +744,10 @@ class ESPHomeDriver(Driver):
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "select" and service == "select_option":
+            # Not the node's entity (HA's voice pipeline made it): its attributes are whatever was restored,
+            # so the choice is remembered without passing them off as the device's (no publish).
             cur = self.hub.states.get(entity.entity_id)
-            self.publish(entity, str(data.get("option")), dict(cur.attributes) if cur else {})
+            self.hub.states.set(entity.entity_id, str(data.get("option")), dict(cur.attributes) if cur else {})
             return None
         raise ServiceNotFound(f"{entity.entity_id} is a Home Assistant voice-pipeline entity; "
                               f"{domain}.{service} has nothing to drive")

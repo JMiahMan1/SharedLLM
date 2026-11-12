@@ -25,6 +25,12 @@ asks the hub (``Search``) and never wakes a camera. Playback is the hub's MP4
 HA's media source chooses), fetched here and streamed through with the
 client's ``Range`` passed on, because the URL carries the hub's session token.
 Only files a listing returned for that camera can be played.
+
+What the hub and each camera are comes from them: after ``get_host_data`` the
+hub's model, hardware and firmware versions and MAC, and each channel's camera
+model, versions and uid, are confirmed onto their devices (``_confirm_devices``).
+Feature flags, ranges, options and classes are this driver's for the
+reolink-aio calls it makes, published with every state.
 """
 from __future__ import annotations
 
@@ -178,12 +184,45 @@ class ReolinkDriver(Driver):
             cam_uid = self.host.camera_uid(ch)
             if cam_uid and cam_uid != "Unknown":
                 self._channel_by_uid[str(cam_uid)] = ch
+        self._confirm_devices()
         try:
             self.host.baichuan.register_callback("homehub", self._on_push)
             await self.host.baichuan.subscribe_events()
         except Exception as exc:  # the poll still reads events, only slower
             self.log.warning("Reolink push events unavailable, polling instead: %s", exc)
         self._publish_all()
+
+    def _confirm_devices(self) -> None:
+        """The hub's and each camera's own description, onto their devices."""
+        from services.homehub.drivers.media_common import normalize_mac
+
+        host = self.host
+        if host is None:
+            return
+
+        def ask(name: str, *args: Any) -> Any:
+            attr = getattr(host, name, None)
+            try:
+                value = attr(*args) if callable(attr) else attr
+            except Exception:  # a channel reolink-aio has no data for
+                return None
+            return None if value in (None, "", "Unknown") else str(value)
+
+        done: set[str] = set()
+        for ent in self.entities:
+            if not ent.device_id or ent.device_id in done:
+                continue
+            ch, _key = self.locate(ent)
+            done.add(ent.device_id)
+            if ch is None:
+                mac = normalize_mac(ask("mac_address"))
+                self.confirm_device(ent.device_id, manufacturer=ask("manufacturer") or "Reolink",
+                                    model=ask("model"), hw_version=ask("hardware_version"),
+                                    sw_version=ask("sw_version"), connections=[["mac", mac]] if mac else [])
+            else:
+                self.confirm_device(ent.device_id, manufacturer="Reolink", model=ask("camera_model", ch),
+                                    hw_version=ask("camera_hardware_version", ch),
+                                    sw_version=ask("camera_sw_version", ch))
 
     async def async_poll(self) -> None:
         host = self.host
@@ -255,7 +294,7 @@ class ReolinkDriver(Driver):
             return "idle", camera_attributes(eid, self.tokens.current(eid), supported_features=2, extra=extra)
         if domain == "binary_sensor" and ch is not None:
             if key == "motion":
-                return _on_off(host.motion_detected(ch)), {}
+                return _on_off(host.motion_detected(ch)), {"device_class": "motion"}
             if key == "sleep":
                 return _on_off(host.sleeping(ch)), {}
             if key in AI_TYPES:

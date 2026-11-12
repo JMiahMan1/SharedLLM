@@ -50,11 +50,16 @@ def uid(scale, ch):
     return f"sensor.emporia_vue.{scale}.{GID}-{ch}"
 
 
+#: A person chose kW for some power sensors: HA keeps that choice in options.sensor (as the live registry does).
+KW = {"sensor": {"unit_of_measurement": "kW"}}
+
 ENTITIES = [
     {"entity_id": "sensor.main_panel_123_1min", "unique_id": uid("instant", "1,2,3"), "unit_of_measurement": "kW",
-     "original_device_class": "power"},
-    {"entity_id": "sensor.ac_unit_1_1min", "unique_id": uid("instant", "1"), "unit_of_measurement": "kW"},
-    {"entity_id": "sensor.ac_unit_2_1min", "unique_id": uid("instant", "2"), "unit_of_measurement": "kW"},
+     "original_device_class": "power", "options": KW},
+    {"entity_id": "sensor.ac_unit_1_1min", "unique_id": uid("instant", "1"), "unit_of_measurement": "kW",
+     "options": KW},
+    {"entity_id": "sensor.ac_unit_2_1min", "unique_id": uid("instant", "2"), "unit_of_measurement": "kW",
+     "options": KW},
     {"entity_id": "sensor.main_panel_balance_1min", "unique_id": uid("instant", "Balance"),
      "unit_of_measurement": "W"},
     {"entity_id": "sensor.main_panel_123_1d", "unique_id": uid("1D", "1,2,3"), "unit_of_measurement": "kWh",

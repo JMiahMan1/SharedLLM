@@ -9,6 +9,10 @@ They are written to a private 0600 directory because the library opens files.
 Entities: media_player and remote, both with unique_id = the TV's MAC. State is
 on/off as in HA (the protocol reports power, the foreground app and volume, not
 playback). A TV that cannot be reached is ``unavailable`` and the poll retries.
+
+Once connected, the TV's own ``device_info`` (maker, model, software version)
+is confirmed onto its device; the MAC is the entities' unique_id, which pairing
+read from the TV.
 """
 from __future__ import annotations
 
@@ -121,7 +125,16 @@ class AndroidTVRemoteDriver(Driver):
             return
         self.available = True
         self.api.keep_reconnecting()
+        self._confirm_info()
         self._publish()
+
+    def _confirm_info(self) -> None:
+        info = getattr(self.api, "device_info", None) or {}
+        ent = next((e for e in self.entities if e.device_id), None)
+        if ent is None or not isinstance(info, dict) or not info:
+            return
+        self.confirm_device(ent, manufacturer=info.get("manufacturer") or None, model=info.get("model") or None,
+                            sw_version=info.get("sw_version") or None)
 
     def _on_available(self, available: bool) -> None:
         self.available = bool(available)

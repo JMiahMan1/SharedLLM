@@ -241,14 +241,15 @@ async def test_sync_is_refused_for_integrations_that_add_devices_in_their_flow(e
 
 # -- discovery: Thread, Music Assistant, DHCP/ARP, moved devices ------------------------------
 
-def test_thread_homekit_is_found_but_said_to_be_unsupported(env):
+def test_thread_homekit_is_found_and_offered_for_pairing(env):
     _hub, _store, rt, _sent = env
-    f = discovery.parse_mdns("_hap._udp.local.", "Sensor._hap._udp.local.", "192.0.2.80", 5683,
+    f = discovery.parse_mdns("_hap._udp.local.", "Sensor._hap._udp.local.", "2001:db8:7::1", 5683,
                              {b"sf": b"1", b"id": b"AA:BB:CC:00:00:01", b"md": b"Sensor", b"ci": b"10"})
     assert f["integration"] == "homekit_controller" and f["props"]["transport"] == "thread"
     rt.discovery.record(f)
     pub = rt.discovery.public(f)
-    assert pub["adoptable"] is False and "Thread" in pub["unsupported"]
+    assert pub["adoptable"] is True and not pub["unsupported"]
+    assert [n["key"] for n in pub["needs"]] == ["code"]
 
 
 def test_music_assistant_servers_are_found_by_mdns():

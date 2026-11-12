@@ -8,6 +8,7 @@ when Home Assistant is gone.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import uuid
@@ -25,6 +26,44 @@ UNKNOWN = "unknown"
 # refuses a service no driver of that domain could ever handle.
 ON_OFF_DOMAINS = {"light", "switch", "fan", "media_player", "remote", "siren", "input_boolean",
                   "automation", "script", "climate", "humidifier", "vacuum", "water_heater"}
+
+
+#: Registry fields that say what an entity is or can do. They are the device's to tell: a driver (or the
+#: flow that probed the device to add it) sets them through :meth:`Hub.confirm_entity` or by publishing a
+#: state that carries them. A value that only the Home Assistant import supplied is a hint, never trusted
+#: for capabilities, and is reported as ``imported`` (``EntityEntry.info_source``).
+ENTITY_INFO_FIELDS = ("original_name", "original_device_class", "unit_of_measurement", "capabilities",
+                      "supported_features", "entity_category", "original_icon", "translation_key")
+#: The same for a device: what it is (maker, model, firmware, serial) and how it is reached (MAC, ids).
+DEVICE_INFO_FIELDS = ("manufacturer", "model", "model_id", "sw_version", "hw_version", "serial_number",
+                      "connections", "identifiers", "configuration_url")
+#: Pseudo-field in ``EntityEntry.confirmed``: a driver has published this entity's state (so the state's
+#: attributes, and a last state restored from the hub's own store, are the device's own).
+STATE_CONFIRMED = "state"
+#: The state attributes HA keeps in the entity registry's ``capabilities``, per domain. A driver publishing
+#: them is the device telling the hub; ``Hub.publish`` copies them into the registry as confirmed.
+CAPABILITY_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    "light": ("supported_color_modes", "min_color_temp_kelvin", "max_color_temp_kelvin", "min_mireds",
+              "max_mireds", "effect_list"),
+    "climate": ("hvac_modes", "min_temp", "max_temp", "target_temp_step", "fan_modes", "preset_modes",
+                "swing_modes", "min_humidity", "max_humidity"),
+    "water_heater": ("min_temp", "max_temp", "operation_list"),
+    "humidifier": ("min_humidity", "max_humidity", "available_modes"),
+    "media_player": ("source_list", "sound_mode_list"),
+    "number": ("min", "max", "step", "mode"),
+    "select": ("options",),
+    "sensor": ("state_class", "options"),
+    "fan": ("preset_modes",),
+    "vacuum": ("fan_speed_list",),
+    "event": ("event_types",),
+    "remote": ("activity_list",),
+    "siren": ("available_tones",),
+    "text": ("min", "max", "pattern", "mode"),
+}
+
+
+def _has_value(value: Any) -> bool:
+    return value not in (None, "", [], {}, 0)
 
 
 def utcnow() -> datetime:
@@ -228,14 +267,22 @@ class DeviceEntry:
     entry_type: str | None = None
     labels: list[str] = field(default_factory=list)
     configuration_url: str | None = None
+    #: The ``DEVICE_INFO_FIELDS`` the device itself reported (through its driver or the flow that added it).
+    confirmed: list[str] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
         return self.name_by_user or self.name or ""
 
+    def info_source(self) -> dict[str, str]:
+        """``field -> "device" | "imported"`` for every info field that has a value."""
+        return {f: "device" if f in self.confirmed else "imported"
+                for f in DEVICE_INFO_FIELDS if _has_value(getattr(self, f))}
+
     def public(self) -> dict[str, Any]:
         d = asdict(self)
         d["primary_config_entry"] = self.config_entries[0] if self.config_entries else None
+        d["info_source"] = self.info_source()
         return d
 
 
@@ -264,14 +311,31 @@ class EntityEntry:
     labels: list[str] = field(default_factory=list)
     options: dict[str, Any] = field(default_factory=dict)
     translation_key: str | None = None
+    #: The ``ENTITY_INFO_FIELDS`` the device itself reported, plus ``STATE_CONFIRMED`` once a driver published
+    #: its state. Anything else in those fields came from the Home Assistant import and is only a hint.
+    confirmed: list[str] = field(default_factory=list)
 
     @property
     def domain(self) -> str:
         return self.entity_id.split(".", 1)[0]
 
+    def trusted(self, name: str) -> Any:
+        """An info field's value when the device reported it; ``None`` when only the import did."""
+        return getattr(self, name) if name in self.confirmed else None
+
+    @property
+    def state_confirmed(self) -> bool:
+        return STATE_CONFIRMED in self.confirmed
+
+    def info_source(self) -> dict[str, str]:
+        """``field -> "device" | "imported"`` for every info field that has a value."""
+        return {f: "device" if f in self.confirmed else "imported"
+                for f in ENTITY_INFO_FIELDS if _has_value(getattr(self, f))}
+
     def public(self) -> dict[str, Any]:
         d = asdict(self)
         d["id"] = self.unique_id
+        d["info_source"] = self.info_source()
         return d
 
 
@@ -340,6 +404,32 @@ class Driver:
     def publish(self, entity: EntityEntry | str, state: Any, attributes: dict[str, Any] | None = None) -> State:
         return self.hub.publish(entity, state, attributes)
 
+    def confirm_device(self, device: DeviceEntry | EntityEntry | str | None, **info: Any) -> DeviceEntry | None:
+        """Record what the device itself reported about itself (maker, model, firmware, serial, MAC...).
+
+        ``device`` is a device, its id, or one of its entities. The values overwrite whatever the import
+        held and are marked as the device's own. ``None`` values are skipped (the protocol did not say).
+        """
+        if isinstance(device, EntityEntry):
+            device = device.device_id
+        dev_id = device.id if isinstance(device, DeviceEntry) else device
+        if not dev_id:
+            return None
+        return self.hub.confirm_device(str(dev_id), **info)
+
+    def confirm_entity(self, entity: EntityEntry | str, **info: Any) -> EntityEntry | None:
+        """Record what the device reported about one entity (device class, unit, feature flags, ranges...)."""
+        return self.hub.confirm_entity(entity, **info)
+
+    @staticmethod
+    def user_unit(entity: EntityEntry) -> str | None:
+        """The display unit a person chose for a sensor (HA's ``options.sensor.unit_of_measurement``), if any.
+
+        A person's choice may come from the import; the unit the integration reported there may not.
+        """
+        chosen = (entity.options.get("sensor") or {}).get("unit_of_measurement") if entity.options else None
+        return str(chosen) if chosen else None
+
     def mark_unavailable(self, entities: Iterable[EntityEntry] | None = None) -> None:
         for e in entities if entities is not None else self.entities:
             cur = self.hub.states.get(e.entity_id)
@@ -368,6 +458,8 @@ class Hub:
         self.store: Any = None
         #: HA entity-registry uuid -> entity_id; HA device triggers name entities by that uuid.
         self.entity_registry_ids: dict[str, str] = {}
+        #: Entities a driver has published a state for since the hub started.
+        self.live: set[str] = set()
 
     # -- registry -----------------------------------------------------------
     def entity_area_id(self, entity_id: str) -> str | None:
@@ -420,21 +512,137 @@ class Hub:
 
     # -- states -------------------------------------------------------------
     def publish(self, entity: EntityEntry | str, state: Any, attributes: dict[str, Any] | None = None) -> State:
-        """Set a state with the registry's naming and metadata applied."""
+        """Set a state with the registry's naming and metadata applied.
+
+        A live state (anything but ``unavailable``, which only carries the last attributes along) is the
+        device speaking: its feature flags, device class, unit and the attributes HA keeps as registry
+        ``capabilities`` are written to the registry as confirmed (``confirm_entity``). Registry values are
+        then filled in only when the device confirmed them or a person chose them (``device_class``,
+        ``icon``); a value only the import held never reaches a state.
+        """
         entry = self.entities.get(entity) if isinstance(entity, str) else entity
         entity_id = entity if isinstance(entity, str) else entity.entity_id
         attrs = dict(attributes or {})
         if entry is not None:
+            if str(state) != UNAVAILABLE:
+                self._confirm_from_state(entry, attrs)
             attrs.setdefault("friendly_name", self.friendly_name(entry))
-            if entry.device_class or entry.original_device_class:
-                attrs.setdefault("device_class", entry.device_class or entry.original_device_class)
-            if entry.unit_of_measurement:
-                attrs.setdefault("unit_of_measurement", entry.unit_of_measurement)
+            device_class = entry.device_class or entry.trusted("original_device_class")
+            if device_class:
+                attrs.setdefault("device_class", device_class)
+            unit = entry.trusted("unit_of_measurement")
+            if unit:
+                attrs.setdefault("unit_of_measurement", unit)
             if entry.icon:
                 attrs.setdefault("icon", entry.icon)
-            if entry.supported_features and "supported_features" not in attrs:
-                attrs["supported_features"] = entry.supported_features
+            features = entry.trusted("supported_features")
+            if features and "supported_features" not in attrs:
+                attrs["supported_features"] = features
+            caps = entry.trusted("capabilities") or {}
+            if entry.domain == "sensor" and caps.get("state_class") and "state_class" not in attrs:
+                attrs["state_class"] = caps["state_class"]
         return self.states.set(entity_id, state, attrs)
+
+    def _confirm_from_state(self, entry: EntityEntry, attrs: dict[str, Any]) -> None:
+        info: dict[str, Any] = {}
+        if "supported_features" in attrs:
+            with contextlib.suppress(TypeError, ValueError):  # a flag value that is not a number says nothing
+                info["supported_features"] = int(attrs["supported_features"] or 0)
+        if attrs.get("device_class") and attrs.get("device_class") != entry.device_class:
+            info["original_device_class"] = attrs["device_class"]
+        if attrs.get("unit_of_measurement"):
+            info["unit_of_measurement"] = attrs["unit_of_measurement"]
+        keys = CAPABILITY_ATTRIBUTES.get(entry.domain, ())
+        caps = {k: attrs[k] for k in keys if attrs.get(k) is not None}
+        if caps:
+            info["capabilities"] = caps
+        self.live.add(entry.entity_id)
+        self.confirm_entity(entry, _state=True, **info)
+
+    # -- confirmed registry information ---------------------------------------
+    def _save(self, kind: str, record: Any) -> None:
+        saver = getattr(self.store, f"save_{kind}", None) if self.store is not None else None
+        if callable(saver):
+            try:
+                saver(record)
+            except Exception:  # the registry in memory is right; the next confirmation saves it again
+                log.exception("saving the %s %s failed", kind, getattr(record, "entity_id", getattr(record, "id", "")))
+
+    def confirm_entity(self, entity: EntityEntry | str, *, _state: bool = False, **info: Any) -> EntityEntry | None:
+        """Write what the device reported about an entity into the registry, marked as the device's own.
+
+        ``capabilities`` merges into what the device confirmed before and replaces anything imported.
+        Unknown field names raise (a typo must not pass silently). Saved only when something changed.
+        """
+        ent = self.entities.get(entity) if isinstance(entity, str) else entity
+        if ent is None:
+            return None
+        unknown = sorted(set(info) - set(ENTITY_INFO_FIELDS))
+        if unknown:
+            raise ValueError(f"not entity info fields: {', '.join(unknown)} (known: {', '.join(ENTITY_INFO_FIELDS)})")
+        changed = False
+        confirmed = list(ent.confirmed)
+        for name, value in info.items():
+            if value is None:
+                continue
+            if name == "capabilities":
+                base = dict(ent.capabilities or {}) if name in confirmed else {}
+                value = {**base, **dict(value)}
+            if name == "supported_features":
+                value = int(value or 0)
+            if getattr(ent, name) != value:
+                setattr(ent, name, value)
+                changed = True
+            if name not in confirmed:
+                confirmed.append(name)
+                changed = True
+        if _state and STATE_CONFIRMED not in confirmed:
+            confirmed.append(STATE_CONFIRMED)
+            changed = True
+        if changed:
+            ent.confirmed = confirmed
+            self._save("entity", ent)
+        return ent
+
+    def confirm_device(self, device_id: str, **info: Any) -> DeviceEntry | None:
+        """Write what a device reported about itself into the registry, marked as the device's own.
+
+        ``connections`` and ``identifiers`` are merged (the device's pairs first): an imported pair stays as
+        a hint discovery matches on. Everything else overwrites. ``None`` values are skipped.
+        """
+        dev = self.devices.get(device_id)
+        if dev is None:
+            return None
+        unknown = sorted(set(info) - set(DEVICE_INFO_FIELDS))
+        if unknown:
+            raise ValueError(f"not device info fields: {', '.join(unknown)} (known: {', '.join(DEVICE_INFO_FIELDS)})")
+        changed = False
+        confirmed = list(dev.confirmed)
+        for name, value in info.items():
+            if value is None or value == "":
+                continue
+            if name in ("connections", "identifiers"):
+                pairs = [[str(a), str(b)] for a, b in value]
+                if not pairs:
+                    continue
+                merged = list(pairs)
+                for old in getattr(dev, name) or []:
+                    if [str(x) for x in old] not in merged:
+                        merged.append(list(old))
+                value = merged
+            else:
+                value = str(value)
+            if getattr(dev, name) != value:
+                setattr(dev, name, value)
+                changed = True
+            if name not in confirmed:
+                confirmed.append(name)
+                changed = True
+        if changed:
+            dev.confirmed = confirmed
+            self._save("device", dev)
+            self.bus.fire("device_registry_updated", {"action": "update", "device_id": dev.id})
+        return dev
 
     # -- services -----------------------------------------------------------
     def register_service(self, domain: str, service: str, handler: ServiceHandler,

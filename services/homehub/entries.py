@@ -21,7 +21,7 @@ import logging
 import re
 from typing import Any
 
-from services.homehub.core import ConfigEntry, DeviceEntry, HubError
+from services.homehub.core import Area, ConfigEntry, DeviceEntry, HubError
 from services.homehub.discovery import LABELS
 
 log = logging.getLogger("homehub.entries")
@@ -316,6 +316,100 @@ async def _remove_matter_node(runtime: Any, entry: ConfigEntry, dev: DeviceEntry
             raise EntryError(f"Could not remove it from the Matter fabric: {exc}. Make sure the Matter Server is up, "
                              "or remove it anyway (the device then needs a factory reset).", 502) from exc
         log.warning("removing Matter device %s without decommissioning: %s", dev.display_name, exc)
+
+
+# -- areas ------------------------------------------------------------------------------------
+# A hub that never imported anything starts with no areas; these make and keep them. The Home Assistant import
+# may also have brought some (names a person gave): they are edited the same way.
+
+def _area_view(area: Area) -> dict[str, Any]:
+    return {"area_id": area.area_id, "name": area.name, "aliases": list(area.aliases), "icon": area.icon,
+            "floor_id": area.floor_id}
+
+
+def _area_fields(body: dict[str, Any]) -> dict[str, Any]:
+    unknown = sorted(set(body) - {"name", "aliases", "icon", "floor_id"})
+    if unknown:
+        raise EntryError(f"An area cannot have {', '.join(unknown)}")
+    out: dict[str, Any] = {}
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise EntryError("An area needs a name")
+        out["name"] = name
+    if "aliases" in body:
+        aliases = body.get("aliases") or []
+        if not isinstance(aliases, list):
+            raise EntryError("aliases is a list of names")
+        out["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
+    for key in ("icon", "floor_id"):
+        if key in body:
+            out[key] = str(body[key]).strip() or None if body[key] is not None else None
+    return out
+
+
+def _name_taken(hub: Any, name: str, except_id: str | None = None) -> bool:
+    return any(a.name.lower() == name.lower() and a.area_id != except_id for a in hub.areas.values())
+
+
+def list_areas(runtime: Any) -> dict[str, Any]:
+    return {"areas": sorted((_area_view(a) for a in runtime.hub.areas.values()), key=lambda a: a["name"].lower())}
+
+
+def create_area(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
+    """``{"name", "aliases"?, "icon"?, "floor_id"?}``; the id is made from the name (``living_room``)."""
+    hub = runtime.hub
+    fields = _area_fields(body)
+    if "name" not in fields:
+        raise EntryError("An area needs a name")
+    if _name_taken(hub, fields["name"]):
+        raise EntryError(f"There is already an area named {fields['name']!r}", 409)
+    base = re.sub(r"[^a-z0-9]+", "_", fields["name"].lower()).strip("_") or "area"
+    area_id, n = base, 2
+    while area_id in hub.areas:
+        area_id, n = f"{base}_{n}", n + 1
+    area = Area(area_id=area_id, **fields)
+    runtime.store.save_area(area)
+    hub.areas[area_id] = area
+    hub.bus.fire("area_registry_updated", {"action": "create", "area_id": area_id})
+    return _area_view(area)
+
+
+def update_area(runtime: Any, area_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    hub = runtime.hub
+    area = hub.areas.get(area_id)
+    if area is None:
+        raise EntryError("No such area", 404)
+    fields = _area_fields(body)
+    if "name" in fields and _name_taken(hub, fields["name"], area_id):
+        raise EntryError(f"There is already an area named {fields['name']!r}", 409)
+    for key, value in fields.items():
+        setattr(area, key, value)
+    runtime.store.save_area(area)
+    hub.bus.fire("area_registry_updated", {"action": "update", "area_id": area_id})
+    return _area_view(area)
+
+
+def delete_area(runtime: Any, area_id: str) -> dict[str, Any]:
+    """Remove an area; its devices and entities keep working, with no area."""
+    hub = runtime.hub
+    if area_id not in hub.areas:
+        raise EntryError("No such area", 404)
+    devices, ents = [], []
+    for dev in hub.devices.values():
+        if dev.area_id == area_id:
+            dev.area_id = None
+            runtime.store.save_device(dev)
+            devices.append(dev.id)
+    for ent in hub.entities.values():
+        if ent.area_id == area_id:
+            ent.area_id = None
+            runtime.store.save_entity(ent)
+            ents.append(ent.entity_id)
+    hub.areas.pop(area_id, None)
+    _delete_row(runtime.store, "areas", "area_id", area_id)
+    hub.bus.fire("area_registry_updated", {"action": "remove", "area_id": area_id})
+    return {"status": "removed", "area_id": area_id, "devices": devices, "entities": ents}
 
 
 # -- the ESPHome Device Builder -----------------------------------------------------------

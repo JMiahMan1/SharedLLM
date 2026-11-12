@@ -10,6 +10,12 @@ pushes status from its own threads, which are handed to the event loop with
 States follow HA's cast integration: playing/paused/idle from the media
 session, ``off`` when no app (or only the backdrop) runs, ``on`` for an app
 without a media session, ``unavailable`` while the socket is down.
+
+The device describes itself: once connected, its Cast info (maker, model, cast
+UUID) is confirmed onto its device, and the feature flags are computed from its
+live status (volume control type, what the media session supports). Cast does
+not report a MAC or firmware version, so those stay unset (discovery's
+neighbour table supplies the MAC for matching).
 """
 from __future__ import annotations
 
@@ -127,6 +133,10 @@ class CastDriver(Driver):
             self.log.warning("cast %s (%s) could not connect: %s", key, getattr(info, "friendly_name", ""), exc)
             return
         self.casts[key] = cc
+        ent = self.wanted().get(key)
+        if ent is not None:
+            self.confirm_device(ent, manufacturer=getattr(info, "manufacturer", None) or None,
+                                model=getattr(info, "model_name", None) or None, identifiers=[["cast", key]])
         self.log.info("cast %s connected (%s at %s)", key, getattr(info, "friendly_name", ""), getattr(info, "host", ""))
         self.publish_key(key)
 

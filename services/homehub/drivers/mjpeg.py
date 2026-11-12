@@ -56,7 +56,13 @@ Optional, for the hub's own camera API (``/api/homehub/cameras``):
 
 Config (all in ``entry.options``, as HA stores it): ``mjpeg_url``,
 ``still_image_url`` (optional), ``username``, ``password``,
-``authentication`` (``basic`` or ``digest``) and ``verify_ssl``.
+``authentication`` (``basic`` or ``digest``) and ``verify_ssl``. Those are
+where and how to reach the camera, nothing more.
+
+**The protocol says nothing about the device.** An MJPEG stream is an HTTP
+response: no maker, model, firmware or MAC. The driver confirms only what it
+knows itself (a camera that gives stills and an MJPEG stream, published with
+every state), never the device fields HA had, which stay marked ``imported``.
 """
 from __future__ import annotations
 

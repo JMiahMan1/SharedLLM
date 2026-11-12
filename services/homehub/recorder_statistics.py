@@ -203,16 +203,18 @@ def targets_from_states(states: Iterable[Any], entities: dict[str, Any] | None =
     """Every entity with a state class HA compiles statistics for.
 
     The state's own ``state_class`` wins; otherwise the registry's
-    ``capabilities.state_class`` (HA keeps it there, and the importer copied
-    it), so a driver that does not publish the attribute still gets the
-    statistics HA kept for that sensor.
+    ``capabilities.state_class`` when the device confirmed it (a flow or the
+    driver wrote it; ``EntityEntry.trusted``). A value only the import carried
+    is not used: history HA kept stays, but new statistics follow what the
+    device says.
     """
     out = []
     for st in states:
         attrs = st.attributes or {}
         sc = attrs.get("state_class")
         if sc is None and entities is not None and (ent := entities.get(st.entity_id)) is not None:
-            sc = (ent.capabilities or {}).get("state_class")
+            trusted = getattr(ent, "trusted", None)
+            sc = ((trusted("capabilities") if callable(trusted) else None) or {}).get("state_class")
         if sc in STATE_CLASSES_MEAN or sc in STATE_CLASSES_SUM:
             out.append(Target(st.entity_id, sc, attrs.get("unit_of_measurement"), attrs.get("friendly_name")))
     return out

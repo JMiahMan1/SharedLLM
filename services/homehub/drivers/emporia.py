@@ -14,8 +14,12 @@ what the circuits do not account for.
 Numbers are the integration's: the API reports kWh used over the minute, which
 it turns into a rate with ``kWh * 60 * 1000`` (W). Some 1-minute sensors had
 their display unit changed to kW in HA, and HA then reported (and automations
-compared) kW; this driver publishes each entity in the unit its registry entry
-carries, so ``numeric_state ... above: 9`` on a kW sensor still means 9 kW.
+compared) kW; this driver publishes each entity in the display unit a person
+chose (``options.sensor.unit_of_measurement``, ``Driver.user_unit``), so
+``numeric_state ... above: 9`` on a kW sensor still means 9 kW. Without such a
+choice it is the native W / kWh, never the unit an imported registry entry
+carried. Each monitor's model and firmware are confirmed from the account's
+device list (``_confirm_devices``).
 Circuit readings are made positive unless the channel is bidirectional or is
 the mains/balance (the integration's ``fix_usage_sign``). The day sensor is
 re-read from the API every 15 minutes and, in between, adds each minute's kWh,
@@ -153,7 +157,17 @@ class EmporiaDriver(Driver):
             if "bidirectional" in str(getattr(ch, "type", "")).lower()
             or "merged" in str(getattr(ch, "type", "")).lower()
         }
+        self._confirm_devices()
         await self.refresh(force=True)
+
+    def _confirm_devices(self) -> None:
+        """Each monitor's model and firmware as the Emporia account reports them."""
+        for gid, dev in self.devices.items():
+            ident = ["emporia_vue", str(gid)]
+            for device in self.hub.devices.values():
+                if self.entry.entry_id in device.config_entries and ident in [list(x) for x in device.identifiers]:
+                    self.confirm_device(device, manufacturer="Emporia", model=getattr(dev, "model", None) or None,
+                                        sw_version=getattr(dev, "firmware", None) or None, identifiers=[ident])
 
     async def async_poll(self) -> None:
         await self.refresh()
@@ -261,7 +275,7 @@ class EmporiaDriver(Driver):
             if kwh is None:
                 return None, {}
             watts = kwh * 60 * 1000
-            unit = entity.unit_of_measurement or "W"
+            unit = self.user_unit(entity) if self.user_unit(entity) in ("W", "kW") else "W"
             value = watts / 1000 if unit == "kW" else watts
             return value, {"state_class": "measurement", "device_class": "power", "unit_of_measurement": unit}
         table = self.day if scale == DAY else self.month
@@ -271,7 +285,7 @@ class EmporiaDriver(Driver):
         if kwh is None:
             return None, {}
         reset = (self.day_reset if scale == DAY else self.month_resets).get(gid)
-        unit = entity.unit_of_measurement or "kWh"
+        unit = self.user_unit(entity) if self.user_unit(entity) in ("Wh", "kWh") else "kWh"
         value = kwh * 1000 if unit == "Wh" else kwh
         attrs = {"state_class": "total", "device_class": "energy", "unit_of_measurement": unit}
         if reset is not None:

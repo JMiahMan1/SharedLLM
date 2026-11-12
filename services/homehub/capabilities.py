@@ -17,6 +17,17 @@ Every answer is derived at the moment it is asked, from what the hub holds:
    apps). A driver may also define ``entity_abilities(entity) -> list[str]``,
    which is added as is.
 
+**Only what the device said counts.** State attributes are read only once a
+driver has published the entity's state (``EntityEntry.state_confirmed``), and
+registry fields (``supported_features``, ``capabilities``,
+``original_device_class``) only when a driver or the flow that probed the device
+confirmed them (``EntityEntry.trusted``). A value only the Home Assistant import
+supplied is never used for an ability: the entity then reports
+``source: "imported"``, ``confirmed: false`` and lists those fields under
+``imported_only``, and keeps only what its domain and its integration's protocol
+guarantee (a light turns on and off; a Cast player casts). Its abilities fill in
+the moment its driver connects.
+
 Nothing here names a device, an entity id or a room. A device added through
 discovery is in the index the moment its entities are registered and publish a
 state, with no restart: the index is computed from the live registry.
@@ -67,6 +78,7 @@ ABILITIES: dict[str, str] = {
     "notify": "takes notifications", "todo": "keeps a to-do list", "weather": "forecasts weather",
     "sense": "reports a reading", "detect": "reports on/off events", "track": "reports a location",
     "event": "fires events", "update": "installs firmware",
+    "converse": "starts a spoken conversation and listens for the answer",
 }
 
 # HA's feature flags, per domain (homeassistant.components.<domain>.const).
@@ -87,6 +99,7 @@ VACUUM = {"pause": 4, "stop": 8, "return_home": 16, "fan_speed": 32, "locate": 5
 SIREN = {"turn_on": 1, "turn_off": 2, "tones": 4, "volume": 8, "duration": 16}
 REMOTE = {"learn_command": 1, "activity": 4}
 CAMERA = {"on_off": 1, "stream": 2}
+ASSIST_SATELLITE = {"announce": 1, "converse": 2}  # AssistSatelliteEntityFeature: ANNOUNCE, START_CONVERSATION
 TODO = {"create": 1, "delete": 2, "update": 4, "move": 8}
 
 #: What an integration's protocol does beyond HA's flags (integration-level, like HA's manifests).
@@ -136,6 +149,7 @@ _ABILITY_SERVICES: dict[str, dict[str, list[str]]] = {
                "remote_command": ["send_command"]},
     "siren": {"power": ["turn_on", "turn_off", "toggle"]},
     "todo": {"todo": ["add_item", "update_item", "remove_item", "remove_completed_items"]},
+    "assist_satellite": {"announce": ["announce"], "converse": ["start_conversation"]},
 }
 
 
@@ -143,10 +157,18 @@ def _flags(features: int, table: dict[str, int]) -> set[str]:
     return {name for name, bit in table.items() if features & bit}
 
 
+def _trusted(ent: Any, name: str) -> Any:
+    """A registry info field the device confirmed; ``None`` for one only the import supplied."""
+    if ent is None:
+        return None
+    trusted = getattr(ent, "trusted", None)
+    return trusted(name) if callable(trusted) else None
+
+
 def _features(attrs: dict[str, Any], ent: Any) -> int:
     raw = attrs.get("supported_features")
-    if raw is None and ent is not None:
-        raw = getattr(ent, "supported_features", 0)
+    if raw is None:
+        raw = _trusted(ent, "supported_features")
     try:
         return int(raw or 0)
     except (TypeError, ValueError):
@@ -172,7 +194,10 @@ def _protocol(ent: Any, entry: Any) -> dict[str, Any]:
         if m:
             out["matter"] = {"node_id": int(m.group(1), 16), "endpoint": int(m.group(2)), "key": m.group(3)}
     if ent.capabilities:
-        out["registry"] = ent.capabilities
+        if _trusted(ent, "capabilities"):
+            out["registry"] = ent.capabilities
+        else:
+            out["registry_imported"] = ent.capabilities  # shown, never used for an ability
     return out
 
 
@@ -202,14 +227,18 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
     """``{entity_id, domain, platform, abilities, services, details, protocol, available}`` for one entity."""
     st = hub.states.get(entity_id)
     ent = hub.entities.get(entity_id)
-    attrs = dict(st.attributes) if st is not None else {}
+    # Hub-made states with no registry record (persons, zones) are the hub's own. A registered entity's
+    # attributes count once a driver has published it; before that they were restored from the import.
+    state_confirmed = ent is None or bool(getattr(ent, "state_confirmed", False))
+    attrs = dict(st.attributes) if st is not None and state_confirmed else {}
     domain = entity_id.split(".", 1)[0]
     platform = ent.platform if ent is not None else None
     entry = hub.config_entries.get(ent.config_entry_id or "") if ent is not None else None
     features = _features(attrs, ent)
     abilities: set[str] = set()
     details: dict[str, Any] = {}
-    device_class = attrs.get("device_class") or (ent.device_class or ent.original_device_class if ent else None)
+    device_class = attrs.get("device_class") or (
+        (ent.device_class or _trusted(ent, "original_device_class")) if ent is not None else None)
     if device_class:
         details["device_class"] = device_class
 
@@ -299,12 +328,12 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
     elif domain in ("number", "input_number"):
         abilities.add("set_value")
         for key in ("min", "max", "step", "unit_of_measurement", "mode"):
-            value = attrs.get(key, (ent.capabilities or {}).get(key) if ent is not None else None)
+            value = attrs.get(key, (_trusted(ent, "capabilities") or {}).get(key))
             if value is not None:
                 details[key] = value
     elif domain in ("select", "input_select"):
         abilities.add("select_option")
-        options = attrs.get("options") or ((ent.capabilities or {}).get("options") if ent is not None else None)
+        options = attrs.get("options") or (_trusted(ent, "capabilities") or {}).get("options")
         if options:
             details["options"] = list(options)
     elif domain == "text":
@@ -331,6 +360,12 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
             details["event_types"] = list(attrs["event_types"])
     elif domain == "update":
         abilities.add("update")
+    elif domain == "assist_satellite":
+        # The device's flags when it published them; the driver's ``entity_abilities`` adds what it serves.
+        f = _flags(features, ASSIST_SATELLITE)
+        abilities |= f
+        if "announce" in f:
+            abilities.add("tts")
 
     abilities |= set((PLATFORM_ABILITIES.get(platform or "") or {}).get(domain, []))
     driver = hub.drivers.get(ent.config_entry_id or "") if ent is not None else None
@@ -340,18 +375,81 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
             abilities |= {str(a) for a in hook(ent) or []}
         except Exception:  # a driver's own extras must never hide the rest, but are reported
             log.exception("%s.entity_abilities(%s) failed", type(driver).__name__, entity_id)
+    if domain == "assist_satellite" and "announce" in abilities:
+        abilities.add("tts")
+    area_id, area_source = hub.entity_area_id(entity_id), "registry"
+    if area_id is None and ent is not None:
+        area_id = inherited_area(hub, ent)
+        area_source = "inherited" if area_id is not None else None
+    elif area_id is None:
+        area_source = None
     services = sorted({f"{domain}.{s}" for s in _ALWAYS.get(domain, [])}
                       | {f"{domain}.{s}" for a in abilities for s in _ABILITY_SERVICES.get(domain, {}).get(a, [])})
+    imported_only = sorted(f for f, src in (ent.info_source().items() if ent is not None else []) if src == "imported")
+    if ent is not None and st is not None and not state_confirmed:
+        imported_only.append("state_attributes")
+    confirmed = state_confirmed or (ent is not None and any(
+        f in ent.confirmed for f in ("supported_features", "capabilities", "original_device_class")))
     return {
         "entity_id": entity_id, "domain": domain, "platform": platform,
         "integration": entry.domain if entry is not None else platform,
         "device_id": ent.device_id if ent is not None else None,
-        "area_id": hub.entity_area_id(entity_id),
+        "area_id": area_id, "area_source": area_source,
         "name": st.name if st is not None else (hub.friendly_name(ent) if ent is not None else entity_id),
         "available": st is not None and st.state != UNAVAILABLE,
         "abilities": sorted(abilities), "services": services, "details": details,
         "protocol": _protocol(ent, entry),
+        # Where the abilities came from: the device (a driver or the flow that probed it), or nothing but
+        # the import (domain and protocol abilities only until the driver connects).
+        "confirmed": bool(confirmed), "source": "device" if confirmed else "imported",
+        "imported_only": imported_only,
     }
+
+
+#: Integrations whose players drive another device's player (an MA player plays through a Cast device, a
+#: Roku, a DLNA renderer...): one with no area of its own reports the area of what it drives.
+WRAPPING_PLATFORMS = {"music_assistant"}
+
+
+def inherited_area(hub: Any, ent: Any) -> str | None:
+    """The area of the player a wrapping player drives, never written into the registry.
+
+    Found through what the hub holds about both: the wrapped entity's id or unique_id as the wrapper's
+    player id (MA names a player by the entity id or by the protocol id, such as a Cast UUID), another
+    entity on the same device, or another device sharing a connection (the MAC MA reports for the player).
+    """
+    if ent is None or ent.platform not in WRAPPING_PLATFORMS:
+        return None
+    uid = str(ent.unique_id or "").lower()
+    st = hub.states.get(ent.entity_id)
+    player_id = str((st.attributes.get("mass_player_id") if st is not None else None) or uid).lower()
+    for other in hub.entities.values():
+        if other.entity_id == ent.entity_id or other.disabled_by or other.platform in WRAPPING_PLATFORMS:
+            continue
+        if other.entity_id.lower() == player_id or (other.unique_id and str(other.unique_id).lower() == player_id):
+            found = hub.entity_area_id(other.entity_id)
+            if found:
+                return found
+    dev = hub.devices.get(ent.device_id or "")
+    if dev is None:
+        return None
+    for eid in hub.device_entities(dev.id):
+        if eid != ent.entity_id and (found := hub.entity_area_id(eid)):
+            return found
+    mine = {(str(k), str(v).lower()) for k, v in (dev.connections or []) if k in ("mac", "upnp")}
+    if mine:
+        for other_dev in hub.devices.values():
+            if other_dev.id == dev.id or not other_dev.area_id:
+                continue
+            if mine & {(str(k), str(v).lower()) for k, v in (other_dev.connections or [])}:
+                return other_dev.area_id
+    return None
+
+
+def areas(hub: Any) -> list[dict[str, Any]]:
+    """The live area registry, as the capability API serves it."""
+    return sorted(({"area_id": a.area_id, "name": a.name, "aliases": list(a.aliases or [])}
+                   for a in hub.areas.values()), key=lambda a: a["name"].lower())
 
 
 def abilities_of(hub: Any, entity_id: str) -> list[str]:
@@ -386,9 +484,9 @@ def find(hub: Any, abilities: list[str] | None = None, *, area: str | None = Non
             continue
         if platform and (ent is None or ent.platform != platform):
             continue
-        if area_id and hub.entity_area_id(eid) != area_id:
-            continue
         cap = entity_capabilities(hub, eid)
+        if area_id and cap["area_id"] != area_id:
+            continue
         if want - set(cap["abilities"]):
             continue
         if available_only and not cap["available"]:
@@ -407,6 +505,25 @@ def device_capabilities(hub: Any, device_id: str) -> dict[str, Any]:
         for a in abilities_of(hub, eid):
             by_ability.setdefault(a, []).append(eid)
     return {"abilities": sorted(by_ability), "by_ability": by_ability}
+
+
+def provenance(hub: Any) -> dict[str, Any]:
+    """How much of the registry the devices confirmed, and what only the import holds."""
+    entities = [e for e in hub.entities.values() if not e.disabled_by]
+    state = sum(1 for e in entities if e.state_confirmed)
+    caps = [e for e in entities if any(f in e.confirmed for f in ("supported_features", "capabilities",
+                                                                    "original_device_class"))]
+    only_imported = [e.entity_id for e in entities if not e.state_confirmed and not any(
+        f in e.confirmed for f in ("supported_features", "capabilities", "original_device_class"))]
+    devices = list(hub.devices.values())
+    dev_confirmed = [d for d in devices if d.confirmed]
+    dev_imported = [d.id for d in devices if not d.confirmed and d.info_source()]
+    return {
+        "entities": len(entities), "entities_state_confirmed": state, "entities_info_confirmed": len(caps),
+        "entities_imported_only": len(only_imported), "imported_only_entities": sorted(only_imported),
+        "devices": len(devices), "devices_confirmed": len(dev_confirmed), "devices_imported_only": len(dev_imported),
+        "imported_only_devices": sorted(dev_imported),
+    }
 
 
 def summary(hub: Any) -> dict[str, int]:

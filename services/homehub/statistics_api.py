@@ -99,7 +99,7 @@ def related_power(hub: Any, statistic_ids: list[str]) -> dict[str, str | None]:
                     continue
                 st = hub.states.get(other.entity_id)
                 dc = (st.attributes.get("device_class") if st else None) or other.device_class \
-                    or other.original_device_class
+                    or other.trusted("original_device_class")
                 if other.domain == "sensor" and dc == "power":
                     candidates.append(other.entity_id)
             # A meter with several circuits on one device: the power sensor named most like the energy one.

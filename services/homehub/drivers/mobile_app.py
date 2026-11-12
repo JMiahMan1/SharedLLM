@@ -579,8 +579,9 @@ class MobileAppDriver(Driver):
 
         for ent in self.entities:
             if ent.domain == "notify":
-                cur = self.hub.states.get(ent.entity_id)
-                self.publish(ent, utcnow().isoformat(), dict(cur.attributes) if cur else {"supported_features": 1})
+                # The notify service this hub serves sends messages (HA's NotifyEntityFeature.MESSAGE = 1);
+                # a restored state's attributes are not carried into a live one.
+                self.publish(ent, utcnow().isoformat(), {"supported_features": 1})
 
     async def async_poll(self) -> None:
         user = self.jarvis_user()

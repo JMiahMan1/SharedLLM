@@ -226,7 +226,12 @@ async def homekit_pair(finding: dict[str, Any], code: str, alias: str) -> tuple[
 
     Built from the mDNS record discovery already holds, so pairing needs no
     second browse (and works where multicast does not reach the container).
+    A Thread accessory (``_hap._udp``) pairs over CoAP instead (``homekit_thread.py``).
     """
+    if (finding.get("props") or {}).get("transport") == "thread":
+        from services.homehub import homekit_thread
+
+        return await homekit_thread.pair(finding, code, alias)
     from aiohomekit.characteristic_cache import CharacteristicCacheMemory
     from aiohomekit.controller.ip.controller import IpController
     from aiohomekit.controller.ip.discovery import IpDiscovery
@@ -271,6 +276,8 @@ async def homekit_pair(finding: dict[str, Any], code: str, alias: str) -> tuple[
 
 
 def _homekit_failure(exc: Exception) -> Exception:
+    if isinstance(exc, FlowError):  # already says what is wrong (a Thread accessory with no route, say)
+        return exc
     name = type(exc).__name__
     if name in ("AuthenticationError", "MalformedPinError", "InvalidAuthTagError"):
         return NeedsInput([HOMEKIT_CODE], "Enter the accessory's HomeKit setup code.", "That code was not accepted.")

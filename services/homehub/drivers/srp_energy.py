@@ -282,5 +282,5 @@ class SrpEnergyDriver(Driver):
         for ent in self.entities:
             if ent.unique_id.endswith("_total_usage"):
                 self.publish(ent, value, {"state_class": "total_increasing",
-                                          "unit_of_measurement": ent.unit_of_measurement or "kWh",
+                                          "unit_of_measurement": "kWh",
                                           "device_class": "energy"})

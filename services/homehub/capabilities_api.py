@@ -2,9 +2,10 @@
 
 | Route | What |
 |---|---|
-| ``GET /api/homehub/capabilities`` | ``{"abilities": {ability: meaning}, "counts": {ability: n}, "entities": [...]}``. Filters: ``ability`` (repeatable; all must hold), ``area`` (id or name), ``domain``, ``device_id``, ``platform``, ``available=1`` |
+| ``GET /api/homehub/capabilities`` | ``{"abilities": {ability: meaning}, "counts": {ability: n}, "areas": [{area_id, name, aliases}], "entities": [...]}``. Filters: ``ability`` (repeatable; all must hold), ``area`` (id or name), ``domain``, ``device_id``, ``platform``, ``available=1`` |
 | ``GET /api/homehub/capabilities/{entity_id}`` | One entity's abilities, services, details and protocol |
 | ``GET /api/homehub/capabilities/devices/{device_id}`` | A device's abilities and which entity provides each |
+| ``GET /api/homehub/capabilities/provenance`` | How many entities and devices the devices themselves confirmed, and which hold only imported data |
 
 Any token the hub accepts (an HA token or the internal secret): the answers
 name entities and what they can do, as ``/api/states`` already does. Who may
@@ -48,7 +49,13 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
             return JSONResponse({"message": str(exc)}, status_code=404)
         filtered = any(q.get(k) for k in ("ability", "area", "domain", "device_id", "platform", "available"))
         return {"abilities": capabilities.ABILITIES,
-                "counts": capabilities.summary(hub) if not filtered else None, "entities": found}
+                "counts": capabilities.summary(hub) if not filtered else None,
+                "areas": capabilities.areas(hub), "entities": found}
+
+    @router.get("/api/homehub/capabilities/provenance")
+    async def provenance(request: Request) -> Any:
+        signed_in(request)
+        return capabilities.provenance(hub)
 
     @router.get("/api/homehub/capabilities/devices/{device_id}")
     async def device(device_id: str, request: Request) -> Any:

@@ -166,6 +166,9 @@ def test_targets_are_the_states_with_a_state_class():
     assert [t.entity_id for t in targets_from_states(hub.states.all())] == ["sensor.a", "sensor.c"]
     hub.entities["sensor.b"] = EntityEntry(entity_id="sensor.b", platform="x",
                                            capabilities={"state_class": "measurement"})
+    # Only the import said so: not a reason to compile new statistics.
+    assert [t.entity_id for t in targets_from_states(hub.states.all(), hub.entities)] == ["sensor.a", "sensor.c"]
+    hub.entities["sensor.b"].confirmed = ["capabilities"]  # the device (a driver or its flow) confirmed it
     assert [t.entity_id for t in targets_from_states(hub.states.all(), hub.entities)] == \
         ["sensor.a", "sensor.b", "sensor.c"]
 

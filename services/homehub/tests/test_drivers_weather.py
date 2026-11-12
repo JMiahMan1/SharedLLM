@@ -213,7 +213,8 @@ async def test_nws_forecasts(monkeypatch):
 
 async def test_nws_sensor_honours_a_metric_unit_override(monkeypatch):
     hub, entry = nws_hub()
-    hub.entities["sensor.outside_temperature"].unit_of_measurement = "°C"
+    # A person's display unit (HA keeps it in options.sensor); the registry's own unit field is ignored.
+    hub.entities["sensor.outside_temperature"].options = {"sensor": {"unit_of_measurement": "°C"}}
     drv = weather.NWSDriver(hub, entry)
     monkeypatch.setattr(drv, "_get_json", nws_routes([]))
     await drv.async_setup()

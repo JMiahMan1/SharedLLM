@@ -27,6 +27,16 @@ Commands are sent with the names and payload keys Home Assistant's own Matter
 integration sends (the chip cluster class names, ``MoveToLevelWithOnOff`` with
 ``level``/``transitionTime``/...). The matter.js server accepts them unchanged,
 which is what "drop-in replacement" means for HA.
+
+**What a node is and can do comes from the node.** Each time a node's data
+arrives, its BasicInformation (maker, product, firmware, hardware version,
+serial) is confirmed onto its device (``confirm_device``) and every entity's
+device class, unit, state class, colour modes, colour-temperature range and
+ranges are recomputed from the node's own clusters (``node_entity_specs``, the
+same function that registers a newly commissioned node) and confirmed onto the
+registry. Registry values the import carried are never read for this: an
+imported entity whose kind ``node_entity_specs`` does not model gets no ranges
+or classes until it does, rather than Home Assistant's.
 """
 from __future__ import annotations
 
@@ -298,6 +308,8 @@ class MatterDriver(Driver):
         self.nodes: dict[int, dict[str, Any]] = {}
         self._refs: dict[str, MatterRef] = {}
         self._by_node: dict[int, list[EntityEntry]] = {}
+        #: node_id -> {unique_id: spec}, from the node's own clusters (``node_entity_specs``).
+        self._specs: dict[int, dict[str, dict[str, Any]]] = {}
         self._index_entities()
 
     # -- configuration -----------------------------------------------------
@@ -394,6 +406,7 @@ class MatterDriver(Driver):
         self._reader = asyncio.create_task(self._read(ws), name="matter-reader")
         nodes = await self._send("start_listening", timeout=LISTEN_TIMEOUT)
         self.nodes = {int(n["node_id"]): n for n in nodes or [] if isinstance(n, dict)}
+        self._specs.clear()
         self.log.info("Matter Server %s: fabric %s, schema %s, %d nodes", self.url,
                       f"{int(got):016X}" if got is not None else "?", self.server_info.get("schema_version"),
                       len(self.nodes))
@@ -497,6 +510,7 @@ class MatterDriver(Driver):
         elif event in ("node_added", "node_updated") and isinstance(data, dict):
             node_id = int(data["node_id"])
             self.nodes[node_id] = data
+            self._specs.pop(node_id, None)
             self._publish_node(node_id)
         elif event == "node_removed":
             node_id = int(data)
@@ -558,8 +572,49 @@ class MatterDriver(Driver):
         for node_id in list(self._by_node):
             self._publish_node(node_id)
 
+    def _node_specs(self, node_id: int) -> dict[str, dict[str, Any]]:
+        """``unique_id -> spec`` for one node, computed from its clusters (cached until the node changes)."""
+        cached = self._specs.get(node_id)
+        if cached is not None:
+            return cached
+        node = self.nodes.get(node_id)
+        ents = self._by_node.get(node_id) or []
+        if node is None or not ents:
+            return {}
+        fabric = self._refs[ents[0].entity_id].fabric
+        specs = {str(sp["unique_id"]).upper(): sp for sp in node_entity_specs(fabric, node)}
+        self._specs[node_id] = specs
+        return specs
+
+    def _spec(self, entity: EntityEntry, ref: MatterRef) -> dict[str, Any]:
+        return self._node_specs(ref.node_id).get(str(entity.unique_id).upper()) or {}
+
+    def _confirm_node(self, node_id: int, node: dict[str, Any]) -> None:
+        """What the node says about itself and its entities, written to the registry as confirmed."""
+        ents = self._by_node.get(node_id) or []
+        if not ents:
+            return
+        fabric = self._refs[ents[0].entity_id].fabric
+        info = node_device_info(fabric, node)
+        info.pop("name", None)
+        for dev_id in {e.device_id for e in ents if e.device_id}:
+            self.confirm_device(dev_id, **info)
+        for entity in ents:
+            spec = self._spec(entity, self._refs[entity.entity_id])
+            fields = {k: spec[k] for k in ("original_device_class", "unit_of_measurement", "capabilities",
+                                           "supported_features", "entity_category") if k in spec}
+            if spec.get("name"):
+                fields["original_name"] = spec["name"]
+            if fields:
+                self.confirm_entity(entity, **fields)
+
     def _publish_node(self, node_id: int) -> None:
         node = self.nodes.get(node_id)
+        if node is not None and node.get("available", False):
+            try:
+                self._confirm_node(node_id, node)
+            except Exception:
+                self.log.exception("reading node %s's own description failed", node_id)
         for entity in self._by_node.get(node_id, ()):
             if node is None or not node.get("available", False):
                 cur = self.hub.states.get(entity.entity_id)
@@ -572,17 +627,20 @@ class MatterDriver(Driver):
 
     def _publish_entity(self, entity: EntityEntry, ref: MatterRef, a: dict[str, Any]) -> None:
         domain = entity.domain
+        spec = self._spec(entity, ref)
         if domain == "light":
             state, attrs = self._light_state(entity, ref, a)
             self.publish(entity, state, attrs)
         elif domain == "number":
             to_ha = NUMBER_CONVERTERS.get(ref.key, (lambda v: v, None))[0]
             value = to_ha(a.get(ref.path()))
-            caps = entity.capabilities or {}
+            caps = spec.get("capabilities") or {}
             attrs = {k: caps[k] for k in ("min", "max", "step", "mode") if k in caps}
+            if spec.get("unit_of_measurement"):
+                attrs["unit_of_measurement"] = spec["unit_of_measurement"]
             self.publish(entity, UNKNOWN if value is None else _num_str(value), attrs)
         elif domain == "select":
-            options = list((entity.capabilities or {}).get("options") or STARTUP_ON_OFF.values())
+            options = list((spec.get("capabilities") or {}).get("options") or STARTUP_ON_OFF.values())
             raw = a.get(ref.path())
             value = STARTUP_ON_OFF.get(raw) if ref.key == "MatterStartUpOnOff" else raw
             self.publish(entity, UNKNOWN if value is None else str(value), {"options": options})
@@ -590,7 +648,7 @@ class MatterDriver(Driver):
             # A button's state is when it was last pressed; keep that across reconnects.
             cur = self.hub.states.get(entity.entity_id)
             keep = cur.state if cur is not None and cur.state not in (UNAVAILABLE, "") else UNKNOWN
-            self.publish(entity, keep, {})
+            self.publish(entity, keep, _classed(spec))
         elif domain == "update":
             version = a.get(f"{ref.endpoint}/{BASIC_INFORMATION}/10") or a.get(ref.path())
             self.publish(entity, "off", {
@@ -598,24 +656,27 @@ class MatterDriver(Driver):
                 "latest_version": None if version is None else str(version),
                 "auto_update": False, "in_progress": False, "skipped_version": None,
                 "release_summary": None, "release_url": None, "title": None,
-                "supported_features": entity.supported_features or UPDATE_FEATURES,
+                "supported_features": UPDATE_FEATURES,
             })
         elif domain == "sensor":
             self.publish(entity, *self._sensor_state(entity, ref, a))
         elif domain == "switch":
             raw = a.get(ref.path())
-            self.publish(entity, UNKNOWN if raw is None else ("on" if raw else "off"), {})
+            self.publish(entity, UNKNOWN if raw is None else ("on" if raw else "off"), _classed(spec))
         elif domain == "binary_sensor":
             conv = BINARY_SENSOR_CONVERTERS.get((ref.cluster, ref.attribute), lambda v: None if v is None else bool(v))
             value = conv(a.get(ref.path()))
-            self.publish(entity, UNKNOWN if value is None else ("on" if value else "off"), {})
+            self.publish(entity, UNKNOWN if value is None else ("on" if value else "off"), _classed(spec))
         else:
             raw = a.get(ref.path())
             self.publish(entity, UNKNOWN if raw is None else str(raw), {})
 
     def _sensor_state(self, entity: EntityEntry, ref: MatterRef, a: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        caps = entity.capabilities or {}
-        attrs: dict[str, Any] = {}
+        spec = self._spec(entity, ref)
+        caps = spec.get("capabilities") or {}
+        attrs: dict[str, Any] = _classed(spec)
+        if spec.get("unit_of_measurement"):
+            attrs["unit_of_measurement"] = spec["unit_of_measurement"]
         if caps.get("state_class"):
             attrs["state_class"] = caps["state_class"]
         raw = a.get(ref.path())
@@ -698,10 +759,14 @@ class MatterDriver(Driver):
                 return ["brightness"]
             if any(k.startswith(f"{ep}/{ON_OFF}/") for k in a):
                 return ["onoff"]
-        return list((entity.capabilities or {}).get("supported_color_modes") or ["onoff"])
+        # The node did not say: the modes its clusters imply (never an imported registry value).
+        ref = self._refs.get(entity.entity_id)
+        spec = self._spec(entity, ref) if ref is not None else {}
+        return list((spec.get("capabilities") or {}).get("supported_color_modes") or ["onoff"])
 
     def _kelvin_range(self, entity: EntityEntry, ep: int, a: dict[str, Any]) -> tuple[int, int]:
-        caps = entity.capabilities or {}
+        ref = self._refs.get(entity.entity_id)
+        caps = (self._spec(entity, ref) if ref is not None else {}).get("capabilities") or {}
         lo_m = a.get(f"{ep}/{COLOR_CONTROL}/16395")
         hi_m = a.get(f"{ep}/{COLOR_CONTROL}/16396")
         min_k = mired_to_kelvin(hi_m) if hi_m else caps.get("min_color_temp_kelvin") or mired_to_kelvin(DEFAULT_MAX_MIREDS)
@@ -838,7 +903,7 @@ class MatterDriver(Driver):
         if "value" not in data:
             raise HubError("number.set_value needs a value")
         value = float(data["value"])
-        caps = entity.capabilities or {}
+        caps = self._spec(entity, ref).get("capabilities") or {}
         if ("min" in caps and value < caps["min"]) or ("max" in caps and value > caps["max"]):
             raise HubError(f"{value} is outside {caps.get('min')}..{caps.get('max')} for {entity.entity_id}")
         to_device = NUMBER_CONVERTERS.get(ref.key, (None, lambda v: int(v) if float(v).is_integer() else v))[1]
@@ -901,6 +966,11 @@ class MatterDriver(Driver):
             self._publish_all()
         else:
             self._publish_node(int(node_id))
+
+
+def _classed(spec: dict[str, Any]) -> dict[str, Any]:
+    """The device class the node's clusters give an entity, as a state attribute."""
+    return {"device_class": spec["original_device_class"]} if spec.get("original_device_class") else {}
 
 
 def _tenths(seconds: Any) -> int:

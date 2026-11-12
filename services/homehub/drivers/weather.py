@@ -504,8 +504,8 @@ class NWSDriver(WeatherDriver):
             if kind is None:
                 continue
             value, _code = obs_value(self.observation, key)
-            unit = ent.unit_of_measurement or (ent.options.get("sensor") or {}).get("unit_of_measurement") \
-                or self.default_unit(kind)
+            # A person's display unit, else the station's default for the household's unit system.
+            unit = self.user_unit(ent) or self.default_unit(kind)
             attrs: dict[str, Any] = {"unit_of_measurement": unit, "state_class": "measurement",
                                      "attribution": NWS_ATTRIBUTION}
             if kind in DEVICE_CLASS:

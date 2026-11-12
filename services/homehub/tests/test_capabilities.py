@@ -30,7 +30,7 @@ def hub():
 
     def entity(eid, platform, entry_id, device_id=None, state="on", **attrs):
         h.entities[eid] = EntityEntry(eid, platform, f"uid-{eid}", entry_id, device_id)
-        h.states.set(eid, state, attrs)
+        h.publish(eid, state, attrs)  # what a driver does: the device's own attributes
 
     h.config_entries["c1"] = ConfigEntry("c1", "cast", "Cast")
     h.config_entries["w1"] = ConfigEntry("w1", "wiz", "Lamp")
@@ -113,7 +113,7 @@ def test_find_answers_which_devices_can_do_something(hub):
 def test_a_new_device_is_in_the_index_as_soon_as_it_is_registered(hub):
     assert caps.find(hub, ["lock"]) == []
     hub.entities["lock.side_door"] = EntityEntry("lock.side_door", "matter", "u", None)
-    hub.states.set("lock.side_door", "locked", {"supported_features": 1})
+    hub.publish("lock.side_door", "locked", {"supported_features": 1})
     found = caps.find(hub, ["lock"])
     assert [c["entity_id"] for c in found] == ["lock.side_door"] and "open_door" in found[0]["abilities"]
     hub.entities["lock.side_door"].disabled_by = "user"
@@ -141,3 +141,116 @@ def test_the_api(hub):
     assert client.get("/api/homehub/capabilities/light.none", headers=H).status_code == 404
     dev = client.get("/api/homehub/capabilities/devices/d-speaker", headers=H).json()
     assert "announce" in dev["abilities"]
+
+
+def test_imported_registry_values_and_restored_attributes_are_never_abilities(hub):
+    """What only the Home Assistant import said is shown as imported, never trusted, until the device says it."""
+    hub.config_entries["c2"] = ConfigEntry("c2", "cast", "Cast 2")
+    hub.entities["media_player.attic"] = EntityEntry(
+        "media_player.attic", "cast", "uid-attic", "c2", supported_features=MEDIA_BASIC,
+        original_device_class="speaker", capabilities={"source_list": ["Radio"]})
+    # A last state restored from the import (the runtime restores without publishing).
+    hub.states.set("media_player.attic", "idle", {"supported_features": MEDIA_BASIC, "source_list": ["Radio"]})
+    cap = caps.entity_capabilities(hub, "media_player.attic")
+    assert cap["confirmed"] is False and cap["source"] == "imported"
+    assert "play_media" not in cap["abilities"] and "volume" not in cap["abilities"]
+    assert set(cap["abilities"]) == {"cast", "show_url", "tts"}  # the protocol's own, from the integration
+    assert {"supported_features", "capabilities", "original_device_class", "state_attributes"} <= set(
+        cap["imported_only"])
+    assert "registry" not in cap["protocol"] and cap["protocol"]["registry_imported"] == {"source_list": ["Radio"]}
+    assert caps.provenance(hub)["imported_only_entities"] == ["media_player.attic"]
+    # The registry fill never copies an imported value into a published state either.
+    hub.publish("media_player.attic", "idle", {})
+    assert "supported_features" not in hub.states.get("media_player.attic").attributes
+    # The driver connects and the device reports its own features: now they count and are marked.
+    hub.publish("media_player.attic", "idle", {"supported_features": 512 | 4})
+    cap = caps.entity_capabilities(hub, "media_player.attic")
+    assert cap["confirmed"] is True and {"play_media", "volume"} <= set(cap["abilities"])
+    assert "pause" not in cap["abilities"]
+    ent = hub.entities["media_player.attic"]
+    assert ent.supported_features == 512 | 4 and ent.info_source()["supported_features"] == "device"
+    assert ent.info_source()["original_device_class"] == "imported"
+
+
+def test_the_api_lists_the_live_areas(hub):
+    hub.areas["den"].aliases = ["Family room"]
+    rt = Runtime(hub, SimpleNamespace(get_kv=lambda *a, **k: None))
+    client = TestClient(build_app(rt, Auth(hub, SECRET)))
+    body = client.get("/api/homehub/capabilities", headers=H).json()
+    assert body["areas"] == [{"area_id": "den", "name": "Den", "aliases": ["Family room"]},
+                             {"area_id": "porch", "name": "Porch", "aliases": []}]
+    hub.areas["attic"] = Area("attic", "Attic")  # added at runtime: in the next answer, no restart
+    names = [a["name"] for a in client.get("/api/homehub/capabilities?ability=dim", headers=H).json()["areas"]]
+    assert names == ["Attic", "Den", "Porch"]
+
+
+def test_a_voice_satellite_announces_from_its_flags_or_its_driver(hub):
+    hub.config_entries["v1"] = ConfigEntry("v1", "esphome", "Voice")
+    hub.entities["assist_satellite.hall"] = EntityEntry("assist_satellite.hall", "esphome", "u-sat", "v1")
+    # Nothing published and no driver: no ability is claimed.
+    assert caps.entity_capabilities(hub, "assist_satellite.hall")["abilities"] == []
+    # The satellite's own published flags: announce (1) and start conversation (2).
+    hub.publish("assist_satellite.hall", "idle", {"supported_features": 1 | 2})
+    cap = caps.entity_capabilities(hub, "assist_satellite.hall")
+    assert {"announce", "converse", "tts"} <= set(cap["abilities"])
+    assert "assist_satellite.announce" in cap["services"] and "assist_satellite.start_conversation" in cap["services"]
+    assert [c["entity_id"] for c in caps.find(hub, ["announce"], domain="assist_satellite")] == [
+        "assist_satellite.hall"]
+
+
+def test_an_esphome_satellite_announces_when_the_node_says_so_and_never_converses():
+    from aioesphomeapi import DeviceInfo, VoiceAssistantFeature
+
+    from services.homehub.drivers.esphome import ESPHomeDriver
+
+    h = Hub()
+    entry = ConfigEntry("v2", "esphome", "Voice", data={"host": "192.0.2.61", "device_name": "voice-pe"})
+    h.config_entries["v2"] = entry
+    h.entities["assist_satellite.kitchen"] = EntityEntry("assist_satellite.kitchen", "esphome",
+                                                         "02:00:00:00:00:61-assist_satellite", "v2")
+    drv = ESPHomeDriver(h, entry)
+    h.drivers["v2"] = drv
+    assert caps.entity_capabilities(h, "assist_satellite.kitchen")["abilities"] == []
+    flags = int(VoiceAssistantFeature.VOICE_ASSISTANT | VoiceAssistantFeature.ANNOUNCE
+                | VoiceAssistantFeature.START_CONVERSATION)
+    drv._device_info = DeviceInfo(name="voice-pe", voice_assistant_feature_flags=flags)
+    abilities = caps.entity_capabilities(h, "assist_satellite.kitchen")["abilities"]
+    assert "announce" in abilities and "tts" in abilities and "converse" not in abilities
+    drv._device_info = DeviceInfo(name="voice-pe", voice_assistant_feature_flags=int(
+        VoiceAssistantFeature.VOICE_ASSISTANT))
+    assert caps.entity_capabilities(h, "assist_satellite.kitchen")["abilities"] == []
+
+
+def test_a_music_assistant_player_without_an_area_inherits_the_one_it_drives(hub):
+    hub.config_entries["m1"] = ConfigEntry("m1", "music_assistant", "MA")
+    cast_uuid = "uid-media_player.den_speaker"  # the den speaker's unique_id doubles as MA's player id here
+    # 1. MA names the player by the wrapped player's id.
+    hub.devices["d-ma1"] = DeviceEntry("d-ma1", name="Den speaker (MA)", config_entries=["m1"])
+    hub.entities["media_player.den_speaker_ma"] = EntityEntry("media_player.den_speaker_ma", "music_assistant",
+                                                              cast_uuid, "m1", "d-ma1")
+    hub.publish("media_player.den_speaker_ma", "idle", {"supported_features": 512})
+    cap = caps.entity_capabilities(hub, "media_player.den_speaker_ma")
+    assert cap["area_id"] == "den" and cap["area_source"] == "inherited"
+    assert hub.entities["media_player.den_speaker_ma"].area_id is None  # never written into the registry
+    assert hub.devices["d-ma1"].area_id is None
+    assert [c["entity_id"] for c in caps.find(hub, ["play_media"], area="Den", platform="music_assistant")] == [
+        "media_player.den_speaker_ma"]
+    # 2. Another device that shares its MAC (what MA reports for the player).
+    hub.devices["d-porch-amp"] = DeviceEntry("d-porch-amp", name="Porch amp", area_id="porch",
+                                             connections=[["mac", "02:00:00:00:00:71"]])
+    hub.devices["d-ma2"] = DeviceEntry("d-ma2", name="Porch amp (MA)", config_entries=["m1"],
+                                       connections=[["mac", "02:00:00:00:00:71"]])
+    hub.entities["media_player.porch_amp_ma"] = EntityEntry("media_player.porch_amp_ma", "music_assistant",
+                                                            "up000000000071", "m1", "d-ma2")
+    cap = caps.entity_capabilities(hub, "media_player.porch_amp_ma")
+    assert cap["area_id"] == "porch" and cap["area_source"] == "inherited"
+    # 3. Its own area always wins, and a player that drives nothing known has none.
+    hub.entities["media_player.porch_amp_ma"].area_id = "den"
+    cap = caps.entity_capabilities(hub, "media_player.porch_amp_ma")
+    assert cap["area_id"] == "den" and cap["area_source"] == "registry"
+    hub.entities["media_player.lonely_ma"] = EntityEntry("media_player.lonely_ma", "music_assistant", "up9", "m1")
+    cap = caps.entity_capabilities(hub, "media_player.lonely_ma")
+    assert cap["area_id"] is None and cap["area_source"] is None
+    # Other integrations never inherit.
+    hub.entities["media_player.stray_cast"] = EntityEntry("media_player.stray_cast", "cast", "x", "c1", "d-ma2")
+    assert caps.entity_capabilities(hub, "media_player.stray_cast")["area_source"] is None

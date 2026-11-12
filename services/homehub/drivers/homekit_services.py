@@ -292,11 +292,11 @@ def state_of(drv: Any, ent: Any, skey: tuple[int, int]) -> tuple[Any, dict[str, 
             state = "locking" if target == 1 else "unlocking"
         return state, {"supported_features": LOCK_FEATURES}
     if domain == "sensor":
-        ch, _dclass, unit = SENSORS[stype]
+        ch, dclass, unit = SENSORS[stype]
         value = v(ch)
-        attrs = {"state_class": "measurement"}
+        attrs = {"state_class": "measurement", **({"device_class": dclass} if dclass else {})}
         if unit == "temp":
-            attrs["unit_of_measurement"] = ent.unit_of_measurement or drv.temp_unit
+            attrs["unit_of_measurement"] = drv.temp_unit
             if value is not None:
                 value = round(float(value) * 9 / 5 + 32, 1) if attrs["unit_of_measurement"] == "°F" \
                     else round(float(value), 1)
@@ -312,7 +312,9 @@ def state_of(drv: Any, ent: Any, skey: tuple[int, int]) -> tuple[Any, dict[str, 
             "changed_by": None, "code_arm_required": False}
     if domain == "event":
         stamp = drv.event_stamps.get(skey)
-        attrs = {"event_types": (ent.capabilities or {}).get("event_types") or list(EVENT_TYPES.values()),
+        spec_for = getattr(drv, "spec_for", None)
+        spec = spec_for(ent) if callable(spec_for) else {}
+        attrs = {"event_types": (spec.get("capabilities") or {}).get("event_types") or list(EVENT_TYPES.values()),
                  "event_type": stamp[1] if stamp else None}
         return (stamp[0] if stamp else UNKNOWN), attrs
     return None

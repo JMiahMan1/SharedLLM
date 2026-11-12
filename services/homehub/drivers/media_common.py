@@ -163,6 +163,16 @@ class UpnpDevice:
         self.services: dict[str, tuple[str, str]] = {}  # kind -> (serviceType, absolute controlURL)
         self.friendly_name = ""
         self.udn = ""
+        #: What the description says the device is (manufacturer, modelName, modelNumber, serialNumber).
+        self.description: dict[str, str] = {}
+
+    def device_fields(self) -> dict[str, Any]:
+        """The DeviceEntry fields the UPnP description gives (empty until it has been loaded)."""
+        d = self.description
+        model = " ".join(x for x in (d.get("modelName"), d.get("modelNumber")) if x) or None
+        return {"manufacturer": d.get("manufacturer") or None, "model": model,
+                "serial_number": d.get("serialNumber") or None,
+                "connections": [["upnp", self.udn]] if self.udn else []}
 
     async def load(self) -> None:
         status, text = await self.http.request("GET", self.location, timeout=5)
@@ -175,6 +185,8 @@ class UpnpDevice:
         base = root.findtext(f"{{{_DEVICE_NS}}}URLBase") or self.location
         self.friendly_name = root.findtext(f".//{{{_DEVICE_NS}}}friendlyName") or ""
         self.udn = root.findtext(f".//{{{_DEVICE_NS}}}UDN") or ""
+        self.description = {k: (root.findtext(f".//{{{_DEVICE_NS}}}{k}") or "").strip()
+                            for k in ("manufacturer", "modelName", "modelNumber", "serialNumber")}
         services: dict[str, tuple[str, str]] = {}
         for svc in root.iter(f"{{{_DEVICE_NS}}}service"):
             stype = (svc.findtext(f"{{{_DEVICE_NS}}}serviceType") or "").strip()

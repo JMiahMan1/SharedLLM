@@ -15,6 +15,12 @@ Entities, by unique_id (HA's roborock integration):
 Status is polled every 30 s and also pushed by the device when it changes;
 consumables, totals, volume and do-not-disturb change slowly and are re-read
 every five minutes.
+
+What each entity is comes from the vacuum and this driver, never from the
+imported registry: the device's own mappings give the fan speeds, mop
+intensities, mop routes and maps; ``SENSOR_INFO`` gives each reading's class,
+unit and state class; the device record (``product.model``, ``device_info.fv`` /
+``sn``) gives the model, firmware and serial (``confirm_device``).
 """
 from __future__ import annotations
 
@@ -52,6 +58,26 @@ STATE_TO_ACTIVITY = {
     "air_drying_stopping": "docked", "back_to_dock_washing_duster": "docked",
     "paused": "paused",
     "charging_problem": "error", "error": "error", "device_offline": "error", "locked": "error",
+}
+
+#: HA's VacuumEntityFeature bits for what this driver serves: pause, stop, return home, fan speed, send
+#: command, locate, clean spot, state, start, and clean area (segment cleaning through send_command).
+VACUUM_FEATURES = 4 | 8 | 16 | 32 | 256 | 512 | 1024 | 4096 | 8192 | 16384
+#: Each sensor key's device class, unit and state class (the readings python-roborock returns).
+SENSOR_INFO: dict[str, dict[str, Any]] = {
+    "battery": {"device_class": "battery", "unit_of_measurement": "%", "state_class": "measurement"},
+    "cleaning_time": {"device_class": "duration", "unit_of_measurement": "s"},
+    "cleaning_area": {"unit_of_measurement": "m²"},
+    "total_cleaning_time": {"device_class": "duration", "unit_of_measurement": "s",
+                            "state_class": "total_increasing"},
+    "total_cleaning_area": {"unit_of_measurement": "m²", "state_class": "total_increasing"},
+    "total_cleaning_count": {"state_class": "total_increasing"},
+    "last_clean_start": {"device_class": "timestamp"},
+    "last_clean_end": {"device_class": "timestamp"},
+    **{k: {"device_class": "duration", "unit_of_measurement": "s"} for k in (
+        "main_brush_time_left", "side_brush_time_left", "filter_time_left", "sensor_time_left",
+        "strainer_time_left", "dust_collection_time_left", "cleaning_brush_time_left", "mop_roller_time_left")},
+    "status": {"device_class": "enum"},
 }
 
 VACUUM_COMMANDS = {
@@ -215,6 +241,8 @@ class RoborockDriver(Driver):
             self._online[duid] = False
             self.mark_unavailable(self.device_entities(duid))
             return
+        if not self._online.get(duid, False):
+            self.confirm_device_info(duid)
         self._online[duid] = True
         if slow:
             self._slow_at[duid] = time.monotonic() + SLOW_REFRESH_S
@@ -255,22 +283,53 @@ class RoborockDriver(Driver):
             except Exception:
                 self.log.exception("publishing %s failed", ent.entity_id)
 
+    def confirm_device_info(self, duid: str) -> None:
+        """Model, firmware and serial as the account's device record has them."""
+        dev = self.devices.get(duid)
+        ents = self.device_entities(duid)
+        if dev is None or not ents:
+            return
+        product = getattr(dev, "product", None)
+        info = getattr(dev, "device_info", None)
+        for dev_id in {e.device_id for e in ents if e.device_id}:
+            self.confirm_device(dev_id, manufacturer="Roborock", model=getattr(product, "model", None),
+                                sw_version=getattr(info, "fv", None), serial_number=getattr(info, "sn", None),
+                                identifiers=[["roborock", getattr(dev, "duid", duid)]])
+
+    @staticmethod
+    def _options(key: str, props: Any) -> list[str]:
+        """A select's options from the device's own mappings."""
+        status = props.status
+        if key == "water_box_mode":
+            return list((_get(status, "water_mode_mapping") or {}).values())
+        if key == "mop_mode":
+            return list((_get(status, "mop_route_mapping") or {}).values())
+        if key == "cleaning_mode":
+            current = _get(status, "current_cleaning_mode_name")
+            known = [m for m in (_get(status, "cleaning_mode_options") or [])]
+            names = [getattr(m, "value", m) for m in known]
+            return names or ([current] if current else [])
+        if key == "selected_map":
+            return [info.name or f"Map {info.map_flag}" for info in _get(props, "maps", "map_info") or []]
+        return []
+
     def publish_entity(self, ent: EntityEntry, key: str, props: Any) -> None:
-        caps = ent.capabilities or {}
         attrs: dict[str, Any] = {}
-        if caps.get("state_class"):
-            attrs["state_class"] = caps["state_class"]
         if ent.domain == "vacuum" and key == "":
             status = props.status
+            speeds = list((_get(status, "fan_speed_mapping") or {}).values()) or [
+                getattr(m, "value", m) for m in _get(status, "fan_speed_options") or []]
             attrs.update({
-                "fan_speed_list": caps.get("fan_speed_list") or [m.value for m in _get(status, "fan_speed_options") or []],
+                "fan_speed_list": speeds,
                 "battery_level": _get(status, "battery"),
                 "fan_speed": _get(status, "fan_speed_name"),
+                "supported_features": VACUUM_FEATURES,
             })
             self.publish(ent, activity(_get(status, "state_name")), attrs)
         elif ent.domain == "sensor" and key in SENSORS:
-            if caps.get("options"):
-                attrs["options"] = caps["options"]
+            attrs.update(SENSOR_INFO.get(key, {}))
+            if key == "status":
+                attrs["options"] = sorted(STATE_TO_ACTIVITY)
             value = SENSORS[key](props)
             self.publish(ent, UNKNOWN if value is None else value, attrs)
         elif ent.domain == "sensor" and key == "current_room":
@@ -279,11 +338,11 @@ class RoborockDriver(Driver):
         elif ent.domain == "binary_sensor" and key in BINARY_SENSORS:
             self.publish(ent, _bool(BINARY_SENSORS[key](props)), attrs)
         elif ent.domain == "select" and key in SELECTS:
-            attrs["options"] = caps.get("options", [])
+            attrs["options"] = self._options(key, props)
             value = SELECTS[key](props)
             self.publish(ent, UNKNOWN if value is None else value, attrs)
         elif ent.domain == "number" and key == "volume":
-            attrs.update({k: caps[k] for k in ("min", "max", "step", "mode") if k in caps})
+            attrs.update({"min": 0, "max": 100, "step": 1, "mode": "slider", "unit_of_measurement": "%"})
             value = _get(props, "sound_volume", "volume")
             self.publish(ent, UNKNOWN if value is None else value, attrs)
         elif ent.domain == "switch" and key == "dnd_switch":

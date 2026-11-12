@@ -10,6 +10,11 @@ for this TV, so :func:`known_macs` falls back to ``options["mac"]`` and the
 host's ARP cache (learned while the TV is on). Jarvis calls
 ``webostv.command`` (``system.launcher/launch`` and friends) and
 ``webostv.button``; both are registered here with HA's data keys.
+
+While connected, the TV's ``system_info`` / ``software_info`` (model, serial,
+firmware) are confirmed onto its device (``confirm_device``); the feature flags,
+sources and device class are published from the TV's live state. The MAC for
+Wake-on-LAN is an address to reach it by, learned from the ARP cache.
 """
 from __future__ import annotations
 
@@ -132,6 +137,7 @@ class WebOSDriver(Driver):
                                             **({"source_list": sorted(self.sources)} if self.sources else {})})
             return
         self._update_sources(ts)
+        self._confirm_info(ts, ent)
         state = "on"
         play_state = next((m.get("playState") for m in (ts.media_state or []) if m.get("playState")), None)
         if play_state == "playing":
@@ -156,6 +162,16 @@ class WebOSDriver(Driver):
                 self.publish(e, state, attrs)
             elif e.domain == "switch" and e.unique_id.endswith("_screen"):
                 self.publish(e, "on" if ts.is_screen_on else "off", {})
+
+    def _confirm_info(self, ts: Any, ent: EntityEntry | None) -> None:
+        system = getattr(ts, "system_info", None) or {}
+        software = getattr(ts, "software_info", None) or {}
+        if ent is None or not (system or software):
+            return
+        major, minor = software.get("major_ver"), software.get("minor_ver")
+        self.confirm_device(ent, manufacturer="LG", model=system.get("modelName") or None,
+                            serial_number=system.get("serialNumber") or None,
+                            sw_version=f"{major}.{minor}" if major is not None and minor is not None else None)
 
     # -- services -----------------------------------------------------------------
     async def require_client(self) -> Any:

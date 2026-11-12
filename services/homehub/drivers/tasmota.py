@@ -10,7 +10,12 @@ The address is not in the HA config entry (it only holds the discovery
 prefix). It comes from, in order: ``entry.options["host"]``, ``entry.data["host"]``,
 ``entry.data["hosts"][<MAC>]`` (several devices on one entry), or the device
 registry entry's ``configuration_url`` (HA stored ``http://<ip>/`` there for the
-Loft-Plug).
+Loft-Plug). Those are only where to reconnect (allowed to come from the import).
+
+What the device is comes from its ``Status 0`` reply on every poll: firmware,
+hardware, MAC and web UI are confirmed onto the device (``device_fields``,
+shared with the flow that adds one), and the energy and status sensors publish
+the class, unit and state class Tasmota's keys have (``ENERGY_META``).
 
 Entities, by unique_id (HA's tasmota integration, ``{MAC}`` upper-case, no colons):
 - ``{MAC}_switch_relay_{n}``                       relay n (Power{n+1})
@@ -50,6 +55,17 @@ ENERGY_META: dict[str, dict[str, Any]] = {
     "Current": {"unit_of_measurement": "A", "device_class": "current", "state_class": "measurement"},
     "TotalStartTime": {"device_class": "timestamp"},
 }
+
+
+def device_fields(status: dict[str, Any], host: str | None) -> dict[str, Any]:
+    """The DeviceEntry fields a ``Status 0`` reply gives."""
+    from services.homehub.discovery import norm_mac
+
+    fwr = status.get("StatusFWR") or {}
+    mac = norm_mac((status.get("StatusNET") or {}).get("Mac"))
+    return {"manufacturer": "Tasmota", "model": fwr.get("Hardware") or None, "sw_version": fwr.get("Version") or None,
+            "connections": [["mac", ":".join(mac[i:i + 2] for i in range(0, 12, 2))]] if mac else [],
+            "configuration_url": f"http://{host}/" if host else None}
 
 
 def _status_value(name: str, st: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
@@ -210,6 +226,9 @@ class TasmotaDriver(Driver):
             self.publish(eid, state, {})
 
     def _publish_all(self) -> None:
+        fields = device_fields(self.status, self.host)
+        for dev_id in {e.device_id for e in self.entities if e.device_id}:
+            self.confirm_device(dev_id, **fields)
         self.power = _parse_power(self.status.get("StatusSTS") or {})
         self._publish_relays()
         energy = (self.status.get("StatusSNS") or {}).get("ENERGY") or {}

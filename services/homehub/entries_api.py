@@ -10,6 +10,8 @@
 | ``GET /hub/flows`` | Every integration that can be added by hand (by address, login or choice), with its fields and ``kind`` |
 | ``POST /hub/flows/{domain}`` | ``{"host"? or "url"?, "name"?, "area_id"?, "input"?}``; same answers as adopting a finding |
 | ``GET /hub/esphome-builder`` | ``{"configured", "url", "state"}`` (never the login) |
+| ``GET /hub/areas``, ``POST /hub/areas`` | The areas; ``{"name", "aliases"?, "icon"?, "floor_id"?}`` makes one (a hub with no import starts with none) |
+| ``PATCH /hub/areas/{id}``, ``DELETE /hub/areas/{id}`` | Rename or change one; remove one (its devices and entities are left with no area) |
 
 Admins only, like the rest of ``/hub/*``. See ``entries.py`` and ``pairing.py``.
 """
@@ -107,6 +109,35 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
                                 status_code=status)
         status, result = await flows.adopt_response(runtime, finding, body)
         return JSONResponse(result, status_code=status) if status != 200 else result
+
+    @router.get("/hub/areas")
+    async def list_areas(request: Request) -> dict[str, Any]:
+        admin(request)
+        return entries.list_areas(runtime)
+
+    @router.post("/hub/areas")
+    async def create_area(request: Request) -> Any:
+        admin(request)
+        try:
+            return entries.create_area(runtime, await body_of(request))
+        except HubError as exc:
+            return failure(exc)
+
+    @router.patch("/hub/areas/{area_id}")
+    async def update_area(area_id: str, request: Request) -> Any:
+        admin(request)
+        try:
+            return entries.update_area(runtime, area_id, await body_of(request))
+        except HubError as exc:
+            return failure(exc)
+
+    @router.delete("/hub/areas/{area_id}")
+    async def delete_area(area_id: str, request: Request) -> Any:
+        admin(request)
+        try:
+            return entries.delete_area(runtime, area_id)
+        except HubError as exc:
+            return failure(exc)
 
     @router.get("/hub/esphome-builder")
     async def esphome_builder(request: Request) -> dict[str, Any]:

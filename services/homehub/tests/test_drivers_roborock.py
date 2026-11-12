@@ -181,7 +181,11 @@ async def test_states_published_like_ha():
         return hub.states.get(e).state
 
     assert s("sensor.roborock_s5_max_status") == "charging"
-    assert hub.states.get("sensor.roborock_s5_max_status").attributes["options"] == ["charging", "cleaning"]
+    # Options, ranges and features are the device's and the driver's own, not the imported registry's.
+    assert {"charging", "cleaning"} <= set(hub.states.get("sensor.roborock_s5_max_status").attributes["options"])
+    assert hub.states.get("select.roborock_s5_max_mop_intensity").attributes["options"] == [
+        "off", "low", "medium", "high"]
+    assert hub.states.get("sensor.roborock_s5_max_battery").attributes["unit_of_measurement"] == "%"
     assert s("sensor.roborock_s5_max_battery") == "100"
     assert s("sensor.roborock_s5_max_cleaning_time") == "5967"
     assert s("sensor.roborock_s5_max_cleaning_area") == "21.8"

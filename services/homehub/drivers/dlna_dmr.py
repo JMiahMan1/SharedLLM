@@ -5,6 +5,10 @@ built-in renderer, e.g. ``http://<tv-address>:9197/dmr``). Everything
 here is AVTransport (``SetAVTransportURI``/``Play``/``Pause``/``Stop``/``Seek``)
 and RenderingControl (volume, mute). A renderer that does not answer is
 ``off``, as in HA: the TV is simply in standby.
+
+The renderer's description (maker, model, serial, UDN) is confirmed onto its
+device each time it answers, and the feature flags come from the services it
+lists (AVTransport, RenderingControl).
 """
 from __future__ import annotations
 
@@ -100,6 +104,8 @@ class DlnaDmrDriver(Driver):
                 muted = await self.upnp.get_mute()
             except HubError:
                 pass
+        for dev_id in {e.device_id for e in ents if e.device_id}:
+            self.confirm_device(dev_id, **self.upnp.device_fields())
         self._state = TRANSPORT_STATES.get(transport.get("CurrentTransportState", ""), "idle")
         meta = parse_didl(position.get("TrackMetaData"))
         uri = position.get("TrackURI") or None

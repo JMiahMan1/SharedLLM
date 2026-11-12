@@ -38,7 +38,16 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from services.homehub.core import UNAVAILABLE, UNKNOWN, ConfigEntry, DeviceEntry, EntityEntry, Hub, HubError
+from services.homehub.core import (
+    ENTITY_INFO_FIELDS,
+    UNAVAILABLE,
+    UNKNOWN,
+    ConfigEntry,
+    DeviceEntry,
+    EntityEntry,
+    Hub,
+    HubError,
+)
 
 log = logging.getLogger("homehub.mobile_app_webhook")
 
@@ -315,7 +324,10 @@ class MobileAppManager:
                 return d
         return next((d for d in self.hub.devices.values() if entry.entry_id in d.config_entries), None)
 
-    def _ensure_device(self, entry: ConfigEntry) -> DeviceEntry:
+    def _ensure_device(self, entry: ConfigEntry, *, from_phone: bool = False) -> DeviceEntry:
+        """The phone's device. ``from_phone``: ``entry.data`` is a registration the phone just sent, so its
+        maker, model and OS version are the phone's own (confirmed); otherwise it may be what the import
+        carried, which only names and identifies the phone."""
         dev = self.device_for(entry)
         d = entry.data
         if dev is None:
@@ -323,12 +335,13 @@ class MobileAppManager:
                               identifiers=[["mobile_app", str(d.get("device_id") or entry.entry_id)]])
             self.hub.devices[dev.id] = dev
         dev.name = d.get("device_name") or dev.name
-        dev.manufacturer = d.get("manufacturer") or dev.manufacturer
-        dev.model = d.get("model") or dev.model
-        dev.sw_version = d.get("os_version") or dev.sw_version
         if entry.entry_id not in dev.config_entries:
             dev.config_entries.append(entry.entry_id)
         self.store.save_device(dev)
+        if from_phone:
+            self.hub.confirm_device(dev.id, manufacturer=d.get("manufacturer") or None, model=d.get("model") or None,
+                                    sw_version=d.get("os_version") or None,
+                                    identifiers=[["mobile_app", str(d.get("device_id") or entry.entry_id)]])
         return dev
 
     def _free_entity_id(self, domain: str, name: str) -> str:
@@ -350,6 +363,8 @@ class MobileAppManager:
         dev = self._ensure_device(entry)
         ent = EntityEntry(entity_id=self._free_entity_id(domain, name), platform=DOMAIN, unique_id=unique_id,
                           config_entry_id=entry.entry_id, device_id=dev.id, original_name=name, **meta)
+        # Registered by the phone (or by the hub for a Jarvis phone): every field given is the source's own.
+        ent.confirmed = [f for f in ENTITY_INFO_FIELDS if getattr(ent, f) not in (None, "", {}, [])]
         self.hub.entities[ent.entity_id] = ent
         self.store.save_entity(ent)
         return ent
@@ -477,7 +492,7 @@ class MobileAppManager:
         entry.title = reg["device_name"]
         entry.disabled_by = None
         self._save_entry(entry)
-        self._ensure_device(entry)
+        self._ensure_device(entry, from_phone=True)
         with contextlib.suppress(Exception):
             await self.runtime.stop_entry(entry.entry_id)
         self.runtime.start_entry(entry)
@@ -632,8 +647,9 @@ class MobileAppManager:
                 sensors.append({
                     "entity_id": ent.entity_id, "name": self.hub.friendly_name(ent), "domain": ent.domain,
                     "state": st.state if st else None,
-                    "unit": (st.attributes.get("unit_of_measurement") if st else None) or ent.unit_of_measurement,
-                    "device_class": ent.device_class or ent.original_device_class,
+                    "unit": (st.attributes.get("unit_of_measurement") if st else None)
+                    or ent.trusted("unit_of_measurement"),
+                    "device_class": ent.device_class or ent.trusted("original_device_class"),
                     "disabled": bool(ent.disabled_by), "source": (st.attributes.get("data_source") if st else None)
                     or ("jarvis" if d.get("app_id") == "jarvis" else "companion"),
                     "last_updated": st.last_updated.isoformat() if st else None,
@@ -847,7 +863,7 @@ async def _update_registration(mgr: MobileAppManager, entry: ConfigEntry, data: 
     new = {**entry.data, **allowed}
     entry.data = new
     mgr._save_entry(entry)
-    mgr._ensure_device(entry)
+    mgr._ensure_device(entry, from_phone=True)
     return WebhookResult(200, {k: new.get(k) for k in SAFE_REGISTRATION_KEYS}, encrypt_for=entry)
 
 
@@ -927,16 +943,45 @@ def _sensor_state(kind: str, value: Any) -> str:
     return str(value)
 
 
+#: The companion apps' own definitions of their common sensors (what the app sends in ``register_sensor``),
+#: keyed by the sensor's unique id. Used for a sensor the phone has not registered with the hub yet (one the
+#: import carried over), so its unit and class come from the app's protocol, never from the import.
+COMPANION_SENSORS: dict[str, dict[str, str]] = {
+    "battery_level": {"unit_of_measurement": "%", "device_class": "battery", "state_class": "measurement"},
+    "battery_temperature": {"unit_of_measurement": "°C", "device_class": "temperature",
+                            "state_class": "measurement"},
+    "battery_power": {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"},
+    "steps_sensor": {"unit_of_measurement": "steps", "state_class": "total_increasing"},
+    "light_sensor": {"unit_of_measurement": "lx", "device_class": "illuminance", "state_class": "measurement"},
+    "pressure_sensor": {"unit_of_measurement": "hPa", "device_class": "pressure", "state_class": "measurement"},
+    "wifi_signal_strength": {"unit_of_measurement": "dBm", "device_class": "signal_strength",
+                             "state_class": "measurement"},
+}
+
+
+def _companion_definition(mgr: MobileAppManager, ent: EntityEntry) -> dict[str, str]:
+    entry = mgr.hub.config_entries.get(ent.config_entry_id or "")
+    wid = str((entry.data if entry is not None else {}).get("webhook_id") or "")
+    uid = ent.unique_id[len(wid) + 1:] if wid and ent.unique_id.startswith(wid + "_") else ent.unique_id
+    return COMPANION_SENSORS.get(uid, {}) if ent.domain == "sensor" else {}
+
+
 def publish_sensor(mgr: MobileAppManager, ent: EntityEntry, data: dict[str, Any]) -> None:
     attrs = dict(data.get("attributes") or {}) if isinstance(data.get("attributes"), dict) else {}
-    icon = data.get("icon") or ent.original_icon
+    # Only what the phone registered counts; a value only the import held is not the phone's word.
+    icon = data.get("icon") or ent.trusted("original_icon")
     if icon:
         attrs["icon"] = icon
-    state_class = (ent.capabilities or {}).get("state_class")
+    known = _companion_definition(mgr, ent)
+    state_class = (ent.trusted("capabilities") or {}).get("state_class") or known.get("state_class")
     if state_class and ent.domain == "sensor":
         attrs["state_class"] = state_class
-    if ent.unit_of_measurement:
-        attrs["unit_of_measurement"] = ent.unit_of_measurement
+    unit = ent.trusted("unit_of_measurement") or known.get("unit_of_measurement")
+    if unit:
+        attrs["unit_of_measurement"] = unit
+    device_class = ent.trusted("original_device_class") or known.get("device_class")
+    if device_class and "device_class" not in attrs:
+        attrs["device_class"] = device_class
     attrs["data_source"] = "companion"
     mgr.hub.publish(ent, _sensor_state(ent.domain, data.get("state")), attrs)
 
@@ -964,17 +1009,22 @@ async def _register_sensor(mgr: MobileAppManager, entry: ConfigEntry, data: Any)
             original_icon=icon, capabilities={"state_class": data["state_class"]} if data.get("state_class") else None,
             disabled_by="integration" if data.get("disabled") else None)
     else:
-        if ent.original_name != full_name:
-            ent.original_name = full_name
         if data.get("disabled") is not None:
             ent.disabled_by = "integration" if data["disabled"] else None
+        # The phone describes the sensor again: that is the device's own word, so it is confirmed.
+        info: dict[str, Any] = {"original_name": full_name}
         for attr, key in (("original_device_class", "device_class"), ("unit_of_measurement", "unit_of_measurement"),
                           ("entity_category", "entity_category"), ("original_icon", "icon")):
             if key in data:
-                setattr(ent, attr, device_class if key == "device_class" else data[key])
+                value = device_class if key == "device_class" else data[key]
+                if value is None:
+                    setattr(ent, attr, None)
+                else:
+                    info[attr] = value
         if data.get("state_class"):
-            ent.capabilities = {**(ent.capabilities or {}), "state_class": data["state_class"]}
+            info["capabilities"] = {"state_class": data["state_class"]}
         mgr.store.save_entity(ent)
+        mgr.hub.confirm_entity(ent, **info)
     if not ent.disabled_by:
         publish_sensor(mgr, ent, data)
     return WebhookResult(201, {"success": True}, encrypt_for=entry)
