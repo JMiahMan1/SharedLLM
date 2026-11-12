@@ -106,6 +106,42 @@
     reverse_proxy bible:8010
 }
 
+# The phones' Home Assistant companion app, at the host name the apps were set
+# up with (HOMEHUB_EXTERNAL_HOST in .env; the homehub "external_url" setting
+# names the same host). TLS ends on the public proxy, which forwards it here
+# with the Host header kept. Only what the app needs reaches the hub:
+#   /api/webhook/*                 sensors, locations (the webhook id is the credential)
+#   /api/mobile_app/registrations  a new phone (bearer token)
+#   /auth/*                        log in and refresh tokens (HA's OAuth-like flow)
+#   /api/websocket                 the app's live connection and local push (bearer token)
+# Everything else (the REST API, /hub/* administration, camera media) answers
+# 404 from outside; the LAN still reaches the hub on :8123 directly.
+http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
+    log {
+        output stdout
+        level INFO
+        # A webhook id is a bearer secret and sits in the path: keep it out of the log.
+        format filter {
+            wrap json
+            fields {
+                request>uri regexp ^/api/webhook/[^/?]+ /api/webhook/REDACTED
+                request>headers>Authorization delete
+                request>headers>Cookie delete
+            }
+        }
+    }
+    @companion path /api/webhook/* /api/mobile_app/registrations /auth/* /api/websocket
+    handle @companion {
+        request_body {
+            max_size 1MB
+        }
+        reverse_proxy {$HOMEHUB_UPSTREAM:host.docker.internal:8123}
+    }
+    handle {
+        respond 404
+    }
+}
+
 # Standard Routes
 :80 {
     log {

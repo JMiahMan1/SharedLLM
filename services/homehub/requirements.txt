@@ -16,3 +16,6 @@ reolink-aio>=0.23.0
 python-roborock>=7.22.0
 pyemvue==0.18.6
 srpenergy>=1.3.8
+# HA companion apps: encrypted mobile_app webhooks (libsodium secretbox) and HA's bcrypt password hashes.
+pynacl>=1.6.2
+bcrypt>=5.0.0

@@ -19,6 +19,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from services.common.secrets import secret_matches
 from services.homehub import discovery_api
 from services.homehub import live_video, live_video_api
+from services.homehub import ha_auth_api, mobile_app_api  # HA companion apps: login, webhooks, pushes
+from services.homehub.mobile_app_webhook import registry_view  # hides phones' webhook ids from non-admins
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import DeviceUnavailable, HubError, State
 from services.homehub.runtime import Runtime
@@ -32,6 +34,8 @@ _BOUNDARY = "frame"
 _NO_STORE = {"Cache-Control": "no-store"}
 #: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
 SNAPSHOT_STREAM_MAX_FAILURES = 5
+#: WebSocket commands other modules add (``async fn(conn, id, msg)``), e.g. mobile_app's push channel.
+WS_COMMANDS: dict[str, Any] = {}
 
 
 def jsonable(value: Any) -> Any:
@@ -493,6 +497,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(api)
     app.include_router(discovery_api.build_router(runtime, auth))
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
+    app.include_router(ha_auth_api.build_router(runtime, auth))
+    app.include_router(mobile_app_api.build_router(runtime, auth))
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:
@@ -622,13 +628,13 @@ class WSConnection:
             elif kind == "config/device_registry/list":
                 await self.result(mid, [d.public() for d in hub.devices.values()])
             elif kind == "config/entity_registry/list":
-                await self.result(mid, [e.public() for e in hub.entities.values()])
+                await self.result(mid, [registry_view(e, self.principal) for e in hub.entities.values()])
             elif kind == "config/entity_registry/get":
                 ent = hub.entities.get(msg.get("entity_id", ""))
                 if ent is None:
                     await self.error(mid, "not_found", "Entity not found")
                 else:
-                    await self.result(mid, ent.public())
+                    await self.result(mid, registry_view(ent, self.principal))
             elif kind == "history/history_during_period":
                 start = parse_time(msg.get("start_time")) or datetime.now(UTC) - timedelta(days=1)
                 rows = await asyncio.to_thread(self.runtime.store.history, msg.get("entity_ids"), start,
@@ -639,6 +645,8 @@ class WSConnection:
                         "s": r["state"], "a": {} if msg.get("no_attributes") else r["attributes"],
                         "lu": datetime.fromisoformat(r["last_updated"]).timestamp()})
                 await self.result(mid, out)
+            elif kind in WS_COMMANDS:
+                await WS_COMMANDS[kind](self, mid, msg)
             else:
                 await self.error(mid, "unknown_command", f"Unknown command: {kind}")
         except HubError as exc:

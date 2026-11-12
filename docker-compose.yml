@@ -66,6 +66,11 @@ services:
       - HOME=/tmp
       # The reverse proxy in front of this stack (docs/PUSH.md, "Limits").
       - PUBLIC_PROXY_IP=${PUBLIC_PROXY_IP:-127.0.0.1}
+      # The companion app's host name and the hub behind it (Caddyfile; homehub mobile_app_api).
+      - HOMEHUB_EXTERNAL_HOST=${HOMEHUB_EXTERNAL_HOST:-homehub.invalid}
+      - HOMEHUB_UPSTREAM=${HOMEHUB_UPSTREAM:-host.docker.internal:8123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sharedllm
     ports:

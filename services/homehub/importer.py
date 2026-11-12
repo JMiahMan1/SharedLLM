@@ -24,6 +24,7 @@ from typing import Any
 
 import yaml
 
+from services.homehub import ha_auth
 from services.homehub.core import Area, ConfigEntry, DeviceEntry, EntityEntry, State
 from services.homehub.store import Store
 
@@ -184,6 +185,7 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
         }, t["jwt_key"])
         tokens += 1
     report["users"], report["refresh_tokens"] = len(auth.get("users", [])), tokens
+    report.update(ha_auth.import_auth(store, config_dir))  # password and refresh-token hashes, sealed
 
     # -- people, zones ----------------------------------------------------------
     store.set_kv("persons", persons)

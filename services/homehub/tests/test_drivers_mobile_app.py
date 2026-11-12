@@ -243,4 +243,5 @@ def test_parse_people_keeps_only_jarvis_fixes():
                                 "properties": {"entity_id": "person.michele", "source_type": "gps"}})
     out = ma.parse_people(payload)
     assert out == {"michele": {"latitude": 33.0, "longitude": -111.0, "gps_accuracy": 10, "battery_level": 80,
-                               "speed": None, "course": None, "last_updated": None, "zone": "home"}}
+                               "speed": None, "course": None, "last_updated": None, "zone": "home",
+                               "activity": None}}

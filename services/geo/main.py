@@ -197,6 +197,7 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
             "battery": attrs.get("battery_level") or attrs.get("battery"),
             "source_type": attrs.get("source_type"),
             "in_zones": attrs.get("in_zones"),
+            "activity": attrs.get("activity"),
             "last_updated": state.get("last_updated") or state.get("last_changed"),
         },
     }
@@ -346,6 +347,7 @@ async def _people_from_history() -> list[dict]:
                 "speed": point.get("spd"),
                 "course": point.get("brg"),
                 "battery_level": point.get("bat"),
+                "activity": point.get("act"),  # the phone's activity recognition; homehub's detected_activity
                 "source_type": "jarvis",
             },
         })
