@@ -23,3 +23,21 @@ bcrypt>=5.0.0
 # Offline lookup of the household time zone from the home location
 # (services/common/household_tz.py, "Derive from home location"). Wheels for 3.11.
 timezonefinder>=6.5,<10
+# Bluetooth (services/homehub/bluetooth.py): the host adapter through BlueZ (bleak, dbus-fast), ESPHome proxies'
+# raw advertisements (bluetooth-data-tools), and the BLE sensor parsers HA uses (Bluetooth-Devices org).
+# Pinned: they change their entity keys between releases. Checked to install on Python 3.11 with
+# cryptography 50.0.2 (the base image's).
+bleak==3.1.0
+dbus-fast==5.2.0
+bluetooth-data-tools==1.29.24
+sensor-state-data==2.20.0
+bluetooth-sensor-state-data==1.9.2
+habluetooth==7.1.2
+bthome-ble==3.25.0
+xiaomi-ble==1.21.2
+govee-ble==1.5.2
+thermopro-ble==1.1.4
+inkbird-ble==1.7.1
+sensorpush-ble==1.9.0
+qingping-ble==1.3.0
+ruuvitag-ble==0.4.0

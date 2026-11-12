@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from services.common.secrets import secret_matches
 from services.homehub import (  # HA companion apps: login, webhooks, pushes
     automation_api,  # automation editor, scheduler, thermostat schedules
+    bluetooth_api,  # /hub/bluetooth: scanners, devices heard, the room map
     capabilities_api,  # the capability index: which devices can do what
     dashboard_api,
     discovery_api,
@@ -28,10 +29,12 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
     live_video,
     live_video_api,
+    matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
     service_logins_api,
     statistics_api,
+    voice_api,  # /hub/voice: the voice satellites and their runs
 )
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import DeviceUnavailable, HubError, State
@@ -567,6 +570,9 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(mobile_app_api.build_router(runtime, auth))
     app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
+    app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
+    app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
+    app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

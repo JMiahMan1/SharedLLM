@@ -95,9 +95,54 @@ browser would need ffmpeg in the image.
   announcements use it). Spoken clips are served at `HOMEHUB_EXTERNAL_URL` or `http://$EXECUTION_EXTERNAL_HOST:8123`;
   with neither set, text to speech fails and says so (a loopback URL is useless to a speaker).
 - `assist_satellite.announce` on an ESPHome voice satellite plays the spoken message through the node's own
-  announcement call. `start_conversation` is refused: it needs an Assist pipeline, which the hub does not run.
+  announcement call. `start_conversation` speaks first and then listens, through the hub's voice pipeline
+  (below); it is refused by name on a node that does not offer it.
 - Not served: `media_player/browse_media` and `media_source/*` (no Jarvis caller uses them), `androidtv.adb_command`
   (no ADB integration), and the `/api/diagnostics/*` routes.
+
+## Voice satellites (`voice_pipeline.py`, `voice_api.py`)
+
+The hub does what HA's Assist did for ESPHome voice satellites: on every connection to a node whose
+`voice_assistant_feature_flags` include `VOICE_ASSISTANT` it subscribes to the node's voice requests
+(a reconnect subscribes again), so the node stops reporting that it cannot reach its server. One run:
+
+1. The node hears its wake word itself and starts a run. Audio comes over the API (`API_AUDIO`) or as UDP
+   to a port opened for the run. A node set to detect the wake word on the server is told the hub has no
+   wake word engine (set its wake word engine location to On device).
+2. The audio streams to speech to text while an energy VAD finds the end of the command: the silence from
+   the satellite's "Finished speaking detection" select (relaxed 1.25 s, default 0.7 s, aggressive 0.25 s),
+   the node ending its audio, or `HOMEHUB_VOICE_MAX_S`. Nothing heard in `HOMEHUB_VOICE_NO_SPEECH_S` ends the run.
+3. Speech to text over Wyoming at `HOMEHUB_VOICE_STT`. Point it at execution's recognising proxy
+   (`VOICE_STT_PORT`), not at Whisper: the proxy records who spoke, and the gateway answers as that
+   person only on a confident match, otherwise as the household.
+4. The transcript goes, unchanged, to the gateway's `/api/chat` at `HOMEHUB_VOICE_JARVIS_URL`, the path HA's
+   conversation agent used, with `voice_context` (the satellite, its area, the conversation id, and what a
+   `start_conversation` asked).
+5. The reply is spoken with Jarvis's voice (`tts.make_clip`) and the node fetches the URL; a node with its own
+   speaker (`SPEAKER`) is also sent the audio over the API. A reply that ends in a question sets
+   `continue_conversation`, so the node listens again.
+
+Each stage sends HA's event sequence (`RUN_START`, `STT_START`, `STT_VAD_START`/`END`, `STT_END`,
+`INTENT_START`/`END`, `TTS_START`/`END`, `RUN_END`) so the node's lights and screen follow, and every failure
+is an `ERROR` with a code and a plain message, then `RUN_END`. The `assist_satellite` entity shows
+`idle`/`listening`/`processing`/`responding`, and is unavailable while the node is offline.
+
+| Setting | Default | What |
+|---|---|---|
+| `HOMEHUB_VOICE_STT` | required | Wyoming speech to text, `host:port` |
+| `HOMEHUB_VOICE_JARVIS_URL` | required | The gateway's base URL (serves `/api/chat`) |
+| `HOMEHUB_VOICE_LANGUAGE` | `en` | Sent to speech to text |
+| `HOMEHUB_VOICE_TTS_VOICE` | the hub's TTS voice | Kokoro voice for replies |
+| `HOMEHUB_VOICE_MAX_S`, `HOMEHUB_VOICE_NO_SPEECH_S` | 15, 8 | Longest command; how long to wait for speech |
+| `HOMEHUB_VOICE_STT_TIMEOUT_S`, `HOMEHUB_VOICE_JARVIS_TIMEOUT_S` | 30, 90 | Per-stage limits |
+| `HOMEHUB_VOICE_VAD_MIN_RMS` | 250 | Quietest 16-bit RMS that counts as speech |
+| `HOMEHUB_VOICE_CONTINUE` | `1` | `0` never continues a conversation |
+
+A missing setting fails the run with an `ERROR` naming it. Per satellite, entry option `voice_pipeline: false`
+turns the pipeline off (`PATCH /hub/voice/{entry_id}` `{"enabled": false}` sets it on the live connection).
+`GET /hub/voice` (admin) lists the satellites with their features, audio path, area, run count, last run
+(outcome, what ended it, per-stage timings) and last error. Transcripts and replies are logged at debug
+level only and never kept.
 
 ## New devices (discovery)
 
@@ -176,8 +221,9 @@ flow that probed the device set, plus `state` once a driver published it.
   are made with `GET|POST /hub/areas`, `PATCH|DELETE /hub/areas/{id}`.
 
 The capability index also lists the live areas (`areas`), gives voice satellites
-`announce` (and `converse` only when the device publishes it and the hub could
-run it; ESPHome satellites never `converse`, the hub runs no Assist pipeline),
+`announce` (and `converse` only when the device publishes it and the hub can
+run it: an ESPHome satellite whose voice pipeline is subscribed and that has
+`START_CONVERSATION`),
 and gives a Music Assistant player with no area of its own the area of the
 player it drives, as `area_source: "inherited"` (never written to the registry).
 
@@ -187,6 +233,92 @@ M-SEARCH or a WiZ broadcast, so both scans also probe every address of the /24
 To also accept the broadcast replies, fix the source ports
 (`HOMEHUB_SSDP_PORT`, `HOMEHUB_WIZ_DISCOVERY_PORT`) and open them on the LAN zone.
 `HOMEHUB_DISCOVERY=0` turns discovery off.
+
+## Bluetooth
+
+One advertisement bus (`bluetooth.py`) fed by the host's adapter and by ESPHome
+Bluetooth proxies, used for BLE sensors and for room presence. Admin API in
+`bluetooth_api.py` (`/hub/bluetooth`, `/hub/bluetooth/devices`,
+`PATCH /hub/bluetooth/scanners/{id}`, `/hub/bluetooth/map...`).
+
+**Host adapter.** `HOMEHUB_BLUETOOTH_ADAPTER` names it by address
+(`AA:BB:CC:DD:EE:FF`, preferred: `hciN` numbers follow USB enumeration and can
+swap across reboots) or as `hciN`. Unset, the host adapter is off and
+`GET /hub/bluetooth` says why. Use an adapter no other program owns: the Matter
+server takes its commissioning adapter over raw HCI, so give the hub the other
+one. `HOMEHUB_BLUETOOTH_SCAN_MODE`: `auto` (default; passive when bluetoothd
+runs with `--experimental` and so offers advertisement monitors, otherwise
+active, LE only, every advertisement), `active`, or `passive` (refused, with
+the reason, when BlueZ cannot). The container needs:
+
+- `/run/dbus/system_bus_socket` mounted (BlueZ is reached over D-Bus; the hub
+  runs as a normal user, which BlueZ's default D-Bus policy allows to scan);
+- on an SELinux host (Fedora), `security_opt: [label=disable]`: the policy
+  denies `container_t` the system bus socket (checked: `EACCES` with the default
+  label, a scan works with `label=disable`). `docker-compose.yml` sets both.
+
+A scanner that hears nothing for 5 minutes is restarted; errors and the scan
+mode are on `GET /hub/bluetooth`.
+
+**ESPHome proxies.** A node whose firmware has `bluetooth_proxy:` reports it in
+`device_info`, and the ESPHome driver then subscribes to its advertisements (raw
+when the node offers them). Nothing on the node is changed. The node's device
+area is its scanner's area unless one is set with the PATCH route. To make a node
+a proxy, add to its YAML and flash it from the ESPHome Device Builder:
+
+```yaml
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+bluetooth_proxy:
+  active: true
+```
+
+**BLE sensors** (`bluetooth_parsers.py`): the Bluetooth-Devices parser libraries
+HA uses (BTHome, Xiaomi, Qingping, SensorPush, ThermoPro, INKBIRD, Ruuvi, Govee;
+versions pinned in `requirements.txt`). A sensor a parser understands is listed
+under New devices with what the parser says it is; adding it asks for the
+bindkey when the parser sees encryption, and checks that the key decrypts.
+`drivers/ble.py` publishes every reading as it arrives and registers readings
+that appear later. The bindkey is sealed in the entry's data; no API returns it.
+
+**Room presence** (`bluetooth_presence.py`). Tracked beacons are iBeacons
+(`<uuid>-<major>-<minor>`):
+
+- a phone's beacon, sent by the companion app as `app_data.ble_beacon`
+  (`update_registration` or `register`) or by the gateway for a Jarvis phone
+  (`PATCH /hub/mobile_app/phones/{entry_id}` `{"app_data": {"ble_beacon": {...} | null}}`);
+  `null` means the beacon was turned off on the phone;
+- an "iBeacon tracker" added by an admin (from New devices or by hand).
+
+Each gets `sensor.<name>_room` (the area name, `not_home`, or `unknown`; attributes
+`area_id`, `distance_m`, `rssi`, `scanner`, `scanners_heard`, `last_seen`,
+`source: ble`, `method`, `confidence`) and `sensor.<name>_room_distance` (m). A
+phone's room sensors use the phone's unique-id prefix (`<prefix>_ble_room`).
+`person.*` entities with such a phone carry `room` and `room_area_id`, read
+from the room sensor whenever the person is published (not stored); the
+capability index reports `presence_room` for both.
+
+The estimate: per scanner, an exponential moving average of RSSI (alpha 0.35)
+over readings from the last 20 s, from scanners that heard anything in the last
+60 s. Until two rooms are mapped, the room is the area of the loudest scanner
+(after its `rssi_offset`); with a map, the RSSI vector is scored against each
+mapped room (per scanner, a Gaussian over RSSI and the probability of being
+heard at all; a scanner that has gone offline is left out), and the tempered
+posterior is the confidence. An unmapped room wins only through its own scanner
+when that is 8 dB louder than every other room's and at least -75 dBm. A new
+room must hold for 12 s before the sensor switches; 180 s unheard is
+`not_home`. Distance: `10 ** ((P - rssi) / 20)` with `P` the tracker's
+`tx_power`, else the beacon's advertised power, else the scanner's `ref_power`,
+else -59 dBm.
+
+**The room map.** `POST /hub/bluetooth/map/sessions {"area_id", "tracker", "duration_s"}`
+records the tracker in a room (one sample of every online scanner per ~2 s
+window); sessions are stored (`bluetooth_map` in the store's kv) and survive
+restarts. `GET /hub/bluetooth/map` gives each room's samples and sessions,
+leave-one-session-out accuracy (a room needs two sessions), the confusion
+matrix, and `stale_reason` when a scanner was added, moved to another area or
+went quiet after mapping (map the rooms again).
 
 ## Known issues
 

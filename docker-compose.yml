@@ -876,8 +876,16 @@ services:
       - MATTER_SERVER_URL=${MATTER_SERVER_URL:-ws://127.0.0.1:5580/ws}
       - MUSIC_ASSISTANT_URL=${MUSIC_ASSISTANT_URL:-http://127.0.0.1:8095}
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
+      # Bluetooth (services/homehub/README.md, "Bluetooth"): the host adapter by address or hciN; empty = off.
+      - HOMEHUB_BLUETOOTH_ADAPTER=${HOMEHUB_BLUETOOTH_ADAPTER:-}
+      - HOMEHUB_BLUETOOTH_SCAN_MODE=${HOMEHUB_BLUETOOTH_SCAN_MODE:-auto}
+    # BlueZ over the system bus. SELinux (Fedora) denies a container_t process the bus socket, so the
+    # hub runs unconfined by SELinux; it already shares the host network.
+    security_opt:
+      - label=disable
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - ./data/homehub:/data
       # A copy of the retired HA config to import from; read-only.
       - ./data/homehub-import:/import:ro
@@ -890,12 +898,26 @@ services:
     container_name: sharedllm_matter_server
     restart: unless-stopped
     network_mode: host
+    # Bluetooth commissioning (MATTER.md "Bluetooth"): raw HCI on the adapter
+    # needs CAP_NET_RAW, which Docker gives only to uid 0. So the container
+    # starts as root with nothing but what setpriv needs, and setpriv runs the
+    # server as uid 1000 (the image's user, owner of ./data/matter-server)
+    # with NET_RAW as its one capability. Same entrypoint with BLE off.
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, SETUID, SETGID, SETPCAP]
+    entrypoint: ["setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--inh-caps=-all,+net_raw",
+                 "--ambient-caps=-all,+net_raw", "--bounding-set=-all,+net_raw", "--"]
+    command: ["node", "--enable-source-maps", "/app/node_modules/matter-server/dist/esm/MatterServer.js"]
     volumes:
       - ./data/matter-server:/data
     environment:
       - STORAGE_PATH=/data
       - PORT=5580
       - PRIMARY_INTERFACE=${MATTER_PRIMARY_INTERFACE:-}
+      # The HCI number of the adapter the server owns for commissioning (1 = hci1).
+      # Blank: Bluetooth off, only devices already on the network can be added.
+      - BLUETOOTH_ADAPTER=${MATTER_BLUETOOTH_ADAPTER:-}
       # The add-on's fabric. Without them the server starts a new, empty fabric.
       - VENDOR_ID=4939
       - FABRIC_ID=2

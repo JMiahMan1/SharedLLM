@@ -44,6 +44,7 @@ def client():
     ("post", "/api/homehub/discovered/esphome:aabbccddee01/adopt"),
     ("post", "/api/homehub/discovered/esphome:aabbccddee01/ignore"),
     ("post", "/api/homehub/matter/commission"),
+    ("get", "/api/homehub/matter/settings"), ("put", "/api/homehub/matter/wifi"), ("delete", "/api/homehub/matter/wifi"),
 ])
 def test_only_admins_reach_discovery(client, hub, verb, path):
     seen, _ = hub
@@ -86,6 +87,26 @@ def test_ignore_and_commission(client, hub):
     assert client.post("/api/homehub/matter/commission", headers=ADMIN, json={"code": " "}).status_code == 400
     client.post("/api/homehub/matter/commission", headers=ADMIN, json={"code": "34970112332", "name": "Lamp"})
     assert seen[-1] == ("POST", "/hub/matter/commission", None, {"code": "34970112332", "name": "Lamp"})
+
+
+def test_bluetooth_commissioning_and_the_household_wifi_pass_through(client, hub):
+    seen, answers = hub
+    body = {"code": "34970112332", "method": "ble", "session": "s1", "wifi_ssid": "ExampleNet",
+            "wifi_password": "made-up-passphrase", "extra": "dropped"}
+    answers["/hub/matter/commission"] = (200, {"status": "pending", "session": "s1", "step": "matter_ble_commission"})
+    assert client.post("/api/homehub/matter/commission", headers=ADMIN, json=body).json()["status"] == "pending"
+    assert seen[-1][3] == {k: v for k, v in body.items() if k != "extra"}
+    answers["/hub/matter/commission"] = (409, {"status": "error", "message": "No household Wi-Fi is set"})
+    resp = client.post("/api/homehub/matter/commission", headers=ADMIN, json=body)
+    assert resp.status_code == 409 and resp.json()["detail"] == "No household Wi-Fi is set"
+
+    answers["/hub/matter/settings"] = (200, {"bluetooth": {"enabled": True}, "wifi": {"configured": False}})
+    assert client.get("/api/homehub/matter/settings", headers=ADMIN).json()["bluetooth"]["enabled"] is True
+    client.put("/api/homehub/matter/wifi", headers=ADMIN, json={"ssid": "ExampleNet", "password": "made-up-passphrase",
+                                                                 "other": 1})
+    assert seen[-1] == ("PUT", "/hub/matter/wifi", None, {"ssid": "ExampleNet", "password": "made-up-passphrase"})
+    client.delete("/api/homehub/matter/wifi", headers=ADMIN)
+    assert seen[-1][:2] == ("DELETE", "/hub/matter/wifi")
 
 
 def test_odd_ids_never_reach_the_hub(client, hub):

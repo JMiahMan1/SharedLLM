@@ -101,8 +101,30 @@ UNREACHABLE_ERRORS = {3: "NodeNotReady", 4: "NodeNotResolving", 7: "SDKStackErro
 COMMAND_TIMEOUT = 30.0
 #: Commissioning joins the device and interviews it before the server answers.
 COMMISSION_TIMEOUT = 180.0
+#: Over Bluetooth the server also finds the device, hands it the Wi-Fi and waits for it to join.
+BLE_COMMISSION_TIMEOUT = 240.0
+#: How long the server looks for the device's Bluetooth advertisement.
+BLE_DISCOVERY_TIMEOUT_S = 90
 LISTEN_TIMEOUT = 120.0  # start_listening dumps every node; the first start can be slow
 RECONNECT_DELAYS = (1, 2, 5, 10, 30, 60)
+
+
+
+class MatterCommandError(HubError):
+    """A command the Matter Server refused: its ``error_code``, ``details`` and, for commissioning, ``reason``.
+
+    ``reason`` is the server's ``CommissionFailureReason`` (``not-discovered``,
+    ``passcode-mismatch``, ``invalid-payload``, ``attestation-rejected``,
+    ``timeout``, ``other``) when it sent one.
+    """
+
+    def __init__(self, command: str, code: int, details: str, reason: str | None = None) -> None:
+        super().__init__(f"{command} failed (Matter error {code}): {details}".strip())
+        self.command = command
+        self.code = code
+        self.details = details
+        self.reason = reason
+
 
 UNIQUE_ID_RE = re.compile(
     r"^(?P<fabric>[0-9A-Fa-f]{16})-(?P<node>[0-9A-Fa-f]{16})-MatterNodeDevice-"
@@ -410,6 +432,10 @@ class MatterDriver(Driver):
         self.log.info("Matter Server %s: fabric %s, schema %s, %d nodes", self.url,
                       f"{int(got):016X}" if got is not None else "?", self.server_info.get("schema_version"),
                       len(self.nodes))
+        if self.server_info.get("bluetooth_enabled") is False:
+            # Visible on purpose: without it only devices already on the network can be added.
+            self.log.info("Matter Server Bluetooth is off (MATTER_BLUETOOTH_ADAPTER is not set): new Wi-Fi devices "
+                          "cannot be commissioned over Bluetooth, only devices already on the network")
         self._publish_all()
 
     async def _keep_connected(self) -> None:
@@ -483,7 +509,8 @@ class MatterDriver(Driver):
             details = reply.get("details") or ""
             if code in UNREACHABLE_ERRORS:
                 raise DeviceUnavailable(f"{command}: {UNREACHABLE_ERRORS[code]} {details}".strip())
-            raise HubError(f"{command} failed (Matter error {code}): {details}".strip())
+            reason = reply.get("reason")
+            raise MatterCommandError(command, code, str(details), str(reason) if reason else None)
         return reply.get("result")
 
     def _handle(self, msg: dict[str, Any]) -> None:
@@ -516,6 +543,8 @@ class MatterDriver(Driver):
             node_id = int(data)
             self.nodes.pop(node_id, None)
             self._publish_node(node_id)
+        elif event == "server_info_updated" and isinstance(data, dict):
+            self.server_info.update(data)
         elif event == "server_shutdown":
             # Closing ends the reader, and the keeper reconnects once the server is back.
             ws = self._ws
@@ -941,18 +970,42 @@ class MatterDriver(Driver):
 
     # -- adding devices (services/homehub/flows.py) ------------------------------
     async def commission_with_code(self, code: str, *, network_only: bool = True,
-                                   timeout: float = COMMISSION_TIMEOUT) -> dict[str, Any]:
+                                   timeout: float = COMMISSION_TIMEOUT, wifi_credentials_id: str | None = None,
+                                   discovery_timeout_s: int | None = None) -> dict[str, Any]:
         """Commission a new device onto our fabric with its setup code; returns the new node.
 
         ``network_only`` is for a device already on the LAN (Wi-Fi or Ethernet,
-        in pairing mode). The server answers once the device has joined and
-        been interviewed, which can take a minute or two.
+        in pairing mode). With ``network_only=False`` the server may also find
+        the device over Bluetooth and give it the Wi-Fi stored under
+        ``wifi_credentials_id`` (``set_wifi_credentials``). The server answers
+        once the device has joined and been interviewed, which can take a minute
+        or two.
         """
-        node = await self._send("commission_with_code", timeout=timeout, code=code, network_only=network_only)
+        extra: dict[str, Any] = {}
+        if wifi_credentials_id is not None:
+            extra["wifi_credentials_id"] = wifi_credentials_id
+        if discovery_timeout_s is not None:
+            extra["discovery_timeout_s"] = discovery_timeout_s
+        node = await self._send("commission_with_code", timeout=timeout, code=code, network_only=network_only,
+                                **extra)
         if not isinstance(node, dict) or "node_id" not in node:
             raise HubError("the Matter Server did not return the new node")
         self.nodes[int(node["node_id"])] = node
         return node
+
+    async def refresh_server_info(self) -> dict[str, Any]:
+        """Ask the server for its current info (``bluetooth_enabled``, ...) and keep it."""
+        info = await self._send("server_info")
+        if isinstance(info, dict):
+            self.server_info.update(info)
+        return self.server_info
+
+    async def set_wifi_credentials(self, cred_id: str, ssid: str, password: str) -> None:
+        """Store Wi-Fi on the server under ``cred_id`` for ``commission_with_code`` to hand a new device."""
+        await self._send("set_wifi_credentials", id=cred_id, ssid=ssid, credentials=password)
+
+    async def remove_wifi_credentials(self, cred_id: str) -> None:
+        await self._send("remove_wifi_credentials", id=cred_id)
 
     @property
     def compressed_fabric_id(self) -> int | None:

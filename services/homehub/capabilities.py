@@ -79,6 +79,7 @@ ABILITIES: dict[str, str] = {
     "sense": "reports a reading", "detect": "reports on/off events", "track": "reports a location",
     "event": "fires events", "update": "installs firmware",
     "converse": "starts a spoken conversation and listens for the answer",
+    "presence_room": "says which room a tracked person or device is in (Bluetooth)",
 }
 
 # HA's feature flags, per domain (homeassistant.components.<domain>.const).
@@ -346,6 +347,9 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
         abilities.add("detect")
     elif domain in ("device_tracker", "person"):
         abilities.add("track")
+        if domain == "person" and "room_area_id" in attrs:  # a phone of theirs has a Bluetooth room sensor
+            abilities.add("presence_room")
+            details.update(room=attrs.get("room"), room_area_id=attrs.get("room_area_id"))
     elif domain == "notify":
         abilities.add("notify")
     elif domain == "tts":
@@ -377,6 +381,9 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
             log.exception("%s.entity_abilities(%s) failed", type(driver).__name__, entity_id)
     if domain == "assist_satellite" and "announce" in abilities:
         abilities.add("tts")
+    bluetooth = getattr(hub, "bluetooth", None)  # room sensors of phones and tags (services/homehub/bluetooth.py)
+    if bluetooth is not None:
+        abilities |= set(bluetooth.entity_abilities(entity_id))
     area_id, area_source = hub.entity_area_id(entity_id), "registry"
     if area_id is None and ent is not None:
         area_id = inherited_area(hub, ent)

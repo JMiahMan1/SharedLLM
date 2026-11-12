@@ -194,10 +194,8 @@ Through the same WebSocket (the dashboard at port 5580 does both of these):
 - New device: `{"message_id": "1", "command": "commission_with_code",
   "args": {"code": "MT:...", "network_only": true}}`. The code is the QR payload
   (`MT:...`) or the 11/21-digit manual code. `network_only: true` for a device
-  already on Wi-Fi (or in its pairing mode on the LAN); BLE commissioning of a
-  fresh Wi-Fi device needs `set_wifi_credentials` first and a Bluetooth adapter
-  (`BLUETOOTH_ADAPTER`/`NOBLE_BINDINGS=dbus` with `/run/dbus` mounted), which this
-  compose service does not set up.
+  already on Wi-Fi (or in its pairing mode on the LAN). A fresh Wi-Fi device is
+  added over Bluetooth instead: see "Bluetooth: adding new Wi-Fi devices" below.
 - Sharing a device with another controller (multi-admin, e.g. Apple or Google
   Home): `{"command": "open_commissioning_window", "args": {"node_id": 38,
   "timeout": 300}}` answers with `setup_manual_code` and `setup_qr_code` for the
@@ -207,3 +205,146 @@ Through the same WebSocket (the dashboard at port 5580 does both of these):
   (`23D10E1156185BE0-{node:016X}-MatterNodeDevice-{endpoint}-{key}-{cluster}-{attribute}`);
   the driver serves any entity registered with such an id, but creating those
   registry entries is not automatic yet.
+
+## Bluetooth: adding new Wi-Fi devices
+
+A new (or freshly reset) Wi-Fi Matter device is not on the network yet. It
+advertises over Bluetooth LE, and the controller gives it the Wi-Fi name and
+password over that link before it joins. The Matter Server does the Bluetooth
+part itself; homehub supplies the code and the Wi-Fi (`matter_ble.py`).
+
+### The adapter
+
+The Jarvis host has two adapters: `hci0`, the built-in one, which stays with
+BlueZ for the hub's other Bluetooth work, and `hci1`, a USB dongle given to the
+Matter Server. `MATTER_BLUETOOTH_ADAPTER` in `.env` is that adapter's HCI number
+(`1` for hci1); the compose service passes it as `BLUETOOTH_ADAPTER`. Blank
+means Bluetooth commissioning is off: the server logs `BLE is disabled`, homehub
+logs that only devices already on the network can be added, and the Bluetooth
+flow refuses with a message naming the setting.
+
+How the server uses it (matterjs-server 1.5.5, `@stoprocent/noble` 2.8):
+
+- **Raw HCI on the adapter**, noble's default on Linux. BlueZ keeps managing
+  hci1 (it stays powered and listed in `bluetoothctl list`); noble scans and
+  connects next to it. Nothing on the host changes, and nothing has to be redone
+  after a reboot. **No sudo is needed.**
+- Raw HCI needs `CAP_NET_RAW` in the server process. Docker gives capabilities
+  only to uid 0 (a `user: 1000` container with `cap_add` has none in effect), so
+  the compose service starts as root with only `NET_RAW`, `SETUID`, `SETGID` and
+  `SETPCAP`, and its entrypoint is the image's own `setpriv`, which runs the
+  server as uid 1000 (the owner of `./data/matter-server`, as before) with
+  `NET_RAW` as its only capability (ambient, bounding set reduced to it). No
+  `NET_ADMIN`, not privileged, no device mounts, no SELinux relabel. The same
+  entrypoint is used with Bluetooth off.
+- Not used: `NOBLE_BINDINGS=dbus` (BlueZ over D-Bus) does not pass the HCI number
+  to the D-Bus binding in this version, so it would take the first adapter
+  (hci0). `HCI_CHANNEL_USER=1` (exclusive user channel) needs `NET_ADMIN` and the
+  adapter powered down in BlueZ before the server starts, which needs sudo on
+  every boot; it is the fallback if BlueZ ever gets in the way of a
+  commissioning (see below).
+
+Verified on the host on 2026-11-12 with throwaway containers of the same image
+(port 5599, storage inside the container, fabric id 99, the real server
+untouched): as uid 1000 with `cap_add` the adapter stays `unknown`; as root with
+only `NET_RAW`, and through `setpriv` as uid 1000 with only `NET_RAW`, noble
+reports `poweredOn` on hci1 (its address, not hci0's) and hears the
+advertisements around it; the full server logs `Bluetooth enabled (hci-id=1)`,
+`BLE is enabled`, `Bluetooth adapter is powered on, BLE discovery started`, and
+`commission_with_code` with a code no device near it has answers
+`reason: not-discovered` after its discovery timeout. `set_wifi_credentials` and
+`remove_wifi_credentials` under an id of our own work, and the server logs the
+credentials as `<redacted>`.
+
+Things to keep in mind:
+
+- **Nothing else should use hci1 through BlueZ** (scans, connections): two
+  scanners on one controller refuse each other's commands. BlueZ's default
+  controller is hci1 on this host (`bluetoothctl list` marks it `[default]`), so
+  anything using BlueZ must select hci0 explicitly.
+- **HCI numbers follow probe order.** They have been stable here, but check
+  after a reboot or when a USB device is added: `ls -l /sys/class/bluetooth/`
+  shows each adapter's USB path, and hci1 must be the dongle
+  (`cat /sys/class/bluetooth/hci1/device/uevent` names its USB product).
+- **Not yet proven with a real device**: no new Matter device was at hand, so
+  the GATT session (PASE and the Wi-Fi handover) has not run with BlueZ also on
+  hci1. BlueZ can attach its own GATT client to a connection noble opened. If a
+  commissioning fails after the device was found (a BTP or GATT error in the
+  server's log), use the exclusive user channel instead: add `NET_ADMIN` to
+  `cap_add` and to the three `setpriv` capability lists, set
+  `HCI_CHANNEL_USER=1` in the service's environment, and on the host (sudo, each
+  boot, before the server starts):
+
+  ```bash
+  sudo btmgmt --index 1 power off
+  ```
+
+  For every boot, a unit can run it after `bluetooth.service`:
+
+  ```bash
+  sudo tee /etc/systemd/system/matter-hci1-release.service >/dev/null <<'UNIT'
+  [Unit]
+  Description=Give hci1 to the Matter Server (power it off in BlueZ)
+  After=bluetooth.service
+  Requires=bluetooth.service
+
+  [Service]
+  Type=oneshot
+  ExecStart=/usr/bin/btmgmt --index 1 power off
+
+  [Install]
+  WantedBy=multi-user.target
+  UNIT
+  sudo systemctl daemon-reload && sudo systemctl enable --now matter-hci1-release.service
+  ```
+
+### Turning it on
+
+1. `.env`: `MATTER_BLUETOOTH_ADAPTER=1`.
+2. `docker compose up -d matter-server` (recreates the container; the fabric
+   storage is untouched). Its log must show `Bluetooth enabled (hci-id=1)` and
+   `BLE is enabled`, and the 14 nodes come back as before.
+3. In Jarvis, Devices > New devices > Wi-Fi for new devices: set the household
+   Wi-Fi (2.4 GHz: Matter Wi-Fi devices do not join 5 GHz networks).
+
+### The household Wi-Fi
+
+A hub setting: the SSID and password, sealed with `FERNET_KEY` in the hub's
+store (blob `matter_commissioning_wifi`). No route returns the password; reads
+say only whether it is set, and the SSID. Admin routes: `GET
+/hub/matter/settings` (`bluetooth.enabled` from the server, `wifi.configured`,
+`wifi.ssid`), `PUT /hub/matter/wifi` `{"ssid", "password"}`, `DELETE
+/hub/matter/wifi` (the gateway's `/api/homehub/matter/...`). A device can be
+given another network (`wifi_ssid` + `wifi_password` in the flow's input).
+
+The Matter Server gets the password only while a device is being added: homehub
+stores it under its own credential id (`homehub-commissioning`, never the
+server's `default`), passes that id to `commission_with_code`, and removes it
+afterwards whatever happened.
+
+### The flow
+
+`POST /hub/matter/commission` with `"method": "ble"` (or the Matter form under
+Add by address, `method: ble`):
+
+1. Checks first, so a wrong setup fails at once: the setup code, the Matter
+   Server connected, `server_info.bluetooth_enabled` (with Bluetooth off the
+   server would silently ignore the Wi-Fi), and a Wi-Fi to give.
+2. Then in the background: `set_wifi_credentials`, `commission_with_code`
+   (`network_only: false`, `wifi_credentials_id`, `discovery_timeout_s: 90`,
+   answer awaited up to 240 s), `remove_wifi_credentials`. One at a time.
+3. The answer is `status: pending` with a `session` and `step`
+   (`matter_ble_prepare`, `matter_ble_commission` with the time so far,
+   `matter_ble_register`); the caller polls with the `session`.
+4. The node is registered like every Matter node: device info and entities from
+   the node's own clusters (`node_device_info`, `node_entity_specs`).
+
+| Failure | Answer |
+|---|---|
+| Bluetooth off | 503, names `MATTER_BLUETOOTH_ADAPTER` |
+| No household Wi-Fi and none given | 409, names the setting |
+| Device not advertising (`reason: not-discovered`) | 404: power, pairing mode, distance |
+| Wrong Wi-Fi password or unreachable network | 400: the server's "failed to add/connect to WiFi network" |
+| Wrong setup code (`passcode-mismatch`, `invalid-payload`) | 400 |
+| Attestation refused (`attestation-rejected`) | 502 with the server's finding |
+| Device stopped answering (`timeout`) | 502 |

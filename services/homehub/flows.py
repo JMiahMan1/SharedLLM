@@ -104,6 +104,10 @@ def needs_for(finding: dict[str, Any]) -> list[dict[str, Any]]:
     from services.homehub import manual_flows, pairing  # both import this module
 
     extra = manual_flows.needs_for(finding)
+    if extra is None:
+        from services.homehub import bluetooth_flows
+
+        extra = bluetooth_flows.needs_for(finding)
     return extra if extra is not None else pairing.needs_for(finding)
 
 
@@ -299,10 +303,10 @@ async def adopt(runtime: Any, finding: dict[str, Any], body: dict[str, Any]) -> 
     reason = unsupported_reason(finding)
     if reason is not None:
         raise FlowError(reason, 501)
-    from services.homehub import manual_flows, pairing  # both import this module
+    from services.homehub import bluetooth_flows, manual_flows, pairing  # each imports this module
 
     flow = (manual_flows.flow_for(integration, finding.get("source")) or FLOWS.get(integration)
-            or pairing.FLOWS.get(integration))
+            or pairing.FLOWS.get(integration) or bluetooth_flows.FLOWS.get(integration))
     if flow is None:
         raise FlowError(f"Adding {integration} devices is not supported yet.", 501)
     hub = runtime.hub
@@ -558,8 +562,6 @@ def matter_driver(runtime: Any) -> Any:
 async def commission_matter(runtime: Any, code: Any, *, name: str | None = None,
                             area_id: str | None = None) -> dict[str, Any]:
     """Commission a Matter device with its setup code and register its entities."""
-    from services.homehub.drivers.matter import node_device_info, node_entity_specs
-
     hub = runtime.hub
     clean = normalize_matter_code(code)
     area = _area(hub, area_id)
@@ -568,6 +570,18 @@ async def commission_matter(runtime: Any, code: Any, *, name: str | None = None,
     if fabric is None:
         raise FlowError("The Matter Server has not reported its fabric yet; try again in a minute.", 503)
     node = await driver.commission_with_code(clean)
+    return await register_matter_node(runtime, driver, node, name=name, area_id=area)
+
+
+async def register_matter_node(runtime: Any, driver: Any, node: dict[str, Any], *, name: str | None,
+                               area_id: str | None) -> dict[str, Any]:
+    """Register a newly commissioned node's device and entities, from the node's own clusters."""
+    from services.homehub.drivers.matter import node_device_info, node_entity_specs
+
+    hub, area = runtime.hub, area_id
+    fabric = driver.compressed_fabric_id
+    if fabric is None:
+        raise FlowError("The Matter Server has not reported its fabric yet; try again in a minute.", 503)
     node_id = int(node["node_id"])
     info = node_device_info(fabric, node)
     plan = Plan(hub, driver.entry, new_entry=False)
@@ -588,6 +602,10 @@ async def commission_matter(runtime: Any, code: Any, *, name: str | None = None,
 
 async def adopt_matter(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                        user_input: dict[str, Any]) -> dict[str, Any]:
+    if user_input.get("method") == "ble":  # a new Wi-Fi device, over Bluetooth (services/homehub/matter_ble.py)
+        from services.homehub import matter_ble
+
+        return await matter_ble.adopt_over_ble(runtime, finding, name, area_id, user_input)
     code = user_input.get("code")
     if not code:
         raise NeedsInput([SETUP_CODE], "Enter the device's Matter setup code.")

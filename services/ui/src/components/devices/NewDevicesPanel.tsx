@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ArrowRightLeft, EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2, Wifi } from 'lucide-react';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
+import MatterAddDialog from './MatterAddDialog';
+import MatterWifiSettings from './MatterWifiSettings';
 import {
   addByAddress,
   adoptDevice,
-  commissionMatter,
   getEntries,
   failureText,
   getDiscovered,
@@ -16,15 +17,9 @@ import {
   scanForDevices,
   updateAddress,
 } from '../../lib/discoveredDevices';
-import type { AdoptResult, DiscoveredDevice, DiscoveryInput, ManualFlow } from '../../lib/discoveredDevices';
+import type { AdoptResult, DiscoveredDevice, ManualFlow } from '../../lib/discoveredDevices';
 
 const QUERY_KEY = ['homehub-discovered'];
-const MATTER_CODE: DiscoveryInput = {
-  key: 'code',
-  label: 'Setup code',
-  type: 'text',
-  help: 'The QR code text (MT:...) or the 11 or 21 digit pairing code on the device or its box.',
-};
 
 function seen(iso: string | null): string {
   if (!iso) return '';
@@ -45,6 +40,7 @@ export default function NewDevicesPanel() {
   const queryClient = useQueryClient();
   const [adopting, setAdopting] = useState<DiscoveredDevice | null>(null);
   const [matterOpen, setMatterOpen] = useState(false);
+  const [wifiOpen, setWifiOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [manual, setManual] = useState<ManualFlow | null>(null);
   const flows = useQuery({ queryKey: ['homehub-flows'], queryFn: getManualFlows, enabled: pickerOpen, retry: false,
@@ -122,6 +118,14 @@ export default function NewDevicesPanel() {
           </button>
           <button
             type="button"
+            onClick={() => setWifiOpen((v) => !v)}
+            aria-expanded={wifiOpen}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+          >
+            <Wifi size={14} /> Wi-Fi for new devices
+          </button>
+          <button
+            type="button"
             onClick={() => scan.mutate()}
             disabled={scan.isPending}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-50"
@@ -130,6 +134,8 @@ export default function NewDevicesPanel() {
           </button>
         </span>
       </header>
+
+      {wifiOpen && <MatterWifiSettings />}
 
       {pickerOpen && (
         <div className="border-b border-white/5 px-4 py-3" data-testid="add-by-address">
@@ -145,7 +151,7 @@ export default function NewDevicesPanel() {
                     <button
                       key={f.domain}
                       type="button"
-                      onClick={() => { setManual(f); setPickerOpen(false); }}
+                      onClick={() => { if (f.domain === 'matter') setMatterOpen(true); else setManual(f); setPickerOpen(false); }}
                       className="min-h-11 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
                     >
                       {f.label}
@@ -279,17 +285,7 @@ export default function NewDevicesPanel() {
           onClose={() => setManual(null)}
         />
       )}
-      {matterOpen && (
-        <AdoptDeviceDialog
-          title="Add a Matter device"
-          intro="Put the device in pairing mode on the home network, then enter its setup code. Adding it can take a minute or two."
-          needs={[MATTER_CODE]}
-          areas={areas}
-          onSubmit={async ({ name, areaId, input }) => commissionMatter(input.code || '', name, areaId)}
-          onDone={added}
-          onClose={() => setMatterOpen(false)}
-        />
-      )}
+      {matterOpen && <MatterAddDialog areas={areas} onDone={added} onClose={() => setMatterOpen(false)} />}
     </>
   );
 }

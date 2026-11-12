@@ -97,9 +97,17 @@ export async function ignoreDevice(id: string, ignored = true): Promise<Discover
   return resp.data;
 }
 
-export async function commissionMatter(code: string, name?: string, areaId?: string): Promise<AdoptResult> {
+/** A new Wi-Fi device over Bluetooth: `method: 'ble'`, the `session` while it runs, a network for this device only. */
+export interface MatterBleRequest {
+  method: 'ble';
+  session?: string;
+  wifi_ssid?: string;
+  wifi_password?: string;
+}
+
+export async function commissionMatter(code: string, name?: string, areaId?: string, ble?: MatterBleRequest): Promise<AdoptResult> {
   const resp = await apiClient.post('/api/homehub/matter/commission',
-    { code, ...(name ? { name } : {}), ...(areaId ? { area_id: areaId } : {}) },
+    { code, ...(name ? { name } : {}), ...(areaId ? { area_id: areaId } : {}), ...(ble || {}) },
     { timeout: 240_000 });
   return resp.data;
 }

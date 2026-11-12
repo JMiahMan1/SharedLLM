@@ -114,13 +114,37 @@ async def ignore(finding_id: str, request: Request):
 
 @router.post("/matter/commission")
 async def commission(request: Request):
-    """Add a Matter device by its setup code: ``{"code", "name"?, "area_id"?}``."""
+    """Add a Matter device by its setup code: ``{"code", "name"?, "area_id"?}``; a new Wi-Fi device over
+    Bluetooth with ``"method": "ble"`` (+ ``"session"`` while it runs, ``"wifi_ssid"``/``"wifi_password"``
+    for a network other than the household one)."""
     await _admin(request)
     body = await _json(request)
     if not str(body.get("code") or "").strip():
         raise HTTPException(status_code=400, detail="Enter the device's Matter setup code")
-    payload = {k: body[k] for k in ("code", "name", "area_id") if body.get(k)}
+    keys = ("code", "name", "area_id", "method", "session", "wifi_ssid", "wifi_password")
+    payload = {k: body[k] for k in keys if body.get(k)}
     return _answer(*await _hub("POST", "/hub/matter/commission", json=payload, timeout=_ADOPT_TIMEOUT))
+
+
+@router.get("/matter/settings")
+async def matter_settings(request: Request):
+    """Whether the Matter Server has Bluetooth, and the household Wi-Fi for new devices (its name, never the password)."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/matter/settings"))
+
+
+@router.put("/matter/wifi")
+async def set_matter_wifi(request: Request):
+    """Set the household Wi-Fi new Matter devices are given: ``{"ssid", "password"}``."""
+    await _admin(request)
+    body = await _json(request)
+    return _answer(*await _hub("PUT", "/hub/matter/wifi", json={k: body.get(k) for k in ("ssid", "password")}))
+
+
+@router.delete("/matter/wifi")
+async def clear_matter_wifi(request: Request):
+    await _admin(request)
+    return _answer(*await _hub("DELETE", "/hub/matter/wifi"))
 
 
 async def _json(request: Request) -> dict[str, Any]:

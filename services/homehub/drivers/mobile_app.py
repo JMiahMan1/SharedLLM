@@ -275,6 +275,9 @@ class PersonManager:
                 if latest.attributes.get(key) is not None:
                     attrs[key] = latest.attributes[key]
             attrs["source"] = latest.entity_id
+        bluetooth = getattr(self.hub, "bluetooth", None)
+        if bluetooth is not None:  # the room a phone's Bluetooth beacon is in, read now (never stored)
+            attrs.update(bluetooth.person_room(p["device_trackers"]))
         self._publish(p, latest.state if latest is not None else UNKNOWN, attrs)
 
     def update_from_fix(self, p: dict[str, Any], fix: dict[str, Any]) -> None:

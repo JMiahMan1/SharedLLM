@@ -253,7 +253,11 @@ class ESPHomeDriver(Driver):
         self._services: list[tuple[str, str]] = []
         self._ha_subs: dict[str, set[str | None]] = {}        # HA entity_id -> attributes the node wants
         self._unsub_bus = None
+        self._bt_detach: Any = None  # the node's Bluetooth proxy feed (services/homehub/bluetooth.py)
         self._tasks: set[asyncio.Task] = set()
+        from services.homehub.voice_pipeline import SatelliteVoice
+
+        self.voice = SatelliteVoice(self)  # the voice pipeline, when the node is a satellite
         self.local_entities = [e for e in self.entities if "/" not in (e.unique_id or "")
                                and re.match(r"^[0-9A-Fa-f:]{17}-", e.unique_id or "")]
 
@@ -307,12 +311,34 @@ class ESPHomeDriver(Driver):
         client.subscribe_home_assistant_states_and_services(
             on_state=self._on_state, on_service_call=self._on_service_call,
             on_state_sub=self._on_state_sub, on_state_request=self._on_state_request)
+        try:
+            self.voice.attach(client, device_info)
+        except Exception:
+            self.log.exception("ESPHome %s: subscribing to its voice assistant failed", self.device_name)
+        self._attach_bluetooth(client, device_info)
         if self._was_connected:
             self.log.info("ESPHome %s (%s) reconnected", self.device_name, self.host)
         self._was_connected = True
 
+    def _attach_bluetooth(self, client: Any, device_info: Any) -> None:
+        """A node running ``bluetooth_proxy`` feeds the hub's Bluetooth bus over this connection."""
+        from services.homehub.bluetooth import attach_esphome_proxy
+
+        self._detach_bluetooth()
+        try:
+            self._bt_detach = attach_esphome_proxy(self.hub, self, client, device_info, self._api_version)
+        except Exception:
+            self.log.exception("ESPHome %s: subscribing to its Bluetooth advertisements failed", self.device_name)
+
+    def _detach_bluetooth(self) -> None:
+        detach, self._bt_detach = self._bt_detach, None
+        if detach is not None:
+            detach()
+
     async def _on_stop(self, expected_disconnect: bool) -> None:
+        self._detach_bluetooth()
         self._client = None
+        self.voice.detach()
         if self._closing:
             return
         self.log.warning("ESPHome %s (%s) disconnected%s; reconnecting", self.device_name, self.host,
@@ -360,12 +386,14 @@ class ESPHomeDriver(Driver):
 
     async def async_unload(self) -> None:
         self._closing = True
+        self._detach_bluetooth()
         if self._reconnect_task is not None:
             self._reconnect_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._reconnect_task
         for t in list(self._tasks):
             t.cancel()
+        self.voice.detach()
         self._unregister_services()
         if self._unsub_bus:
             self._unsub_bus()
@@ -378,13 +406,14 @@ class ESPHomeDriver(Driver):
     def entity_abilities(self, entity: EntityEntry) -> list[str]:
         """What a voice satellite can do, from the node's own voice-assistant feature flags.
 
-        ``announce`` when the node says it takes announcements. Never ``converse``: starting a
-        conversation needs an Assist pipeline to hear the answer, which the hub does not run.
+        ``announce`` when the node says it takes announcements; ``converse`` when it can start a
+        conversation and the hub's voice pipeline (``voice_pipeline.py``) is listening to it.
         """
         if entity.domain != "assist_satellite" or self._device_info is None:
             return []
         flags = int(getattr(self._device_info, "voice_assistant_feature_flags", 0) or 0)
-        return ["announce"] if flags & int(VoiceAssistantFeature.ANNOUNCE) else []
+        out = ["announce"] if flags & int(VoiceAssistantFeature.ANNOUNCE) else []
+        return [*out, "converse"] if self.voice.can_converse else out
 
     def _confirm(self, device_info: Any) -> None:
         """What the node said about itself and its entities, onto the registry as the device's own."""
@@ -715,12 +744,14 @@ class ESPHomeDriver(Driver):
         """HA's ``assist_satellite.announce`` on a voice satellite: the node's own announcement call.
 
         The text is spoken by Jarvis's voice (the hub's TTS) and the node plays the clip with its
-        announcement handling (ducking, LED ring). ``start_conversation`` needs an Assist pipeline to
-        hear the answer, which the hub does not run, so it is refused by name and callers fall back.
+        announcement handling (ducking, LED ring). ``start_conversation`` speaks first and then the
+        node listens, through the hub's voice pipeline (``voice_pipeline.py``).
         """
         if service == "start_conversation":
-            raise ServiceNotFound("assist_satellite.start_conversation needs a voice pipeline, which the hub "
-                                  "does not run; use assist_satellite.announce")
+            if not self.voice.can_converse:
+                raise ServiceNotFound(f"assist_satellite.start_conversation needs the node's voice pipeline, which "
+                                      f"{self.device_name} does not offer now; use assist_satellite.announce")
+            return await self.voice.start_conversation(data)
         if service != "announce":
             raise ServiceNotFound(f"assist_satellite.{service} is not supported")
         client = self._require_client()

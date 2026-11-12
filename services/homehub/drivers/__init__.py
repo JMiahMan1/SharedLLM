@@ -39,6 +39,10 @@ DRIVERS: dict[str, str] = {
     "mobile_app": "services.homehub.drivers.mobile_app:MobileAppDriver",
     "local_todo": "services.homehub.drivers.todo:LocalTodoDriver",
     "shopping_list": "services.homehub.drivers.todo:ShoppingListDriver",
+    # Bluetooth: one driver for every BLE sensor parser (services/homehub/bluetooth_parsers.py), and iBeacon tags.
+    **{d: "services.homehub.drivers.ble:BLESensorDriver" for d in (
+        "bthome", "xiaomi_ble", "qingping", "sensorpush", "thermopro", "inkbird", "ruuvitag_ble", "govee_ble")},
+    "ibeacon": "services.homehub.drivers.ble:IBeaconDriver",
 }
 
 

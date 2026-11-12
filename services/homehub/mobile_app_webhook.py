@@ -443,6 +443,9 @@ class MobileAppManager:
         app_data = data.get("app_data") or {}
         if not isinstance(app_data, dict):
             raise HubError("Message format incorrect: app_data")
+        beacon_error = _ble_beacon_error(app_data)
+        if beacon_error:
+            raise HubError(f"Message format incorrect: app_data.ble_beacon: {beacon_error}")
         reg["app_data"] = app_data
         reg["supports_encryption"] = bool(data.get("supports_encryption", False))
         async with self._lock:
@@ -460,6 +463,7 @@ class MobileAppManager:
                 await self._reregister(existing, reg)
             else:
                 await self._create_entry(reg)
+        _beacons_changed(self.hub)
         return {"cloudhook_url": None, "remote_ui_url": None, "secret": reg.get("secret"),
                 "webhook_id": reg["webhook_id"]}
 
@@ -617,8 +621,21 @@ class MobileAppManager:
         entry = self.hub.config_entries.get(entry_id)
         if entry is None or entry.domain != DOMAIN:
             raise HubError("No such phone")
+        app_data = patch.get("app_data")
+        if "app_data" in patch:  # the Jarvis app's room beacon, relayed by the gateway; checked before any write
+            if not isinstance(app_data, dict):
+                raise HubError("app_data must be an object")
+            unknown = sorted(set(app_data) - {"ble_beacon"})
+            if unknown:
+                raise HubError(f"unknown app_data key: {', '.join(unknown)} (only ble_beacon is set here)")
+            beacon_error = _ble_beacon_error(app_data)
+            if beacon_error:
+                raise HubError(f"app_data.ble_beacon: {beacon_error}")
         for key, value in patch.items():
-            if key == "jarvis_user":
+            if key == "app_data":
+                # Merged like update_registration: push_url and every other key the app sent stay.
+                entry.data = {**entry.data, "app_data": {**(entry.data.get("app_data") or {}), **app_data}}
+            elif key == "jarvis_user":
                 if value in (None, ""):
                     entry.options.pop("jarvis_user", None)
                 else:
@@ -630,6 +647,8 @@ class MobileAppManager:
             else:
                 raise HubError(f"unknown option: {key}")
         self._save_entry(entry)
+        if "app_data" in patch:
+            _beacons_changed(self.hub)
         return entry
 
     # -- listing for the admin UI ---------------------------------------------------------
@@ -850,6 +869,26 @@ async def _update_location(mgr: MobileAppManager, entry: ConfigEntry, data: Any)
     return _ok()
 
 
+def _ble_beacon_error(app_data: dict[str, Any]) -> str | None:
+    """Why ``app_data.ble_beacon`` (the Jarvis app's room-presence beacon) is malformed, or None."""
+    if app_data.get("ble_beacon") is None:
+        return None
+    from services.homehub.bluetooth_presence import beacon_from_dict
+
+    try:
+        beacon_from_dict(app_data["ble_beacon"])
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _beacons_changed(hub: Hub) -> None:
+    """A phone registered, changed or dropped its beacon: the Bluetooth manager makes its room sensors."""
+    bluetooth = getattr(hub, "bluetooth", None)
+    if bluetooth is not None:
+        bluetooth.sync_trackers()
+
+
 @command("update_registration")
 async def _update_registration(mgr: MobileAppManager, entry: ConfigEntry, data: Any) -> WebhookResult:
     if not isinstance(data, dict):
@@ -860,10 +899,14 @@ async def _update_registration(mgr: MobileAppManager, entry: ConfigEntry, data: 
         return _ok()
     if "app_data" in allowed and not isinstance(allowed["app_data"], dict):
         return _ok()
+    beacon_error = _ble_beacon_error(allowed.get("app_data") or {})
+    if beacon_error:
+        return _error("invalid_format", f"app_data.ble_beacon: {beacon_error}")
     new = {**entry.data, **allowed}
     entry.data = new
     mgr._save_entry(entry)
     mgr._ensure_device(entry, from_phone=True)
+    _beacons_changed(mgr.hub)
     return WebhookResult(200, {k: new.get(k) for k in SAFE_REGISTRATION_KEYS}, encrypt_for=entry)
 
 

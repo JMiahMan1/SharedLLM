@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Loader2, MonitorCheck } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { failureText } from '../../lib/discoveredDevices';
+import { MATTER_BLE_STEPS } from '../../lib/matterCommissioning';
 import type { AdoptResult, DiscoveryInput, HubArea } from '../../lib/discoveredDevices';
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
   /** Fields known up front (an encrypted node's key, a Matter code); the hub may ask for more. */
   needs: DiscoveryInput[];
   submitLabel?: string;
+  /** Shown above the fields (not while waiting), e.g. a choice of how to add the device. */
+  extra?: React.ReactNode;
   /** Rooms the new device can be put in; the picker is left out when there are none. */
   areas?: HubArea[];
   onSubmit: (values: { name?: string; areaId?: string; input: Record<string, string> }) => Promise<AdoptResult>;
@@ -20,6 +23,7 @@ interface Props {
 const STEP_TITLES: Record<string, string> = {
   accept_on_tv: 'Accept on your TV',
   accept_on_device: 'Accept on the device',
+  ...MATTER_BLE_STEPS,
 };
 const DEFAULT_POLL_MS = 2000;
 
@@ -33,7 +37,7 @@ const DEFAULT_POLL_MS = 2000;
  * - `pending`: the device is waiting for a person (Allow on the TV). The dialog
  *   says so and asks again with the `session` until the hub answers otherwise.
  */
-export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, submitLabel = 'Add', areas = [], onSubmit, onDone, onClose }: Props) {
+export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, submitLabel = 'Add', extra, areas = [], onSubmit, onDone, onClose }: Props) {
   const fieldId = useId();
   const [name, setName] = useState('');
   const [areaId, setAreaId] = useState('');
@@ -131,6 +135,7 @@ export default function AdoptDeviceDialog({ title, intro, needs: initialNeeds, s
           </div>
         ) : (
           <>
+            {extra}
             {message && <p className="text-sm text-slate-300">{message}</p>}
             <label className="block text-xs text-slate-400">
               Name (optional)

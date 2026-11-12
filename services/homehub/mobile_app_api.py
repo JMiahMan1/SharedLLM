@@ -6,7 +6,7 @@
 | ``POST /api/mobile_app/registrations`` | bearer (an HA user) | Register a phone; answers 201 ``{webhook_id, secret, ...}`` |
 | ``GET /hub/mobile_app/phones`` | admin | Every phone with its sensors, their source and freshness |
 | ``POST /hub/mobile_app/phones`` | admin | ``{"jarvis_user", "device_name"?}``: a phone fed by Jarvis only |
-| ``PATCH /hub/mobile_app/phones/{entry_id}`` | admin | ``{"jarvis_user"?, "jarvis_fallback"?}`` |
+| ``PATCH /hub/mobile_app/phones/{entry_id}`` | admin | ``{"jarvis_user"?, "jarvis_fallback"?, "app_data"?: {"ble_beacon": {...} or null}}`` |
 | ``DELETE /hub/mobile_app/phones/{entry_id}`` | admin | Remove a phone (its webhook then answers 410) |
 | ``GET/PUT /hub/mobile_app/settings`` | admin | URLs, freshness window, relay allow-list, Jarvis fallback |
 

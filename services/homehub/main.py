@@ -72,6 +72,7 @@ class Service:
         builtin.register(self.hub)
         tts.register(self.hub)
         await self._start_people()
+        await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
         # Automations wait (in the background, so the API is up at once) for
         # every integration's first setup attempt, as HA starts them only once
@@ -93,6 +94,17 @@ class Service:
             self.runtime.discovery = manager  # the /hub/discovered API reads it from here
         except Exception:
             log.exception("device discovery could not start")
+
+    async def _start_bluetooth(self) -> None:
+        """The Bluetooth bus (services/homehub/bluetooth.py); the host adapter only when configured."""
+        try:
+            from services.homehub.bluetooth import BluetoothManager
+
+            manager = BluetoothManager(self.hub, self.store, discovery=lambda: getattr(self.runtime, "discovery", None))
+            await manager.start()
+            self.runtime.bluetooth = manager
+        except Exception:
+            log.exception("Bluetooth could not start")
 
     async def _start_people(self) -> None:
         try:
@@ -126,6 +138,10 @@ class Service:
             log.exception("automation engine could not start")
 
     async def stop(self) -> None:
+        bluetooth = getattr(self.runtime, "bluetooth", None)
+        if bluetooth is not None:
+            self.runtime.bluetooth = None
+            await bluetooth.stop()
         for t in self._bg:
             t.cancel()
         self._bg.clear()

@@ -71,6 +71,9 @@ SPECS: dict[str, dict[str, Any]] = {
     "cast": {"label": "Google Cast device", "kind": "local", "fields": [HOST]},
     "homekit_controller": {"label": "HomeKit accessory", "kind": "local", "fields": [HOST]},
     "matter": {"label": "Matter device", "kind": "local", "fields": [
+        {"key": "method", "label": "How is the device connected?", "type": "select", "optional": True,
+         "options": [{"value": "network", "label": "Already on the network (share code)"},
+                     {"value": "ble", "label": "New device, over Bluetooth"}]},
         {"key": "code", "label": "Setup code", "type": "text",
          "help": "The QR code's text (MT:...) or the 11 or 21 digit pairing code on the device or its box."}]},
     "mjpeg": {"label": "MJPEG IP camera", "kind": "local", "fields": [
@@ -92,6 +95,13 @@ SPECS: dict[str, dict[str, Any]] = {
         {"key": "is_tou", "label": "Time-of-use plan", "type": "select", "optional": True,
          "options": [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]}]},
     "roborock": {"label": "Roborock account", "kind": "cloud", "fields": [EMAIL]},
+    "ibeacon": {"label": "iBeacon tracker (room presence)", "kind": "local", "fields": [
+        {"key": "name", "label": "Name", "type": "text", "help": "Whose tag, e.g. Keys or a person's name."},
+        {"key": "uuid", "label": "Beacon UUID", "type": "text"},
+        {"key": "major", "label": "Major", "type": "text", "help": "0 to 65535."},
+        {"key": "minor", "label": "Minor", "type": "text", "help": "0 to 65535."},
+        {"key": "tx_power", "label": "Power at 1 m (dBm)", "type": "text", "optional": True,
+         "help": "Empty: what the beacon advertises."}]},
     "sun": {"label": "Sun", "kind": "helper", "single": True, "fields": []},
     "open_meteo": {"label": "Open-Meteo weather", "kind": "helper", "fields": lambda hub: [
         {"key": "zone", "label": "Zone", "type": "select", "options": _zone_options(hub) or
@@ -114,7 +124,7 @@ SPECS: dict[str, dict[str, Any]] = {
          "options": [{"value": "", "label": "No"}, {"value": "1", "label": "Yes"}]}]},
 }
 #: Domains whose devices need no address (the finding is a placeholder).
-NO_ADDRESS = {"matter", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
+NO_ADDRESS = {"matter", "ibeacon", "emporia_vue", "srp_energy", "roborock", "sun", "open_meteo", "nws", "local_todo",
               "shopping_list", "switch_as_x", "music_assistant", "go2rtc", "mjpeg"}
 #: Discovery labels its findings with these when it has one.
 KINDS = {"local": "On the network", "service": "Servers and services", "cloud": "Cloud accounts", "helper": "Helpers"}

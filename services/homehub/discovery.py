@@ -108,12 +108,17 @@ LABELS = {
     "homekit_controller": "HomeKit", "androidtv_remote": "Android TV", "samsungtv": "Samsung TV",
     "webostv": "LG webOS TV", "dlna_dmr": "DLNA renderer", "tasmota": "Tasmota", "reolink": "Reolink",
     "music_assistant": "Music Assistant", "roborock": "Roborock",
+    # Bluetooth (services/homehub/bluetooth.py): BLE sensors by their parser, and iBeacon tags.
+    "bthome": "BTHome", "xiaomi_ble": "Xiaomi BLE", "qingping": "Qingping", "sensorpush": "SensorPush",
+    "thermopro": "ThermoPro", "inkbird": "INKBIRD", "ruuvitag_ble": "Ruuvi", "govee_ble": "Govee BLE",
+    "ibeacon": "iBeacon",
 }
 #: Integrations a finding can be added for (services/homehub/flows.py).
 ADOPTABLE = {"esphome", "wiz", "cast", "roku", "matter", "tasmota", "homekit_controller", "androidtv_remote",
-             "samsungtv", "webostv", "dlna_dmr", "reolink", "music_assistant", "roborock"}
+             "samsungtv", "webostv", "dlna_dmr", "reolink", "music_assistant", "roborock", "bthome", "xiaomi_ble",
+             "qingping", "sensorpush", "thermopro", "inkbird", "ruuvitag_ble", "govee_ble", "ibeacon"}
 #: Integrations nobody is told about (too many, and nothing to do with them yet).
-QUIET = {"dlna_dmr"}
+QUIET = {"dlna_dmr", "ibeacon"}  # iBeacons: every passing phone or tag; listed, never announced
 
 _MAC12 = re.compile(r"^[0-9a-f]{12}$")
 _SAFE_ID = re.compile(r"[^a-z0-9_.:-]+")

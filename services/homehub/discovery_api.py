@@ -6,7 +6,7 @@
 | ``POST /hub/discovered/scan`` | Run SSDP and the WiZ sweep now (at most once a minute) |
 | ``POST /hub/discovered/{id}/adopt`` | ``{"name"?, "area_id"?, "input": {...}}``; answers ``status: adopted``, ``status: needs_input`` with ``needs`` (and ``session`` while a pairing is open), or ``status: pending`` with ``session`` (the device waits for a person; send ``input.session`` again) |
 | ``POST /hub/discovered/{id}/ignore`` | ``{"ignored": false}`` un-ignores |
-| ``POST /hub/matter/commission`` | ``{"code", "name"?, "area_id"?}`` for a Matter device that does not announce itself |
+| ``POST /hub/matter/commission`` | ``{"code", "name"?, "area_id"?}`` for a Matter device that does not announce itself; with ``"method": "ble"`` (+ ``"session"``, ``"wifi_ssid"``/``"wifi_password"``) a new Wi-Fi device over Bluetooth (``matter_ble.py``), answered like adopt |
 
 Admins only: the stack's ``INTERNAL_SECRET`` or an HA admin token, as for the
 rest of ``/hub/*``. The manager is ``runtime.discovery`` (set by main.py).
@@ -101,6 +101,11 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     async def matter_commission(request: Request) -> Any:
         admin(request)
         body = await body_of(request)
+        if body.get("method") == "ble":
+            from services.homehub import matter_ble
+
+            status, result = await matter_ble.commission_response(runtime, body)
+            return JSONResponse(result, status_code=status) if status != 200 else result
         try:
             return await flows.commission_matter(runtime, body.get("code"), name=body.get("name") or None,
                                                  area_id=body.get("area_id") or None)
