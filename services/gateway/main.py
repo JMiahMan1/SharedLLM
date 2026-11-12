@@ -985,68 +985,21 @@ def health():
 
 @app.get("/health/ready")
 async def readiness():
-    """Verifies all downstream services are reachable."""
-    services = {
-      "identity": f"{IDENTITY_SVC}/health",
-      "execution": f"{EXECUTION_SVC}/health",
-      "rag": f"{RAG_SVC}/health",
-      "storage": f"{STORAGE_SVC}/health",
-      "logging": f"{LOGGING_SVC}/health",
-      "workspace_runtime": f"{WORKSPACE_RUNTIME_SVC}/health",
-      "control_plane": f"{CONTROL_PLANE_URL}/health",
-      # Family-facing services the dashboard depends on (maps/location, the
-      # Bible reader, health/telemetry). Leaving them out showed a green
-      # board while their pages were broken.
-      "geo": f"{GEO_SVC}/health",
-      "bible": f"{BIBLE_SVC}/health",
-      "health": f"{HEALTH_SVC}/health",
-      "telemetry": f"{TELEMETRY_SVC}/health",
-    }
+    """Every service's status, from the list the containers declare (gateway/readiness.py).
 
-    services_status: dict[str, str] = {}
-    service_details: dict[str, dict] = {}
-    results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
-
-    async def _probe(client, name: str, url: str) -> tuple[str, str, dict | None]:
-        # Retry with a generous per-probe timeout. RAG/Execution are the two
-        # services the Raven worker hammers; under worker load their /health
-        # can briefly exceed a tight timeout. A short retry here prevents a
-        # transient blip from marking a healthy service UNREACHABLE (which in
-        # turn made the whole gateway report DEGRADED for no real reason).
-        status_val = "UNREACHABLE"
-        for attempt in range(3):
-            try:
-                # async with: a non-200 answer (a service restarting) left its
-                # connection unreleased ("Unclosed connection" after deploys).
-                async with client.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
-                    if resp.status == 200:
-                        details = None
-                        try:
-                            data = await resp.json()
-                            if isinstance(data, dict):
-                                details = {
-                                    "git_sha": data.get("git_sha", "unknown"),
-                                    "start_time": data.get("start_time", None),
-                                }
-                        except Exception:
-                            pass
-                        return name, "OK", details
-                    status_val = f"ERROR ({resp.status})"
-            except Exception as e:
-                status_val = "UNREACHABLE"
-                log.warning(f"[health] {name} at {redact_url(url)} failed (attempt {attempt + 1}): {e}")
-            await asyncio.sleep(0.3)
-        return name, status_val, None
+    No service names live here: the control plane lists the ``sharedllm_*``
+    containers and each one's compose labels say how it is checked, so a new
+    service appears on the board (and in admin alerts) without editing code.
+    """
+    from services.gateway import readiness as _readiness
 
     # Probed concurrently: the dashboard polls this, and one slow service used
-    # to delay every other check behind it. Successful probes are not logged:
-    # at one poll per open dashboard they were ~40% of the gateway's log.
+    # to delay every other check behind it. Successful probes are not logged.
     async with shared_http_client() as client:
-      probes = await asyncio.gather(*(_probe(client, n, u) for n, u in services.items()))
-    for name, status_val, details in probes:
-        services_status[name] = status_val
-        if details is not None:
-            service_details[name] = details
+        services_status, service_details, inventory = await _readiness.collect(
+            client, CONTROL_PLANE_URL or "", INTERNAL_SECRET or "", skip={"gateway", "redis"})
+    results: dict[str, Any] = {"status": "READY", "services": services_status,
+                               "service_details": service_details, "inventory": inventory}
     all_ok = all(v == "OK" for v in services_status.values())
 
     # The Gateway itself is running if we are responding to this request

@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   XCircle,
   Settings2,
+  House,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -102,6 +103,7 @@ const SERVICE_ICON_MAP = {
   storage: FolderKanban,
   rag: Activity,
   redis: Activity,
+  homehub: House,
 } as const;
 
 // Service Status Card

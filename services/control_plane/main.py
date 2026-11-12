@@ -460,6 +460,18 @@ def system_health():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/monitored", dependencies=[Depends(verify_internal_secret)])
+def monitored_services():
+    """The services the dashboard watches, from the containers' own labels (see monitored.py)."""
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+    from services.control_plane.monitored import monitored
+    try:
+        return {"services": monitored(client.containers.list(all=True))}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"listing containers failed: {e}") from e
+
+
 @app.get("/api/status/{service_name}", dependencies=[Depends(verify_internal_secret)])
 def get_service_status(service_name: str):
     if not client:
