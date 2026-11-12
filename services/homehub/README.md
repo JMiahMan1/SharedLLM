@@ -62,6 +62,25 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | mobile_app | `mobile_app.py` | Locations from geo (`/people?source=jarvis`) and `device_tracker.see`; persons, zones, `notify.mobile_app_*` sent through Jarvis notices |
 | local_todo, shopping_list | `todo.py` | |
 
+## Cameras
+
+HA's own camera routes, plus the hub's camera API for Jarvis's Cameras page
+(the gateway calls it with the user's HA token; any token the hub accepts works).
+The contract a camera driver follows is at the top of `drivers/mjpeg.py`.
+
+| Route | What |
+|---|---|
+| `GET /api/camera_proxy/<entity>` | One JPEG (bearer or the picture's `?token=`) |
+| `GET /api/camera_proxy_stream/<entity>` | Live `multipart/x-mixed-replace`: an MJPEG camera's own stream relayed; others built from snapshots (Reolink every 0.5 s, others every 1 s), stopping when the client leaves. 503 when the first frame fails |
+| `GET /api/homehub/cameras` | Every camera: `entity_id`, `name`, `area`, `platform`, `state`, `recordings`, `live`, `stream` (`camera` or `snapshots`), `snapshot_interval`, and for Reolink `battery`, `sleeping`, `model` |
+| `GET /api/homehub/cameras/<entity>/recordings?start=&end=` | Recordings, newest first: `file`, `start`, `end`, `duration` (s), `triggers` (`person`, `vehicle`, `animal`, `motion`...), `size`, `stream`. Default the last 24 h; at most 7 days |
+| `GET /api/homehub/cameras/<entity>/recordings/play?file=` | One recording as MP4, streamed, `Range` passed on (206 with `Content-Range` when the recorder supports it). Only files a listing returned for that camera |
+
+Reolink recordings come from the Home Hub's storage (`Search`), so listing
+never wakes a battery camera; a live view does, every frame. Live Reolink video
+is snapshots rather than the RTSP/FLV stream, because relaying H.264 to a
+browser would need ffmpeg in the image.
+
 ## Known issues
 
 - **Garage door sensor (hardware): needs fixing.** `binary_sensor.garage_door_sensor`

@@ -38,6 +38,7 @@ const Docs = lazy(() => import('./pages/Docs'));
 const Login = lazy(() => import('./pages/Login'));
 const Media = lazy(() => import('./pages/Media'));
 const Remote = lazy(() => import('./pages/Remote'));
+const Cameras = lazy(() => import('./pages/Cameras'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Wander = lazy(() => import('./pages/Wander'));
 const Health = lazy(() => import('./pages/Health'));
@@ -181,6 +182,7 @@ function App() {
                 cache and "you are here" state can't diverge between them. */}
             <Route path="/family-circle" element={<Navigate to="/wander" replace />} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
+            <Route path="/cameras" element={<ProtectedRoute isMobile={isMobile}><Cameras /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />

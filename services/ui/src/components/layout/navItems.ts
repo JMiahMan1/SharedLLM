@@ -2,6 +2,7 @@ import {
   BookOpen,
   Brain,
   Calendar,
+  Cctv,
   ChefHat,
   Compass,
   Database,
@@ -56,6 +57,7 @@ export const NAV_PAGES: NavPage[] = [
   { icon: ShieldHalf, label: 'Guardian', path: '/guardian', keywords: 'family guardian parental controls screen time safety children kids wellbeing' },
   { icon: Smartphone, label: 'Devices', memberLabel: 'Shared files', path: '/devices', keywords: 'mdm device management inventory remote wipe lock update push shared school library files' },
   { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant' },
+  { icon: Cctv, label: 'Cameras', path: '/cameras', keywords: 'cameras live view security footage recordings garage backyard reolink doorbell' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists' },
   // The recipes page had a route but no entry anywhere, so the only way to it

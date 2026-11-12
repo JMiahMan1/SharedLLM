@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
+import type { CameraInfo, CameraRecordings } from '../lib/cameras';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
@@ -4926,6 +4927,21 @@ export const api = {
   // their position or be silently ignored -- neither is worth the API surface.
   // The one cross-user read, `getBibleActivitySummary`, is consent-gated
   // server-side and exists so the family view can ask.
+  /** The cameras the caller may see (homehub through the gateway), with their live modes and recordings. */
+  async getCameras(): Promise<CameraInfo[]> {
+    const resp = await apiClient.get<{ cameras?: CameraInfo[] }>('/api/cameras');
+    return resp.data.cameras ?? [];
+  },
+
+  /** One camera's recordings between two times (ISO), newest first; the hub allows at most 7 days. */
+  async getCameraRecordings(entityId: string, start: string, end: string): Promise<CameraRecordings> {
+    const resp = await apiClient.get(`/api/cameras/${encodeURIComponent(entityId)}/recordings`, {
+      params: { start, end },
+      timeout: 60_000,
+    });
+    return resp.data;
+  },
+
   /** The household forecast and the caller's own weather heads-up (docs/WEATHER.md). */
   /** The caller's forecast (their own place, else home); `household` is always home. */
   async getWeather(household = false): Promise<WeatherResponse> {

@@ -12,6 +12,7 @@ const PAGE_FEATURES: Record<string, string> = {
   '/health': 'health',
   '/bible': 'bible',
   '/remote': 'remote',
+  '/cameras': 'cameras',
   '/settings': 'settings',
 };
 

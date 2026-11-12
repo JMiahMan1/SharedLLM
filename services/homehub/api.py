@@ -24,6 +24,12 @@ from services.homehub.runtime import Runtime
 log = logging.getLogger("homehub.api")
 
 HA_VERSION = "2026.11.0"
+#: The longest span one recordings request may cover.
+MAX_RECORDING_RANGE = timedelta(days=7)
+_BOUNDARY = "frame"
+_NO_STORE = {"Cache-Control": "no-store"}
+#: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
+SNAPSHOT_STREAM_MAX_FAILURES = 5
 
 
 def jsonable(value: Any) -> Any:
@@ -50,6 +56,32 @@ def parse_time(raw: str | None) -> datetime | None:
 
 def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"message": message}, status_code=status)
+
+
+def _frame(img: bytes) -> bytes:
+    return (f"--{_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(img)}\r\n\r\n").encode() \
+        + img + b"\r\n"
+
+
+async def _snapshot_frames(request: Request, driver: Any, ent: Any, first: bytes, interval: float):
+    """``multipart/x-mixed-replace`` from repeated snapshots, the way HA serves a camera with no MJPEG."""
+    loop = asyncio.get_running_loop()
+    yield _frame(first)
+    failures = 0
+    while failures < SNAPSHOT_STREAM_MAX_FAILURES:
+        started = loop.time()
+        if await request.is_disconnected():
+            return  # every frame may wake a battery camera: stop as soon as nobody watches
+        try:
+            img = await driver.async_camera_image(ent)
+        except Exception:
+            img = b""
+        if img:
+            failures = 0
+            yield _frame(img)
+        else:
+            failures += 1
+        await asyncio.sleep(max(0.05, interval - (loop.time() - started)))
 
 
 def config_payload(runtime: Runtime) -> dict[str, Any]:
@@ -293,20 +325,115 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     async def camera_stream(entity_id: str, request: Request) -> Response:
         _camera_auth(request, entity_id)
         driver, ent = await _camera_driver(entity_id)
-        boundary = "frame"
+        if hasattr(driver, "async_open_mjpeg_stream"):
+            # The camera's own MJPEG, relayed: its full frame rate, not one snapshot a second.
+            try:
+                ctype, chunks = await driver.async_open_mjpeg_stream(ent)
+            except Exception as exc:
+                log.info("%s: relaying the camera's stream failed, sending snapshots instead: %s", entity_id, exc)
+            else:
+                return StreamingResponse(chunks, media_type=ctype, headers=_NO_STORE)
+        try:
+            first = await driver.async_camera_image(ent)
+        except Exception as exc:
+            return _error(503, f"Camera is not available: {exc}")
+        if not first:
+            return _error(503, "Camera returned no image")
+        interval = float(getattr(driver, "snapshot_interval", 1.0) or 1.0)
+        return StreamingResponse(_snapshot_frames(request, driver, ent, first, interval),
+                                 media_type=f"multipart/x-mixed-replace; boundary={_BOUNDARY}", headers=_NO_STORE)
 
-        async def frames():
-            while True:
-                try:
-                    img = await driver.async_camera_image(ent)
-                except Exception:
-                    break
-                if img:
-                    yield (f"--{boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(img)}\r\n\r\n").encode()
-                    yield img + b"\r\n"
-                await asyncio.sleep(1.0)
+    # -- the hub's own camera API (Jarvis's Cameras page, through the gateway) --------
+    def _camera_entities() -> list[Any]:
+        return sorted((e for e in hub.entities.values() if e.domain == "camera" and not e.disabled_by),
+                      key=lambda e: e.entity_id)
 
-        return StreamingResponse(frames(), media_type=f"multipart/x-mixed-replace; boundary={boundary}")
+    def _supports_recordings(driver: Any, ent: Any) -> bool:
+        if driver is None or not hasattr(driver, "async_list_recordings") \
+                or not hasattr(driver, "async_open_recording"):
+            return False
+        check = getattr(driver, "supports_recordings", None)
+        return bool(check(ent)) if callable(check) else True
+
+    def _camera_summary(ent: Any) -> dict[str, Any]:
+        driver = hub.drivers.get(ent.config_entry_id or "")
+        st = hub.states.get(ent.entity_id)
+        live: list[str] = []
+        if driver is not None and hasattr(driver, "async_camera_image"):
+            live = ["snapshot", "mjpeg"]
+        out: dict[str, Any] = {
+            "entity_id": ent.entity_id,
+            "name": (st.attributes.get("friendly_name") if st is not None else None) or hub.friendly_name(ent),
+            "area": hub.area_name(ent.entity_id),
+            "platform": ent.platform,
+            "state": st.state if st is not None else "unavailable",
+            "recordings": _supports_recordings(driver, ent),
+            "live": live,
+            # "camera" when the stream is the camera's own video, "snapshots" when it is built from stills.
+            "stream": "camera" if driver is not None and hasattr(driver, "async_open_mjpeg_stream") else "snapshots",
+            "snapshot_interval": float(getattr(driver, "snapshot_interval", 1.0) or 1.0) if driver else None,
+        }
+        info = getattr(driver, "camera_info", None)
+        if callable(info):
+            with contextlib.suppress(Exception):
+                out.update({k: v for k, v in (info(ent) or {}).items() if k not in out})
+        return out
+
+    @api.get("/api/homehub/cameras")
+    async def homehub_cameras(request: Request) -> list[dict[str, Any]]:
+        principal(request)
+        return [_camera_summary(e) for e in _camera_entities()]
+
+    def _recording_driver(entity_id: str) -> tuple[Any, Any]:
+        ent = hub.entities.get(entity_id)
+        if ent is None or ent.domain != "camera" or ent.disabled_by:
+            raise HTTPException(404, detail="Entity not found.")
+        driver = hub.drivers.get(ent.config_entry_id or "")
+        if driver is None:
+            raise HTTPException(503, detail="Camera is not available")
+        if not _supports_recordings(driver, ent):
+            raise HTTPException(404, detail="This camera has no recordings")
+        return driver, ent
+
+    @api.get("/api/homehub/cameras/{entity_id}/recordings")
+    async def homehub_recordings(entity_id: str, request: Request) -> Response:
+        principal(request)
+        driver, ent = _recording_driver(entity_id)
+        q = request.query_params
+        end = parse_time(q.get("end")) or datetime.now(UTC)
+        start = parse_time(q.get("start")) or end - timedelta(days=1)
+        if start >= end:
+            return _error(400, "start must be before end")
+        if end - start > MAX_RECORDING_RANGE:
+            return _error(400, f"The range is longer than {MAX_RECORDING_RANGE.days} days")
+        try:
+            items = await driver.async_list_recordings(ent, start, end)
+        except HubError as exc:
+            return _error(exc.status, str(exc))
+        except Exception as exc:
+            log.exception("listing recordings of %s failed", entity_id)
+            return _error(500, f"{type(exc).__name__}: {exc}")
+        items = sorted(items, key=lambda r: str(r.get("start") or ""), reverse=True)
+        return JSONResponse({"entity_id": entity_id, "start": start.isoformat(), "end": end.isoformat(),
+                             "recordings": jsonable(items)})
+
+    @api.get("/api/homehub/cameras/{entity_id}/recordings/play")
+    async def homehub_recording_play(entity_id: str, request: Request) -> Response:
+        principal(request)
+        driver, ent = _recording_driver(entity_id)
+        file = request.query_params.get("file") or ""
+        if not file:
+            return _error(400, "file is required")
+        try:
+            rec = await driver.async_open_recording(ent, file, range_header=request.headers.get("range"))
+        except HubError as exc:
+            return _error(exc.status, str(exc))
+        except Exception as exc:
+            log.exception("opening recording %s of %s failed", file, entity_id)
+            return _error(500, f"{type(exc).__name__}: {exc}")
+        headers = {**rec.headers, "Cache-Control": "private, no-store"}
+        headers.setdefault("Accept-Ranges", "bytes" if rec.status == 206 or "Content-Range" in headers else "none")
+        return StreamingResponse(rec.body, status_code=rec.status, media_type=rec.content_type, headers=headers)
 
     # -- hub administration (internal secret / HA admin only) -----------------------
     @app.get("/hub/status")

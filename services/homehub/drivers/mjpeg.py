@@ -27,6 +27,32 @@ Any driver that owns ``camera.*`` entities (this one, ``reolink``) provides:
 This driver also offers ``async_open_mjpeg_stream(entity)`` -> ``(content_type,
 async iterator of bytes)``, which relays the camera's stream with its auth
 applied, for an API that would rather not hand the URL to a second client.
+``camera_proxy_stream`` relays it when a driver has it, and falls back to
+frames from ``async_camera_image`` when it fails.
+
+Optional, for the hub's own camera API (``/api/homehub/cameras``):
+
+``snapshot_interval`` (class attribute, seconds)
+    How often ``camera_proxy_stream`` asks for a frame when it builds the
+    stream from snapshots. Default 1.0.
+
+``def camera_info(self, entity) -> dict``
+    Extra facts for the camera list (``battery``, ``sleeping``, ``model``).
+
+``async def async_list_recordings(self, entity, start, end) -> list[dict]``
+    Recordings between two aware datetimes, each ``{"file", "start", "end",
+    "duration", "triggers", "size", "stream"}`` (times as ISO strings with an
+    offset, ``duration`` in seconds, ``triggers`` lower-case names such as
+    ``person``). Any order; the API sorts them.
+
+``async def async_open_recording(self, entity, file, *, range_header) -> RecordingStream``
+    One recording a ``<video>`` element can play, streamed. ``range_header``
+    is the client's ``Range`` header, passed on so seeking works. Raises
+    ``EntityNotFound`` for a file this camera did not list.
+
+``def supports_recordings(self, entity) -> bool`` (optional)
+    Narrows recordings to some of the driver's cameras; without it every
+    camera of a driver with ``async_list_recordings`` has them.
 
 Config (all in ``entry.options``, as HA stores it): ``mjpeg_url``,
 ``still_image_url`` (optional), ``username``, ``password``,
@@ -40,6 +66,7 @@ import secrets
 import time
 from collections import deque
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -55,6 +82,17 @@ STREAM_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=15)
 #: Give up looking for a frame in a stream after this many bytes (a few frames).
 MAX_FRAME_SEARCH = 8 * 1024 * 1024
 SOI, EOI = b"\xff\xd8", b"\xff\xd9"
+
+
+@dataclass
+class RecordingStream:
+    """A recording on its way to a client: the upstream status (200, or 206 for a range) and its body."""
+
+    status: int
+    content_type: str
+    body: AsyncIterator[bytes]
+    #: Only the headers a player needs: Content-Length, Content-Range, Accept-Ranges.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class CameraTokens:

@@ -18,20 +18,41 @@ overrides it with an address; set it to the hub's IP (and give the hub a DHCP
 reservation).
 
 Camera images and streams follow the contract at the top of ``mjpeg.py``.
+
+Recordings: battery cameras record to the Home Hub's own storage, so listing
+asks the hub (``Search``) and never wakes a camera. Playback is the hub's MP4
+(``get_vod_source`` with ``Playback``, or ``Download`` on an NVR or hub, as
+HA's media source chooses), fetched here and streamed through with the
+client's ``Range`` passed on, because the URL carries the hub's session token.
+Only files a listing returned for that camera can be played.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
+from collections import OrderedDict
+from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
+import aiohttp
 from reolink_aio.api import Host
-from reolink_aio.enums import ConnectionEnum, DayNightEnum
+from reolink_aio.enums import ConnectionEnum, DayNightEnum, VodRequestType
 from reolink_aio.exceptions import ReolinkError
+from reolink_aio.typings import VOD_trigger, parse_file_name
 
-from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, EntityEntry, ServiceNotFound
-from services.homehub.drivers.mjpeg import CameraTokens, camera_attributes
+from services.homehub.core import (
+    UNAVAILABLE,
+    DeviceUnavailable,
+    Driver,
+    EntityEntry,
+    EntityNotFound,
+    ServiceNotFound,
+)
+from services.homehub.drivers.mjpeg import CameraTokens, RecordingStream, camera_attributes
 
 #: Seconds between full state reads that wake battery cameras (HA's value).
 BATTERY_WAKE_S = 3600.0
@@ -63,6 +84,14 @@ NUMBER_RANGES = {"volume": (0, 100), "pir_sensitivity": (1, 100), "motion_sensit
 DAY_NIGHT_OPTIONS = [e.name for e in DayNightEnum]  # auto, color, blackwhite (HA's option keys)
 SIREN_FEATURES = 1 | 2 | 16 | 32  # TURN_ON | TURN_OFF | VOLUME_SET | DURATION
 
+#: Recording triggers, in the order a badge list shows them (most telling first).
+TRIGGER_ORDER = ["person", "vehicle", "animal", "package", "face", "doorbell", "motion", "crossline", "intrusion",
+                 "linger", "forgotten_item", "taken_item", "crying", "io", "timer"]
+#: Recording file names each camera listed recently, so play can refuse anything else.
+LISTED_FILES_MAX = 2000
+#: A recording is long lived: bound the connect and each read, not the whole.
+VOD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=30)
+
 
 class ReolinkDriver(Driver):
     platform = "reolink"
@@ -74,6 +103,9 @@ class ReolinkDriver(Driver):
         self.tokens = CameraTokens()
         self._last_wake = 0.0
         self._channel_by_uid: dict[str, int] = {}
+        #: (entity_id, file) -> None, newest last; the files a listing returned.
+        self._listed: OrderedDict[tuple[str, str], None] = OrderedDict()
+        self._vod_session: aiohttp.ClientSession | None = None
 
     # -- addressing -----------------------------------------------------------
     async def _address(self) -> str:
@@ -175,6 +207,9 @@ class ReolinkDriver(Driver):
 
     async def async_unload(self) -> None:
         host, self.host = self.host, None
+        session, self._vod_session = self._vod_session, None
+        if session is not None:
+            await session.close()
         if host is None:
             return
         with contextlib.suppress(Exception):
@@ -362,6 +397,177 @@ class ReolinkDriver(Driver):
             return await host.get_stream_source(ch, stream)
         except ReolinkError as exc:
             raise DeviceUnavailable(f"{entity.entity_id}: {exc}") from exc
+
+
+    # A sleeping battery camera answers a snapshot in a second or two; asking
+    # twice a second keeps the live view as fresh as the camera allows.
+    snapshot_interval = 0.5
+
+    def camera_info(self, entity: EntityEntry) -> dict[str, Any]:
+        host = self.host
+        ch, key = self.locate(entity)
+        if host is None or ch is None or key not in CAMERA_STREAMS:
+            return {}
+        return {"battery": bool(host.supported(ch, "battery")), "sleeping": bool(host.sleeping(ch)),
+                "model": host.camera_model(ch)}
+
+    # -- recordings -------------------------------------------------------------
+    def supports_recordings(self, entity: EntityEntry) -> bool:
+        ch, key = self.locate(entity)
+        return ch is not None and key in CAMERA_STREAMS
+
+    def _recording_stream(self, stream: str) -> str:
+        """The recording stream for a camera entity's live stream (recordings are main or sub)."""
+        if stream.startswith("autotrack_"):
+            return stream
+        return "main" if stream == "main" else "sub"
+
+    def _camera_tz(self) -> tzinfo:
+        tz = None
+        with contextlib.suppress(Exception):
+            tz = self.host.timezone() if self.host is not None else None
+        if tz is not None:
+            return tz
+        try:
+            return ZoneInfo(self.hub.time_zone)
+        except Exception:
+            return ZoneInfo("UTC")
+
+    async def async_list_recordings(self, entity: EntityEntry, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """The camera's recordings between two aware datetimes, from the hub's storage (no camera wakes)."""
+        host, ch, stream = self._camera(entity)
+        stream = self._recording_stream(stream)
+        tz = self._camera_tz()
+        # The hub searches in its own local time, one calendar day at a time.
+        lo, hi = start.astimezone(tz).replace(tzinfo=None), end.astimezone(tz).replace(tzinfo=None)
+        out: dict[str, dict[str, Any]] = {}
+        day_start = lo
+        while day_start <= hi:
+            day_end = min(hi, day_start.replace(hour=23, minute=59, second=59, microsecond=0))
+            try:
+                _statuses, files = await host.request_vod_files(ch, day_start, day_end, stream=stream)
+            except ReolinkError as exc:
+                raise DeviceUnavailable(f"{entity.entity_id}: could not list recordings: {exc}") from exc
+            for vod in files:
+                item = self._recording_item(vod, tz)
+                if item is not None and item["file"] not in out:
+                    out[item["file"]] = item
+            day_start = (day_start + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        for name in out:
+            self._remember(entity.entity_id, name)
+        return list(out.values())
+
+    def _recording_item(self, vod: Any, tz: tzinfo) -> dict[str, Any] | None:
+        try:
+            name = str(vod.file_name)
+            begin, finish = vod.start_time, vod.end_time
+        except (KeyError, TypeError, ValueError):
+            return None
+        if begin.tzinfo is None:
+            begin, finish = begin.replace(tzinfo=tz), finish.replace(tzinfo=tz)
+        size = None
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            size = vod.size
+        return {"file": name, "start": begin.isoformat(), "end": finish.isoformat(),
+                "duration": max(0.0, (finish - begin).total_seconds()), "triggers": trigger_names(vod.triggers),
+                "size": size, "stream": vod.data.get("type") if isinstance(getattr(vod, "data", None), dict) else None}
+
+    def _remember(self, entity_id: str, file: str) -> None:
+        key = (entity_id, file)
+        self._listed.pop(key, None)
+        self._listed[key] = None
+        while len(self._listed) > LISTED_FILES_MAX:
+            self._listed.popitem(last=False)
+
+    async def _known_file(self, entity: EntityEntry, file: str) -> bool:
+        """Was this file listed for this camera? After a restart, list the file's own day again to find out."""
+        if (entity.entity_id, file) in self._listed:
+            return True
+        day = recording_day(file)
+        if day is None:
+            return False
+        tz = self._camera_tz()
+        # A name without a date of its own is the playback time in UTC, so the local day may be either side.
+        start = datetime(day.year, day.month, day.day, tzinfo=tz) - timedelta(days=1)
+        await self.async_list_recordings(entity, start, start + timedelta(days=3, seconds=-1))
+        return (entity.entity_id, file) in self._listed
+
+    def _vod_client(self) -> aiohttp.ClientSession:
+        if self._vod_session is None or self._vod_session.closed:
+            # The hub answers HTTPS with its own self-signed certificate (reolink-aio does the same).
+            self._vod_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False),
+                                                      cookie_jar=aiohttp.DummyCookieJar())
+        return self._vod_session
+
+    async def async_open_recording(self, entity: EntityEntry, file: str, *,
+                                   range_header: str | None = None) -> RecordingStream:
+        host, ch, stream = self._camera(entity)
+        stream = self._recording_stream(stream)
+        if not file or len(file) > 512 or any(c in file for c in "\r\n\x00") or not await self._known_file(entity, file):
+            raise EntityNotFound(f"{entity.entity_id} has no recording {file!r}")
+        if file.endswith((".mp4", ".vref")) or host.is_hub:
+            request_type = VodRequestType.DOWNLOAD if host.is_nvr else VodRequestType.PLAYBACK
+        else:
+            # Anything else needs RTMP or an NVR download job, which would need ffmpeg here.
+            raise DeviceUnavailable(f"{entity.entity_id}: this recorder only offers RTMP playback")
+        try:
+            _mime, url = await host.get_vod_source(ch, file, stream, request_type)
+        except ReolinkError as exc:
+            raise DeviceUnavailable(f"{entity.entity_id}: {exc}") from exc
+        headers = {"Range": range_header} if range_header else {}
+        try:
+            resp = await self._vod_client().get(url, headers=headers, timeout=VOD_TIMEOUT)
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise DeviceUnavailable(f"{entity.entity_id}: the hub did not send the recording ({type(exc).__name__})") \
+                from exc
+        ctype = resp.headers.get("Content-Type", "")
+        if resp.status not in (200, 206) or ctype.startswith(("text/", "application/json")):
+            # The hub answers an error (an expired session, a busy disk) as a page, never as video.
+            status = resp.status
+            resp.release()
+            raise DeviceUnavailable(f"{entity.entity_id}: the hub refused the recording (HTTP {status})")
+        out_headers = {k: resp.headers[k] for k in ("Content-Length", "Content-Range", "Accept-Ranges")
+                       if resp.headers.get(k)}
+
+        async def body() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in resp.content.iter_chunked(65536):
+                    yield chunk
+            finally:
+                resp.release()
+
+        # The hub labels its MP4s application/octet-stream (some firmware misspells even that).
+        content_type = ctype if ctype.startswith("video/") else "video/mp4"
+        return RecordingStream(status=resp.status, content_type=content_type, body=body(), headers=out_headers)
+
+
+def trigger_names(triggers: Any) -> list[str]:
+    """``VOD_trigger`` flags as lower-case names, most telling first (``["person", "motion"]``)."""
+    try:
+        flags = VOD_trigger(int(triggers))
+    except (TypeError, ValueError):
+        return []
+    names = {flag.name.lower() for flag in VOD_trigger if flag.name and flag.value and flag in flags}
+    return [n for n in TRIGGER_ORDER if n in names] + sorted(names - set(TRIGGER_ORDER))
+
+
+_DATE_IN_NAME = re.compile(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?:\d{6})?(?!\d)")
+
+
+def recording_day(file: str) -> datetime | None:
+    """The day a recording file name was made on, for finding it again after a restart."""
+    parsed = None
+    with contextlib.suppress(Exception):
+        parsed = parse_file_name(file)
+    if parsed is not None:
+        return datetime(parsed.date.year, parsed.date.month, parsed.date.day)
+    m = _DATE_IN_NAME.search(file.rsplit("/", 1)[-1]) or _DATE_IN_NAME.search(file)
+    if m is None:
+        return None
+    try:
+        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
 
 
 def _on_off(value: Any) -> str:
