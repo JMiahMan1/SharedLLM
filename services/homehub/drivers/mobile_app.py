@@ -10,8 +10,8 @@ Jarvis user to the HA device:
 2. The HA person whose ``device_trackers`` list this phone's tracker.
 3. The HA person whose ``user_id`` is the entry's ``user_id``.
 4. ``hub.ha_users`` (optional, ``{ha_user_id: name}`` from ``.storage/auth``).
-5. The device name: "Michele's Phone", "Jeremiahs Phone", "kalebs-phone"
-   -> michele, jeremiah, kaleb.
+5. The device name: "Alex's Phone", "Sams Phone", "robins-phone"
+   -> alex, sam, robin.
 
 A user with several phones gets the same fix on each (geo keeps one track per
 user), so the battery sensor is only written for a user with one phone.
@@ -82,7 +82,7 @@ IGNORED_STATES = {UNKNOWN, UNAVAILABLE, ""}
 
 
 def slugify(text: str) -> str:
-    """HA's ``slugify`` for the names here: "Michele's Phone" -> ``michele_s_phone``."""
+    """HA's ``slugify`` for the names here: "Alex's Phone" -> ``alex_s_phone``."""
     norm = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", "_", norm).strip("_") or "unknown"
 

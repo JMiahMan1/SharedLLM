@@ -1,7 +1,7 @@
 """DLNA Digital Media Renderer: play a URL, transport and volume over raw UPnP SOAP.
 
-HA's ``dlna_dmr`` entry holds only the renderer's description URL (the Loft
-Samsung's built-in renderer, ``http://192.168.2.115:9197/dmr``). Everything
+HA's ``dlna_dmr`` entry holds only the renderer's description URL (a TV's
+built-in renderer, e.g. ``http://<tv-address>:9197/dmr``). Everything
 here is AVTransport (``SetAVTransportURI``/``Play``/``Pause``/``Stop``/``Seek``)
 and RenderingControl (volume, mute). A renderer that does not answer is
 ``off``, as in HA: the TV is simply in standby.

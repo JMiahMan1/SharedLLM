@@ -45,7 +45,10 @@ try:  # guarded so the tests can run without the library
 except ImportError:  # pragma: no cover - the image installs srpenergy
     srp_client = None  # type: ignore[assignment]
 
-PHOENIX = ZoneInfo("America/Phoenix")
+#: SRP reports hours in its customers' local time without an offset. Which
+#: zone that is comes from the entry's ``time_zone`` option, else the hub's
+#: own time zone (``SrpEnergyDriver.tz``); this is only the last resort.
+FALLBACK_TZ = ZoneInfo("UTC")
 REQUEST_TIMEOUT = (10, 30)  # requests' (connect, read)
 CALL_TIMEOUT = 120.0
 
@@ -80,23 +83,23 @@ SETTLE = timedelta(hours=2)
 FETCH_CHUNK = timedelta(days=31)
 
 
-def _local(iso: str) -> datetime:
+def _local(iso: str, tz: Any = FALLBACK_TZ) -> datetime:
     dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
-    return dt.replace(tzinfo=PHOENIX) if dt.tzinfo is None else dt
+    return dt.replace(tzinfo=tz) if dt.tzinfo is None else dt
 
 
-def normalize_hourly(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_hourly(raw: list[dict[str, Any]], tz: Any = FALLBACK_TZ) -> list[dict[str, Any]]:
     """SRP's hourlyUsageList -> ``{start, kwh, cost, periods}``; totals built from the parts when SRP leaves them 0."""
     out = []
     for row in raw or []:
         periods = {suffix: float(row.get(f"{field}Kwh") or 0.0) for field, suffix in PERIOD_FIELDS.items()}
         kwh = float(row.get("totalKwh") or 0.0) or sum(periods.values())
         cost = float(row.get("totalCost") or 0.0) or sum(float(row.get(f"{f}Cost") or 0.0) for f in PERIOD_FIELDS)
-        out.append({"start": _local(row["date"]), "kwh": kwh, "cost": cost, "periods": periods})
+        out.append({"start": _local(row["date"], tz), "kwh": kwh, "cost": cost, "periods": periods})
     return out
 
 
-def fetch_hourly(client: Any, start: datetime, end: datetime) -> list[dict[str, Any]]:
+def fetch_hourly(client: Any, start: datetime, end: datetime, tz: Any = FALLBACK_TZ) -> list[dict[str, Any]]:
     """SRP's hourly detail, with the period columns, through srpenergy's own endpoints and headers (blocking)."""
     if srp_client is None or not hasattr(client, "_check_response"):
         raise AttributeError("srpenergy client without the hourly detail endpoint")
@@ -116,12 +119,12 @@ def fetch_hourly(client: Any, start: datetime, end: datetime) -> list[dict[str, 
                                    "endDate": end.strftime("%m-%d-%Y")},
                            headers={"x-xsrf-token": token})
         client._check_response(resp, "usage/hourlydetail")
-        return normalize_hourly(resp.json().get("hourlyUsageList") or [])
+        return normalize_hourly(resp.json().get("hourlyUsageList") or [], tz)
 
 
-def from_usage_tuples(rows: list[tuple]) -> list[dict[str, Any]]:
+def from_usage_tuples(rows: list[tuple], tz: Any = FALLBACK_TZ) -> list[dict[str, Any]]:
     """srpenergy's ``usage()`` tuples in the same shape (no period columns)."""
-    return [{"start": _local(r[2]), "kwh": float(r[3]), "cost": float(r[4] or 0.0), "periods": {}} for r in rows]
+    return [{"start": _local(r[2], tz), "kwh": float(r[3]), "cost": float(r[4] or 0.0), "periods": {}} for r in rows]
 
 
 def published(rows: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
@@ -142,6 +145,7 @@ class SrpEnergyDriver(Driver):
         #: Whether the last fetch reached the end of its window (a long catch-up can stop early).
         self.fetch_complete = False
         self.failing = False
+        self.tz = ZoneInfo(str(entry.options.get("time_zone") or hub.time_zone or "UTC"))
 
     def _new_client(self) -> Any:
         if srp_client is None:
@@ -178,7 +182,7 @@ class SrpEnergyDriver(Driver):
         starts = []
         last = stats.last_start(self.statistic_id("energy_consumption"))
         floor = day_start - timedelta(days=float(opts.get("statistics_backfill_days", 30)))
-        starts.append(max(floor, last.astimezone(PHOENIX) + timedelta(hours=1)) if last else floor)
+        starts.append(max(floor, last.astimezone(self.tz) + timedelta(hours=1)) if last else floor)
         if self.entry.data.get("is_tou"):
             # The period statistics are the hub's own (HA kept none), so the first fetch reaches
             # back far enough to see every season's time-of-use hours.
@@ -186,7 +190,7 @@ class SrpEnergyDriver(Driver):
             lasts = [stats.last_start(self.statistic_id(f"energy_consumption_{p}")) for p in PERIOD_FIELDS.values()]
             known = [x for x in lasts if x is not None]
             if known:
-                starts.append(max(tou_floor, min(known).astimezone(PHOENIX) + timedelta(hours=1)))
+                starts.append(max(tou_floor, min(known).astimezone(self.tz) + timedelta(hours=1)))
             elif not stats.get_kv(self._tou_marker()):
                 starts.append(tou_floor)  # once: an account billed in no period must not refetch a year an hour
         return min(min(starts), day_start)
@@ -206,11 +210,11 @@ class SrpEnergyDriver(Driver):
         while True:
             chunk_end = min(end, cursor + FETCH_CHUNK)
             try:
-                got = await asyncio.wait_for(asyncio.to_thread(fetch_hourly, self.client, cursor, chunk_end),
+                got = await asyncio.wait_for(asyncio.to_thread(fetch_hourly, self.client, cursor, chunk_end, self.tz),
                                              CALL_TIMEOUT)
             except AttributeError:
                 old = await asyncio.wait_for(asyncio.to_thread(self.client.usage, start, end, is_tou), CALL_TIMEOUT)
-                return from_usage_tuples(old), False
+                return from_usage_tuples(old, self.tz), False
             except Exception as exc:
                 if not rows:
                     raise
@@ -247,7 +251,7 @@ class SrpEnergyDriver(Driver):
                                      amounts=[(r["start"], r["periods"].get(suffix, 0.0)) for r in rows])
 
     async def refresh(self, raise_on_error: bool = False) -> None:
-        end = datetime.now(PHOENIX)
+        end = datetime.now(self.tz)
         start = end - timedelta(days=1)
         is_tou = bool(self.entry.data.get("is_tou", False))
         try:

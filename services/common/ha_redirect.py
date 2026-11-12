@@ -1,12 +1,12 @@
 """Point stored Home Assistant URLs at homehub without rewriting anyone's settings.
 
-Every account keeps the HA URL it was set up with (``https://ha.sumemail.com``).
+Every account keeps the HA URL it was set up with (e.g. ``https://ha.example.com``).
 ``HA_URL_REDIRECTS`` maps such a base URL to the hub that now answers for it:
 
-    HA_URL_REDIRECTS=https://ha.sumemail.com=http://192.168.2.205:8123
+    HA_URL_REDIRECTS=https://ha.example.com=http://hub.lan:8123
 
 Music Assistant ran on the same host, so its stored URLs (``mass_url``) go
-through the same map, e.g. ``http://ha.sumemail.com:8095=http://192.168.2.205:8095``.
+through the same map, e.g. ``http://ha.example.com:8095=http://hub.lan:8095``.
 Several pairs are comma-separated. Matching is on scheme+host+port, so a stored
 URL with a trailing slash or path still redirects. The accounts' HA tokens keep
 working because the hub verifies them against the refresh tokens it imported.

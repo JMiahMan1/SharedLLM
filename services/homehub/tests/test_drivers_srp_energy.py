@@ -9,6 +9,9 @@ from services.homehub.drivers import srp_energy as srp
 from services.homehub.drivers.srp_energy import SrpEnergyDriver, daily_usage
 from services.homehub.tests.conftest import make_hub
 
+# The zone the driver runs in for these tests: the hub's own (conftest's make_hub sets it).
+TZ = __import__("zoneinfo").ZoneInfo("America/Phoenix")
+
 ENTRY_ID = "01J5YSDXYK9R57Q5HTQDS96FQK"
 ENTITIES = [{"entity_id": "sensor.srp_energy_home_energy_usage", "unique_id": f"{ENTRY_ID}_total_usage",
              "unit_of_measurement": "kWh", "original_device_class": "energy",
@@ -116,7 +119,7 @@ def _raw(day: str, hours: range, peak: range) -> list[dict]:
 
 
 def test_normalize_builds_totals_from_the_period_columns():
-    (row,) = srp.normalize_hourly(_raw("2026-07-06", range(15, 16), range(14, 20)))
+    (row,) = srp.normalize_hourly(tz=TZ, raw=_raw("2026-07-06", range(15, 16), range(14, 20)))
     assert row["kwh"] == 2.0 and row["cost"] == pytest.approx(0.4)
     assert row["periods"]["on_peak"] == 2.0 and str(row["start"].tzinfo) == "America/Phoenix"
 
@@ -124,13 +127,13 @@ def test_normalize_builds_totals_from_the_period_columns():
 def test_published_holds_back_unpublished_hours():
     from datetime import datetime, timedelta
 
-    rows = srp.normalize_hourly(_raw("2026-07-06", range(0, 24), range(14, 20)))
+    rows = srp.normalize_hourly(tz=TZ, raw=_raw("2026-07-06", range(0, 24), range(14, 20)))
     for r in rows[20:]:
         r["kwh"] = 0.0  # SRP has not filled these in yet
     now = rows[-1]["start"] + timedelta(hours=1)
     kept = srp.published(rows, now)
     assert len(kept) == 20 and kept[-1]["start"].hour == 19
-    assert srp.published(rows, datetime(2026, 7, 6, 5, tzinfo=srp.PHOENIX)) == rows[:3]
+    assert srp.published(rows, datetime(2026, 7, 6, 5, tzinfo=TZ)) == rows[:3]
 
 
 async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkeypatch):
@@ -142,9 +145,9 @@ async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkey
     raw = _raw("2026-07-06", range(0, 24), range(14, 20)) + _raw("2026-07-07", range(0, 24), range(14, 20))
     calls = []
 
-    def fake_fetch(client, start, end):
+    def fake_fetch(client, start, end, tz=None):
         calls.append((start, end))
-        return [r for r in srp.normalize_hourly(raw) if start.date() <= r["start"].date() <= end.date()]
+        return [r for r in srp.normalize_hourly(raw, TZ) if start.date() <= r["start"].date() <= end.date()]
 
     monkeypatch.setattr(srp, "fetch_hourly", fake_fetch)
     import datetime as dt_mod
@@ -160,7 +163,7 @@ async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkey
     meta = {m["statistic_id"] for m in stats.all_meta()}
     assert meta == {f"srp_energy:{acct}_energy_consumption", f"srp_energy:{acct}_energy_cost",
                     f"srp_energy:{acct}_energy_consumption_on_peak", f"srp_energy:{acct}_energy_consumption_off_peak"}
-    on = stats.during_period(dt_mod.datetime(2026, 7, 6, tzinfo=srp.PHOENIX), None,
+    on = stats.during_period(dt_mod.datetime(2026, 7, 6, tzinfo=TZ), None,
                              [f"srp_energy:{acct}_energy_consumption_on_peak"], "day", ["change"])
     assert [d["change"] for d in on[f"srp_energy:{acct}_energy_consumption_on_peak"]] == [12.0, 12.0]
     # The first fetch reaches back a year for the time-of-use periods, a month per request;
@@ -169,8 +172,8 @@ async def test_statistics_written_with_the_utilitys_own_periods(tmp_path, monkey
     assert all((e - s).days <= 31 for s, e in calls)
     first = len(calls)
     await driver.async_poll()
-    assert calls[first:] == [(dt_mod.datetime(2026, 7, 7, 9, 30, tzinfo=srp.PHOENIX),
-                              dt_mod.datetime(2026, 7, 8, 9, 30, tzinfo=srp.PHOENIX))]
+    assert calls[first:] == [(dt_mod.datetime(2026, 7, 7, 9, 30, tzinfo=TZ),
+                              dt_mod.datetime(2026, 7, 8, 9, 30, tzinfo=TZ))]
     # The sensor keeps HA's meaning: yesterday's and today's hours only.
     assert hub.states.get("sensor.srp_energy_home_energy_usage").state == str(round(18 * 1.0 + 6 * 2.0, 2))
     stats.close()
@@ -202,9 +205,9 @@ async def test_an_account_billed_in_no_period_backfills_once(tmp_path, monkeypat
         r["totalKwh"] = 1.0
     calls = []
 
-    def fake_fetch(client, start, end):
+    def fake_fetch(client, start, end, tz=None):
         calls.append(start)
-        return srp.normalize_hourly(raw)
+        return srp.normalize_hourly(raw, TZ)
 
     class FrozenDT(dt_mod.datetime):
         @classmethod
@@ -218,3 +221,13 @@ async def test_an_account_billed_in_no_period_backfills_once(tmp_path, monkeypat
     await driver.async_poll()
     assert first > 1 and len(calls) == first + 1
     stats.close()
+
+
+def test_the_utility_time_zone_is_configuration_not_code():
+    """SRP's hours carry no offset; their zone is the entry's option, else the hub's own."""
+    hub, entry = make_hub("srp_energy", data={"id": "1", "username": "u", "password": "p"})
+    assert str(SrpEnergyDriver(hub, entry).tz) == hub.time_zone
+    entry.options["time_zone"] = "America/Denver"
+    assert str(SrpEnergyDriver(hub, entry).tz) == "America/Denver"
+    (row,) = srp.normalize_hourly([{"date": "2026-07-06T15:00:00", "onPeakKwh": 1}], srp.ZoneInfo("America/Denver"))
+    assert str(row["start"].tzinfo) == "America/Denver"
