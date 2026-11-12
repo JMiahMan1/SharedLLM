@@ -2,6 +2,8 @@
 """Redis storage for report jobs, reports, and the notification outbox."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import uuid
 from datetime import UTC, datetime
@@ -9,6 +11,7 @@ from typing import Any
 
 import redis.asyncio as redis
 
+from services.identity.crypto import decrypt, encrypt
 from services.telemetry.config import (
     GEO_SVC,
     IDENTITY_SVC,
@@ -50,6 +53,12 @@ USAGE_UNKNOWN_DEVICE = "_unknown"
 # parents receive, kept by week start.
 CONCERNS_PREFIX = "tel:concerns:"
 CONCERNS_MAX = 300
+# A concern's image is never shown or written as a picture. The original
+# base64 payload is held encrypted (Fernet) for a short time only so a parent
+# or administrator can export it as a file for review.
+CONCERN_IMAGE_PREFIX = "tel:concern-image:"
+CONCERN_IMAGE_TTL_SECONDS = 30 * 24 * 60 * 60
+CONCERN_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 RECAP_PREFIX = "tel:recap:"
 RECAP_MAX_WEEKS = 12
 
@@ -452,6 +461,92 @@ async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             out.append(item)
     return out
+
+
+def _clean_image_b64(value: str) -> str:
+    """Strip a data URI and whitespace, restore standard alphabet and padding."""
+    cleaned = (value or "").strip()
+    if cleaned.startswith("data:"):
+        _, _, cleaned = cleaned.partition(",")
+    cleaned = "".join(cleaned.split())
+    cleaned = cleaned.replace("-", "+").replace("_", "/")
+    cleaned += "=" * ((-len(cleaned)) % 4)
+    return cleaned
+
+
+def image_type(data: bytes) -> tuple[str, str] | None:
+    """(extension, media type) for a supported image, or None."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return ("jpg", "image/jpeg")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ("png", "image/png")
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return None
+
+
+async def save_concern_image(rc, user: str, concern_id: str, image_b64: str) -> bool:
+    """Keep the encoded image, encrypted, for a later parent/admin export.
+
+    No decoded image is ever written to disk or exposed in the concern list.
+    """
+    cleaned = _clean_image_b64(image_b64)
+    try:
+        data = base64.b64decode(cleaned, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    if not data or len(data) > CONCERN_IMAGE_MAX_BYTES or image_type(data) is None:
+        return False
+    try:
+        token = encrypt(cleaned)
+    except Exception:
+        return False
+    if not token:
+        return False
+    await rc.set(
+        f"{CONCERN_IMAGE_PREFIX}{user}:{concern_id}",
+        token,
+        ex=CONCERN_IMAGE_TTL_SECONDS,
+    )
+    return True
+
+
+async def get_concern_image(rc, user: str, concern_id: str) -> str | None:
+    """The original base64 payload, decrypted, or None when expired/absent."""
+    token = await rc.get(f"{CONCERN_IMAGE_PREFIX}{user}:{concern_id}")
+    if not token:
+        return None
+    return decrypt(token)
+
+
+async def review_concern(
+    rc,
+    user: str,
+    concern_id: str,
+    verdict: str,
+    by: str,
+    note: str = "",
+) -> dict[str, Any] | None:
+    """Record a parent's or administrator's human review on one concern."""
+    key = f"{CONCERNS_PREFIX}{user}"
+    for index, raw in enumerate(await rc.lrange(key, 0, -1)):
+        try:
+            concern = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(concern, dict):
+            continue
+        if str(concern.get("id") or "") != concern_id:
+            continue
+        concern["human_review"] = {
+            "verdict": verdict,
+            "by": by,
+            "at": utcnow_iso(),
+            "note": str(note or "").strip()[:500],
+        }
+        await rc.lset(key, index, json.dumps(concern))
+        return concern
+    return None
 
 
 async def save_recap(rc, user: str, week: str, recap: dict[str, Any]) -> None:

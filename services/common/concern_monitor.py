@@ -122,6 +122,8 @@ def scan_text(text: str) -> list[dict[str, Any]]:
                 "label": spec["label"],
                 "level": spec["level"],
                 "excerpt": _excerpt(text, match.start(), match.end()),
+                # Wider surrounding context so a parent can judge the hit.
+                "context": _excerpt(text, match.start(), match.end(), width=160),
             })
     return found
 
@@ -139,7 +141,14 @@ def scan_event(event: dict[str, Any]) -> list[dict[str, Any]]:
             if hit["category"] in seen:
                 continue
             seen.add(hit["category"])
-            out.append({**hit, "feature": event.get("feature"), "action": event.get("action"), "at": event.get("at")})
+            item = event.get("item")
+            out.append({
+                **hit,
+                "item": item if isinstance(item, str) and item.strip() else None,
+                "feature": event.get("feature"),
+                "action": event.get("action"),
+                "at": event.get("at"),
+            })
     return out
 
 

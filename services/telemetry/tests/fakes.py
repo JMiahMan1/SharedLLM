@@ -70,6 +70,10 @@ class FakeRedis:
         items = self.lists.get(key, [])
         return items[start:] if end == -1 else items[start:end + 1]
 
+    async def lset(self, key, index, value):
+        self.lists.setdefault(key, [])[index] = value
+        return True
+
     async def hget(self, key, field):
         return self.hashes.get(key, {}).get(field)
 

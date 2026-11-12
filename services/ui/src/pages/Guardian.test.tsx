@@ -6,9 +6,16 @@ import type { ReactElement } from 'react';
 import Guardian from './Guardian';
 import { api } from '../services/api';
 import { localDay } from '../lib/healthHub';
-import type { GuardianRecap, ScreenTimeStatus } from '../types/api';
+import type { GuardianConcern, GuardianRecap, ScreenTimeStatus } from '../types/api';
 
-const auth = vi.hoisted(() => ({ user: { username: 'dad', is_minor: false } as { username: string; is_minor: boolean } }));
+const auth = vi.hoisted(() => ({
+  user: { username: 'dad', is_minor: false } as {
+    username: string;
+    is_minor: boolean;
+    is_admin?: boolean;
+    family_role?: string;
+  },
+}));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 
 vi.mock('../services/api', async (importOriginal) => {
@@ -23,6 +30,8 @@ vi.mock('../services/api', async (importOriginal) => {
       getGuardianRecap: vi.fn(),
       getGuardianGuidance: vi.fn(),
       getGuardianConcerns: vi.fn(),
+      reviewGuardianConcern: vi.fn(),
+      downloadGuardianConcernImage: vi.fn(),
       getGuardianJournal: vi.fn(),
       addGuardianJournal: vi.fn(),
       getGuardRequests: vi.fn(),
@@ -138,6 +147,37 @@ describe('The family guardian page (a parent)', () => {
   it('keeps the old /guardian?child= links working', async () => {
     wrap(<Guardian />, '/guardian?child=sam');
     expect(await screen.findByTestId('where')).toHaveTextContent('/family/member/sam');
+  });
+
+  it('lets an admin confirm a concern and keeps the controls from non-parents', async () => {
+    const concern: GuardianConcern = {
+      id: 'c1',
+      category: 'bullying',
+      label: 'Bullying',
+      level: 'high',
+      excerpt: 'nobody likes you',
+      context: 'a wider piece of context around the words',
+      item: 'Unknown',
+      feature: 'sms',
+      at: new Date().toISOString(),
+    };
+    auth.user = { username: 'dad', is_minor: false, is_admin: true };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
+    vi.mocked(api.reviewGuardianConcern).mockResolvedValue({ concern } as never);
+    const view = wrap(<Guardian />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /confirm/i }));
+    await waitFor(() =>
+      expect(api.reviewGuardianConcern).toHaveBeenCalledWith('emma', 'c1', 'confirmed', ''),
+    );
+    expect(screen.getByTestId('concern-review')).toBeInTheDocument();
+    view.unmount();
+
+    auth.user = { username: 'mom', is_minor: false };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
+    wrap(<Guardian />);
+    expect(await screen.findByTestId('member-concerns')).toHaveTextContent('Bullying');
+    expect(screen.queryByTestId('concern-review')).not.toBeInTheDocument();
   });
 
   it('explains itself to someone who is not a parent', async () => {

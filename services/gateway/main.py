@@ -1,7 +1,9 @@
 # services/gateway/main.py
 import asyncio
 import base64
+import csv
 import hashlib
+import io
 import ipaddress
 import json
 import logging
@@ -6505,6 +6507,188 @@ async def guardian_recap(request: Request, user: str, day: str = ""):
 async def guardian_concerns(request: Request, user: str, limit: int = 50):
     """What content monitoring found on a child's phone, newest first."""
     return await _parents_only_telemetry(request, user, f"/api/telemetry/concerns/{user}", {"limit": max(1, min(limit, 300))})
+
+
+async def _concerns_reviewer(request: Request, user: str, action: str = "export") -> str:
+    """The two gates for concern export/review: raw access, then admin or parent.
+
+    Identity's raw-data rule already refuses a minor asking for themselves and
+    every sibling; "admins and parents, and no one else" is narrower still, so
+    a grown member's concerns remain admin-only.
+    """
+    await _raw_access(request, user)
+    creds = await _resolve_identity_from_request(request)
+    viewer = str((creds or {}).get("user") or "").strip()
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not bool((creds or {}).get("is_admin")):
+        parents, _ = await _my_parents(user)
+        if viewer not in parents:
+            raise HTTPException(status_code=403, detail=f"Only a parent can {action} this")
+    return viewer
+
+
+def _image_kind(data: bytes) -> tuple[str, str] | None:
+    """(extension, media type) for a supported exported image, or None."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return ("jpg", "image/jpeg")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ("png", "image/png")
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return None
+
+
+def _csv_cell(value: Any) -> str:
+    """A cell a spreadsheet can never run as a formula (OWASP CSV injection)."""
+    text = "" if value is None else str(value)
+    if text.startswith(("=", "+", "-", "@")) or text.startswith(("\t", "\r")):
+        return "'" + text
+    return text
+
+
+@app.get("/api/guardian/concerns/{user}/export")
+async def guardian_concerns_export(request: Request, user: str, format: str = "csv"):
+    """Download the whole retained flagged-context list for one child.
+
+    The card shows the newest few; this is everything telemetry still keeps
+    (up to its 300), as a spreadsheet for a parent or a JSON record for an
+    admin. Two gates, because "admins and parents, and no one else" is
+    narrower than identity's raw-data rule: the caller must first pass
+    ``_raw_access`` (which already refuses a minor asking for themselves and
+    every sibling), then be an admin or one of the child's parents. A grown
+    member's concerns stay their own; only an admin may export those.
+    """
+    if format not in ("csv", "json"):
+        raise HTTPException(status_code=422, detail="format must be csv or json")
+    viewer = await _concerns_reviewer(request, user, "export")
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}",
+            params={"limit": 300},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        if resp.status != 200:
+            return await _proxy_json_response(resp)
+        concerns = (await resp.json(content_type=None) or {}).get("concerns") or []
+    concerns = [c for c in concerns if isinstance(c, dict)]
+    log.info("concerns export: viewer=%s subject=%s format=%s count=%d", viewer, user, format, len(concerns))
+
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", user).strip("._") or "member"
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d")
+    headers = {
+        "Content-Disposition": f'attachment; filename="jarvis-concerns-{safe}-{stamp}.{format}"',
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if format == "json":
+        body = {
+            "child": user,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "count": len(concerns),
+            "concerns": concerns,
+        }
+        return Response(
+            content=json.dumps(body, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers=headers,
+        )
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow([
+        "id", "at", "category", "label", "level", "item", "feature", "action",
+        "excerpt", "context", "file_name", "has_image",
+        "review_verdict", "review_reason",
+        "human_verdict", "human_by", "human_at", "human_note",
+    ])
+    for concern in concerns:
+        review = concern.get("review")
+        if not isinstance(review, dict):
+            review = {}
+        human = concern.get("human_review")
+        if not isinstance(human, dict):
+            human = {}
+        writer.writerow(
+            [
+                _csv_cell(concern.get("id")),
+                _csv_cell(concern.get("at")),
+                _csv_cell(concern.get("category")),
+                _csv_cell(concern.get("label")),
+                _csv_cell(concern.get("level")),
+                _csv_cell(concern.get("item")),
+                _csv_cell(concern.get("feature")),
+                _csv_cell(concern.get("action")),
+                _csv_cell(concern.get("excerpt")),
+                _csv_cell(concern.get("context")),
+                _csv_cell(concern.get("file_name")),
+                _csv_cell("yes" if concern.get("has_image") else ""),
+                _csv_cell(review.get("verdict")),
+                _csv_cell(review.get("reason")),
+                _csv_cell(human.get("verdict")),
+                _csv_cell(human.get("by")),
+                _csv_cell(human.get("at")),
+                _csv_cell(human.get("note")),
+            ]
+        )
+    return Response(content=out.getvalue().encode("utf-8"), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.post("/api/guardian/concerns/{user}/{concern_id}/review")
+async def guardian_concern_review(
+    request: Request, user: str, concern_id: str, body: dict[str, Any]
+):
+    """Confirm a concern or mark it a false alarm, as the signed-in reviewer."""
+    verdict = str(body.get("verdict") or "").strip().lower()
+    if verdict not in ("confirmed", "dismissed"):
+        raise HTTPException(status_code=422, detail="verdict must be confirmed or dismissed")
+    note = str(body.get("note") or "")[:500]
+    viewer = await _concerns_reviewer(request, user, "review")
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}/{concern_id}/review",
+            json={"verdict": verdict, "by": viewer, "note": note},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        if resp.status != 200:
+            return await _proxy_json_response(resp)
+        log.info("concern review: viewer=%s subject=%s id=%s verdict=%s", viewer, user, concern_id, verdict)
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/guardian/concerns/{user}/{concern_id}/image")
+async def guardian_concern_image(request: Request, user: str, concern_id: str):
+    """Export one concern's image as an attachment. It is never shown inline."""
+    viewer = await _concerns_reviewer(request, user, "download")
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}/{concern_id}/image",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        if resp.status != 200:
+            return await _proxy_json_response(resp)
+        data = (await resp.json(content_type=None)) or {}
+    try:
+        image = base64.b64decode(str(data.get("image_b64") or ""), validate=False)
+    except Exception:
+        raise HTTPException(status_code=502, detail="The image could not be read") from None
+    kind = _image_kind(image)
+    if not kind:
+        raise HTTPException(status_code=502, detail="The image could not be read")
+    ext, media_type = kind
+    raw_name = re.split(r"[\\/]", str(data.get("file_name") or ""))[-1]
+    stem = re.sub(r"\.(?:jpe?g|png|webp)$", "", raw_name, flags=re.IGNORECASE)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._") or f"concern-{concern_id}"
+    log.info("concern image export: viewer=%s subject=%s id=%s", viewer, user, concern_id)
+    return Response(
+        content=image,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{stem}.{ext}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.get("/api/guardian/guidance/{user}")

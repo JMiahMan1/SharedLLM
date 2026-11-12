@@ -3,7 +3,9 @@ import { registerPlugin } from '@capacitor/core';
 /* Photos and videos on the phone's gallery: the runtime permission and the
    background safety scanner. Only a protected child's phone, with photo
    scanning kept on by a parent, reads anything; a downscaled thumbnail is
-   sent to the family's server-side scanner and the image itself is not kept. */
+   sent to the family's server-side scanner. Jarvis never shows the image and
+   never writes it to disk; the encoded payload is held encrypted for a short
+   time only so a parent or administrator can download it for review. */
 
 export interface PhotoScanAccess {
   images: boolean;

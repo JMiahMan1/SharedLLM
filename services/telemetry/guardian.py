@@ -22,7 +22,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from services.common import concern_monitor, concern_review, device_noun, guardian_recap
@@ -41,6 +41,19 @@ MODEL_TIMEOUT_SECONDS = 25
 _settings_cache: tuple[float, dict[str, str]] | None = None
 
 Deliver = Callable[[dict[str, Any]], Awaitable[Any]]
+
+
+def _iso_at(value: Any) -> str:
+    """An event's timestamp as ISO text: strings pass through, epoch numbers convert."""
+    if isinstance(value, str) and value.strip():
+        return value
+    if isinstance(value, (int, float)):
+        seconds = value / 1000 if value > 10_000_000_000 else value
+        try:
+            return datetime.fromtimestamp(seconds, UTC).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return store.utcnow_iso()
 
 
 def household_now() -> datetime:
@@ -153,7 +166,8 @@ async def scan_media_item(
     """Scan one image or thumbnail from a child's device using local vision model.
 
     Returns the concern dict if a concern is detected, else None.
-    The raw image data is NEVER stored to protect child privacy.
+    The image is never displayed or written to disk; its encoded payload is
+    held encrypted for a parent/admin export (see store.save_concern_image).
     """
     if child.get("monitoring") == "off" or child.get("photo_scan") is False:
         return None
@@ -185,11 +199,23 @@ async def scan_media_item(
             return None
         cat = verdict["category"]
         spec = concern_monitor.CATEGORIES.get(cat, concern_monitor.CATEGORIES["sexual"])
+        description = verdict["description"] or f"Safety concern in {media_type} '{file_name}'"
+        context_parts = [description]
+        if verdict["reason"]:
+            context_parts.append(f"Checked: {verdict['reason']}")
+        if isinstance(metadata, dict):
+            for key in ("app", "package", "folder", "album", "title", "taken_at"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    context_parts.append(f"{key.replace('_', ' ')}: {value.strip()[:80]}")
         concern = {
+            "id": store.new_id(),
             "category": cat,
             "label": spec["label"],
             "level": verdict["level"],
-            "excerpt": verdict["description"] or f"Safety concern in {media_type} '{file_name}'",
+            "excerpt": description,
+            "context": " · ".join(context_parts)[:500],
+            "item": file_name,
             "feature": "media",
             "action": f"{media_type}_scan",
             "file_name": file_name,
@@ -258,6 +284,9 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
         if not found:
             return []
         found = await second_pass(session, event, found)
+        for concern in found:
+            concern.setdefault("id", store.new_id())
+            concern["at"] = _iso_at(concern.get("at"))
         await store.add_concerns(rc, child["username"], found)
         for concern in found:
             if not concern_monitor.pages_parent(concern, child.get("monitoring")):

@@ -1031,8 +1031,10 @@ point.
       vision AI (`vision_ocr_proxy_url` / `llm_local_url` via
       `services/common/concern_review.py:media_messages` and `parse_media_verdict`) across sexual
       content/nudity, violence/weapons, drugs/alcohol, self-harm, and cyberbullying. Strict privacy
-      boundary: raw image/video binary bytes are **never** persisted to disk or databases; only the
-      AI concern verdict (`category`, `level`, `excerpt` description, and `review`) is recorded in
+      boundary: raw image/video binary bytes are **never** written to disk, and Jarvis never renders
+      a concern image. The downscaled JPEG's encoded payload is held in Redis encrypted with Fernet
+      for 30 days, solely so an authorized parent or administrator can download it as a file for
+      review; the AI verdict (`category`, `level`, `excerpt` description, and `review`) is recorded in
       `tel:concerns:{child}`. Severe concerns immediately page both parents via `family_safety`
       notices and are summarized in Sunday recaps. **What is not visible:** an end-to-end chat
       app's private conversation (Snapchat, WhatsApp, Instagram, Telegram) is its own - Android

@@ -1296,6 +1296,47 @@ export const api = {
     return resp.data;
   },
 
+  /** The whole retained concern list for a child (an admin or their parents only). */
+  async exportGuardianConcerns(username: string, format: 'csv' | 'json' = 'csv'): Promise<Blob> {
+    const resp = await apiClient.get(`/api/guardian/concerns/${encodeURIComponent(username)}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    return resp.data;
+  },
+
+  /** Confirm a concern or mark it a false alarm (an admin or their parents only). */
+  async reviewGuardianConcern(
+    username: string,
+    concernId: string,
+    verdict: 'confirmed' | 'dismissed',
+    note = '',
+  ): Promise<{ concern: GuardianConcern }> {
+    const resp = await apiClient.post(
+      `/api/guardian/concerns/${encodeURIComponent(username)}/${encodeURIComponent(concernId)}/review`,
+      { verdict, note },
+    );
+    return resp.data;
+  },
+
+  /** Download one concern's image as a file. It is never shown inside Jarvis. */
+  async downloadGuardianConcernImage(
+    username: string,
+    concernId: string,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const resp = await apiClient.get(
+      `/api/guardian/concerns/${encodeURIComponent(username)}/${encodeURIComponent(concernId)}/image`,
+      { responseType: 'blob' },
+    );
+    const headers = resp.headers as Record<string, unknown>;
+    const disposition = String(headers?.['content-disposition'] || '');
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    return {
+      blob: resp.data,
+      filename: match?.[1] || `concern-${concernId}.jpg`,
+    };
+  },
+
   /** A child's week (parents only). */
   async getGuardianRecap(username: string, day?: string): Promise<{ recap: GuardianRecap }> {
     const resp = await apiClient.get(`/api/guardian/recap/${encodeURIComponent(username)}`, { params: day ? { day } : {} });

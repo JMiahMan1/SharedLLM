@@ -660,14 +660,21 @@ export interface MdmAuditEvent {
 
 /** One thing content monitoring found on a child's phone. */
 export interface GuardianConcern {
+  id?: string;
   category: string;
   label: string;
   level: ConcernLevel;
   excerpt: string;
+  context?: string;
+  item?: string | null;
   feature?: string;
   action?: string;
   at?: string;
+  file_name?: string;
+  has_image?: boolean;
+  image_kept_days?: number;
   review?: ConcernReview | null;
+  human_review?: HumanConcernReview | null;
 }
 
 /** A child asking a parent first: a new app, an app's permission, or a blocked site. */
@@ -2182,10 +2189,18 @@ export type ConcernLevel = 'medium' | 'high' | 'severe';
 
 /** How a concern was weighed: by the household's local model in context, or by the phrase list alone (and why). */
 export interface ConcernReview {
-  by: 'model' | 'phrases';
+  by: 'model' | 'phrases' | 'vision';
   verdict?: 'confirmed' | 'doubted' | 'dismissed';
   reason: string;
   model?: string;
+}
+
+/** A parent's or administrator's own verdict on a concern. */
+export interface HumanConcernReview {
+  verdict: 'confirmed' | 'dismissed';
+  by: string;
+  at: string;
+  note?: string;
 }
 
 export interface GuardianConcernSummary {

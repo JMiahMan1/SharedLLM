@@ -473,6 +473,49 @@ def create_app():
         rc = _redis()
         return {"status": "SUCCESS", "concerns": list(reversed(await store.list_concerns(rc, user)))[:limit]}
 
+    @application.get("/api/telemetry/concerns/{user}/{concern_id}/image")
+    async def get_concern_image(
+        user: str, concern_id: str, _: bool = Depends(require_internal)
+    ):
+        """The original encoded image for one concern, for an authorized export.
+
+        The bytes are returned as base64 in JSON; they are never written to
+        disk here and are never part of the normal concern list.
+        """
+        rc = _redis()
+        for concern in await store.list_concerns(rc, user):
+            if str(concern.get("id") or "") == concern_id:
+                payload = await store.get_concern_image(rc, user, concern_id)
+                if not payload:
+                    raise HTTPException(status_code=404, detail="image expired or unavailable")
+                return {
+                    "status": "SUCCESS",
+                    "file_name": concern.get("file_name") or "concern-image.jpg",
+                    "image_b64": payload,
+                }
+        raise HTTPException(status_code=404, detail="concern not found")
+
+    @application.post("/api/telemetry/concerns/{user}/{concern_id}/review")
+    async def review_concern(
+        user: str,
+        concern_id: str,
+        body: dict[str, Any],
+        _: bool = Depends(require_internal),
+    ):
+        """Record a parent's or administrator's human review of one concern."""
+        verdict = str(body.get("verdict") or "").strip().lower()
+        if verdict not in ("confirmed", "dismissed"):
+            raise HTTPException(status_code=422, detail="verdict must be confirmed or dismissed")
+        by = str(body.get("by") or "").strip()[:80]
+        if not by:
+            raise HTTPException(status_code=422, detail="by is required")
+        concern = await store.review_concern(
+            _redis(), user, concern_id, verdict, by, str(body.get("note") or "")
+        )
+        if not concern:
+            raise HTTPException(status_code=404, detail="concern not found")
+        return {"status": "SUCCESS", "concern": concern}
+
     @application.post("/api/telemetry/media/scan")
     async def scan_media(
         body: dict[str, Any], _: bool = Depends(require_internal)
@@ -498,6 +541,9 @@ def create_app():
             client, child, media_type, file_name, image_b64, metadata
         )
         if concern:
+            if await store.save_concern_image(rc, user, str(concern.get("id") or ""), image_b64):
+                concern["has_image"] = True
+                concern["image_kept_days"] = store.CONCERN_IMAGE_TTL_SECONDS // 86400
             await store.add_concerns(rc, user, [concern])
             day = guardian.household_now().date().isoformat()
             if guardian.concern_monitor.pages_parent(concern, child.get("monitoring")):
@@ -512,6 +558,7 @@ def create_app():
                 "category": concern["category"],
                 "level": concern["level"],
                 "label": concern["label"],
+                "has_image": bool(concern.get("has_image")),
             }
         return {"status": "SUCCESS", "concern": False}
 

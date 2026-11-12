@@ -134,6 +134,15 @@ it, and it links on here.
   says `technical` so the page knows whether to offer Devices.
 - `GET /api/family/member/{u}/devices` (identity `GET /api/family/devices/{u}`)
   serves the Devices section to the father and admins only, 403 otherwise.
+- `GET /api/guardian/concerns/{u}/export?format=csv|json` is narrower than raw
+  data: the caller must pass `_raw_access` and be an admin or one of the
+  child's parents (`/api/internal/guard/parents/{u}`). A grown member's list is
+  admin-only. CSV cells are formula-neutralized and responses are `no-store`.
+  The same two gates protect `POST /api/guardian/concerns/{u}/{id}/review`
+  (a parent's or admin's confirmed/false-alarm verdict and note) and
+  `GET /api/guardian/concerns/{u}/{id}/image`, which returns one concern's
+  image as a file attachment. Jarvis never displays a concern image; the
+  encoded payload is kept encrypted for 30 days solely for that export.
 - **Package names stay** for the mother: every app control (block, minutes,
   approve an install) is keyed by one. The page shows app names only.
 
@@ -143,7 +152,7 @@ it, and it links on here.
 |---|---|---|
 | Member strip | avatar, state dot and word (on the phone, not on the phone, locked, paused, bedtime, no report today), today's ring | `/api/screen-time/{u}/status`, `/api/usage/{u}` |
 | Header | name, role, now (lock reason or last app in use, last use), where (family place or "away", fix age), Pause/Resume, Bonus (+15/30/60), Lock now (30 min, 1 h, 2 h), Talk (family chat) | status, usage, `/api/users/location/all`, `/api/geo/zones`, `pause`/`bonus` |
-| Overview | today ring vs limit with time left, bonus and the next routine; open requests (more time, apps, permissions, sites) answered inline; 7-day bars with limit line, average and over-limit days; concerns (severity word and icon, context, what to say from the week's guidance); top apps today; mini-map; last night's sleep | status, usage, `/api/screen-time/requests`, `/api/guard/requests`, `/api/guardian/concerns` and `/guidance`, `/api/health/family` |
+| Overview | today ring vs limit with time left, bonus and the next routine; open requests (more time, apps, permissions, sites) answered inline; 7-day bars with limit line, average and over-limit days; concerns (severity word and icon, surrounding context and absolute time, what to say from the week's guidance; admins and the child's parents can confirm or mark a false alarm, download the whole retained list as CSV or JSON, and download a flagged image as a file - never shown in the page); top apps today; mini-map; last night's sleep | status, usage, `/api/screen-time/requests`, `/api/guard/requests`, `/api/guardian/concerns` and `/guidance`, `/api/health/family` |
 | Time | weekly schedule (a row per day: own limit or the everyday/weekend one it falls back to, school day), bedtime and school routines; 14-day hour × day heatmap; answered time requests; the viewer's offline unlock code | rules (`day_limits` is new), `/api/guardian/activity`, requests, `/api/guard/offline-code` |
 | Apps & web | open app/permission/site requests; each app with today's and the week's time and state (allowed, limited, blocked, awaiting approval), install approvals and permission gating; web filter, lists; recent websites (visited, blocked); answered requests | status rules, usage, guard requests, activity (`web`) |
 | Calls & messages (parents only), right after Overview | totals for today / 7 / 30 days (calls, missed, talk time, texts sent and received, app messages), who they are most in touch with, every call and message by day with its whole text, filter by calls / texts / app messages, search; a "today" card with a link on Overview | `/api/guardian/comms/{u}?days=` (the whole log for the window, up to 3000) |

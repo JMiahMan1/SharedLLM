@@ -47,3 +47,12 @@ def test_who_gets_paged():
     assert pages_parent(severe, None) and not pages_parent(high, None)
     assert pages_parent(high, "all")
     assert not pages_parent(severe, "off") and pages_parent(self_harm, "off")
+
+
+def test_a_hit_carries_wider_context_and_its_source_item():
+    body = ("before " * 40) + "i want to die" + (" after" * 40)
+    [hit] = scan_event({"feature": "sms", "item": "Unknown", "action": "incoming", "detail": {"body": body}})
+    assert hit["item"] == "Unknown"
+    assert "want to die" in hit["excerpt"] and "want to die" in hit["context"]
+    assert len(hit["context"]) > len(hit["excerpt"])
+    assert hit["context"].startswith("…") and hit["context"].endswith("…")

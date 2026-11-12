@@ -287,3 +287,79 @@ def test_media_scan_clean_image_leaves_no_concern(wired, monkeypatch):
     concerns = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
     assert concerns == []
 
+
+def test_a_concern_gets_an_id_timestamp_and_context_without_an_event_time(wired):
+    client, _fake, _ = wired
+    client.post(
+        "/api/telemetry/activity",
+        headers=HEADERS,
+        json={"user": "kid", "feature": "web", "item": "draftkings.com", "action": "visit"},
+    )
+    [concern] = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
+    assert concern["id"]
+    assert concern["at"]  # filled in even though the event had none
+    assert concern["item"] == "draftkings.com"
+    assert "draftkings.com" in concern["context"]
+
+
+PNG_1X1 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def test_a_media_concern_image_is_encrypted_for_export_and_can_be_reviewed(wired, monkeypatch):
+    client, fake, _ = wired
+
+    async def _vision_settings(_session):
+        return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "qwen2.5-vl:7b"}
+
+    async def _vision_chat(_session, url, payload, timeout):
+        return (
+            '{"concern": true, "category": "sexual", "level": "high", '
+            '"description": "Suggestive photo detected", "reason": "Contains explicit content"}'
+        )
+
+    monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
+    monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
+
+    resp = client.post(
+        "/api/telemetry/media/scan",
+        headers=HEADERS,
+        json={
+            "user": "kid",
+            "file_name": "photo_123.png",
+            "media_type": "image",
+            "image_b64": PNG_1X1,
+            "metadata": {"app": "Messages", "folder": "Camera"},
+        },
+    )
+    assert resp.status_code == 200 and resp.json()["has_image"] is True
+
+    [concern] = client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
+    assert concern["file_name"] == "photo_123.png"
+    assert concern["item"] == "photo_123.png"
+    assert "Messages" in concern["context"] and "Camera" in concern["context"]
+    assert concern["at"]
+
+    # The image is held encrypted, not as base64 or a file.
+    [key] = [k for k in fake.strings if k.startswith("tel:concern-image:")]
+    assert PNG_1X1 not in fake.strings[key]
+
+    image = client.get(
+        f"/api/telemetry/concerns/kid/{concern['id']}/image", headers=HEADERS
+    )
+    assert image.status_code == 200
+    assert image.json()["image_b64"] == PNG_1X1
+    assert image.json()["file_name"] == "photo_123.png"
+
+    review = client.post(
+        f"/api/telemetry/concerns/kid/{concern['id']}/review",
+        headers=HEADERS,
+        json={"verdict": "confirmed", "by": "dad", "note": "Talked to her about it."},
+    )
+    assert review.status_code == 200
+    human = review.json()["concern"]["human_review"]
+    assert human["verdict"] == "confirmed" and human["by"] == "dad"
+    assert human["note"] == "Talked to her about it."
+    assert client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["human_review"]["by"] == "dad"
+
