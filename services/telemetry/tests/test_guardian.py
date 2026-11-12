@@ -363,3 +363,29 @@ def test_a_media_concern_image_is_encrypted_for_export_and_can_be_reviewed(wired
     assert human["note"] == "Talked to her about it."
     assert client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"][0]["human_review"]["by"] == "dad"
 
+
+
+def test_a_review_stays_on_its_concern_while_the_list_moves():
+    """Reviews are kept by concern id, so a full list shifting cannot move one onto another concern."""
+    import asyncio
+    import json as _json
+
+    from services.telemetry import store as _store
+    from services.telemetry.tests.fakes import FakeRedis
+
+    async def go():
+        rc = FakeRedis()
+        key = f"{_store.CONCERNS_PREFIX}kid"
+        for cid in ("a", "b", "c"):
+            await rc.rpush(key, _json.dumps({"id": cid, "category": "x"}))
+        assert (await _store.review_concern(rc, "kid", "b", "confirmed", "dad", "seen"))["id"] == "b"
+        # A new concern arrives and the oldest is trimmed: every position shifts by one.
+        await rc.rpush(key, _json.dumps({"id": "d", "category": "x"}))
+        await rc.ltrim(key, -3, -1)
+        listed = {c["id"]: c for c in await _store.list_concerns(rc, "kid")}
+        assert sorted(listed) == ["b", "c", "d"]
+        assert listed["b"]["human_review"]["verdict"] == "confirmed"
+        assert "human_review" not in listed["c"] and "human_review" not in listed["d"]
+        assert await _store.review_concern(rc, "kid", "a", "dismissed", "dad") is None  # trimmed away
+
+    asyncio.run(go())

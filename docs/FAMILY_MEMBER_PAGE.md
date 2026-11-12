@@ -136,8 +136,10 @@ it, and it links on here.
   serves the Devices section to the father and admins only, 403 otherwise.
 - `GET /api/guardian/concerns/{u}/export?format=csv|json` is narrower than raw
   data: the caller must pass `_raw_access` and be an admin or one of the
-  child's parents (`/api/internal/guard/parents/{u}`). A grown member's list is
-  admin-only. CSV cells are formula-neutralized and responses are `no-store`.
+  child's parents (`/api/internal/guard/parents/{u}`). In practice only
+  monitored children carry concerns; a grown member's raw data is their own,
+  so nobody else, admins included, can open that list. CSV cells are
+  formula-neutralized and responses are `no-store`.
   The same two gates protect `POST /api/guardian/concerns/{u}/{id}/review`
   (a parent's or admin's confirmed/false-alarm verdict and note) and
   `GET /api/guardian/concerns/{u}/{id}/image`, which returns one concern's

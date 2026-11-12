@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +21,8 @@ from services.telemetry.config import (
     REDIS_URL,
 )
 from services.telemetry.schedule import next_run_at
+
+log = logging.getLogger("telemetry.store")
 
 JOB_PREFIX = "tel:job:"
 JOBS_BY_USER = "tel:jobs:user:"
@@ -451,6 +454,14 @@ async def add_concerns(rc, user: str, concerns: list[dict[str, Any]]) -> None:
     await rc.ltrim(key, -CONCERNS_MAX, -1)
 
 
+#: A parent's or administrator's verdict per concern id, one hash per child.
+#: Kept apart from the concern list, which is appended to and trimmed from the
+#: front: rewriting a list item by its position raced with that (a new concern
+#: shifts every position once the list is full) and could overwrite another
+#: concern. HSET on the concern's own id is atomic.
+CONCERN_REVIEWS_PREFIX = "tel:concern-reviews:"
+
+
 async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for raw in await rc.lrange(f"{CONCERNS_PREFIX}{user}", 0, -1):
@@ -460,6 +471,15 @@ async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
             continue
         if isinstance(item, dict):
             out.append(item)
+    reviews = await rc.hgetall(f"{CONCERN_REVIEWS_PREFIX}{user}")
+    if reviews:
+        for item in out:
+            raw_review = reviews.get(str(item.get("id") or ""))
+            if raw_review:
+                try:
+                    item["human_review"] = json.loads(raw_review)
+                except (TypeError, ValueError):
+                    log.warning("unreadable review for concern %s of %s", item.get("id"), user)
     return out
 
 
@@ -499,9 +519,11 @@ async def save_concern_image(rc, user: str, concern_id: str, image_b64: str) -> 
         return False
     try:
         token = encrypt(cleaned)
-    except Exception:
+    except Exception as exc:
+        log.warning("concern image for %s not kept: encryption failed (%s)", user, exc)
         return False
     if not token:
+        log.warning("concern image for %s not kept: encryption returned nothing", user)
         return False
     await rc.set(
         f"{CONCERN_IMAGE_PREFIX}{user}:{concern_id}",
@@ -527,26 +549,23 @@ async def review_concern(
     by: str,
     note: str = "",
 ) -> dict[str, Any] | None:
-    """Record a parent's or administrator's human review on one concern."""
-    key = f"{CONCERNS_PREFIX}{user}"
-    for index, raw in enumerate(await rc.lrange(key, 0, -1)):
-        try:
-            concern = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(concern, dict):
-            continue
-        if str(concern.get("id") or "") != concern_id:
-            continue
-        concern["human_review"] = {
-            "verdict": verdict,
-            "by": by,
-            "at": utcnow_iso(),
-            "note": str(note or "").strip()[:500],
-        }
-        await rc.lset(key, index, json.dumps(concern))
-        return concern
-    return None
+    """Record a parent's or administrator's human review on one concern.
+
+    The verdict goes into the per-child reviews hash under the concern's id
+    (see CONCERN_REVIEWS_PREFIX), never back into the concern list.
+    """
+    concern = next((c for c in await list_concerns(rc, user) if str(c.get("id") or "") == concern_id), None)
+    if concern is None:
+        return None
+    review = {
+        "verdict": verdict,
+        "by": by,
+        "at": utcnow_iso(),
+        "note": str(note or "").strip()[:500],
+    }
+    await rc.hset(f"{CONCERN_REVIEWS_PREFIX}{user}", concern_id, json.dumps(review))
+    concern["human_review"] = review
+    return concern
 
 
 async def save_recap(rc, user: str, week: str, recap: dict[str, Any]) -> None:

@@ -4,6 +4,7 @@ import { AlertOctagon, AlertTriangle, Check, Download, Info, ShieldAlert, X } fr
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { downloadBlobUrl } from '../../lib/artifactKinds';
+import { errorText } from '../../lib/errorText';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
 import type { ConcernLevel, GuardianConcern } from '../../types/api';
@@ -49,6 +50,28 @@ function whenText(value?: string): string {
  * way to see one. The server checks all of this again; this only keeps the
  * controls off everyone else's screen.
  */
+/** Save a downloaded blob, then release its object URL. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  downloadBlobUrl(url, filename);
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+/** The server's reason for a failed download. A blob request's error body is a
+ *  Blob, so it is read and parsed before errorText can see its `detail`. */
+async function downloadError(err: unknown, fallback: string): Promise<string> {
+  const data = (err as { response?: { data?: unknown } })?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text());
+      return errorText({ response: { data: parsed } }, fallback);
+    } catch {
+      return fallback;
+    }
+  }
+  return errorText(err, fallback);
+}
+
 export default function ConcernsCard({ username, name, limit = 5 }: { username: string; name: string; limit?: number }) {
   const device = useMemberDeviceNoun(username);
   const { user } = useAuth();
@@ -72,9 +95,9 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     try {
       const blob = await api.exportGuardianConcerns(username, format);
       const stamp = new Date().toISOString().slice(0, 10);
-      downloadBlobUrl(URL.createObjectURL(blob), `jarvis-concerns-${username}-${stamp}.${format}`);
-    } catch {
-      setExportError('The export could not be downloaded.');
+      saveBlob(blob, `jarvis-concerns-${username}-${stamp}.${format}`);
+    } catch (err) {
+      setExportError(await downloadError(err, 'The export could not be downloaded.'));
     } finally {
       setExporting(null);
     }
@@ -91,8 +114,8 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
         return next;
       });
       await queryClient.invalidateQueries({ queryKey: ['guardian-concerns', username] });
-    } catch {
-      setReviewError('The review could not be saved.');
+    } catch (err) {
+      setReviewError(errorText(err, 'The review could not be saved.'));
     } finally {
       setReviewing(null);
     }
@@ -104,9 +127,9 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     setReviewError(null);
     try {
       const { blob, filename } = await api.downloadGuardianConcernImage(username, concern.id);
-      downloadBlobUrl(URL.createObjectURL(blob), filename);
-    } catch {
-      setReviewError('The image could not be downloaded.');
+      saveBlob(blob, filename);
+    } catch (err) {
+      setReviewError(await downloadError(err, 'The image could not be downloaded.'));
     } finally {
       setImageBusy(null);
     }

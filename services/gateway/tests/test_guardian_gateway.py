@@ -245,7 +245,8 @@ def export_wired(monkeypatch):
         async def get(self, url, **kw):
             calls.append({"url": url, **kw})
             if "may-view-raw" in url:
-                return _Resp({"allowed": state["allowed"], "technical": state["is_admin"], "comms": True})
+                return _Resp({"allowed": state["allowed"], "technical": state["is_admin"],
+                              "comms": state.get("comms", True)})
             if "guard/parents" in url:
                 return _Resp({"parents": state["parents"], "display_name": "Kid"})
             if url.endswith("/image"):
@@ -355,3 +356,28 @@ def test_a_bad_review_verdict_is_refused_before_telemetry(export_wired):
         "/api/guardian/concerns/kid/c1/review", json={"verdict": "maybe"}
     ).status_code == 422
     assert all(not c["url"].endswith("/review") for c in calls)
+
+
+def test_without_comms_access_the_export_leaves_out_message_concerns(export_wired):
+    """The export can never reach further than the Concerns card the viewer can read."""
+    client, _calls, state = export_wired
+    state["is_admin"], state["parents"], state["comms"] = True, [], False
+    state["concerns"] = state["concerns"] + [{"id": "c2", "category": "violence", "feature": "browser"}]
+    body = client.get("/api/guardian/concerns/kid/export", params={"format": "json"}).json()
+    assert [c["id"] for c in body["concerns"]] == ["c2"] and body["count"] == 1
+
+
+def test_without_comms_access_a_message_concern_cannot_be_reviewed_or_downloaded(export_wired):
+    client, calls, state = export_wired
+    state["is_admin"], state["parents"], state["comms"] = True, [], False
+    review = client.post("/api/guardian/concerns/kid/c1/review", json={"verdict": "confirmed"})
+    image = client.get("/api/guardian/concerns/kid/c1/image")
+    assert review.status_code == 404 and image.status_code == 404
+    assert not [c for c in calls if c["url"].endswith(("/review", "/image"))]
+
+
+def test_concern_ids_are_escaped_into_the_telemetry_path(export_wired):
+    client, calls, _state = export_wired
+    client.post("/api/guardian/concerns/kid/a%3Fb/review", json={"verdict": "dismissed"})
+    posted = [c["url"] for c in calls if c["url"].endswith("/review")]
+    assert posted and posted[0].endswith("/concerns/kid/a%3Fb/review")

@@ -180,6 +180,28 @@ describe('The family guardian page (a parent)', () => {
     expect(screen.queryByTestId('concern-review')).not.toBeInTheDocument();
   });
 
+  it('says why an image could not be downloaded, in the server\'s words', async () => {
+    const concern: GuardianConcern = {
+      id: 'c2',
+      category: 'violence',
+      label: 'Violence',
+      level: 'high',
+      excerpt: 'flagged picture',
+      item: 'photo.png',
+      feature: 'photos',
+      has_image: true,
+      at: new Date().toISOString(),
+    };
+    auth.user = { username: 'dad', is_minor: false, is_admin: true };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
+    const body = new Blob([JSON.stringify({ detail: 'image expired or unavailable' })], { type: 'application/json' });
+    vi.mocked(api.downloadGuardianConcernImage).mockRejectedValue({ response: { status: 404, data: body } });
+    wrap(<Guardian />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /download image/i }));
+    expect(await screen.findByText('image expired or unavailable')).toBeInTheDocument();
+  });
+
   it('explains itself to someone who is not a parent', async () => {
     vi.mocked(api.getFamily).mockRejectedValue(Object.assign(new Error('no'), { isAxiosError: true, response: { status: 403 } }));
     wrap(<Guardian />);

@@ -6509,14 +6509,14 @@ async def guardian_concerns(request: Request, user: str, limit: int = 50):
     return await _parents_only_telemetry(request, user, f"/api/telemetry/concerns/{user}", {"limit": max(1, min(limit, 300))})
 
 
-async def _concerns_reviewer(request: Request, user: str, action: str = "export") -> str:
+async def _concerns_reviewer(request: Request, user: str, action: str = "export") -> tuple[str, dict]:
     """The two gates for concern export/review: raw access, then admin or parent.
 
     Identity's raw-data rule already refuses a minor asking for themselves and
-    every sibling; "admins and parents, and no one else" is narrower still, so
-    a grown member's concerns remain admin-only.
+    every sibling. In practice only monitored children carry concerns; a grown
+    member's raw data is their own, so nobody else can open their list.
     """
-    await _raw_access(request, user)
+    access = await _raw_access(request, user)
     creds = await _resolve_identity_from_request(request)
     viewer = str((creds or {}).get("user") or "").strip()
     if not viewer:
@@ -6525,7 +6525,39 @@ async def _concerns_reviewer(request: Request, user: str, action: str = "export"
         parents, _ = await _my_parents(user)
         if viewer not in parents:
             raise HTTPException(status_code=403, detail=f"Only a parent can {action} this")
-    return viewer
+    return viewer, access
+
+
+def _concerns_for(access: dict, concerns: list) -> list[dict]:
+    """The concerns this viewer may see, exactly as the Concerns card shows them.
+
+    The same rule as ``_parents_only_telemetry``: no calls, texts or social
+    concerns without ``comms`` access, and no technical keys without
+    ``technical``. An export, a review or an image download must never reach
+    further than the list the viewer can already read.
+    """
+    out = [c for c in concerns if isinstance(c, dict)]
+    if not access.get("comms"):
+        out = [c for c in out if c.get("feature") not in COMMS_FEATURES]
+    if not access.get("technical"):
+        out = [strip_technical(c) for c in out]
+    return out
+
+
+async def _visible_concern(client, user: str, concern_id: str, access: dict) -> None:
+    """404 unless ``concern_id`` is one of the concerns this viewer may see."""
+    if access.get("comms"):
+        return  # nothing is hidden from this viewer; telemetry answers 404 for an unknown id
+    resp = await client.get(
+        f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}",
+        params={"limit": 300},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    if resp.status != 200:
+        raise HTTPException(status_code=502, detail=f"Concerns could not be read (telemetry answered {resp.status})")
+    listed = (await resp.json(content_type=None) or {}).get("concerns") or []
+    if not any(str(c.get("id") or "") == concern_id for c in _concerns_for(access, listed)):
+        raise HTTPException(status_code=404, detail="concern not found")
 
 
 def _image_kind(data: bytes) -> tuple[str, str] | None:
@@ -6556,22 +6588,22 @@ async def guardian_concerns_export(request: Request, user: str, format: str = "c
     admin. Two gates, because "admins and parents, and no one else" is
     narrower than identity's raw-data rule: the caller must first pass
     ``_raw_access`` (which already refuses a minor asking for themselves and
-    every sibling), then be an admin or one of the child's parents. A grown
-    member's concerns stay their own; only an admin may export those.
+    every sibling), then be an admin or one of the child's parents. The export
+    holds exactly what the viewer's Concerns card can show (``_concerns_for``).
     """
     if format not in ("csv", "json"):
         raise HTTPException(status_code=422, detail="format must be csv or json")
-    viewer = await _concerns_reviewer(request, user, "export")
+    viewer, access = await _concerns_reviewer(request, user, "export")
     async with borrow_http_client() as client:
         resp = await client.get(
-            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}",
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}",
             params={"limit": 300},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         if resp.status != 200:
             return await _proxy_json_response(resp)
         concerns = (await resp.json(content_type=None) or {}).get("concerns") or []
-    concerns = [c for c in concerns if isinstance(c, dict)]
+    concerns = _concerns_for(access, concerns)
     log.info("concerns export: viewer=%s subject=%s format=%s count=%d", viewer, user, format, len(concerns))
 
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", user).strip("._") or "member"
@@ -6643,10 +6675,11 @@ async def guardian_concern_review(
     if verdict not in ("confirmed", "dismissed"):
         raise HTTPException(status_code=422, detail="verdict must be confirmed or dismissed")
     note = str(body.get("note") or "")[:500]
-    viewer = await _concerns_reviewer(request, user, "review")
+    viewer, access = await _concerns_reviewer(request, user, "review")
     async with borrow_http_client() as client:
+        await _visible_concern(client, user, concern_id, access)
         resp = await client.post(
-            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}/{concern_id}/review",
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}/{quote(concern_id, safe='')}/review",
             json={"verdict": verdict, "by": viewer, "note": note},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
@@ -6659,10 +6692,11 @@ async def guardian_concern_review(
 @app.get("/api/guardian/concerns/{user}/{concern_id}/image")
 async def guardian_concern_image(request: Request, user: str, concern_id: str):
     """Export one concern's image as an attachment. It is never shown inline."""
-    viewer = await _concerns_reviewer(request, user, "download")
+    viewer, access = await _concerns_reviewer(request, user, "download")
     async with borrow_http_client() as client:
+        await _visible_concern(client, user, concern_id, access)
         resp = await client.get(
-            f"{TELEMETRY_SVC}/api/telemetry/concerns/{user}/{concern_id}/image",
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}/{quote(concern_id, safe='')}/image",
             headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         if resp.status != 200:
