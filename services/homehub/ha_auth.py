@@ -327,6 +327,58 @@ class HAAuth:
             self._save(blob)
         return token_id, value
 
+    # -- service logins (HA's long-lived access tokens) ------------------------
+    def ensure_service_user(self, name: str) -> str:
+        """A non-admin hub user for one service (e.g. Music Assistant), created once.
+
+        Its own user, so its token can be revoked and its access judged on its
+        own, never borrowed from a person or the stack's internal secret.
+        """
+        users = self.store.get_kv("users", []) or []
+        for u in users:
+            if u.get("service") and u.get("name") == name:
+                return str(u["id"])
+        uid = uuid.uuid4().hex
+        users.append({"id": uid, "name": name, "is_owner": False, "is_active": True,
+                      "system_generated": False, "group_ids": ["system-users"], "service": True})
+        self.store.set_kv("users", users)
+        return uid
+
+    def create_long_lived_token(self, user_id: str, client_name: str, days: int = 3650) -> str:
+        """HA's long-lived access token: a JWT signed by its own refresh token's key."""
+        if self._user_allowed(user_id) is None:
+            raise AuthError("access_denied", "User is not active", status=403)
+        token_id = uuid.uuid4().hex
+        jwt_key = secrets.token_hex(64)
+        now = int(time.time())
+        lifetime = int(days) * 86400
+        self.store.save_refresh_token(token_id, {
+            "user_id": user_id, "client_name": client_name, "token_type": "long_lived_access_token",
+            "created_at": now, "access_token_expiration": lifetime,
+        }, jwt_key)
+        with self._lock:
+            blob = self._blob()
+            blob["tokens"][token_id] = {"token_type": "long_lived_access_token", "client_name": client_name,
+                                        "user_id": user_id, "created_at": now, "access_token_expiration": lifetime}
+            self._save(blob)
+        return jwt.encode({"iss": token_id, "iat": now, "exp": now + lifetime}, jwt_key, algorithm="HS256")
+
+    def revoke_long_lived(self, user_id: str, client_name: str | None = None) -> int:
+        """Revoke a user's long-lived tokens (all, or one client's). Returns how many."""
+        with self._lock:
+            blob = self._blob()
+            gone = [tid for tid, m in blob["tokens"].items()
+                    if m.get("token_type") == "long_lived_access_token" and m.get("user_id") == user_id
+                    and (client_name is None or m.get("client_name") == client_name)]
+            for tid in gone:
+                blob["tokens"].pop(tid, None)
+                self.store._exec("DELETE FROM refresh_tokens WHERE id=?", (tid,))
+            self._save(blob)
+        cache = getattr(self.auth, "_cache", None)
+        if gone and isinstance(cache, dict):
+            cache.clear()
+        return len(gone)
+
     def revoke(self, value: str | None) -> bool:
         """``/auth/revoke``: forget the refresh token and every access token it signed."""
         found = self.find_refresh_token(value or "")

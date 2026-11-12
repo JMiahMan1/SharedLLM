@@ -23,9 +23,11 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
     ha_auth_api,
+    ha_ws_compat,
     live_video,
     live_video_api,
     mobile_app_api,
+    service_logins_api,
     statistics_api,
 )
 from services.homehub.auth import Auth, Principal, bearer
@@ -43,7 +45,7 @@ _NO_STORE = {"Cache-Control": "no-store"}
 #: A snapshot stream gives up after this many failed frames in a row (a camera gone to sleep for good).
 SNAPSHOT_STREAM_MAX_FAILURES = 5
 #: WebSocket commands other modules add (``async fn(conn, id, msg)``), e.g. mobile_app's push channel.
-WS_COMMANDS: dict[str, Any] = {}
+WS_COMMANDS: dict[str, Any] = dict(ha_ws_compat.COMMANDS)  # HA commands other HA clients ask for
 
 
 def jsonable(value: Any) -> Any:
@@ -511,6 +513,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages
     app.include_router(ha_auth_api.build_router(runtime, auth))
     app.include_router(mobile_app_api.build_router(runtime, auth))
+    app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:
