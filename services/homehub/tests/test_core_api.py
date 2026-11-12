@@ -263,3 +263,33 @@ async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
     await svc._start_people()
     assert not errors
     assert svc.hub.states.get("zone.home") is not None and svc.hub.states.get("zone.work") is not None
+
+
+async def test_runtime_reports_when_every_entry_has_tried_to_load(tmp_path, monkeypatch):
+    import asyncio
+
+    from services.homehub import runtime as rt
+
+    class Slow(Driver):
+        poll_interval = None
+
+        async def async_setup(self):
+            await asyncio.sleep(0.05)
+
+    class Broken(Driver):
+        async def async_setup(self):
+            raise DeviceUnavailable("off")
+
+    classes = {"slow": Slow, "broken": Broken}
+    monkeypatch.setattr(rt, "driver_class", lambda domain: classes.get(domain))
+    hub = Hub()
+    for eid, dom in (("a", "slow"), ("b", "broken"), ("c", "nodriver")):
+        hub.config_entries[eid] = ConfigEntry(eid, dom)
+    runtime = Runtime(hub, Store(str(tmp_path / "h.db"), Fernet.generate_key().decode()))
+    await runtime.start_all()
+    pending = await runtime.wait_first_setups(2)
+    assert pending == []
+    assert hub.config_entries["a"].state == "loaded"
+    assert hub.config_entries["b"].state == "setup_retry"
+    assert hub.config_entries["c"].state == "not_loaded"
+    await runtime.shutdown()

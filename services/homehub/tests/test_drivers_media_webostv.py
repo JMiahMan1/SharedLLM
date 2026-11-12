@@ -152,3 +152,15 @@ async def test_turn_on_uses_wol_from_options_mac(monkeypatch):
     await drv2.async_setup()
     with pytest.raises(HubError, match="no MAC"):
         await drv2.async_call(hub2.entities[ENT], "media_player", "turn_on", {})
+
+
+def test_a_failed_connection_reads_as_disconnected_not_an_error():
+    from services.homehub.drivers.webostv import WebOSDriver
+
+    class Raising:
+        def is_connected(self):
+            raise OSError(113, "Connect call failed")
+
+    drv = WebOSDriver.__new__(WebOSDriver)
+    drv.client = Raising()
+    assert drv.connected is False

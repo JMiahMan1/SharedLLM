@@ -23,6 +23,8 @@ class Runtime:
         self.hub = hub
         self.store = store
         self._tasks: dict[str, asyncio.Task] = {}
+        #: Set once an entry's first setup attempt has finished, loaded or not.
+        self._first_attempt: dict[str, asyncio.Event] = {}
         self._unsub_record = None
         self.automations: Any = None  # set by main once the engine is loaded
 
@@ -66,6 +68,7 @@ class Runtime:
         old = self._tasks.pop(entry.entry_id, None)
         if old is not None:
             old.cancel()
+        self._first_attempt.setdefault(entry.entry_id, asyncio.Event())
         self._tasks[entry.entry_id] = asyncio.create_task(self._supervise(entry), name=f"entry:{entry.domain}")
 
     async def stop_entry(self, entry_id: str) -> None:
@@ -80,9 +83,11 @@ class Runtime:
                 await driver.async_unload()
 
     async def _supervise(self, entry: ConfigEntry) -> None:
+        first = self._first_attempt.setdefault(entry.entry_id, asyncio.Event())
         cls = driver_class(entry.domain)
         if cls is None:
             entry.state, entry.reason = "not_loaded", "no driver for this integration yet"
+            first.set()
             return
         attempt = 0
         while True:
@@ -99,10 +104,12 @@ class Runtime:
                 driver.mark_unavailable()
                 with contextlib.suppress(Exception):
                     await driver.async_unload()
+                first.set()
                 await asyncio.sleep(delay)
                 continue
             self.hub.drivers[entry.entry_id] = driver
             entry.state, entry.reason = "loaded", None
+            first.set()
             attempt = 0
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
@@ -115,6 +122,18 @@ class Runtime:
                     raise
                 except Exception as exc:
                     log.warning("%s (%s) poll failed: %s", entry.domain, entry.title, exc)
+
+    async def wait_first_setups(self, timeout: float) -> list[str]:
+        """Wait until every started entry has tried to load once; returns the ones still pending.
+
+        Automations and the scheduler start after this: HA starts them once
+        its integrations are up, and a schedule replayed at startup must reach
+        a loaded thermostat driver, not "no driver is running".
+        """
+        events = {eid: ev for eid, ev in self._first_attempt.items() if eid in self._tasks}
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*(ev.wait() for ev in events.values())), timeout)
+        return [eid for eid, ev in events.items() if not ev.is_set()]
 
     async def housekeeping(self) -> None:
         while True:

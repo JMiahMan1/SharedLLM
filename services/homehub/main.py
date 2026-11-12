@@ -27,6 +27,8 @@ log = logging.getLogger("homehub")
 DB_PATH = os.getenv("HOMEHUB_DB", "/data/homehub.db")
 IMPORT_DIR = os.getenv("HOMEHUB_IMPORT_DIR", "/import")
 PORT = int(os.getenv("HOMEHUB_PORT", "8123"))
+# How long automations wait for the integrations to load before starting anyway.
+STARTUP_WAIT_S = float(os.getenv("HOMEHUB_STARTUP_WAIT_S", "60"))
 
 
 class Service:
@@ -48,7 +50,10 @@ class Service:
         builtin.register(self.hub)
         await self._start_people()
         await self.runtime.start_all()
-        await self._start_automations()
+        # Automations wait (in the background, so the API is up at once) for
+        # every integration's first setup attempt, as HA starts them only once
+        # it has started.
+        self._bg.append(asyncio.create_task(self._start_automations_when_ready()))
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
 
     async def _start_people(self) -> None:
@@ -60,6 +65,12 @@ class Service:
             await mobile_app.setup_persons(self.hub, self.store.get_kv("persons", []) or [])
         except Exception:
             log.exception("people and zones could not start")
+
+    async def _start_automations_when_ready(self) -> None:
+        pending = await self.runtime.wait_first_setups(STARTUP_WAIT_S)
+        if pending:
+            log.warning("starting automations with %d integrations still loading", len(pending))
+        await self._start_automations()
 
     async def _start_automations(self) -> None:
         try:
@@ -77,6 +88,7 @@ class Service:
     async def stop(self) -> None:
         for t in self._bg:
             t.cancel()
+        self._bg.clear()
         if self.runtime.automations is not None:
             await self.runtime.automations.stop()
             self.runtime.automations = None

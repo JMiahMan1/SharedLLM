@@ -69,7 +69,14 @@ class WebOSDriver(Driver):
 
     @property
     def connected(self) -> bool:
-        return self.client is not None and bool(self.client.is_connected())
+        if self.client is None:
+            return False
+        try:
+            return bool(self.client.is_connected())
+        except Exception:
+            # aiowebostv re-raises the failed connection attempt here when the
+            # TV is off or asleep; that is "not connected", not a crash.
+            return False
 
     async def connect(self) -> bool:
         if self.client is None:
