@@ -525,6 +525,28 @@ def _is_ip(value: str) -> bool:
     return True
 
 
+def _is_loopback(value: str) -> bool:
+    """The hub reaching a service on its own machine (127.0.0.1, ::1): never a stale address."""
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def shared_macs(neighbours: dict[str, str]) -> set[str]:
+    """MACs the neighbour table shows at more than one address.
+
+    A Wi-Fi range extender (or any MAC-translating bridge) answers ARP for every
+    device behind it with its own MAC, so that MAC names the extender, not a
+    device. Used as an identity it merged unrelated devices into one and
+    reported them as a single device that "moved".
+    """
+    seen: dict[str, int] = {}
+    for mac in neighbours.values():
+        seen[mac] = seen.get(mac, 0) + 1
+    return {mac for mac, count in seen.items() if count > 1}
+
+
 def current_host(entry: Any) -> str | None:
     """The address the driver uses now: an options override wins, as in the drivers."""
     for src in (entry.options or {}, entry.data or {}):
@@ -684,7 +706,7 @@ class DiscoveryManager:
         if known and entry is not None and how == "id" and new_host:
             cur = current_host(entry)
             # Only an IP address goes stale; a host name follows the device by itself.
-            if cur and _is_ip(cur) and _is_ip(new_host) and cur.lower() != new_host:
+            if cur and _is_ip(cur) and _is_ip(new_host) and cur.lower() != new_host and not _is_loopback(cur):
                 moved = {"entry_id": entry.entry_id, "entry_title": entry.title, "old_host": cur,
                          "new_host": f.get("host")}
         return {
@@ -1024,6 +1046,21 @@ class DiscoveryManager:
     async def _scan_dhcp(self) -> int:
         """Neighbours by MAC and host name -> findings, and MACs for findings that had none."""
         neighbours = parse_arp(self.read_arp())
+        proxied = shared_macs(neighbours)
+        if proxied:
+            log.debug("dhcp: %d MAC(s) answer for several addresses (an extender or bridge); not used as ids",
+                      len(proxied))
+            # Undo what an earlier scan learned from such a MAC: its own findings go, and
+            # other findings lose it as an id (it was filled in from the extender).
+            for fid, f in list(self.findings.items()):
+                if f.get("mac") not in proxied:
+                    continue
+                if f.get("source") == "dhcp":
+                    del self.findings[fid]
+                else:
+                    f["ids"] = sorted(set(f.get("ids") or []) - {f["mac"]})
+                    f["mac"] = None
+                self._dirty = True
         by_host: dict[str, dict[str, Any]] = {}
         for f in self.findings.values():
             if f.get("host"):
@@ -1031,7 +1068,7 @@ class DiscoveryManager:
         filled = 0
         for host, mac in neighbours.items():
             f = by_host.get(host)
-            if f is not None and not f.get("mac"):
+            if f is not None and not f.get("mac") and mac not in proxied:
                 f["mac"] = mac
                 f["ids"] = sorted(set(f.get("ids") or []) | {mac})
                 self._dirty = True
@@ -1047,6 +1084,8 @@ class DiscoveryManager:
             await asyncio.gather(*(one(h) for h in neighbours))
         found = 0
         for host, mac in neighbours.items():
+            if mac in proxied:
+                continue  # the extender's MAC, not this device's: no id can be made from it
             f = parse_dhcp(host, mac, names.get(host))
             if f is None:
                 continue
