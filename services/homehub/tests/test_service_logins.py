@@ -81,6 +81,20 @@ async def test_a_refused_link_revokes_the_login_and_aborts_the_flow(parts):
     assert ("config/flows/abort", {"flow_id": "f1"}) in ma.calls
 
 
+async def test_link_uses_the_drivers_live_connection(parts):
+    """The real driver keeps its MA connection in ``conn``; the link must talk through it."""
+    store, _auth, ha = parts
+    hub = Hub()
+
+    class Driver:
+        entry = ConfigEntry("ma", "music_assistant")
+        conn = FakeMA()
+
+    hub.drivers["ma"] = Driver()
+    out = await link_music_assistant(Runtime(hub, store), ha, "http://127.0.0.1:8123")
+    assert out["instance_id"] == "hass--x" and Driver.conn.calls
+
+
 async def test_link_needs_music_assistant_connected(parts):
     store, _auth, ha = parts
     with pytest.raises(HTTPException) as err:

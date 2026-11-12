@@ -42,6 +42,8 @@ async def link_music_assistant(runtime: Any, ha: HAAuth, hub_url: str) -> dict[s
     """Give Music Assistant's HA plugin a fresh hub login and the hub's URL, through MA's own setup flow."""
     hub = runtime.hub
     driver = next((d for d in hub.drivers.values() if getattr(d.entry, "domain", "") == "music_assistant"), None)
+    # The driver holds its live connection in ``conn`` (an MAConnection with ``command``).
+    driver = getattr(driver, "conn", None) or driver
     if driver is None or not hasattr(driver, "command"):
         raise HTTPException(503, detail="Music Assistant is not connected to the hub")
     providers = await driver.command("config/providers")
