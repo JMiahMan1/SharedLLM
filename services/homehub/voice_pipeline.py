@@ -613,12 +613,18 @@ class SatelliteVoice:
         self.max_active_wake_words = int(getattr(cfg, "max_active_wake_words", 0) or 0)
         self.wake_word_error = None
         active = [self.wake_words.get(w, w) for w in self.active_wake_words]
-        self.log.info("voice satellite %s: listens for %s (offers %s)", self.name,
-                      ", ".join(repr(a) for a in active) or "no wake word",
-                      ", ".join(repr(w) for w in self.wake_words.values()) or "none")
-        if not active:
-            self.log.warning("voice satellite %s: no wake word is active, so it will never wake; choose one "
-                             "with its Wake word select", self.name)
+        if self.wake_words:
+            self.log.info("voice satellite %s: listens for %s (offers %s)", self.name,
+                          ", ".join(repr(a) for a in active) or "no wake word",
+                          ", ".join(repr(w) for w in self.wake_words.values()))
+        if not self.wake_words:
+            # Firmware whose wake word model is built in (micro_wake_word without selectable models) lists
+            # none here; it still wakes on its own phrase, which only its config or log names.
+            self.log.info("voice satellite %s: its wake word is fixed in its firmware (it lists none to choose)",
+                          self.name)
+        elif not active:
+            self.log.warning("voice satellite %s: none of its wake words is active, so it will not wake; choose "
+                             "one with its Wake word select", self.name)
         self._publish_wake_word_select()
 
     def _publish_wake_word_select(self) -> None:
@@ -626,7 +632,8 @@ class SatelliteVoice:
         if sel is None:
             return
         if self.wake_word_error or not self.wake_words:
-            self.hub.publish(sel, UNAVAILABLE, {"reason": self.wake_word_error or "the node offers no wake words"})
+            self.hub.publish(sel, UNAVAILABLE, {"reason": self.wake_word_error or (
+                "the wake word is fixed in this satellite's firmware; there is none to choose")})
             return
         active = next((self.wake_words[w] for w in self.active_wake_words if w in self.wake_words), NO_WAKE_WORD)
         self.hub.publish(sel, active, {"options": [*self.wake_words.values(), NO_WAKE_WORD]})

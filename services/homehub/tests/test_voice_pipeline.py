@@ -630,3 +630,22 @@ async def test_a_node_that_cannot_report_its_wake_words_says_so(env, monkeypatch
     assert st.state == UNAVAILABLE and "did not report its wake words" in st.attributes["reason"]
     assert "connection reset" in drv.voice.status()["wake_words"]["error"]
 
+
+
+async def test_a_wake_word_fixed_in_firmware_is_not_reported_as_missing(env, monkeypatch, caplog):
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    original = drv._make_client
+
+    def fixed(host):
+        c = original(host)
+        c.available_wake_words, c.active_wake_words = [], []
+        return c
+
+    drv._make_client = fixed  # type: ignore[method-assign]
+    await drv.async_setup()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    st = hub.states.get(WAKE)
+    assert st.state == UNAVAILABLE and "fixed in this satellite's firmware" in st.attributes["reason"]
+    assert "will not wake" not in caplog.text
