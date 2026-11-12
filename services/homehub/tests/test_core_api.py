@@ -244,3 +244,22 @@ def test_device_tracker_see_from_the_location_relay(client, setup):
     assert st.attributes["speed"] == 3
     bad = client.post("/api/services/device_tracker/see", headers=H, json={"dev_id": "../x"})
     assert bad.status_code >= 400
+
+
+async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
+    """main.Service wires zones and persons the way the drivers define them."""
+    import importlib
+
+    monkeypatch.setenv("HOMEHUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
+    main = importlib.import_module("services.homehub.main")
+    svc = main.Service.__new__(main.Service)
+    svc.hub = Hub(location={"latitude": 33.4, "longitude": -111.9, "location_name": "Home"})
+    svc.store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
+    svc.store.set_kv("zones", [{"id": "work", "name": "Work", "latitude": 33.5, "longitude": -112.0, "radius": 200}])
+    svc.store.set_kv("persons", [{"id": "michele", "name": "Michele", "user_id": "u", "device_trackers": []}])
+    errors = []
+    monkeypatch.setattr(main.log, "exception", lambda *a, **k: errors.append(a))
+    await svc._start_people()
+    assert not errors
+    assert svc.hub.states.get("zone.home") is not None and svc.hub.states.get("zone.work") is not None

@@ -56,7 +56,7 @@ class Service:
             from services.homehub.drivers import mobile_app
 
             home = {"name": (self.hub.location or {}).get("location_name", "Home"), **(self.hub.location or {})}
-            await mobile_app.setup_zones(self.hub, self.store.get_kv("zones", []) or [], home)
+            mobile_app.setup_zones(self.hub, self.store.get_kv("zones", []) or [], home)
             await mobile_app.setup_persons(self.hub, self.store.get_kv("persons", []) or [])
         except Exception:
             log.exception("people and zones could not start")
