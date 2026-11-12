@@ -11,6 +11,16 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 import { seedAuth } from '../fixtures/mediaMocks';
 import { expectNoHorizontalOverflow } from '../fixtures/layoutChecks';
 
+/** Like the server (zoneinfo): any zone the runtime knows, "UTC" included. */
+function isIanaZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const ORDER = ['household setting', 'TZ in .env', 'home location'];
 
 interface ZoneState { setting: string; env_tz: string; from_location: boolean; location_set: boolean }
@@ -47,7 +57,7 @@ async function mockGateway(page: Page, initial: Partial<ZoneState> = {}) {
     if (req.method() === 'PUT') {
       const body = req.postDataJSON() as Record<string, unknown>;
       puts.push(body);
-      if (typeof body.timezone === 'string' && body.timezone && !body.timezone.includes('/')) {
+      if (typeof body.timezone === 'string' && body.timezone && !isIanaZone(body.timezone)) {
         return route.fulfill({ status: 400, json: { detail: `Not an IANA time zone: ${body.timezone}` } });
       }
       if (typeof body.timezone === 'string') state.setting = body.timezone;

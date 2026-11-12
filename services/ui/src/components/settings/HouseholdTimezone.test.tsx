@@ -7,6 +7,16 @@ import { filterTimeZones } from '../../lib/householdTimezone';
 import { renderWithProviders } from '../../test/render';
 import { server } from '../../test/setup';
 
+/** Like the server (zoneinfo): any zone the runtime knows, "UTC" included. */
+function isIanaZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }));
 
 const ORDER = ['household setting', 'TZ in .env', 'home location'];
@@ -34,7 +44,7 @@ beforeEach(() => {
     http.put('/api/household-timezone', async ({ request }) => {
       const body = (await request.json()) as Record<string, unknown>;
       puts.push(body);
-      if (typeof body.timezone === 'string' && body.timezone && !body.timezone.includes('/')) {
+      if (typeof body.timezone === 'string' && body.timezone && !isIanaZone(body.timezone)) {
         return HttpResponse.json({ detail: `Not an IANA time zone: ${body.timezone}` }, { status: 400 });
       }
       if (typeof body.timezone === 'string') state.setting = body.timezone;

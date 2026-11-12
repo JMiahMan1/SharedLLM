@@ -258,6 +258,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                     value={currentNote}
                     onChange={(event) => setNotes((current) => ({ ...current, [c.id!]: event.target.value }))}
                     placeholder="Note (optional)"
+                    aria-label="Review note (optional)"
                     maxLength={500}
                     className="min-w-[8rem] flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-slate-100 placeholder:text-slate-400 focus:border-sky-300/40 focus:outline-none"
                   />
