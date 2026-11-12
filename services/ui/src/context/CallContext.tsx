@@ -1195,7 +1195,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         ? { ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now() }
         : current);
       if (outgoing) {
-        void api.ringCall(room).catch(() => {
+        void api.ringCall(room).then(({ ringing, reason }) => {
+          // A ring that reached nobody must not look like one nobody answered.
+          if (ringing.length === 0 && reason && sessionRef.current === session) {
+            toast.error(`Nobody was rung: ${reason}`);
+          }
+        }).catch(() => {
           // The call still works; the others can see it in their call list.
         });
       }

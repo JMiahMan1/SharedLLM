@@ -8397,20 +8397,43 @@ async def _announce_call(request: Request, token: str) -> None:
     )
 
 
+async def _talk_detail(request: Request, payload: dict) -> tuple[dict, str]:
+    """One /execute/talk call as the caller: its ``detail`` and, if empty, why."""
+    joined = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    try:
+        result = json.loads(joined.body)
+    except (TypeError, ValueError):
+        result = {}
+    result = result if isinstance(result, dict) else {}
+    detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
+    why = "" if detail else f"HTTP {joined.status_code} {result.get('status') or ''} {result.get('message') or ''}".strip()
+    return detail, why
+
+
 async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, set[str]] | None:
     """``me``'s display name and the conversation's other members (usernames).
 
     None when the room or the family list could not be read. Talk actor ids
     are the household's nextcloud_user values, which is the mapping identity
-    holds; the Jarvis bot is a member of every room and never counts.
+    holds; the Jarvis bot is a member of every room and never counts. Every
+    way this can end with nobody to ring is logged, because the caller only
+    ever sees a call that nobody answers.
     """
+    from services.gateway import calls as _calls
+
     try:
-        joined = await _proxy_execution_with_identity(
-            request, "/execute/talk", {"action": "participants", "token": token}
-        )
-        people = (json.loads(joined.body).get("detail") or {}).get("participants") or []
+        detail, why = await _talk_detail(request, {"action": "participants", "token": token})
+        people = detail.get("participants") or []
+        if not people:
+            log.warning("[call-notice] room %s: Talk gave no members (%s)", token, why or "empty list")
+            # A one-to-one room names the other person, so it can still ring.
+            opened, why_open = await _talk_detail(request, {"action": "open", "token": token})
+            people = _calls.one_to_one_members(opened.get("conversation"))
+            if not people:
+                log.warning("[call-notice] room %s: could not read the room either (%s)", token, why_open or "not one-to-one")
+                return None
     except Exception as e:
-        log.warning("[call-notice] could not read the room: %s", e)
+        log.warning("[call-notice] could not read the room %s: %s: %s", token, type(e).__name__, e)
         return None
 
     try:
@@ -8425,29 +8448,16 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
         log.warning("[call-notice] could not list the family: %s", e)
         return None
     if not isinstance(users, list):
+        log.warning("[call-notice] could not list the family: identity answered %s", getattr(resp, "status", "?"))
         return None
-    by_talk: dict[str, str] = {}
-    for u in users:
-        if not isinstance(u, dict):
-            continue
-        username = str(u.get("username") or "")
-        talk_id = str(u.get("nextcloud_user") or "")
-        if username and talk_id and not u.get("is_system_default"):
-            by_talk[talk_id] = username
 
-    display = ""
-    recipients: set[str] = set()
-    for person in people:
-        if not isinstance(person, dict):
-            continue
-        username = by_talk.get(str(person.get("actor_id") or ""))
-        if not username:
-            continue
-        if username == me:
-            display = str(person.get("display_name") or username)
-            continue
-        recipients.add(username)
-    return display or me, recipients
+    display, recipients, unmatched = _calls.talk_recipients(people, users, me)
+    if not recipients:
+        log.warning(
+            "[call-notice] room %s: nobody to ring (%d member(s); no family account for %s)",
+            token, len(people), ", ".join(unmatched) or "none",
+        )
+    return display, recipients
 
 
 @app.post("/api/communication/calls/{room}/ring")
@@ -8470,11 +8480,16 @@ async def ring_family_call(room: str, request: Request):
 
     found = await _call_recipients(request, room, me)
     if found is None:
-        return {"ringing": []}
+        return {"ringing": [], "reason": "Could not read who is in this conversation."}
     display, recipients = found
-    drop_in = await _calls.drop_in_recipients(me, recipients) if recipients else set()
-    if not recipients or not await _calls.hub.ring(room, me, display, recipients, drop_in):
+    if not recipients:
+        return {"ringing": [], "reason": "Nobody else in this conversation has a Jarvis account."}
+    drop_in = await _calls.drop_in_recipients(me, recipients)
+    if not await _calls.hub.ring(room, me, display, recipients, drop_in):
+        log.info("[call-notice] room %s already rang (or the call ended); not ringing again", room)
         return {"ringing": []}
+    log.info("[call-notice] %s rang %s in %s (drop-in: %s)", me, ", ".join(sorted(recipients)), room,
+             ", ".join(sorted(drop_in)) or "none")
 
     group = len(recipients) > 1
     name = await _calls.hub.room_name(room)

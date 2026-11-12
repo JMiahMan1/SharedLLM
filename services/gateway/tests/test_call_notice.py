@@ -142,7 +142,7 @@ def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
     asyncio.run(calls.hub.join(peer, "Family"))
 
     first = client.post("/api/communication/calls/room-family/ring")
-    assert first.json() == {"ringing": ["noah"]}
+    assert first.json()["ringing"] == ["noah"]
     [notice] = notices
     assert notice["user"] == "noah"
     assert notice["category"] == "call"
@@ -153,3 +153,117 @@ def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
     notices.clear()
     assert client.post("/api/communication/calls/room-family/ring").json() == {"ringing": []}
     assert notices == []
+
+
+def _joined(room, username="michele"):
+    import asyncio
+
+    from services.gateway import calls
+
+    class _Socket:
+        async def send_json(self, payload):
+            pass
+
+    peer = calls.Peer(id="p1", room=room, username=username, name=username.title(), websocket=_Socket())
+    asyncio.run(calls.hub.join(peer, "Call"))
+
+
+def test_a_ring_reaches_a_member_whose_talk_id_differs_in_case(monkeypatch):
+    """Nextcloud keeps "Noah" while Identity stores "noah": he must still ring."""
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+    monkeypatch.setitem(
+        globals(),
+        "PARTICIPANTS",
+        [{"actor_id": "michele", "display_name": "Michele"}, {"actor_id": "Noah", "display_name": "Noah"}],
+    )
+    _joined("room-noah")
+
+    reply = TestClient(app).post("/api/communication/calls/room-noah/ring").json()
+    assert reply["ringing"] == ["noah"]
+    assert [n["user"] for n in notices] == ["noah"]
+
+
+def test_a_one_to_one_room_rings_even_when_its_member_list_is_unreadable(monkeypatch, caplog):
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+
+    async def proxy(request, endpoint, payload=None, *, method="POST", as_user=None):
+        action = (payload or {}).get("action")
+        if action == "participants":
+            return JSONResponse(status_code=200, content={"status": "FAILURE", "message": "Forbidden", "detail": None})
+        if action == "open":
+            return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
+                "conversation": {"token": "room-dm", "type": 1, "name": "noah", "display_name": "Noah"},
+            }})
+        return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {}})
+
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
+    _joined("room-dm")
+
+    with caplog.at_level("WARNING"):
+        reply = TestClient(app).post("/api/communication/calls/room-dm/ring").json()
+    assert reply["ringing"] == ["noah"]
+    assert [n["user"] for n in notices] == ["noah"]
+    assert "Talk gave no members" in caplog.text and "Forbidden" in caplog.text
+
+
+def test_a_ring_that_reaches_nobody_says_why(monkeypatch, caplog):
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+
+    async def proxy(request, endpoint, payload=None, *, method="POST", as_user=None):
+        return JSONResponse(status_code=502, content={"status": "FAILURE", "message": "Nextcloud is down"})
+
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
+    _joined("room-group")
+
+    with caplog.at_level("WARNING"):
+        reply = TestClient(app).post("/api/communication/calls/room-group/ring").json()
+    assert reply["ringing"] == []
+    assert reply["reason"]
+    assert notices == []
+    assert "Nextcloud is down" in caplog.text
+
+
+def test_members_without_a_family_account_are_logged_not_rung(monkeypatch, caplog):
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+    monkeypatch.setitem(
+        globals(),
+        "PARTICIPANTS",
+        [{"actor_id": "michele", "display_name": "Michele"}, {"actor_id": "stranger", "display_name": "Guest"}],
+    )
+    _joined("room-odd")
+
+    with caplog.at_level("WARNING"):
+        reply = TestClient(app).post("/api/communication/calls/room-odd/ring").json()
+    assert reply["ringing"] == [] and reply["reason"]
+    assert notices == []
+    assert "stranger" in caplog.text
+
+
+def test_talk_recipients_skips_guests_and_the_system_account():
+    from services.gateway.calls import talk_recipients
+
+    display, recipients, unmatched = talk_recipients(
+        [
+            {"actor_type": "users", "actor_id": "Michele", "display_name": "Mum"},
+            {"actor_type": "users", "actor_id": "NOAH"},
+            {"actor_type": "users", "actor_id": "jarvis"},
+            {"actor_type": "emails", "actor_id": "abc123"},
+        ],
+        USERS,
+        "michele",
+    )
+    assert display == "Mum"
+    assert recipients == {"noah"}
+    assert unmatched == ["jarvis"]

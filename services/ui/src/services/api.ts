@@ -2514,8 +2514,13 @@ export const api = {
   },
 
   /** Ring the conversation's other members for a call you just started. */
-  async ringCall(room: string): Promise<void> {
-    await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`);
+  async ringCall(room: string): Promise<{ ringing: string[]; reason?: string }> {
+    const resp = await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`);
+    const data = resp.data ?? {};
+    return {
+      ringing: Array.isArray(data.ringing) ? data.ringing : [],
+      reason: typeof data.reason === 'string' ? data.reason : undefined,
+    };
   },
 
   /** Stop a call ringing you, and let the caller know. */

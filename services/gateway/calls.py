@@ -337,6 +337,60 @@ def _display_name(user: dict[str, Any]) -> str:
     return str(user.get("full_name") or user.get("display_name") or user.get("username") or "Family member")
 
 
+def talk_recipients(
+    people: list[Any], users: list[Any], me: str
+) -> tuple[str, set[str], list[str]]:
+    """Map a Talk room's members to the family usernames a ring reaches.
+
+    Returns ``me``'s display name in the room, the other members' usernames,
+    and the Talk actor ids that matched nobody (for the log). Nextcloud user
+    ids keep the case they were created with ("Noah") while Identity stores
+    them as typed ("noah"), so the match ignores case: an exact match missed
+    that member on every call to them. The system account never counts.
+    """
+    by_talk: dict[str, str] = {}
+    for u in users:
+        if not isinstance(u, dict) or u.get("is_system_default"):
+            continue
+        username = str(u.get("username") or "")
+        talk_id = str(u.get("nextcloud_user") or "")
+        if username and talk_id:
+            by_talk[talk_id.casefold()] = username
+    display = ""
+    recipients: set[str] = set()
+    unmatched: list[str] = []
+    for person in people:
+        if not isinstance(person, dict):
+            continue
+        actor = str(person.get("actor_id") or "")
+        if person.get("actor_type") not in (None, "users"):
+            continue  # guests and e-mail invitees have no phone to ring
+        username = by_talk.get(actor.casefold())
+        if not username:
+            if actor:
+                unmatched.append(actor)
+            continue
+        if username == me:
+            display = str(person.get("display_name") or username)
+            continue
+        recipients.add(username)
+    return display or me, recipients, unmatched
+
+
+def one_to_one_members(conversation: Any) -> list[dict[str, Any]]:
+    """The other member of a one-to-one Talk room, from the room itself.
+
+    Talk names a one-to-one room after the other person's user id, so the
+    room alone says whom to ring when its member list cannot be read.
+    """
+    if not isinstance(conversation, dict) or conversation.get("type") != 1:
+        return []
+    other = str(conversation.get("name") or "")
+    if not other:
+        return []
+    return [{"actor_type": "users", "actor_id": other, "display_name": conversation.get("display_name") or other}]
+
+
 @router.get("/api/communication/calls")
 async def list_calls(device_key: str = "", user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
     """The calls in progress this person may see, for the Family Calls tab.
