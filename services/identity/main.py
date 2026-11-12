@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.common import device_noun
+from services.common import device_noun, ha_redirect
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import PERMISSION_GROUPS, WEB_FILTER_CATEGORIES
 from services.common.secrets import secret_matches
@@ -383,9 +383,12 @@ def _decrypt_field(enc: str | None) -> str | None:
 def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
     """The user's own plaintext credentials for one service."""
     if service == "home_assistant":
-        return {"ha_url": user.ha_url, "ha_token": _decrypt_field(user.ha_token_enc)}
+        # A retired HA host answers through homehub (HA_URL_REDIRECTS); the
+        # stored URL is left as the user set it.
+        return {"ha_url": ha_redirect.redirect(user.ha_url), "ha_token": _decrypt_field(user.ha_token_enc)}
     if service == "music_assistant":
-        return {"mass_url": user.mass_url, "mass_token": _decrypt_field(user.mass_token_enc)}
+        # Music Assistant ran on the same retired host; same redirect map.
+        return {"mass_url": ha_redirect.redirect(user.mass_url), "mass_token": _decrypt_field(user.mass_token_enc)}
     if service == "audiobookshelf":
         return {
             "audiobookshelf_url": user.audiobookshelf_url,
@@ -7332,6 +7335,7 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
         if not ha_url or not ha_token:
             log.warning("[location] Cannot forward location to Home Assistant: HA_URL or HA_TOKEN not configured")
             return
+        ha_url = ha_redirect.redirect(ha_url)
 
         if not dev_ids:
             clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', user_id.lower())

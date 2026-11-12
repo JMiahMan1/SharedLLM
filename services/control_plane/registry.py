@@ -23,7 +23,7 @@ MANIFEST_ACCEPT = ",".join((
 _KNOWN_SERVICES = {
     "gateway", "identity", "rag", "storage", "logging", "workspace_runtime",
     "control_plane", "geo", "ui", "caddy", "bible", "dns", "telemetry",
-    "automation", "execution",
+    "automation", "execution", "homehub",
 }
 
 

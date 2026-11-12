@@ -36,10 +36,6 @@
     reverse_proxy identity:8001
 }
 
-:8095 {
-    reverse_proxy ma:8095
-}
-
 :11435 {
     log {
         output stdout

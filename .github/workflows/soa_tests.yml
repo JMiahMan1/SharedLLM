@@ -58,6 +58,7 @@ jobs:
         pip install -r services/health/requirements.txt
         pip install -r services/automation/requirements.txt
         pip install -r services/telemetry/requirements.txt
+        pip install -r services/homehub/requirements.txt pytest-asyncio
         # RAG has huge deps (Torch), so we mock it for CI unit tests
         # The tests are designed to bypass heavy ML loads via mocker.
 

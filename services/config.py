@@ -2,6 +2,8 @@ import logging
 import os
 import sys
 
+from services.common.ha_redirect import redirect as _ha_redirect
+
 # Configuration module - handles bootstrap and runtime config resolution
 log = logging.getLogger(__name__)
 
@@ -95,7 +97,8 @@ BIBLE_SVC_URL = _net_url("BIBLE", "http://bible:8010")
 HEALTH_SVC_URL = _net_url("HEALTH", "http://health:8011")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE.upper()}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
-HA_URL = os.getenv("HA_URL")
+# A retired HA host answers through homehub (services/common/ha_redirect.py).
+HA_URL = _ha_redirect(os.getenv("HA_URL"))
 #: Self-hosted OSRM for snapping trip routes to roads (services/geo/map_match.py).
 #: Unset: routes are served as raw breadcrumbs.
 OSRM_URL = os.getenv("OSRM_URL")

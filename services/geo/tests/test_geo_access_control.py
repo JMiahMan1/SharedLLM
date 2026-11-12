@@ -417,3 +417,19 @@ def test_people_with_ha_down_still_respect_consent(client, monkeypatch):
     _ha_down(monkeypatch, {"jeremiah": 60, "michele": 60})
     ids = _person_ids(client.get("/people", params={"viewer": "sam"}))
     assert ids == ["person.michele"]
+
+
+def test_people_source_jarvis_never_asks_home_assistant(client, monkeypatch):
+    """homehub plays HA's part now; reading its trackers back would only echo them."""
+    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
+    _ha_down(monkeypatch, {"jeremiah": 60})
+
+    async def _must_not_call():
+        raise AssertionError("source=jarvis must not read Home Assistant")
+
+    monkeypatch.setattr(geo, "_ha_get_states", _must_not_call)
+    r = client.get("/people", params={"viewer": "jeremiah", "is_admin": "true", "source": "JARVIS"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "jarvis"
+    assert [f["properties"]["entity_id"] for f in body["features"]] == ["person.jeremiah"]

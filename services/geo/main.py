@@ -230,9 +230,14 @@ def health():
 async def get_people(
     viewer: str | None = None,
     is_admin: str | None = None,
+    source: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
 ):
     """Person + device_tracker entities as a GeoJSON FeatureCollection.
+
+    ``source=jarvis`` skips Home Assistant and answers from Jarvis's own fixes.
+    homehub asks for that: it now plays HA's part, so reading its states back
+    here would only echo its own trackers instead of the phones' positions.
 
     This returns the *live* position of everyone in the house. It previously had
     no authentication at all and geo is published on its own host port, so the
@@ -271,17 +276,21 @@ async def get_people(
         if e.get("paused")
     } - {clean_viewer}
 
-    source = "home_assistant"
-    try:
-        states = await _ha_get_states()
-        entities = _filter_entities(states, "person") + _filter_entities(states, "device_tracker")
-    except Exception as e:
-        # Home Assistant down: everyone's phone still reports to geo first
-        # (/record keeps the point before forwarding it to HA), so the people
-        # map is built from Jarvis's own breadcrumbs instead of failing.
-        log.warning(f"[Geo] /people: Home Assistant unavailable ({getattr(e, 'detail', e)}); using Jarvis's own fixes")
-        entities = await _people_from_history()
+    if (source or "").lower() == "jarvis":
         source = "jarvis"
+        entities = await _people_from_history()
+    else:
+        source = "home_assistant"
+        try:
+            states = await _ha_get_states()
+            entities = _filter_entities(states, "person") + _filter_entities(states, "device_tracker")
+        except Exception as e:
+            # Home Assistant down: everyone's phone still reports to geo first
+            # (/record keeps the point before forwarding it to HA), so the people
+            # map is built from Jarvis's own breadcrumbs instead of failing.
+            log.warning(f"[Geo] /people: Home Assistant unavailable ({getattr(e, 'detail', e)}); using Jarvis's own fixes")
+            entities = await _people_from_history()
+            source = "jarvis"
     features = []
     for s in entities:
         if visible is not None and not _entity_belongs_to(s.get("entity_id") or "", visible):

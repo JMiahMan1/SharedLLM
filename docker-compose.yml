@@ -72,7 +72,7 @@ services:
       - "8080:80"
       - "8443:443"
       - "8001:8001"  # Host:8001 -> Caddy -> identity:8001
-      - "8095:8095"  # Host:8095 -> Caddy -> ma:8095
+      # 8095 is Music Assistant itself (host network, the music-assistant service).
       - "11435:11435" # Host:11435 -> Caddy -> gateway:11435
       - "8004:8004"  # Host:8004 -> Caddy -> rag:8004
       - "8005:8005"  # Host:8005 -> Caddy -> storage:8005
@@ -796,6 +796,89 @@ services:
       - 172.26.0.254
     networks:
       - sharedllm
+
+  homehub:
+    image: ghcr.io/jmiahman1/sharedllm-homehub:latest
+    build:
+      context: .
+      dockerfile: services/homehub/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_homehub
+    restart: always
+    mem_limit: 768m
+    # The device hub that replaces Home Assistant (services/homehub/README.md).
+    # Host network: WiZ bulbs answer UDP broadcasts, Cast/HomeKit/ESPHome are
+    # found over mDNS, TVs are woken by Wake-on-LAN, and the household's
+    # clients reach it on HA's own port, 8123.
+    network_mode: host
+    user: "${PUID}:${PGID}"
+    env_file:
+      - .env
+    environment:
+      - HOME=/tmp
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - NETWORK_MODE=host
+      - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
+      - TELEMETRY_SVC_URL=${HOST_TELEMETRY_SVC_URL}
+      - EXECUTION_SVC_URL=${HOST_EXECUTION_SVC_URL}
+      - GEO_SVC_URL=${HOST_GEO_SVC_URL:-http://127.0.0.1:8009}
+      - REDIS_URL=${HOST_REDIS_URL}
+      - HOMEHUB_PORT=${HOMEHUB_PORT:-8123}
+      - HOMEHUB_DB=/data/homehub.db
+      - HOMEHUB_IMPORT_DIR=/import
+      - MATTER_SERVER_URL=${MATTER_SERVER_URL:-ws://127.0.0.1:5580/ws}
+      - MUSIC_ASSISTANT_URL=${MUSIC_ASSISTANT_URL:-http://127.0.0.1:8095}
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data/homehub:/data
+      # A copy of the retired HA config to import from; read-only.
+      - ./data/homehub-import:/import:ro
+
+  matter-server:
+    # Matter controller for homehub (services/homehub/MATTER.md). A prebuilt
+    # upstream image, the same server HA's Matter add-on 9.3.0 ran, on that
+    # add-on's fabric storage. Never run it while HA's add-on is up.
+    image: ghcr.io/matter-js/matterjs-server:1.5.5
+    container_name: sharedllm_matter_server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data/matter-server:/data
+    environment:
+      - STORAGE_PATH=/data
+      - PORT=5580
+      - PRIMARY_INTERFACE=${MATTER_PRIMARY_INTERFACE:-enp1s0}
+      # The add-on's fabric. Without them the server starts a new, empty fabric.
+      - VENDOR_ID=4939
+      - FABRIC_ID=2
+      # The WebSocket API has no authentication; homehub is on the host
+      # network, so loopback is all it needs.
+      - LISTEN_ADDRESS=127.0.0.1
+      - LOG_LEVEL=info
+      - ENABLE_TIME_SYNC=true
+      - TZ=America/Phoenix
+
+  music-assistant:
+    # Music Assistant, formerly HA's add-on (services/homehub/MUSIC_ASSISTANT.md).
+    # Prebuilt upstream image, same version as the add-on; serves 8095 itself.
+    image: ghcr.io/music-assistant/server:2.10.9
+    container_name: sharedllm_music_assistant
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data/music-assistant:/data
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - TZ=America/Phoenix
 
   redis:
     image: redis:7-alpine
