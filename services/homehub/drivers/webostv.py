@@ -21,7 +21,7 @@ from aiowebostv import WebOsClient
 from aiowebostv.exceptions import WebOsTvCommandError, WebOsTvPairError
 
 from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, HubError, ServiceCall, ServiceNotFound
-from services.homehub.drivers.media_common import F, clamp01, clean, known_macs, wake_on_lan
+from services.homehub.drivers.media_common import F, clamp01, clean, known_macs, remember_mac, wake_on_lan
 
 LIVE_TV_APP_ID = "com.webos.app.livetv"
 BROWSER_APP_ID = "com.webos.app.browser"
@@ -95,6 +95,8 @@ class WebOSDriver(Driver):
         except Exception as exc:  # standby, unreachable, or a dropped socket: all mean "off"
             self.log.debug("LG TV %s not reachable: %r", self.host, exc)
             return False
+        if self.connected:
+            remember_mac(self, self.host)  # so "turn on" can wake it once it is off again
         return self.connected
 
     async def _on_state(self, _tv_state: Any) -> None:

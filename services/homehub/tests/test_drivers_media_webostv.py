@@ -164,3 +164,25 @@ def test_a_failed_connection_reads_as_disconnected_not_an_error():
     drv = WebOSDriver.__new__(WebOSDriver)
     drv.client = Raising()
     assert drv.connected is False
+
+
+def test_a_connected_tv_teaches_the_hub_its_mac(tmp_path):
+    from services.homehub.drivers import media_common
+    from services.homehub.tests.conftest import make_hub
+
+    arp = tmp_path / "arp"
+    arp.write_text("IP address HW type Flags HW address Mask Device\n"
+                   "10.0.0.7 0x1 0x2 aa:bb:cc:dd:ee:ff * eth0\n")
+    hub, entry = make_hub("webostv", data={"host": "10.0.0.7"})
+
+    class D:
+        pass
+
+    drv = D()
+    drv.hub, drv.entry = hub, entry
+    drv.log = __import__("logging").getLogger("t")
+    assert media_common.remember_mac(drv, "10.0.0.7", str(arp)) == "aa:bb:cc:dd:ee:ff"
+    assert entry.options["mac"] == "aa:bb:cc:dd:ee:ff"
+    entry.options["mac"] = "11:22:33:44:55:66"  # an operator's value is never overwritten
+    assert media_common.remember_mac(drv, "10.0.0.7", str(arp)) is None
+    assert entry.options["mac"] == "11:22:33:44:55:66"

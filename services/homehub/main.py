@@ -23,6 +23,11 @@ from services.homehub.store import Store
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("homehub")
+# aioesphomeapi warns on every reconnect attempt; with devices switched off at
+# the wall that is one warning per device per minute. The ESPHome driver logs
+# a device going unreachable (and coming back) once, which is what matters.
+logging.getLogger("aioesphomeapi.connection").setLevel(logging.ERROR)
+logging.getLogger("aioesphomeapi.reconnect_logic").setLevel(logging.ERROR)
 
 DB_PATH = os.getenv("HOMEHUB_DB", "/data/homehub.db")
 IMPORT_DIR = os.getenv("HOMEHUB_IMPORT_DIR", "/import")

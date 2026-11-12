@@ -334,6 +334,30 @@ def arp_mac(ip: str, path: str = "/proc/net/arp") -> str | None:
     return None
 
 
+def remember_mac(driver: Driver, host: str | None, path: str = "/proc/net/arp") -> str | None:
+    """Learn a TV's MAC from the ARP cache while it is on, and keep it in its entry's options.
+
+    Wake-on-LAN is the only way to turn most TVs on, and some entries (the LG
+    one) came from HA with no MAC at all. While the TV answers, the host's ARP
+    cache has its MAC; saving it means "turn on" works after it is switched off.
+    An operator's ``options.mac`` is never overwritten.
+    """
+    if not host or driver.entry.options.get("mac"):
+        return None
+    mac = arp_mac(host, path)
+    if not mac:
+        return None
+    driver.entry.options["mac"] = mac
+    store = getattr(driver.hub, "store", None)
+    if store is not None:
+        try:
+            store.save_config_entry(driver.entry)
+        except Exception:  # keeping it in memory still helps until the next restart
+            driver.log.warning("could not save the learned MAC for %s", host)
+    driver.log.info("learned MAC %s for %s", mac, host)
+    return mac
+
+
 def known_macs(driver: Driver, entity: EntityEntry | None = None, host: str | None = None) -> list[str]:
     """Every MAC the registry knows for this TV, best first.
 
