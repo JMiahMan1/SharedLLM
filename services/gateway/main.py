@@ -57,7 +57,7 @@ from services.common.screen_time import (
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
-from services.gateway import calls, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
+from services.gateway import calls, camera_live_routes, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -917,6 +917,7 @@ app.include_router(calls.router)
 app.include_router(drawing.router)
 app.include_router(mdm.router)
 app.include_router(camera_routes.router)
+app.include_router(camera_live_routes.router)
 app.include_router(discovery_routes.router)  # New devices
 
 @app.exception_handler(Exception)

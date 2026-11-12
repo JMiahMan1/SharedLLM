@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 
 from services.common.secrets import secret_matches
 from services.homehub import discovery_api
+from services.homehub import live_video, live_video_api
 from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import DeviceUnavailable, HubError, State
 from services.homehub.runtime import Runtime
@@ -374,6 +375,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             "stream": "camera" if driver is not None and hasattr(driver, "async_open_mjpeg_stream") else "snapshots",
             "snapshot_interval": float(getattr(driver, "snapshot_interval", 1.0) or 1.0) if driver else None,
         }
+        out.update(live_video.camera_summary(hub, ent.entity_id))  # "realtime" when go2rtc can play it
         info = getattr(driver, "camera_info", None)
         if callable(info):
             with contextlib.suppress(Exception):
@@ -490,6 +492,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
 
     app.include_router(api)
     app.include_router(discovery_api.build_router(runtime, auth))
+    app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

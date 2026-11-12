@@ -1,5 +1,6 @@
 import { getServerOrigin } from './serverUrl';
 import type { MediaToken } from './mediaToken';
+import type { CameraRealtime } from './cameraLive';
 
 /** One camera as the gateway lists it (homehub's `/api/homehub/cameras`). */
 export interface CameraInfo {
@@ -19,6 +20,8 @@ export interface CameraInfo {
   battery?: boolean;
   sleeping?: boolean;
   model?: string;
+  /** Present when go2rtc can play this camera in real time (WebRTC, MSE or MP4). */
+  realtime?: CameraRealtime | null;
 }
 
 export interface CameraRecording {

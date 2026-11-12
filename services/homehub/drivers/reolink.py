@@ -398,6 +398,23 @@ class ReolinkDriver(Driver):
         except ReolinkError as exc:
             raise DeviceUnavailable(f"{entity.entity_id}: {exc}") from exc
 
+    async def async_camera_stream_sources(self, entity: EntityEntry) -> dict[str, str]:
+        """The channel's main and sub streams for go2rtc (``live_video.py``), in the entry's protocol.
+
+        ``check=False``: checking an RTSP URL opens it, which would wake a battery
+        camera on every sync. The URLs carry the hub's password; never log them.
+        """
+        host, ch, _stream = self._camera(entity)
+        out: dict[str, str] = {}
+        for quality in ("sub", "main"):
+            try:
+                url = await host.get_stream_source(ch, quality, check=False)
+            except ReolinkError:
+                url = None
+            if url:
+                out[quality] = url
+        return out
+
 
     # A sleeping battery camera answers a snapshot in a second or two; asking
     # twice a second keeps the live view as fresh as the camera allows.

@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BatteryMedium, CameraOff, Cctv, ChevronLeft, ChevronRight, Film, Loader2, Moon, Play, RefreshCw, X,
+  BatteryMedium, CameraOff, Cctv, ChevronDown, ChevronLeft, ChevronRight, Film, Loader2, Moon, Play, RefreshCw, X,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useMediaToken } from '../lib/mediaToken';
 import { useHaptics } from '../hooks/useHaptics';
 import { errorText } from '../lib/errorText';
+import { useAuth } from '../context/AuthContext';
+import { browserCaps, playbackModes } from '../lib/cameraLive';
+import RealtimePlayer from '../components/cameras/RealtimePlayer';
+import LiveVideoSettings from '../components/cameras/LiveVideoSettings';
 import {
   addDays, cameraMediaUrl, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline, sameDay,
   tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
@@ -127,7 +131,10 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [paused, setPaused] = useState(false);
+  // go2rtc's real-time video when the hub offers it and this browser can play it; the picture stream otherwise.
+  const [realtimeFailed, setRealtimeFailed] = useState(false);
   const online = isCameraOnline(camera);
+  const realtime = online && !paused && !realtimeFailed && playbackModes(camera.realtime, browserCaps()).length > 0;
 
   // Every frame keeps a battery camera awake, so its live view stops on its own.
   useEffect(() => {
@@ -136,12 +143,18 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
     return () => window.clearTimeout(id);
   }, [camera.battery, paused, attempt]);
 
-  const src = online && !paused ? cameraMediaUrl(token, camera.entity_id, 'stream', { n: String(attempt) }) : null;
-  const again = () => { setFailed(false); setLoaded(false); setPaused(false); setAttempt((a) => a + 1); };
+  const src = online && !paused && !realtime
+    ? cameraMediaUrl(token, camera.entity_id, 'stream', { n: String(attempt) }) : null;
+  const again = () => {
+    setFailed(false); setLoaded(false); setPaused(false); setRealtimeFailed(false); setAttempt((a) => a + 1);
+  };
 
   return (
     <div className="space-y-2">
-      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black">
+      {realtime && (
+        <RealtimePlayer key={attempt} camera={camera} token={token} onGiveUp={() => setRealtimeFailed(true)} />
+      )}
+      <div className={`relative w-full aspect-video rounded-xl overflow-hidden bg-black ${realtime ? 'hidden' : ''}`}>
         {src && !failed && (
           <img
             key={src}
@@ -187,7 +200,9 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
         )}
       </div>
       <p className="text-xs text-slate-500">
-        {camera.stream === 'camera'
+        {realtime
+          ? 'Real-time video.'
+          : camera.stream === 'camera'
           ? 'The camera’s own video.'
           : `A fresh picture about every ${Math.max(0.5, camera.snapshot_interval ?? 1)} s.`}
         {camera.battery ? ' Battery camera: live view stops after two minutes.' : ''}
@@ -397,6 +412,8 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
  */
 const Cameras = () => {
   const token = useMediaToken();
+  const isAdmin = Boolean(useAuth().user?.is_admin);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { trigger } = useHaptics();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -469,6 +486,17 @@ const Cameras = () => {
             <CameraTile key={camera.entity_id} camera={camera} token={token} onOpen={open} />
           ))}
         </div>
+      )}
+
+      {isAdmin && (
+        <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setSettingsOpen(e.currentTarget.open)}>
+          <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
+            <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+            Live video settings
+          </summary>
+          {/* Read from the hub only once opened: most visits to this page are to watch, not to configure. */}
+          {settingsOpen && <div className="pt-3"><LiveVideoSettings /></div>}
+        </details>
       )}
 
       {selected && (

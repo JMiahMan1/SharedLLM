@@ -75,6 +75,7 @@ The contract a camera driver follows is at the top of `drivers/mjpeg.py`.
 | `GET /api/homehub/cameras` | Every camera: `entity_id`, `name`, `area`, `platform`, `state`, `recordings`, `live`, `stream` (`camera` or `snapshots`), `snapshot_interval`, and for Reolink `battery`, `sleeping`, `model` |
 | `GET /api/homehub/cameras/<entity>/recordings?start=&end=` | Recordings, newest first: `file`, `start`, `end`, `duration` (s), `triggers` (`person`, `vehicle`, `animal`, `motion`...), `size`, `stream`. Default the last 24 h; at most 7 days |
 | `GET /api/homehub/cameras/<entity>/recordings/play?file=` | One recording as MP4, streamed, `Range` passed on (206 with `Content-Range` when the recorder supports it). Only files a listing returned for that camera |
+| `POST .../live/webrtc`, `WS .../live/ws`, `GET .../live/stream.mp4` | Real-time video through go2rtc (the `go2rtc` integration, `live_video.py`; admin settings at `/hub/live-video`). A camera go2rtc can play has `realtime` in the list |
 
 Reolink recordings come from the Home Hub's storage (`Search`), so listing
 never wakes a battery camera; a live view does, every frame. Live Reolink video
