@@ -880,6 +880,24 @@ services:
     environment:
       - TZ=America/Phoenix
 
+  whisper:
+    # Speech-to-text for Jarvis's voice: execution's Wyoming proxy (:10310,
+    # which adds speaker recognition) forwards audio here
+    # (VOICE_STT_UPSTREAM=127.0.0.1:10300). This used to be Home Assistant's
+    # Whisper add-on; same engine, model and settings. Prebuilt upstream image.
+    image: rhasspy/wyoming-whisper:3.8.1
+    container_name: sharedllm_whisper
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --uri=tcp://127.0.0.1:10300
+      - --model=${WHISPER_MODEL:-small-int8}
+      - --language=${WHISPER_LANGUAGE:-en}
+      - --beam-size=${WHISPER_BEAM_SIZE:-2}
+      - --data-dir=/data
+    volumes:
+      - ./data/whisper:/data
+
   redis:
     image: redis:7-alpine
     container_name: sharedllm_redis
