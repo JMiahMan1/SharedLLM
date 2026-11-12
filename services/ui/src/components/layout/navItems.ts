@@ -21,6 +21,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
+import { History as HistoryIcon, House, Thermometer, Zap } from 'lucide-react';
 
 /**
  * The app's pages, in one list for every navigator: the desktop sidebar, the
@@ -58,6 +59,10 @@ export const NAV_PAGES: NavPage[] = [
   { icon: Smartphone, label: 'Devices', memberLabel: 'Shared files', path: '/devices', keywords: 'mdm device management inventory remote wipe lock update push shared school library files' },
   { icon: MonitorSmartphone, label: 'Remote', path: '/remote', keywords: 'remote control tv devices home assistant' },
   { icon: Cctv, label: 'Cameras', path: '/cameras', keywords: 'cameras live view security footage recordings garage backyard reolink doorbell' },
+  { icon: House, label: 'Rooms', path: '/rooms', keywords: 'rooms areas lights switches thermostats media sensors home control' },
+  { icon: Thermometer, label: 'Climate', path: '/climate', keywords: 'thermostat temperature humidity heating cooling ac air handler' },
+  { icon: Zap, label: 'Energy', path: '/energy', keywords: 'energy power electricity usage kwh cost circuits peak utility bill' },
+  { icon: HistoryIcon, label: 'History', path: '/history', keywords: 'history graph chart sensor states timeline statistics' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists' },
   // The recipes page had a route but no entry anywhere, so the only way to it

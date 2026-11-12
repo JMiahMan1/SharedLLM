@@ -15,6 +15,7 @@ log = logging.getLogger("homehub.drivers")
 DRIVERS: dict[str, str] = {
     "wiz": "services.homehub.drivers.wiz:WizDriver",
     "esphome": "services.homehub.drivers.esphome:ESPHomeDriver",
+    "esphome_builder": "services.homehub.drivers.esphome_builder:ESPHomeBuilderDriver",
     "tasmota": "services.homehub.drivers.tasmota:TasmotaDriver",
     "switch_as_x": "services.homehub.drivers.switch_as_x:SwitchAsXDriver",
     "matter": "services.homehub.drivers.matter:MatterDriver",

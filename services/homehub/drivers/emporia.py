@@ -21,6 +21,15 @@ the mains/balance (the integration's ``fix_usage_sign``). The day sensor is
 re-read from the API every 15 minutes and, in between, adds each minute's kWh,
 starting again from zero at local midnight, which is how the integration keeps
 it current without a request a minute.
+
+Attributes match what HA recorded for these sensors (statistics and the
+energy dashboard depend on them): power sensors ``state_class: measurement``,
+``device_class: power``; day and month sensors ``state_class: total``,
+``device_class: energy`` and ``last_reset`` (local midnight; the billing-cycle
+start day for the month). HA's integration set the month's ``last_reset`` to
+this month's cycle day even before that day came, so its stored statistics
+carry future reset times; the statistics compiler does not count leaving one
+of those as a new cycle.
 """
 from __future__ import annotations
 
@@ -254,7 +263,7 @@ class EmporiaDriver(Driver):
             watts = kwh * 60 * 1000
             unit = entity.unit_of_measurement or "W"
             value = watts / 1000 if unit == "kW" else watts
-            return value, {"state_class": "measurement", "unit_of_measurement": unit}
+            return value, {"state_class": "measurement", "device_class": "power", "unit_of_measurement": unit}
         table = self.day if scale == DAY else self.month
         if not self.ok[scale] and key not in table:
             return None, {}
@@ -264,7 +273,7 @@ class EmporiaDriver(Driver):
         reset = (self.day_reset if scale == DAY else self.month_resets).get(gid)
         unit = entity.unit_of_measurement or "kWh"
         value = kwh * 1000 if unit == "Wh" else kwh
-        attrs = {"state_class": "total", "unit_of_measurement": unit}
+        attrs = {"state_class": "total", "device_class": "energy", "unit_of_measurement": unit}
         if reset is not None:
             attrs["last_reset"] = reset.isoformat()
         return value, attrs

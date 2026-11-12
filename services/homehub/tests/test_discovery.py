@@ -247,7 +247,7 @@ async def test_a_scan_ranks_one_finding_per_address_and_reads_the_description(en
     assert result["found"]["ssdp"] == 2 and result["found"]["wiz"] == 1
     ids = {f["id"]: f for f in mgr.list()}
     assert ids["roku:x00000000001"]["name"] == "Den Roku"
-    assert ids["dlna_dmr:0a0b0c0d-0000-1000-8000-000000000002"]["adoptable"] is False
+    assert ids["dlna_dmr:0a0b0c0d-0000-1000-8000-000000000002"]["adoptable"] is True
     assert ids["wiz:aabbcc0a1b2c"]["adoptable"] is True
     # the renderer is quiet; the Roku and the bulb are told
     assert sorted(p["tag"] for p in sent) == ["admin:new-device:roku:x00000000001",
@@ -325,14 +325,16 @@ def test_an_encrypted_node_asks_for_its_key_before_connecting(client, monkeypatc
     assert r.json()["needs"][0]["key"] == "noise_psk"
 
 
-def test_unsupported_integrations_say_so(client):
+def test_a_homekit_accessory_asks_for_its_setup_code(client):
     c, _hub, _rt, mgr = client
     mgr.handle_mdns("_hap._tcp.local.", "T._hap._tcp.local.", "192.0.2.60", 80,
-                    {b"sf": b"1", b"id": b"AA:BB:CC:00:11:22"}, "t.local.")
+                    {b"sf": b"1", b"id": b"AA:BB:CC:00:11:22", b"ff": b"0"}, "t.local.")
+    listed = {d["id"]: d for d in c.get("/hub/discovered", headers=auth_headers()).json()["devices"]}
+    assert listed["homekit_controller:aa:bb:cc:00:11:22"]["adoptable"] is True
+    assert listed["homekit_controller:aa:bb:cc:00:11:22"]["needs"][0]["key"] == "code"
     r = c.post("/hub/discovered/homekit_controller:aa:bb:cc:00:11:22/adopt", headers=auth_headers(), json={})
-    assert r.status_code == 501
-    assert r.json()["status"] == "unsupported"
-    assert "not supported yet" in r.json()["message"]
+    assert r.status_code == 200
+    assert r.json()["status"] == "needs_input" and r.json()["needs"][0]["key"] == "code"
 
 
 def test_scan_is_reachable(client, monkeypatch):

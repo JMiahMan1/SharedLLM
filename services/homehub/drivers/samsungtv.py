@@ -1,4 +1,4 @@
-"""Samsung TVs: websocket (2016+, samsungtvws) and legacy (pre-2014, port 55000).
+"""Samsung TVs: websocket (2016+, samsungtvws), encrypted (2014-2015 H/J, port 8000) and legacy (pre-2014, port 55000).
 
 The HA entry's ``method`` picks the protocol. Both identify themselves exactly
 as HA's samsungtv integration did (name ``HomeAssistant``, legacy id
@@ -110,6 +110,52 @@ class LegacyBridge:
         pass
 
 
+class EncryptedBridge:
+    """2014-2015 (H/J series) TVs: an encrypted websocket on port 8000 with the token and session id from pairing."""
+
+    power_key = "KEY_POWEROFF"
+
+    def __init__(self, host: str, port: int, token: str | None, session_id: str | None) -> None:
+        self.host, self.port = host, port or 8000
+        self.token, self.session_id = token or "", session_id or ""
+        self.remote: Any = None
+        self._session: Any = None
+
+    async def is_on(self) -> bool:
+        return await LegacyBridge(self.host, self.port).is_on()
+
+    async def send_keys(self, keys: list[str], delay: float) -> None:
+        import aiohttp
+        from samsungtvws.encrypted.remote import SamsungTVEncryptedWSAsyncRemote
+        from samsungtvws.encrypted.remote import SendRemoteKey as EncryptedKey
+
+        if not self.token or not self.session_id:
+            raise HubError(f"Samsung {self.host} has no pairing token; add it again to pair")
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+        if self.remote is None:
+            self.remote = SamsungTVEncryptedWSAsyncRemote(self.host, web_session=self._session, token=self.token,
+                                                          session_id=self.session_id, port=self.port, timeout=8)
+        try:
+            await self.remote.send_commands([EncryptedKey.click(k) for k in keys], key_press_delay=delay)
+        except (OSError, TimeoutError, ConnectionFailure) as exc:
+            await self.close()
+            raise DeviceUnavailable(f"Samsung {self.host} did not answer: {exc}") from exc
+
+    async def launch_app(self, app_id: str, app_type: str = "DEEP_LINK", meta: str = "") -> None:
+        raise ServiceNotFound("an encrypted (2014-2015) Samsung TV cannot launch apps")
+
+    async def close(self) -> None:
+        remote, self.remote = self.remote, None
+        if remote is not None:
+            with contextlib.suppress(Exception):
+                await remote.close()
+        session, self._session = self._session, None
+        if session is not None:
+            with contextlib.suppress(Exception):
+                await session.close()
+
+
 class WebsocketBridge:
     """samsungtvws over wss:8002 with the stored token; REST :8001 for power state."""
 
@@ -186,7 +232,9 @@ class SamsungTVDriver(Driver):
         self.method = str(d.get("method") or "websocket")
         port = int(d.get("port") or 0)
         if self.method == "legacy":
-            self.bridge: LegacyBridge | WebsocketBridge = LegacyBridge(self.host, port)
+            self.bridge: LegacyBridge | WebsocketBridge | EncryptedBridge = LegacyBridge(self.host, port)
+        elif self.method == "encrypted":
+            self.bridge = EncryptedBridge(self.host, port, d.get("token"), d.get("session_id"))
         else:
             self.bridge = WebsocketBridge(self.host, port, d.get("token"), self.http)
         loc = d.get("ssdp_rendering_control_location")

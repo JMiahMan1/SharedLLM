@@ -95,7 +95,8 @@ LABELS = {
     "webostv": "LG webOS TV", "dlna_dmr": "DLNA renderer", "tasmota": "Tasmota", "reolink": "Reolink",
 }
 #: Integrations a finding can be added for (services/homehub/flows.py).
-ADOPTABLE = {"esphome", "wiz", "cast", "roku", "matter", "tasmota"}
+ADOPTABLE = {"esphome", "wiz", "cast", "roku", "matter", "tasmota", "homekit_controller", "androidtv_remote",
+             "samsungtv", "webostv", "dlna_dmr", "reolink"}
 #: Integrations nobody is told about (too many, and nothing to do with them yet).
 QUIET = {"dlna_dmr"}
 
@@ -186,7 +187,11 @@ def parse_mdns(service_type: str, name: str, host: str | None, port: int | None,
         return {
             "id": make_id("homekit_controller", pairing_id), "integration": "homekit_controller",
             "name": instance, "model": props.get("md"), "manufacturer": None, "host": host, "port": port,
-            "mac": None, "ids": [pairing_id], "source": "mdns", "props": {"category": props.get("ci")},
+            "mac": None, "ids": [pairing_id], "source": "mdns",
+            # What aiohomekit needs to pair without browsing again: feature flags
+            # (MFi or software auth), config/state numbers and protocol version.
+            "props": {"category": props.get("ci"), "pairing_id": pairing_id, "ff": props.get("ff"),
+                      "c#": props.get("c#"), "s#": props.get("s#"), "pv": props.get("pv")},
         }
     if stype == "_googlecast._tcp.local.":
         raw_id = props.get("id", "")

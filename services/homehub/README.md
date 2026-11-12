@@ -42,6 +42,8 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | `templating.py` | HA's Jinja template API (`/api/template`, automations) |
 | `automation.py` | Automations, scripts, scenes, blueprints and the nielsfaber scheduler |
 | `builtin.py` | `device_tracker.see` (Jarvis's location relay), `homeassistant.update_entity`, notifications |
+| `statistics.py`, `statistics_api.py`, `energy.py`, `dashboard_api.py` | HA's recorder statistics (5-minute and hourly, `statistics.db`), `recorder/*` and `energy/*` WS commands, the HA statistics importer (`POST /hub/statistics/import`), energy settings and the Rooms/Energy/Climate pages' data; see each module's docstring |
+| `mobile_app_webhook.py`, `mobile_app_api.py`, `ha_auth.py`, `ha_auth_api.py` | The HA companion apps: webhooks, registration, pushes, `/auth/*` login and token refresh. See `MOBILE_APP.md` |
 | `drivers/` | One module per HA integration; see `drivers/__init__.py` |
 
 ## Integrations
@@ -55,11 +57,12 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | switch_as_x | `switch_as_x.py` | Mirrors the wrapped switch |
 | cast, roku, webostv, samsungtv, androidtv_remote, dlna_dmr | media drivers | Same client identities HA used, so no TV asks to pair again |
 | music_assistant | `music_assistant.py` | MA's WebSocket API; registers the `music_assistant.*` services. See `MUSIC_ASSISTANT.md`. |
-| homekit_controller | `homekit.py` | aiohomekit on HA's stored pairing (ecobee, Honeywell T5) |
+| homekit_controller | `homekit.py` | aiohomekit, on HA's stored pairings or new ones (`pairing.py`); every standard HAP service mapped by type (`homekit_services.py`) |
+| esphome_builder | `esphome_builder.py` | Where admins open the ESPHome Device Builder container (`ESPHOME_BUILDER.md`); no entities |
 | roborock, emporia_vue, srp_energy | cloud drivers | Stored logins, no re-login |
 | mjpeg, reolink | camera drivers | `/api/camera_proxy/<entity>` |
 | open_meteo, nws, sun | `weather.py`, `sun.py` | `weather.get_forecasts` |
-| mobile_app | `mobile_app.py` | Locations from geo (`/people?source=jarvis`) and `device_tracker.see`; persons, zones, `notify.mobile_app_*` sent through Jarvis notices |
+| mobile_app | `mobile_app.py` | The companion app's own webhooks first (sensors, location, pushes; `MOBILE_APP.md`), Jarvis's reports from geo when it is quiet; persons, zones, `notify.mobile_app_*` |
 | local_todo, shopping_list | `todo.py` | |
 
 ## Cameras
@@ -90,8 +93,9 @@ and a WiZ `getSystemConfig` sweep hourly and on demand. Each finding says whethe
 the registry already knows it; admins get one notice per new device. `flows.py`
 adds one (HA's data keys and unique_ids): WiZ, Cast, Roku and Tasmota with no
 input, ESPHome with its key when encrypted, Matter by setup code through the
-Matter Server. HomeKit, Android TV, Samsung and LG are listed but need a pairing
-step that is not built yet. The Devices page's "New devices" panel drives it
+Matter Server; HomeKit, Android TV, Samsung, LG, DLNA and Reolink pair through
+`pairing.py`, and Devices > Integrations reconfigures, renames and removes
+(unpairs) what is set up (see `PAIRING.md`). The Devices page's "New devices" panel drives it
 through the gateway (`/api/homehub/...`).
 
 | Route (admin) | What |

@@ -15,9 +15,13 @@ entry is started (``runtime.start_entry``).
 | tasmota | ``password`` when the web UI has one | entry ``{host}``; relays ``{MAC}_switch_relay_{n}``, energy ``{MAC}_sensor_sensor_ENERGY_{Key}`` |
 | matter | the setup code | commissioned through the Matter Server; entities in HA's Matter scheme on the existing ``matter`` entry |
 
-HomeKit, Android TV Remote, Samsung and LG need a pairing step on the device
-(a code to enter, a prompt to accept on the TV) that is not built yet; their
-findings say so instead of offering Add.
+The flows that pair with the device (HomeKit, Android TV Remote, Samsung, LG
+webOS) and DLNA, Reolink and the ESPHome builder are in
+``services/homehub/pairing.py``. A flow answers in one of three ways: the
+records it created (``adopted``), ``NeedsInput`` (fields to fill in, with a
+``session`` when a pairing is open on the device), or ``Pending`` (the device is
+waiting for a person, e.g. "Allow" on a TV; the caller asks again with the
+``session``).
 
 The device transports are module functions so the tests can replace them.
 """
@@ -36,15 +40,8 @@ from services.homehub.discovery import norm_mac, token, wiz_type_label
 
 log = logging.getLogger("homehub.flows")
 
-UNSUPPORTED = {
-    "homekit_controller": "Pairing a new HomeKit accessory is not supported yet (the hub drives only the "
-                          "thermostats imported from Home Assistant).",
-    "androidtv_remote": "Needs pairing with a code shown on the TV, which is not supported yet.",
-    "samsungtv": "Needs accepting on the TV, which is not supported yet.",
-    "webostv": "Needs accepting on the TV, which is not supported yet.",
-    "dlna_dmr": "Adding DLNA renderers is not supported yet.",
-    "reolink": "Adding Reolink cameras here is not supported yet.",
-}
+#: Integrations a finding names that no flow can add (none right now; kept for new discovery sources).
+UNSUPPORTED: dict[str, str] = {}
 
 MATTER_CODE_RE = re.compile(r"^MT:[0-9A-Z.\-]{10,}$")
 
@@ -60,11 +57,25 @@ class FlowError(HubError):
 class NeedsInput(Exception):
     """The flow needs input from the admin (a key, a code)."""
 
-    def __init__(self, needs: list[dict[str, Any]], message: str, error: str | None = None) -> None:
+    def __init__(self, needs: list[dict[str, Any]], message: str, error: str | None = None,
+                 session: str | None = None) -> None:
         super().__init__(message)
         self.needs = needs
         self.message = message
         self.error = error
+        #: A pairing open on the device (the TV is showing a code); sent back with the input.
+        self.session = session
+
+
+class Pending(Exception):
+    """The device is waiting for a person (accept on the TV); ask again with ``session``."""
+
+    def __init__(self, session: str, message: str, step: str = "accept_on_device", poll_ms: int = 2000) -> None:
+        super().__init__(message)
+        self.session = session
+        self.message = message
+        self.step = step
+        self.poll_ms = poll_ms
 
 
 NOISE_PSK = {"key": "noise_psk", "label": "Encryption key", "type": "password",
@@ -83,7 +94,9 @@ def needs_for(finding: dict[str, Any]) -> list[dict[str, Any]]:
         return [NOISE_PSK]
     if integration == "matter":
         return [SETUP_CODE]
-    return []
+    from services.homehub import pairing  # pairing imports this module
+
+    return pairing.needs_for(finding)
 
 
 def unsupported_reason(finding: dict[str, Any]) -> str | None:
@@ -145,20 +158,32 @@ class Plan:
         self.entry = entry
         self.new_entry = new_entry
         self.device: DeviceEntry | None = None
+        #: Every device the flow creates; the first is ``device`` (a bridge has one per accessory).
+        self.devices: list[DeviceEntry] = []
         self.entities: list[EntityEntry] = []
         self._taken: set[str] = set()
 
     def set_device(self, name: str, *, name_by_user: str | None, area_id: str | None, **fields: Any) -> DeviceEntry:
-        self.device = DeviceEntry(id=uuid.uuid4().hex, name=name, name_by_user=name_by_user or None,
-                                  area_id=area_id, config_entries=[self.entry.entry_id], **fields)
+        self.device = self.add_device(name, name_by_user=name_by_user, area_id=area_id, **fields)
         return self.device
 
-    def add_entity(self, domain: str, unique_id: str, own_name: str | None, **fields: Any) -> EntityEntry:
-        dev_name = (self.device.display_name if self.device else "") or self.entry.title
+    def add_device(self, name: str, *, name_by_user: str | None = None, area_id: str | None = None,
+                   **fields: Any) -> DeviceEntry:
+        dev = DeviceEntry(id=uuid.uuid4().hex, name=name, name_by_user=name_by_user or None,
+                          area_id=area_id, config_entries=[self.entry.entry_id], **fields)
+        self.devices.append(dev)
+        if self.device is None:
+            self.device = dev
+        return dev
+
+    def add_entity(self, domain: str, unique_id: str, own_name: str | None, *, device: DeviceEntry | None = None,
+                   **fields: Any) -> EntityEntry:
+        dev = device or self.device
+        dev_name = (dev.display_name if dev else "") or self.entry.title
         base = slugify(f"{dev_name} {own_name}" if own_name else dev_name)
         ent = EntityEntry(entity_id=free_entity_id(self.hub, domain, base, self._taken), platform=self.entry.domain,
                           unique_id=unique_id, config_entry_id=self.entry.entry_id,
-                          device_id=self.device.id if self.device else None, original_name=own_name,
+                          device_id=dev.id if dev else None, original_name=own_name,
                           has_entity_name=True, **fields)
         self.entities.append(ent)
         return ent
@@ -172,9 +197,9 @@ async def commit(runtime: Any, plan: Plan, *, restart: bool = True) -> dict[str,
     except RuntimeError as exc:  # no FERNET_KEY: the store refuses to keep credentials in the clear
         raise FlowError(str(exc), 503) from exc
     hub.config_entries[plan.entry.entry_id] = plan.entry
-    if plan.device is not None:
-        store.save_device(plan.device)
-        hub.devices[plan.device.id] = plan.device
+    for dev in plan.devices:
+        store.save_device(dev)
+        hub.devices[dev.id] = dev
     for ent in plan.entities:
         store.save_entity(ent)
         hub.entities[ent.entity_id] = ent
@@ -255,7 +280,9 @@ async def adopt(runtime: Any, finding: dict[str, Any], body: dict[str, Any]) -> 
     reason = unsupported_reason(finding)
     if reason is not None:
         raise FlowError(reason, 501)
-    flow = FLOWS.get(integration)
+    from services.homehub import pairing  # pairing imports this module
+
+    flow = FLOWS.get(integration) or pairing.FLOWS.get(integration)
     if flow is None:
         raise FlowError(f"Adding {integration} devices is not supported yet.", 501)
     hub = runtime.hub
@@ -570,3 +597,22 @@ FLOWS = {
     "tasmota": adopt_tasmota,
     "matter": adopt_matter,
 }
+
+
+async def adopt_response(runtime: Any, finding: dict[str, Any], body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """Run a flow and turn its outcome into ``(HTTP status, body)`` for the admin API."""
+    try:
+        result = await adopt(runtime, finding, body)
+    except NeedsInput as need:
+        out: dict[str, Any] = {"status": "needs_input", "message": need.message, "error": need.error,
+                               "needs": need.needs}
+        if need.session:
+            out["session"] = need.session
+        return 200, out
+    except Pending as wait:
+        return 200, {"status": "pending", "message": wait.message, "session": wait.session, "step": wait.step,
+                     "poll_ms": wait.poll_ms}
+    except HubError as exc:
+        status = int(getattr(exc, "status", 400) or 400)
+        return status, {"status": "unsupported" if status == 501 else "error", "message": str(exc)}
+    return 200, result

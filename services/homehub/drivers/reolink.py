@@ -129,7 +129,8 @@ class ReolinkDriver(Driver):
         uid = getattr(self.host, "uid", None) if self.host is not None else None
         if uid and uid != "Unknown":
             return str(uid)
-        return str(self.entry.data.get("uid") or "")
+        # A device without the UID capability is keyed by its MAC, the entry's unique_id (as in HA).
+        return str(self.entry.data.get("uid") or self.entry.unique_id or "")
 
     def locate(self, entity: EntityEntry) -> tuple[int | None, str]:
         """(channel or None for the hub itself, key) from an HA unique_id."""

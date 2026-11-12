@@ -127,3 +127,51 @@ async def test_the_hub_is_called_with_the_internal_secret(monkeypatch):
     assert status == 200 and body == {"devices": []}
     assert sent["url"] == f"{discovery_routes.HOMEHUB_URL}/hub/discovered"
     assert sent["headers"] == {"Authorization": "Bearer made-up-secret"}
+
+
+@pytest.mark.parametrize("verb,path", [
+    ("get", "/api/homehub/entries"), ("patch", "/api/homehub/entries/e1"), ("delete", "/api/homehub/entries/e1"),
+    ("patch", "/api/homehub/devices/d1"), ("delete", "/api/homehub/devices/d1"), ("get", "/api/homehub/flows"),
+    ("post", "/api/homehub/flows/samsungtv"), ("get", "/api/homehub/esphome-builder"),
+])
+def test_only_admins_manage_integrations(client, hub, verb, path):
+    seen, _ = hub
+    assert getattr(client, verb)(path, headers=KID).status_code == 403
+    assert seen == []
+
+
+def test_integration_management_is_passed_through(client, hub):
+    seen, answers = hub
+    answers["/hub/entries/e1"] = (502, {"status": "error", "message": "Could not unpair it"})
+    resp = client.delete("/api/homehub/entries/e1", headers=ADMIN)
+    assert resp.status_code == 502 and resp.json()["detail"] == "Could not unpair it"
+    answers["/hub/entries/e1"] = (200, {"status": "removed"})
+    client.delete("/api/homehub/entries/e1?force=true", headers=ADMIN)
+    assert seen[-1] == ("DELETE", "/hub/entries/e1", {"force": "1"}, None)
+    client.patch("/api/homehub/devices/d1", headers=ADMIN, json={"name_by_user": "Den TV", "area_id": "den",
+                                                                  "evil": 1})
+    assert seen[-1] == ("PATCH", "/hub/devices/d1", None, {"name_by_user": "Den TV", "area_id": "den"})
+    client.patch("/api/homehub/entries/e1", headers=ADMIN, json={"data": {"host": "192.0.2.5"}})
+    assert seen[-1][3] == {"data": {"host": "192.0.2.5"}}
+    assert client.delete("/api/homehub/devices/bad%20id", headers=ADMIN).status_code == 404
+
+
+def test_pairing_sessions_pass_through(client, hub):
+    seen, answers = hub
+    answers["/hub/flows/samsungtv"] = (200, {"status": "pending", "session": "s1", "message": "Accept on the TV",
+                                             "step": "accept_on_tv", "poll_ms": 2000})
+    resp = client.post("/api/homehub/flows/samsungtv", headers=ADMIN,
+                       json={"host": "192.0.2.70", "input": {"session": "s1"}})
+    assert resp.json()["status"] == "pending"
+    assert seen[-1] == ("POST", "/hub/flows/samsungtv", None, {"host": "192.0.2.70", "input": {"session": "s1"}})
+    answers["/hub/flows/samsungtv"] = (410, {"status": "error", "message": "That pairing has expired"})
+    assert client.post("/api/homehub/flows/samsungtv", headers=ADMIN, json={}).status_code == 410
+    assert client.post("/api/homehub/flows/Bad-Domain", headers=ADMIN, json={}).status_code == 404
+
+
+def test_the_builder_link_never_carries_its_login(client, hub):
+    _, answers = hub
+    answers["/hub/esphome-builder"] = (200, {"configured": True, "url": "http://192.0.2.5:6052/", "state": "loaded",
+                                             "password": "leak"})
+    body = client.get("/api/homehub/esphome-builder", headers=ADMIN).json()
+    assert body == {"configured": True, "url": "http://192.0.2.5:6052/", "state": "loaded"}

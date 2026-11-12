@@ -1,4 +1,5 @@
-"""Devices > New devices: devices on the LAN that are not set up yet, and adding them.
+"""Devices > New devices and Integrations: adding devices (discovered or by address), pairing them,
+and managing what is set up (reconfigure, rename, move, remove/unpair).
 
 Admins only. Everything is homehub's discovery API (``services/homehub/discovery_api.py``),
 reached with the stack's internal secret at ``HOMEHUB_URL`` (default the hub on
@@ -28,9 +29,12 @@ _TIMEOUT = aiohttp.ClientTimeout(total=30, connect=5)
 #: A scan listens for replies for several seconds; commissioning a Matter device takes minutes.
 _SCAN_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=5)
 _ADOPT_TIMEOUT = aiohttp.ClientTimeout(total=240, connect=5)
-#: Statuses whose hub body is for people ("needs a key", "already set up", "not supported yet").
-_PASS_THROUGH = {200, 400, 404, 409, 501, 503}
+#: Statuses whose hub body is for people ("needs a key", "already set up", "not supported yet",
+#: "the pairing expired", "could not unpair").
+_PASS_THROUGH = {200, 400, 404, 409, 410, 501, 502, 503}
 _FINDING_ID = re.compile(r"^[a-z0-9_.:-]{3,200}$")
+_REGISTRY_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_DOMAIN = re.compile(r"^[a-z0-9_]{2,40}$")
 
 
 async def _admin(request: Request) -> str:
@@ -128,3 +132,84 @@ async def _json(request: Request) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="The body must be a JSON object")
     return body
+
+
+# -- Integrations: what is set up -------------------------------------------------------------
+
+def _rid(value: str, what: str) -> str:
+    if not _REGISTRY_ID.match(value or ""):
+        raise HTTPException(status_code=404, detail=f"No such {what}")
+    return value
+
+
+def _force(force: bool) -> dict[str, str] | None:
+    return {"force": "1"} if force else None
+
+
+@router.get("/entries")
+async def list_entries(request: Request):
+    """Every integration entry with its devices, entities and reconfigurable fields (never secrets)."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/entries"))
+
+
+@router.patch("/entries/{entry_id}")
+async def reconfigure_entry(entry_id: str, request: Request):
+    """Change an entry's name, address or login: ``{"title"?, "data"?: {...}}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("title", "data") if k in body}
+    return _answer(*await _hub("PATCH", f"/hub/entries/{_rid(entry_id, 'integration')}", json=payload,
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.delete("/entries/{entry_id}")
+async def remove_entry(entry_id: str, request: Request, force: bool = False):
+    """Remove (and unpair) an integration entry; ``force`` when the device cannot be reached."""
+    await _admin(request)
+    return _answer(*await _hub("DELETE", f"/hub/entries/{_rid(entry_id, 'integration')}", params=_force(force),
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.patch("/devices/{device_id}")
+async def update_device(device_id: str, request: Request):
+    """Rename a device or move it to an area: ``{"name_by_user"?, "area_id"?}``."""
+    await _admin(request)
+    body = await _json(request)
+    payload = {k: body[k] for k in ("name_by_user", "area_id") if k in body}
+    return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}", json=payload))
+
+
+@router.delete("/devices/{device_id}")
+async def remove_device(device_id: str, request: Request, force: bool = False):
+    await _admin(request)
+    return _answer(*await _hub("DELETE", f"/hub/devices/{_rid(device_id, 'device')}", params=_force(force),
+                               timeout=_SCAN_TIMEOUT))
+
+
+@router.get("/flows")
+async def manual_flows(request: Request):
+    """Integrations that can be added by address, with the fields each needs."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/hub/flows"))
+
+
+@router.post("/flows/{domain}")
+async def manual_add(domain: str, request: Request):
+    """Add a device by address: ``{"host"? | "url"?, "name"?, "area_id"?, "input"?}``; answers like adopt."""
+    await _admin(request)
+    if not _DOMAIN.match(domain or ""):
+        raise HTTPException(status_code=404, detail="No such integration")
+    body = await _json(request)
+    payload = {k: body[k] for k in ("host", "url", "name", "area_id", "input") if k in body}
+    return _answer(*await _hub("POST", f"/hub/flows/{domain}", json=payload, timeout=_ADOPT_TIMEOUT))
+
+
+@router.get("/esphome-builder")
+async def esphome_builder(request: Request):
+    """Where admins open the ESPHome Device Builder: ``{"configured", "url"?, "state"?}`` (never its login)."""
+    await _admin(request)
+    status, body = await _hub("GET", "/hub/esphome-builder")
+    if status != 200 or not isinstance(body, dict):
+        return _answer(status, body)
+    return {k: body[k] for k in ("configured", "url", "state", "reason", "title", "entry_id", "login") if k in body}

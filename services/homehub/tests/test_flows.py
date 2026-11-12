@@ -229,7 +229,7 @@ async def test_tasmota_asks_for_a_password_then_adds_relays_and_energy(rt, monke
 
 
 async def test_unsupported_integrations_are_refused_plainly(rt):
-    for integration in ("homekit_controller", "androidtv_remote", "samsungtv", "webostv"):
+    for integration in ("zigbee", "nest"):
         with pytest.raises(flows.FlowError) as err:
             await flows.adopt(rt, {"id": f"{integration}:x", "integration": integration, "host": "192.0.2.9"}, {})
         assert err.value.status == 501

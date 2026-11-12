@@ -12,6 +12,8 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => ({
   adoptDevice: vi.fn(),
   ignoreDevice: vi.fn(),
   commissionMatter: vi.fn(),
+  getManualFlows: vi.fn(),
+  addByAddress: vi.fn(),
 }));
 vi.mock('react-hot-toast', () => {
   const toast = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() });
@@ -98,5 +100,26 @@ describe('NewDevicesPanel', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Add/ }));
     await waitFor(() => expect(discovered.commissionMatter).toHaveBeenCalledWith('3497-011-2332', undefined));
     await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
+  });
+
+  it('adds a device by address after the TV is accepted', async () => {
+    vi.mocked(discovered.getManualFlows).mockResolvedValue([
+      { domain: 'samsungtv', label: 'Samsung TV', fields: [{ key: 'host', label: 'Address', type: 'text' }] },
+    ]);
+    vi.mocked(discovered.addByAddress)
+      .mockResolvedValueOnce({ status: 'pending', session: 's1', step: 'accept_on_tv', message: 'Choose Allow on the TV.', poll_ms: 10 })
+      .mockResolvedValueOnce({ status: 'adopted', entry_id: 'tv1', name: 'Den TV', entities: ['media_player.den_tv'] });
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: /Add by address/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Samsung TV' }));
+    const dialog = await screen.findByTestId('adopt-dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Address/), { target: { value: '192.0.2.70' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add/ }));
+    expect(await within(dialog).findByText('Accept on your TV')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
+    expect(discovered.addByAddress).toHaveBeenNthCalledWith(1, 'samsungtv',
+      { name: undefined, input: { host: '192.0.2.70' }, host: '192.0.2.70', url: undefined });
+    expect(discovered.addByAddress).toHaveBeenNthCalledWith(2, 'samsungtv',
+      { name: undefined, input: { host: '192.0.2.70', session: 's1' }, host: '192.0.2.70', url: undefined });
   });
 });

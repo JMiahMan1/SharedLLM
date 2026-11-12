@@ -4,7 +4,7 @@
 |---|---|
 | ``GET /hub/discovered[?new=1]`` | Every finding (``new=1``: only those not set up and not ignored) |
 | ``POST /hub/discovered/scan`` | Run SSDP and the WiZ sweep now (at most once a minute) |
-| ``POST /hub/discovered/{id}/adopt`` | ``{"name"?, "area_id"?, "input": {...}}``; answers ``status: adopted`` or ``status: needs_input`` with ``needs`` |
+| ``POST /hub/discovered/{id}/adopt`` | ``{"name"?, "area_id"?, "input": {...}}``; answers ``status: adopted``, ``status: needs_input`` with ``needs`` (and ``session`` while a pairing is open), or ``status: pending`` with ``session`` (the device waits for a person; send ``input.session`` again) |
 | ``POST /hub/discovered/{id}/ignore`` | ``{"ignored": false}`` un-ignores |
 | ``POST /hub/matter/commission`` | ``{"code", "name"?, "area_id"?}`` for a Matter device that does not announce itself |
 
@@ -83,14 +83,10 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         if pub["known"]:
             return JSONResponse({"status": "error", "message": f"Already set up as {pub['entry_title'] or 'an entry'}",
                                  "entry_id": pub["entry_id"]}, status_code=409)
-        try:
-            result = await flows.adopt(runtime, finding, body)
-        except flows.NeedsInput as need:
-            return {"status": "needs_input", "message": need.message, "error": need.error, "needs": need.needs}
-        except HubError as exc:
-            return flow_failure(exc)
-        mgr.mark_adopted(finding_id, result["entry_id"])
-        return result
+        status, result = await flows.adopt_response(runtime, finding, body)
+        if status == 200 and result.get("status") == "adopted":
+            mgr.mark_adopted(finding_id, result["entry_id"])
+        return JSONResponse(result, status_code=status) if status != 200 else result
 
     @router.post("/hub/discovered/{finding_id}/ignore")
     async def ignore(finding_id: str, request: Request) -> dict[str, Any]:

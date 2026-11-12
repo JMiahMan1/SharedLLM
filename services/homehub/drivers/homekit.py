@@ -1,9 +1,13 @@
 """HomeKit accessories over IP (HAP), with the pairing Home Assistant made.
 
-One HA config entry is one paired accessory. ``entry.data`` is aiohomekit's own
-pairing dict (AccessoryPairingID, AccessoryLTPK, iOSDeviceLTSK, ...), stored by
-HA unchanged, so it is handed to aiohomekit as-is and no re-pairing is needed.
-The two that matter here are thermostats: an ecobee and a Resideo T5/T6.
+One HA config entry is one paired accessory (or bridge). ``entry.data`` is
+aiohomekit's own pairing dict (AccessoryPairingID, AccessoryLTPK, iOSDeviceLTSK,
+...), stored by HA unchanged or made by ``services/homehub/pairing.py``, so it is
+handed to aiohomekit as-is and no re-pairing is needed.
+
+Thermostats are handled here; every other standard HAP service (lights,
+switches, outlets, fans, covers, locks, sensors, security systems, buttons) is
+mapped by type in ``homekit_services.py``.
 
 Entities, by unique_id (HA's homekit_controller):
 - ``{pairing_id}_{aid}_{service_iid}``             the climate entity (thermostat service)
@@ -31,6 +35,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.drivers import homekit_services as hks
 
 try:  # guarded so the tests can run the driver against a fake pairing
     from aiohomekit.characteristic_cache import CharacteristicCacheMemory
@@ -154,6 +159,8 @@ class HomeKitDriver(Driver):
         self.values: dict[tuple[int, int], Any] = {}
         self.available = False
         self._last_on_mode: dict[tuple[int, int], int] = {}
+        #: (aid, service iid) -> (ISO time, event type) of a stateless switch's last press.
+        self.event_stamps: dict[tuple[int, int], tuple[str, str]] = {}
 
     # -- setup --------------------------------------------------------------
     async def _make_pairing(self) -> Any:
@@ -222,6 +229,7 @@ class HomeKitDriver(Driver):
 
     # -- events and polling --------------------------------------------------
     def _on_event(self, event: dict[tuple[int, int], dict[str, Any]]) -> None:
+        hks.note_events(self, event)
         for key, item in (event or {}).items():
             if isinstance(item, dict) and "value" in item:
                 self.values[tuple(key)] = item["value"]  # type: ignore[index]
@@ -251,6 +259,14 @@ class HomeKitDriver(Driver):
                 self.values[tuple(key)] = item["value"]  # type: ignore[index]
         self.available = True
         self.publish_all()
+
+    async def async_unpair(self) -> None:
+        """Remove our pairing from the accessory, so it can be paired again (by us or anyone)."""
+        pairing = self._pairing or await self._make_pairing()
+        controller_id = self.entry.data.get("iOSPairingId")
+        if not controller_id:
+            raise HubError("the stored pairing has no controller id (iOSPairingId)")
+        await asyncio.wait_for(pairing.remove_pairing(controller_id), REQUEST_TIMEOUT)
 
     async def async_unload(self) -> None:
         for unsub in self._unsubs:
@@ -321,6 +337,12 @@ class HomeKitDriver(Driver):
             self.publish_climate(ent, skey)
             return
         if iid is None:
+            if ent.domain in hks.SERVICE_ENTITY_DOMAINS:
+                result = hks.state_of(self, ent, skey)
+                if result is None:
+                    self.mark_unavailable([ent])
+                else:
+                    self.publish(ent, *result)
             return
         meta = self.chars.get((skey[0], iid))
         if meta is None:
@@ -508,6 +530,11 @@ class HomeKitDriver(Driver):
             writes = self.select_writes(skey, iid, str(data.get("option", "")))
         elif entity.domain == "button" and service == "press" and iid is not None:
             writes = [(skey[0], iid, True)]
+        elif iid is None and entity.domain in hks.SERVICE_ENTITY_DOMAINS:
+            try:
+                writes = hks.writes_for(self, entity, skey, service, data)
+            except hks.WriteError as exc:
+                raise ServiceNotFound(str(exc)) from exc
         else:
             raise ServiceNotFound(f"homekit_controller cannot run {domain}.{service} on {entity.entity_id}")
         await self._put(writes)

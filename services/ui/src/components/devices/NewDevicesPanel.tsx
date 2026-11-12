@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { EyeOff, Loader2, Plus, Radar, RefreshCw, Undo2 } from 'lucide-react';
+import { EyeOff, Loader2, Network, Plus, Radar, RefreshCw, Undo2 } from 'lucide-react';
 import AdoptDeviceDialog from './AdoptDeviceDialog';
 import {
+  addByAddress,
   adoptDevice,
   commissionMatter,
   failureText,
   getDiscovered,
+  getManualFlows,
   ignoreDevice,
   scanForDevices,
 } from '../../lib/discoveredDevices';
-import type { AdoptResult, DiscoveredDevice, DiscoveryInput } from '../../lib/discoveredDevices';
+import type { AdoptResult, DiscoveredDevice, DiscoveryInput, ManualFlow } from '../../lib/discoveredDevices';
 
 const QUERY_KEY = ['homehub-discovered'];
 const MATTER_CODE: DiscoveryInput = {
@@ -31,13 +33,19 @@ function seen(iso: string | null): string {
 
 /**
  * Devices > New devices (admins): what the device hub has found on the LAN that
- * is not set up yet, with Add and Ignore, a "Scan now", and "Add Matter device"
- * for a Matter device that only shows up once its setup code is entered.
+ * is not set up yet, with Add and Ignore, a "Scan now", "Add Matter device"
+ * for a Matter device that only shows up once its setup code is entered, and
+ * "Add by address" for one that does not announce itself. Pairing steps (a
+ * code on the TV, Allow on the TV, a HomeKit code) run in the Add dialog.
  */
 export default function NewDevicesPanel() {
   const queryClient = useQueryClient();
   const [adopting, setAdopting] = useState<DiscoveredDevice | null>(null);
   const [matterOpen, setMatterOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [manual, setManual] = useState<ManualFlow | null>(null);
+  const flows = useQuery({ queryKey: ['homehub-flows'], queryFn: getManualFlows, enabled: pickerOpen, retry: false,
+    staleTime: 10 * 60 * 1000 });
   const [showIgnored, setShowIgnored] = useState(false);
   const list = useQuery({ queryKey: QUERY_KEY, queryFn: getDiscovered, retry: false, refetchInterval: 60_000 });
   const refresh = () => queryClient.invalidateQueries({ queryKey: QUERY_KEY });
@@ -64,7 +72,10 @@ export default function NewDevicesPanel() {
     toast.success(`${result.name || result.title || 'The device'} was added${result.entities?.length ? ` with ${result.entities.length} entities` : ''}.`);
     setAdopting(null);
     setMatterOpen(false);
+    setManual(null);
     void refresh();
+    void queryClient.invalidateQueries({ queryKey: ['homehub-entries'] });
+    void queryClient.invalidateQueries({ queryKey: ['homehub-esphome-builder'] });
   }
 
   return (
@@ -74,6 +85,14 @@ export default function NewDevicesPanel() {
           <Radar size={14} /> New devices
         </span>
         <span className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            aria-expanded={pickerOpen}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+          >
+            <Network size={14} /> Add by address
+          </button>
           <button
             type="button"
             onClick={() => setMatterOpen(true)}
@@ -91,6 +110,26 @@ export default function NewDevicesPanel() {
           </button>
         </span>
       </header>
+
+      {pickerOpen && (
+        <div className="border-b border-white/5 px-4 py-3" data-testid="add-by-address">
+          <p className="mb-2 text-xs text-slate-400">What kind of device?</p>
+          {flows.isLoading && <p className="text-xs text-slate-500">Loading…</p>}
+          {flows.error && <p className="text-xs text-amber-300/90">{failureText(flows.error)}</p>}
+          <div className="flex flex-wrap gap-2">
+            {(flows.data || []).map((f) => (
+              <button
+                key={f.domain}
+                type="button"
+                onClick={() => { setManual(f); setPickerOpen(false); }}
+                className="min-h-11 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5"
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {list.isLoading && <p className="p-4 text-sm text-slate-500">Looking for devices…</p>}
       {list.error && <p className="p-4 text-sm text-amber-300/90" data-testid="new-devices-error">{failureText(list.error)}</p>}
@@ -168,6 +207,16 @@ export default function NewDevicesPanel() {
           onSubmit={({ name, input }) => adoptDevice(adopting.id, { name, input })}
           onDone={added}
           onClose={() => setAdopting(null)}
+        />
+      )}
+      {manual && (
+        <AdoptDeviceDialog
+          title={`Add ${manual.label}`}
+          intro="For a device that is on the network but was not found automatically."
+          needs={manual.fields}
+          onSubmit={({ name, input }) => addByAddress(manual.domain, { name, input, host: input.host, url: input.url })}
+          onDone={added}
+          onClose={() => setManual(null)}
         />
       )}
       {matterOpen && (

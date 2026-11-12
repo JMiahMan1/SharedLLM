@@ -914,6 +914,28 @@ services:
     environment:
       - TZ=America/Phoenix
 
+  esphome:
+    # ESPHome Device Builder (formerly HA's ESPHome add-on 2026.10.2): edits node
+    # YAML, compiles firmware and flashes it over the air. The official prebuilt
+    # image at the add-on's version; nothing is built here. Host network: it
+    # finds nodes over mDNS and uploads OTA (outbound to each node). Its
+    # dashboard has no login unless USERNAME/PASSWORD are set, so it listens on
+    # loopback by default; to reach it from the LAN set ESPHOME_ADDRESS=0.0.0.0
+    # together with ESPHOME_USERNAME and ESPHOME_PASSWORD, and open 6052 to the
+    # LAN (services/homehub/ESPHOME_BUILDER.md). The Devices page links to it
+    # once its URL is saved as the hub's esphome_builder integration.
+    image: ghcr.io/esphome/esphome:2026.10.2
+    container_name: sharedllm_esphome
+    restart: unless-stopped
+    network_mode: host
+    command: ["dashboard", "/config", "--address", "${ESPHOME_ADDRESS:-127.0.0.1}", "--port", "${ESPHOME_PORT:-6052}"]
+    volumes:
+      - ./data/esphome:/config
+    environment:
+      - TZ=America/Phoenix
+      - USERNAME=${ESPHOME_USERNAME:-}
+      - PASSWORD=${ESPHOME_PASSWORD:-}
+
   whisper:
     # Speech-to-text for Jarvis's voice: execution's Wyoming proxy (:10310,
     # which adds speaker recognition) forwards audio here

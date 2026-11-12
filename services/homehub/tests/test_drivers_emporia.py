@@ -101,6 +101,7 @@ async def test_power_in_the_unit_ha_reported():
     assert float(val(hub, "sensor.rosebud_123_1min")) == pytest.approx(2.39041495869954)
     assert hub.states.get("sensor.rosebud_123_1min").attributes["unit_of_measurement"] == "kW"
     assert hub.states.get("sensor.rosebud_123_1min").attributes["state_class"] == "measurement"
+    assert hub.states.get("sensor.rosebud_123_1min").attributes["device_class"] == "power"
     assert float(val(hub, "sensor.rosebud_balance_1min")) == pytest.approx(739.533572896321)
     assert hub.states.get("sensor.rosebud_balance_1min").attributes["unit_of_measurement"] == "W"
     # a circuit is made positive, as the integration does
@@ -115,6 +116,7 @@ async def test_energy_sensors():
     d = hub.states.get("sensor.rosebud_123_1d")
     assert float(d.state) == pytest.approx(37.9)
     assert d.attributes["state_class"] == "total" and d.attributes["unit_of_measurement"] == "kWh"
+    assert d.attributes["device_class"] == "energy" and d.attributes["last_reset"]
     assert d.attributes["last_reset"].endswith("T00:00:00-07:00")
     m = hub.states.get("sensor.rosebud_123_1mon")
     assert float(m.state) == pytest.approx(2498.2)

@@ -10,7 +10,8 @@ aioesphomeapi>=46.28.0
 aiohomekit>=4.0.1
 pychromecast>=14.1.1
 aiowebostv>=0.10.0
-samsungtvws[async]>=3.0.7
+# encrypted: the PIN pairing of 2014-2015 (H/J) Samsung TVs (py3rijndael)
+samsungtvws[async,encrypted]>=3.0.7
 androidtvremote2>=0.3.3
 reolink-aio>=0.23.0
 python-roborock>=7.22.0

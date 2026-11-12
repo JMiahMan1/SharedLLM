@@ -42,10 +42,15 @@ export interface DiscoveredList {
 }
 
 export interface AdoptResult {
-  status: 'adopted' | 'needs_input' | 'error' | 'unsupported';
+  /** `pending`: the device waits for a person (Allow on the TV); ask again with `session` after `poll_ms`. */
+  status: 'adopted' | 'needs_input' | 'pending' | 'error' | 'unsupported';
   message?: string;
   error?: string | null;
   needs?: DiscoveryInput[];
+  /** A pairing open on the device; sent back as `input.session`. */
+  session?: string;
+  step?: 'accept_on_tv' | 'accept_on_device' | string;
+  poll_ms?: number;
   entry_id?: string;
   title?: string;
   name?: string;
@@ -87,6 +92,128 @@ export async function commissionMatter(code: string, name?: string): Promise<Ado
 }
 
 /** The hub's own words for a failed call ("already set up", "did not answer"), else a plain fallback. */
+/** Add a device by its address (Integrations > Add by address). Answers like `adoptDevice`. */
+export interface ManualFlow {
+  domain: string;
+  label: string;
+  fields: DiscoveryInput[];
+}
+
+export async function getManualFlows(): Promise<ManualFlow[]> {
+  const resp = await apiClient.get('/api/homehub/flows');
+  return resp.data.flows || [];
+}
+
+export async function addByAddress(domain: string, body: AdoptRequest & { host?: string; url?: string }): Promise<AdoptResult> {
+  const resp = await apiClient.post(`/api/homehub/flows/${encodeURIComponent(domain)}`, body, { timeout: 240_000 });
+  return resp.data;
+}
+
+// -- Integrations: what is set up --------------------------------------------------
+
+export interface ReconfigureField {
+  key: string;
+  label: string;
+  type: 'text' | 'password';
+  /** Current value (never for secrets). */
+  value?: string;
+  /** For secrets: whether one is stored. */
+  set?: boolean;
+}
+
+export interface HubDevice {
+  id: string;
+  name: string;
+  original_name: string | null;
+  name_by_user: string | null;
+  area_id: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  via_device_id: string | null;
+  entities: string[];
+}
+
+export interface HubEntry {
+  entry_id: string;
+  domain: string;
+  label: string;
+  title: string;
+  state: string;
+  reason: string | null;
+  source: string;
+  disabled_by: string | null;
+  devices: HubDevice[];
+  entities: number;
+  reconfigure: ReconfigureField[];
+  /** Removing it also unpairs it on the device (HomeKit). */
+  unpairs: boolean;
+  /** Shared by many devices (Matter, Cast): remove devices, not the entry. */
+  shared: boolean;
+}
+
+export interface HubArea {
+  area_id: string;
+  name: string;
+}
+
+export interface EntriesList {
+  entries: HubEntry[];
+  areas: HubArea[];
+}
+
+export interface RemoveResult {
+  status: 'removed';
+  entry_id?: string;
+  unpaired?: boolean | null;
+  warning?: string;
+}
+
+export interface BuilderLink {
+  configured: boolean;
+  url?: string;
+  state?: string;
+  reason?: string | null;
+  entry_id?: string;
+  title?: string;
+}
+
+export async function getEntries(): Promise<EntriesList> {
+  const resp = await apiClient.get('/api/homehub/entries');
+  return resp.data;
+}
+
+export async function reconfigureEntry(entryId: string, body: { title?: string; data?: Record<string, string> }): Promise<HubEntry> {
+  const resp = await apiClient.patch(`/api/homehub/entries/${encodeURIComponent(entryId)}`, body, { timeout: 60_000 });
+  return resp.data;
+}
+
+export async function removeEntry(entryId: string, force = false): Promise<RemoveResult> {
+  const resp = await apiClient.delete(`/api/homehub/entries/${encodeURIComponent(entryId)}`,
+    { params: force ? { force: true } : undefined, timeout: 60_000 });
+  return resp.data;
+}
+
+export async function updateHubDevice(deviceId: string, body: { name_by_user?: string | null; area_id?: string | null }): Promise<HubDevice> {
+  const resp = await apiClient.patch(`/api/homehub/devices/${encodeURIComponent(deviceId)}`, body);
+  return resp.data;
+}
+
+export async function removeHubDevice(deviceId: string, force = false): Promise<RemoveResult> {
+  const resp = await apiClient.delete(`/api/homehub/devices/${encodeURIComponent(deviceId)}`,
+    { params: force ? { force: true } : undefined, timeout: 60_000 });
+  return resp.data;
+}
+
+export async function getBuilderLink(): Promise<BuilderLink> {
+  const resp = await apiClient.get('/api/homehub/esphome-builder');
+  return resp.data;
+}
+
+/** HTTP status of a failed call (502 from the hub means "could not reach the device"). */
+export function failureStatus(err: unknown): number | undefined {
+  return isAxiosError(err) ? err.response?.status : undefined;
+}
+
 export function failureText(err: unknown): string {
   if (isAxiosError(err)) {
     const data = err.response?.data as { detail?: string; message?: string } | undefined;

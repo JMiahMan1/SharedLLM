@@ -41,6 +41,10 @@ const Login = lazy(() => import('./pages/Login'));
 const Media = lazy(() => import('./pages/Media'));
 const Remote = lazy(() => import('./pages/Remote'));
 const Cameras = lazy(() => import('./pages/Cameras'));
+const Rooms = lazy(() => import('./pages/Rooms'));
+const Energy = lazy(() => import('./pages/Energy'));
+const HistoryPage = lazy(() => import('./pages/History'));
+const Climate = lazy(() => import('./pages/Climate'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Wander = lazy(() => import('./pages/Wander'));
 const Health = lazy(() => import('./pages/Health'));
@@ -189,6 +193,10 @@ function App() {
             <Route path="/family-circle" element={<Navigate to="/wander" replace />} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
             <Route path="/cameras" element={<ProtectedRoute isMobile={isMobile}><Cameras /></ProtectedRoute>} />
+            <Route path="/rooms" element={<ProtectedRoute isMobile={isMobile}><Rooms /></ProtectedRoute>} />
+            <Route path="/energy" element={<ProtectedRoute isMobile={isMobile}><Energy /></ProtectedRoute>} />
+            <Route path="/history" element={<ProtectedRoute isMobile={isMobile}><HistoryPage /></ProtectedRoute>} />
+            <Route path="/climate" element={<ProtectedRoute isMobile={isMobile}><Climate /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />
