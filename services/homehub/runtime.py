@@ -12,7 +12,9 @@ from services.homehub.store import Store
 
 log = logging.getLogger("homehub.runtime")
 
-RETRY_DELAYS = (10, 30, 60, 120, 300)
+# Capped at a minute: devices on a switched outlet or wall switch come back
+# often, and waiting five minutes for one to show again felt broken.
+RETRY_DELAYS = (5, 10, 30, 60)
 HISTORY_KEEP_DAYS = 30
 
 

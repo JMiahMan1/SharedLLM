@@ -101,9 +101,14 @@ async def udp_request(host: str, method: str, params: dict[str, Any] | None = No
     return result if isinstance(result, dict) else {}
 
 
+#: Poll period while a bulb answers, and while it does not (off at the switch).
+ONLINE_POLL_S = 30.0
+OFFLINE_POLL_S = 5.0
+
+
 class WizDriver(Driver):
     platform = "wiz"
-    poll_interval = 30.0
+    poll_interval = ONLINE_POLL_S
 
     def __init__(self, hub, entry) -> None:
         super().__init__(hub, entry)
@@ -116,6 +121,8 @@ class WizDriver(Driver):
         self.power: EntityEntry | None = None
         self.pilot: dict[str, Any] = {}
         self._online = False
+        self._identified = False
+        self.poll_interval = ONLINE_POLL_S
         for e in self.entities:
             uid = e.unique_id or ""
             if uid.endswith("_effect_speed"):
@@ -157,8 +164,23 @@ class WizDriver(Driver):
             return  # an entry whose entities were all removed has nothing to drive
         if not self.host:
             raise DeviceUnavailable("WiZ entry has no host")
-        # One answer is required to load; anything else is best effort.
-        self.pilot = await self._request("getPilot")
+        # Bathroom bulbs sit behind a wall switch and lose power many times a
+        # day (HA logged 125-160 drops each in ten days). A bulb that is off
+        # now is not a broken entry: load it unavailable and keep checking.
+        try:
+            self.pilot = await self._request("getPilot")
+        except DeviceUnavailable as exc:
+            self.log.info("WiZ %s (%s) is off or unreachable; waiting for it: %s", self.entry.title, self.host, exc)
+            self._went_offline()
+            return
+        await self._identify()
+        self._came_online()
+        await self._publish_all()
+
+    async def _identify(self) -> None:
+        """Model details, read once per bulb; all best effort."""
+        if self._identified:
+            return
         try:
             cfg = await self._request("getSystemConfig")
             self.module = str(cfg.get("moduleName") or "")
@@ -174,8 +196,17 @@ class WizDriver(Driver):
                 self.kelvin_range = (min(cct), max(cct))
         if self.kelvin_range == (2700, 6500) and self.is_rgb:
             self.kelvin_range = (2200, 6500)
+        self._identified = True
+
+    def _came_online(self) -> None:
         self._online = True
-        await self._publish_all()
+        self.poll_interval = ONLINE_POLL_S
+
+    def _went_offline(self) -> None:
+        self._online = False
+        # Poll fast while it is off, so a flipped wall switch shows within seconds.
+        self.poll_interval = OFFLINE_POLL_S
+        self.mark_unavailable()
 
     async def async_poll(self) -> None:
         if not self.entities:
@@ -185,12 +216,12 @@ class WizDriver(Driver):
         except DeviceUnavailable as exc:
             if self._online:
                 self.log.warning("WiZ %s (%s) unreachable: %s", self.entry.title, self.host, exc)
-            self._online = False
-            self.mark_unavailable()
+            self._went_offline()
             return
         if not self._online:
             self.log.info("WiZ %s (%s) is back", self.entry.title, self.host)
-        self._online = True
+            await self._identify()
+        self._came_online()
         await self._publish_all()
 
     # -- states ---------------------------------------------------------------
@@ -252,6 +283,12 @@ class WizDriver(Driver):
 
     # -- services -------------------------------------------------------------
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
+        if not self._online:
+            # The switch may have just been flipped on: try now rather than
+            # wait for the next poll, and learn the bulb's type first.
+            self.pilot = await self._request("getPilot")
+            await self._identify()
+            self._came_online()
         if entity is self.light or (self.light is not None and entity.entity_id == self.light.entity_id):
             if service == "toggle":
                 service = "turn_off" if self.pilot.get("state") else "turn_on"

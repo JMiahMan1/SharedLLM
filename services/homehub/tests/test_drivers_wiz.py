@@ -88,12 +88,32 @@ async def test_setup_publishes_the_light_speed_and_power():
     assert hub.states.get(f"sensor.wiz_{MAC}_power").attributes["unit_of_measurement"] == "W"
 
 
-async def test_a_silent_bulb_fails_setup_so_the_runtime_retries():
+async def test_a_bulb_off_at_the_wall_loads_unavailable_and_polls_fast():
+    """Bathroom bulbs lose power at the switch many times a day; that is not a broken entry."""
+    from services.homehub.drivers import wiz
+
     bulb = FakeBulb()
     bulb.online = False
-    _, drv = make_driver(bulb)
-    with pytest.raises(DeviceUnavailable):
-        await drv.async_setup()
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()  # does not raise
+    assert hub.states.get(drv.light.entity_id).state == "unavailable"
+    assert drv.poll_interval == wiz.OFFLINE_POLL_S
+    bulb.online = True  # the switch goes back on
+    await drv.async_poll()
+    assert hub.states.get(drv.light.entity_id).state == "on"
+    assert drv.poll_interval == wiz.ONLINE_POLL_S
+    assert drv.module == "ESP21_SHTW_01"  # identified once it answered
+
+
+async def test_a_command_reaches_a_bulb_that_just_came_back_before_the_next_poll():
+    bulb = FakeBulb()
+    bulb.online = False
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()
+    bulb.online = True
+    await drv.async_call(drv.light, "light", "turn_off", {})
+    assert bulb.pilot["state"] is False
+    assert hub.states.get(drv.light.entity_id).state == "off"
 
 
 async def test_an_entry_without_entities_loads_without_touching_the_network():
