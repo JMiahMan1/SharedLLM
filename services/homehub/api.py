@@ -29,6 +29,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     live_video,
     live_video_api,
     mobile_app_api,
+    prune_api,  # dry-run and apply pruning of stale imported HA data
     service_logins_api,
     statistics_api,
 )
@@ -564,6 +565,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages
     app.include_router(ha_auth_api.build_router(runtime, auth))
     app.include_router(mobile_app_api.build_router(runtime, auth))
+    app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
 
     @app.websocket("/api/websocket")
