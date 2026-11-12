@@ -9,18 +9,20 @@ from services.homehub.core import HubError
 from services.homehub.drivers import weather
 from services.homehub.tests.conftest import make_hub
 
-NOW_HOUR = int(time.time()) // 3600 * 3600
 OFFSET = -7 * 3600
 
 
 def open_meteo_payload(is_day=1, code=0):
-    day0 = NOW_HOUR - (NOW_HOUR + OFFSET) % 86400  # local midnight, as epoch
+    # The current hour at call time, not import time: a long suite crossing an
+    # hour boundary otherwise makes the driver drop one more "past" hour.
+    now_hour = int(time.time()) // 3600 * 3600
+    day0 = now_hour - (now_hour + OFFSET) % 86400  # local midnight, as epoch
     return {
         "utc_offset_seconds": OFFSET,
         "current": {"temperature_2m": 71.3, "relative_humidity_2m": 23, "apparent_temperature": 69.0, "is_day": is_day,
                     "weather_code": code, "cloud_cover": 5, "pressure_msl": 1016.0, "wind_speed_10m": 4.2,
                     "wind_direction_10m": 210, "wind_gusts_10m": 9.1, "dew_point_2m": 32.0},
-        "hourly": {"time": [NOW_HOUR - 3600, NOW_HOUR, NOW_HOUR + 3600],
+        "hourly": {"time": [now_hour - 3600, now_hour, now_hour + 3600],
                    "temperature_2m": [70, 71, 72], "relative_humidity_2m": [20, 21, 22],
                    "precipitation": [0, 0, 0.1], "precipitation_probability": [0, 5, 40],
                    "weather_code": [0, 0, 61], "wind_speed_10m": [3, 4, 5], "wind_direction_10m": [200, 210, 220],
