@@ -22,10 +22,12 @@ vi.mock('react-hot-toast', () => {
   return { default: toast };
 });
 
-const sensor = (entity_id: string, name: string, state: string, source: 'companion' | 'jarvis', unit: string | null = null) => ({
-  entity_id, name, domain: entity_id.split('.')[0], state, unit, device_class: null, disabled: false, source,
+const sensor = (entity_id: string, name: string, state: string, source: 'companion' | 'jarvis', unit: string | null = null,
+  device_class: string | null = null) => ({
+  entity_id, name, domain: entity_id.split('.')[0], state, unit, device_class, disabled: false, source,
   last_updated: null,
 });
+const ALARM = '2030-03-18T13:30:00+00:00';
 
 const companion: Phone = {
   entry_id: 'entry-one', name: "Robin's Phone", kind: 'companion',
@@ -41,7 +43,13 @@ const companion: Phone = {
 const jarvisOnly: Phone = {
   ...companion, entry_id: 'entry-two', name: "Kim's Phone", kind: 'jarvis', jarvis_user: 'kim', companion_last_seen: null,
   companion_fresh: false, push: { relay: false, local_channel: false }, notify_service: 'notify.mobile_app_kim_s_phone',
-  sensors: [sensor('sensor.kim_s_phone_steps_sensor', "Kim's Phone Steps sensor", '4200', 'jarvis', 'steps')],
+  sensors: [
+    sensor('sensor.kim_s_phone_steps_sensor', "Kim's Phone Steps sensor", '4200', 'jarvis', 'steps'),
+    sensor('sensor.kim_s_phone_battery_state', "Kim's Phone Battery state", 'charging', 'jarvis'),
+    sensor('sensor.kim_s_phone_charger_type', "Kim's Phone Charger type", 'wireless', 'jarvis'),
+    sensor('binary_sensor.kim_s_phone_is_charging', "Kim's Phone Is charging", 'on', 'jarvis', null, 'plug'),
+    sensor('sensor.kim_s_phone_next_alarm', "Kim's Phone Next alarm", ALARM, 'jarvis', null, 'timestamp'),
+  ],
 };
 const data: PhoneList = {
   phones: [companion, jarvisOnly],
@@ -75,7 +83,7 @@ describe('PhonesPanel', () => {
     fireEvent.click(within(rows[0]).getByText(/All sensors/));
     expect(within(rows[0]).getByText(/BSSID/)).toBeInTheDocument();
     expect(within(rows[1]).getByText('Jarvis only (no companion app)')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Jarvis')).toBeInTheDocument();
+    expect(within(rows[1]).getAllByText('Jarvis').length).toBeGreaterThan(0);
   });
 
   it('maps a phone to a Jarvis user, adds a Jarvis phone and removes a phone', async () => {
@@ -108,6 +116,43 @@ describe('PhonesPanel', () => {
     const sent = vi.mocked(phones.savePhoneSettings).mock.calls[0][0];
     expect(sent.external_url).toBe('https://new.example.invalid');
     expect(sent.push_url_allowlist).toEqual(['https://a.example.invalid/']);
+  });
+
+  it('shows the charging state and next alarm of each phone', async () => {
+    wrap();
+    const rows = await screen.findAllByTestId('phone');
+    expect(within(rows[1]).getByTestId('phone-power')).toHaveTextContent('Charging (wireless)');
+    expect(within(rows[1]).getByTestId('phone-alarm')).toHaveTextContent(`Next alarm ${phones.alarmText(ALARM)}`);
+    expect(within(rows[1]).getByText('Wireless')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Yes')).toBeInTheDocument();
+    // A phone whose app never reported them shows neither line.
+    expect(within(rows[0]).queryByTestId('phone-power')).toBeNull();
+    expect(within(rows[0]).queryByTestId('phone-alarm')).toBeNull();
+  });
+
+  it('reads charging and alarm sensors as words', () => {
+    const p = (...sensors: phones.PhoneSensor[]): Phone => ({ ...jarvisOnly, sensors });
+    expect(phones.alarmText(ALARM, 'UTC')).toMatch(/Mon.*1:30/);
+    expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'discharging', 'jarvis'),
+      sensor('sensor.x_charger_type', 'x', 'none', 'jarvis'),
+      sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp')))).toEqual({
+      power: 'On battery', alarm: 'No alarm set' });
+    expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'full', 'jarvis'),
+      sensor('sensor.x_charger_type', 'x', 'ac', 'jarvis'))).power).toBe('Full (AC)');
+    expect(phones.phoneStatus(p(sensor('binary_sensor.x_is_charging', 'x', 'on', 'jarvis'))).power).toBe('Charging');
+    expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'unknown', 'jarvis')))).toEqual({ power: null, alarm: null });
+    // An app too old to report them: clearly unavailable, never "no alarm".
+    const old = 'not reported by the Jarvis app on this phone (an older version; update the app)';
+    expect(phones.phoneStatus(p({ ...sensor('sensor.x_battery_state', 'x', 'unavailable', 'jarvis'), reason: old },
+      { ...sensor('sensor.x_charger_type', 'x', 'unavailable', 'jarvis'), reason: old },
+      { ...sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'), reason: old }))).toEqual({
+      power: 'Charging state unavailable', alarm: 'Next alarm unavailable' });
+    expect(phones.sensorText({ ...sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'),
+      reason: old })).toBe('unavailable');
+    expect(phones.sensorText(sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'))).toBe('None set');
+    expect(phones.sensorText(sensor('sensor.x_battery_state', 'x', 'not_charging', 'jarvis'))).toBe('Not charging');
+    expect(phones.sensorText(sensor('sensor.x_battery_level', 'x', '81', 'jarvis', '%'))).toBe('81 %');
+    expect(phones.sensorText(sensor('sensor.x_battery_level', 'x', 'unknown', 'jarvis', '%'))).toBe('unknown');
   });
 
   it('formats a last report', () => {

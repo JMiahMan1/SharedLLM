@@ -5,8 +5,10 @@ import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.hardware.Sensor;
@@ -25,6 +27,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
+import androidx.core.content.ContextCompat;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.location.ActivityRecognition;
@@ -93,6 +96,19 @@ public class LocationTrackingService extends Service {
     private PowerManager.WakeLock wakeLock;
     private volatile Location lastKnown;
     private volatile long lastUploadAt = 0L;
+    /**
+     * Plugging in, unplugging and a new next alarm each send a report of their
+     * own (automations trigger on them), rate-limited by {@link PhoneStatusRules.Limiter}.
+     */
+    private final PhoneStatusRules.Limiter statusLimiter = new PhoneStatusRules.Limiter();
+    private boolean statusReceiverRegistered = false;
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(TAG, "status change: " + intent.getAction());
+            requestStatusReport();
+        }
+    };
     /** Fix time of the last fix uploaded, so an unchanged fix is not re-sent. */
     private volatile long lastUploadedFixTime = 0L;
     private volatile String username;
@@ -348,6 +364,7 @@ public class LocationTrackingService extends Service {
         readSteps();
         requestUpdates();
         registerTransitions();
+        registerStatusReceiver();
         scheduleHeartbeat();
         // Sticky: if Android reclaims us, come back on our own.
         return START_STICKY;
@@ -744,6 +761,7 @@ public class LocationTrackingService extends Service {
         MotionModeSelector.Mode before = motion.mode();
         if (motion.tick(System.currentTimeMillis())) onModeChanged(before);
         registerTransitions();
+        registerStatusReceiver();
         if (System.currentTimeMillis() - lastUploadAt >= HEARTBEAT_MS) requestFreshFix();
         scheduleHeartbeat();
     }
@@ -864,6 +882,7 @@ public class LocationTrackingService extends Service {
             BatteryManager bm = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
             if (bm != null) body.put("charging", bm.isCharging());
         }
+        putPhoneStatus(body);
         // Steps are filed under the fix's day on the server, so only with a
         // recent reading from the same local day as the fix (a held fix from
         // before midnight would file today's count under yesterday, and the
@@ -964,6 +983,108 @@ public class LocationTrackingService extends Service {
         }
     }
 
+    /**
+     * The charging state and the next alarm, as the companion app reported
+     * them (the hub's battery_state, charger_type and next_alarm sensors).
+     * next_alarm_ms is 0 when no alarm is set, so the server can tell "none"
+     * from an older app that does not send it.
+     */
+    private void putPhoneStatus(JSONObject body) throws Exception {
+        Intent battery = null;
+        try {
+            battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        } catch (RuntimeException e) {
+            Log.w(TAG, "battery status unavailable", e);
+        }
+        // Not sent when Android will not say: the hub then shows the sensor
+        // unavailable, never a guess. Logged, so a phone that never says is visible.
+        if (battery == null) {
+            Log.w(TAG, "no battery status from Android; battery_state and charger_type not sent");
+        } else {
+            int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            int plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+            String state = PhoneStatusRules.batteryState(status);
+            if ("unknown".equals(state)) {
+                Log.w(TAG, "battery status " + status + " is not one the companion app names; battery_state not sent");
+            } else {
+                body.put("battery_state", state);
+            }
+            String charger = PhoneStatusRules.chargerType(plugged);
+            if ("unknown".equals(charger)) {
+                Log.w(TAG, "no plug reading (" + plugged + "); charger_type not sent");
+            } else {
+                body.put("charger_type", charger);
+            }
+        }
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am == null) {
+            Log.w(TAG, "no AlarmManager; next_alarm_ms not sent");
+            return;
+        }
+        AlarmManager.AlarmClockInfo next = null;
+        try {
+            next = am.getNextAlarmClock();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "next alarm unreadable; next_alarm_ms not sent", e);
+            return;
+        }
+        long at = next == null ? 0L : PhoneStatusRules.nextAlarmMs(next.getTriggerTime(), System.currentTimeMillis());
+        body.put("next_alarm_ms", at);
+        if (at > 0 && next.getShowIntent() != null) {
+            String pkg = PhoneStatusRules.alarmPackage(next.getShowIntent().getCreatorPackage());
+            if (pkg != null) body.put("next_alarm_package", pkg);
+        }
+    }
+
+    /** Listen for the charger and the next alarm while tracking (registered once). */
+    private void registerStatusReceiver() {
+        if (statusReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_POWER_CONNECTED);
+        filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        filter.addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED);
+        try {
+            // System broadcasts still reach a receiver that is not exported.
+            ContextCompat.registerReceiver(this, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+            statusReceiverRegistered = true;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "status receiver refused", e);
+        }
+    }
+
+    private void unregisterStatusReceiver() {
+        if (!statusReceiverRegistered) return;
+        statusReceiverRegistered = false;
+        try {
+            unregisterReceiver(statusReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Already gone.
+        }
+    }
+
+    /** A status change: report now, or at the end of the rate limit's gap. */
+    private void requestStatusReport() {
+        long wait = statusLimiter.request(System.currentTimeMillis());
+        if (wait == PhoneStatusRules.Limiter.ALREADY_PENDING) return;
+        handler.postDelayed(this::sendStatusReport, wait);
+    }
+
+    /**
+     * Re-send the fix held, now carrying the new status. It keeps its own fix
+     * time, so the server does not take it for a new position. With no fix
+     * held yet there is nothing to attach the status to; the next fix carries it.
+     */
+    private void sendStatusReport() {
+        Location held = lastKnown;
+        if (held != null && uploading) {
+            // An upload in flight may have read the status before the change.
+            handler.postDelayed(this::sendStatusReport, 5_000L);
+            return;
+        }
+        statusLimiter.sent(System.currentTimeMillis());
+        if (held != null) upload(held, true);
+    }
+
     /** Battery charge 0-100, or -1 when the device will not say. */
     private int batteryPercent() {
         BatteryManager bm = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
@@ -978,6 +1099,7 @@ public class LocationTrackingService extends Service {
         updatesRequested = false;
         removeUpdates();
         removeTransitions();
+        unregisterStatusReceiver();
         postDrivingEvents(drivingMonitor.finish());
         stopCrashListening();
         releaseWakeLock();
@@ -991,6 +1113,7 @@ public class LocationTrackingService extends Service {
         releaseWakeLock();
         removeUpdates();
         stopCrashListening();
+        unregisterStatusReceiver();
         if (instance == this) instance = null;
         super.onDestroy();
     }

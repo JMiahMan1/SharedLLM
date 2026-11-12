@@ -37,7 +37,7 @@ export const ROOMS = {
       ent('light.living_ceiling', 'Ceiling light', 'on'),
       ent('switch.living_fan', 'Ceiling fan', 'off'),
       ent('sensor.living_temperature', 'Temperature', '74.2', { unit: '°F', device_class: 'temperature' }),
-      ent('climate.downstairs', 'Downstairs', 'cool', { attributes: THERMOSTAT_ATTRS }),
+      ent('climate.hallway', 'Downstairs', 'cool', { attributes: THERMOSTAT_ATTRS }),
     ] },
     { area_id: 'kitchen', name: 'Kitchen with a rather long room name for small phones', floor_id: 'ground', icon: null, entities: [
       ent('light.kitchen_pendants', 'Pendants', 'off'),
@@ -52,13 +52,13 @@ export const ROOMS = {
 };
 
 const DASH_THERMOSTAT = {
-  ...ent('climate.downstairs', 'Downstairs', 'cool', { attributes: THERMOSTAT_ATTRS }),
+  ...ent('climate.hallway', 'Downstairs', 'cool', { attributes: THERMOSTAT_ATTRS }),
   area_name: 'Living room', power: [ent('sensor.ac_power', 'AC power', '2.4', { unit: 'kW', device_class: 'power' })],
   power_source: 'area', sensors: [ent('sensor.living_humidity', 'Humidity', '41', { unit: '%', device_class: 'humidity' })],
 };
 
 const SCHEDULED_THERMOSTAT = {
-  entity_id: 'climate.downstairs', name: 'Downstairs', area: 'Living room', state: 'cool',
+  entity_id: 'climate.hallway', name: 'Downstairs', area: 'Living room', state: 'cool',
   current_temperature: 76, temperature: 74, hvac_action: 'cooling',
   capabilities: { hvac_modes: ['off', 'heat', 'cool', 'heat_cool'], fan_modes: ['auto'], min_temp: 60, max_temp: 90, unit: '°F' },
   current: { program_id: 'p1', program_name: 'Weekdays', slot: 0, start: '06:00', end: '17:00', setpoint: { hvac_mode: 'cool', temperature: 74 } },
@@ -68,7 +68,7 @@ const SCHEDULED_THERMOSTAT = {
 };
 
 const PROGRAM = {
-  id: 'p1', name: 'Weekdays', entity_ids: ['climate.downstairs'], weekdays: ['workday'], start_date: null, end_date: null,
+  id: 'p1', name: 'Weekdays', entity_ids: ['climate.hallway'], weekdays: ['workday'], start_date: null, end_date: null,
   enabled: true, slots: [
     { start: '06:00', hvac_mode: 'cool', temperature: 74 },
     { start: '17:00', hvac_mode: 'cool', temperature: 78 },
@@ -136,8 +136,26 @@ const ENTRIES = {
   ],
 };
 
+const phoneSensor = (entity_id: string, name: string, state: string, unit: string | null = null,
+  device_class: string | null = null) => ({
+  entity_id, name, domain: entity_id.split('.')[0], state, unit, device_class, disabled: false, source: 'jarvis',
+  last_updated: null,
+});
+
 const PHONES = {
-  phones: [],
+  phones: [{
+    entry_id: 'phone-1', name: "Robin's Phone", kind: 'jarvis', app: {}, jarvis_user: 'robin', jarvis_fallback: true,
+    companion_last_seen: null, companion_fresh: false, encrypted: false, push: { relay: false, local_channel: false },
+    notify_service: 'notify.mobile_app_robin_s_phone', state: 'loaded',
+    sensors: [
+      phoneSensor('sensor.robin_s_phone_battery_level', "Robin's Phone Battery level", '64', '%', 'battery'),
+      phoneSensor('sensor.robin_s_phone_battery_state', "Robin's Phone Battery state", 'charging'),
+      phoneSensor('sensor.robin_s_phone_charger_type', "Robin's Phone Charger type", 'wireless'),
+      phoneSensor('binary_sensor.robin_s_phone_is_charging', "Robin's Phone Is charging", 'on', null, 'plug'),
+      phoneSensor('sensor.robin_s_phone_next_alarm', "Robin's Phone Next alarm", '2030-03-18T13:30:00+00:00', null,
+        'timestamp'),
+    ],
+  }],
   settings: { external_url: '', internal_url: '', companion_fresh_minutes: 10, jarvis_fallback: true, auto_jarvis_phones: true,
     jarvis_phone_name: '{user} phone', push_url_allowlist: [] },
 };
@@ -198,7 +216,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/dashboard/entities') {
       return json({ entities: [
         { entity_id: 'sensor.living_temperature', name: 'Living room temperature', domain: 'sensor', unit: '°F', device_class: 'temperature', state: '74' },
-        { entity_id: 'climate.downstairs', name: 'Downstairs', domain: 'climate', unit: null, device_class: null, state: 'cool' },
+        { entity_id: 'climate.hallway', name: 'Downstairs', domain: 'climate', unit: null, device_class: null, state: 'cool' },
       ] });
     }
     if (p === '/api/dashboard/energy/summary') return json(ENERGY_SUMMARY);

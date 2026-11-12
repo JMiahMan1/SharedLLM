@@ -198,6 +198,8 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
             "source_type": attrs.get("source_type"),
             "in_zones": attrs.get("in_zones"),
             "activity": attrs.get("activity"),
+            # The phone's charging state and next alarm (Jarvis's own fixes only).
+            **{k: attrs.get(k) for k in PHONE_STATUS_ATTRS},
             "last_updated": state.get("last_updated") or state.get("last_changed"),
         },
     }
@@ -307,6 +309,94 @@ async def get_people(
 #: A breadcrumb older than this is not shown as where someone is.
 PEOPLE_FALLBACK_MAX_AGE_S = 24 * 3600
 
+#: The companion app's battery_state and charger_type values; anything else is dropped.
+BATTERY_STATES = ("charging", "discharging", "full", "not_charging")
+CHARGER_TYPES = ("ac", "usb", "wireless", "dock", "none")
+#: What /people says about a phone's charging and next alarm, next to battery_level.
+PHONE_STATUS_ATTRS = ("battery_state", "charger_type", "is_charging", "next_alarm", "next_alarm_ms",
+                      "next_alarm_package")
+
+
+def phone_status(
+    charging: bool | None = None,
+    battery_state: str | None = None,
+    charger_type: str | None = None,
+    next_alarm_ms: int | None = None,
+    next_alarm_package: str | None = None,
+) -> dict:
+    """A phone's charging state and next alarm as stored on a breadcrumb (short keys).
+
+    ``bst`` battery state, ``plg`` charger type, ``ich`` is charging, ``alm``
+    the next alarm in epoch ms (0: none set) and ``alp`` the app that set it.
+    A field the phone did not send is left out, so an older app (none of them)
+    stores nothing and the sensors keep showing "unknown" rather than a guess.
+    """
+    out: dict = {}
+    if battery_state is not None:
+        state = str(battery_state).strip().lower()
+        if state in BATTERY_STATES:
+            out["bst"] = state
+        else:
+            log.warning(f"[Geo] Dropped battery_state {battery_state!r}: not one of {', '.join(BATTERY_STATES)}")
+    if charger_type is not None:
+        plug = str(charger_type).strip().lower()
+        if plug in CHARGER_TYPES:
+            out["plg"] = plug
+        else:
+            log.warning(f"[Geo] Dropped charger_type {charger_type!r}: not one of {', '.join(CHARGER_TYPES)}")
+    if "bst" in out:
+        # HA's is_charging: charging, or full while still on the charger.
+        out["ich"] = out["bst"] in ("charging", "full")
+    elif charging is not None:
+        out["ich"] = bool(charging)
+    if next_alarm_ms is not None:
+        if next_alarm_ms >= 0:
+            out["alm"] = int(next_alarm_ms)
+            if next_alarm_ms > 0 and next_alarm_package:
+                out["alp"] = str(next_alarm_package)[:200]
+        else:
+            log.warning(f"[Geo] Dropped next_alarm_ms {next_alarm_ms!r}: must be epoch ms, or 0 for no alarm")
+    return out
+
+
+def phone_status_attrs(status: dict) -> dict:
+    """The stored short keys as /people's attributes (``next_alarm`` is ISO 8601, UTC)."""
+    alarm_ms = status.get("alm")
+    return {
+        "battery_state": status.get("bst"),
+        "charger_type": status.get("plg"),
+        "is_charging": status.get("ich"),
+        "next_alarm": datetime.fromtimestamp(alarm_ms / 1000, tz=UTC).isoformat() if alarm_ms else None,
+        "next_alarm_ms": alarm_ms,
+        "next_alarm_package": status.get("alp"),
+    }
+
+
+def _status_key(clean_id: str) -> str:
+    return f"geo:phone_status:{clean_id}"
+
+
+async def _save_phone_status(r, entity_id: str, status: dict, ts: float | None) -> None:
+    """Keep the newest status per user, apart from the breadcrumbs.
+
+    A status report rides whatever fix the phone holds, and that fix may not
+    become a breadcrumb (too coarse, or a re-sent fix). Plugging in must still
+    show, so the status is kept on its own; a report older than the one held
+    (the phone's offline queue) does not overwrite it.
+    """
+    if not r or not status:
+        return
+    clean_id = entity_id.split(".")[-1].lower()
+    t = float(ts or time.time())
+    try:
+        raw = await r.get(_status_key(clean_id))
+        held = json.loads(raw) if raw else None
+        if held and float(held.get("t") or 0) > t:
+            return
+        await r.set(_status_key(clean_id), json.dumps({**status, "t": t}), ex=30 * 86400)
+    except Exception as e:
+        log.warning(f"[Geo] Failed to save phone status ({clean_id}): {e}")
+
 
 async def _people_from_history() -> list[dict]:
     """HA-shaped person states from the latest breadcrumb of each user (no HA needed)."""
@@ -335,6 +425,11 @@ async def _people_from_history() -> list[dict]:
             with contextlib.suppress(TypeError, ValueError):
                 zone = str(json.loads(raw_zone).get("zone") or zone).split(".")[-1]
         when = datetime.fromtimestamp(ts, tz=UTC).isoformat()
+        status = {k: point[k] for k in ("bst", "plg", "ich", "alm", "alp") if k in point}
+        with contextlib.suppress(TypeError, ValueError):
+            saved = await r.get(_status_key(user))
+            if saved:
+                status = json.loads(saved)
         out.append({
             "entity_id": f"person.{user}",
             "state": zone,
@@ -348,6 +443,7 @@ async def _people_from_history() -> list[dict]:
                 "course": point.get("brg"),
                 "battery_level": point.get("bat"),
                 "activity": point.get("act"),  # the phone's activity recognition; homehub's detected_activity
+                **phone_status_attrs(status),
                 "source_type": "jarvis",
             },
         })
@@ -863,6 +959,7 @@ async def record_point(
     timestamp: float | None = None,
     activity: str | None = None,
     device: str | None = None,
+    status: dict | None = None,
 ):
     r = await get_redis()
     if not r:
@@ -884,8 +981,11 @@ async def record_point(
         "bat": battery,
         **({"act": activity} if activity else {}),
         **({"dev": device[:12]} if device else {}),
+        **(status or {}),
     }
     encoded = json.dumps(point)
+    if await _replace_resent_fix(r, entity_id, clean_id, point, encoded):
+        return
     for k in {f"geo:history:{entity_id.lower()}", f"geo:history:{clean_id}"}:
         try:
             await r.zadd(k, {encoded: ts})
@@ -899,6 +999,37 @@ async def record_point(
         log.warning(f"[Geo] Failed to process trip point: {e}")
     # Arrivals and departures, off the upload path (HA zones, ETAs, pushes).
     _spawn(_safe_presence_transition(r, clean_id, lat, lon, ts, accuracy or 0.0, speed, activity))
+
+
+async def _replace_resent_fix(r, entity_id: str, clean_id: str, point: dict, encoded: str) -> bool:
+    """A fix the phone sent again (same time and place) to report a status change.
+
+    Plugging in or unplugging sends the fix the phone holds with the new
+    charging state. It is not a new position: the breadcrumb is updated in
+    place (so its status is current) and no trip, arrival or departure is
+    worked out from it again.
+    """
+    ts = point["t"]
+    replaced = False
+    for k in {f"geo:history:{entity_id.lower()}", f"geo:history:{clean_id}"}:
+        try:
+            same_time = await r.zrangebyscore(k, ts, ts)
+        except Exception:
+            continue
+        for raw in same_time:
+            try:
+                old = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if old.get("lat") == point["lat"] and old.get("lon") == point["lon"]:
+                try:
+                    await r.zrem(k, raw)
+                    await r.zadd(k, {encoded: ts})
+                    replaced = True
+                except Exception as e:
+                    log.warning(f"[Geo] Failed to update a re-sent fix ({k}): {e}")
+                break
+    return replaced
 
 
 # Arrival / departure notices
@@ -1624,6 +1755,19 @@ class LocationUpdate(BaseModel):
     #: Which device sent it (a short install id), kept on the breadcrumb so a
     #: person's fixes can be told apart when more than one device reports.
     device: str | None = None
+    #: The phone's charging state and next alarm (newer app builds only; an
+    #: older build sends none of them). battery_state: charging, discharging,
+    #: full, not_charging; charger_type: ac, usb, wireless, dock, none;
+    #: next_alarm_ms: epoch ms of the next alarm clock, 0 when none is set.
+    charging: bool | None = None
+    battery_state: str | None = None
+    charger_type: str | None = None
+    next_alarm_ms: int | None = None
+    next_alarm_package: str | None = None
+
+    def status(self) -> dict:
+        return phone_status(self.charging, self.battery_state, self.charger_type, self.next_alarm_ms,
+                            self.next_alarm_package)
 
 
 @app.post("/people/{entity_id:path}/see")
@@ -1660,7 +1804,9 @@ async def post_see(
         timestamp=update.timestamp,
         activity=update.activity,
         device=update.device,
+        status=update.status(),
     )
+    await _save_phone_status(r_steps, entity_id, update.status(), update.timestamp)
 
     dev_id = entity_id.split(".")[-1]
     payload = {
@@ -1716,7 +1862,9 @@ async def post_record(
         timestamp=update.timestamp,
         activity=update.activity,
         device=update.device,
+        status=update.status(),
     )
+    await _save_phone_status(r_steps, entity_id, update.status(), update.timestamp)
     return {"status": "ok", "entity_id": entity_id}
 
 

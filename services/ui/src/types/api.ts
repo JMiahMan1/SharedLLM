@@ -2686,6 +2686,8 @@ export interface UserLiveLocation {
   speed?: number | null;
   bearing?: number | null;
   battery?: number | null;
+  /** The phone is charging (or full on the charger); absent from an older app. */
+  charging?: boolean | null;
   timestamp?: number;
   updated_at?: number;
   /** What the phone's activity recognition says: driving, cycling, walking, still, unknown. */

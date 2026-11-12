@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
+import { AlarmClock, BatteryCharging, ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
 import { failureText } from '../../lib/discoveredDevices';
 import {
   addJarvisPhone,
   getPhones,
   keySensors,
   lastSeenText,
+  phoneStatus,
   removePhone,
   savePhoneSettings,
+  sensorText,
   updatePhone,
 } from '../../lib/phones';
 import type { Phone, PhoneSensor, PhoneSettings } from '../../lib/phones';
@@ -29,11 +31,11 @@ function SourceChip({ source }: { source: string }) {
 }
 
 function SensorLine({ s }: { s: PhoneSensor }) {
-  const value = s.state == null ? '-' : `${s.state}${s.unit && s.state !== 'unknown' && s.state !== 'unavailable' ? ` ${s.unit}` : ''}`;
+  const value = sensorText(s);
   return (
     <li className="flex items-center justify-between gap-3 text-xs" data-testid="phone-sensor">
       <span className="min-w-0 truncate text-slate-300">{s.name}</span>
-      <span className="flex shrink-0 items-center gap-2 text-slate-200">
+      <span className="flex shrink-0 items-center gap-2 text-slate-200" title={s.reason || undefined}>
         {value} <SourceChip source={s.source} />
       </span>
     </li>
@@ -59,6 +61,7 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
   });
   const shown = keySensors(phone);
   const companion = phone.kind === 'companion';
+  const status = phoneStatus(phone);
 
   return (
     <li className="space-y-2 px-4 py-3" data-testid="phone">
@@ -71,6 +74,22 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
               : 'Jarvis only (no companion app)'}
             {companion && (phone.push.local_channel || phone.push.relay) ? ' · push ready' : ''}
           </p>
+          {(status.power || status.alarm) && (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-300">
+              {status.power && (
+                <span className="inline-flex items-center gap-1" data-testid="phone-power"
+                  title={phone.sensors.find((x) => x.entity_id.endsWith('_battery_state'))?.reason || undefined}>
+                  <BatteryCharging size={12} className="text-emerald-400" aria-hidden /> {status.power}
+                </span>
+              )}
+              {status.alarm && (
+                <span className="inline-flex items-center gap-1" data-testid="phone-alarm"
+                  title={phone.sensors.find((x) => x.entity_id.endsWith('_next_alarm'))?.reason || undefined}>
+                  <AlarmClock size={12} className="text-sky-400" aria-hidden /> {status.alarm}
+                </span>
+              )}
+            </p>
+          )}
           <p className="text-[11px] text-slate-500">{phone.notify_service}</p>
         </div>
         <button

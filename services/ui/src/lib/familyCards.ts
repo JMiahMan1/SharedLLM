@@ -9,6 +9,8 @@ export interface FamilyMemberStatus {
   isMoving: boolean;
   speedMph: number;
   battery: number | null;
+  /** The phone is on the charger (the Jarvis app's report), when it says. */
+  charging?: boolean | null;
   assignedVehicle?: string;
   lastUpdated?: string;
   /** GPS accuracy in metres, when the source reports it. */
@@ -46,7 +48,7 @@ const MPS_TO_MPH = 2.23694;
 
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-/** The users a HA entity belongs to, by underscore token (person.jeremiah_phone -> jeremiah). */
+/** The users a HA entity belongs to, by underscore token (person.alex_phone -> alex). */
 function entityTokens(entityId: string): Set<string> {
   const obj = entityId.split('.').slice(1).join('.').toLowerCase();
   return new Set(obj.replace(/-/g, '_').split('_').filter(Boolean));
@@ -148,6 +150,7 @@ export function buildFamilyCards(
       activity: loc.activity ?? null,
     };
     if (typeof loc.battery === 'number') update.battery = loc.battery;
+    if (typeof loc.charging === 'boolean') update.charging = loc.charging;
 
     if (existing) {
       Object.assign(existing, update);

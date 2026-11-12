@@ -60,6 +60,7 @@ import {
   Edit2,
   Gauge,
   Battery,
+  BatteryCharging,
   DollarSign,
   Calendar as CalendarIcon,
   MapPin,
@@ -787,7 +788,11 @@ const Wander = () => {
 
           {member.battery !== null && (
             <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-900/60 px-2 py-1 rounded-lg border border-white/5">
-              <Battery size={13} className={member.battery < 20 ? 'text-rose-400' : 'text-emerald-400'} />
+              {member.charging ? (
+                <BatteryCharging size={13} className="text-emerald-400" aria-label="Charging" />
+              ) : (
+                <Battery size={13} className={member.battery < 20 ? 'text-rose-400' : 'text-emerald-400'} />
+              )}
               <span>{member.battery}%</span>
             </div>
           )}

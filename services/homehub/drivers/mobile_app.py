@@ -37,8 +37,12 @@ category ``home``); ``notify.notify`` goes to the whole family.
 Companion app first, Jarvis second. A phone whose companion app reported
 within ``companion_fresh_minutes`` (a mobile_app setting) owns its tracker and
 sensors. Otherwise Jarvis's reports fill the same entities: the tracker,
-``*_battery_level``, ``*_steps_sensor`` (geo's step count for today) and
-``*_detected_activity``. A user with several phones has them filled on one
+``*_battery_level``, ``*_steps_sensor`` (geo's step count for today),
+``*_detected_activity``, and the charging state and next alarm the Jarvis app
+reports (``*_battery_state``, ``*_charger_type``, ``binary_sensor.*_is_charging``
+and ``*_next_alarm``, created with the companion app's unique ids the first
+time Jarvis fills the phone; ``unavailable`` with a ``reason`` while the phone's
+app is too old to report them). A user with several phones has them filled on one
 phone only: the one whose companion app reported last, or the only one left
 after an admin turns ``jarvis_fallback`` off for the others (a stale old
 install, say). Jarvis-filled states carry ``data_source: jarvis``.
@@ -79,6 +83,23 @@ NOTICE_CATEGORY = "home"
 #: Messages the HA companion app treats as commands, not text to show.
 COMMAND_MESSAGES = {"clear_notification", "remove_channel", "request_location_update", "TTS"}
 IGNORED_STATES = {UNKNOWN, UNAVAILABLE, ""}
+#: The companion app's battery_state icons, by state.
+BATTERY_STATE_ICONS = {"charging": "mdi:battery-plus", "discharging": "mdi:battery-minus",
+                       "full": "mdi:battery-charging", "not_charging": "mdi:battery"}
+CHARGER_TYPE_ICONS = {"ac": "mdi:power-plug", "usb": "mdi:usb-port", "wireless": "mdi:battery-charging-wireless",
+                      "dock": "mdi:power-plug", "none": "mdi:battery"}
+#: Why a status sensor is unavailable when the Jarvis app's report does not carry it.
+NOT_REPORTED = "not reported by the Jarvis app on this phone (an older version; update the app)"
+#: Status sensors the Jarvis app feeds: suffix -> (domain, name after the phone's, registry metadata).
+#: The names give HA's entity ids: sensor.<phone>_battery_state, sensor.<phone>_charger_type,
+#: binary_sensor.<phone>_is_charging and sensor.<phone>_next_alarm.
+STATUS_SENSORS: dict[str, tuple[str, str, dict[str, Any]]] = {
+    "battery_state": ("sensor", "Battery state", {"entity_category": "diagnostic"}),
+    "charger_type": ("sensor", "Charger type", {"entity_category": "diagnostic"}),
+    "is_charging": ("binary_sensor", "Is charging", {"device_class": "plug", "original_device_class": "plug",
+                                                     "entity_category": "diagnostic"}),
+    "next_alarm": ("sensor", "Next alarm", {"device_class": "timestamp", "original_device_class": "timestamp"}),
+}
 
 
 def slugify(text: str) -> str:
@@ -328,6 +349,10 @@ def parse_people(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "speed": props.get("speed"), "course": props.get("course"),
             "last_updated": props.get("last_updated"), "zone": props.get("state"),
             "activity": props.get("activity"),
+            # The Jarvis app's charging state and next alarm (None from an app that does not send them).
+            "battery_state": props.get("battery_state"), "charger_type": props.get("charger_type"),
+            "is_charging": props.get("is_charging"), "next_alarm": props.get("next_alarm"),
+            "next_alarm_ms": props.get("next_alarm_ms"), "next_alarm_package": props.get("next_alarm_package"),
         }
     return out
 
@@ -607,6 +632,70 @@ class MobileAppDriver(Driver):
             if steps is not None:
                 self.publish(ent, steps, {"unit_of_measurement": "steps", "state_class": "total_increasing",
                                           "icon": "mdi:walk", **jarvis})
+        self._fill_status(fix)
+
+    def _status_sensor(self, key: str) -> EntityEntry | None:
+        """This phone's ``key`` status sensor, created (HA's unique id and entity id) when missing."""
+        domain, label, meta = STATUS_SENSORS[key]
+        for ent in self.entities:
+            if ent.domain == domain and ent.unique_id.endswith(f"_{key}"):
+                return ent
+        mgr = self._manager()
+        if mgr is None:
+            return None
+        return mgr.ensure_phone_sensor(self.entry, domain, key, label, **meta)
+
+    def _publish_status(self, key: str, state: Any, attrs: dict[str, Any]) -> None:
+        ent = self._status_sensor(key)
+        if ent is not None and not ent.disabled_by:
+            self.publish(ent, state, {**attrs, "data_source": "jarvis"})
+
+    def _fill_status(self, fix: dict[str, Any]) -> None:
+        """The companion app's charging and next alarm sensors, from the Jarvis app's reports.
+
+        A field the report does not carry (an app too old to send it) makes its
+        sensor ``unavailable`` with a ``reason`` saying so, never a guessed value.
+        """
+        state = fix.get("battery_state")
+        plug = fix.get("charger_type")
+        charging = fix.get("is_charging")
+        if state:
+            attrs: dict[str, Any] = {"icon": BATTERY_STATE_ICONS.get(state, "mdi:battery")}
+            if plug:
+                attrs["charger_type"] = plug
+            if charging is not None:
+                attrs["is_charging"] = bool(charging)
+            self._publish_status("battery_state", state, attrs)
+        else:
+            self._not_reported("battery_state")
+        if plug:
+            self._publish_status("charger_type", plug, {"icon": CHARGER_TYPE_ICONS.get(plug, "mdi:battery")})
+        else:
+            self._not_reported("charger_type")
+        if charging is not None:
+            self._publish_status("is_charging", "on" if charging else "off",
+                                 {"icon": "mdi:power-plug" if charging else "mdi:power-plug-off"})
+        else:
+            self._not_reported("is_charging")
+        alarm_ms = fix.get("next_alarm_ms")
+        if alarm_ms is None:
+            self._not_reported("next_alarm")
+        elif alarm_ms == 0:
+            # No alarm set: the companion app's sensor reads unavailable.
+            self._publish_status("next_alarm", UNAVAILABLE, {"icon": "mdi:alarm-off"})
+        elif not fix.get("next_alarm"):
+            log.warning("%s: geo sent next_alarm_ms %r without next_alarm (its ISO time); "
+                        "next_alarm left unavailable", self.device_name, alarm_ms)
+            self._publish_status("next_alarm", UNAVAILABLE, {"icon": "mdi:alarm-off",
+                                                             "reason": "geo sent next_alarm_ms without next_alarm"})
+        else:
+            attrs = {"Time in Milliseconds": int(alarm_ms), "icon": "mdi:alarm"}
+            if fix.get("next_alarm_package"):
+                attrs["Package"] = fix["next_alarm_package"]
+            self._publish_status("next_alarm", fix["next_alarm"], attrs)
+
+    def _not_reported(self, key: str) -> None:
+        self._publish_status(key, UNAVAILABLE, {"reason": NOT_REPORTED})
 
     def _only_phone_of(self, user: str) -> bool:
         """Whether this phone gets the user's single Jarvis report (geo keeps one track per user).

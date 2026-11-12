@@ -499,6 +499,118 @@ def test_a_jarvis_phone_gets_tracker_battery_steps_and_activity(env, geo):
     assert sam["kind"] == "jarvis" and {s["source"] for s in sam["sensors"]} == {"jarvis"}
 
 
+ALARM_ISO = "2030-03-17T17:46:40+00:00"
+ALARM_MS = 1_900_000_000_000
+CHARGING = {"battery": 41, "battery_state": "charging", "charger_type": "wireless", "is_charging": True,
+            "next_alarm": ALARM_ISO, "next_alarm_ms": ALARM_MS, "next_alarm_package": "com.example.clock"}
+
+
+def _jarvis_phone(env, user="sam"):
+    c, hub = env["client"], env["hub"]
+    r = c.post("/hub/mobile_app/phones", headers=ADMIN, json={"jarvis_user": user})
+    entry = hub.config_entries[r.json()["entry_id"]]
+    drv = ma.MobileAppDriver(hub, entry)
+    hub.drivers[entry.entry_id] = drv
+    return entry, drv
+
+
+def _poll(hub, drv):
+    if hasattr(hub, "_geo_people_cache"):
+        hub._geo_people_cache["at"] = 0.0
+    asyncio.run(drv.async_poll())
+
+
+def test_a_jarvis_phone_gets_charging_and_next_alarm_sensors(env, geo):
+    hub = env["hub"]
+    entry, drv = _jarvis_phone(env)
+    geo["payload"] = _fixes(sam=CHARGING)
+    _poll(hub, drv)
+    state = hub.states.get("sensor.sam_s_phone_battery_state")
+    assert state.state == "charging" and state.attributes["data_source"] == "jarvis"
+    assert state.attributes["charger_type"] == "wireless" and state.attributes["is_charging"] is True
+    assert hub.states.get("sensor.sam_s_phone_charger_type").state == "wireless"
+    plug = hub.states.get("binary_sensor.sam_s_phone_is_charging")
+    assert plug.state == "on" and plug.attributes["device_class"] == "plug"
+    alarm = hub.states.get("sensor.sam_s_phone_next_alarm")
+    assert alarm.state == ALARM_ISO and alarm.attributes["device_class"] == "timestamp"
+    assert alarm.attributes["Package"] == "com.example.clock"
+    assert alarm.attributes["Time in Milliseconds"] == ALARM_MS
+    # Registered with HA's companion unique ids (prefix + key), on the phone's device.
+    reg = {e.entity_id: e for e in hub.entities.values() if e.config_entry_id == entry.entry_id}
+    uid = entry.data["device_id"]
+    assert reg["sensor.sam_s_phone_battery_state"].unique_id == f"{uid}_battery_state"
+    assert reg["sensor.sam_s_phone_charger_type"].unique_id == f"{uid}_charger_type"
+    assert reg["binary_sensor.sam_s_phone_is_charging"].unique_id == f"{uid}_is_charging"
+    assert reg["sensor.sam_s_phone_next_alarm"].unique_id == f"{uid}_next_alarm"
+    assert len({e.device_id for e in reg.values()}) == 1
+    # Unplugged, alarm cleared: the same entities, no new ones.
+    geo["payload"] = _fixes(sam={**CHARGING, "battery_state": "discharging", "charger_type": "none",
+                                 "is_charging": False, "next_alarm": None, "next_alarm_ms": 0,
+                                 "next_alarm_package": None})
+    _poll(hub, drv)
+    assert hub.states.get("sensor.sam_s_phone_battery_state").state == "discharging"
+    assert hub.states.get("sensor.sam_s_phone_charger_type").state == "none"
+    assert hub.states.get("binary_sensor.sam_s_phone_is_charging").state == "off"
+    assert hub.states.get("sensor.sam_s_phone_next_alarm").state == "unavailable"
+    assert len([e for e in hub.entities.values() if e.config_entry_id == entry.entry_id]) == len(reg)
+
+
+def test_an_older_app_leaves_the_status_sensors_unavailable_and_says_why(env, geo):
+    c, hub = env["client"], env["hub"]
+    entry, drv = _jarvis_phone(env)
+    geo["payload"] = _fixes(sam={"battery": 41})
+    _poll(hub, drv)
+    assert hub.states.get("sensor.sam_s_phone_battery_level").state == "41"
+    for eid in ("sensor.sam_s_phone_battery_state", "sensor.sam_s_phone_charger_type",
+                "binary_sensor.sam_s_phone_is_charging", "sensor.sam_s_phone_next_alarm"):
+        st = hub.states.get(eid)
+        assert st.state == "unavailable", eid
+        assert "older version" in st.attributes["reason"], eid
+    listed = c.get("/hub/mobile_app/phones", headers=ADMIN).json()["phones"]
+    sam = next(p for p in listed if p["entry_id"] == entry.entry_id)
+    alarm = next(s for s in sam["sensors"] if s["entity_id"] == "sensor.sam_s_phone_next_alarm")
+    assert alarm["state"] == "unavailable" and "update the app" in alarm["reason"]
+
+
+def test_no_alarm_set_is_unavailable_with_no_reason(env, geo):
+    hub = env["hub"]
+    _, drv = _jarvis_phone(env)
+    geo["payload"] = _fixes(sam={**CHARGING, "next_alarm": None, "next_alarm_ms": 0, "next_alarm_package": None})
+    _poll(hub, drv)
+    alarm = hub.states.get("sensor.sam_s_phone_next_alarm")
+    assert alarm.state == "unavailable" and "reason" not in alarm.attributes
+
+
+def test_a_quiet_companion_phone_keeps_its_imported_status_sensors(env, geo):
+    """The companion app's own entities (webhook-id unique ids) are filled, not duplicated."""
+    c, hub = env["client"], env["hub"]
+    entry = hub.config_entries["e-plain"]
+    entry.options["jarvis_user"] = "alex"
+    hub.entities["sensor.alex_s_phone_battery_state"] = EntityEntry(
+        entity_id="sensor.alex_s_phone_battery_state", platform="mobile_app", unique_id=f"{HOOK}_battery_state",
+        config_entry_id="e-plain", device_id="device-e-plain")
+    hub.entities["sensor.alex_s_phone_next_alarm"] = EntityEntry(
+        entity_id="sensor.alex_s_phone_next_alarm", platform="mobile_app", unique_id=f"{HOOK}_next_alarm",
+        config_entry_id="e-plain", device_id="device-e-plain", disabled_by="user")
+    drv = ma.MobileAppDriver(hub, entry)
+    hub.drivers["e-plain"] = drv
+    c.put("/hub/mobile_app/settings", headers=ADMIN, json={"auto_jarvis_phones": False})
+    geo["payload"] = _fixes(alex=CHARGING)
+    _poll(hub, drv)
+    assert hub.states.get("sensor.alex_s_phone_battery_state").state == "charging"
+    assert hub.states.get("sensor.alex_s_phone_next_alarm") is None, "a sensor the user disabled stays off"
+    created = hub.entities["sensor.alex_s_phone_charger_type"]
+    assert created.unique_id == f"{HOOK}_charger_type" and created.device_id == "device-e-plain"
+    assert hub.states.get("binary_sensor.alex_s_phone_is_charging").state == "on"
+    assert not [e for e in hub.entities if e.startswith("sensor.alex_s_phone_battery_state_")]
+    # The companion app reports again: it owns the sensors, Jarvis stands back.
+    hook(c, {"type": "update_sensor_states", "data": [{"type": "sensor", "unique_id": "battery_state",
+                                                       "state": "full"}]})
+    geo["payload"] = _fixes(alex={**CHARGING, "battery_state": "discharging"})
+    _poll(hub, drv)
+    assert hub.states.get("sensor.alex_s_phone_battery_state").state == "full"
+
+
 def test_jarvis_fills_a_quiet_companion_phone_and_stands_back_when_it_reports(env, geo):
     c, hub = env["client"], env["hub"]
     entry = hub.config_entries["e-plain"]

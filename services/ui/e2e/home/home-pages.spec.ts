@@ -148,6 +148,18 @@ test.describe('home pages', () => {
     await expect(page.getByTestId('integrations-health')).toContainText('Music server');
     await expectTapTargets(page.getByTestId('devices-sections'));
     await expectLayoutSound(page, info, 'devices');
+    // Phones: charging and the next alarm from the Jarvis app, on every screen size.
+    const phone = page.getByTestId('phones').getByTestId('phone');
+    await phone.scrollIntoViewIfNeeded();
+    await expect(phone.getByTestId('phone-power')).toHaveText('Charging (wireless)');
+    await expect(phone.getByTestId('phone-alarm')).toContainText('Next alarm');
+    for (const line of [phone.getByTestId('phone-power'), phone.getByTestId('phone-alarm')]) {
+      const box = await line.boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0), 'the status line stays on screen').toBeLessThanOrEqual(
+        (page.viewportSize()?.width ?? 0) + 1);
+    }
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'devices-phones');
     await page.getByRole('button', { name: /Add Matter device/ }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('adopt-dialog')).toBeVisible();

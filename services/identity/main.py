@@ -7276,6 +7276,14 @@ class LocationUpdate(BaseModel):
     battery: int | float | None = None
     #: Newer app builds say whether the phone is charging (low battery notice).
     charging: bool | None = None
+    #: The companion app's charging state (charging, discharging, full,
+    #: not_charging) and charger (ac, usb, wireless, dock, none). Newer app builds only.
+    battery_state: str | None = None
+    charger_type: str | None = None
+    #: The phone's next alarm clock in epoch milliseconds, 0 when none is set,
+    #: and the app that set it. Newer app builds only (absent = not known).
+    next_alarm_ms: int | None = None
+    next_alarm_package: str | None = None
     timestamp: float | None = None
     daily_steps: int | None = None
     #: What the phone says the person is doing (its activity recognition):
@@ -7420,6 +7428,12 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
             payload["daily_steps"] = location.daily_steps
         if location.activity:
             payload["activity"] = location.activity
+        # The phone's charging state and next alarm: homehub's battery_state,
+        # charger_type, is_charging and next_alarm sensors read them from geo.
+        for field in ("charging", "battery_state", "charger_type", "next_alarm_ms", "next_alarm_package"):
+            value = getattr(location, field)
+            if value is not None:
+                payload[field] = value
         if location.device_id:
             from services.identity.location_devices import device_key
             payload["device"] = device_key(location.device_id)[:12]
@@ -7481,6 +7495,10 @@ async def update_user_location(
         # than a speed a network fix cannot give.
         "activity": location.activity if location.activity in PHONE_ACTIVITIES else None,
         "device": (location.device_name or "")[:80] or None,
+        # A bolt by the battery on the family cards: charging, or full on the
+        # charger (the companion app's is_charging). None from an older app.
+        "charging": (location.battery_state in ("charging", "full")) if location.battery_state
+        in ("charging", "discharging", "full", "not_charging") else location.charging,
     }
     low_battery = None
     with Session(engine) as session:

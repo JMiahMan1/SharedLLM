@@ -538,6 +538,21 @@ class MobileAppManager:
         log.info("created a Jarvis-sourced phone for %s", user)
         return entry
 
+    def ensure_phone_sensor(self, entry: ConfigEntry, domain: str, key: str, label: str,
+                            **meta: Any) -> EntityEntry:
+        """A phone's ``key`` sensor (HA's ``<prefix>_<key>`` unique id), registered if it is missing.
+
+        For the status sensors only the Jarvis app reports (charging, next
+        alarm): a companion phone keeps its webhook id as the prefix, as HA
+        registered its sensors, and a Jarvis phone its device id, as
+        ``create_jarvis_phone`` registers battery and steps.
+        """
+        d = entry.data
+        prefix = str(d.get("device_id") or entry.entry_id) if d.get("app_id") == "jarvis" \
+            else str(d.get("webhook_id") or d.get("device_id") or entry.entry_id)
+        name = str(d.get("device_name") or entry.title or "")
+        return self._add_entity(entry, domain, f"{prefix}_{key}", f"{name} {label}", **meta)
+
     async def ensure_jarvis_phones(self, jarvis_users: set[str]) -> list[str]:
         """``auto_jarvis_phones``: a Jarvis phone for each reporting user that has no phone at all."""
         if not self.settings()["auto_jarvis_phones"]:
@@ -622,6 +637,8 @@ class MobileAppManager:
                     "disabled": bool(ent.disabled_by), "source": (st.attributes.get("data_source") if st else None)
                     or ("jarvis" if d.get("app_id") == "jarvis" else "companion"),
                     "last_updated": st.last_updated.isoformat() if st else None,
+                    # Why a sensor is unavailable, when its source said (an app too old to report it).
+                    "reason": st.attributes.get("reason") if st else None,
                 })
             seen = self.last_seen(entry.entry_id)
             out.append({
