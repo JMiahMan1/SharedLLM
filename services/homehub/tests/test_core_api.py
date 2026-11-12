@@ -251,6 +251,7 @@ async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
     import importlib
 
     monkeypatch.setenv("HOMEHUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("TZ", "Etc/UTC")
     monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
     main = importlib.import_module("services.homehub.main")
     svc = main.Service.__new__(main.Service)
@@ -293,3 +294,17 @@ async def test_runtime_reports_when_every_entry_has_tried_to_load(tmp_path, monk
     assert hub.config_entries["b"].state == "setup_retry"
     assert hub.config_entries["c"].state == "not_loaded"
     await runtime.shutdown()
+
+
+def test_homehub_refuses_to_start_without_a_time_zone(tmp_path, monkeypatch):
+    """No guessed zone: a missing TZ stops startup with a message naming the setting."""
+    import importlib
+    import sys
+
+    monkeypatch.setenv("HOMEHUB_DB", str(tmp_path / "hub.db"))
+    monkeypatch.setenv("FERNET_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("TZ", raising=False)
+    sys.modules.pop("services.homehub.main", None)
+    with pytest.raises(SystemExit, match="TZ is not set"):
+        importlib.import_module("services.homehub.main")
+    sys.modules.pop("services.homehub.main", None)

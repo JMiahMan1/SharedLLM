@@ -231,3 +231,12 @@ def test_the_utility_time_zone_is_configuration_not_code():
     assert str(SrpEnergyDriver(hub, entry).tz) == "America/Denver"
     (row,) = srp.normalize_hourly([{"date": "2026-07-06T15:00:00", "onPeakKwh": 1}], srp.ZoneInfo("America/Denver"))
     assert str(row["start"].tzinfo) == "America/Denver"
+
+
+def test_no_time_zone_is_a_clear_error_not_a_guess():
+    from services.homehub.core import HubError
+
+    hub, entry = make_hub("srp_energy", data={"id": "1", "username": "u", "password": "p"})
+    hub.time_zone = ""
+    with pytest.raises(HubError, match="time zone"):
+        SrpEnergyDriver(hub, entry)

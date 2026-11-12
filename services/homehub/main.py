@@ -40,7 +40,11 @@ class Service:
     def __init__(self) -> None:
         self.store = Store(DB_PATH, os.getenv("FERNET_KEY"))
         self.auth = Auth(self.store, os.getenv("INTERNAL_SECRET"))
-        self.hub = Hub(time_zone=os.getenv("TZ", "UTC"))
+        tz = os.getenv("TZ")
+        if not tz:
+            # No guessed zone: schedules, sun times and energy periods would all be wrong without a word.
+            raise SystemExit("homehub: TZ is not set; set it in .env to the household time zone, e.g. America/Phoenix")
+        self.hub = Hub(time_zone=tz)
         self.hub.store = self.store  # drivers that keep their own data (to-do lists) use it
         self.runtime = Runtime(self.hub, self.store)
         self._lock = asyncio.Lock()
