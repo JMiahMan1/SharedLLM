@@ -418,10 +418,10 @@ def esphome_builder(runtime: Any) -> dict[str, Any]:
     """Where admins open the builder, when an entry says so; never its login."""
     entry = next((e for e in runtime.hub.config_entries.values()
                   if e.domain == "esphome_builder" and not e.disabled_by), None)
-    if entry is None:
-        return {"configured": False}
     from services.homehub import esphome_configs
 
+    if entry is None:  # the config report does not depend on the dashboard link
+        return {"configured": False, "configs": esphome_configs.report(runtime.hub)}
     return {"configured": True, "entry_id": entry.entry_id, "title": entry.title, "url": entry.data.get("url"),
             "state": entry.state, "reason": entry.reason, "login": bool(entry.data.get("username")),
             "configs": esphome_configs.report(runtime.hub)}

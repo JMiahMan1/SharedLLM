@@ -181,7 +181,8 @@ def test_the_api_routes(env, monkeypatch):
     assert c.patch("/hub/devices/nope", headers=H, json={}).status_code == 404
     r = c.patch("/hub/entries/tv1", headers=H, json={"data": {"token": "x"}})
     assert r.status_code == 400 and "cannot change token" in r.json()["message"]
-    assert c.get("/hub/esphome-builder", headers=H).json() == {"configured": False}
+    body = c.get("/hub/esphome-builder", headers=H).json()
+    assert body["configured"] is False and "mounted" in body["configs"]
     flows_list = c.get("/hub/flows", headers=H).json()["flows"]
     assert {"samsungtv", "reolink", "dlna_dmr", "esphome_builder"} <= {f["domain"] for f in flows_list}
 
