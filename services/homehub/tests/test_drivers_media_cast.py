@@ -180,30 +180,67 @@ async def test_media_status_states_and_attributes(setup):
     assert hub.states.get("media_player.office_tv_chrome").state == "unavailable"
 
 
-async def test_a_sleeping_tv_is_off_whatever_its_native_app_reports(setup):
-    """A Google TV in standby kept showing Spotify "paused" (and "playing" while a phone
-    played it) though nothing came out of its speakers."""
+class FakeRemote:
+    """The TV's own remote connection (androidtv_remote driver) as the cast driver sees it."""
+    platform = "androidtv_remote"
+    def __init__(self, host, app=None, on=True):
+        self.app_names = {"com.spotify.tv.android": "Spotify"}
+        self.host, self.available = host, True
+        self.api = SimpleNamespace(is_on=on, current_app=app)
+
+
+async def _spotify_report(setup):
     hub, drv, made = setup
     await drv.async_setup()
     FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
     await settle()
     cc = made[OFFICE]
-    cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "AndroidNativeApp", "Spotify", True
+    cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "AndroidNativeApp", "Spotify", False
     ms = cc.media_controller.status
     ms.player_state = "PLAYING"
-    ms.media_metadata = {"metadataType": 3, "title": "Someone else's song"}
-    drv.publish_key(OFFICE)
+    ms.media_metadata = {"metadataType": 3, "title": "A song"}
+    return hub, drv, cc
+
+
+def _shown(hub):
     st = hub.states.get("media_player.office_tv_chrome")
-    assert st.state == "off"
-    assert "media_title" not in st.attributes and "app_name" not in st.attributes
-    cc.status.is_stand_by = False  # the TV is awake and showing Spotify: believe it
+    return st.state, st.attributes.get("app_name"), st.attributes.get("media_title")
+
+
+async def test_a_sleeping_tv_never_shows_its_apps_report(setup):
+    """The Office TV's Spotify app reported Spotify paused or playing though it never played there."""
+    hub, drv, cc = await _spotify_report(setup)
+    cc.status.is_stand_by = True
     drv.publish_key(OFFICE)
-    st = hub.states.get("media_player.office_tv_chrome")
-    assert st.state == "playing" and st.attributes["media_title"] == "Someone else's song"
-    # the media receiver (Jarvis's own casts) is never hidden by the standby flag
+    assert _shown(hub) == ("off", None, None)
+
+
+async def test_an_awake_tv_shows_its_apps_report_only_when_that_app_is_on_screen(setup):
+    hub, drv, _cc = await _spotify_report(setup)
+    remote = FakeRemote("192.0.2.50", app="com.google.android.youtube.tv")  # the address the fake TV has
+    hub.drivers["atv"] = remote
+    drv.publish_key(OFFICE)
+    assert _shown(hub) == ("on", None, None)  # YouTube on screen: Spotify's report is false
+    remote.api.is_on = False
+    drv.publish_key(OFFICE)
+    assert _shown(hub) == ("off", None, None)
+    remote.api.is_on, remote.api.current_app = True, "com.spotify.tv.android"  # really playing Spotify
+    drv.publish_key(OFFICE)
+    assert _shown(hub) == ("playing", "Spotify", "A song")
+
+
+async def test_without_the_tvs_remote_an_awake_tv_is_believed(setup):
+    hub, drv, _cc = await _spotify_report(setup)
+    drv.publish_key(OFFICE)
+    assert _shown(hub) == ("playing", "Spotify", "A song")
+
+
+async def test_jarvis_casts_are_never_hidden(setup):
+    hub, drv, cc = await _spotify_report(setup)
+    hub.drivers["atv"] = FakeRemote("192.0.2.50", app="com.google.android.youtube.tv")
     cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "CC1AD845", "Default Media Receiver", True
     drv.publish_key(OFFICE)
-    assert hub.states.get("media_player.office_tv_chrome").state == "playing"
+    assert _shown(hub) == ("playing", "Default Media Receiver", "A song")
 
 
 async def test_commands(setup):

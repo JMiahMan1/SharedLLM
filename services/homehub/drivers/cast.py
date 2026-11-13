@@ -36,6 +36,7 @@ from services.homehub.drivers.media_common import F, clamp01, clean, mime_for
 MEDIA_RECEIVER_APP_ID = "CC1AD845"
 # An Android/Google TV reports its foreground Android app (Spotify, YouTube) under this id.
 ANDROID_NATIVE_APP_ID = "AndroidNativeApp"
+_NO_REMOTE = object()
 COMMAND_TIMEOUT_S = 10.0
 # Loading media may first switch the TV from another app (Spotify, YouTube) to the media receiver.
 LOAD_TIMEOUT_S = 30.0
@@ -68,6 +69,7 @@ class CastDriver(Driver):
     def __init__(self, hub, entry) -> None:
         super().__init__(hub, entry)
         self.casts: dict[str, Any] = {}
+        self.hosts: dict[str, str] = {}
         self.connection: dict[str, str] = {}
         self.browser: Any = None
         self.zconf: Any = None
@@ -138,6 +140,7 @@ class CastDriver(Driver):
             self.log.warning("cast %s (%s) could not connect: %s", key, getattr(info, "friendly_name", ""), exc)
             return
         self.casts[key] = cc
+        self.hosts[key] = str(getattr(info, "host", "") or "")
         ent = self.wanted().get(key)
         if ent is not None:
             self.confirm_device(ent, manufacturer=getattr(info, "manufacturer", None) or None,
@@ -180,13 +183,18 @@ class CastDriver(Driver):
         cs = cc.status
         ms = self._media_status(cc)
         app_id = getattr(cc, "app_id", None) or getattr(cs, "app_id", None)
-        # A sleeping Android TV still reports its last app's session: Spotify on a Google TV
-        # mirrors the account's player (paused, or "playing" while a phone plays it) though
-        # the TV makes no sound. Casting wakes the TV, so a real cast is never asleep.
-        asleep = app_id == ANDROID_NATIVE_APP_ID and getattr(cs, "is_stand_by", None) is True
-        if asleep:
+        # An Android/Google TV's own apps report through Cast as "AndroidNativeApp", and that
+        # report can be false: the Office TV's built-in Spotify app said Spotify was paused or
+        # "playing" though Spotify was never played on it. So a native app's session counts
+        # only while the TV is awake and, when Jarvis also has the TV's remote connection,
+        # that app is the one on screen. Real playback in the app still shows.
+        native = app_id == ANDROID_NATIVE_APP_ID
+        on_screen = self._screen_app(key) if native else _NO_REMOTE
+        asleep = native and getattr(cs, "is_stand_by", None) is True
+        hidden = asleep or (native and on_screen is not _NO_REMOTE and on_screen != getattr(cs, "display_name", None))
+        if hidden:
             ms = None
-            state = "off"
+            state = "off" if asleep or on_screen == "" else "on"
         elif ms is not None and ms.player_state in ("PLAYING", "BUFFERING"):
             state = "playing"
         elif ms is not None and ms.player_is_paused:
@@ -203,7 +211,7 @@ class CastDriver(Driver):
         attrs: dict[str, Any] = {
             "volume_level": cs.volume_level, "is_volume_muted": cs.volume_muted,
         }
-        if state != "off":
+        if state != "off" and not hidden:
             attrs.update(app_id=app_id, app_name=getattr(cs, "display_name", None))
         if ms is not None and state in ("playing", "paused", "idle"):
             sf |= F.STOP
@@ -235,6 +243,21 @@ class CastDriver(Driver):
             })
         attrs["supported_features"] = sf
         return state, clean(attrs)
+
+    def _screen_app(self, key: str) -> Any:
+        """What the TV's own remote connection says is on screen: the app's name, "" when the
+        TV is off or the remote is not connected, or _NO_REMOTE when Jarvis has no remote for
+        this TV (then only the standby flag can be checked)."""
+        host = self.hosts.get(key)
+        remote = next((d for d in self.hub.drivers.values()
+                       if getattr(d, "platform", None) == "androidtv_remote" and host and getattr(d, "host", None) == host),
+                      None)
+        if remote is None:
+            return _NO_REMOTE
+        api = getattr(remote, "api", None)
+        if not getattr(remote, "available", False) or api is None or not api.is_on:
+            return ""
+        return getattr(remote, "app_names", {}).get(api.current_app or "", api.current_app or "")
 
     def publish_key(self, key: str) -> None:
         ent = self.wanted().get(key)

@@ -69,6 +69,7 @@ def key_code(command: str) -> str:
 class AndroidTVRemoteDriver(Driver):
     platform = "androidtv_remote"
     poll_interval = 15.0
+    app_names = APP_NAMES  # read by the cast driver to check which app is on screen
     remote_factory = AndroidTVRemote
 
     def __init__(self, hub, entry) -> None:
