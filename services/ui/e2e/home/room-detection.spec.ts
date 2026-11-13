@@ -45,7 +45,8 @@ test.describe('Room detection', () => {
   test('Map rooms: pick the phone, record a room, another pass, the summary, clear a room and all', async ({ page }, info) => {
     const run = await openDevices(page);
     await sessionProgress(page);
-    await page.getByTestId('devices-sections').getByRole('link', { name: 'Room detection' }).click();
+    // Room detection is on the Setup tab (the old link already opened it); the tab says so.
+    await expect(page.getByTestId('devices-sections').getByRole('tab', { name: 'Setup' })).toHaveAttribute('aria-selected', 'true');
     const panel = page.getByTestId('room-map');
     await panel.scrollIntoViewIfNeeded();
 
