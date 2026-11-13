@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from services.common.secrets import secret_matches
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
 from services.control_plane import router_monitor as rm
+from services.control_plane import router_syslog
 
 log = logging.getLogger("control_plane.network")
 
@@ -85,6 +86,7 @@ def loop() -> None:
 
 def start() -> None:
     threading.Thread(target=loop, name="router-monitor", daemon=True).start()
+    router_syslog.start(monitor().r, load_config)
 
 
 def _events(r, limit: int) -> list[dict[str, Any]]:
@@ -106,8 +108,15 @@ def check():
 
 @router.get("/log")
 def router_log(limit: int = 200, level: str | None = None, q: str | None = None):
-    """The router's log, newest first; ``level`` keeps that level and worse."""
+    """The router's log, newest first; ``level`` keeps that level and worse.
+
+    The log the router forwards (every line) once it is arriving; until then the
+    lines the monitor polls (the router's small buffer, read once a minute).
+    """
     limit = max(1, min(limit, 2000))
+    store = router_syslog.store()
+    if store is not None and store.latest() is not None:
+        return {"lines": store.log(limit, level, q), "source": "forwarded"}
     order = list(rm._SYSLOG_LEVELS.values())
     worst = order.index(level) if level in order else len(order) - 1
     needle = (q or "").lower()
@@ -118,7 +127,26 @@ def router_log(limit: int = 200, level: str | None = None, q: str | None = None)
             out.append(e)
             if len(out) >= limit:
                 break
-    return {"lines": out}
+    return {"lines": out, "source": "polled"}
+
+
+@router.get("/sites")
+def sites(hours: int = 24, device: str | None = None, limit: int = 200):
+    """Domains each device looked up over the last ``hours``, most looked up first.
+
+    From the DNS lookups the router forwards; a device is its MAC where the router
+    knows it. Admins only (the gateway), since it shows what each person visits.
+    """
+    store = router_syslog.store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="The router's log is not being received (ROUTER_SYSLOG_PORT)")
+    hours, limit = max(1, min(hours, 24 * router_syslog.RETENTION_DAYS)), max(1, min(limit, 5000))
+    known = json.loads(monitor().r.get(rm.STATUS_KEY) or "{}").get("devices") or {}
+    rows = store.sites(time.time() - hours * 3600, device.lower() if device else None, limit)
+    for row in rows:
+        info = known.get(row["device"]) or {}
+        row["name"] = info.get("name") or row["device"]
+    return {"hours": hours, "sites": rows, "receiving": store.latest() is not None}
 
 
 def _network_of(ip: str | None, networks: list[dict[str, Any]]) -> str | None:

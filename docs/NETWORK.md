@@ -73,6 +73,38 @@ monitor treats an empty table as not working: it falls back to the access
 points' counters, restarts nlbwmon (at most once an hour) and sends one
 notice saying so, or how to allow the restart if the login may not.
 
+### The router's log and each device's DNS lookups
+
+The router forwards everything it logs to Jarvis as it happens (system, Wi-Fi,
+firewall, DHCP, and every DNS lookup), so nothing is lost between polls of its
+small log buffer. `services/control_plane/router_syslog.py` receives it on TCP
+`ROUTER_SYSLOG_PORT` (5514; `0` turns it off), accepts lines only from the
+router's address (from its login, or `ROUTER_SYSLOG_ALLOW`), and keeps, in
+`data/network/router.db` for `ROUTER_LOG_RETENTION_DAYS` (30):
+
+- **sites per device:** each lookup counted per hour, device (its MAC from the
+  monitor's device list, so a new address is still the same device) and domain.
+  Web traffic is encrypted, so domains are what can be seen, not pages;
+- **the router log:** every other line, which Admin > Network's log shows once
+  it arrives (before that, the polled buffer).
+
+On the router (OpenWrt, nothing to install):
+
+```
+uci set dhcp.@dnsmasq[0].logqueries='1'
+uci set system.@system[0].log_ip='<server address>'
+uci set system.@system[0].log_port='5514'
+uci set system.@system[0].log_proto='tcp'
+uci commit && /etc/init.d/dnsmasq restart && /etc/init.d/log restart
+```
+
+`data/network` must exist and belong to the stack's user (`PUID`) before the
+control plane starts, or Docker creates it as root and nothing is kept (the
+log says so). `GET /api/network/sites?hours=&device=` (admins only, through the
+gateway) lists domains per device. A device using its own encrypted DNS
+(Android Private DNS, iCloud Private Relay, a browser's secure DNS, a VPN) is
+not seen; blocking those at the router is a separate decision.
+
 ## What is checked, every minute
 
 - **Internet:** a TCP connection to 1.1.1.1, 9.9.9.9 or 208.67.222.222 on

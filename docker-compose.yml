@@ -1153,6 +1153,8 @@ services:
       - TZ=${TZ:?TZ must name the household time zone in .env, e.g. America/Denver}
       - GHCR_TOKEN=${GHCR_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - ROUTER_SYSLOG_PORT=${ROUTER_SYSLOG_PORT:-5514}
+      - NETWORK_DATA_DIR=/data/network
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
@@ -1161,10 +1163,15 @@ services:
       - ./data:/hostfs/data:ro
       - ${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}:/hostfs/workspaces:ro
       - /var/lib/docker:/hostfs/docker:ro
+      # The router's forwarded log and each device's DNS lookups (router_syslog.py, docs/NETWORK.md).
+      - ./data/network:/data/network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.254
+    # The router forwards its log here over TCP; only the router's address is accepted.
+    ports:
+      - "${ROUTER_SYSLOG_PORT:-5514}:${ROUTER_SYSLOG_PORT:-5514}/tcp"
     networks:
       - sharedllm
 

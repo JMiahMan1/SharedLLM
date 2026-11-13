@@ -60,6 +60,13 @@ async def network_usage(request: Request, hours: int = 24):
     return await _control_plane("GET", "/usage", {"hours": hours})
 
 
+@router.get("/sites")
+async def network_sites(request: Request, hours: int = 24, device: str | None = None, limit: int = 200):
+    await _admin(request)
+    params = {"hours": hours, "limit": limit, **({"device": device} if device else {})}
+    return await _control_plane("GET", "/sites", params)
+
+
 @router.get("/outages")
 async def network_outages(request: Request, days: int = 30):
     await _admin(request)
