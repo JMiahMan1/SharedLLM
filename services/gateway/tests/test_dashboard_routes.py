@@ -187,3 +187,40 @@ def test_settings_are_admin_only_and_use_the_internal_secret(client, admin_hub):
     assert admin_hub[-1][2] == {"days": 90}
     assert client.put("/api/dashboard/prefs", json={"hidden": []},
                       headers={"Authorization": "Bearer admin-key"}).status_code == 200
+
+
+CONTROLS = {
+    "entity_id": "camera.yard",
+    "actions": [ent("siren.yard_siren", group="actions", role="siren"),
+                ent("switch.garage_door", group="actions", role="opener",
+                    door=ent("binary_sensor.garage_door_sensor", device_class="door"))],
+    "status": [ent("binary_sensor.yard_person", group="status", role="person")],
+    "settings": [ent("number.yard_volume", group="settings", role="number")],
+}
+
+
+def test_camera_controls_are_what_the_viewer_may_use_and_settings_are_for_admins(client, upstream, perms, member):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/homehub/dashboard/cameras/camera.yard/controls",
+                  payload=CONTROLS)
+    perms["assigned"] = frozenset({"camera.yard", "siren.yard_siren", "binary_sensor.yard_person",
+                                   "switch.garage_door", "number.yard_volume"})
+    body = client.get("/api/dashboard/cameras/camera.yard/controls").json()
+    # The opener needs its door sensor too; settings are never a member's, even if assigned.
+    assert [a["entity_id"] for a in body["actions"]] == ["siren.yard_siren"]
+    assert [s["entity_id"] for s in body["status"]] == ["binary_sensor.yard_person"]
+    assert body["settings"] == []
+
+
+def test_admins_get_every_control_and_the_settings(client, upstream, perms):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/homehub/dashboard/cameras/camera.yard/controls",
+                  payload=CONTROLS)
+    body = client.get("/api/dashboard/cameras/camera.yard/controls").json()
+    assert [a["role"] for a in body["actions"]] == ["siren", "opener"]
+    assert [s["entity_id"] for s in body["settings"]] == ["number.yard_volume"]
+
+
+def test_controls_of_a_camera_the_viewer_may_not_watch_do_not_exist(client, upstream, perms, member):
+    perms["assigned"] = frozenset({"siren.yard_siren"})
+    assert client.get("/api/dashboard/cameras/camera.yard/controls").status_code == 404
+    assert client.get("/api/dashboard/cameras/light.porch/controls").status_code == 404
+    assert _sent(upstream, f"{TEST_HA_URL}/api/homehub/dashboard/cameras") == []

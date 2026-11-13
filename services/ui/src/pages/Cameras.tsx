@@ -17,6 +17,7 @@ import RealtimePlayer from '../components/cameras/RealtimePlayer';
 import LiveVideoSettings from '../components/cameras/LiveVideoSettings';
 import MotionRecordingSettings from '../components/cameras/MotionRecordingSettings';
 import WhoCanWatch from '../components/cameras/WhoCanWatch';
+import CameraControls from '../components/cameras/CameraControls';
 import { updateEntity } from '../lib/hardware';
 import {
   addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
@@ -457,7 +458,7 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
       aria-modal="true"
       aria-label={displayName(camera)}
     >
-      <div className="mx-auto w-full max-w-4xl px-3 sm:px-6 pb-10 pt-[max(0.75rem,env(safe-area-inset-top))] space-y-3">
+      <div className="mx-auto w-full max-w-6xl px-3 sm:px-6 pb-10 pt-[max(0.75rem,env(safe-area-inset-top))] space-y-3">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold text-white truncate">{displayName(camera)}</h2>
@@ -499,17 +500,25 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
             </button>
           </div>
         )}
-        {tab === 'live' ? <LiveView camera={camera} token={token} /> : <RecordingsView camera={camera} token={token} />}
-        {isAdmin && (
-          <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setWhoOpen(e.currentTarget.open)}>
-            <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
-              <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
-              Who can watch
-            </summary>
-            {/* Read only once opened: most visits to a camera are to watch it. */}
-            {whoOpen && <div className="pt-3"><WhoCanWatch entityId={camera.entity_id} cameraName={displayName(camera)} /></div>}
-          </details>
-        )}
+        {/* Phones stack the picture and the controls; wide screens put the controls beside the picture. */}
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)] lg:items-start">
+          <div className="min-w-0">
+            {tab === 'live' ? <LiveView camera={camera} token={token} /> : <RecordingsView camera={camera} token={token} />}
+          </div>
+          <div className="min-w-0 space-y-3">
+            <CameraControls entityId={camera.entity_id} cameraName={displayName(camera)} isAdmin={isAdmin} />
+            {isAdmin && (
+              <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setWhoOpen(e.currentTarget.open)}>
+                <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
+                  <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+                  Who can watch
+                </summary>
+                {/* Read only once opened: most visits to a camera are to watch it. */}
+                {whoOpen && <div className="pt-3"><WhoCanWatch entityId={camera.entity_id} cameraName={displayName(camera)} /></div>}
+              </details>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

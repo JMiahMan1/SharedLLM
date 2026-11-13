@@ -219,6 +219,17 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         principal(request)
         return climate(hub, load_prefs(runtime.store))
 
+    @router.get("/api/homehub/dashboard/cameras/{entity_id}/controls")
+    async def get_camera_controls(entity_id: str, request: Request) -> Any:
+        """What the camera's device can do (camera_controls.py); the gateway filters it per viewer."""
+        from services.homehub import camera_controls
+
+        principal(request)
+        found = camera_controls.discover(hub, entity_id)
+        if found is None:
+            raise HTTPException(404, detail="Entity not found.")
+        return found
+
     @router.get("/api/homehub/dashboard/prefs")
     async def get_prefs(request: Request) -> Any:
         principal(request)

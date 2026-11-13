@@ -189,6 +189,59 @@ test.describe('home pages', () => {
     clean(run);
   });
 
+  test('Cameras: the camera’s own controls, beside or under the picture', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/cameras');
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    const viewer = page.getByRole('dialog', { name: 'Yard' });
+    const controls = viewer.getByTestId('camera-controls');
+    await expect(controls).toBeVisible();
+    // Quick actions: the gate (one opener: its state and what a press does), the siren, the floodlight.
+    await expect(controls.getByTestId('camera-action')).toHaveCount(3);
+    // Names drop the camera's own name: "Yard Gate" on the Yard camera is "Gate".
+    const gate = controls.getByRole('button', { name: 'Open Gate' });
+    await expect(gate).toContainText('Closed');
+    // Status: a detection now and a low battery stand out.
+    await expect(controls.getByTestId('camera-status').filter({ hasText: 'Motion' })).toContainText('Detected');
+    await expect(controls.getByTestId('camera-status').filter({ hasText: 'Battery' })).toContainText('15%');
+    await expectTapTargets(controls);
+    await expectNoHorizontalOverflow(page);
+    const longName = controls.getByText('Floodlight With A Long Name For Small Phones', { exact: true });
+    expect(await longName.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await snap(page, info, 'cameras-controls');
+
+    // Moving a gate asks first; Cancel sends nothing, Open sends the press.
+    await gate.click();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    expect(run.mocks.posts.filter((x) => x.path === '/execute/ha_service')).toEqual([]);
+    await gate.click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Open', exact: true }).click();
+    await expect.poll(() => run.mocks.posts.find((x) => x.path === '/execute/ha_service')?.body)
+      .toMatchObject({ entity_id: 'switch.yard_gate' });
+    // The siren asks too, and sounds for a set time.
+    await controls.getByRole('button', { name: 'Sound the siren' }).click();
+    await page.getByRole('button', { name: 'Sound siren' }).click();
+    await expect.poll(() => run.mocks.posts.filter((x) => x.path === '/execute/ha_service').at(-1)?.body)
+      .toMatchObject({ entity_id: 'siren.yard_siren' });
+
+    // Settings are folded away, for admins.
+    await controls.getByText('Camera settings').click();
+    await expect(controls.getByTestId('camera-setting')).toHaveCount(3);
+    await expect(controls.getByRole('slider', { name: 'Volume' })).toHaveValue('90');
+    await expectTapTargets(controls);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'cameras-controls-settings');
+    clean(run);
+  });
+
+  test('Cameras: a member gets the camera’s actions but not its settings', async ({ page }) => {
+    const run = await open(page, 'member', '/cameras');
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    const controls = page.getByRole('dialog', { name: 'Yard' }).getByTestId('camera-controls');
+    await expect(controls.getByTestId('camera-action')).toHaveCount(3);
+    await expect(controls.getByText('Camera settings')).toHaveCount(0);
+    clean(run);
+  });
+
   test('Cameras: a camera on its side is shown turned, and an admin can turn one', async ({ page }, info) => {
     const run = await open(page, 'admin', '/cameras');
     // The Porch camera is set to a quarter turn: its picture is turned and still inside its tile.

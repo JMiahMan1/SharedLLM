@@ -112,6 +112,33 @@ const CAMERAS = [
   { entity_id: 'camera.porch', name: 'Porch', area: 'Front', platform: 'reolink', state: 'idle', recordings: false, live: ['mjpeg'], stream: 'camera', battery: true, rotation: 90 },
 ];
 
+const cam = (entity_id: string, name: string, state: string, group: string, role: string, extra: Record<string, unknown> = {}) => ({
+  entity_id, name, state, group, role, domain: entity_id.split('.')[0], attributes: {}, device_class: null, unit: null,
+  icon: null, area_id: null, device_id: 'd-yard', last_changed: iso(-60), ...extra,
+});
+
+/** The Yard camera's device: a gate opener, a siren, detections, battery, and settings. */
+const YARD_CONTROLS = {
+  entity_id: 'camera.yard',
+  actions: [
+    cam('switch.yard_gate', 'Yard Gate', 'off', 'actions', 'opener',
+      { door: cam('binary_sensor.yard_gate_sensor', 'Yard Gate Sensor', 'off', 'status', 'door', { device_class: 'door' }) }),
+    cam('siren.yard_siren', 'Yard Siren', 'unknown', 'actions', 'siren'),
+    cam('light.yard_floodlight', 'Yard Floodlight With A Long Name For Small Phones', 'off', 'actions', 'light'),
+  ],
+  status: [
+    cam('binary_sensor.yard_motion', 'Yard Motion', 'on', 'status', 'motion', { device_class: 'motion' }),
+    cam('binary_sensor.yard_person', 'Yard Person', 'off', 'status', 'person'),
+    cam('sensor.yard_battery', 'Yard Battery', '15', 'status', 'battery', { device_class: 'battery', unit: '%' }),
+  ],
+  settings: [
+    cam('number.yard_volume', 'Yard Volume', '90', 'settings', 'number', { attributes: { min: 0, max: 100, step: 1 } }),
+    cam('select.yard_day_night_mode', 'Yard Day Night Mode', 'auto', 'settings', 'select',
+      { attributes: { options: ['auto', 'color', 'black_and_white'] } }),
+    cam('switch.yard_siren_on_event', 'Yard Siren On Event', 'off', 'settings', 'switch'),
+  ],
+};
+
 const RECORDING_DEFAULTS = {
   enabled: false, sensitivity: 60, pre_s: 3, post_s: 10, max_s: 120, fps: 4, retention_days: 14, schedule: null,
 };
@@ -308,6 +335,12 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
+    if (p === '/api/dashboard/cameras/camera.yard/controls') {
+      return json({ ...YARD_CONTROLS, settings: role === 'admin' ? YARD_CONTROLS.settings : [] });
+    }
+    if (/^\/api\/dashboard\/cameras\/[^/]+\/controls$/.test(p)) {
+      return json({ entity_id: decodeURIComponent(p.split('/')[4]), actions: [], status: [], settings: [] });
+    }
     const viewersOf = /^\/api\/admin\/cameras\/([^/]+)\/viewers$/.exec(p);
     if (viewersOf) {
       const id = decodeURIComponent(viewersOf[1]);

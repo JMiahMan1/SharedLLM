@@ -171,6 +171,36 @@ async def rooms(request: Request):
             "unassigned": [e for e in data.get("unassigned") or [] if _visible(perms, e)]}
 
 
+_CAMERA_ID = re.compile(r"^camera\.[a-z0-9_]+$")
+
+
+@router.get("/cameras/{entity_id}/controls")
+async def camera_controls(entity_id: str, request: Request):
+    """What the camera's device can do (homehub camera_controls.py), for the camera view.
+
+    Only for a camera the caller may watch (404 otherwise, as if it did not exist). Each action and status is
+    kept only when the caller may use that entity; the device's settings are for admins only.
+    """
+    if not _CAMERA_ID.match(entity_id or ""):
+        raise HTTPException(status_code=404, detail="Camera not found")
+    creds = await _caller(request)
+    perms = await _permissions(creds)
+    if not can_view(perms, entity_id):
+        raise HTTPException(status_code=404, detail="Camera not found")
+    data = await _hub_get(creds, f"/api/homehub/dashboard/cameras/{entity_id}/controls")
+
+    def usable(item: Any) -> bool:
+        door = item.get("door") if isinstance(item, dict) else None
+        return _visible(perms, item) and (door is None or _visible(perms, door))
+
+    return {
+        "entity_id": entity_id,
+        "actions": [i for i in data.get("actions") or [] if usable(i)],
+        "status": [i for i in data.get("status") or [] if usable(i)],
+        "settings": [i for i in data.get("settings") or [] if usable(i)] if creds.get("is_admin") else [],
+    }
+
+
 @router.get("/climate")
 async def climate(request: Request):
     """Thermostats with their area's sensors and the power circuits that belong with them."""
