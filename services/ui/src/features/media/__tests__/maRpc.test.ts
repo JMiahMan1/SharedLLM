@@ -191,8 +191,16 @@ describe('eventIsForPlayer', () => {
     expect(eventIsForPlayer('player_updated', { player_id: 'kitchen' }, 'kitchen', 'office')).toBe(false);
     expect(eventIsForPlayer('player_updated', {}, 'kitchen', 'kitchen')).toBe(true);
   });
-  it('lets through events that name nobody, and everything when no id is known', () => {
+  it('lets through events that are not about a player', () => {
     expect(eventIsForPlayer('providers_updated', {}, 'kitchen')).toBe(true);
-    expect(eventIsForPlayer('player_updated', { player_id: 'x' }, '')).toBe(true);
+    expect(eventIsForPlayer('providers_updated', {}, '')).toBe(true);
+  });
+  it("never takes another player's song: no id of our own, or an event that names no player", () => {
+    // The Office TV's "Spotify" session showed on a phone's player and lock screen.
+    expect(eventIsForPlayer('player_updated', { player_id: 'office_tv', current_media: { title: 'x' } }, '')).toBe(false);
+    expect(eventIsForPlayer('queue_updated', { queue_id: 'office_tv' }, '')).toBe(false);
+    expect(eventIsForPlayer('player_updated', { current_media: { title: 'x' } }, 'kitchen')).toBe(false);
+    expect(eventIsForPlayer('queue_time_updated', {}, 'kitchen')).toBe(false);
+    expect(eventIsForPlayer('player_updated', {}, '', 'office_tv')).toBe(false);
   });
 });

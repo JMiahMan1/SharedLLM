@@ -213,8 +213,12 @@ export class MaRpc {
 /**
  * Whether an MA event is about `playerId`. Strict equality on the id the
  * event names (BUG-52): `includes` both ways let "kitchen" match
- * "kitchen_2". MA's envelope `object_id` wins when present; events that name
- * no player apply to everyone.
+ * "kitchen_2". MA's envelope `object_id` wins when present. A player or
+ * queue event is this player's only when it names this player: with no id
+ * of our own yet, or an event that names no player, it is not. Letting those
+ * through made this phone's player (and its lock-screen controls) show
+ * another player's song: the Office TV's "Spotify" session appeared on a
+ * phone as if Jarvis were playing it. Other events apply to everyone.
  */
 export function eventIsForPlayer(
   event: string,
@@ -222,13 +226,12 @@ export function eventIsForPlayer(
   playerId: string,
   objectId?: string,
 ): boolean {
-  if (!playerId) return true;
+  const aboutAPlayer = event === 'player_updated' || event === 'queue_updated'
+    || event === 'queue_items_updated' || event === 'queue_time_updated';
+  if (!aboutAPlayer) return true;
+  if (!playerId) return false;
   if (objectId) return objectId === playerId;
-  const id = event === 'player_updated'
-    ? data.player_id ?? data.id
-    : event === 'queue_updated' || event === 'queue_items_updated' || event === 'queue_time_updated'
-      ? data.queue_id ?? data.player_id
-      : undefined;
-  if (id === undefined || id === null || id === '') return true;
+  const id = event === 'player_updated' ? data.player_id ?? data.id : data.queue_id ?? data.player_id;
+  if (id === undefined || id === null || id === '') return false;
   return String(id) === playerId;
 }
