@@ -207,6 +207,7 @@ def _delete_row(store: Any, table: str, column: str, key: str) -> None:
 
 def _drop_entities(runtime: Any, entity_ids: list[str]) -> None:
     hub, store = runtime.hub, runtime.store
+    mapping_changed = False
     for eid in entity_ids:
         ent = hub.entities.pop(eid, None)
         hub.states.remove(eid)
@@ -215,8 +216,12 @@ def _drop_entities(runtime: Any, entity_ids: list[str]) -> None:
         for uuid_, mapped in list(hub.entity_registry_ids.items()):
             if mapped == eid:
                 hub.entity_registry_ids.pop(uuid_, None)
+                mapping_changed = True
         if ent is not None:
             hub.bus.fire("entity_registry_updated", {"action": "remove", "entity_id": eid})
+    if mapping_changed and store is not None:
+        # The stored copy is what the next start loads; without this a removed entity's id came back.
+        store.set_kv("entity_registry_ids", hub.entity_registry_ids)
 
 
 def _drop_device(runtime: Any, dev: DeviceEntry) -> None:

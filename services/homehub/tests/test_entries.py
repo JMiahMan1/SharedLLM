@@ -141,6 +141,14 @@ async def test_removing_a_bridged_device_keeps_the_bridge(env):
     assert "hk1" in hub.config_entries and "d-br" in hub.devices and "d-l1" not in hub.devices
 
 
+async def test_a_removed_entitys_registry_id_is_gone_after_a_restart(env):
+    hub, store, rt = env
+    hub.entity_registry_ids = {"uuid-lamp": "light.lamp", "uuid-other": "light.kept"}
+    store.set_kv("entity_registry_ids", dict(hub.entity_registry_ids))
+    await entries.remove_device(rt, "d-l1")
+    assert store.get_kv("entity_registry_ids") == {"uuid-other": "light.kept"}
+
+
 async def test_removing_the_only_device_removes_its_entry(env):
     hub, _store, rt = env
     result = await entries.remove_device(rt, "d-tv")
