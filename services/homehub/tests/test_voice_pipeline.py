@@ -353,7 +353,14 @@ async def test_nobody_speaking_ends_with_no_speech(env, monkeypatch):
     await run_turn(drv, drv._client, [_silence(0.1)])
     err = await _error_of(drv)
     assert err["code"] == "stt-no-text-recognized" and "No speech" in err["message"]
+    # It says what arrived, so "too quiet" and "nothing came through" are told apart.
+    assert "0.1 s of audio arrived" in err["message"] and "loudest moment was 0 RMS" in err["message"]
     await drv.async_unload()
+
+
+def test_the_vad_reports_when_no_audio_arrived():
+    from services.homehub.voice_pipeline import EnergyVAD
+    assert EnergyVAD(1.0).heard() == "no audio arrived from the satellite"
 
 
 async def test_a_command_that_never_stops_is_cut_at_the_max_duration(env, monkeypatch):

@@ -51,6 +51,13 @@ class FakeMC:
     def register_status_listener(self, listener):
         self.listeners.append(listener)
 
+    load_response: tuple[bool, dict | None] = (True, {"type": "MEDIA_STATUS"})
+
+    def play_media(self, *a, callback_function=None, **kw):
+        self.calls.append(("play_media", a, kw))
+        if callback_function is not None:
+            callback_function(*self.load_response)
+
     def __getattr__(self, name):
         def rec(*a, **kw):
             self.calls.append((name, a, kw))
@@ -198,6 +205,31 @@ async def test_commands(setup):
         await drv.async_call(ent, "media_player", "select_source", {"source": "x"})
     with pytest.raises(DeviceUnavailable):
         await drv.async_call(hub.entities["media_player.master_bedroom_tv"], "media_player", "media_play", {})
+
+
+async def test_a_url_is_loaded_into_the_media_receiver_not_the_app_on_screen(setup):
+    hub, drv, made = setup
+    await drv.async_setup()
+    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    await settle()
+    cc = made[OFFICE]
+    cc.status.app_id = "CC32E753"  # another app's receiver holds the session
+    await drv.async_call(hub.entities["media_player.office_tv_chrome"], "media_player", "play_media", {
+        "media_content_id": "http://jarvis/announce.wav", "media_content_type": "music"})
+    assert cc.calls[-1] == ("start_app", "CC1AD845")
+    assert cc.media_controller.calls[-1][0] == "play_media"
+
+
+@pytest.mark.parametrize("response", [(False, None), (True, {"type": "LOAD_FAILED", "reason": "x"})])
+async def test_a_load_the_tv_refuses_is_an_error_not_a_success(setup, response):
+    hub, drv, made = setup
+    await drv.async_setup()
+    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    await settle()
+    made[OFFICE].media_controller.load_response = response
+    with pytest.raises(DeviceUnavailable):
+        await drv.async_call(hub.entities["media_player.office_tv_chrome"], "media_player", "play_media", {
+            "media_content_id": "http://jarvis/announce.wav", "media_content_type": "music"})
 
 
 async def test_cast_app_quick_play(setup, monkeypatch):

@@ -211,10 +211,20 @@ class EnergyVAD:
         self._quiet = 0
         self.in_speech = False
         self.speech_frames = 0
+        self.frames = 0
+        self.peak_rms = 0.0
 
     @property
     def floor(self) -> float:
         return statistics.median(self._quiet_levels)
+
+    def heard(self) -> str:
+        """What arrived, for a "no speech" error: none at all and too quiet need different fixes."""
+        if not self.frames:
+            return "no audio arrived from the satellite"
+        return (f"{self.frames * self.FRAME_MS / 1000:.1f} s of audio arrived; the loudest moment was "
+                f"{self.peak_rms:.0f} RMS, speech needs {max(self.min_rms, self.floor * self.ratio):.0f} "
+                f"(HOMEHUB_VOICE_VAD_MIN_RMS, or the satellite's volume multiplier)")
 
     @staticmethod
     def rms(frame: bytes) -> float:
@@ -233,6 +243,8 @@ class EnergyVAD:
         while len(self._buf) >= self.frame_bytes:
             frame, self._buf = self._buf[: self.frame_bytes], self._buf[self.frame_bytes:]
             level = self.rms(frame)
+            self.frames += 1
+            self.peak_rms = max(self.peak_rms, level)
             speech = level >= max(self.min_rms, self.floor * self.ratio)
             if not speech:
                 self._quiet_levels.append(level)
@@ -901,7 +913,8 @@ class SatelliteVoice:
             remaining = started + limit - now
             if remaining <= 0:
                 if not vad.speech_frames:
-                    raise PipelineError("stt-no-text-recognized", f"No speech was heard within {limit:g} s")
+                    raise PipelineError("stt-no-text-recognized",
+                                        f"No speech was heard within {limit:g} s: {vad.heard()}")
                 run.ended_by = "max_duration"
                 break
             try:
@@ -923,7 +936,7 @@ class SatelliteVoice:
             if run.ended_by == "vad":
                 break
         if not vad.speech_frames and run.ended_by != "max_duration":
-            raise PipelineError("stt-no-text-recognized", "No speech was heard")
+            raise PipelineError("stt-no-text-recognized", f"No speech was heard: {vad.heard()}")
         run.speech_ms = vad.speech_frames * EnergyVAD.FRAME_MS
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 

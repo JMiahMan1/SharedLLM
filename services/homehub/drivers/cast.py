@@ -28,12 +28,15 @@ from uuid import UUID
 import pychromecast
 import zeroconf
 from pychromecast.discovery import CastBrowser, SimpleCastListener
+from pychromecast.response_handler import WaitResponse
 
 from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
 from services.homehub.drivers.media_common import F, clamp01, clean, mime_for
 
 MEDIA_RECEIVER_APP_ID = "CC1AD845"
 COMMAND_TIMEOUT_S = 10.0
+# Loading media may first switch the TV from another app (Spotify, YouTube) to the media receiver.
+LOAD_TIMEOUT_S = 30.0
 
 
 class _Listener:
@@ -245,9 +248,9 @@ class CastDriver(Driver):
             raise DeviceUnavailable(f"{entity.entity_id} is not connected over Cast")
         return cc
 
-    async def _run(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    async def _run(self, fn: Any, *args: Any, _timeout: float = COMMAND_TIMEOUT_S, **kwargs: Any) -> Any:
         try:
-            return await asyncio.wait_for(asyncio.to_thread(fn, *args, **kwargs), COMMAND_TIMEOUT_S + 5)
+            return await asyncio.wait_for(asyncio.to_thread(fn, *args, **kwargs), _timeout + 5)
         except (TimeoutError, pychromecast.error.PyChromecastError) as exc:
             raise DeviceUnavailable(f"Cast command failed: {type(exc).__name__}: {exc}") from exc
 
@@ -318,7 +321,27 @@ class CastDriver(Driver):
         kwargs["stream_type"] = extra.get("stream_type", "BUFFERED")
         if data.get("enqueue") in ("add", "next"):
             kwargs["enqueue"] = True
-        await self._run(cc.media_controller.play_media, media_id, mime_for(mtype, media_id), **kwargs)
+        await self._run(_load_and_wait, cc, media_id, mime_for(mtype, media_id), kwargs, _timeout=LOAD_TIMEOUT_S)
+
+
+def _load_and_wait(cc: Any, media_id: str, mime: str, kwargs: dict[str, Any]) -> None:
+    """Load media and wait for the TV to accept it.
+
+    pychromecast's play_media only sends the request (after launching the media receiver when another
+    app holds the screen) and returns, so a TV that refused or never answered looked like success.
+    """
+    if cc.app_id != MEDIA_RECEIVER_APP_ID:
+        # Another app's receiver (Spotify, YouTube) takes a LOAD as its own and refuses a plain URL
+        # with INVALID_REQUEST, so switch to the media receiver first, as HA's cast integration does.
+        cc.start_app(MEDIA_RECEIVER_APP_ID, timeout=LOAD_TIMEOUT_S)
+    waiter = WaitResponse(LOAD_TIMEOUT_S, f"load {media_id}")
+    cc.media_controller.play_media(media_id, mime, **kwargs, callback_function=waiter.callback)
+    waiter.wait_response()
+    response = getattr(waiter, "response", None) or {}
+    if isinstance(response, dict) and str(response.get("type") or "").upper() in (
+            "LOAD_FAILED", "LOAD_CANCELLED", "INVALID_REQUEST", "ERROR"):
+        reason = response.get("reason") or response.get("detailedErrorCode") or response["type"]
+        raise pychromecast.error.RequestFailed(f"load {media_id} ({reason})")
 
 
 def _ha_content_type(ms: Any) -> str | None:
