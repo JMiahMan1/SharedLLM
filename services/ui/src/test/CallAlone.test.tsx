@@ -55,7 +55,9 @@ class FakeSocket {
   readyState = 0;
   closed = false;
   sent: string[] = [];
-  constructor(public url: string) {
+  url: string;
+  constructor(url: string) {
+    this.url = url;
     FakeSocket.last = this;
     setTimeout(() => {
       this.readyState = 1;
