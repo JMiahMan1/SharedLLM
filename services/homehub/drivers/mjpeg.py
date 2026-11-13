@@ -78,7 +78,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
 
-from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, ServiceNotFound
+from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, EntityEntry, ServiceNotFound
 
 #: HA rotates camera access tokens this often and accepts the newest two.
 TOKEN_ROTATE_S = 300.0
@@ -165,6 +165,10 @@ def extract_jpeg(buf: bytes) -> tuple[bytes | None, int]:
     return buf[start:end + 2], end + 2
 
 
+#: How long the reachability check waits for the camera's server to take a connection.
+REACH_TIMEOUT_S = 3.0
+
+
 class MjpegDriver(Driver):
     platform = "mjpeg"
     #: Nothing to read from the camera; the poll only rotates the picture token.
@@ -172,6 +176,8 @@ class MjpegDriver(Driver):
 
     def __init__(self, hub, entry) -> None:
         super().__init__(hub, entry)
+        #: Whether the camera's server answered the last check (setup and every poll).
+        self.reachable = True
         self.tokens = CameraTokens()
         self._session: aiohttp.ClientSession | None = None
 
@@ -209,16 +215,39 @@ class MjpegDriver(Driver):
     async def async_setup(self) -> None:
         if not self.mjpeg_url:
             raise RuntimeError("mjpeg entry has no mjpeg_url")
+        self.reachable = await self._answers()
         for ent in self.entities:
             if ent.domain == "camera":
                 self.tokens.rotate(ent.entity_id)
                 self._publish(ent)
 
     async def async_poll(self) -> None:
+        reachable = await self._answers()
+        changed, self.reachable = reachable != self.reachable, reachable
         for ent in self.entities:
-            if ent.domain == "camera" and self.tokens.due(ent.entity_id):
+            if ent.domain != "camera":
+                continue
+            if self.tokens.due(ent.entity_id):
                 self.tokens.rotate(ent.entity_id)
+                changed = True
+            if changed:
                 self._publish(ent)
+
+    async def _answers(self) -> bool:
+        """Whether the camera's server takes a connection. Only a TCP connect: a request would hold the one
+        stream a small camera (an ESP32) serves, and leave the family's live view without a picture."""
+        parts = urlsplit(self.mjpeg_url)
+        if not parts.hostname:
+            return False
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        try:
+            _reader, writer = await asyncio.wait_for(asyncio.open_connection(parts.hostname, port), REACH_TIMEOUT_S)
+        except (OSError, TimeoutError):
+            return False
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return True
 
     async def async_unload(self) -> None:
         if self._session is not None:
@@ -226,7 +255,9 @@ class MjpegDriver(Driver):
             self._session = None
 
     def _publish(self, ent: EntityEntry) -> None:
-        self.publish(ent, "idle", camera_attributes(ent.entity_id, self.tokens.current(ent.entity_id)))
+        # A camera that stopped answering is shown offline, never "idle" (that would say it is fine).
+        state = "idle" if self.reachable else UNAVAILABLE
+        self.publish(ent, state, camera_attributes(ent.entity_id, self.tokens.current(ent.entity_id)))
 
     def access_tokens(self, entity_id: str) -> list[str]:
         return self.tokens.valid(entity_id)

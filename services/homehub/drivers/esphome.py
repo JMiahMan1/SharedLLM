@@ -43,6 +43,7 @@ import inspect
 import json
 import math
 import re
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -102,6 +103,11 @@ COMMAND_SETTLE = 1.0  # how long a command waits for the node to push the new st
 SERVICE_TIMEOUT = 5.0
 #: A camera frame (ESP32 cameras send one in well under a second when idle).
 CAMERA_TIMEOUT_S = 10.0
+#: An ESPHome camera streams for about 5 s after each request, so a live view asks again before then.
+CAMERA_STREAM_RENEW_S = 4.0
+#: Frames waiting for a slow viewer; older ones are dropped so the picture stays live.
+CAMERA_STREAM_QUEUE = 2
+_MJPEG_BOUNDARY = "esphomeframe"
 SATELLITE_ANNOUNCE_TIMEOUT_S = 120.0  # a long announcement plays to the end before the node answers
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 
@@ -250,6 +256,8 @@ class ESPHomeDriver(Driver):
         self._info_for: dict[str, Any] = {}                    # entity_id -> EntityInfo
         self._last: dict[tuple[int, int], Any] = {}            # last EntityState per key
         self._waiters: dict[tuple[int, int], list[asyncio.Future]] = {}
+        #: Live views of a camera: each gets every frame the node sends while it streams.
+        self._frame_queues: dict[tuple[int, int], set[asyncio.Queue]] = {}
         self._camera_tokens = CameraTokens()
         self._services: list[tuple[str, str]] = []
         self._ha_subs: dict[str, set[str | None]] = {}        # HA entity_id -> attributes the node wants
@@ -481,6 +489,14 @@ class ESPHomeDriver(Driver):
         for fut in self._waiters.pop(k, []):
             if not fut.done():
                 fut.set_result(state)
+        for queue in self._frame_queues.get(k, ()):
+            frame = getattr(state, "data", None)
+            if not frame:
+                continue
+            if queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()  # a slow viewer gets the newest picture, not a backlog
+            queue.put_nowait(bytes(frame))
         entity, info = self._entity_for.get(k), self._infos.get(k)
         if entity is None or info is None:
             return
@@ -707,8 +723,47 @@ class ESPHomeDriver(Driver):
                 waiting.remove(fut)
         return bytes(state.data)
 
+    async def async_open_mjpeg_stream(self, entity: EntityEntry) -> tuple[str, AsyncIterator[bytes]]:
+        """Live video over the node's own (encrypted) API: the camera streams frames for a few seconds
+        after each request, asked again while someone watches. No camera web page is involved, so the
+        node needs none (an ESP32 camera's web page has no login). The caller must exhaust or close it."""
+        key = next((k for k, e in self._entity_for.items() if e.entity_id == entity.entity_id), None)
+        if key is None or not isinstance(self._infos.get(key), CameraInfo):
+            raise ServiceNotFound(f"{entity.entity_id} is not a camera on ESPHome node {self.device_name}")
+        if self._client is None:
+            raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
+        queue: asyncio.Queue = asyncio.Queue(maxsize=CAMERA_STREAM_QUEUE)
+        self._frame_queues.setdefault(key, set()).add(queue)
+        loop = asyncio.get_running_loop()
+
+        async def body() -> AsyncIterator[bytes]:
+            asked = 0.0
+            try:
+                while True:
+                    if loop.time() - asked >= CAMERA_STREAM_RENEW_S:
+                        if self._client is None:
+                            return  # the node went away: end the stream, the viewer retries
+                        self._client.request_image_stream()
+                        asked = loop.time()
+                    try:
+                        frame = await asyncio.wait_for(queue.get(), CAMERA_TIMEOUT_S)
+                    except TimeoutError:
+                        self.log.info("ESPHome %s: %s sent no frame; ending its live view",
+                                      self.device_name, entity.entity_id)
+                        return
+                    yield (f"--{_MJPEG_BOUNDARY}\r\nContent-Type: image/jpeg\r\n"
+                           f"Content-Length: {len(frame)}\r\n\r\n").encode() + frame + b"\r\n"
+            finally:
+                watching = self._frame_queues.get(key)
+                if watching is not None:
+                    watching.discard(queue)
+                    if not watching:
+                        self._frame_queues.pop(key, None)
+
+        return f"multipart/x-mixed-replace; boundary={_MJPEG_BOUNDARY}", body()
+
     async def async_camera_stream_url(self, entity: EntityEntry) -> str | None:
-        return None  # no stream URL; the API serves frames from async_camera_image
+        return None  # no stream URL; live video comes from async_open_mjpeg_stream over the API
 
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "assist_satellite" and domain == "assist_satellite":

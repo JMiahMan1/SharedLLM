@@ -83,9 +83,14 @@ def test_extract_jpeg_without_length_and_incomplete():
     assert mjpeg.extract_jpeg(b"--b\r\n\r\n\xff\xd8partial")[0] is None
 
 
-async def test_mjpeg_publishes_idle_with_a_token_picture():
+async def answering(*_a, **_k):
+    return True
+
+
+async def test_mjpeg_publishes_idle_with_a_token_picture(monkeypatch):
     hub, entry = mjpeg_hub()
     drv = mjpeg.MjpegDriver(hub, entry)
+    monkeypatch.setattr(drv, "_answers", answering)
     await drv.async_setup()
     st = hub.states.get("camera.garage")
     assert st.state == "idle"
@@ -94,6 +99,54 @@ async def test_mjpeg_publishes_idle_with_a_token_picture():
     assert drv.access_tokens("camera.garage") == [token]
     drv.tokens.rotate("camera.garage")
     assert len(drv.access_tokens("camera.garage")) == 2  # the newest two stay valid
+
+
+async def test_a_camera_that_stops_answering_is_offline_not_idle(monkeypatch):
+    hub, entry = mjpeg_hub()
+    drv = mjpeg.MjpegDriver(hub, entry)
+    up = {"now": True}
+
+    async def answers():
+        return up["now"]
+
+    monkeypatch.setattr(drv, "_answers", answers)
+    await drv.async_setup()
+    assert hub.states.get("camera.garage").state == "idle"
+    up["now"] = False
+    await drv.async_poll()
+    assert hub.states.get("camera.garage").state == "unavailable"
+    up["now"] = True
+    await drv.async_poll()
+    assert hub.states.get("camera.garage").state == "idle"
+
+
+async def test_the_reachability_check_only_connects_and_never_asks_for_the_stream():
+    """A request would hold the one stream an ESP32 serves; a TCP connect does not."""
+    import asyncio
+
+    got: list[bytes] = []
+
+    async def serve(reader, writer):
+        got.append(await reader.read(100))
+        writer.close()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    hub, entry = mjpeg_hub(mjpeg_url=f"http://127.0.0.1:{port}/")
+    drv = mjpeg.MjpegDriver(hub, entry)
+    try:
+        assert await drv._answers() is True
+        await asyncio.sleep(0.05)
+        assert got == [b""]  # connected and left without sending a request
+    finally:
+        server.close()
+        await server.wait_closed()
+    server2 = await asyncio.start_server(serve, "127.0.0.1", 0)
+    closed_port = server2.sockets[0].getsockname()[1]
+    server2.close()
+    await server2.wait_closed()
+    drv2 = mjpeg.MjpegDriver(*mjpeg_hub(mjpeg_url=f"http://127.0.0.1:{closed_port}/"))
+    assert await drv2._answers() is False
 
 
 async def test_mjpeg_still_image_then_stream_fallback():

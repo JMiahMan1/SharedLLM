@@ -496,6 +496,60 @@ async def test_camera_snapshot_comes_from_a_single_image_request(monkeypatch):
     await drv.async_unload()
 
 
+async def test_live_video_streams_over_the_api_and_stops_when_the_viewer_leaves(monkeypatch):
+    """No camera web page: frames come over the node's own encrypted API, re-asked while someone watches."""
+    from aioesphomeapi import CameraInfo, CameraState
+
+    monkeypatch.setattr(sys.modules[__name__], "INFOS",
+                        [*INFOS, CameraInfo(object_id="garage_camera", key=50, name="Garage Camera")])
+    monkeypatch.setattr(esphome, "CAMERA_STREAM_RENEW_S", 0.0)  # ask again before every frame
+    asks: list[str] = []
+
+    class Streamer(FakeClient):
+        def request_image_stream(self):
+            asks.append("stream")
+            n = len(asks)
+            asyncio.get_running_loop().call_soon(
+                self.on_state, CameraState(key=50, data=b"\xff\xd8frame%d\xff\xd9" % n))
+
+    hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
+                                                               "unique_id": f"{MAC}/0/camera/Garage Camera"}])
+    drv = ESPHomeDriver(hub, entry)
+    drv._make_client = lambda host: Streamer()  # type: ignore[method-assign]
+    await drv.async_setup()
+    ctype, body = await drv.async_open_mjpeg_stream(hub.entities["camera.garage_door_garage_camera"])
+    assert ctype.startswith("multipart/x-mixed-replace; boundary=")
+    parts = [await body.__anext__() for _ in range(3)]
+    assert b"Content-Type: image/jpeg" in parts[0] and b"\xff\xd8frame1\xff\xd9" in parts[0]
+    assert b"frame3" in parts[2] and len(asks) == 3
+    assert drv._frame_queues  # watching
+    await body.aclose()
+    assert not drv._frame_queues  # the viewer left: nothing keeps the camera streaming
+    await drv.async_unload()
+
+
+async def test_live_video_ends_when_the_camera_goes_quiet(monkeypatch):
+    from aioesphomeapi import CameraInfo
+
+    monkeypatch.setattr(sys.modules[__name__], "INFOS",
+                        [*INFOS, CameraInfo(object_id="garage_camera", key=50, name="Garage Camera")])
+    monkeypatch.setattr(esphome, "CAMERA_TIMEOUT_S", 0.05)
+
+    class Quiet(FakeClient):
+        def request_image_stream(self):
+            pass
+
+    hub, entry = make_hub("esphome", dict(DATA), [*ENTITIES, {"entity_id": "camera.garage_door_garage_camera",
+                                                               "unique_id": f"{MAC}/0/camera/Garage Camera"}])
+    drv = ESPHomeDriver(hub, entry)
+    drv._make_client = lambda host: Quiet()  # type: ignore[method-assign]
+    await drv.async_setup()
+    _ctype, body = await drv.async_open_mjpeg_stream(hub.entities["camera.garage_door_garage_camera"])
+    assert [chunk async for chunk in body] == []
+    assert not drv._frame_queues
+    await drv.async_unload()
+
+
 async def test_camera_snapshot_times_out_cleanly(monkeypatch):
     from aioesphomeapi import CameraInfo
 
