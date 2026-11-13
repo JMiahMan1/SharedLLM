@@ -107,16 +107,6 @@ def test_a_lower_sensitivity_needs_more_of_the_picture_to_change():
         assert any([d.feed(at(x)) for x in (10, 30, 50, 70)]) is expected
 
 
-def test_whole_pictures_come_out_of_an_mjpeg_stream_however_it_is_cut():
-    a, b = jpeg(), jpeg(square_at=10)
-    stream = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + a + b"\r\n--frame\r\n\r\n" + b + b"\r\n"
-    s = rec.JpegSplitter()
-    out = []
-    for i in range(0, len(stream), 777):
-        out += s.feed(stream[i:i + 777])
-    assert out == [a, b]
-
-
 # -- clips ------------------------------------------------------------------------
 
 def test_a_clip_name_carries_its_start_and_length():
@@ -481,3 +471,17 @@ def test_main_reads_the_household_account_once_from_the_environment(monkeypatch)
                                                 "password": "value-NEXTCLOUD_PASS"}
     monkeypatch.delenv("NEXTCLOUD_PASS")
     assert rec.household_account_from_env() is None
+
+
+async def test_a_camera_is_watched_by_single_pictures_never_its_stream(tmp_path):
+    """Holding an ESP32's one stream would leave the live view without a picture."""
+    hub, drv = recording_hub(tmp_path, "https://cloud.example.test")
+    cam = hub.drivers["esp1"]
+    cam.async_open_mjpeg_stream = lambda entity: pytest.fail("the recorder opened the camera's stream")
+    w = rec.CameraWatcher(drv, "camera.garage", {**rec.DEFAULTS, "fps": 10})
+    got = []
+    async for frame in w.frames():
+        got.append(frame)
+        if len(got) == 3:
+            break
+    assert len(got) == 3 and cam.i == 3

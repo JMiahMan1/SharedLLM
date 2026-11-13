@@ -96,6 +96,9 @@ seconds kept before and after motion, longest clip, pictures a second, a
 schedule, and how many days clips are kept. Set it up on the Cameras page
 ("Motion recording", admins).
 
+- **Pictures** are single snapshots, `fps` a second, never the camera's MJPEG
+  stream: an ESP32's web server serves one stream at a time, and holding it
+  would leave the live view without a picture.
 - **Motion** is found in the picture: each frame, shrunk to 96x72 grey, is
   compared with the previous frame and with a slowly updated background; a
   pixel moves when it differs from both (one alone flickers, or leaves a

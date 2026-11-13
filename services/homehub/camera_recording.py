@@ -5,10 +5,12 @@ camera (an ESPHome ESP32 camera, an MJPEG camera such as a 3D printer's) has
 nowhere to keep anything, so the hub records for it, with the settings a
 Reolink camera has:
 
-- it watches the camera's own pictures (the camera contract in
-  ``drivers/mjpeg.py``: the camera's MJPEG stream when its driver relays one,
-  single pictures otherwise) and spots motion by comparing each frame with a
-  slowly updated background (:class:`MotionDetector`);
+- it takes single pictures from the camera (``async_camera_image``, the camera
+  contract in ``drivers/mjpeg.py``), ``fps`` a second, and spots motion by
+  comparing each with the one before and a slowly updated background
+  (:class:`MotionDetector`). Never the camera's MJPEG stream: small camera
+  servers (an ESP32's) often serve one stream at a time, and holding it would
+  leave the family's live view without a picture;
 - a clip starts with the seconds before the motion (``pre_s``), runs while
   motion goes on, and ends ``post_s`` after it stops (or at ``max_s``);
 - the frames, with their real timing, become an H.264 MP4 (ffmpeg), so every
@@ -253,33 +255,6 @@ class MotionDetector:
         return self.hits >= MOTION_FRAMES
 
 
-class JpegSplitter:
-    """Whole JPEG pictures out of an MJPEG stream's bytes, whatever its multipart framing."""
-
-    MAX_BUFFER = 8 * 1024 * 1024
-
-    def __init__(self) -> None:
-        self.buf = bytearray()
-
-    def feed(self, chunk: bytes) -> list[bytes]:
-        self.buf += chunk
-        out: list[bytes] = []
-        while True:
-            start = self.buf.find(b"\xff\xd8")
-            if start < 0:
-                del self.buf[:-1]  # keep a trailing 0xff: it may start the next marker
-                break
-            end = self.buf.find(b"\xff\xd9", start + 2)
-            if end < 0:
-                del self.buf[:start]
-                if len(self.buf) > self.MAX_BUFFER:
-                    self.buf.clear()  # not a picture stream, or a broken one: do not grow without end
-                break
-            out.append(bytes(self.buf[start:end + 2]))
-            del self.buf[:end + 2]
-        return out
-
-
 # -- clips ----------------------------------------------------------------------
 
 def clip_name(start: datetime, seconds: float, trigger: str = "motion") -> str:
@@ -505,22 +480,9 @@ class CameraWatcher:
                 await asyncio.sleep(wait)
 
     async def frames(self) -> AsyncIterator[bytes]:
+        """Single pictures, ``fps`` a second (see the module docstring for why never the stream)."""
         ent, driver = self.recorder.camera(self.entity_id)
         gap = 1.0 / self.settings["fps"]
-        if hasattr(driver, "async_open_mjpeg_stream"):
-            _ctype, chunks = await driver.async_open_mjpeg_stream(ent)
-            splitter, last = JpegSplitter(), 0.0
-            try:
-                async for chunk in chunks:
-                    for jpeg in splitter.feed(chunk):
-                        now = time.monotonic()
-                        if now - last >= gap * 0.9:  # the stream may run faster than we watch and record
-                            last = now
-                            yield jpeg
-            finally:
-                with contextlib.suppress(Exception):
-                    await chunks.aclose()  # type: ignore[attr-defined]
-            return
         while True:
             began = time.monotonic()
             yield await driver.async_camera_image(ent)
