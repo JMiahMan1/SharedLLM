@@ -218,6 +218,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const profile = PROFILES[role];
   // Camera turns an admin sets, so the list read after a rotate says the new one.
   const rotations = new Map<string, number>();
+  // Device locks set from a camera's Who can watch, so the next read shows them.
+  const locks = new Map<string, string[]>();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -238,6 +240,13 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: profile.username });
       if (p === '/api/admin/cameras/recording') {
         return json({ ...MOTION_RECORDING, configured: true, enabled: true, state: 'loaded', account: 'household' });
+      }
+      const lock = /^\/api\/entity-protection\/([^/]+)$/.exec(p);
+      if (method === 'PUT' && lock) {
+        const want = body as { protected: boolean; permitted_usernames: string[] };
+        const id = decodeURIComponent(lock[1]);
+        if (want.protected) locks.set(id, want.permitted_usernames); else locks.delete(id);
+        return json({ entity_id: id, permitted_usernames: want.protected ? want.permitted_usernames : [] });
       }
       const entityPatch = /^\/api\/homehub\/entities\/([^/]+)$/.exec(p);
       if (method === 'PATCH' && entityPatch && typeof (body as { rotation?: unknown })?.rotation === 'number') {
@@ -299,6 +308,19 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
+    const viewersOf = /^\/api\/admin\/cameras\/([^/]+)\/viewers$/.exec(p);
+    if (viewersOf) {
+      const id = decodeURIComponent(viewersOf[1]);
+      const permit = locks.get(id);
+      // Without a lock, the made-up roles decide: Robin's role covers every device, Sky has none assigned.
+      const watches = (name: string) => (permit ? permit.includes(name) : name === 'robin');
+      return json({ entity_id: id, limited: Boolean(permit), permitted: permit ?? [], people: [
+        { username: 'parent', name: 'Parent', is_admin: true, always: true, can_watch: true },
+        { username: 'robin', name: 'Robin', is_admin: false, always: false, can_watch: watches('robin') },
+        { username: 'sky', name: 'Sky With A Very Long Display Name For Small Phones', is_admin: false, always: false,
+          can_watch: watches('sky') },
+      ] });
+    }
     if (p === '/api/homehub/discovered') return json({ ...DISCOVERED, devices: [...DISCOVERED.devices, MOVED_FINDING] });
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     if (p.startsWith('/api/homehub/hardware/')) return json(HARDWARE_DETAIL);

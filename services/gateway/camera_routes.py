@@ -10,6 +10,11 @@ Who sees what follows the device permissions every other HA surface uses
 not listed, and its picture, stream and recordings answer 404 as if it did not
 exist.
 
+Admins also get ``GET /api/admin/cameras/{id}/viewers``: who in the family can
+watch a camera now, and whether it is limited to a list. Changing who may watch
+goes through Identity's entity protection (``PUT /api/entity-protection/{id}``),
+the same lock every device uses, so there is one set of rules.
+
 The list and recordings index take the API key. The pictures, the live stream
 and the recordings themselves are loaded by ``<img>`` and ``<video>``, which
 cannot send a header, so they live under ``/api/media/`` and take the signed
@@ -225,3 +230,56 @@ async def play_recording(entity_id: str, request: Request, file: str = ""):
     headers["X-Accel-Buffering"] = "no"
     return StreamingResponse(_relay(resp, session, request), status_code=resp.status,
                              media_type=headers.pop("Content-Type", "video/mp4"), headers=headers)
+
+
+# -- who can watch (admins) ------------------------------------------------------------
+
+async def _identity_json(path: str, auth: str | None) -> Any:
+    """GET an Identity admin route as the caller (Identity checks that they may)."""
+    from services.config import IDENTITY_SVC
+    from services.gateway.main import shared_http_client
+
+    try:
+        async with shared_http_client() as client, client.get(
+            f"{IDENTITY_SVC}{path}", headers={"Authorization": auth} if auth else {}, timeout=_JSON_TIMEOUT,
+        ) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=resp.status if resp.status in (401, 403) else 502,
+                                    detail="Identity did not list the family and device locks")
+            return await resp.json()
+    except (TimeoutError, aiohttp.ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Identity did not answer") from exc
+
+
+@router.get("/api/admin/cameras/{entity_id}/viewers")
+async def camera_viewers(entity_id: str, request: Request):
+    """Who can watch this camera now: everyone in the family, with whether they can, and whether the camera
+    is limited to a list (a device lock) or follows each person's device access.
+
+    ``always`` people (admins, and roles that may use locked devices) can watch whatever the list says.
+    """
+    from services.gateway import main as gateway
+
+    await gateway._require_admin(request)
+    if not _CAMERA_ID.match(entity_id or ""):
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    auth = request.headers.get("Authorization")
+    users = await _identity_json("/api/users", auth)
+    locks = await _identity_json("/api/entity-protection", auth)
+    lock = next((x for x in locks if isinstance(x, dict) and x.get("entity_id") == entity_id), None)
+    people = []
+    for u in users if isinstance(users, list) else []:
+        name = str(u.get("username") or "")
+        if not name or u.get("is_system_default"):
+            continue  # the household's shared account is not a person to choose
+        admin = bool(u.get("is_admin"))
+        people.append({
+            "username": name,
+            "name": u.get("display_name") or name,
+            "is_admin": admin,
+            "always": admin or "devices.use_locked" in (u.get("permissions") or []),
+            "can_watch": can_view(await load_entity_permissions(name, admin), entity_id),
+        })
+    people.sort(key=lambda p: (not p["is_admin"], str(p["name"]).lower()))
+    return {"entity_id": entity_id, "limited": lock is not None,
+            "permitted": list(lock.get("permitted_usernames") or []) if lock else [], "people": people}

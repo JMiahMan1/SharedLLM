@@ -98,6 +98,7 @@ test.describe('home pages', () => {
     await page.getByRole('button', { name: /Open Yard/ }).click();
     await expect(page.getByRole('dialog', { name: 'Yard' })).toBeVisible();
     await expect(page.getByTestId('camera-rotate')).toHaveCount(0);
+    await expect(page.getByText('Who can watch', { exact: true })).toHaveCount(0);
     clean(run);
   });
 
@@ -156,6 +157,35 @@ test.describe('home pages', () => {
     const saved = viewer.locator('video');
     await expect(saved).toHaveAttribute('controls', '');
     await expect(saved).not.toHaveAttribute('style', /rotate/);
+    clean(run);
+  });
+
+  test('Cameras: an admin chooses who can watch a camera', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/cameras');
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    const viewer = page.getByRole('dialog', { name: 'Yard' });
+    await viewer.getByText('Who can watch', { exact: true }).click();
+    const who = viewer.getByTestId('who-can-watch');
+    await expect(who).toContainText('2 of 3 people can watch. Following each person’s device access');
+    await expect(who.getByRole('switch', { name: 'Parent can watch Yard' })).toBeDisabled();
+    const sky = who.getByRole('switch', { name: /^Sky .* can watch Yard$/ });
+    await expect(sky).toHaveAttribute('aria-checked', 'false');
+    await sky.click();
+    await expect.poll(() => run.mocks.posts.find((x) => x.path === '/api/entity-protection/camera.yard')?.body)
+      .toMatchObject({ protected: true, permitted_usernames: ['robin', 'sky'] });
+    await expect(who).toContainText('3 of 3 people can watch. Only the people switched on');
+    await expect(sky).toHaveAttribute('aria-checked', 'true');
+    await expectTapTargets(who);
+    await expectNoHorizontalOverflow(page);
+    // A long name wraps rather than being cut off.
+    const longName = who.getByText('Sky With A Very Long Display Name For Small Phones', { exact: true });
+    expect(await longName.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await viewer.getByTestId('who-can-watch').scrollIntoViewIfNeeded();
+    await snap(page, info, 'cameras-who-can-watch');
+    await who.getByRole('button', { name: 'Use each person’s device access again' }).click();
+    await expect.poll(() => run.mocks.posts.filter((x) => x.path === '/api/entity-protection/camera.yard').at(-1)?.body)
+      .toMatchObject({ protected: false });
+    await expect(who).toContainText('2 of 3 people can watch. Following');
     clean(run);
   });
 

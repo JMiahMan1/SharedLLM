@@ -190,3 +190,69 @@ def test_recording_play_of_an_unknown_file_is_404(client, upstream, perms):
     resp = client.get("/api/media/cameras/camera.backyard_fluent/recordings/play", params={"file": "x.mp4"})
     assert resp.status_code == 404
     assert client.get("/api/media/cameras/camera.backyard_fluent/recordings/play").status_code == 400
+
+
+# -- who can watch (admins) ------------------------------------------------------------
+
+@pytest.fixture
+def family(monkeypatch):
+    """Identity's family list and device locks, as an admin would read them."""
+    data = {
+        "/api/users": [
+            {"username": "default", "display_name": "Home", "is_admin": True, "is_system_default": True},
+            {"username": "parent", "display_name": "Parent", "is_admin": True, "permissions": []},
+            {"username": "teen", "display_name": "Teen", "is_admin": False, "permissions": []},
+            {"username": "sitter", "display_name": "Sitter", "is_admin": False, "permissions": ["devices.use_locked"]},
+            {"username": "kid", "display_name": "Kid", "is_admin": False, "permissions": []},
+        ],
+        "/api/entity-protection": [],
+    }
+    seen = []
+
+    async def identity_json(path, auth):
+        seen.append((path, auth))
+        return data[path]
+
+    monkeypatch.setattr(camera_routes, "_identity_json", identity_json)
+    return data, seen
+
+
+def test_who_can_watch_lists_the_family_with_what_each_can_do(client, perms, family):
+    data, seen = family
+    perms["assigned"] = frozenset({"camera.backyard_fluent"})
+    r = client.get("/api/admin/cameras/camera.backyard_fluent/viewers", headers={"Authorization": "Bearer admin-key"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["limited"] is False and body["permitted"] == []
+    people = {p["username"]: p for p in body["people"]}
+    assert "default" not in people  # the shared household account is not a person to choose
+    assert people["parent"]["always"] and people["parent"]["can_watch"]
+    assert people["sitter"]["always"] and not people["sitter"]["is_admin"]
+    assert people["teen"]["can_watch"] and not people["teen"]["always"]
+    assert next(p["username"] for p in body["people"]) == "parent"  # admins first
+    assert all(auth == "Bearer admin-key" for _p, auth in seen)  # Identity checks the caller itself
+    data["/api/entity-protection"] = [{"entity_id": "camera.backyard_fluent", "permitted_usernames": ["kid"]}]
+    body = client.get("/api/admin/cameras/camera.backyard_fluent/viewers",
+                      headers={"Authorization": "Bearer admin-key"}).json()
+    assert body["limited"] is True and body["permitted"] == ["kid"]
+
+
+def test_who_can_watch_is_for_admins_only(client, perms, family, monkeypatch):
+    from fastapi import HTTPException
+
+    async def admin_only(request):
+        if request.headers.get("Authorization") != "Bearer admin-key":
+            raise HTTPException(status_code=403, detail="Admin only")
+        return "parent"
+
+    monkeypatch.setattr(gateway_main, "_require_admin", admin_only)
+    r = client.get("/api/admin/cameras/camera.backyard_fluent/viewers", headers={"Authorization": "Bearer kid"})
+    assert r.status_code == 403
+    assert family[1] == []  # nothing was read from Identity
+    ok = client.get("/api/admin/cameras/camera.backyard_fluent/viewers", headers={"Authorization": "Bearer admin-key"})
+    assert ok.status_code == 200
+
+
+def test_who_can_watch_refuses_what_is_not_a_camera(client, perms, family):
+    r = client.get("/api/admin/cameras/light.porch/viewers", headers={"Authorization": "Bearer admin-key"})
+    assert r.status_code == 404

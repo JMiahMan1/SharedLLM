@@ -44,7 +44,7 @@ function CameraCard({ camera, value, limits, onChange }: {
   return (
     <li className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3" data-testid="recording-camera">
       <div className="flex min-h-11 items-center gap-3 text-sm text-white">
-        <span className="min-w-0 flex-1 truncate">{camera.name}</span>
+        <span className="min-w-0 flex-1 break-words">{camera.name}</span>
         <Toggle checked={value.enabled && !blocked} disabled={blocked} ariaLabel={`Record motion on ${camera.name}`}
           onChange={(on) => onChange({ enabled: on })} />
       </div>
@@ -172,7 +172,7 @@ export default function MotionRecordingSettings() {
             <button type="button" aria-pressed={form.account === 'household'}
               onClick={() => setForm({ ...form, account: 'household' })} className={choice(form.account === 'household')}>
               <span className="block text-sm">Jarvis’s Nextcloud</span>
-              <span className="block truncate text-[11px] text-slate-400">
+              <span className="block break-all text-[11px] text-slate-400">
                 {s.household_account.username} at {s.household_account.url}
               </span>
             </button>

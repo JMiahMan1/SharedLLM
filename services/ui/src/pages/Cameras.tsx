@@ -16,6 +16,7 @@ import { browserCaps, playbackModes } from '../lib/cameraLive';
 import RealtimePlayer from '../components/cameras/RealtimePlayer';
 import LiveVideoSettings from '../components/cameras/LiveVideoSettings';
 import MotionRecordingSettings from '../components/cameras/MotionRecordingSettings';
+import WhoCanWatch from '../components/cameras/WhoCanWatch';
 import { updateEntity } from '../lib/hardware';
 import {
   addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
@@ -421,6 +422,7 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
   const isAdmin = Boolean(useAuth().user?.is_admin);
   const queryClient = useQueryClient();
   const rotation = cameraRotation(camera);
+  const [whoOpen, setWhoOpen] = useState(false);
   const rotate = useMutation({
     mutationFn: (next: CameraRotation) => updateEntity(camera.entity_id, { rotation: next }),
     onSuccess: (_out, next) => {
@@ -498,6 +500,16 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
           </div>
         )}
         {tab === 'live' ? <LiveView camera={camera} token={token} /> : <RecordingsView camera={camera} token={token} />}
+        {isAdmin && (
+          <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setWhoOpen(e.currentTarget.open)}>
+            <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
+              <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+              Who can watch
+            </summary>
+            {/* Read only once opened: most visits to a camera are to watch it. */}
+            {whoOpen && <div className="pt-3"><WhoCanWatch entityId={camera.entity_id} cameraName={displayName(camera)} /></div>}
+          </details>
+        )}
       </div>
     </div>
   );
