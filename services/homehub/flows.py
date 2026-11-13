@@ -425,6 +425,21 @@ async def adopt_roku(runtime: Any, finding: dict[str, Any], name: str | None, ar
 _ESPHOME_DOMAINS = {"text_sensor": "sensor"}
 
 
+def _builder_key(device_name: Any) -> tuple[str | None, str | None]:
+    """The node's key from the ESPHome builder's config (read-only), or ``(None, None)``."""
+    from services.homehub import esphome_configs
+
+    try:
+        found = esphome_configs.key_for(str(device_name or ""))
+    except esphome_configs.AmbiguousConfig as exc:
+        raise FlowError(f"{exc}; rename one before adding the node", 409) from exc
+    if found is None:
+        return None, None
+    key, file = found
+    log.info("ESPHome node %s: using the key from the builder's %s", device_name, file)
+    return key, file
+
+
 async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                         user_input: dict[str, Any]) -> dict[str, Any]:
     from aioesphomeapi import (
@@ -445,13 +460,21 @@ async def adopt_esphome(runtime: Any, finding: dict[str, Any], name: str | None,
     mac_hint = norm_mac(finding.get("mac"))
     if mac_hint and _existing_entry(hub, "esphome", ":".join(mac_hint[i:i + 2] for i in range(0, 12, 2))):
         raise FlowError("This ESPHome node is already set up", 409)
+    label = finding.get("name") or host
+    from_builder = None  # the builder config the key came from, when the admin typed none
+    if not psk:
+        psk, from_builder = _builder_key(props.get("device_name"))
     if props.get("encrypted") and not psk:
-        raise NeedsInput([NOISE_PSK], f"{finding.get('name') or host} is encrypted: enter its key.")
+        raise NeedsInput([NOISE_PSK], f"{label} is encrypted: enter its key.")
     try:
         device_info, infos = await esphome_probe(host, port, psk, password)
     except RequiresEncryptionAPIError as exc:
-        raise NeedsInput([NOISE_PSK], f"{finding.get('name') or host} is encrypted: enter its key.") from exc
+        raise NeedsInput([NOISE_PSK], f"{label} is encrypted: enter its key.") from exc
     except InvalidEncryptionKeyAPIError as exc:
+        if from_builder:
+            raise NeedsInput([NOISE_PSK], f"Enter {label}'s encryption key.",
+                             f"The key in the ESPHome builder's {from_builder} was not accepted: the node was "
+                             "flashed with another one.") from exc
         raise NeedsInput([NOISE_PSK], "Enter the node's encryption key.", "That key was not accepted.") from exc
     except EncryptionPlaintextAPIError as exc:
         raise FlowError("This node is not encrypted; add it without a key.", 400) from exc

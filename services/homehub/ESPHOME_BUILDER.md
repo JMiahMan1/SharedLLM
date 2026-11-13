@@ -79,3 +79,24 @@ docker compose up -d esphome
 
 Then add the link (above). The nodes then compile and flash from the builder
 as they did from HA.
+
+## Node keys and the config report
+
+The hub mounts the builder's folder **read-only** (`./data/esphome:/esphome:ro`,
+`HOMEHUB_ESPHOME_CONFIG=/esphome`, read once at startup like every setting):
+
+- **Adding an encrypted node** needs no pasted key when the builder has a
+  current (not `archive/`) config with that node's `esphome: name:`. Its
+  `api: encryption: key:` is used, through `secrets.yaml` when it is a
+  `!secret`. A key the node refuses still asks for one, naming the config it
+  came from; two current configs with the same name are refused, not guessed
+  between.
+- **`GET /hub/esphome-builder`** includes `configs`: for each ESPHome device,
+  whether the builder has its current config, only an archived one, or none,
+  and which configs match no device. It says only whether a key exists.
+- Keys are never logged or returned, and a YAML parse error logs only the file
+  and line, since the line could hold a key.
+
+Write credentials as `!secret` references in node YAML, never as literals;
+`secrets.yaml` stays mode 600. A Kauf bulb's web page can flash it, so its
+config gives `web_server` a login (`auth: type: digest`).

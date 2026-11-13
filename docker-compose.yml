@@ -879,6 +879,8 @@ services:
       # Bluetooth (services/homehub/README.md, "Bluetooth"): the host adapter by address or hciN; empty = off.
       - HOMEHUB_BLUETOOTH_ADAPTER=${HOMEHUB_BLUETOOTH_ADAPTER:-}
       - HOMEHUB_BLUETOOTH_SCAN_MODE=${HOMEHUB_BLUETOOTH_SCAN_MODE:-auto}
+      # The ESPHome builder's node configs (read-only), for node keys and the config report.
+      - HOMEHUB_ESPHOME_CONFIG=/esphome
     # BlueZ over the system bus. SELinux (Fedora) denies a container_t process the bus socket, so the
     # hub runs unconfined by SELinux; it already shares the host network.
     security_opt:
@@ -889,6 +891,8 @@ services:
       - ./data/homehub:/data
       # A copy of the retired HA config to import from; read-only.
       - ./data/homehub-import:/import:ro
+      # The ESPHome builder's config folder, read-only (never written by the hub).
+      - ./data/esphome:/esphome:ro
 
   matter-server:
     # Matter controller for homehub (services/homehub/MATTER.md). A prebuilt

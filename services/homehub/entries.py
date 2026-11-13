@@ -420,5 +420,8 @@ def esphome_builder(runtime: Any) -> dict[str, Any]:
                   if e.domain == "esphome_builder" and not e.disabled_by), None)
     if entry is None:
         return {"configured": False}
+    from services.homehub import esphome_configs
+
     return {"configured": True, "entry_id": entry.entry_id, "title": entry.title, "url": entry.data.get("url"),
-            "state": entry.state, "reason": entry.reason, "login": bool(entry.data.get("username"))}
+            "state": entry.state, "reason": entry.reason, "login": bool(entry.data.get("username")),
+            "configs": esphome_configs.report(runtime.hub)}
