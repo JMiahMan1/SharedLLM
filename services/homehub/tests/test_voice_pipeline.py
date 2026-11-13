@@ -345,16 +345,30 @@ async def test_an_unconfigured_hub_says_which_setting_is_missing(env, monkeypatc
     await drv.async_unload()
 
 
-async def test_nobody_speaking_ends_with_no_speech(env, monkeypatch):
+async def test_nobody_speaking_ends_with_no_words_and_says_what_arrived(env, monkeypatch):
     monkeypatch.setenv("HOMEHUB_VOICE_NO_SPEECH_S", "0.2")
-    Backends().install(monkeypatch)
+    Backends(stt=FakeSTT(text="")).install(monkeypatch)
     _hub, drv = make_driver()
     await drv.async_setup()
     await run_turn(drv, drv._client, [_silence(0.1)])
     err = await _error_of(drv)
-    assert err["code"] == "stt-no-text-recognized" and "No speech" in err["message"]
+    assert err["code"] == "stt-no-text-recognized" and "No words" in err["message"]
     # It says what arrived, so "too quiet" and "nothing came through" are told apart.
     assert "0.1 s of audio arrived" in err["message"] and "loudest moment was 0 RMS" in err["message"]
+    await drv.async_unload()
+
+
+async def test_speech_too_quiet_for_the_gate_is_still_transcribed(env, monkeypatch):
+    # A voice across the room reached the hub at ~46 RMS, under the gate; the words were still there.
+    monkeypatch.setenv("HOMEHUB_VOICE_NO_SPEECH_S", "0.3")
+    monkeypatch.setenv("HOMEHUB_VOICE_VAD_MIN_RMS", "250")
+    b = Backends(stt=FakeSTT(text="what time is it"))
+    b.install(monkeypatch)
+    _hub, drv = make_driver()
+    await drv.async_setup()
+    await run_turn(drv, drv._client, [_tone(0.2, amplitude=60)])
+    assert E.VOICE_ASSISTANT_STT_END in drv._client.kinds()
+    assert E.VOICE_ASSISTANT_ERROR not in drv._client.kinds()
     await drv.async_unload()
 
 

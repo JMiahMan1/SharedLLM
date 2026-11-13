@@ -135,7 +135,7 @@ is an `ERROR` with a code and a plain message, then `RUN_END`. The `assist_satel
 | `HOMEHUB_VOICE_TTS_VOICE` | the hub's TTS voice | Kokoro voice for replies |
 | `HOMEHUB_VOICE_MAX_S`, `HOMEHUB_VOICE_NO_SPEECH_S` | 15, 8 | Longest command; how long to wait for speech |
 | `HOMEHUB_VOICE_STT_TIMEOUT_S`, `HOMEHUB_VOICE_JARVIS_TIMEOUT_S` | 30, 90 | Per-stage limits |
-| `HOMEHUB_VOICE_VAD_MIN_RMS` | 250 | Quietest 16-bit RMS that counts as speech |
+| `HOMEHUB_VOICE_VAD_MIN_RMS` | 40 | Quietest 16-bit RMS that counts as speech (the room's noise floor x 2.5 usually decides; a run that heard nothing this loud still asks speech to text) |
 | `HOMEHUB_VOICE_CONTINUE` | `1` | `0` never continues a conversation |
 
 A missing setting fails the run with an `ERROR` naming it. Per satellite, entry option `voice_pipeline: false`

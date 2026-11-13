@@ -134,7 +134,7 @@ class VoiceSettings:
     stt_timeout: float = 30.0
     jarvis_timeout: float = 90.0
     continue_conversation: bool = True
-    vad_min_rms: float = 250.0
+    vad_min_rms: float = 40.0
     #: Proves to the gateway that the room context (voice_context) comes from the hub.
     internal_secret: str = field(default="", repr=False)
 
@@ -151,7 +151,7 @@ class VoiceSettings:
             jarvis_timeout=_float_env("HOMEHUB_VOICE_JARVIS_TIMEOUT_S", 90.0),
             continue_conversation=os.getenv("HOMEHUB_VOICE_CONTINUE", "1").strip().lower()
             not in ("0", "false", "no", "off"),
-            vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 250.0),
+            vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 40.0),
             internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
         )
 
@@ -479,6 +479,7 @@ class Run:
     error: dict[str, str] | None = None
     continue_conversation: bool = False
     speech_ms: int | None = None
+    heard: str | None = None  # what arrived when the loudness gate heard no speech
     run_end_sent: bool = False
     aborted: bool = False
 
@@ -811,7 +812,8 @@ class SatelliteVoice:
                                     f"{settings.stt_timeout:g} s") from exc
             run.mark("transcribed")
             if not text:
-                raise PipelineError("stt-no-text-recognized", "No words were recognised")
+                raise PipelineError("stt-no-text-recognized", "No words were recognised"
+                                    + (f": {run.heard}" if run.heard else ""))
             self.log.debug("voice satellite %s run %s heard: %s", self.name, run.id, text)
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_END, {"text": text})
 
@@ -912,10 +914,9 @@ class SatelliteVoice:
             limit = settings.max_seconds if vad.speech_frames else settings.no_speech_seconds
             remaining = started + limit - now
             if remaining <= 0:
-                if not vad.speech_frames:
-                    raise PipelineError("stt-no-text-recognized",
-                                        f"No speech was heard within {limit:g} s: {vad.heard()}")
-                run.ended_by = "max_duration"
+                # Quiet speech (far from the microphone) can stay under the loudness gate, so a run that
+                # received audio still asks speech to text; only no words at all is "no speech".
+                run.ended_by = "max_duration" if vad.speech_frames else "no_speech_timeout"
                 break
             try:
                 # asyncio.timeout, not wait_for: on 3.11 wait_for drops a cancel that lands with a chunk.
@@ -935,8 +936,10 @@ class SatelliteVoice:
                     run.ended_by = "vad"
             if run.ended_by == "vad":
                 break
-        if not vad.speech_frames and run.ended_by != "max_duration":
-            raise PipelineError("stt-no-text-recognized", f"No speech was heard: {vad.heard()}")
+        if not vad.speech_frames:
+            if not vad.frames:
+                raise PipelineError("stt-no-text-recognized", f"No speech was heard: {vad.heard()}")
+            run.heard = vad.heard()
         run.speech_ms = vad.speech_frames * EnergyVAD.FRAME_MS
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 
