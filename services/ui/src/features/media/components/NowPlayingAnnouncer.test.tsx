@@ -48,6 +48,7 @@ function remote(over: Partial<RemotePlayer> = {}): RemotePlayer {
     groupMembers: [],
     iconKind: 'speaker',
     maPlayerId: null,
+    maOwnQueue: false,
     appName: null,
     queueVersion: 0,
     ...over,

@@ -109,3 +109,29 @@ async def test_status_non_ma_player_has_no_ma_player_id(monkeypatch):
     player = result.detail["all_players"][0]
     assert player["ma_player_id"] is None
     assert player["icon_kind"] == "speaker"
+
+
+async def test_a_music_assistant_wrapper_says_whether_it_plays_its_own_queue(monkeypatch):
+    """Only then may the screens show the Cast device's song as the wrapper's: the Office TV
+    box's Spotify app reported sessions that never played there."""
+    def wrapper(eid, source, app_id=None):
+        attrs = {"friendly_name": "TV", "mass_player_id": "media_player.tv_cast", "mass_player_type": "player",
+                 "source": source}
+        if app_id:
+            attrs["app_id"] = app_id
+        return {"entity_id": eid, "state": "playing", "attributes": attrs}
+
+    async def fake_get_states(ha_url, ha_token):
+        return [wrapper("media_player.tv_a", "Music Assistant Queue"),
+                wrapper("media_player.tv_b", "Spotify", app_id="music_assistant"),
+                wrapper("media_player.tv_c", "External Source"),
+                wrapper("media_player.tv_d", "Spotify", app_id="spotify"),
+                TV_STATE]
+
+    monkeypatch.setattr(media_status.ha_client, "get_states", fake_get_states)
+    players = {p["entity_id"]: p for p in (await media_status.handle_media_status(_request())).detail["all_players"]}
+    assert players["media_player.tv_a"]["ma_own_queue"] is True
+    assert players["media_player.tv_b"]["ma_own_queue"] is True
+    assert players["media_player.tv_c"]["ma_own_queue"] is False
+    assert players["media_player.tv_d"]["ma_own_queue"] is False
+    assert players["media_player.office_tv"]["ma_own_queue"] is False

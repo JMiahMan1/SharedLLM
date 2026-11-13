@@ -110,6 +110,7 @@ function blankPlayer(id: OutputId): RemotePlayer {
     groupMembers: [],
     iconKind: 'speaker',
     maPlayerId: null,
+    maOwnQueue: false,
     appName: null,
     queueVersion: 0,
   };
@@ -130,6 +131,7 @@ interface PlayerPatch {
   groupMembers?: string[];
   iconKind?: 'tv' | 'speaker';
   maPlayerId?: string | null;
+  maOwnQueue?: boolean;
   appName?: string | null;
 }
 
@@ -149,6 +151,7 @@ function applyPatch(prev: RemotePlayer, patch: PlayerPatch, now: number, volumeL
   if (patch.groupMembers !== undefined) next.groupMembers = patch.groupMembers;
   if (patch.iconKind !== undefined) next.iconKind = patch.iconKind;
   if (patch.maPlayerId !== undefined) next.maPlayerId = patch.maPlayerId;
+  if (patch.maOwnQueue !== undefined) next.maOwnQueue = patch.maOwnQueue;
   if (patch.appName !== undefined) next.appName = patch.appName;
 
   const trackChanged = patch.item !== undefined && !sameTrack(prev.item, patch.item);
@@ -230,6 +233,7 @@ function patchFromStatus(row: MediaStatus, now: number): PlayerPatch {
     groupMembers: row.group_members ?? [],
     iconKind: row.icon_kind === 'tv' ? 'tv' : 'speaker',
     maPlayerId: row.ma_player_id ?? null,
+    maOwnQueue: row.ma_own_queue === true,
     appName: row.app_name ?? null,
   };
 }

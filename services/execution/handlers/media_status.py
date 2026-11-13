@@ -82,6 +82,11 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         else:
             icon_kind = "tv" if attrs.get("device_class") == "tv" or tv_kind in _TV_ICON_KINDS else "speaker"
         ma_id = ma_player_id(attrs, entity_id) if is_ma else None
+        # Playing its own queue, not wrapping something else the device plays ("External
+        # Source", or another app such as a TV's Spotify): only then may the screens show
+        # the song of the Cast player it plays through as this player's.
+        ma_own_queue = bool(is_ma and (attrs.get("app_id") == "music_assistant"
+                                       or "music assistant" in str(source or "").lower()))
 
         # Keep: MA players, anything actively rendering, anything with now-playing
         # metadata, and live selectable targets. Drop dead non-MA entities only.
@@ -112,6 +117,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "app_name": app_name,
             "icon_kind": icon_kind,
             "ma_player_id": ma_id,
+            "ma_own_queue": ma_own_queue,
             "area_id": idx.area_of(entity_id) if idx is not None else None,
         }
 

@@ -186,6 +186,8 @@ export interface RemotePlayer {
   groupMembers: string[]
   iconKind: 'tv' | 'speaker'
   maPlayerId: string | null
+  /** A Music Assistant player playing its own queue (not wrapping another app's playback). */
+  maOwnQueue: boolean
   appName: string | null
   /** Bumped on every queue change, so queue views know to refetch. */
   queueVersion: number
@@ -228,6 +230,8 @@ export interface MediaStatus {
   media_content_id?: string
   media_type?: string
   ma_player_id?: string | null
+  /** True while a Music Assistant player plays its own queue. */
+  ma_own_queue?: boolean | null
   icon_kind?: string | null
   app_name?: string | null
   /** Players grouped with this one (HA entity ids or MA player ids). */
