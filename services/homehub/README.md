@@ -127,6 +127,8 @@ Each stage sends HA's event sequence (`RUN_START`, `STT_START`, `STT_VAD_START`/
 is an `ERROR` with a code and a plain message, then `RUN_END`. The `assist_satellite` entity shows
 `idle`/`listening`/`processing`/`responding`, and is unavailable while the node is offline.
 
+These are read once when the hub starts; change one and restart the hub.
+
 | Setting | Default | What |
 |---|---|---|
 | `HOMEHUB_VOICE_STT` | required | Wyoming speech to text, `host:port` |
@@ -137,6 +139,7 @@ is an `ERROR` with a code and a plain message, then `RUN_END`. The `assist_satel
 | `HOMEHUB_VOICE_STT_TIMEOUT_S`, `HOMEHUB_VOICE_JARVIS_TIMEOUT_S` | 30, 90 | Per-stage limits |
 | `HOMEHUB_VOICE_VAD_MIN_RMS` | 40 | Quietest 16-bit RMS that counts as speech (the room's noise floor x 2.5 usually decides; a run that heard nothing this loud still asks speech to text) |
 | `HOMEHUB_VOICE_CONTINUE` | `1` | `0` never continues a conversation |
+| `HOMEHUB_VOICE_INPUT_GAIN` | `auto` | Boost for the audio sent to speech to text. `auto` lifts a quiet or far voice toward a clear level (up to 16x, never clipping); a number is a fixed multiplier. The loudness gate always measures the unboosted audio. Each run's `levels` (peak, noise floor, speech threshold, boost used) show what to tune |
 
 A missing setting fails the run with an `ERROR` naming it. Per satellite, entry option `voice_pipeline: false`
 turns the pipeline off (`PATCH /hub/voice/{entry_id}` `{"enabled": false}` sets it on the live connection).

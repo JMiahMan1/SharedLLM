@@ -123,7 +123,7 @@ def _float_env(name: str, default: float) -> float:
 
 @dataclass
 class VoiceSettings:
-    """The hub's voice settings, read from the environment for every run (a change needs no restart)."""
+    """The hub's voice settings, read from the environment once when the hub starts (``current_settings()``)."""
 
     stt: str = ""
     jarvis_url: str = ""
@@ -135,6 +135,8 @@ class VoiceSettings:
     jarvis_timeout: float = 90.0
     continue_conversation: bool = True
     vad_min_rms: float = 40.0
+    #: A fixed boost for the audio sent to speech to text, or None for automatic (``InputGain``).
+    input_gain: float | None = None
     #: Proves to the gateway that the room context (voice_context) comes from the hub.
     internal_secret: str = field(default="", repr=False)
 
@@ -152,6 +154,7 @@ class VoiceSettings:
             continue_conversation=os.getenv("HOMEHUB_VOICE_CONTINUE", "1").strip().lower()
             not in ("0", "false", "no", "off"),
             vad_min_rms=_float_env("HOMEHUB_VOICE_VAD_MIN_RMS", 40.0),
+            input_gain=_gain_env("HOMEHUB_VOICE_INPUT_GAIN"),
             internal_secret=os.getenv("INTERNAL_SECRET", "").strip(),
         )
 
@@ -176,7 +179,34 @@ class VoiceSettings:
                 "no_speech_seconds": self.no_speech_seconds, "stt_timeout_s": self.stt_timeout,
                 "jarvis_timeout_s": self.jarvis_timeout, "continue_conversation": self.continue_conversation,
                 "vad_min_rms": self.vad_min_rms,
+                "input_gain": "auto" if self.input_gain is None else self.input_gain,
                 "problems": self.problems()}
+
+
+def _gain_env(name: str) -> float | None:
+    raw = (os.getenv(name) or "").strip().lower()
+    if raw in ("", "auto"):
+        return None
+    return _float_env(name, 1.0)
+
+
+def _settings_at_startup() -> VoiceSettings | HubError:
+    try:
+        return VoiceSettings.from_env()
+    except HubError as exc:
+        log.error("voice settings are invalid, so satellites cannot run: %s", exc)
+        return exc
+
+
+# Settings come from the environment once, when the hub starts; changing one means a restart.
+_STARTUP_SETTINGS = _settings_at_startup()
+
+
+def current_settings() -> VoiceSettings:
+    """The voice settings the hub started with; an invalid one raises the error it was found with."""
+    if isinstance(_STARTUP_SETTINGS, HubError):
+        raise HubError(str(_STARTUP_SETTINGS))
+    return _STARTUP_SETTINGS
 
 
 def _parse_address(value: str) -> tuple[str, int] | None:
@@ -225,6 +255,9 @@ class EnergyVAD:
         return (f"{self.frames * self.FRAME_MS / 1000:.1f} s of audio arrived; the loudest moment was "
                 f"{self.peak_rms:.0f} RMS, speech needs {max(self.min_rms, self.floor * self.ratio):.0f} "
                 f"(HOMEHUB_VOICE_VAD_MIN_RMS, or the satellite's volume multiplier)")
+
+    def threshold(self) -> float:
+        return max(self.min_rms, self.floor * self.ratio)
 
     @staticmethod
     def rms(frame: bytes) -> float:
@@ -416,6 +449,54 @@ def _gain(pcm: bytes, multiplier: float) -> bytes:
     return samples.tobytes()
 
 
+class InputGain:
+    """Brings quiet microphone audio up to a level speech to text hears well, without clipping.
+
+    A far or soft voice reaches the hub at a few dozen RMS (about -57 dBFS), where Whisper misses
+    words. Automatic: the gain aims the loudest recent audio at ``TARGET_RMS``; it drops at once when
+    the audio gets louder and rises back slowly (``RELEASE_PER_S``), never past ``MAX_GAIN`` and never
+    so far that a sample clips. Fixed (``HOMEHUB_VOICE_INPUT_GAIN``): that multiplier, clipped.
+    Only speech to text gets the boost: the loudness gate compares speech with the room's noise, and
+    a gain that moves during speech would squash that ratio.
+    """
+
+    TARGET_RMS = 3000.0  # about -20 dBFS, a clear voice close to a microphone
+    MAX_GAIN = 16.0  # +24 dB; more mostly lifts the room's hiss
+    RELEASE_PER_S = 0.7  # the level estimate falls ~30% a second once the audio gets quieter
+    PEAK_LIMIT = 32000
+
+    def __init__(self, fixed: float | None) -> None:
+        self.fixed = fixed
+        self.level = 0.0
+        self.gain = fixed if fixed is not None else 1.0
+        self.max_applied = self.gain
+
+    def apply(self, pcm: bytes) -> bytes:
+        samples = array.array("h")
+        samples.frombytes(pcm[: len(pcm) - len(pcm) % 2])
+        if sys.byteorder == "big":
+            samples.byteswap()
+        if not samples:
+            return pcm
+        peak = max(abs(s) for s in samples) or 1
+        if self.fixed is not None:
+            gain = self.fixed
+        else:
+            rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+            self.level = max(rms, self.level * self.RELEASE_PER_S ** (len(samples) / RATE))
+            gain = max(1.0, min(self.MAX_GAIN, self.TARGET_RMS / max(self.level, 1.0)))
+            gain = max(1.0, min(gain, self.PEAK_LIMIT / peak))
+        self.gain = gain
+        self.max_applied = max(self.max_applied, gain)
+        if abs(gain - 1.0) < 1e-3:
+            return pcm
+        for i, s in enumerate(samples):
+            samples[i] = max(-32768, min(32767, int(s * gain)))
+        if sys.byteorder == "big":
+            samples.byteswap()
+        return samples.tobytes()
+
+
 def to_satellite_pcm(wav_bytes: bytes) -> bytes:
     """A WAV clip as 16 kHz mono 16-bit PCM, what a node's speaker takes over the API."""
     with wave.open(io.BytesIO(wav_bytes)) as w:
@@ -480,6 +561,7 @@ class Run:
     continue_conversation: bool = False
     speech_ms: int | None = None
     heard: str | None = None  # what arrived when the loudness gate heard no speech
+    levels: dict[str, float] | None = None  # microphone levels, to tune the gate and the boost from
     run_end_sent: bool = False
     aborted: bool = False
 
@@ -501,7 +583,7 @@ class Run:
         return {"id": self.id, "started_at": self.started_at, "wake_word": self.wake_word,
                 "outcome": self.outcome, "ended_by": self.ended_by, "error": self.error,
                 "continue_conversation": self.continue_conversation, "speech_ms": self.speech_ms,
-                "timings_ms": self.timings_ms()}
+                "heard": self.heard, "levels": self.levels, "timings_ms": self.timings_ms()}
 
 
 def feature_names(flags: int) -> list[str]:
@@ -789,7 +871,7 @@ class SatelliteVoice:
                 raise PipelineError("wake-engine-missing", "The hub has no wake word engine; set the satellite's "
                                     "wake word engine location to On device")
             try:
-                settings = VoiceSettings.from_env()
+                settings = current_settings()
             except HubError as exc:
                 raise PipelineError("pipeline-not-configured", str(exc)) from exc
             problems = settings.problems()
@@ -909,6 +991,7 @@ class SatelliteVoice:
         loop = asyncio.get_running_loop()
         started = loop.time()
         gain = float(getattr(self._audio_settings, "volume_multiplier", 1.0) or 1.0)
+        boost = InputGain(settings.input_gain)
         while True:
             now = loop.time()
             limit = settings.max_seconds if vad.speech_frames else settings.no_speech_seconds
@@ -928,7 +1011,7 @@ class SatelliteVoice:
                 run.ended_by = "satellite"
                 break
             chunk = _gain(chunk, gain)
-            await stt.send(chunk)
+            await stt.send(boost.apply(chunk))
             for edge in vad.process(chunk):
                 if edge == "start":
                     self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_START, {})
@@ -941,6 +1024,8 @@ class SatelliteVoice:
                 raise PipelineError("stt-no-text-recognized", f"No speech was heard: {vad.heard()}")
             run.heard = vad.heard()
         run.speech_ms = vad.speech_frames * EnergyVAD.FRAME_MS
+        run.levels = {"peak_rms": round(vad.peak_rms), "noise_floor": round(vad.floor),
+                      "speech_threshold": round(vad.threshold()), "input_gain": round(boost.max_applied, 1)}
         self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_STT_VAD_END, {})
 
     def _context(self, run: Run) -> dict[str, Any]:
@@ -992,7 +1077,8 @@ class SatelliteVoice:
             raise HubError(f"the voice pipeline is turned off for {self.name} (voice_pipeline: false)")
         if not self.subscribed or self.client is None:
             raise DeviceUnavailable(f"ESPHome {self.name} is not connected")
-        problems = VoiceSettings.from_env().problems()
+        voice = current_settings()
+        problems = voice.problems()
         if problems:
             raise HubError("start_conversation cannot hear the answer: " + "; ".join(problems))
         message = str(data.get("start_message") or "")
@@ -1000,7 +1086,7 @@ class SatelliteVoice:
         if not media_id:
             if not message:
                 raise HubError("assist_satellite.start_conversation needs a start_message or a start_media_id")
-            media_id = await BACKENDS.speak(message, VoiceSettings.from_env().tts_voice)
+            media_id = await BACKENDS.speak(message, voice.tts_voice)
         extra: dict[str, Any] = {"started_by": "start_conversation"}
         if message:
             extra["asked"] = message
@@ -1053,5 +1139,5 @@ def satellites(hub: Any) -> list[dict[str, Any]]:
     return sorted(out, key=lambda s: s["title"] or "")
 
 
-__all__ = ["BACKENDS", "Backends", "EnergyVAD", "PipelineError", "SatelliteVoice", "VoiceSettings",
-           "WyomingSTT", "ask_jarvis", "chat_reply_text", "satellites", "to_satellite_pcm"]
+__all__ = ["BACKENDS", "Backends", "EnergyVAD", "InputGain", "PipelineError", "SatelliteVoice", "VoiceSettings",
+           "WyomingSTT", "ask_jarvis", "chat_reply_text", "current_settings", "satellites", "to_satellite_pcm"]

@@ -23,6 +23,8 @@ from services.homehub.drivers.esphome import ESPHomeDriver
 from services.homehub.tests.conftest import make_hub
 from services.homehub.voice_pipeline import EnergyVAD, PipelineError, VoiceSettings
 
+REAL_CURRENT_SETTINGS = voice_pipeline.current_settings
+
 E = VoiceAssistantEventType
 F = VoiceAssistantFeature
 MAC = "02:00:00:00:0A:0B"
@@ -173,6 +175,12 @@ def _wav(rate: int, seconds: float) -> bytes:
         w.setframerate(rate)
         w.writeframes(_tone(seconds, rate=rate))
     return buf.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def settings_from_the_test(monkeypatch):
+    """The hub reads its voice settings once at startup; each test sets its own, so read them live here."""
+    monkeypatch.setattr(voice_pipeline, "current_settings", VoiceSettings.from_env)
 
 
 @pytest.fixture
@@ -369,6 +377,66 @@ async def test_speech_too_quiet_for_the_gate_is_still_transcribed(env, monkeypat
     await run_turn(drv, drv._client, [_tone(0.2, amplitude=60)])
     assert E.VOICE_ASSISTANT_STT_END in drv._client.kinds()
     assert E.VOICE_ASSISTANT_ERROR not in drv._client.kinds()
+    await drv.async_unload()
+
+
+def test_settings_are_read_once_at_startup_not_per_run(monkeypatch):
+    monkeypatch.setattr(voice_pipeline, "current_settings", REAL_CURRENT_SETTINGS)
+    monkeypatch.setenv("HOMEHUB_VOICE_STT", "127.0.0.1:10310")
+    monkeypatch.setattr(voice_pipeline, "_STARTUP_SETTINGS", voice_pipeline._settings_at_startup())
+    monkeypatch.setenv("HOMEHUB_VOICE_STT", "192.0.2.1:1")  # changed after startup: not seen
+    assert voice_pipeline.current_settings().stt == "127.0.0.1:10310"
+    monkeypatch.setattr(voice_pipeline, "_STARTUP_SETTINGS", HubError("HOMEHUB_VOICE_MAX_S must be a number"))
+    with pytest.raises(HubError, match="HOMEHUB_VOICE_MAX_S"):
+        voice_pipeline.current_settings()
+
+
+def _rms(pcm: bytes) -> float:
+    n = len(pcm) // 2
+    return math.sqrt(sum(s * s for s in struct.unpack(f"<{n}h", pcm)) / n)
+
+
+def test_the_boost_lifts_a_far_voice_and_leaves_a_close_one():
+    from services.homehub.voice_pipeline import InputGain
+    boost = InputGain(None)
+    far = boost.apply(_tone(0.1, amplitude=65))  # ~46 RMS, a voice across the room
+    assert boost.gain == InputGain.MAX_GAIN and 600 < _rms(far) < 800
+    close = InputGain(None).apply(_tone(0.1, amplitude=8000))
+    assert close == _tone(0.1, amplitude=8000)
+
+
+def test_the_boost_never_clips_a_sudden_loud_sound():
+    from services.homehub.voice_pipeline import InputGain
+    boost = InputGain(None)
+    boost.apply(_tone(0.5, amplitude=60))
+    loud = boost.apply(_tone(0.03, amplitude=12000))
+    assert max(abs(s) for s in struct.unpack(f"<{len(loud) // 2}h", loud)) <= InputGain.PEAK_LIMIT
+
+
+def test_a_fixed_boost_is_used_as_set(monkeypatch):
+    from services.homehub.voice_pipeline import InputGain
+    monkeypatch.setenv("HOMEHUB_VOICE_INPUT_GAIN", "4")
+    assert VoiceSettings.from_env().input_gain == 4.0
+    monkeypatch.setenv("HOMEHUB_VOICE_INPUT_GAIN", "auto")
+    assert VoiceSettings.from_env().input_gain is None
+    monkeypatch.setenv("HOMEHUB_VOICE_INPUT_GAIN", "loud")
+    with pytest.raises(HubError, match="HOMEHUB_VOICE_INPUT_GAIN"):
+        VoiceSettings.from_env()
+    assert _rms(InputGain(4.0).apply(_tone(0.1, amplitude=100))) == pytest.approx(4 * _rms(_tone(0.1, amplitude=100)), rel=0.02)
+
+
+async def test_speech_to_text_gets_the_boost_and_the_run_records_levels(env, monkeypatch):
+    monkeypatch.setenv("HOMEHUB_VOICE_NO_SPEECH_S", "0.3")
+    monkeypatch.setenv("HOMEHUB_VOICE_VAD_MIN_RMS", "250")
+    b = Backends(stt=FakeSTT(text="what time is it"))
+    b.install(monkeypatch)
+    _hub, drv = make_driver()
+    await drv.async_setup()
+    await run_turn(drv, drv._client, [_tone(0.2, amplitude=65)])
+    assert _rms(b.stt.audio) > 10 * _rms(_tone(0.2, amplitude=65))
+    levels = drv.voice.last_run.public()["levels"]
+    assert levels["input_gain"] == 16.0 and 40 <= levels["peak_rms"] <= 50
+    assert levels["speech_threshold"] == 250 and drv.voice.last_run.public()["heard"]
     await drv.async_unload()
 
 

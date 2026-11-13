@@ -2,7 +2,7 @@
 
 | Route | What |
 |---|---|
-| ``GET /hub/voice`` | ``settings`` (the hub's ``HOMEHUB_VOICE_*`` values and any ``problems`` naming the one to fix) and ``satellites``: each ESPHome voice satellite with its entity, area, features, audio path, ``enabled``, ``subscribed``, run count, ``last_run`` (outcome, what ended it, error, per-stage ``timings_ms``) and ``last_error`` |
+| ``GET /hub/voice`` | ``settings`` (the hub's ``HOMEHUB_VOICE_*`` values and any ``problems`` naming the one to fix) and ``satellites``: each ESPHome voice satellite with its entity, area, features, audio path, ``enabled``, ``subscribed``, run count, ``last_run`` (outcome, what ended it, error, microphone ``levels``, per-stage ``timings_ms``) and ``last_error`` |
 | ``PATCH /hub/voice/{entry_id}`` | ``{"enabled": bool}``: turn one satellite's pipeline on or off (entry option ``voice_pipeline``), applied on its live connection |
 
 No transcript or reply is ever returned. Admins only, like the rest of ``/hub/*``. See ``voice_pipeline.py``.
@@ -32,7 +32,7 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     async def voice_status(request: Request) -> dict[str, Any]:
         admin(request)
         try:
-            settings: dict[str, Any] = voice_pipeline.VoiceSettings.from_env().public()
+            settings: dict[str, Any] = voice_pipeline.current_settings().public()
         except HubError as exc:
             settings = {"problems": [str(exc)]}
         return {"settings": settings, "satellites": voice_pipeline.satellites(hub)}
