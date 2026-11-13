@@ -50,10 +50,16 @@ export function shortName(name: string, cameraName: string): string {
 }
 
 /** What a status item says: a detection is Detected/Clear, a door Open/Closed, a reading its value. */
-export function statusText(item: Pick<CameraControl, 'domain' | 'state' | 'device_class' | 'unit'>): string {
+/** A battery camera's sleep sensor (Reolink's "Sleep status"): on is asleep, not a detection. */
+const isSleep = (item: { entity_id?: string }) => /(^|_)sleep(_|$)/.test(item.entity_id?.split('.')[1] ?? '');
+
+export function statusText(
+  item: Pick<CameraControl, 'domain' | 'state' | 'device_class' | 'unit'> & { entity_id?: string },
+): string {
   if (isOffline(item)) return 'Not reporting';
   if (item.domain === 'binary_sensor') {
     const on = item.state === 'on';
+    if (isSleep(item)) return on ? 'Asleep' : 'Awake';
     switch (item.device_class) {
       case 'door': case 'garage_door': case 'opening': case 'window': case 'gate': return on ? 'Open' : 'Closed';
       case 'battery': return on ? 'Low' : 'OK';
@@ -67,8 +73,12 @@ export function statusText(item: Pick<CameraControl, 'domain' | 'state' | 'devic
 }
 
 /** Whether a status item should stand out: a detection now, a door open, a low battery. */
-export function statusAlert(item: Pick<CameraControl, 'domain' | 'state' | 'device_class'>): boolean {
-  if (item.domain === 'binary_sensor') return item.state === 'on' && item.device_class !== 'connectivity';
+export function statusAlert(
+  item: Pick<CameraControl, 'domain' | 'state' | 'device_class'> & { entity_id?: string },
+): boolean {
+  if (item.domain === 'binary_sensor') {
+    return item.state === 'on' && item.device_class !== 'connectivity' && !isSleep(item);
+  }
   if (item.device_class === 'battery') {
     const n = Number(item.state);
     return Number.isFinite(n) && n <= 20;

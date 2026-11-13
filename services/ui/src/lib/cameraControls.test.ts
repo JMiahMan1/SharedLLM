@@ -22,6 +22,11 @@ describe('camera controls', () => {
     expect(statusText(s('sensor', '64', 'battery', '%'))).toBe('64%');
     expect(statusText(s('sensor', '72.46', 'temperature', '°F'))).toBe('72.5 °F');
     expect(statusText(s('sensor', 'unavailable'))).toBe('Not reporting');
+    // A battery camera asleep is not something detected.
+    const sleep = { ...s('binary_sensor', 'on'), entity_id: 'binary_sensor.garage_camera_1_sleep_status' };
+    expect(statusText(sleep)).toBe('Asleep');
+    expect(statusText({ ...sleep, state: 'off' })).toBe('Awake');
+    expect(statusAlert(sleep)).toBe(false);
   });
 
   it('makes a detection, an open door and a low battery stand out', () => {
