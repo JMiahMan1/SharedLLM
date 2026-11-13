@@ -111,6 +111,27 @@ const CAMERAS = [
   { entity_id: 'camera.porch', name: 'Porch', area: 'Front', platform: 'reolink', state: 'idle', recordings: false, live: ['mjpeg'], stream: 'camera', battery: true, rotation: 90 },
 ];
 
+const RECORDING_DEFAULTS = {
+  enabled: false, sensitivity: 60, pre_s: 3, post_s: 10, max_s: 120, fps: 4, retention_days: 14, schedule: null,
+};
+
+const MOTION_RECORDING = {
+  configured: false, enabled: false, state: null, reason: null, account: null,
+  household_account: { url: 'https://cloud.example.test', username: 'household' },
+  url: '', username: '', has_password: false, folder: 'Jarvis/Cameras', defaults: RECORDING_DEFAULTS,
+  limits: { sensitivity: [1, 100], pre_s: [0, 10], post_s: [2, 60], max_s: [10, 600], fps: [1, 10], retention_days: [1, 365] },
+  error: null,
+  cameras: [
+    { entity_id: 'camera.shed', name: 'Shed', platform: 'esphome', records_itself: false, unavailable_reason: null,
+      settings: RECORDING_DEFAULTS, motion_entity: null, status: null },
+    { entity_id: 'camera.porch', name: 'Porch', platform: 'reolink', records_itself: false,
+      unavailable_reason: 'it runs on a battery, and every picture would wake it', settings: RECORDING_DEFAULTS,
+      motion_entity: null, status: null },
+    { entity_id: 'camera.yard', name: 'Yard', platform: 'reolink', records_itself: true, unavailable_reason: null,
+      settings: RECORDING_DEFAULTS, motion_entity: null, status: null },
+  ],
+};
+
 const AUTOMATION = {
   kind: 'automation', id: 'a1', entity_id: 'automation.porch_at_dusk', alias: 'Porch light at dusk', description: null, icon: null,
   enabled: true, runnable: true, unsupported_reason: null, warnings: [], last_triggered: iso(-600), last_error: null,
@@ -214,6 +235,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
       // Minted with a POST; without it no camera picture is ever signed.
       if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: profile.username });
+      if (p === '/api/admin/cameras/recording') {
+        return json({ ...MOTION_RECORDING, configured: true, enabled: true, state: 'loaded', account: 'household' });
+      }
       const entityPatch = /^\/api\/homehub\/entities\/([^/]+)$/.exec(p);
       if (method === 'PATCH' && entityPatch && typeof (body as { rotation?: unknown })?.rotation === 'number') {
         rotations.set(decodeURIComponent(entityPatch[1]), (body as { rotation: number }).rotation);
@@ -269,6 +293,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       return json({ recordings: [{ start: iso(-120), end: iso(-119), trigger: 'person', id: 'r1' }] });
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
+    if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
     if (p === '/api/homehub/discovered') return json({ ...DISCOVERED, devices: [...DISCOVERED.devices, MOVED_FINDING] });
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     if (p.startsWith('/api/homehub/hardware/')) return json(HARDWARE_DETAIL);

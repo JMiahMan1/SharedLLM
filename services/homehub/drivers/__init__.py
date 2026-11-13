@@ -33,6 +33,7 @@ DRIVERS: dict[str, str] = {
     "mjpeg": "services.homehub.drivers.mjpeg:MjpegDriver",
     "reolink": "services.homehub.drivers.reolink:ReolinkDriver",
     "go2rtc": "services.homehub.live_video:Go2rtcDriver",
+    "camera_recording": "services.homehub.camera_recording:CameraRecordingDriver",
     "open_meteo": "services.homehub.drivers.weather:OpenMeteoDriver",
     "nws": "services.homehub.drivers.weather:NWSDriver",
     "sun": "services.homehub.drivers.sun:SunDriver",

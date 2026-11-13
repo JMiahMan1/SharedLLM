@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { browserCaps, playbackModes } from '../lib/cameraLive';
 import RealtimePlayer from '../components/cameras/RealtimePlayer';
 import LiveVideoSettings from '../components/cameras/LiveVideoSettings';
+import MotionRecordingSettings from '../components/cameras/MotionRecordingSettings';
 import { updateEntity } from '../lib/hardware';
 import {
   addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
@@ -516,6 +517,7 @@ const Cameras = () => {
   const token = useMediaToken();
   const isAdmin = Boolean(useAuth().user?.is_admin);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [recordingOpen, setRecordingOpen] = useState(false);
   const { trigger } = useHaptics();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -591,6 +593,16 @@ const Cameras = () => {
           </summary>
           {/* Read from the hub only once opened: most visits to this page are to watch, not to configure. */}
           {settingsOpen && <div className="pt-3"><LiveVideoSettings /></div>}
+        </details>
+      )}
+
+      {isAdmin && (
+        <details className="glass-panel rounded-2xl p-4 group" onToggle={(e) => setRecordingOpen(e.currentTarget.open)}>
+          <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-white">
+            <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+            Motion recording
+          </summary>
+          {recordingOpen && <div className="pt-3"><MotionRecordingSettings /></div>}
         </details>
       )}
 

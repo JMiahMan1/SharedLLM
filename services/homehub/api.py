@@ -20,6 +20,8 @@ from services.common.secrets import secret_matches
 from services.homehub import (  # HA companion apps: login, webhooks, pushes
     automation_api,  # automation editor, scheduler, thermostat schedules
     bluetooth_api,  # /hub/bluetooth: scanners, devices heard, the room map
+    camera_recording,
+    camera_recording_api,
     capabilities_api,  # the capability index: which devices can do what
     dashboard_api,
     discovery_api,
@@ -421,6 +423,13 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         check = getattr(driver, "supports_recordings", None)
         return bool(check(ent)) if callable(check) else True
 
+    def _recordings_of(ent: Any) -> Any:
+        """Who keeps this camera's recordings: the camera itself (Reolink), or the hub's motion recorder."""
+        driver = hub.drivers.get(ent.config_entry_id or "")
+        if _supports_recordings(driver, ent):
+            return driver
+        return camera_recording.recorder_for(hub, ent.entity_id)
+
     def _camera_summary(ent: Any) -> dict[str, Any]:
         driver = hub.drivers.get(ent.config_entry_id or "")
         st = hub.states.get(ent.entity_id)
@@ -433,7 +442,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             "area": hub.area_name(ent.entity_id),
             "platform": ent.platform,
             "state": st.state if st is not None else "unavailable",
-            "recordings": _supports_recordings(driver, ent),
+            "recordings": _recordings_of(ent) is not None,
             "live": live,
             # "camera" when the stream is the camera's own video, "snapshots" when it is built from stills.
             "stream": "camera" if driver is not None and hasattr(driver, "async_open_mjpeg_stream") else "snapshots",
@@ -457,10 +466,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         ent = hub.entities.get(entity_id)
         if ent is None or ent.domain != "camera" or ent.disabled_by:
             raise HTTPException(404, detail="Entity not found.")
-        driver = hub.drivers.get(ent.config_entry_id or "")
+        driver = _recordings_of(ent)
         if driver is None:
-            raise HTTPException(503, detail="Camera is not available")
-        if not _supports_recordings(driver, ent):
             raise HTTPException(404, detail="This camera has no recordings")
         return driver, ent
 
@@ -566,6 +573,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(hardware_api.build_router(runtime, auth))
     app.include_router(capabilities_api.build_router(runtime, auth))
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
+    app.include_router(camera_recording_api.build_router(runtime, auth))  # motion recording to Nextcloud
     app.include_router(statistics_api.build_router(runtime, auth))  # long-term statistics, energy
     app.include_router(dashboard_api.build_router(runtime, auth))  # Jarvis's Home/Climate pages
     app.include_router(ha_auth_api.build_router(runtime, auth))

@@ -240,3 +240,17 @@ def test_live_video_settings_are_for_admins(admin_hub):
     assert c.post(f"{url}/sync", headers=admin).status_code == 200
     assert admin_hub == [("GET", "/hub/live-video", None), ("PUT", "/hub/live-video", {"webrtc_port": 8555}),
                          ("POST", "/hub/live-video/sync", None)]
+
+
+def test_motion_recording_settings_are_for_admins(admin_hub):
+    c = TestClient(gateway_main.app, raise_server_exceptions=False)
+    url = "/api/admin/cameras/recording"
+    assert c.get(url, headers={"Authorization": "Bearer kid"}).status_code == 403
+    assert c.put(url, json={}).status_code == 401
+    assert admin_hub == []
+    admin = {"Authorization": "Bearer admin-key"}
+    assert c.get(url, headers=admin).json() == {"configured": True}
+    assert c.put(url, json={"account": "household"}, headers=admin).status_code == 200
+    assert c.put(url, json="x", headers=admin).status_code == 400
+    assert admin_hub == [("GET", "/hub/camera-recording", None),
+                         ("PUT", "/hub/camera-recording", {"account": "household"})]

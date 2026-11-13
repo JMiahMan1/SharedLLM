@@ -80,6 +80,44 @@ The contract a camera driver follows is at the top of `drivers/mjpeg.py`.
 | `GET /api/homehub/cameras/<entity>/recordings?start=&end=` | Recordings, newest first: `file`, `start`, `end`, `duration` (s), `triggers` (`person`, `vehicle`, `animal`, `motion`...), `size`, `stream`. Default the last 24 h; at most 7 days |
 | `GET /api/homehub/cameras/<entity>/recordings/play?file=` | One recording as MP4, streamed, `Range` passed on (206 with `Content-Range` when the recorder supports it). Only files a listing returned for that camera |
 | `POST .../live/webrtc`, `WS .../live/ws`, `GET .../live/stream.mp4` | Real-time video through go2rtc (the `go2rtc` integration, `live_video.py`; admin settings at `/hub/live-video`). A camera go2rtc can play has `realtime` in the list |
+| `GET/PUT /hub/camera-recording` | Admins: motion recording for cameras that cannot record themselves (below) |
+
+Each camera in the list also has `rotation` (0, 90, 180 or 270): how far
+Jarvis turns its picture, for a camera mounted on its side. Admins set it with
+`PATCH /hub/entities/<camera>` `{"rotation": 90}`; it is kept in the entity's
+options (`{"camera": {"rotation": 90}}`) and the video itself is untouched.
+
+### Motion recording (`camera_recording.py`, `camera_recording_api.py`)
+
+Reolink cameras keep their own recordings. A camera with nowhere to keep any
+(an ESPHome ESP32 camera, an MJPEG camera such as a 3D printer's) can be
+recorded by the hub, with the settings a Reolink camera has: sensitivity,
+seconds kept before and after motion, longest clip, pictures a second, a
+schedule, and how many days clips are kept. Set it up on the Cameras page
+("Motion recording", admins).
+
+- **Motion** is found in the picture: each frame, shrunk to 96x72 grey, is
+  compared with the previous frame and with a slowly updated background; a
+  pixel moves when it differs from both (one alone flickers, or leaves a
+  "ghost" after something leaves), and motion needs two frames in a row. A
+  jump in the whole picture's brightness (lights, night mode) starts over
+  instead of counting. A PIR or any other sensor can be added as a trigger later.
+- **Clips** start `pre_s` before the motion and end `post_s` after it (or at
+  `max_s`). Frames keep their real timing and become H.264 MP4 through ffmpeg
+  (installed in the hub's image).
+- **Storage** is Nextcloud over WebDAV: `<folder>/<camera>/<yyyy-mm-dd>/
+  <yyyymmdd-hhmmss>_<seconds>s_motion.mp4` (local time), folder default
+  `Jarvis/Cameras`. The account is Jarvis's own (`NEXTCLOUD_URL`,
+  `NEXTCLOUD_USER`, `NEXTCLOUD_PASS`, read once when the hub starts and copied
+  into the integration when chosen) or another one with an app password.
+  Credentials are stored encrypted and never returned. Days older than the
+  camera's retention are deleted hourly.
+- A clip Nextcloud cannot take waits in `<data>/camera-recordings/pending`, is
+  still listed and playable, and is uploaded on the next minute's sync.
+- Clips show in the camera's Recordings tab (`recordings: true` once the camera
+  is in the recorder's settings). Motion is also a `binary_sensor.<camera>_motion`
+  (device class `motion`, on the camera's device) for automations.
+- Battery cameras are never watched: every picture would wake them.
 
 Reolink recordings come from the Home Hub's storage (`Search`), so listing
 never wakes a battery camera; a live view does, every frame. Live Reolink video

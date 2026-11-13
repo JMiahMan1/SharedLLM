@@ -13,6 +13,7 @@ directly between the browser and go2rtc's WebRTC port.
 | ``WS /api/media/cameras/{id}/live/ws?mt=&user=[&quality=]`` | go2rtc's WebSocket (MSE), relayed |
 | ``GET /api/media/cameras/{id}/live/stream.mp4?mt=&user=[&quality=]`` | The live view as one MP4, for a plain ``<video>`` |
 | ``GET/PUT /api/admin/cameras/live-video``, ``POST .../sync`` | Admins: the go2rtc integration's settings |
+| ``GET/PUT /api/admin/cameras/recording`` | Admins: motion recording for cameras that cannot record themselves |
 
 Under ``/api/media/`` the signed media token is accepted (a WebSocket and a
 ``<video>`` cannot send a header); the WebSocket takes only that.
@@ -246,3 +247,23 @@ async def sync_live(request: Request):
     """Register every camera with go2rtc now (it also happens every minute)."""
     await _admin(request)
     return await _admin_hub("POST", "/hub/live-video/sync")
+
+
+@router.get("/api/admin/cameras/recording")
+async def get_recording_settings(request: Request):
+    """Motion recording (``services/homehub/camera_recording.py``): the Nextcloud account, folder and cameras."""
+    await _admin(request)
+    return await _admin_hub("GET", "/hub/camera-recording")
+
+
+@router.put("/api/admin/cameras/recording")
+async def put_recording_settings(request: Request):
+    """Change it (``account``, ``url``, ``username``, ``password``, ``folder``, ``enabled``, ``cameras``)."""
+    await _admin(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="The body must be a JSON object")
+    return await _admin_hub("PUT", "/hub/camera-recording", body)

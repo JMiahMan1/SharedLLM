@@ -52,6 +52,7 @@ DISCOVERY_SOURCES: dict[str, list[str]] = {
 #: Integrations that add themselves (an app registers) or are part of the hub.
 SELF_ADDED: dict[str, str] = {
     "mobile_app": "Phones add themselves when the Jarvis or Home Assistant companion app signs in.",
+    "camera_recording": "Set up from the Cameras page: Motion recording.",
     # BLE sensors are listed under New devices once a Bluetooth scanner hears them (services/homehub/bluetooth.py).
     **{d: "Found when a Bluetooth scanner hears it; add it from New devices." for d in (
         "bthome", "xiaomi_ble", "qingping", "sensorpush", "thermopro", "inkbird", "ruuvitag_ble", "govee_ble")},

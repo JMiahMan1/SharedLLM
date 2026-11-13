@@ -466,6 +466,10 @@ class Hub:
         self.started_at = utcnow()
         #: The Store, when the service runs with one (drivers keeping their own data use it).
         self.store: Any = None
+        #: The folder drivers keep files in (camera clips waiting for upload), set by the service.
+        self.data_dir: str | None = None
+        #: Jarvis's own Nextcloud account (url, username, password), read once at start; None when unset.
+        self.household_nextcloud: dict[str, str] | None = None
         #: HA entity-registry uuid -> entity_id; HA device triggers name entities by that uuid.
         self.entity_registry_ids: dict[str, str] = {}
         #: Entities a driver has published a state for since the hub started.

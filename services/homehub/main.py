@@ -14,7 +14,7 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import automation_api, builtin, recorder_statistics, tts
+from services.homehub import automation_api, builtin, camera_recording, recorder_statistics, tts
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -59,6 +59,10 @@ class Service:
         # without a word. A change applies when the hub restarts.
         self.hub = Hub(time_zone=_household_time_zone(self.store.get_kv("core_config", {}) or None))
         self.hub.store = self.store  # drivers that keep their own data (to-do lists) use it
+        # Where drivers keep files (camera clips waiting for upload), beside the database.
+        self.hub.data_dir = os.path.dirname(os.path.abspath(DB_PATH))
+        # Jarvis's own Nextcloud account, read once here: the motion-recording settings can use it.
+        self.hub.household_nextcloud = camera_recording.household_account_from_env()
         self.runtime = Runtime(self.hub, self.store)
         self._lock = asyncio.Lock()
         self._bg: list[asyncio.Task] = []

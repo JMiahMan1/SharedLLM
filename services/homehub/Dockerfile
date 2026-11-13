@@ -3,6 +3,10 @@ FROM ${BASE_IMAGE} AS base
 WORKDIR /app
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+# ffmpeg turns motion clips from cameras that cannot record themselves into MP4
+# (services/homehub/camera_recording.py).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 # Device libraries first: they change rarely, so CI reuses this layer and a
 # code change ships as a small source layer.
 COPY services/homehub/requirements.txt /tmp/homehub-requirements.txt

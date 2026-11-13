@@ -101,6 +101,31 @@ test.describe('home pages', () => {
     clean(run);
   });
 
+  test('Cameras: motion recording for a camera without its own storage', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/cameras');
+    await page.getByText('Motion recording', { exact: true }).click();
+    const panel = page.getByTestId('motion-recording-settings');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText('household at https://cloud.example.test')).toBeVisible();
+    // The Reolink camera records itself; the battery camera cannot be recorded.
+    await expect(panel.getByTestId('recording-camera')).toHaveCount(2);
+    await expect(panel.getByText(/Record on their own .*Yard/)).toBeVisible();
+    await expect(panel.getByRole('switch', { name: 'Record motion on Porch' })).toBeDisabled();
+    await expect(panel.getByRole('button', { name: /Jarvis’s Nextcloud/ })).toHaveAttribute('aria-pressed', 'true');
+    await panel.getByRole('switch', { name: 'Record motion on Shed' }).click();
+    await panel.getByLabel(/^Sensitivity/).fill('80');
+    await panel.getByRole('switch', { name: 'Only record at certain times' }).click();
+    await expectTapTargets(panel);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'cameras-motion-recording');
+    await panel.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(() => run.mocks.posts.find((x) => x.path === '/api/admin/cameras/recording')?.body).toEqual({
+      enabled: true, folder: 'Jarvis/Cameras', account: 'household',
+      cameras: { 'camera.shed': { enabled: true, sensitivity: 80, schedule: { from: '22:00', to: '06:00' } } },
+    });
+    clean(run);
+  });
+
   test('Cameras: a camera on its side is shown turned, and an admin can turn one', async ({ page }, info) => {
     const run = await open(page, 'admin', '/cameras');
     // The Porch camera is set to a quarter turn: its picture is turned and still inside its tile.
