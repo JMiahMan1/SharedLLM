@@ -186,6 +186,96 @@ def device_view(runtime: Any, dev: DeviceEntry, *, areas: dict[str, str] | None 
     }
 
 
+#: A device's kind, from the entities it has, most telling first (the Devices page groups by it).
+KIND_ORDER = (("phone", ("device_tracker",)), ("voice", ("assist_satellite",)), ("camera", ("camera",)),
+              ("climate", ("climate", "water_heater", "fan", "humidifier")), ("media", ("media_player", "remote")),
+              ("light", ("light",)), ("vacuum", ("vacuum", "lawn_mower")), ("access", ("lock", "cover", "valve")),
+              ("power", ("switch",)), ("sensor", ("sensor", "binary_sensor", "event")))
+
+
+def device_kind(hub: Any, device_id: str, domain: str | None) -> str:
+    """phone, voice, camera, climate, media, light, vacuum, access, power, sensor or other."""
+    if domain == "mobile_app":
+        return "phone"
+    have = {eid.split(".", 1)[0] for eid in hub.device_entities(device_id)
+            if (e := hub.entities.get(eid)) is not None and not e.entity_category}
+    for kind, domains in KIND_ORDER:
+        if have & set(domains):
+            return kind
+    return "other"
+
+
+def is_service(dev: DeviceEntry, domain: str | None) -> bool:
+    """Not a device in the house: an add-on, an assistant, a cloud account (HA's entry_type "service")."""
+    from services.homehub.drivers import REPLACED
+
+    return dev.entry_type == "service" or (domain or "") in REPLACED or domain in ("marketplace",)
+
+
+def _real_mac(value: str) -> str | None:
+    """A MAC a maker assigned. Locally administered ones (a mesh bridge, a phone's private
+    address) are shared by unrelated devices, so they never mean "the same device"."""
+    m = norm_mac(value)
+    return m if m and not int(m[0:2], 16) & 0x02 else None
+
+
+def physical_groups(views: list[dict[str, Any]]) -> dict[str, str]:
+    """device id -> the id of the device standing for that physical thing.
+
+    Integrations each register what they see: a TV is a Roku device, a Music Assistant player
+    and a Cast device. Two views are one thing when they share a real MAC, or when different
+    integrations give them the same name and the same model or room. One integration's own
+    devices are never merged with each other (several monitors can share a name, a camera
+    behind a hub reports the hub's MAC). The standing-for device
+    is the one in a room with the most entities, Music Assistant's player last.
+    """
+    parent = {v["id"]: v["id"] for v in views}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        parent[find(a)] = find(b)
+
+    # Within one integration a shared MAC is a parent and its children (cameras behind a hub
+    # report the hub's), so a MAC only joins views from different integrations.
+    by_mac: dict[str, list[dict[str, Any]]] = {}
+    for v in views:
+        for c in v.get("connections") or []:
+            if c.get("type") == "mac" and (mac := _real_mac(c.get("value", ""))):
+                for other in by_mac.setdefault(mac, []):
+                    if other.get("domain") != v.get("domain"):
+                        union(v["id"], other["id"])
+                by_mac[mac].append(v)
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for v in views:
+        if v.get("service"):
+            continue
+        by_name.setdefault(str(v.get("name") or "").strip().lower(), []).append(v)
+    for same in by_name.values():
+        for i, a in enumerate(same):
+            for b in same[i + 1:]:
+                if a.get("domain") == b.get("domain"):
+                    continue
+                model = a.get("model") and str(a.get("model")).lower() == str(b.get("model") or "").lower()
+                room = a.get("area_id") and a.get("area_id") == b.get("area_id")
+                if model or room:
+                    union(a["id"], b["id"])
+    members: dict[str, list[dict[str, Any]]] = {}
+    for v in views:
+        members.setdefault(find(v["id"]), []).append(v)
+    out: dict[str, str] = {}
+    for group in members.values():
+        best = max(group, key=lambda v: (bool(v.get("area_id")), v.get("domain") != "music_assistant",
+                                         v.get("entities") or 0, v["id"]))
+        for v in group:
+            out[v["id"]] = best["id"]
+    return out
+
+
 def device_list(runtime: Any) -> dict[str, Any]:
     hub = runtime.hub
     areas = _area_names(hub)
@@ -193,6 +283,14 @@ def device_list(runtime: Any) -> dict[str, Any]:
     devices = [device_view(runtime, d, areas=areas, finding_hosts=hosts) for d in hub.devices.values()
                if not any((e := hub.config_entries.get(x)) is not None and e.source == "ignore"
                           for x in d.config_entries)]
+    for d in devices:
+        dev = hub.devices[d["id"]]
+        d["kind"] = device_kind(hub, d["id"], d["domain"])
+        d["service"] = is_service(dev, d["domain"])
+    groups = physical_groups(devices)
+    for d in devices:
+        d["group_id"] = groups[d["id"]]
+        d["group_primary"] = groups[d["id"]] == d["id"]
     devices.sort(key=lambda d: str(d["name"]).lower())
     return {"devices": devices,
             "areas": sorted(({"area_id": k, "name": v} for k, v in areas.items()), key=lambda a: a["name"].lower())}

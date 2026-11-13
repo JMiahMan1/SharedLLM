@@ -16,7 +16,7 @@ async function openDevices(page: Page): Promise<{ mocks: HomeMocks; errors: stri
   const mocks = await mockHome(page, 'admin');
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/devices');
+  await page.goto('/devices#devices-rooms');  // an old link: opens the Setup tab
   await expect(page.getByTestId('page-header')).toBeVisible();
   return { mocks, errors };
 }

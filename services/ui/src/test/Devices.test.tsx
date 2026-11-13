@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import toast from 'react-hot-toast';
 import Devices from '../pages/Devices';
@@ -91,6 +91,8 @@ beforeEach(() => {
   pushed = [];
   wiped = [];
   vi.clearAllMocks();
+  // These tests are about the family's devices: open the page on that tab, as an old link would.
+  window.location.hash = '#devices-family';
   server.use(
     http.get('/api/mdm/devices', () => HttpResponse.json(inventory)),
     http.get('/api/mdm/files', () => HttpResponse.json(folders)),
@@ -115,6 +117,17 @@ beforeEach(() => {
 });
 
 describe('Devices page', () => {
+  it("opens on the house's devices for an admin, with the family a tab away", async () => {
+    window.location.hash = '';
+    renderWithProviders(<Devices />);
+    const tabs = await screen.findByTestId('devices-sections');
+    expect(within(tabs).getByRole('tab', { name: 'Your devices' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText("Kid's phone")).not.toBeInTheDocument();
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Family' }));
+    expect(await screen.findByText("Kid's phone")).toBeInTheDocument();
+    expect(window.location.hash).toBe('#family');
+  });
+
   it('lists every family device with its owner and guard state', async () => {
     renderWithProviders(<Devices />);
     expect(await screen.findByText("Kid's phone")).toBeInTheDocument();

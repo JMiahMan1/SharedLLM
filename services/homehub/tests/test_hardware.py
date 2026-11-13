@@ -390,3 +390,51 @@ def test_the_api_is_admin_only_and_answers(env):
     assert client.post("/hub/discovered/none/update-address", headers=H).status_code == 404
     rows = client.get("/hub/integrations", headers=H).json()["integrations"]
     assert any(r["domain"] == "roku" and r["status"] == "disabled" for r in rows)
+
+
+def _view(i, name, domain, model=None, area=None, macs=(), ents=1, service=False):
+    return {"id": i, "name": name, "domain": domain, "model": model, "area_id": area, "entities": ents,
+            "service": service, "connections": [{"type": "mac", "value": m} for m in macs]}
+
+
+def test_one_physical_device_seen_by_several_integrations_is_one_group():
+    from services.homehub import hardware
+    views = [
+        _view("roku", "Den TV", "roku", "TV 28", "den", ["00:1b:63:00:00:01"], ents=8),
+        _view("ma1", "Den TV", "music_assistant", "TV 28", None, ["00:1b:63:00:00:01"], ents=2),
+        _view("bulb_m", "Lamp 1", "matter", "BR30", "kitchen", ents=10),
+        _view("bulb_w", "Lamp 1", "wiz", "ESP25", "kitchen", ["00:1b:63:00:00:02"], ents=3),
+        # A camera behind a hub reports the hub's MAC: one integration, so never merged.
+        _view("hub", "Camera hub", "reolink", "Hub", "garage", ["00:1b:63:00:00:03"]),
+        _view("cam", "Garage camera", "reolink", "Argus", "garage", ["00:1b:63:00:00:03"]),
+        # A mesh bridge's locally administered MAC is shared by unrelated devices.
+        _view("tv2", "Loft TV", "samsungtv", "Q900", "loft", ["7a:20:51:0a:1a:88"]),
+        _view("plug", "Loft plug", "tasmota", "Plug", "loft", ["7a:20:51:0a:1a:88"]),
+        # Same name in one integration: separate monitors, not one.
+        _view("vue1", "Panel", "emporia_vue", "VUE003", "den"),
+        _view("vue2", "Panel", "emporia_vue", "VUE003", None),
+    ]
+    g = hardware.physical_groups(views)
+    assert g["ma1"] == g["roku"] == "roku"  # the one in a room with the most entities stands for it
+    assert g["bulb_w"] == g["bulb_m"] == "bulb_m"
+    assert g["cam"] == "cam" and g["hub"] == "hub"
+    assert g["tv2"] == "tv2" and g["plug"] == "plug"
+    assert g["vue1"] == "vue1" and g["vue2"] == "vue2"
+
+
+def test_a_devices_kind_comes_from_its_entities_and_services_are_not_devices():
+    from services.homehub import hardware
+    from services.homehub.core import DeviceEntry, EntityEntry, Hub
+    hub = Hub()
+    for eid, dev in (("media_player.tv", "tv"), ("sensor.tv_power", "tv"), ("light.lamp", "lamp"),
+                     ("sensor.temp", "probe"), ("switch.plug", "plug")):
+        hub.entities[eid] = EntityEntry(entity_id=eid, platform="x", device_id=dev)
+    assert hardware.device_kind(hub, "tv", "cast") == "media"
+    assert hardware.device_kind(hub, "lamp", "wiz") == "light"
+    assert hardware.device_kind(hub, "probe", "esphome") == "sensor"
+    assert hardware.device_kind(hub, "plug", "tasmota") == "power"
+    assert hardware.device_kind(hub, "nothing", "mobile_app") == "phone"
+    assert hardware.device_kind(hub, "nothing", "esphome") == "other"
+    assert hardware.is_service(DeviceEntry(id="a", name="Add-on", entry_type="service"), "hassio")
+    assert hardware.is_service(DeviceEntry(id="b", name="Agent"), "openai_conversation")
+    assert not hardware.is_service(DeviceEntry(id="c", name="Lamp"), "wiz")

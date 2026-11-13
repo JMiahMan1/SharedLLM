@@ -48,7 +48,7 @@ async function open(page: Page, hub: Partial<MatterHub> = {}): Promise<{ mocks: 
   });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/devices');
+  await page.goto('/devices#devices-new');  // an old link: opens the Add & fix tab
   await expect(page.getByTestId('page-header')).toBeVisible();
   return { mocks, errors, hub: state };
 }

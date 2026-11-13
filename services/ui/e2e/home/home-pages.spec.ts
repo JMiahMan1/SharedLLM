@@ -147,6 +147,9 @@ test.describe('home pages', () => {
   test('Devices: section jumps, new devices, Add dialog, integrations health, phones', async ({ page }, info) => {
     const run = await open(page, 'admin', '/devices');
     await expect(page.getByTestId('devices-sections')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Your devices' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('hardware')).toBeVisible();
+    await page.getByRole('tab', { name: 'Setup' }).click();
     await expect(page.getByTestId('integrations-health')).toContainText('Music server');
     await expectTapTargets(page.getByTestId('devices-sections'));
     await expectLayoutSound(page, info, 'devices');
@@ -162,6 +165,7 @@ test.describe('home pages', () => {
     }
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'devices-phones');
+    await page.getByRole('tab', { name: 'Add & fix' }).click();
     await page.getByRole('button', { name: /Add Matter device/ }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('adopt-dialog')).toBeVisible();

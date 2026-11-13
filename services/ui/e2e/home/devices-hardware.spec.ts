@@ -76,6 +76,7 @@ test.describe('Devices: the hardware list', () => {
 
   test('a device at a new address is offered as an update; adding by hand is grouped', async ({ page }, info) => {
     const run = await open(page);
+    await page.getByRole('tab', { name: 'Add & fix' }).click();
     const moved = page.getByTestId('moved-device');
     await moved.scrollIntoViewIfNeeded();
     await expect(moved).toContainText('192.0.2.66 → 192.0.2.96');

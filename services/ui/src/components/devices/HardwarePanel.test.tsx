@@ -71,7 +71,7 @@ describe('HardwarePanel', () => {
     wrap();
     const rows = await screen.findAllByTestId('hardware-device');
     expect(rows).toHaveLength(2);
-    expect(screen.getAllByTestId('hardware-group').map((g) => within(g).getByRole('heading').textContent))
+    expect(screen.getAllByTestId('hardware-group').map((g) => within(g).getByRole('heading', { level: 3 }).textContent))
       .toEqual(['Den 1', 'Porch 1']);
     expect(screen.getByRole('button', { name: 'Den TV, Offline' })).toBeInTheDocument();
     expect(within(rows[1]).getByText('Dim')).toBeInTheDocument();
@@ -125,6 +125,43 @@ describe('HardwarePanel', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: /^Remove$/ }));
     fireEvent.click(within(sheet).getByRole('button', { name: /Yes, remove it/ }));
     await waitFor(() => expect(discovered.removeHubDevice).toHaveBeenCalledWith('d-lamp', false));
+  });
+
+  it('shows one row per physical device, with every integration that sees it', async () => {
+    const roku: HardwareDevice = { ...tv, id: 'd-roku', status: 'online', unavailable: 0, kind: 'media', group_id: 'd-roku' };
+    const player: HardwareDevice = { ...tv, id: 'd-player', domain: 'music_assistant', label: 'Music Assistant',
+      area_id: null, area: null, status: 'partial', kind: 'media', group_id: 'd-roku' };
+    const addon: HardwareDevice = { ...base, id: 'd-addon', name: 'File editor', domain: 'hassio', label: 'Supervisor',
+      service: true, group_id: 'd-addon' };
+    vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [{ ...base, kind: 'light' }, roku, player, addon],
+      areas: [{ area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Porch' }] });
+    wrap();
+    await screen.findAllByTestId('hardware-device');
+    const listed = screen.getAllByTestId('hardware-group').flatMap((g) => within(g).queryAllByTestId('hardware-device'));
+    expect(listed).toHaveLength(2);
+    const tvRow = screen.getByRole('button', { name: 'Den TV, Online' });
+    expect(tvRow).toHaveTextContent('Roku · Music Assistant');
+    // Within a room, devices are split by type.
+    expect(screen.getAllByTestId('hardware-kind').map((k) => k.querySelector('h4')?.textContent)).toEqual(['TVs & speakers', 'Lights']);
+    // Add-ons and assistants are not devices in the house: folded away, still reachable.
+    expect(within(screen.getByTestId('hardware-services')).getByText(/Not devices.*\(1\)/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByTestId('hardware-filters')).getByRole('button', { name: /Lights 1/ }));
+    expect(screen.getAllByTestId('hardware-group').flatMap((g) => within(g).queryAllByTestId('hardware-device'))).toHaveLength(1);
+  });
+
+  it('puts a device with no room into one from the needs-attention list, every view of it', async () => {
+    vi.mocked(discovered.updateHubDevice).mockResolvedValue({} as never);
+    const lost: HardwareDevice = { ...base, id: 'd-a', name: 'Hall bulb', area_id: null, area: null, kind: 'light', group_id: 'd-a' };
+    const lostToo: HardwareDevice = { ...lost, id: 'd-b', domain: 'matter', label: 'Matter', group_id: 'd-a' };
+    vi.mocked(hardware.getHardware).mockResolvedValue({ devices: [lost, lostToo, tv],
+      areas: [{ area_id: 'den', name: 'Den' }, { area_id: 'porch', name: 'Porch' }] });
+    wrap();
+    const attention = await screen.findByTestId('needs-attention');
+    expect(within(attention).getByRole('button', { name: 'Not answering 1' })).toBeInTheDocument();
+    fireEvent.click(within(attention).getByRole('button', { name: 'No room 1' }));
+    fireEvent.change(within(attention).getByLabelText('Room for Hall bulb'), { target: { value: 'porch' } });
+    await waitFor(() => expect(discovered.updateHubDevice).toHaveBeenCalledWith('d-b', { area_id: 'porch' }));
+    expect(discovered.updateHubDevice).toHaveBeenCalledWith('d-a', { area_id: 'porch' });
   });
 
   it('says when the hub has nothing or cannot answer', async () => {

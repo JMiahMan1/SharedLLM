@@ -1361,11 +1361,26 @@ function AuditLogPanel() {
   );
 }
 
+/** The admin's tabs, and which old "#devices-..." link opens which. */
+const DEVICE_TABS = [
+  { id: 'devices', label: 'Your devices', anchors: ['devices-hardware'] },
+  { id: 'add', label: 'Add & fix', anchors: ['devices-new'] },
+  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-rooms'] },
+  { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-folders', 'devices-activity'] },
+] as const;
+type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
+
+function tabForHash(hash: string): DeviceTab {
+  const anchor = hash.replace(/^#/, '');
+  return DEVICE_TABS.find((t) => t.id === anchor || (t.anchors as readonly string[]).includes(anchor))?.id ?? 'devices';
+}
+
 export default function Devices() {
   const user = useAuth().user;
   const isAdmin = Boolean(user?.is_admin || user?.family_role === 'father' || user?.family_role === 'mother' || user?.username === 'default');
   const queryClient = useQueryClient();
   const [detailDevice, setDetailDevice] = useState<MdmDevice | null>(null);
+  const [tab, setTab] = useState<DeviceTab>(() => tabForHash(typeof window === 'undefined' ? '' : window.location.hash));
   const inventory = useQuery({ queryKey: ['mdm-devices'], queryFn: () => api.getMdmDevices(), enabled: isAdmin, retry: false });
   const myDevices = useQuery({ queryKey: ['my-companion-devices'], queryFn: () => api.getCompanionDevices(), enabled: !isAdmin, retry: false });
   const files = useQuery({ queryKey: ['mdm-files'], queryFn: () => api.getMdmFiles(), enabled: isAdmin, retry: false });
@@ -1435,20 +1450,22 @@ export default function Devices() {
   return (
     <div className={PAGE}>
       <PageHeader icon={Smartphone} tone="text-violet-400" title="Devices and integrations"
-        subtitle="Family phones and tablets, new devices to add, the hub's integrations, shared folders and remote actions.">
-        {/* The page is long; a row of jumps gets an admin to each part in one tap. */}
-        <nav aria-label="Sections of this page" className="flex gap-2 overflow-x-auto touch-pan-x pb-1" data-testid="devices-sections">
-          {[
-            ['devices-family', 'Family devices'],
-            ...(user?.is_admin ? [['devices-new', 'Add devices'], ['devices-hardware', 'Hardware'], ['devices-integrations', 'Integrations'], ['devices-phones', 'Phones'], ['devices-rooms', 'Room detection']] : []),
-            ['devices-folders', 'Shared folders'],
-            ['devices-activity', 'Activity'],
-          ].map(([id, label]) => (
-            <a key={id} href={`#${id}`} className={`${HEADER_ACTION} shrink-0 whitespace-nowrap`}>{label}</a>
-          ))}
-        </nav>
+        subtitle="The house's devices by room, adding and fixing them, their setup, and the family's phones and folders.">
+        {/* Admins: four tabs instead of one long page. Old #devices-... links open the right tab. */}
+        {user?.is_admin && (
+          <div role="tablist" aria-label="Parts of this page" className="flex gap-2 overflow-x-auto touch-pan-x pb-1"
+            data-testid="devices-sections">
+            {DEVICE_TABS.map((t) => (
+              <button key={t.id} type="button" role="tab" aria-selected={tab === t.id}
+                aria-controls={`devices-tab-${t.id}`}
+                className={`${HEADER_ACTION} shrink-0 whitespace-nowrap ${tab === t.id ? 'border-sky-400/50 bg-sky-500/15 text-sky-100' : ''}`}
+                onClick={() => { setTab(t.id); window.history.replaceState(null, '', `#${t.id}`); }}>{t.label}</button>
+            ))}
+          </div>
+        )}
       </PageHeader>
 
+      {(!user?.is_admin || tab === 'family') && (<div id="devices-tab-family" role={user?.is_admin ? 'tabpanel' : undefined} className="space-y-4">
       <div id="devices-family" className="scroll-mt-4">
       <Panel title="Family devices" icon={Smartphone}
         aside={<span className="text-xs text-slate-500">{inventory.data?.devices.length ?? 0} device(s)</span>}>
@@ -1494,19 +1511,28 @@ export default function Devices() {
       </Panel>
       </div>
 
-      {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
-      {user?.is_admin && <div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div>}
-      {user?.is_admin && <div id="devices-hardware" className="scroll-mt-4"><HardwarePanel /></div>}
-      {user?.is_admin && <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>}
-      {user?.is_admin && <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>}
-      {user?.is_admin && <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>}
-
       <div id="devices-folders" className="scroll-mt-4 space-y-4">
         {files.isLoading && <CardSkeletons count={1} className="grid" height="h-24" label="Loading shared folders" />}
         {files.data?.folders.map((f) => <FolderCard key={f.folder} folder={f} members={members.filter((m) => m.readable)} />)}
       </div>
 
       <div id="devices-activity" className="scroll-mt-4"><AuditLogPanel /></div>
+      </div>)}
+
+      {/* The hub's discovery API is for admins only (parents without the admin flag get 403). */}
+      {user?.is_admin && tab === 'devices' && (
+        <div id="devices-tab-devices" role="tabpanel"><div id="devices-hardware" className="scroll-mt-4"><HardwarePanel /></div></div>
+      )}
+      {user?.is_admin && tab === 'add' && (
+        <div id="devices-tab-add" role="tabpanel"><div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div></div>
+      )}
+      {user?.is_admin && tab === 'setup' && (
+        <div id="devices-tab-setup" role="tabpanel" className="space-y-4">
+          <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>
+          <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>
+          <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
+        </div>
+      )}
 
       {detailDevice && (
         <DeviceDetailSheet

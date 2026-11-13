@@ -45,6 +45,29 @@ export interface HardwareDevice {
   status: DeviceStatus;
   last_seen: string | null;
   abilities: string[];
+  /** What it is, from its entities (homehub hardware.device_kind); absent from older hubs. */
+  kind?: DeviceKind;
+  /** Not a device in the house: an add-on, an assistant, a cloud account. */
+  service?: boolean;
+  /** Views of one physical device share it (a TV seen by Roku, Cast and Music Assistant). */
+  group_id?: string;
+  group_primary?: boolean;
+}
+
+export type DeviceKind = 'light' | 'media' | 'camera' | 'climate' | 'access' | 'power' | 'sensor' | 'vacuum'
+  | 'voice' | 'phone' | 'other';
+
+export const KIND_ORDER: DeviceKind[] = ['light', 'media', 'camera', 'climate', 'access', 'power', 'sensor', 'vacuum',
+  'voice', 'phone', 'other'];
+
+export const KIND_LABEL: Record<DeviceKind, string> = {
+  light: 'Lights', media: 'TVs & speakers', camera: 'Cameras', climate: 'Climate', access: 'Doors & locks',
+  power: 'Plugs & power', sensor: 'Sensors', vacuum: 'Vacuums', voice: 'Voice assistants', phone: 'Phones', other: 'Other',
+};
+
+/** One physical device: the view standing for it, plus every integration's view of it. */
+export interface PhysicalDevice extends HardwareDevice {
+  views: HardwareDevice[];
 }
 
 export interface EntityCapabilities {
@@ -137,13 +160,64 @@ export const STATUS_TONE: Record<string, string> = {
   not_loaded: 'bg-slate-500',
 };
 
-export type GroupBy = 'area' | 'integration' | 'status' | 'none';
+export type GroupBy = 'area' | 'kind' | 'integration' | 'status' | 'none';
 
 export interface DeviceFilter {
   query?: string;
   integration?: string;
   status?: string;
   ability?: string;
+  kind?: string;
+}
+
+const kindOf = (d: HardwareDevice): DeviceKind => d.kind ?? 'other';
+
+/**
+ * One entry per physical device (the hub's group_id), and what is not a device kept apart.
+ * The physical device is online when any of its views is (a TV whose Music Assistant player
+ * is idle is still on), offline when none answers. Older hubs send no groups: one per device.
+ */
+export function physicalDevices(devices: HardwareDevice[]): { devices: PhysicalDevice[]; services: HardwareDevice[] } {
+  const services = devices.filter((d) => d.service);
+  const groups = new Map<string, HardwareDevice[]>();
+  for (const d of devices) {
+    if (d.service) continue;
+    const key = d.group_id || d.id;
+    groups.set(key, [...(groups.get(key) ?? []), d]);
+  }
+  const out: PhysicalDevice[] = [];
+  for (const [key, views] of groups) {
+    const primary = views.find((v) => v.id === key) ?? views[0];
+    const live = views.filter((v) => v.status !== 'disabled');
+    const status: DeviceStatus = live.length === 0 ? 'disabled'
+      : live.some((v) => v.status === 'online') ? 'online'
+        : live.some((v) => v.status === 'partial') ? 'partial' : primary.status;
+    const placed = views.find((v) => v.area_id);
+    out.push({ ...primary, status, area_id: primary.area_id ?? placed?.area_id ?? null,
+      area: primary.area ?? placed?.area ?? null, views });
+  }
+  return { devices: out.sort((a, b) => a.name.localeCompare(b.name)), services };
+}
+
+/** What needs a person: devices that stopped answering, and devices in no room. */
+export function needsAttention(devices: PhysicalDevice[]): { offline: PhysicalDevice[]; noRoom: PhysicalDevice[] } {
+  return {
+    offline: devices.filter((d) => d.status === 'offline' || d.status === 'not_loaded'),
+    noRoom: devices.filter((d) => !d.area_id && kindOf(d) !== 'phone'),
+  };
+}
+
+/** Kinds present in a list with counts, in the page's order, for the type chips. */
+export function kindsIn(devices: HardwareDevice[]): { kind: DeviceKind; label: string; count: number }[] {
+  const counts = new Map<DeviceKind, number>();
+  for (const d of devices) counts.set(kindOf(d), (counts.get(kindOf(d)) ?? 0) + 1);
+  return KIND_ORDER.filter((k) => counts.has(k)).map((k) => ({ kind: k, label: KIND_LABEL[k], count: counts.get(k)! }));
+}
+
+/** A room's devices split by kind, in the page's order. */
+export function kindSections<T extends HardwareDevice>(devices: T[]): { kind: DeviceKind; label: string; devices: T[] }[] {
+  return KIND_ORDER.map((k) => ({ kind: k, label: KIND_LABEL[k], devices: devices.filter((d) => kindOf(d) === k) }))
+    .filter((s) => s.devices.length > 0);
 }
 
 /** Search names, makers, models, areas, integrations and addresses; then the chips. */
@@ -153,6 +227,7 @@ export function filterDevices(devices: HardwareDevice[], f: DeviceFilter): Hardw
     if (f.integration && d.domain !== f.integration) return false;
     if (f.status && d.status !== f.status) return false;
     if (f.ability && !d.abilities.includes(f.ability)) return false;
+    if (f.kind && kindOf(d) !== f.kind) return false;
     if (!q) return true;
     const hay = [d.name, d.original_name, d.manufacturer, d.model, d.area, d.label, d.entry_title, d.sw_version,
       ...d.connections.map((c) => c.value)];
@@ -161,14 +236,15 @@ export function filterDevices(devices: HardwareDevice[], f: DeviceFilter): Hardw
 }
 
 /** Sections for the list; devices keep their order, "No area" / "Other" last. */
-export function groupDevices(devices: HardwareDevice[], by: GroupBy): { key: string; label: string; devices: HardwareDevice[] }[] {
+export function groupDevices<T extends HardwareDevice>(devices: T[], by: GroupBy): { key: string; label: string; devices: T[] }[] {
   if (by === 'none') return [{ key: 'all', label: 'All devices', devices }];
-  const key = (d: HardwareDevice): [string, string] => {
+  const key = (d: T): [string, string] => {
     if (by === 'area') return d.area_id ? [d.area_id, d.area || d.area_id] : ['', 'No area'];
     if (by === 'integration') return d.domain ? [d.domain, d.label || d.domain] : ['', 'Other'];
+    if (by === 'kind') return [kindOf(d), KIND_LABEL[kindOf(d)]];
     return [d.status, STATUS_LABEL[d.status] || d.status];
   };
-  const groups = new Map<string, { key: string; label: string; devices: HardwareDevice[] }>();
+  const groups = new Map<string, { key: string; label: string; devices: T[] }>();
   for (const d of devices) {
     const [k, label] = key(d);
     if (!groups.has(k)) groups.set(k, { key: k, label, devices: [] });
@@ -177,6 +253,7 @@ export function groupDevices(devices: HardwareDevice[], by: GroupBy): { key: str
   const statusOrder = ['offline', 'partial', 'not_loaded', 'online', 'disabled'];
   return [...groups.values()].sort((a, b) => {
     if (by === 'status') return statusOrder.indexOf(a.key) - statusOrder.indexOf(b.key);
+    if (by === 'kind') return KIND_ORDER.indexOf(a.key as DeviceKind) - KIND_ORDER.indexOf(b.key as DeviceKind);
     if (!a.key) return 1;
     if (!b.key) return -1;
     return a.label.localeCompare(b.label);
