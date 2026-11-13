@@ -187,6 +187,14 @@ class FakeHost:
     async def get_motion_state_all_ch(self):
         self.calls.append(("motion_all",))
 
+    sw_version = "v3.0.0.1"
+
+    def camera_sw_version(self, ch):
+        return "v3.1.0.2"
+
+    async def check_new_firmware(self, ch_list=None):
+        return {}
+
     async def logout(self):
         self.calls.append(("logout",))
 
@@ -413,3 +421,36 @@ async def test_reolink_unload_logs_out(fake_host):
     host = fake_host.instances[0]
     await drv.async_unload()
     assert ("logout",) in host.calls and not host.baichuan.subscribed
+
+
+async def test_reolink_firmware_is_read_only_and_what_reolink_aio_cannot_do_is_disabled(fake_host, monkeypatch):
+    from reolink_aio.software_version import NewSoftwareVersion
+
+    hub, entry = reolink_hub()
+    for eid, uid in (("update.reolink_hub_firmware", f"{HUB}_firmware"),
+                     ("update.garage_camera_1_firmware", f"{HUB}_{CAM1}_firmware"),
+                     ("button.garage_camera_1_pre_siren", f"{HUB}_{CAM1}_pre_siren"),
+                     ("select.reolink_hub_scene_mode", f"{HUB}_scene_mode")):
+        hub.entities[eid] = reolink.EntityEntry(entity_id=eid, unique_id=uid, platform="reolink",
+                                                config_entry_id=entry.entry_id)
+    checks = []
+
+    async def check_new_firmware(self, ch_list=None):
+        checks.append(ch_list)
+        return {None: False, 0: NewSoftwareVersion("v3.1.0.9", release_notes="Fixes"), 1: False}
+
+    monkeypatch.setattr(FakeHost, "check_new_firmware", check_new_firmware)
+    drv = reolink.ReolinkDriver(hub, entry)
+    await drv.async_setup()
+    assert hub.entities["button.garage_camera_1_pre_siren"].disabled_by == "integration"
+    assert hub.entities["select.reolink_hub_scene_mode"].disabled_by == "integration"
+    assert hub.states.get("update.garage_camera_1_firmware").state == "unknown"  # not checked yet
+    await drv.async_poll()
+    await drv.async_poll()
+    assert len(checks) == 1  # twice a day, not every poll
+    cam = hub.states.get("update.garage_camera_1_firmware")
+    assert cam.state == "on" and cam.attributes["latest_version"] == "v3.1.0.9"
+    assert cam.attributes["installed_version"] == "v3.1.0.2" and cam.attributes["supported_features"] == 0
+    hub_fw = hub.states.get("update.reolink_hub_firmware")
+    assert hub_fw.state == "off" and hub_fw.attributes["latest_version"] == "v3.0.0.1"
+    assert hub.states.get("button.garage_camera_1_pre_siren") is None

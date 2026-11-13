@@ -95,6 +95,11 @@ TRIGGER_ORDER = ["person", "vehicle", "animal", "package", "face", "doorbell", "
                  "linger", "forgotten_item", "taken_item", "crying", "io", "timer"]
 #: Recording file names each camera listed recently, so play can refuse anything else.
 LISTED_FILES_MAX = 2000
+#: How often the hub and cameras are asked about new firmware (HA's interval).
+FIRMWARE_CHECK_S = 12 * 3600
+#: HA entities this driver cannot provide: reolink-aio has no call for them. They are disabled
+#: by the integration (kept, so they return if support is added) instead of unavailable forever.
+UNSUPPORTED_KEYS = {"pre_siren", "pre_siren_on_event", "hub_alarm_ringtone", "scene_mode"}
 #: A recording is long lived: bound the connect and each read, not the whole.
 VOD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=30)
 
@@ -108,6 +113,8 @@ class ReolinkDriver(Driver):
         self.host: Host | None = None
         self.tokens = CameraTokens()
         self._last_wake = 0.0
+        self._firmware: dict[int | None, Any] = {}
+        self._firmware_checked = 0.0
         self._channel_by_uid: dict[str, int] = {}
         #: (entity_id, file) -> None, newest last; the files a listing returned.
         self._listed: OrderedDict[tuple[str, str], None] = OrderedDict()
@@ -185,6 +192,7 @@ class ReolinkDriver(Driver):
             if cam_uid and cam_uid != "Unknown":
                 self._channel_by_uid[str(cam_uid)] = ch
         self._confirm_devices()
+        self._disable_unsupported()
         try:
             self.host.baichuan.register_callback("homehub", self._on_push)
             await self.host.baichuan.subscribe_events()
@@ -243,6 +251,7 @@ class ReolinkDriver(Driver):
         for ent in self.entities:
             if ent.domain == "camera" and self.tokens.due(ent.entity_id):
                 self.tokens.rotate(ent.entity_id)
+        await self._check_firmware()
         self._publish_all()
 
     async def async_unload(self) -> None:
@@ -277,6 +286,8 @@ class ReolinkDriver(Driver):
         if host is None:
             return
         ch, key = self.locate(ent)
+        if key in UNSUPPORTED_KEYS:
+            return
         if ch is not None and not host.camera_online(ch):
             cur = self.hub.states.get(ent.entity_id)
             self.publish(ent, UNAVAILABLE, dict(cur.attributes) if cur else {})
@@ -318,11 +329,52 @@ class ReolinkDriver(Driver):
                 return None
             lo, hi = NUMBER_RANGES[key]
             return value, {"min": lo, "max": hi, "step": 1, "mode": "auto"}
+        if domain == "update" and key == "firmware":
+            return self._firmware_state(ch)
         if domain == "select" and ch is not None and key == "day_night_mode":
             raw = host.daynight_state(ch)
             option = next((e.name for e in DayNightEnum if e.value == raw), None)
             return (option or "unknown"), {"options": DAY_NIGHT_OPTIONS}
         return None
+
+    def _firmware_state(self, ch: int | None) -> tuple[Any, dict[str, Any]]:
+        """HA's update entity, read-only: installed version, and the newer one when the device offers it.
+
+        Installing is not offered: a failed flash leaves a camera to be reset by hand.
+        """
+        host = self.host
+        assert host is not None
+        installed = host.sw_version if ch is None else host.camera_sw_version(ch)
+        new = self._firmware.get(ch)
+        latest = getattr(new, "version_string", None) or (new if isinstance(new, str) else None)
+        attrs = {"installed_version": installed, "latest_version": latest or installed, "supported_features": 0,
+                 "auto_update": False, "in_progress": False, "title": "Reolink firmware",
+                 "release_summary": (getattr(new, "release_notes", "") or None) if new else None,
+                 "skipped_version": None}
+        if not self._firmware_checked:
+            return "unknown", attrs
+        return ("on" if new else "off"), attrs
+
+    async def _check_firmware(self) -> None:
+        host = self.host
+        if host is None or (self._firmware_checked and time.monotonic() - self._firmware_checked < FIRMWARE_CHECK_S):
+            return
+        self._firmware_checked = time.monotonic()
+        try:
+            self._firmware = dict(await host.check_new_firmware())
+        except ReolinkError as exc:
+            self.log.warning("Reolink firmware check failed: %s", exc)
+
+    def _disable_unsupported(self) -> None:
+        """Entities reolink-aio cannot drive: disabled by the integration, once, and said in the log."""
+        store = getattr(self.hub, "store", None)
+        for ent in self.entities:
+            if ent.disabled_by or self.locate(ent)[1] not in UNSUPPORTED_KEYS:
+                continue
+            ent.disabled_by = "integration"
+            if store is not None:
+                store.save_entity(ent)
+            self.log.info("%s is disabled: the Reolink library has no call for it", ent.entity_id)
 
     def _number(self, ch: int | None, key: str) -> Any:
         host = self.host
