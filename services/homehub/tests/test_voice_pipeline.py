@@ -440,6 +440,29 @@ async def test_speech_to_text_gets_the_boost_and_the_run_records_levels(env, mon
     await drv.async_unload()
 
 
+async def test_run_history_is_kept_across_a_restart(env, monkeypatch, tmp_path):
+    from services.homehub.store import Store
+    from services.homehub.voice_pipeline import HISTORY_KEEP, SatelliteVoice
+    Backends().install(monkeypatch)
+    hub, drv = make_driver()
+    hub.store = Store(str(tmp_path / "hub.db"))
+    drv.voice = SatelliteVoice(drv)
+    await drv.async_setup()
+    for _ in range(2):
+        await run_turn(drv, drv._client, [_tone(0.5), _silence(1.0)])
+    run_id = drv.voice.history[0]["id"]
+    await drv.async_unload()
+    again = SatelliteVoice(drv)  # what the hub builds when it starts again
+    status = again.status()
+    assert again.runs == 2 and status["runs"] == 2 and len(status["history"]) == 2
+    assert status["last_run"]["id"] == run_id and status["last_run"]["outcome"] == "ok"
+    assert "levels" in status["last_run"] and "timings_ms" in status["last_run"]
+    for i in range(HISTORY_KEEP + 5):
+        again.history.insert(0, {"id": str(i)})
+    again._record(drv.voice.last_run)
+    assert len(again.history) == HISTORY_KEEP
+
+
 def test_the_vad_reports_when_no_audio_arrived():
     from services.homehub.voice_pipeline import EnergyVAD
     assert EnergyVAD(1.0).heard() == "no audio arrived from the satellite"

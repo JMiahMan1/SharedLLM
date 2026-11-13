@@ -586,6 +586,11 @@ class Run:
                 "heard": self.heard, "levels": self.levels, "timings_ms": self.timings_ms()}
 
 
+#: Runs kept per satellite, newest first, in the hub's store so a restart or deploy keeps them.
+HISTORY_KEEP = 20
+HISTORY_KV = "voice_runs:{entry_id}"
+
+
 def feature_names(flags: int) -> list[str]:
     return [f.name.lower() for f in VoiceAssistantFeature if flags & int(f)]
 
@@ -601,6 +606,8 @@ class SatelliteVoice:
         self.subscribed = False
         self.runs = 0
         self.last_run: Run | None = None
+        #: Finished runs as their public records (no audio, no transcript), newest first; kept in the store.
+        self.history: list[dict[str, Any]] = []
         self.last_error: dict[str, Any] | None = None
         self._unsub: Callable[[], None] | None = None
         self._run: Run | None = None
@@ -617,6 +624,33 @@ class SatelliteVoice:
         self.max_active_wake_words = 0
         self.wake_word_error: str | None = None
         self.log = logging.getLogger(f"homehub.voice.{driver.device_name or driver.host}")
+        self._restore_history()
+
+    # -- run history ----------------------------------------------------------------
+    @property
+    def _history_key(self) -> str | None:
+        entry = getattr(self.driver, "entry", None)
+        return HISTORY_KV.format(entry_id=entry.entry_id) if entry is not None else None
+
+    def _restore_history(self) -> None:
+        store, key = getattr(self.hub, "store", None), self._history_key
+        if store is None or key is None:
+            return
+        doc = store.get_kv(key) or {}
+        self.runs = int(doc.get("runs") or 0)
+        self.history = list(doc.get("history") or [])[:HISTORY_KEEP]
+
+    def _record(self, run: Run) -> None:
+        self.history.insert(0, run.public())
+        del self.history[HISTORY_KEEP:]
+        store, key = getattr(self.hub, "store", None), self._history_key
+        if store is None or key is None:
+            return
+        try:
+            store.set_kv(key, {"runs": self.runs, "history": self.history})
+        except Exception as exc:  # the run happened; only its record could not be kept
+            self.log.warning("voice satellite %s: run %s could not be saved to the store: %s",
+                             self.name, run.id, exc)
 
     # -- what it is -----------------------------------------------------------------
     @property
@@ -968,6 +1002,7 @@ class SatelliteVoice:
             self._close_udp()
         self.runs += 1
         self.last_run = run
+        self._record(run)
         t = run.timings_ms()
         self.log.info("voice satellite %s run %s: %s%s; ended by %s; %s", self.name, run.id, run.outcome,
                       f" ({run.error['code']})" if run.error else "", run.ended_by or "-",
@@ -1122,7 +1157,8 @@ class SatelliteVoice:
                            "active": [self.wake_words.get(w, w) for w in self.active_wake_words],
                            "max_active": self.max_active_wake_words, "error": self.wake_word_error},
             "running": self._run.id if self._run is not None else None,
-            "runs": self.runs, "last_run": self.last_run.public() if self.last_run else None,
+            "runs": self.runs, "last_run": self.history[0] if self.history else None,
+            "history": self.history,
             "last_error": self.last_error,
         }
 
