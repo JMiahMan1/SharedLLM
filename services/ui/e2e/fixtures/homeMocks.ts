@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import { isServerCall } from './serverCalls';
 import { FLOWS, HARDWARE, HARDWARE_DETAIL, MOVED_FINDING } from './hardwareMocks';
+import { TINY_WEBM_BASE64 } from './tinyVideo';
 
 /**
  * A made-up house for the home pages (Rooms, Climate, Cameras, Energy, History,
@@ -290,7 +291,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       return json({ cameras: CAMERAS.map((c) => (rotations.has(c.entity_id) ? { ...c, rotation: rotations.get(c.entity_id) } : c)) });
     }
     if (/^\/api\/cameras\/[^/]+\/recordings$/.test(p)) {
-      return json({ recordings: [{ start: iso(-120), end: iso(-119), trigger: 'person', id: 'r1' }] });
+      return json({ recordings: [{ file: 'r1.mp4', start: iso(-120), end: iso(-119), duration: 42, triggers: ['person', 'motion'] }] });
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
@@ -313,9 +314,10 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     unmocked.push(`${method} ${p}`);
     return route.fulfill({ json: [] });
   });
-  // Camera pictures: a 1x1 image instead of a network error.
-  await page.route('**/api/media/cameras/**', (route) =>
+  // Camera pictures: a 1x1 image instead of a network error; recordings: a tiny video that really plays.
+  await page.route('**/api/media/cameras/**', (route) => (route.request().url().includes('/recordings/play')
+    ? route.fulfill({ contentType: 'video/webm', body: Buffer.from(TINY_WEBM_BASE64, 'base64') }) :
     route.fulfill({ contentType: 'image/png', body: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') }));
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') })));
   return { unmocked, posts };
 }

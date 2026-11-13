@@ -126,6 +126,34 @@ test.describe('home pages', () => {
     clean(run);
   });
 
+  test('Cameras: a turned recording plays with its own controls the right way up', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/cameras');
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    const viewer = page.getByRole('dialog', { name: 'Yard' });
+    await viewer.getByTestId('camera-rotate').click();
+    await expect(viewer.getByTestId('camera-rotate')).toHaveAccessibleName(/now 90°/);
+    await viewer.getByRole('tab', { name: 'Recordings' }).click();
+    await viewer.getByRole('list', { name: 'Recordings' }).getByRole('button').first().click();
+    const video = viewer.locator('video');
+    await expect(video).toHaveAttribute('style', /rotate\(90deg\)/);
+    // The browser's own controls would turn with the video; these stay upright and reachable.
+    await expect(video).not.toHaveAttribute('controls', /.*/);
+    const play = viewer.getByRole('button', { name: /^(Play|Pause)$/ });
+    const seek = viewer.getByRole('slider', { name: 'Position' });
+    await expect(play).toBeVisible();
+    await expect(seek).toBeEnabled();
+    await expect(viewer.getByText(/\d+:\d{2} \/ \d+:\d{2}/)).toBeVisible();
+    for (const control of [play, seek]) {
+      const box = await control.boundingBox();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'cameras-recording-turned');
+    clean(run);
+  });
+
   test('Cameras: a camera on its side is shown turned, and an admin can turn one', async ({ page }, info) => {
     const run = await open(page, 'admin', '/cameras');
     // The Porch camera is set to a quarter turn: its picture is turned and still inside its tile.
