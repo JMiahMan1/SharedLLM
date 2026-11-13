@@ -46,6 +46,31 @@ DRIVERS: dict[str, str] = {
 }
 
 
+#: Home Assistant's own integrations that came over with its data but have nothing to drive here,
+#: because the hub does the job itself or the job does not exist outside Home Assistant. They show
+#: as not loaded with this reason, instead of "no driver yet" or a setup retried forever.
+REPLACED: dict[str, str] = {
+    "analytics": "Home Assistant's usage reports to its developers; the hub sends none",
+    "backup": "Home Assistant's own backups; the hub keeps its data in its own database",
+    "hassio": "Home Assistant OS's Supervisor and add-ons; the hub runs as a container and has none",
+    "google_translate": "Home Assistant's Google text to speech; the hub speaks with Jarvis's voice",
+    "wyoming": "Home Assistant's link to speech services; the hub's voice pipeline talks to them directly",
+    "ollama": "a Home Assistant conversation agent; voice and chat go to Jarvis",
+    "openai_conversation": "a Home Assistant conversation agent; voice and chat go to Jarvis",
+    "bluetooth": "Home Assistant's Bluetooth adapter; the hub scans Bluetooth itself",
+}
+#: Home Assistant's iBeacon integration is one entry with no data; here each beacon is its own entry.
+IBEACON_UMBRELLA = "Replaced by the hub: Home Assistant's iBeacon integration; the hub's Bluetooth presence tracks each beacon itself"
+
+
+def replaced_reason(domain: str, data: dict | None) -> str | None:
+    """Why an entry has nothing to drive here (``REPLACED``), or None when it should load."""
+    if domain == "ibeacon" and not data:
+        return IBEACON_UMBRELLA
+    reason = REPLACED.get(domain)
+    return f"Replaced by the hub: {reason}" if reason else None
+
+
 def driver_class(domain: str) -> type[Driver] | None:
     target = DRIVERS.get(domain)
     if target is None:

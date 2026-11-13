@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub
-from services.homehub.drivers import driver_class
+from services.homehub.drivers import driver_class, replaced_reason
 from services.homehub.store import Store
 
 log = logging.getLogger("homehub.runtime")
@@ -90,6 +90,11 @@ class Runtime:
 
     async def _supervise(self, entry: ConfigEntry) -> None:
         first = self._first_attempt.setdefault(entry.entry_id, asyncio.Event())
+        replaced = replaced_reason(entry.domain, entry.data)
+        if replaced:
+            entry.state, entry.reason = "not_loaded", replaced
+            first.set()
+            return
         cls = driver_class(entry.domain)
         if cls is None:
             entry.state, entry.reason = "not_loaded", "no driver for this integration yet"

@@ -329,6 +329,32 @@ async def test_runtime_reports_when_every_entry_has_tried_to_load(tmp_path, monk
     await runtime.shutdown()
 
 
+async def test_home_assistant_internals_show_as_replaced_and_are_never_retried(tmp_path, monkeypatch):
+    from services.homehub import runtime as rt
+
+    tried = []
+
+    class Beacon(Driver):
+        async def async_setup(self):
+            tried.append(self.entry.entry_id)
+
+    monkeypatch.setattr(rt, "driver_class", lambda domain: Beacon if domain == "ibeacon" else None)
+    hub = Hub()
+    hub.config_entries["ha_ib"] = ConfigEntry("ha_ib", "ibeacon", data={})
+    hub.config_entries["phone"] = ConfigEntry("phone", "ibeacon", data={
+        "uuid": "8a6f1c2e-0b7d-4c9e-9f3a-2d4b6e8f0a1c", "major": 1, "minor": 2})
+    hub.config_entries["tts"] = ConfigEntry("tts", "google_translate")
+    hub.config_entries["mqtt"] = ConfigEntry("mqtt", "mqtt")
+    runtime = Runtime(hub, Store(str(tmp_path / "h.db"), Fernet.generate_key().decode()))
+    await runtime.start_all()
+    assert await runtime.wait_first_setups(2) == []
+    e = hub.config_entries
+    assert e["ha_ib"].state == "not_loaded" and "Bluetooth presence" in e["ha_ib"].reason and tried == ["phone"]
+    assert e["tts"].state == "not_loaded" and e["tts"].reason.startswith("Replaced by the hub")
+    assert e["mqtt"].reason == "no driver for this integration yet"  # not claimed as replaced
+    await runtime.shutdown()
+
+
 def test_homehub_refuses_to_start_without_a_time_zone(tmp_path, monkeypatch):
     """No guessed zone: a missing TZ stops startup with a message naming the setting."""
     import importlib
