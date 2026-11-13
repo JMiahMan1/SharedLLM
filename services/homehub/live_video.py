@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import ipaddress
 import json
 import logging
 import re
@@ -123,10 +124,18 @@ def _int(value: Any, default: int) -> int:
 
 
 def webrtc_settings(options: dict[str, Any]) -> dict[str, Any]:
-    """The ``webrtc`` section go2rtc should run with, from the entry's options."""
+    """The ``webrtc`` section go2rtc should run with, from the entry's options.
+
+    With a WebRTC address that is an IP, go2rtc also listens only there: otherwise it takes the port on every
+    address the host has (Docker bridges, IPv6), none of which a phone can use.
+    """
     port = _int(options.get("webrtc_port"), DEFAULT_WEBRTC_PORT)
     host = str(options.get("webrtc_host") or "").strip()
-    return {"listen": f":{port}", "candidates": [f"{host}:{port}"] if host else []}
+    bind = ""
+    with contextlib.suppress(ValueError):
+        bind = str(ipaddress.ip_address(host.strip("[]")))
+    listen = (f"[{bind}]:{port}" if ":" in bind else f"{bind}:{port}") if bind else f":{port}"
+    return {"listen": listen, "candidates": [f"{host}:{port}"] if host else []}
 
 
 def camera_options(options: dict[str, Any], entity_id: str) -> dict[str, Any]:

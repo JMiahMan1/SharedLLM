@@ -228,10 +228,18 @@ async def test_a_mains_camera_can_be_kept_open(monkeypatch, fake_go2rtc):
 
 async def test_webrtc_settings_follow_the_options_and_restart_only_on_change(monkeypatch, fake_go2rtc):
     _hub, g = await _hub_with_go2rtc(monkeypatch, options={"webrtc_host": "10.0.0.5", "webrtc_port": 18555})
-    assert fake_go2rtc.config["webrtc"] == {"listen": ":18555", "candidates": ["10.0.0.5:18555"]}
+    # An IP address: go2rtc listens only there, not on every address the host has.
+    assert fake_go2rtc.config["webrtc"] == {"listen": "10.0.0.5:18555", "candidates": ["10.0.0.5:18555"]}
     assert fake_go2rtc.restarts == 1
     assert f"{REO}:sub" in fake_go2rtc.streams  # registered again after the restart
     assert await g.apply_webrtc_config() is False and fake_go2rtc.restarts == 1
+
+
+def test_a_named_webrtc_address_listens_everywhere_and_an_ipv6_one_is_bracketed():
+    assert live_video.webrtc_settings({"webrtc_host": "cams.example.test", "webrtc_port": 8555}) == {
+        "listen": ":8555", "candidates": ["cams.example.test:8555"]}
+    assert live_video.webrtc_settings({"webrtc_host": "fd00::5"})["listen"] == "[fd00::5]:8555"
+    assert live_video.webrtc_settings({})["listen"] == ":8555"
 
 
 async def test_default_webrtc_settings_need_no_restart(monkeypatch, fake_go2rtc):
