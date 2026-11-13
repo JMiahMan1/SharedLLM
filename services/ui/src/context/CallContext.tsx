@@ -32,6 +32,8 @@ import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
 const RING_INTERVAL_MS = 2_500;
+/** How long someone who joined another person's call stays once everyone else has left. */
+const ALONE_HANGUP_MS = 15_000;
 /** A drop-in answered from the background asks for the microphone this often, this many times (about 8 s). */
 const DROP_IN_MIC_RETRY_MS = 800;
 const DROP_IN_MIC_ATTEMPTS = 10;
@@ -1216,8 +1218,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
       await session.start(options?.auto ? DROP_IN_MIC_ATTEMPTS : 1);
       if (sessionRef.current !== session) return;
       reportDropInJoined(room);  // the phone's safety net need not ring it
-      // Nobody was there: this is a new call, so ring the others.
-      const outgoing = session.peersAtJoin === 0;
+      if (options?.auto && session.peersAtJoin === 0) {
+        // A Drop In whose caller has already gone: never sit in an empty room with the mic on.
+        sessionRef.current = null;
+        session.close();
+        setPeers([]);
+        setLocalStream(null);
+        setCall(null);
+        return;
+      }
+      // Nobody was there and this person started it: a new call, so ring the others. A phone that answered
+      // a Drop In by itself never rings anyone.
+      const outgoing = !options?.auto && session.peersAtJoin === 0;
       setCall((current) => current
         ? { ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now() }
         : current);
@@ -1301,6 +1313,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     endCallRef.current = endCall;
   }, [endCall]);
+
+  // Someone who joined another person's call hangs up once they have been alone in it for a while: the
+  // others left, so it is over (a phone left in an empty room kept its microphone open for ten minutes).
+  // The person who started the call keeps waiting, as they choose.
+  const alone = Boolean(call && call.status === 'connected' && !call.outgoing && peers.length === 0);
+  useEffect(() => {
+    if (!alone) return undefined;
+    const id = window.setTimeout(() => endCallRef.current(), ALONE_HANGUP_MS);
+    return () => window.clearTimeout(id);
+  }, [alone]);
 
   const toggleMute = useCallback(() => {
     const next = !mutedRef.current;
