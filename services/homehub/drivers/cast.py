@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 from typing import Any
 from uuid import UUID
 
@@ -40,6 +41,18 @@ _NO_REMOTE = object()
 COMMAND_TIMEOUT_S = 10.0
 # Loading media may first switch the TV from another app (Spotify, YouTube) to the media receiver.
 LOAD_TIMEOUT_S = 30.0
+
+
+def _squash(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def _same_app(cast_name: Any, on_screen: str) -> bool:
+    """Whether the app Cast names ("Spotify", "Prime Video") is the one on screen, given the
+    remote's app name and package ("Spotify com.spotify.tv.android"). Any app, known or not:
+    the name appears in the package or the known name."""
+    name = _squash(cast_name)
+    return bool(name) and name in _squash(on_screen)
 
 
 class _Listener:
@@ -191,7 +204,8 @@ class CastDriver(Driver):
         native = app_id == ANDROID_NATIVE_APP_ID
         on_screen = self._screen_app(key) if native else _NO_REMOTE
         asleep = native and getattr(cs, "is_stand_by", None) is True
-        hidden = asleep or (native and on_screen is not _NO_REMOTE and on_screen != getattr(cs, "display_name", None))
+        hidden = asleep or (native and on_screen is not _NO_REMOTE
+                            and not _same_app(getattr(cs, "display_name", None), on_screen))
         if hidden:
             ms = None
             state = "off" if asleep or on_screen == "" else "on"
@@ -257,7 +271,8 @@ class CastDriver(Driver):
         api = getattr(remote, "api", None)
         if not getattr(remote, "available", False) or api is None or not api.is_on:
             return ""
-        return getattr(remote, "app_names", {}).get(api.current_app or "", api.current_app or "")
+        package = str(api.current_app or "")
+        return " ".join(filter(None, (getattr(remote, "app_names", {}).get(package), package)))
 
     def publish_key(self, key: str) -> None:
         ent = self.wanted().get(key)

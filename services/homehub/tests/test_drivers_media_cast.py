@@ -216,7 +216,7 @@ async def test_a_sleeping_tv_never_shows_its_apps_report(setup):
 
 
 async def test_an_awake_tv_shows_its_apps_report_only_when_that_app_is_on_screen(setup):
-    hub, drv, _cc = await _spotify_report(setup)
+    hub, drv, cc = await _spotify_report(setup)
     remote = FakeRemote("192.0.2.50", app="com.google.android.youtube.tv")  # the address the fake TV has
     hub.drivers["atv"] = remote
     drv.publish_key(OFFICE)
@@ -227,6 +227,10 @@ async def test_an_awake_tv_shows_its_apps_report_only_when_that_app_is_on_screen
     remote.api.is_on, remote.api.current_app = True, "com.spotify.tv.android"  # really playing Spotify
     drv.publish_key(OFFICE)
     assert _shown(hub) == ("playing", "Spotify", "A song")
+    # any app counts, listed or not: its name in the package is enough
+    cc.status.display_name, remote.api.current_app = "Netflix", "com.netflix.ninja"
+    drv.publish_key(OFFICE)
+    assert _shown(hub) == ("playing", "Netflix", "A song")
 
 
 async def test_without_the_tvs_remote_an_awake_tv_is_believed(setup):
