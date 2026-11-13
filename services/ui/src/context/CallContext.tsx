@@ -30,6 +30,9 @@ import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 /** How often the app looks for a family drop-in call started elsewhere. */
 const ACTIVE_CALL_REFRESH_MS = 5_000;
 const RING_INTERVAL_MS = 2_500;
+/** A drop-in answered from the background asks for the microphone this often, this many times (about 8 s). */
+const DROP_IN_MIC_RETRY_MS = 800;
+const DROP_IN_MIC_ATTEMPTS = 10;
 // A drop-in call nobody answers used to chime every 2.5 seconds until somebody
 // dismissed the banner, so a phone left on a table rang all afternoon. The
 // banner stays up; the ringing stops after a minute.
@@ -216,17 +219,30 @@ class CallSession {
     this.events = events;
   }
 
-  async start(): Promise<void> {
+  /**
+   * ``micAttempts`` > 1 for a drop-in: the phone answers it from the background, and Android lends the
+   * microphone only once the drop-in's foreground service is up, a moment after the app is told to join.
+   * Asking again shortly instead of giving up is what keeps a drop-in from ever needing a tap.
+   */
+  async start(micAttempts = 1): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('This device cannot make an audio call.');
     }
-    try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      });
-    } catch {
-      throw new Error('Microphone permission is needed to join a family call.');
+    for (let attempt = 1; ; attempt++) {
+      try {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+        break;
+      } catch (error) {
+        if (this.closed) throw new Error('The call ended.', { cause: error });
+        if (attempt >= micAttempts) {
+          console.warn('[calls] microphone refused', error);
+          throw new Error('Microphone permission is needed to join a family call.', { cause: error });
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, DROP_IN_MIC_RETRY_MS));
+      }
     }
     this.events.onLocalStream(this.localStream);
 
@@ -1187,7 +1203,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     sessionRef.current = session;
 
     try {
-      await session.start();
+      await session.start(options?.auto ? DROP_IN_MIC_ATTEMPTS : 1);
       if (sessionRef.current !== session) return;
       // Nobody was there: this is a new call, so ring the others.
       const outgoing = session.peersAtJoin === 0;
@@ -1232,6 +1248,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => listenForDropIn(
     (room, name) => {
       autoTriedRef.current.add(room);
+      playDropInChime();  // the one sound a drop-in makes: no ring, no tap
       void startCall(room, name, { auto: true }).then(() => {
         // Signed out, or already in another call: nothing joined, so the
         // native call must not stay up holding the microphone.
