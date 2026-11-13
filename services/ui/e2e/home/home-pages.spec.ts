@@ -13,12 +13,12 @@ const expect = baseExpect.configure({ timeout: 15_000 });
  * every call is answered by fixtures/homeMocks.ts.
  */
 
-async function open(page: Page, role: Role, path: string): Promise<{ mocks: HomeMocks; errors: string[] }> {
+async function open(page: Page, role: Role, path: string, ready = 'page-header'): Promise<{ mocks: HomeMocks; errors: string[] }> {
   const mocks = await mockHome(page, role);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(path);
-  await expect(page.getByTestId('page-header')).toBeVisible();
+  await expect(page.getByTestId(ready)).toBeVisible();
   return { mocks, errors };
 }
 
@@ -239,6 +239,28 @@ test.describe('home pages', () => {
     const controls = page.getByRole('dialog', { name: 'Yard' }).getByTestId('camera-controls');
     await expect(controls.getByTestId('camera-action')).toHaveCount(3);
     await expect(controls.getByText('Camera settings')).toHaveCount(0);
+    clean(run);
+  });
+
+  test('Network: sites by device, then one device’s sites grouped by site', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/admin/network', 'network-sites');
+    const sites = page.getByTestId('network-sites');
+    await expect(sites).toBeVisible();
+    await sites.scrollIntoViewIfNeeded();
+    await expect(sites.getByRole('button', { name: /Sites Robin’s phone/ })).toContainText('1,234');
+    await expectTapTargets(sites);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'network-sites');
+    await sites.getByRole('button', { name: /Sites Robin’s phone/ }).click();
+    const one = sites.getByTestId('device-sites');
+    // video.example.com and img.example.com are one site.
+    await expect(one.getByRole('listitem').filter({ hasText: /^example\.com/ }).first()).toContainText('600');
+    await one.getByLabel('Find a site').fill('news');
+    await expect(one.getByText('example.org', { exact: true })).toBeVisible();
+    await expect(one.getByText('example.com', { exact: true })).toHaveCount(0);
+    await expectTapTargets(sites);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'network-sites-device');
     clean(run);
   });
 

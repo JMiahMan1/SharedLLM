@@ -294,6 +294,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/health') return json({ status: 'ok', services: {} });
     if (p === '/api/admin/services/updates') return json({ checked: 0, updates_available: 0, services: [] });
     if (p === '/api/users/family') return json([]);
+    // The Admin page reads the family and the shared-service defaults.
+    if (p === '/api/users') return json([profile]);
+    if (p === '/api/users/service-defaults') return json({});
     if (p === '/api/info') return json({ service: 'jarvis-ui', version: 'e2e', git_sha: 'e2e' });
 
     // The home pages.
@@ -335,6 +338,31 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
+    // Admin > Network (a made-up router and devices).
+    if (p === '/api/network/status') {
+      return json({ configured: true, connected: true, url: 'https://192.0.2.1', username: 'jarvis', has_password: true,
+        radios: [], devices: {}, networks: [], events: [], internet: { up: true }, checked_at: iso(-1) });
+    }
+    if (p === '/api/network/usage') return json({ hours: 24, devices: [], networks: [], series: [], bucket: 'hour', source: 'nlbw' });
+    if (p === '/api/network/log') return json({ lines: [], source: 'forwarded' });
+    if (p === '/api/network/outages') return json({ days: 30, outages: [] });
+    if (p === '/api/network/sites/devices') {
+      const now = Date.now() / 1000;
+      return json({ hours: Number(url.searchParams.get('hours') || 24), receiving: true, devices: [
+        { device: '02:00:00:00:00:50', name: 'Robin’s phone with a long name for small screens', ip: '192.0.2.50',
+          network: 'devices', lookups: 1234, domains: 87, last: now - 120 },
+        { device: '02:00:00:00:00:51', name: 'Living room TV', ip: '192.0.2.51', network: 'devices', lookups: 310, domains: 12, last: now - 7200 },
+      ] });
+    }
+    if (p === '/api/network/sites') {
+      const now = Date.now() / 1000;
+      return json({ hours: 24, sites: [
+        { device: '02:00:00:00:00:50', name: 'Robin', ip: '192.0.2.50', domain: 'video.example.com', lookups: 400, last: now - 60 },
+        { device: '02:00:00:00:00:50', name: 'Robin', ip: '192.0.2.50', domain: 'img.example.com', lookups: 200, last: now - 600 },
+        { device: '02:00:00:00:00:50', name: 'Robin', ip: '192.0.2.50', domain: 'news.example.org', lookups: 90, last: now - 900 },
+        { device: '02:00:00:00:00:50', name: 'Robin', ip: '192.0.2.50', domain: 'a-very-long-subdomain-name-for-small-phones.example.net', lookups: 5, last: now - 9000 },
+      ] });
+    }
     if (p === '/api/dashboard/cameras/camera.yard/controls') {
       return json({ ...YARD_CONTROLS, settings: role === 'admin' ? YARD_CONTROLS.settings : [] });
     }

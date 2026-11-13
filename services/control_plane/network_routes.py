@@ -149,6 +149,25 @@ def sites(hours: int = 24, device: str | None = None, limit: int = 200):
     return {"hours": hours, "sites": rows, "receiving": store.latest() is not None}
 
 
+@router.get("/sites/devices")
+def site_devices(hours: int = 24):
+    """Every device that looked anything up over the last ``hours``: how many lookups, of how many
+    domains, by name where the router knows it. Admins only (the gateway)."""
+    store = router_syslog.store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="The router's log is not being received (ROUTER_SYSLOG_PORT)")
+    hours = max(1, min(hours, 24 * router_syslog.RETENTION_DAYS))
+    current = json.loads(monitor().r.get(rm.STATUS_KEY) or "{}")
+    known = current.get("devices") or {}
+    networks = current.get("networks") or []
+    rows = store.device_totals(time.time() - hours * 3600)
+    for row in rows:
+        info = known.get(row["device"]) or {}
+        row["name"] = info.get("name") or row["device"]
+        row["network"] = _network_of(row.get("ip"), networks)
+    return {"hours": hours, "devices": rows, "receiving": store.latest() is not None}
+
+
 def _network_of(ip: str | None, networks: list[dict[str, Any]]) -> str | None:
     if not ip:
         return None

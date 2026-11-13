@@ -144,6 +144,14 @@ class Store:
             return [{"device": d, "ip": ip, "domain": dom, "lookups": n, "last": last}
                     for d, ip, dom, n, last in db.execute(sql, args)]
 
+    def device_totals(self, since: float) -> list[dict[str, Any]]:
+        """Each device's lookups since ``since``: how many, of how many domains, the last one; most first."""
+        sql = ("SELECT device, max(ip), sum(count), count(DISTINCT domain), max(last) FROM dns_hourly"
+               " WHERE hour >= ? GROUP BY device ORDER BY sum(count) DESC")
+        with self._connect() as db:
+            return [{"device": d, "ip": ip, "lookups": n, "domains": k, "last": last}
+                    for d, ip, n, k, last in db.execute(sql, (_local_hour(since),))]
+
     def log(self, limit: int, worst: str | None, needle: str | None) -> list[dict[str, Any]]:
         levels = LEVELS[: LEVELS.index(worst) + 1] if worst in LEVELS else LEVELS
         sql = (f"SELECT id, time, level, source, msg FROM router_log WHERE level IN ({','.join('?' * len(levels))})"

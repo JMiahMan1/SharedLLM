@@ -32,6 +32,10 @@ def calls(monkeypatch):
             return {"days": params["days"], "outages": []}
         if url.endswith("/api/network/usage"):
             return {"hours": params["hours"], "devices": []}
+        if url.endswith("/api/network/sites/devices"):
+            return {"hours": params["hours"], "devices": [{"device": "02:00:00:00:00:50", "lookups": 3}]}
+        if url.endswith("/api/network/sites"):
+            return {"hours": params["hours"], "sites": []}
         if url.endswith("/api/admin/seed-credential"):
             return {"status": "SUCCESS"}
         raise AssertionError(url)
@@ -48,6 +52,7 @@ def client():
 
 @pytest.mark.parametrize("verb,path", [("get", "/api/network/status"), ("get", "/api/network/log"),
                                        ("get", "/api/network/usage"), ("get", "/api/network/outages"),
+                                       ("get", "/api/network/sites"), ("get", "/api/network/sites/devices"),
                                        ("post", "/api/network/check"),
                                        ("put", "/api/network/settings")])
 def test_only_admins_see_the_network(client, calls, verb, path):
@@ -84,3 +89,9 @@ def test_a_blank_password_keeps_the_stored_one(client, calls):
 def test_the_router_address_must_be_https(client, calls, url):
     resp = client.put("/api/network/settings", headers=ADMIN, json={"url": url, "username": "jarvis"})
     assert resp.status_code == 400 and calls == []
+
+
+def test_sites_by_device_come_from_the_control_plane(client, calls):
+    body = client.get("/api/network/sites/devices?hours=168", headers=ADMIN).json()
+    assert body["devices"][0]["lookups"] == 3
+    assert calls[-1][1].endswith("/api/network/sites/devices") and calls[-1][2] == {"hours": 168}

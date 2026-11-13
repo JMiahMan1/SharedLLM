@@ -82,6 +82,12 @@ The contract a camera driver follows is at the top of `drivers/mjpeg.py`.
 | `POST .../live/webrtc`, `WS .../live/ws`, `GET .../live/stream.mp4` | Real-time video through go2rtc (the `go2rtc` integration, `live_video.py`; admin settings at `/hub/live-video`). A camera go2rtc can play has `realtime` in the list |
 | `GET/PUT /hub/camera-recording` | Admins: motion recording for cameras that cannot record themselves (below) |
 
+go2rtc's WebRTC settings are saved into `data/go2rtc/go2rtc.yaml`, which must
+exist and hold a mapping (at least `{}`): go2rtc 1.9.15 answers "no such file"
+when it is missing and crashes merging into an empty one. With the WebRTC
+address set to an IP (`192.168.2.205` here), go2rtc listens on port 8555 there
+only, not on every address the server has.
+
 Each camera in the list also has `rotation` (0, 90, 180 or 270): how far
 Jarvis turns its picture, for a camera mounted on its side. Admins set it with
 `PATCH /hub/entities/<camera>` `{"rotation": 90}`; it is kept in the entity's

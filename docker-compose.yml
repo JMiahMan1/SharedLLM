@@ -940,6 +940,8 @@ services:
     # homehub is its only API client: it registers each camera's stream at
     # runtime (in memory, never written to the config) and manages the WebRTC
     # section of ./data/go2rtc/go2rtc.yaml from the go2rtc integration's options.
+    # That file must exist and hold a mapping (at least "{}"): go2rtc 1.9.15 refuses
+    # a settings change when it is missing and crashes merging into an empty one.
     # The second -config is applied last and cannot be changed through the API:
     # the API (no auth, and it fetches any URL it is given) listens on loopback
     # only, and go2rtc's RTSP and SRTP servers, which would re-share every

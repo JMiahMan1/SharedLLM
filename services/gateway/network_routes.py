@@ -67,6 +67,13 @@ async def network_sites(request: Request, hours: int = 24, device: str | None = 
     return await _control_plane("GET", "/sites", params)
 
 
+@router.get("/sites/devices")
+async def network_site_devices(request: Request, hours: int = 24):
+    """Each device's DNS lookups over the period (Admin > Network > Sites by device). Admins only."""
+    await _admin(request)
+    return await _control_plane("GET", "/sites/devices", {"hours": hours})
+
+
 @router.get("/outages")
 async def network_outages(request: Request, days: int = 30):
     await _admin(request)

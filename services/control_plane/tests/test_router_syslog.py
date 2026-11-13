@@ -115,3 +115,16 @@ def test_the_polled_alert_log_leaves_out_dns_lookups():
              {"id": 4, "time": 1000, "priority": 30, "msg": "dnsmasq[1]: 40 192.0.2.5/52240 query[A] a.example.com from 192.0.2.5"},
              {"id": 3, "time": 1000, "priority": 27, "msg": "netifd: Interface 'wan' is now down"}]
     assert [e["id"] for e in rm.log_entries(lines)] == [3]
+
+
+def test_each_devices_totals_say_how_many_lookups_of_how_many_domains(tmp_path):
+    rec, store = receiver(tmp_path)
+    for domain in ("a.example.com", "a.example.com", "b.example.com"):
+        rec.accept(ROUTER, line("dnsmasq[1]", f"query[A] {domain} from {PHONE_IP}"), NOW)
+    rec.accept(ROUTER, line("dnsmasq[1]", "query[A] c.example.org from 192.0.2.99"), NOW)
+    rec.drain()
+    assert store.device_totals(NOW - 3600) == [
+        {"device": PHONE, "ip": PHONE_IP, "lookups": 3, "domains": 2, "last": NOW},
+        {"device": "192.0.2.99", "ip": "192.0.2.99", "lookups": 1, "domains": 1, "last": NOW},
+    ]
+    assert store.device_totals(NOW + 7200) == []

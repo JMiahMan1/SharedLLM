@@ -13,6 +13,7 @@ import {
   type NetworkStatus,
   type NetworkUsage,
 } from '../../lib/network';
+import SitesSection from './SitesSection';
 
 /**
  * Admin > Network: the home router as Jarvis sees it (docs/NETWORK.md).
@@ -158,6 +159,7 @@ export const NetworkPanel: FC = () => {
       {radios.map((r) => <RadioCard key={r.device} radio={r} />)}
 
       {s.configured && <UsageSection hours={usageHours} onHours={setUsageHours} usage={usage} />}
+      {s.configured && <SitesSection />}
 
       {s.configured && <OutagesSection />}
 
