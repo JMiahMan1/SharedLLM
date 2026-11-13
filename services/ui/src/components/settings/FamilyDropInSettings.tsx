@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { PhoneIncoming } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, PhoneIncoming } from 'lucide-react';
 import Toggle from '../ui/Toggle';
 import { api } from '../../services/api';
 import { getDeviceKey } from '../../lib/deviceRegistration';
 import { storeDeviceDropIn } from '../../lib/callSettings';
+import { nativeDropInStatus, openOverlaySettings } from '../../lib/dropIn';
 import type { DropInPerson, DropInSetting, DropInSettings } from '../../types/api';
 
 /**
@@ -28,6 +29,18 @@ export default function FamilyDropInSettings() {
   const [data, setData] = useState<DropInSettings | null>(null);
   const [error, setError] = useState(false);
   const [thisDevice, setThisDevice] = useState('');
+  // This phone's own Drop In setup (Android): null off Android or on an APK too old to say.
+  const [overOtherApps, setOverOtherApps] = useState<boolean | null>(null);
+  const checkPhone = useCallback(() => {
+    void nativeDropInStatus().then((s) => setOverOtherApps(s ? s.overOtherApps : null));
+  }, []);
+  useEffect(() => {
+    checkPhone();
+    // Coming back from Android's settings page: read it again.
+    const again = () => { if (!document.hidden) checkPhone(); };
+    document.addEventListener('visibilitychange', again);
+    return () => document.removeEventListener('visibilitychange', again);
+  }, [checkPhone]);
 
   const load = useCallback(async () => {
     try {
@@ -111,6 +124,31 @@ export default function FamilyDropInSettings() {
         </div>
       )}
       {!data && !error && <p className="px-1 text-xs text-slate-500">Loading…</p>}
+
+      {overOtherApps === false && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 space-y-2" data-testid="drop-in-setup">
+          <p className="flex items-start gap-2 text-sm font-semibold text-amber-100">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden />
+            Finish setting up Drop In on this phone
+          </p>
+          <p className="text-xs text-amber-100/90">
+            Android only lets Jarvis open a Drop In by itself while you are using another app when Jarvis may
+            &ldquo;Display over other apps&rdquo;. Until then, a Drop In that arrives while you use the phone rings instead.
+            Jarvis never draws anything over your apps with it.
+          </p>
+          <button type="button" onClick={() => void openOverlaySettings().then((ok) => {
+            if (!ok) toast.error('Open Settings > Apps > Jarvis OS > Display over other apps');
+          })}
+            className="min-h-11 rounded-xl bg-amber-500/25 border border-amber-500/50 px-4 text-sm font-semibold text-amber-50">
+            Allow &ldquo;Display over other apps&rdquo;
+          </button>
+        </div>
+      )}
+      {overOtherApps === true && (
+        <p className="flex items-center gap-2 px-1 text-xs text-emerald-300" data-testid="drop-in-ready">
+          <CheckCircle2 size={14} aria-hidden />This phone is set up to answer a Drop In by itself, even while you use another app.
+        </p>
+      )}
 
       {data && mine && (
         <PersonDropIn

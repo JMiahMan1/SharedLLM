@@ -321,3 +321,17 @@ def test_a_ring_marks_drop_in_only_for_who_allows_the_caller(one_loop_client, dr
         assert for_mom["ringing"] and for_mom["drop_in"] is True
         assert for_kid["ringing"] and for_kid["drop_in"] is False
         dad.send({"type": "websocket.disconnect", "code": 1000})
+
+
+def test_a_phone_reports_what_it_did_with_a_drop_in(one_loop_client, caplog):
+    c = one_loop_client
+    body = {"event": "rang", "detail": "the phone is unlocked and Jarvis may not open over other apps",
+            "device_key": "abcdef1234567890", "android": 37, "app_build": 650}
+    assert c.post("/api/communication/calls/room-dm/device-report", json=body).status_code == 401
+    with caplog.at_level("INFO", logger="gateway.calls"):
+        r = c.post("/api/communication/calls/room-dm/device-report", json=body, headers=_auth("mom"))
+    assert r.status_code == 200
+    assert "mom's device abcdef12 (Android 37, build 650): rang room-dm (the phone is unlocked" in caplog.text
+    assert "1234567890" not in caplog.text  # only the start of a device key is logged
+    bad = c.post("/api/communication/calls/bad%20room/device-report", json=body, headers=_auth("mom"))
+    assert bad.status_code in (404, 422)

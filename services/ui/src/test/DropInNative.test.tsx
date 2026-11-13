@@ -18,6 +18,9 @@ vi.mock('../lib/dropIn', () => ({
     return () => {};
   },
   reportDropInEnded: native.ended,
+  reportDropInJoined: vi.fn(),
+  // A newer APK: it dings by itself, so the web app does not.
+  nativeDropInStatus: () => Promise.resolve({ overOtherApps: true }),
 }));
 
 describe('native drop-in (Android answered a ring in the background)', () => {

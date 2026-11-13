@@ -29,6 +29,12 @@ public class DropInPlugin extends Plugin {
         if (instance == this) instance = null;
     }
 
+    /** Whether the app's WebView is running (so a Drop In it holds can still be live). */
+    static boolean hasWebView() {
+        DropInPlugin plugin = instance;
+        return plugin != null && plugin.getBridge() != null;
+    }
+
     /** Ask the running WebView to join {@code room}; false when there is none. */
     static boolean join(String room, String name) {
         DropInPlugin plugin = instance;
@@ -68,6 +74,29 @@ public class DropInPlugin extends Plugin {
     public void status(PluginCall call) {
         JSObject result = new JSObject();
         result.put("active", DropInCall.isActive());
+        result.put("overOtherApps", DropInCall.canOpenOverOtherApps(getContext()));
         call.resolve(result);
+    }
+
+    /** The web app is in the Drop In call for {@code room}: the native safety net need not ring. */
+    @PluginMethod
+    public void joined(PluginCall call) {
+        DropInCall.markJoined(call.getString("room"));
+        call.resolve();
+    }
+
+    /** Open Android's "Display over other apps" page for Jarvis (it lets a Drop In open the call at once). */
+    @PluginMethod
+    public void openOverlaySettings(PluginCall call) {
+        try {
+            android.content.Intent intent = new android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + getContext().getPackageName()))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not open the setting: " + e.getMessage());
+        }
     }
 }

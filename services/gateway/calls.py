@@ -580,6 +580,27 @@ async def get_drop_in(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]
     }
 
 
+@router.post("/api/communication/calls/{room}/device-report")
+async def drop_in_device_report(room: str, request: Request, user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
+    """A phone saying what it did with a Drop In (DropInReport.java): "answering" and how, or "rang" and why.
+
+    Only logged, so a Drop In that did not connect can be explained from the gateway's log.
+    """
+    if not ROOM_RE.match(room or ""):
+        raise HTTPException(status_code=422, detail="Unknown call.")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    event = str(body.get("event") or "")[:32]
+    detail = str(body.get("detail") or "")[:300]
+    device = str(body.get("device_key") or "")[:8]
+    log.info(f"[calls] {user.get('username')}'s device {device or '?'} (Android {body.get('android')}, "
+             f"build {body.get('app_build')}): {event} {room}{f' ({detail})' if detail else ''}")
+    return {"ok": True}
+
+
 @router.put("/api/communication/calls/drop-in/{username}")
 async def put_drop_in(username: str, request: Request, user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]:
     """Set who may drop in on ``username`` (yourself, or a child as a parent)."""

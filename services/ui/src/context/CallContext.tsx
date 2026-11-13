@@ -24,7 +24,7 @@ import {
   storeDeviceDropIn,
 } from '../lib/callSettings';
 import { getDeviceKey } from '../lib/deviceRegistration';
-import { listenForDropIn, reportDropInEnded } from '../lib/dropIn';
+import { listenForDropIn, nativeDropInStatus, reportDropInEnded, reportDropInJoined } from '../lib/dropIn';
 import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
@@ -1205,6 +1205,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     try {
       await session.start(options?.auto ? DROP_IN_MIC_ATTEMPTS : 1);
       if (sessionRef.current !== session) return;
+      reportDropInJoined(room);  // the phone's safety net need not ring it
       // Nobody was there: this is a new call, so ring the others.
       const outgoing = session.peersAtJoin === 0;
       setCall((current) => current
@@ -1248,7 +1249,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => listenForDropIn(
     (room, name) => {
       autoTriedRef.current.add(room);
-      playDropInChime();  // the one sound a drop-in makes: no ring, no tap
+      // The one sound a drop-in makes. Newer APKs ding by themselves as they answer; older ones do not.
+      void nativeDropInStatus().then((status) => { if (!status) playDropInChime(); });
       void startCall(room, name, { auto: true }).then(() => {
         // Signed out, or already in another call: nothing joined, so the
         // native call must not stay up holding the microphone.

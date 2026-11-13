@@ -62,6 +62,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- The crash countdown ("Did you crash?") may take the screen, like an alarm. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- "Display over other apps": the only way Android lets Jarvis open a Drop In call while another
+         app is on screen (an unlocked phone would otherwise show a notification to tap). The person
+         allows it in Settings > Family calls; nothing is ever drawn over other apps with it. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

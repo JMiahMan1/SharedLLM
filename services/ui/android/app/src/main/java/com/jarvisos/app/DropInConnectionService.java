@@ -46,6 +46,10 @@ public class DropInConnectionService extends ConnectionService {
         private final String room;
         private boolean finished = false;
 
+        String room() {
+            return room;
+        }
+
         DropInConnection(String room, String name) {
             this.room = room;
             setConnectionProperties(PROPERTY_SELF_MANAGED);
@@ -74,6 +78,7 @@ public class DropInConnectionService extends ConnectionService {
                 return;
             }
             setActive();
+            DropInCall.ding();
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 useSpeakerUnlessHeadset(getCallAudioState());
             }
