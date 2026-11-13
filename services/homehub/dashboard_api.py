@@ -23,8 +23,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from services.homehub import capabilities
+from services.homehub import capabilities, entries
 from services.homehub.auth import Auth, Principal, bearer
+from services.homehub.core import UNAVAILABLE
 
 PREFS_KEY = "dashboard_prefs"
 #: Domains a room card can show or control. Everything else (updates, buttons, numbers, automations) is setup, not use.
@@ -76,6 +77,35 @@ def _device_class(hub: Any, entity_id: str) -> str | None:
         (ent.device_class or ent.trusted("original_device_class")) if ent else None)
 
 
+def offline_cause(hub: Any, entity_id: str) -> dict[str, Any] | None:
+    """Why an unavailable entity is unavailable, so a page can say something useful.
+
+    ``integration``: its integration is not running, or every device it has stopped answering at
+    once (a Matter server or a bridge down, not each bulb). ``device``: the integration is fine
+    and this device alone stopped answering, which for a bulb on a wall switch means the
+    switch is off. None when the entity is available.
+    """
+    st = hub.states.get(entity_id)
+    if st is None or st.state != UNAVAILABLE:
+        return None
+    ent = hub.entities.get(entity_id)
+    entry = hub.config_entries.get(ent.config_entry_id) if ent and ent.config_entry_id else None
+    if entry is None:
+        return {"cause": "unknown", "integration": None}
+    label = entries.label(entry.domain)
+    if entry.state != "loaded":
+        return {"cause": "integration", "integration": label}
+    devices = {e.device_id for e in hub.entities.values()
+               if e.config_entry_id == entry.entry_id and e.device_id and not e.disabled_by}
+    if len(devices) > 1:
+        answering = any(e.device_id in devices and not e.disabled_by
+                        and (s := hub.states.get(e.entity_id)) is not None and s.state != UNAVAILABLE
+                        for e in hub.entities.values() if e.config_entry_id == entry.entry_id)
+        if not answering:
+            return {"cause": "integration", "integration": label}
+    return {"cause": "device", "integration": label}
+
+
 def summarize(hub: Any, entity_id: str) -> dict[str, Any] | None:
     st = hub.states.get(entity_id)
     ent = hub.entities.get(entity_id)
@@ -90,6 +120,7 @@ def summarize(hub: Any, entity_id: str) -> dict[str, Any] | None:
         "last_changed": st.last_changed.isoformat(),
         # What it can do (capabilities.py): the pages draw their controls from these.
         "abilities": capabilities.abilities_of(hub, entity_id),
+        "offline": offline_cause(hub, entity_id),
     }
 
 

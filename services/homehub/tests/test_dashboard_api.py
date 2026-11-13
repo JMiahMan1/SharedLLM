@@ -89,3 +89,27 @@ def test_routes_and_admin_prefs(hub, tmp_path):
     assert next(x for x in t if x["entity_id"] == "climate.hall")["power_source"] == "settings"
     assert client.put("/hub/dashboard/prefs", headers=H, json={"hidden": "x"}).status_code == 400
     store.close()
+
+
+def test_an_unavailable_light_says_whether_its_device_or_its_integration_is_out():
+    from services.homehub.core import ConfigEntry
+    hub = Hub()
+    hub.config_entries["m"] = ConfigEntry("m", "matter")
+    hub.config_entries["m"].state = "loaded"
+    hub.config_entries["w"] = ConfigEntry("w", "wiz")
+    hub.config_entries["w"].state = "setup_retry"
+    for dev in ("bulb1", "bulb2"):
+        hub.devices[dev] = DeviceEntry(id=dev, name=dev)
+    for eid, dev, cfg, state in (("light.bulb1", "bulb1", "m", "unavailable"), ("light.bulb2", "bulb2", "m", "on"),
+                                 ("light.porch", None, "w", "unavailable")):
+        hub.entities[eid] = EntityEntry(entity_id=eid, platform="test", device_id=dev, config_entry_id=cfg)
+        hub.states.set(eid, state, {})
+    # One bulb of several stopped answering: that bulb has no power.
+    assert dashboard_api.offline_cause(hub, "light.bulb1") == {"cause": "device", "integration": "Matter"}
+    assert dashboard_api.offline_cause(hub, "light.bulb2") is None
+    # Every device of the integration at once: the integration (a Matter server down), not each bulb.
+    hub.states.set("light.bulb2", "unavailable", {})
+    assert dashboard_api.offline_cause(hub, "light.bulb1")["cause"] == "integration"
+    # An integration that is not running.
+    assert dashboard_api.offline_cause(hub, "light.porch") == {"cause": "integration", "integration": "WiZ"}
+    assert dashboard_api.summarize(hub, "light.porch")["offline"]["cause"] == "integration"

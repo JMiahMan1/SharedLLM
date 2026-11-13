@@ -37,6 +37,8 @@ test.describe('home pages', () => {
     await expect(glance.getByText('Following Weekdays: 74, goes to 78 at 5 PM')).toBeVisible();
     await expect(glance.getByTestId('glance-energy')).toContainText('18.4');
     await expect(page.getByTestId('room-card')).toHaveCount(3);
+    // A bulb that alone stopped answering says why: its wall switch is probably off.
+    await expect(page.locator('[data-entity="light.kitchen_sink"]')).toContainText('No power (wall switch off?)');
     await expectTapTargets(glance);
     await expectLayoutSound(page, info, 'rooms');
     await glance.getByRole('button', { name: 'Turn off the lights in Living room' }).click();

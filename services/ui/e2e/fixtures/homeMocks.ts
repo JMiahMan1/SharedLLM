@@ -42,6 +42,7 @@ export const ROOMS = {
     ] },
     { area_id: 'kitchen', name: 'Kitchen with a rather long room name for small phones', floor_id: 'ground', icon: null, entities: [
       ent('light.kitchen_pendants', 'Pendants', 'off'),
+      ent('light.kitchen_sink', 'Sink light', 'unavailable', { offline: { cause: 'device', integration: 'Matter' } }),
       ent('binary_sensor.back_door', 'Back door', 'off', { device_class: 'door' }),
       ent('camera.yard', 'Yard', 'idle'),
     ] },

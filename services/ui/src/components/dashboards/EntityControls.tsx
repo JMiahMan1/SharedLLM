@@ -10,7 +10,8 @@ import {
   SETPOINT_DEBOUNCE_MS, modeVisual, numberAttr, setpointRange, snap, titleize, type ClimateAttributes,
 } from '../../lib/climate';
 import {
-  binaryLabel, brightnessPct, can, formatState, isActive, isUnavailable, runService, supportsBrightness, type HubEntity,
+  binaryLabel, brightnessPct, can, formatState, isActive, isUnavailable, runService, supportsBrightness,
+  unavailableLabel, type HubEntity,
 } from '../../lib/dashboards';
 
 const TOUCH = 'min-h-11 min-w-11';
@@ -65,7 +66,7 @@ export function LightControl({ entity, onChanged }: { entity: HubEntity; onChang
   const dim = supportsBrightness(entity);
   return (
     <div>
-      <Row entity={shown} detail={isUnavailable(shown.state) ? 'Unavailable' : on && pct != null ? `${pct}%` : on ? 'On' : 'Off'}>
+      <Row entity={shown} detail={isUnavailable(shown.state) ? unavailableLabel(shown) : on && pct != null ? `${pct}%` : on ? 'On' : 'Off'}>
         <Lightbulb size={16} className={on ? 'text-amber-400' : 'text-slate-600'} aria-hidden />
         <Toggle on={on} label={`Toggle ${entity.name}`} disabled={isUnavailable(shown.state)}
           onClick={() => act('light', 'toggle', undefined, { state: on ? 'off' : 'on' })} />
@@ -225,7 +226,7 @@ export function ClimateControl({ entity, onChanged, compact = false }: {
         <div className="min-w-0">
           {!compact && <p className="truncate text-sm text-slate-200">{shown.name}</p>}
           <p className="text-xs text-slate-500">
-            {unavailable ? 'Unavailable' : [
+            {unavailable ? unavailableLabel(shown) : [
               attrs.hvac_action ? titleize(attrs.hvac_action) : modeVisual(shown.state).label,
               current != null ? `Now ${current}°` : null,
               humidity != null ? `${Math.round(humidity)}% RH` : null,

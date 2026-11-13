@@ -26,6 +26,14 @@ export interface HubEntity {
   last_changed: string;
   /** What it can do, from the hub's capability index (homehub capabilities.py); absent from older hubs. */
   abilities?: string[];
+  /** Why it is unavailable (homehub dashboard_api.offline_cause); absent when available or from older hubs. */
+  offline?: OfflineCause | null;
+}
+
+export interface OfflineCause {
+  /** device: it alone stopped answering; integration: its integration is not connected. */
+  cause: 'device' | 'integration' | 'unknown';
+  integration: string | null;
 }
 
 export interface RoomArea {
@@ -393,9 +401,21 @@ export function supportsBrightness(e: HubEntity): boolean {
   return typeof e.attributes?.brightness === 'number';
 }
 
+/**
+ * An unavailable entity in words that say what to do. A light that alone stopped answering has
+ * lost power, which for a bulb on a wall switch means the switch is off; a whole integration
+ * down is said as that, since every one of its devices is out at once, not each bulb.
+ */
+export function unavailableLabel(e: Partial<Pick<HubEntity, 'domain' | 'offline'>>): string {
+  const o = e.offline;
+  if (o?.cause === 'integration') return o.integration ? `${o.integration} not connected` : 'Not connected';
+  if (o?.cause === 'device') return e.domain === 'light' ? 'No power (wall switch off?)' : 'Not answering';
+  return 'Unavailable';
+}
+
 /** "21.3 °F" for a sensor; states that are not numbers pass through. */
-export function formatState(e: Pick<HubEntity, 'state' | 'unit'>): string {
-  if (isUnavailable(e.state)) return 'Unavailable';
+export function formatState(e: Pick<HubEntity, 'state' | 'unit'> & Partial<Pick<HubEntity, 'domain' | 'offline'>>): string {
+  if (isUnavailable(e.state)) return unavailableLabel(e);
   const n = Number(e.state);
   if (e.state !== '' && Number.isFinite(n)) {
     const rounded = Math.abs(n) >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
@@ -406,7 +426,7 @@ export function formatState(e: Pick<HubEntity, 'state' | 'unit'>): string {
 
 /** A binary sensor's state in words its device class implies ("Open", "Motion", "Clear"). */
 export function binaryLabel(e: HubEntity): string {
-  if (isUnavailable(e.state)) return 'Unavailable';
+  if (isUnavailable(e.state)) return unavailableLabel(e);
   const on = e.state === 'on';
   switch (e.device_class) {
     case 'door': case 'garage_door': case 'window': case 'opening': return on ? 'Open' : 'Closed';
