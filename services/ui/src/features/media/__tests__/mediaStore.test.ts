@@ -305,8 +305,8 @@ describe('selectors', () => {
 });
 
 describe('shownPlayer', () => {
-  const rows = (wrapperTitle: string, ownQueue = true): MediaStatus[] => [
-    { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', ma_player_id: 'media_player.office_tv_chrome', ma_own_queue: ownQueue, media_title: wrapperTitle },
+  const rows = (wrapperTitle: string): MediaStatus[] => [
+    { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', ma_player_id: 'media_player.office_tv_chrome', media_title: wrapperTitle },
     { entity_id: 'media_player.office_tv_chrome', friendly_name: 'Office TV Cast', state: 'playing', media_title: 'Pharaoh', media_content_id: 'http://ma/flow.flac' },
   ] as MediaStatus[];
 
@@ -317,13 +317,5 @@ describe('shownPlayer', () => {
     const own = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('Its own') }, T0).players;
     expect(shownPlayer(own, 'media_player.office_tv_chrome_2')?.item?.title).toBe('Its own');
     expect(shownPlayer(players, '')).toBeNull();
-  });
-
-  it("never shows another app's session on the device as the wrapper's song", () => {
-    // Music Assistant is not playing: the Cast device's track belongs to some other app (the
-    // Office TV box's Spotify app reported sessions that never played on that TV).
-    const { players } = ingest(EMPTY_PLAYERS, { type: 'status', players: rows('', false) }, T0);
-    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')).toBe(players['media_player.office_tv_chrome_2']);
-    expect(shownPlayer(players, 'media_player.office_tv_chrome_2')?.item).toBeNull();
   });
 });

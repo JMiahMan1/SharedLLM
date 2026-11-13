@@ -265,7 +265,6 @@ class MediaStateSyncRequest(BaseRequest):
     app_name: str | None = None
     icon_kind: str | None = None
     ma_player_id: str | None = None
-    ma_own_queue: bool | None = None
     queue: list | None = None
 
 

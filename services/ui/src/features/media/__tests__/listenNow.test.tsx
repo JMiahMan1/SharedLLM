@@ -96,7 +96,7 @@ describe('Listen Now', () => {
           active: null,
           all_players: [
             { entity_id: 'media_player.office_tv_chrome_2', friendly_name: 'Office TV', state: 'playing', is_ma: true,
-              ma_player_id: 'media_player.office_tv_chrome', ma_own_queue: true, media_title: '', media_content_id: null },
+              ma_player_id: 'media_player.office_tv_chrome', media_title: '', media_content_id: null },
             { entity_id: 'media_player.office_tv_chrome', friendly_name: 'Office TV Cast', state: 'playing',
               media_title: 'Pharaoh (Let My People Go)', media_artist: 'Brandon Lake', media_content_id: 'http://ma:8097/flow/x.flac' },
           ],
