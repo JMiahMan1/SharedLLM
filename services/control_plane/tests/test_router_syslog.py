@@ -35,6 +35,7 @@ def test_lines_from_logd_are_read():
     assert extra["dns"] == {"type": "AAAA", "domain": "cdn.example.net", "ip": PHONE_IP}
     assert rs.parse(line("dnsmasq[1]", f"40 {PHONE_IP}/52240 reply cdn.example.net is 203.0.113.9"))["skip"]
     assert rs.parse(line("dnsmasq[1]", f"40 {PHONE_IP}/52240 cached cdn.example.net is NODATA"))["skip"]
+    assert rs.parse(line("dnsmasq[1]", f"41 {PHONE_IP}/5 /tmp/hosts/dhcp.cfg01 hub.example.com is 192.0.2.20"))["skip"]
 
 
 def receiver(tmp_path, allowed=(ROUTER,)):

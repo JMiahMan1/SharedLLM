@@ -77,7 +77,9 @@ _LINE = re.compile(r"^<(?P<pri>\d{1,3})>(?:1 )?(?:(?:\w{3} +\d{1,2} [\d:]{8}|\S+
 # query's serial and the asker's address/port: "40 192.0.2.7/52240 query[A] example.com from 192.0.2.7".
 _EXTRA = re.compile(r"^\d+ [0-9a-fA-F.:]+/\d+ ")
 _QUERY = re.compile(r"^query\[(?P<type>[A-Z0-9]+)\] (?P<domain>\S+) from (?P<ip>[0-9a-fA-F.:]+)$")
-_DNS_CHATTER = re.compile(r"^(forwarded|reply|cached|cached-stale|config|validation|/etc/hosts|DHCP|"
+# Answers and their sources, one or more per lookup; "/tmp/hosts/dhcp... name is 192.0.2.20" is an
+# answer from a hosts file (any path).
+_DNS_CHATTER = re.compile(r"^(forwarded|reply|cached|cached-stale|config|validation|/\S+ \S+ is |DHCP|"
                           r"query\[|dnssec|NODATA|NXDOMAIN)")
 
 
