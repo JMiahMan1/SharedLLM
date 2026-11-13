@@ -171,8 +171,20 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
 
 
 NLBW_EMPTY = ("nlbwmon on the router is counting nothing (its table for this period is empty, which happens "
-              "when it stalls at a new accounting period); restart it on the router (/etc/init.d/nlbwmon restart). "
-              "Until then data use comes from the access points and covers Wi-Fi devices only")
+              "when it stalls at a new accounting period). Until it counts again, data use comes from the access "
+              "points and covers Wi-Fi devices only")
+#: A stalled nlbwmon is restarted at most this often (the router login may run only that restart).
+NLBW_RESTART_EVERY_S = 3600
+
+
+def restart_nlbw(client: RouterClient) -> str | None:
+    """Restart nlbwmon; None when the router did it, else why not."""
+    try:
+        client.call("file", "exec", {"command": "/etc/init.d/nlbwmon", "params": ["restart"]})
+    except RouterError as e:
+        return (f"Jarvis could not restart it ({e}); re-run scripts/router_setup.sh so its login may, "
+                "or run /etc/init.d/nlbwmon restart on the router")
+    return None
 
 
 def _nlbw_counters(client: RouterClient) -> dict[str, dict[str, int]] | None:
@@ -454,10 +466,11 @@ def capacity_notices(state: dict[str, Any], snap: dict[str, Any]) -> list[dict[s
 def usage_notices(state: dict[str, Any], problem: str | None) -> list[dict[str, Any]]:
     """One notice when data use stops being counted properly, re-armed once it works again."""
     was = state.get("usage_problem")
+    if problem and was and problem.startswith(NLBW_EMPTY) and was.startswith(NLBW_EMPTY):
+        return []  # the same stall, now with what Jarvis did about it: still one notice
     state["usage_problem"] = problem
     if not problem or problem == was:
         return []
-    log.warning(f"[network] {problem}")
     return [_notice("Router data use is not being counted", problem, "network-usage")]
 
 
@@ -728,7 +741,14 @@ class Monitor:
             self.state["last_log_id"] = max(e["id"] for e in entries)
         usage_source, deltas = traffic_deltas(self.prev, snap)
         usage_add(self.r, deltas, now)
-        self._record(usage_notices(self.state, snap.get("usage_problem")), now)
+        problem = snap.get("usage_problem")
+        if problem == NLBW_EMPTY and now - float(self.state.get("nlbw_restarted_at") or 0) >= NLBW_RESTART_EVERY_S:
+            self.state["nlbw_restarted_at"] = now
+            refused = restart_nlbw(client)
+            problem = f"{problem}. {refused}" if refused else f"{problem}. Jarvis restarted it; counting resumes shortly"
+            snap["usage_problem"] = problem
+            log.warning(f"[network] {problem}")
+        self._record(usage_notices(self.state, problem), now)
 
         status = {"configured": True, "connected": True, "error": None, "usage_source": usage_source,
                   "usage_problem": snap.get("usage_problem"),

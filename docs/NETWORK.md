@@ -38,9 +38,12 @@ the router:
   read: `system` info and board, `network.interface` dump, `iwinfo` devices,
   info, client lists and channel survey, `luci-rpc` DHCP leases, the `dhcp`
   UCI config, the system `log`, the two conntrack counters under `/proc`, and
-  running `/usr/sbin/nlbw` (nlbwmon's read-only traffic report, nothing else);
-- adds an rpcd login `jarvis` with that ACL and a new random password (hashed
-  on the router with `uhttpd -m`), and reloads rpcd.
+  running `/usr/sbin/nlbw` (nlbwmon's read-only traffic report, nothing else).
+  Its only write permission is `/etc/init.d/nlbwmon restart`: no other action,
+  on nlbwmon or any other service;
+- adds an rpcd login `jarvis` with that ACL for read and write (write holds only
+  that restart) and a new random password (hashed on the router with
+  `uhttpd -m`), and reloads rpcd.
 
 The password goes from the script into Identity through the internal API and
 is never printed or saved anywhere else. Running the script again replaces it.
@@ -62,6 +65,13 @@ stays in `/var/lib/nlbwmon`, which on OpenWrt is RAM, so it does not wear
 the flash; Jarvis keeps the history. Without it, data use falls back to the
 access points' counters and covers Wi-Fi devices only (Admin > Network says
 which).
+
+nlbwmon can stall when it starts a new accounting period: it keeps running
+but its table stays empty (in November 2026 it counted nothing from the 1st
+until it was restarted on the 12th, and Jarvis recorded no data use). The
+monitor treats an empty table as not working: it falls back to the access
+points' counters, restarts nlbwmon (at most once an hour) and sends one
+notice saying so, or how to allow the restart if the login may not.
 
 ## What is checked, every minute
 

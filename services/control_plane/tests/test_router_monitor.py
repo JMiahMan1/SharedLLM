@@ -303,7 +303,7 @@ def test_a_stalled_nlbw_with_an_empty_table_falls_back_to_wifi_and_says_why():
                                           "data": []})}
 
     counters, problem = rm._nlbw_read(Empty())
-    assert counters is None and problem == rm.NLBW_EMPTY and "restart" in problem
+    assert counters is None and problem == rm.NLBW_EMPTY and "stalls" in problem
     prev, now_ = snap(0, server_bytes=1000), snap(60, server_bytes=6000)
     prev["nlbw"], now_["nlbw"] = {SERVER: {"down": 1, "up": 1}}, None
     source, deltas = rm.traffic_deltas(prev, now_)
@@ -317,6 +317,32 @@ def test_a_usage_problem_is_one_notice_until_it_clears():
     assert rm.usage_notices(state, rm.NLBW_EMPTY) == []
     assert rm.usage_notices(state, None) == []
     assert len(rm.usage_notices(state, rm.NLBW_EMPTY)) == 1
+
+
+def test_a_stalled_nlbw_is_restarted_and_a_refusal_says_how_to_allow_it():
+    calls = []
+
+    class Router:
+        def call(self, obj, method, args):
+            calls.append((args["command"], args["params"]))
+            return {"code": 0}
+
+    assert rm.restart_nlbw(Router()) is None
+    assert calls == [("/etc/init.d/nlbwmon", ["restart"])]
+
+    class ReadOnly:
+        def call(self, *a):
+            raise RouterError("file.exec failed (ubus status 6)")
+
+    assert "router_setup.sh" in rm.restart_nlbw(ReadOnly())
+
+
+def test_the_same_stall_with_what_jarvis_did_is_still_one_notice():
+    state: dict = {}
+    first = rm.usage_notices(state, rm.NLBW_EMPTY + ". Jarvis restarted it; counting resumes shortly")
+    assert len(first) == 1 and "restarted" in first[0]["body"]
+    assert rm.usage_notices(state, rm.NLBW_EMPTY) == []
+    assert rm.usage_notices(state, None) == []
 
 
 def test_usage_sums_devices_networks_and_a_series(monkeypatch):

@@ -9,7 +9,8 @@
 # What it changes on the router, after saving a backup to ~/Desktop:
 #   - /usr/share/rpcd/acl.d/jarvis-monitor.json: an ACL that can only read
 #     status (system, interfaces, Wi-Fi, DHCP leases and config, the log) and
-#     run nlbw, nlbwmon's read-only report of each device's traffic;
+#     run nlbw, nlbwmon's read-only report of each device's traffic; the one
+#     thing it may change is restarting nlbwmon when its table stalls empty;
 #   - an rpcd login "jarvis" using that ACL, with a new random password;
 #   - rpcd is reloaded so the login works.
 # The password goes from here straight into Jarvis's Identity (encrypted) and
@@ -38,7 +39,7 @@ echo "== 2. Installing the read-only ACL"
 rsh 'cat > /usr/share/rpcd/acl.d/jarvis-monitor.json' <<'JSON'
 {
   "jarvis-monitor": {
-    "description": "Jarvis: read-only network monitoring",
+    "description": "Jarvis: network monitoring (read-only, plus restarting a stalled nlbwmon)",
     "read": {
       "ubus": {
         "system": ["info", "board"],
@@ -54,6 +55,11 @@ rsh 'cat > /usr/share/rpcd/acl.d/jarvis-monitor.json' <<'JSON'
         "/proc/sys/net/netfilter/nf_conntrack_count": ["read"],
         "/proc/sys/net/netfilter/nf_conntrack_max": ["read"],
         "/usr/sbin/nlbw": ["exec"]
+      }
+    },
+    "write": {
+      "file": {
+        "/etc/init.d/nlbwmon restart": ["exec"]
       }
     }
   }
@@ -73,6 +79,7 @@ s="$(uci add rpcd login)"
 uci set "rpcd.$s.username=$LOGIN"
 uci set "rpcd.$s.password=$hash"
 uci add_list "rpcd.$s.read=jarvis-monitor"
+uci add_list "rpcd.$s.write=jarvis-monitor"  # its write section is only "restart nlbwmon"
 uci commit rpcd
 /etc/init.d/rpcd reload
 SH
