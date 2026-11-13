@@ -8763,9 +8763,13 @@ async def _call_recipients(request: Request, token: str, me: str) -> tuple[str, 
         people = detail.get("participants") or []
         if not people:
             log.warning("[call-notice] room %s: Talk gave no members (%s)", token, why or "empty list")
-            # A one-to-one room names the other person, so it can still ring.
+        if len(people) < 2:
+            # Only the caller (or nobody) is listed. A one-to-one room still names the other person, who may
+            # have left the Talk chat (Talk keeps the room under their name): they are still the one to ring.
+            # Joining a Jarvis call never needs Talk membership, only the ring.
             opened, why_open = await _talk_detail(request, {"action": "open", "token": token})
-            people = _calls.one_to_one_members(opened.get("conversation"))
+            other = _calls.one_to_one_members(opened.get("conversation"))
+            people = [*people, *other]
             if not people:
                 log.warning("[call-notice] room %s: could not read the room either (%s)", token, why_open or "not one-to-one")
                 return None

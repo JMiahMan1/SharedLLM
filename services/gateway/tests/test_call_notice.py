@@ -212,6 +212,54 @@ def test_a_one_to_one_room_rings_even_when_its_member_list_is_unreadable(monkeyp
     assert "Talk gave no members" in caplog.text and "Forbidden" in caplog.text
 
 
+def test_a_one_to_one_room_rings_the_other_person_even_after_they_left_it(monkeypatch):
+    """Talk keeps a one-to-one room under the other person's name after they leave it, and lists only the
+    caller. That person is still the one to ring: joining a Jarvis call needs no Talk membership."""
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+
+    async def proxy(request, endpoint, payload=None, *, method="POST", as_user=None):
+        action = (payload or {}).get("action")
+        if action == "participants":
+            return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
+                "participants": [{"actor_type": "users", "actor_id": "sam", "display_name": "Sam"}]}})
+        if action == "open":
+            return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
+                "conversation": {"token": "room-dm", "type": 1, "name": "jordan", "display_name": "Jordan"}}})
+        return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {}})
+
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
+    _joined("room-dm")
+    reply = TestClient(app).post("/api/communication/calls/room-dm/ring").json()
+    assert reply["ringing"] == ["jordan"]
+    assert [n["user"] for n in notices] == ["jordan"]
+
+
+def test_a_group_room_with_only_the_caller_left_rings_nobody(monkeypatch):
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+
+    async def proxy(request, endpoint, payload=None, *, method="POST", as_user=None):
+        action = (payload or {}).get("action")
+        if action == "participants":
+            return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
+                "participants": [{"actor_type": "users", "actor_id": "sam", "display_name": "Sam"}]}})
+        if action == "open":
+            return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {
+                "conversation": {"token": "room-group", "type": 2, "name": "Family"}}})
+        return JSONResponse(status_code=200, content={"status": "SUCCESS", "detail": {}})
+
+    monkeypatch.setattr(gateway_main, "_proxy_execution_with_identity", proxy)
+    _joined("room-group")
+    reply = TestClient(app).post("/api/communication/calls/room-group/ring").json()
+    assert reply["ringing"] == [] and "Jarvis account" in reply["reason"]
+    assert notices == []
+
+
 def test_a_ring_that_reaches_nobody_says_why(monkeypatch, caplog):
     from services.gateway import calls
 
