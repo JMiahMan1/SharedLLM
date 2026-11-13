@@ -30,6 +30,11 @@ def test_lines_from_logd_are_read():
     with_host = rs.parse("<27>Nov  2 03:04:05 router kernel: [123.456] oops")
     assert with_host["level"] == "err" and with_host["source"] == "kernel"
     assert rs.parse("not syslog") is None
+    # log-queries=extra, which is how OpenWrt logs them (the router's real format)
+    extra = rs.parse(line("dnsmasq[1]", f"40 {PHONE_IP}/52240 query[AAAA] cdn.example.net from {PHONE_IP}"))
+    assert extra["dns"] == {"type": "AAAA", "domain": "cdn.example.net", "ip": PHONE_IP}
+    assert rs.parse(line("dnsmasq[1]", f"40 {PHONE_IP}/52240 reply cdn.example.net is 203.0.113.9"))["skip"]
+    assert rs.parse(line("dnsmasq[1]", f"40 {PHONE_IP}/52240 cached cdn.example.net is NODATA"))["skip"]
 
 
 def receiver(tmp_path, allowed=(ROUTER,)):
@@ -106,5 +111,6 @@ def test_devices_and_router_address_come_from_what_jarvis_already_knows():
 def test_the_polled_alert_log_leaves_out_dns_lookups():
     lines = [{"id": 1, "time": 1000, "priority": 30, "msg": "dnsmasq[9]: query[A] a.example.com from 192.0.2.5"},
              {"id": 2, "time": 1000, "priority": 30, "msg": "dnsmasq[9]: reply a.example.com is 203.0.113.1"},
+             {"id": 4, "time": 1000, "priority": 30, "msg": "dnsmasq[1]: 40 192.0.2.5/52240 query[A] a.example.com from 192.0.2.5"},
              {"id": 3, "time": 1000, "priority": 27, "msg": "netifd: Interface 'wan' is now down"}]
     assert [e["id"] for e in rm.log_entries(lines)] == [3]

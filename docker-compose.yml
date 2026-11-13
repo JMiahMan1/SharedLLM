@@ -1171,7 +1171,7 @@ services:
       - 172.26.0.254
     # The router forwards its log here over TCP; only the router's address is accepted.
     ports:
-      - "${ROUTER_SYSLOG_PORT:-5514}:${ROUTER_SYSLOG_PORT:-5514}/tcp"
+      - "0.0.0.0:${ROUTER_SYSLOG_PORT:-5514}:${ROUTER_SYSLOG_PORT:-5514}/tcp"  # IPv4 only
     networks:
       - sharedllm
 

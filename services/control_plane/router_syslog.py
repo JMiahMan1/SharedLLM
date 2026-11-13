@@ -73,8 +73,12 @@ CREATE INDEX IF NOT EXISTS router_log_time ON router_log(time);
 # logd sends RFC 3164; the hostname is optional and some senders put a version after the priority.
 _LINE = re.compile(r"^<(?P<pri>\d{1,3})>(?:1 )?(?:(?:\w{3} +\d{1,2} [\d:]{8}|\S+T\S+) )?"
                    r"(?:(?P<host>[\w.-]+) )?(?P<tag>[^\s:\[]+)(?:\[\d+\])?: ?(?P<msg>.*)$")
+# With log-queries=extra (OpenWrt's default when logqueries is on) each line starts with the
+# query's serial and the asker's address/port: "40 192.0.2.7/52240 query[A] example.com from 192.0.2.7".
+_EXTRA = re.compile(r"^\d+ [0-9a-fA-F.:]+/\d+ ")
 _QUERY = re.compile(r"^query\[(?P<type>[A-Z0-9]+)\] (?P<domain>\S+) from (?P<ip>[0-9a-fA-F.:]+)$")
-_DNS_CHATTER = re.compile(r"^(forwarded|reply|cached|config|validation|/etc/hosts|DHCP) ")
+_DNS_CHATTER = re.compile(r"^(forwarded|reply|cached|cached-stale|config|validation|/etc/hosts|DHCP|"
+                          r"query\[|dnssec|NODATA|NXDOMAIN)")
 
 
 def parse(line: str) -> dict[str, Any] | None:
@@ -86,6 +90,7 @@ def parse(line: str) -> dict[str, Any] | None:
     tag, msg = m.group("tag"), m.group("msg").strip()
     out: dict[str, Any] = {"level": level, "source": tag, "msg": msg}
     if tag == "dnsmasq":
+        msg = _EXTRA.sub("", msg)
         q = _QUERY.match(msg)
         if q:
             out["dns"] = {"type": q.group("type"), "domain": q.group("domain").rstrip(".").lower(),

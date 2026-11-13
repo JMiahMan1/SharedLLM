@@ -572,7 +572,7 @@ def _known_devices(snap: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 #: dnsmasq's per-lookup lines (logqueries): thousands an hour, kept by router_syslog, not in the alert log.
-_DNS_LINE = re.compile(r"dnsmasq\[\d+\]: (query|forwarded|reply|cached)\[?")
+_DNS_LINE = re.compile(r"dnsmasq\[\d+\]: (\d+ [0-9a-fA-F.:]+/\d+ )?(query|forwarded|reply|cached)\b")
 
 
 def log_entries(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
