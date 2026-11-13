@@ -67,6 +67,8 @@ SCAN_INTERVAL_S = float(os.getenv("HOMEHUB_DISCOVERY_INTERVAL_S", "3600"))
 MIN_SCAN_GAP_S = 60.0
 #: Housekeeping (expiry, saving, mDNS freshness) runs every this many seconds.
 HOUSEKEEPING_S = 60.0
+#: A device the hub follows by MAC that stopped answering gets a sweep this soon, not at the hourly scan.
+FOLLOW_SCAN_S = 600.0
 #: The first active scan waits this long after start, so drivers connect first.
 STARTUP_DELAY_S = 20.0
 #: New findings from mDNS are batched for this long before admins are told.
@@ -585,6 +587,8 @@ class DiscoveryManager:
         self.notified: list[str] = []
         self.last_scan: dict[str, Any] = {}
         self._last_active = 0.0
+        #: The hub's runtime, set by the service: following a device to a new address reloads its entry.
+        self.runtime: Any = None
         self._dirty = False
         self._tasks: list[asyncio.Task] = []
         self._scan_lock = asyncio.Lock()
@@ -654,6 +658,10 @@ class DiscoveryManager:
             await asyncio.sleep(HOUSEKEEPING_S)
 
     async def housekeeping(self) -> None:
+        try:
+            await self.follow_addresses()
+        except Exception:
+            log.exception("following devices to new addresses failed")
         t = now()
         for fid in list(self._mdns_seen):
             if fid in self.findings:
@@ -810,6 +818,43 @@ class DiscoveryManager:
                 self.findings[p["id"]]["notified"] = True
             self.save()
         return len(fresh) if sent else 0
+
+    async def follow_addresses(self) -> None:
+        """Learn the MAC of devices set up by IP, and follow them when DHCP moves them (address_follow.py)."""
+        from services.homehub import address_follow
+
+        try:
+            neighbours = parse_arp(self.read_arp())
+        except RuntimeError:
+            return
+        proxied = shared_macs(neighbours)
+        learn, moves = address_follow.plan(self.hub, neighbours, proxied)
+        for device, mac in learn:
+            address_follow.learn_mac(self.hub, device, mac)
+        for move in moves:
+            entry = address_follow.apply_move(self.hub, move)
+            if self.runtime is not None:
+                await self.runtime.stop_entry(entry.entry_id)
+                if not entry.disabled_by:
+                    self.runtime.start_entry(entry)
+            await self._notify_followed(move)
+        # A followed device that stopped answering and is not in the table: sweep now, so the kernel
+        # learns where it went, instead of waiting for the hourly scan.
+        if not moves and now() - self._last_active >= FOLLOW_SCAN_S and address_follow.lost(self.hub, neighbours):
+            self._last_active = now()  # one early sweep per FOLLOW_SCAN_S
+            asyncio.get_running_loop().create_task(self.scan(reason="a followed device stopped answering"))
+
+    async def _notify_followed(self, move: Any) -> None:
+        from services.common import notify
+
+        payload = notify.notice(
+            "@admins", "admin", f"{move.title} has a new address",
+            f"The router gave {move.title} a new address ({move.old_ip} to {move.new_ip}). "
+            "Jarvis followed it by its hardware address; nothing needs doing.",
+            url="/devices", priority=3, tag=f"admin:device-followed:{move.entry_id}",
+            once=f"homehub:followed:{move.entry_id}:{move.new_ip}", kind="admin", audience="parents")
+        with contextlib.suppress(Exception):
+            await self.notifier(payload)
 
     async def _notify_moved(self, moved: list[dict[str, Any]]) -> None:
         """One notice per device whose address changed (until it changes again)."""

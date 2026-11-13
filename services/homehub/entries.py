@@ -30,6 +30,9 @@ log = logging.getLogger("homehub.entries")
 RECONFIGURABLE: dict[str, dict[str, Any]] = {
     "host": {"label": "Address", "type": "text"},
     "url": {"label": "URL", "type": "text"},
+    # A camera set up by its web page keeps these (in its options, as HA's MJPEG integration did).
+    "mjpeg_url": {"label": "Stream URL", "type": "text"},
+    "still_image_url": {"label": "Snapshot URL", "type": "text"},
     "port": {"label": "Port", "type": "text"},
     "username": {"label": "Username", "type": "text"},
     "password": {"label": "Password", "type": "password", "secret": True},
@@ -53,12 +56,26 @@ def label(domain: str) -> str:
     return LABELS.get(domain) or EXTRA_LABELS.get(domain) or domain.replace("_", " ").title()
 
 
+#: Keys an entry may keep in its options rather than its data; they are changed where they are.
+OPTION_KEYS = {"mjpeg_url", "still_image_url", "username", "password"}
+
+
+def _home_of(entry: ConfigEntry, key: str) -> str | None:
+    """Where the entry keeps ``key``: "data", "options" (only for OPTION_KEYS), or None."""
+    if key in (entry.data or {}):
+        return "data"
+    if key in OPTION_KEYS and key in (entry.options or {}):
+        return "options"
+    return None
+
+
 def reconfigure_fields(entry: ConfigEntry) -> list[dict[str, Any]]:
     out = []
     for key, meta in RECONFIGURABLE.items():
-        if key not in (entry.data or {}):
+        home = _home_of(entry, key)
+        if home is None:
             continue
-        value = entry.data.get(key)
+        value = (entry.data if home == "data" else entry.options).get(key)
         field = {"key": key, "label": meta["label"], "type": meta["type"]}
         if meta.get("secret"):
             field["set"] = bool(value)
@@ -132,22 +149,26 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
         raise EntryError(f"{label(entry.domain)} cannot change {', '.join(unknown)}"
                          + (f" (only {', '.join(sorted(allowed))})" if allowed else ""))
     data = dict(entry.data)
+    kept_options = dict(entry.options)
     for key, value in changes.items():
         text = "" if value is None else str(value).strip()
+        target = kept_options if _home_of(entry, key) == "options" else data
         if RECONFIGURABLE[key].get("secret") and not text:
             continue  # an empty secret field means "keep the stored one"
-        if key in ("host", "url") and not text:
+        if key in ("host", "url", "mjpeg_url") and not text:
             raise EntryError(f"{RECONFIGURABLE[key]['label']} cannot be empty")
+        if key in ("url", "mjpeg_url", "still_image_url") and text and not text.lower().startswith(("http://", "https://", "rtsp://", "rtsps://")):
+            raise EntryError(f"{RECONFIGURABLE[key]['label']} must start with http:// or https://")
         if key == "port":
             if text and not text.isdigit():
                 raise EntryError("Port must be a number")
             data[key] = int(text) if text else None
             continue
-        data[key] = text if key not in ("password",) else str(value)
+        target[key] = text if key not in ("password",) else str(value)
     title = str(body.get("title") or "").strip()
     if "title" in body and not title:
         raise EntryError("The name cannot be empty")
-    options = dict(entry.options)
+    options = kept_options
     if "host" in changes and str(changes.get("host") or "").strip():
         # An address override from the import would win over the new address.
         options.pop("host", None)

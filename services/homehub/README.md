@@ -227,6 +227,16 @@ Thread network) and `_mass._tcp` (Music Assistant). A set-up device found at a n
 address is listed with `moved` and offered as an update to its entry
 (`POST /hub/discovered/{id}/update-address`), and admins get one notice per new address.
 
+Devices set up by IP are also **followed by MAC on their own** (`address_follow.py`, every
+minute in discovery's housekeeping): while an entry works, its device learns the MAC the
+neighbour table shows at its address; when that MAC turns up at another address, every
+address the entry keeps (`host`, `url`, a camera's `mjpeg_url`/`still_image_url`, in its data
+or options) is rewritten, the entry reloads, and admins get one notice that it happened. A
+followed device that stopped answering triggers an early sweep (at most every 10 minutes)
+rather than waiting for the hourly scan. An extender's shared MAC never counts, and a host
+name is left alone. A camera's stream and snapshot URLs can also be changed by hand
+(`PATCH /hub/entries/{id}`).
+
 Every driver can be added by hand (`GET /hub/flows`, grouped as on the network,
 servers, cloud accounts and helpers; `manual_flows.py`); phones add themselves.
 

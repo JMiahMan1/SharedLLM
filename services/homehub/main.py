@@ -94,6 +94,7 @@ class Service:
             from services.homehub.discovery import DiscoveryManager
 
             manager = DiscoveryManager(self.hub, self.store)
+            manager.runtime = self.runtime  # following a device to a new address reloads its entry
             await manager.start()
             self.runtime.discovery = manager  # the /hub/discovered API reads it from here
         except Exception:
