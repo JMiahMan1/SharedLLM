@@ -291,7 +291,7 @@ class CallHub:
         peer.camera = bool(camera)
         async with self._lock:
             peers = list(self._rooms.get(peer.room, {}).values())
-        await self.broadcast(peers, {"type": "peer-state", "peer": peer.public()})
+        await self.broadcast(peers, {"type": "peer-state", "from": peer.id, "peer": peer.public()})
 
 
 hub = CallHub()
@@ -711,7 +711,9 @@ async def calls_websocket(
             "name": await hub.room_name(room),
         },
     )
-    await hub.broadcast(existing, {"type": "peer-joined", "peer": peer.public()})
+    # "from" on every message about a person: the app routes each one by it (without it, a join was dropped and
+    # the newcomer showed as "Family member", a leaver's tile stayed, and mute/camera changes never showed).
+    await hub.broadcast(existing, {"type": "peer-joined", "from": peer.id, "peer": peer.public()})
     log.info(f"[calls] {peer.name} joined {room} ({len(existing) + 1} in the call)")
 
     try:
@@ -740,5 +742,5 @@ async def calls_websocket(
         log.warning(f"[calls] {peer.name} signalling failed: {type(e).__name__}: {e}")
     finally:
         remaining = await hub.leave(peer)
-        await hub.broadcast(remaining, {"type": "peer-left", "id": peer.id})
+        await hub.broadcast(remaining, {"type": "peer-left", "from": peer.id, "id": peer.id})
         log.info(f"[calls] {peer.name} left {room} ({len(remaining)} remaining)")

@@ -25,6 +25,8 @@ import {
 } from '../lib/callSettings';
 import { getDeviceKey } from '../lib/deviceRegistration';
 import { listenForDropIn, nativeDropInStatus, reportDropInEnded, reportDropInJoined } from '../lib/dropIn';
+import UserAvatar from '../components/UserAvatar';
+import { useFamilyDirectory } from '../components/chat/familyDirectory';
 import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 
 /** How often the app looks for a family drop-in call started elsewhere. */
@@ -172,6 +174,19 @@ interface CallEvents {
   onLocalStream: (stream: MediaStream | null) => void;
   onEnded: (message: string) => void;
   onDeclined?: (name: string) => void;
+}
+
+/**
+ * Who a signalling message is about: its "from", else the person it carries, else its "id". An older
+ * server sent peer-joined and peer-state without "from", and dropping them left the newcomer nameless
+ * ("Family member"), a leaver's tile up, and mute or camera changes unseen.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function signalSender(message: Record<string, unknown>): string {
+  if (typeof message.from === 'string' && message.from) return message.from;
+  const carried = message.peer as Record<string, unknown> | undefined;
+  if (typeof carried?.id === 'string' && carried.id) return carried.id;
+  return typeof message.id === 'string' ? message.id : '';
 }
 
 function participant(value: unknown): CallParticipant | null {
@@ -439,7 +454,7 @@ class CallSession {
       this.events.onDeclined?.(typeof message.name === 'string' && message.name ? message.name : 'Someone');
       return;
     }
-    const from = typeof message.from === 'string' ? message.from : '';
+    const from = signalSender(message);
     if (!from) return;
 
     if (type === 'peer-joined') {
@@ -660,15 +675,6 @@ class CallSession {
   }
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('') || '?';
-}
-
 function elapsed(startedAt: number, now: number): string {
   const total = Math.max(0, Math.floor((now - startedAt) / 1000));
   const seconds = total % 60;
@@ -693,6 +699,10 @@ function CallVideo({ stream, muted = false, className }: { stream: MediaStream; 
 }
 
 function PeerTile({ peer }: { peer: CallPeer }) {
+  // The person's picture and name from the family directory (the one chat uses); the call's own name when
+  // the directory has none.
+  const person = useFamilyDirectory()(peer.username || peer.name);
+  const name = person?.display_name || peer.name;
   return (
     <div
       className="relative aspect-square overflow-hidden rounded-2xl border border-white/10 bg-slate-900"
@@ -706,10 +716,8 @@ function PeerTile({ peer }: { peer: CallPeer }) {
       )}
       {!peer.hasVideo && (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 to-slate-950">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-lg font-bold text-white">
-            {initials(peer.name)}
-          </span>
-          <span className="max-w-full truncate px-3 text-sm font-semibold text-slate-100">{peer.name}</span>
+          <UserAvatar username={person?.username || peer.username || name} avatar={person?.avatar} name={name} size={56} />
+          <span className="max-w-full break-words px-3 text-center text-sm font-semibold text-slate-100">{name}</span>
           <span className="text-[11px] text-slate-400">
             {peer.connection === 'connected' ? 'Audio call' : peer.connection === 'failed' ? 'Reconnecting…' : 'Connecting…'}
           </span>
@@ -717,7 +725,7 @@ function PeerTile({ peer }: { peer: CallPeer }) {
       )}
       {peer.hasVideo && peer.stream && (
         <span className="absolute bottom-0 left-0 right-0 truncate bg-gradient-to-t from-slate-950/90 to-transparent px-3 py-2 text-xs font-semibold text-white">
-          {peer.name}
+          {name}
         </span>
       )}
       {peer.muted && (
@@ -914,6 +922,7 @@ function CallOverlay({
 /** Full-screen incoming call: answer or decline, like a phone call. */
 function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswer: () => void; onDecline: () => void }) {
   const caller = call.caller || call.participants[0]?.name || 'Someone';
+  const person = useFamilyDirectory()(call.participants[0]?.username || caller);
   const group = call.name && call.name !== caller ? call.name : '';
   return (
     <div
@@ -928,8 +937,9 @@ function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswe
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Family call</p>
         <span className="relative mt-4 flex h-28 w-28 items-center justify-center sm:mt-2 sm:h-20 sm:w-20">
           <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20" />
-          <span className="relative flex h-full w-full items-center justify-center rounded-full bg-white/10 text-3xl font-bold text-white sm:text-2xl">
-            {initials(caller)}
+          <span className="relative flex h-full w-full items-center justify-center">
+            <UserAvatar username={person?.username || caller} avatar={person?.avatar} name={caller}
+              size={112} className="h-full w-full" />
           </span>
         </span>
         <p className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-xl">{caller}</p>

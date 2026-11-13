@@ -35,6 +35,8 @@ def test_two_people_join_the_same_room_and_exchange_signals(one_loop_client):
             joined = mom.receive_json()
             assert joined["type"] == "peer-joined"
             assert joined["peer"]["name"] == "Kid"
+            # Every message about a person says who it is from: the app routes them by it.
+            assert joined["from"] == kid_welcome["self"]["id"] == joined["peer"]["id"]
 
             mom.send_json(
                 {
@@ -50,7 +52,7 @@ def test_two_people_join_the_same_room_and_exchange_signals(one_loop_client):
 
             kid.send_json({"type": "state", "muted": True, "camera": False})
             state = mom.receive_json()
-            assert state["type"] == "peer-state"
+            assert state["type"] == "peer-state" and state["from"] == kid_welcome["self"]["id"]
             assert state["peer"]["muted"] is True
             assert state["peer"]["camera"] is False
 
@@ -59,7 +61,8 @@ def test_two_people_join_the_same_room_and_exchange_signals(one_loop_client):
             # can tell the other peer.
             kid.send({"type": "websocket.disconnect", "code": 1000})
             left = mom.receive_json()
-            assert left == {"type": "peer-left", "id": kid_welcome["self"]["id"]}
+            kid_id = kid_welcome["self"]["id"]
+            assert left == {"type": "peer-left", "from": kid_id, "id": kid_id}
 
 
 def test_rooms_do_not_relay_between_each_other(one_loop_client):
