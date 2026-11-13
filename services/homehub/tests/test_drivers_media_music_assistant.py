@@ -125,6 +125,18 @@ async def test_state_mapping():
         assert ("music_assistant", s) in hub.services
 
 
+async def test_a_powered_off_player_is_on_no_source():
+    """A sleeping Google TV still names its last app to Music Assistant; Jarvis showed Spotify on it."""
+    _hub, drv, _made = build()
+    await drv.async_setup()
+    sources = [{"id": "spotify", "name": "Spotify"}, {"id": "youtube", "name": "YouTube"}]
+    state, attrs = drv.player_state(player("tv1", "Some TV", powered=False, active_source="spotify", source_list=sources))
+    assert state == "off" and "source" not in attrs and "app_id" not in attrs
+    assert attrs["source_list"] == ["Spotify", "YouTube"]  # still offered to pick from
+    state, attrs = drv.player_state(player("tv1", "Some TV", active_source="spotify", source_list=sources))
+    assert attrs["source"] == "Spotify" and attrs["app_id"] == "spotify"
+
+
 async def test_events_update_state():
     hub, drv, made = build()
     await drv.async_setup()

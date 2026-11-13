@@ -381,6 +381,10 @@ class MusicAssistantDriver(Driver):
         active_source = p.get("active_source")
         source_name = next((s.get("name") for s in (p.get("source_list") or [])
                             if isinstance(s, dict) and s.get("id") == active_source), None)
+        if state == "off":
+            # A powered-off player is on no source. A sleeping Google TV still names its last
+            # app (Spotify) to Music Assistant, which made Jarvis show it on the TV.
+            active_source = source_name = None
         attrs: dict[str, Any] = {
             "volume_level": p["volume_level"] / 100 if isinstance(p.get("volume_level"), (int, float)) else None,
             "is_volume_muted": p.get("volume_muted"),
