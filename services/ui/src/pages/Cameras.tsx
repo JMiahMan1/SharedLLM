@@ -19,7 +19,7 @@ import MotionRecordingSettings from '../components/cameras/MotionRecordingSettin
 import { updateEntity } from '../lib/hardware';
 import {
   addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
-  nextRotation, rotatedMediaStyle, sameDay, tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
+  nextRotation, playbackRotation, rotatedMediaStyle, sameDay, tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
   type CameraInfo, type CameraRecording, type CameraRotation,
 } from '../lib/cameras';
 
@@ -346,7 +346,7 @@ function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnTy
             <RecordingPlayer
               key={playing.file}
               src={playUrl}
-              rotation={cameraRotation(camera)}
+              rotation={playbackRotation(camera, playing)}
               label={`Recording at ${formatClock(playing.start)}`}
               onError={() => setPlayError(true)}
             />

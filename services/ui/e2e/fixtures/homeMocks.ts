@@ -291,7 +291,11 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       return json({ cameras: CAMERAS.map((c) => (rotations.has(c.entity_id) ? { ...c, rotation: rotations.get(c.entity_id) } : c)) });
     }
     if (/^\/api\/cameras\/[^/]+\/recordings$/.test(p)) {
-      return json({ recordings: [{ file: 'r1.mp4', start: iso(-120), end: iso(-119), duration: 42, triggers: ['person', 'motion'] }] });
+      return json({ recordings: [
+        { file: 'r1.mp4', start: iso(-120), end: iso(-119), duration: 42, triggers: ['person', 'motion'] },
+        // A motion clip the hub saved already turned a quarter turn.
+        { file: 'r2_r90.mp4', start: iso(-240), end: iso(-239), duration: 12, triggers: ['motion'], rotation: 90 },
+      ] });
     }
     if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);

@@ -108,8 +108,12 @@ schedule, and how many days clips are kept. Set it up on the Cameras page
 - **Clips** start `pre_s` before the motion and end `post_s` after it (or at
   `max_s`). Frames keep their real timing and become H.264 MP4 through ffmpeg
   (installed in the hub's image).
+- **Turned cameras record turned:** a clip is saved with the camera's
+  `rotation` (entity options) applied, so it is upright in Nextcloud too; its
+  name ends `_r90` (or `_r180`, `_r270`) and the recordings list carries
+  `rotation`, which the app subtracts so it never turns a clip twice.
 - **Storage** is Nextcloud over WebDAV: `<folder>/<camera>/<yyyy-mm-dd>/
-  <yyyymmdd-hhmmss>_<seconds>s_motion.mp4` (local time), folder default
+  <yyyymmdd-hhmmss>_<seconds>s_motion[_r<turn>].mp4` (local time), folder default
   `Jarvis/Cameras`. The account is Jarvis's own (`NEXTCLOUD_URL`,
   `NEXTCLOUD_USER`, `NEXTCLOUD_PASS`, read once when the hub starts and copied
   into the integration when chosen) or another one with an app password.

@@ -35,6 +35,18 @@ export function cameraRotation(camera: { rotation?: number | null } | null | und
   return r === 90 || r === 180 || r === 270 ? r : 0;
 }
 
+/**
+ * How far to turn a recording as it plays: the camera's turn, less whatever the
+ * file already has (a motion clip from the hub is saved turned; a Reolink
+ * camera's own recording is not).
+ */
+export function playbackRotation(
+  camera: { rotation?: number | null }, recording: { rotation?: number | null } | null | undefined,
+): CameraRotation {
+  const turn = (cameraRotation(camera) - cameraRotation(recording ?? null) + 360) % 360;
+  return turn as CameraRotation;
+}
+
 /** The next quarter turn clockwise, back to 0 after 270. */
 export function nextRotation(rotation: CameraRotation): CameraRotation {
   return ((rotation + 90) % 360) as CameraRotation;
@@ -66,6 +78,8 @@ export interface CameraRecording {
   triggers: string[];
   size?: number | null;
   stream?: string | null;
+  /** The turn already saved into the file (the hub's motion recorder records turned cameras turned). */
+  rotation?: number | null;
 }
 
 export interface CameraRecordings {

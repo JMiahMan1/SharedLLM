@@ -64,7 +64,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, Hub, HubError
+from services.homehub.core import DeviceUnavailable, Driver, EntityEntry, Hub, HubError, camera_rotation
 
 log = logging.getLogger("homehub.camera_recording")
 
@@ -82,7 +82,10 @@ LIMITS: dict[str, tuple[int, int]] = {
 }
 _CAMERA_ID = re.compile(r"camera\.[a-z0-9_]+")
 _HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
-_CLIP_NAME = re.compile(r"(\d{8})-(\d{6})_(\d{1,4})s_([a-z_]+)\.mp4")
+#: ``<yyyymmdd-hhmmss>_<seconds>s_<trigger>[_r<turn>].mp4``; ``_r90`` marks a clip saved already turned.
+_CLIP_NAME = re.compile(r"(\d{8})-(\d{6})_(\d{1,4})s_([a-z]+)(?:_r(90|180|270))?\.mp4")
+#: ffmpeg filters that turn a picture clockwise.
+_TURN = {0: "", 90: "transpose=clock,", 180: "hflip,vflip,", 270: "transpose=cclock,"}
 _DAY_NAME = re.compile(r"\d{4}-\d{2}-\d{2}")
 _HTTP_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=10, sock_read=60)
 #: How often the driver re-checks which cameras record, uploads waiting clips and prunes old days.
@@ -257,11 +260,13 @@ class MotionDetector:
 
 # -- clips ----------------------------------------------------------------------
 
-def clip_name(start: datetime, seconds: float, trigger: str = "motion") -> str:
-    return f"{start.strftime('%Y%m%d-%H%M%S')}_{max(1, round(seconds))}s_{trigger}.mp4"
+def clip_name(start: datetime, seconds: float, trigger: str = "motion", rotation: int = 0) -> str:
+    turned = f"_r{rotation}" if rotation else ""
+    return f"{start.strftime('%Y%m%d-%H%M%S')}_{max(1, round(seconds))}s_{trigger}{turned}.mp4"
 
 
-def parse_clip_name(name: str, tz: ZoneInfo) -> tuple[datetime, int, str] | None:
+def parse_clip_name(name: str, tz: ZoneInfo) -> tuple[datetime, int, str, int] | None:
+    """(start, seconds, trigger, the turn the clip was saved with), or None for any other name."""
     m = _CLIP_NAME.fullmatch(name)
     if not m:
         return None
@@ -269,7 +274,7 @@ def parse_clip_name(name: str, tz: ZoneInfo) -> tuple[datetime, int, str] | None
         start = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=tz)
     except ValueError:
         return None
-    return start, int(m.group(3)), m.group(4)
+    return start, int(m.group(3)), m.group(4), int(m.group(5) or 0)
 
 
 class Clip:
@@ -298,13 +303,14 @@ class Clip:
         lines.append(f"file '{len(self.times) - 1:06d}.jpg'")  # the concat demuxer drops the last duration otherwise
         return "\n".join(lines) + "\n"
 
-    async def encode(self, out: Path, fps: int) -> None:
+    async def encode(self, out: Path, fps: int, rotation: int = 0) -> None:
+        """The MP4, turned ``rotation`` degrees clockwise (the camera's turn, so the file is upright anywhere)."""
         if not self.times:
             raise RuntimeError("a clip with no frames")
         (self.dir / "frames.txt").write_text(self.concat_list(1.0 / fps))
         proc = await asyncio.create_subprocess_exec(
             FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-            "-i", str(self.dir / "frames.txt"), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+            "-i", str(self.dir / "frames.txt"), "-vf", f"{_TURN[rotation]}scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
             "-r", str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-movflags", "+faststart",
             str(out), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
         _out, err = await proc.communicate()
@@ -681,11 +687,15 @@ class CameraRecordingDriver(Driver):
         return self.pending_dir / camera_id.split(".", 1)[1] / name
 
     async def save_clip(self, camera_id: str, clip: Clip, fps: int) -> None:
-        name = clip_name(datetime.fromtimestamp(clip.times[0], self.tz), clip.seconds)
+        # Saved the way the camera is turned in Jarvis (its entity options), so the file is upright in
+        # Nextcloud too; the name says so, and the app does not turn it again.
+        cam = self.hub.entities.get(camera_id)
+        rotation = camera_rotation(cam) if cam is not None else 0
+        name = clip_name(datetime.fromtimestamp(clip.times[0], self.tz), clip.seconds, rotation=rotation)
         local = self.pending_path(camera_id, name)
         local.parent.mkdir(parents=True, exist_ok=True)
         try:
-            await clip.encode(local, fps)
+            await clip.encode(local, fps, rotation)
         except Exception as exc:
             self.log.warning("%s: a clip could not be made: %s", camera_id, exc)
             with contextlib.suppress(OSError):
@@ -787,12 +797,13 @@ class CameraRecordingDriver(Driver):
         parsed = parse_clip_name(name, self.tz)
         if parsed is None:
             return None
-        began, seconds, trigger = parsed
+        began, seconds, trigger, rotation = parsed
         finished = began + timedelta(seconds=seconds)
         if finished < start or began > end:
             return None
+        # rotation: the turn already in the file; the app turns it only by what the camera's turn adds.
         return {"file": name, "start": began.isoformat(), "end": finished.isoformat(), "duration": seconds,
-                "triggers": [trigger], "size": size, "stream": None}
+                "triggers": [trigger], "size": size, "stream": None, "rotation": rotation}
 
     async def async_open_recording(self, entity: EntityEntry, file: str, *, range_header: str | None = None) -> Any:
         from services.homehub.drivers.mjpeg import RecordingStream

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addDays, cameraMediaUrl, cameraRotation, dayRange, nextRotation, rotatedMediaStyle, formatDuration, fromDateInput, tileRefreshMs, toDateInput, triggerLabel,
+  addDays, cameraMediaUrl, cameraRotation, dayRange, nextRotation, playbackRotation, rotatedMediaStyle, formatDuration, fromDateInput, tileRefreshMs, toDateInput, triggerLabel,
   type CameraInfo,
 } from './cameras';
 
@@ -67,5 +67,13 @@ describe('cameras helpers', () => {
     expect(side).toMatchObject({ width: '56.25%', height: '177.78%', left: '50%', top: '50%' });
     expect(side?.transform).toBe('translate(-50%, -50%) rotate(90deg)');
     expect(rotatedMediaStyle(270, 4 / 3)).toMatchObject({ width: '75%', height: '133.33%' });
+  });
+
+  it('turns a recording only by what its file does not already have', () => {
+    expect(playbackRotation({ rotation: 90 }, { rotation: 0 })).toBe(90);  // a Reolink recording
+    expect(playbackRotation({ rotation: 90 }, { rotation: 90 })).toBe(0);  // a motion clip saved turned
+    expect(playbackRotation({ rotation: 180 }, { rotation: 90 })).toBe(90); // turned again since it was saved
+    expect(playbackRotation({ rotation: 0 }, { rotation: 270 })).toBe(90);  // turned back since it was saved
+    expect(playbackRotation({ rotation: 90 }, null)).toBe(90);
   });
 });

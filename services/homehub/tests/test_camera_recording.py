@@ -114,7 +114,11 @@ def test_a_clip_name_carries_its_start_and_length():
     start = datetime(2026, 11, 13, 9, 30, 5, tzinfo=tz)
     name = rec.clip_name(start, 41.6)
     assert name == "20261113-093005_42s_motion.mp4"
-    assert rec.parse_clip_name(name, tz) == (start, 42, "motion")
+    assert rec.parse_clip_name(name, tz) == (start, 42, "motion", 0)
+    turned = rec.clip_name(start, 41.6, rotation=270)
+    assert turned == "20261113-093005_42s_motion_r270.mp4"
+    assert rec.parse_clip_name(turned, tz) == (start, 42, "motion", 270)
+    assert rec.parse_clip_name("20261113-093005_42s_motion_r45.mp4", tz) is None
     assert rec.parse_clip_name("../20261113-093005_42s_motion.mp4", tz) is None
     assert rec.parse_clip_name("20261399-093005_42s_motion.mp4", tz) is None
 
@@ -296,7 +300,8 @@ async def test_motion_makes_a_clip_in_nextcloud_listed_and_playable(tmp_path, ne
         [(path, data)] = list(nextcloud.files.items())
         assert path.startswith("Jarvis/Cameras/garage/") and data[4:8] == b"ftyp"
         day, name = path.split("/")[3:]
-        start, seconds, trigger = rec.parse_clip_name(name, ZoneInfo(TZ))
+        start, seconds, trigger, turned = rec.parse_clip_name(name, ZoneInfo(TZ))
+        assert turned == 0
         assert day == start.date().isoformat() and trigger == "motion"
         # It begins before the motion (pre_s) and ends post_s after it.
         assert start.timestamp() <= 1_763_051_400.0 + 1.5 and 3 <= seconds <= 7
@@ -315,6 +320,36 @@ async def test_motion_makes_a_clip_in_nextcloud_listed_and_playable(tmp_path, ne
         assert got.status == 206 and body == data[:100] and got.headers["Content-Range"].endswith(f"/{len(data)}")
         with pytest.raises(rec.NextcloudError):
             await drv.async_open_recording(ent, "../../etc/passwd", range_header=None)
+    finally:
+        await drv.async_unload()
+
+
+@NEEDS_FFMPEG
+async def test_a_turned_camera_records_turned_clips_and_says_so(tmp_path, nextcloud):
+    hub, drv = recording_hub(tmp_path, nextcloud.url)
+    hub.entities["camera.garage"].options = {"camera": {"rotation": 90}}
+    await drv.async_setup()
+    for w in list(drv.watchers.values()):
+        await w.stop()
+    drv.watchers.clear()
+    try:
+        await record_motion(drv)
+        [(path, data)] = list(nextcloud.files.items())
+        name = path.rsplit("/", 1)[-1]
+        assert name.endswith("_motion_r90.mp4")
+        local = tmp_path / "turned.mp4"
+        local.write_bytes(data)
+        if shutil.which("ffprobe"):
+            import subprocess
+
+            size = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                   "stream=width,height", "-of", "csv=p=0", str(local)],
+                                  capture_output=True, text=True, check=True).stdout.strip()
+            assert size == "240,320"  # the 320x240 frames, turned on their side
+        start = rec.parse_clip_name(name, ZoneInfo(TZ))[0]
+        [listed] = await drv.async_list_recordings(hub.entities["camera.garage"], start - timedelta(minutes=5),
+                                                   start + timedelta(minutes=5))
+        assert listed["rotation"] == 90  # already turned: the app must not turn it again
     finally:
         await drv.async_unload()
 

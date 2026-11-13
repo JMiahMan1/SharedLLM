@@ -151,6 +151,11 @@ test.describe('home pages', () => {
     }
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'cameras-recording-turned');
+    // A clip the hub saved already turned is not turned again, and keeps the browser's own controls.
+    await viewer.getByRole('list', { name: 'Recordings' }).getByRole('button').nth(1).click();
+    const saved = viewer.locator('video');
+    await expect(saved).toHaveAttribute('controls', '');
+    await expect(saved).not.toHaveAttribute('style', /rotate/);
     clean(run);
   });
 
