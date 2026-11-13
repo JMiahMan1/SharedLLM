@@ -138,7 +138,7 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         except (RouterError, ValueError):
             pass
 
-    nlbw = _nlbw_counters(client)
+    nlbw, usage_problem = _nlbw_read(client)
 
     lines = client.call("log", "read", {"lines": 1000, "stream": False}).get("log", [])
     # Line ids restart when the router reboots; then every line is new.
@@ -165,30 +165,47 @@ def collect(client: RouterClient, last_log_id: int) -> dict[str, Any]:
         "radios": radios,
         "conntrack": conntrack,
         "nlbw": nlbw,
+        "usage_problem": usage_problem,
         "log": new_lines,
     }
 
 
+NLBW_EMPTY = ("nlbwmon on the router is counting nothing (its table for this period is empty, which happens "
+              "when it stalls at a new accounting period); restart it on the router (/etc/init.d/nlbwmon restart). "
+              "Until then data use comes from the access points and covers Wi-Fi devices only")
+
+
 def _nlbw_counters(client: RouterClient) -> dict[str, dict[str, int]] | None:
+    return _nlbw_read(client)[0]
+
+
+def _nlbw_read(client: RouterClient) -> tuple[dict[str, dict[str, int]] | None, str | None]:
     """Bytes each device (wired or Wi-Fi) downloaded and uploaded this
-    accounting period, from the router's nlbwmon; None when it is not
-    installed or the account may not run it (then Wi-Fi counters are used)."""
+    accounting period, from the router's nlbwmon, and what is wrong with it.
+
+    None when it is not installed or the account may not run it (then Wi-Fi
+    counters are used, which is expected). An installed nlbwmon whose table is
+    empty has stalled: that is None too, with ``NLBW_EMPTY`` as the problem,
+    because counters that never move would record no data use at all.
+    """
     try:
         out = client.call("file", "exec", {"command": "/usr/sbin/nlbw", "params": ["-c", "json", "-g", "mac"]})
         data = json.loads(out.get("stdout") or "{}")
     except (RouterError, ValueError):
-        return None
+        return None, None
     cols = data.get("columns") or []
     try:
         i_mac, i_rx, i_tx = cols.index("mac"), cols.index("rx_bytes"), cols.index("tx_bytes")
     except ValueError:
-        return None
+        return None, None
     counters = {}
     for row in data.get("data") or []:
         mac = str(row[i_mac] or "").lower()
         if mac and mac != "00:00:00:00:00:00":
             counters[mac] = {"down": int(row[i_rx] or 0), "up": int(row[i_tx] or 0)}
-    return counters
+    if not counters:
+        return None, NLBW_EMPTY
+    return counters, None
 
 
 def _seconds(t: Any) -> float:
@@ -432,6 +449,16 @@ def capacity_notices(state: dict[str, Any], snap: dict[str, Any]) -> list[dict[s
                 f"{pct:.0f}% of its memory is free; it may slow down or restart.",
                 "admin:network:memory", priority=3))
     return notices
+
+
+def usage_notices(state: dict[str, Any], problem: str | None) -> list[dict[str, Any]]:
+    """One notice when data use stops being counted properly, re-armed once it works again."""
+    was = state.get("usage_problem")
+    state["usage_problem"] = problem
+    if not problem or problem == was:
+        return []
+    log.warning(f"[network] {problem}")
+    return [_notice("Router data use is not being counted", problem, "network-usage")]
 
 
 def internet_notices(state: dict[str, Any], internet: bool, now: float) -> list[dict[str, Any]]:
@@ -701,8 +728,10 @@ class Monitor:
             self.state["last_log_id"] = max(e["id"] for e in entries)
         usage_source, deltas = traffic_deltas(self.prev, snap)
         usage_add(self.r, deltas, now)
+        self._record(usage_notices(self.state, snap.get("usage_problem")), now)
 
         status = {"configured": True, "connected": True, "error": None, "usage_source": usage_source,
+                  "usage_problem": snap.get("usage_problem"),
                   **status_view(snap, loads, internet, now)}
         self.prev, self.prev_at = snap, now
         self._save(status)

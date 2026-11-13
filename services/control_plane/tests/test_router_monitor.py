@@ -294,6 +294,31 @@ def test_nlbw_report_is_parsed_by_column_name():
     assert rm._nlbw_counters(Denied()) is None
 
 
+def test_a_stalled_nlbw_with_an_empty_table_falls_back_to_wifi_and_says_why():
+    # 2026-11: nlbwmon rolled into a new period and counted nothing; the monitor read
+    # "nlbw works, nobody used any data" and recorded no data use for 12 days.
+    class Empty:
+        def call(self, obj, method, args):
+            return {"stdout": json.dumps({"columns": ["mac", "conns", "rx_bytes", "rx_pkts", "tx_bytes", "tx_pkts"],
+                                          "data": []})}
+
+    counters, problem = rm._nlbw_read(Empty())
+    assert counters is None and problem == rm.NLBW_EMPTY and "restart" in problem
+    prev, now_ = snap(0, server_bytes=1000), snap(60, server_bytes=6000)
+    prev["nlbw"], now_["nlbw"] = {SERVER: {"down": 1, "up": 1}}, None
+    source, deltas = rm.traffic_deltas(prev, now_)
+    assert source == "wifi" and deltas[SERVER]["down"] == 5000
+
+
+def test_a_usage_problem_is_one_notice_until_it_clears():
+    state: dict = {}
+    first = rm.usage_notices(state, rm.NLBW_EMPTY)
+    assert len(first) == 1 and first[0]["tag"] == "network-usage"
+    assert rm.usage_notices(state, rm.NLBW_EMPTY) == []
+    assert rm.usage_notices(state, None) == []
+    assert len(rm.usage_notices(state, rm.NLBW_EMPTY)) == 1
+
+
 def test_usage_sums_devices_networks_and_a_series(monkeypatch):
     import time as _time
 

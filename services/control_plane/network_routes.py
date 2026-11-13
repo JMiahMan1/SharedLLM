@@ -174,6 +174,7 @@ def usage(hours: int = 24):
     return {
         "hours": hours,
         "source": current.get("usage_source", "wifi"),
+        "problem": current.get("usage_problem"),
         "devices": rows,
         "networks": [{"name": k, **v} for k, v in sorted(totals.items(), key=lambda kv: -(kv[1]["down"] + kv[1]["up"]))],
         "series": [{"t": k, **v} for k, v in series.items()],
