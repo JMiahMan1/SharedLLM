@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { getServerOrigin } from './serverUrl';
 import type { MediaToken } from './mediaToken';
 import type { CameraRealtime } from './cameraLive';
@@ -22,6 +23,38 @@ export interface CameraInfo {
   model?: string;
   /** Present when go2rtc can play this camera in real time (WebRTC, MSE or MP4). */
   realtime?: CameraRealtime | null;
+  /** Clockwise degrees to turn the picture by (a camera mounted on its side or upside down). */
+  rotation?: number | null;
+}
+
+export type CameraRotation = 0 | 90 | 180 | 270;
+
+/** The camera's turn, or 0 for anything that is not a quarter turn. */
+export function cameraRotation(camera: { rotation?: number | null } | null | undefined): CameraRotation {
+  const r = camera?.rotation;
+  return r === 90 || r === 180 || r === 270 ? r : 0;
+}
+
+/** The next quarter turn clockwise, back to 0 after 270. */
+export function nextRotation(rotation: CameraRotation): CameraRotation {
+  return ((rotation + 90) % 360) as CameraRotation;
+}
+
+/**
+ * The style that turns a picture or video filling a box of the given shape
+ * (width / height; every camera box is 16:9). A quarter turn swaps the
+ * element's width and height first, so the turned picture still fills the box
+ * rather than spilling over it. Undefined when there is nothing to turn.
+ */
+export function rotatedMediaStyle(rotation: CameraRotation, aspect = 16 / 9): CSSProperties | undefined {
+  if (rotation === 0) return undefined;
+  if (rotation === 180) return { transform: 'rotate(180deg)' };
+  const pct = (n: number) => `${Math.round(n * 1e4) / 1e2}%`;
+  return {
+    left: '50%', top: '50%', right: 'auto', bottom: 'auto',
+    width: pct(1 / aspect), height: pct(aspect),
+    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+  };
 }
 
 export interface CameraRecording {

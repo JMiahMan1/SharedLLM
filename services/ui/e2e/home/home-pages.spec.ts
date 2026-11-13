@@ -95,6 +95,39 @@ test.describe('home pages', () => {
     const run = await open(page, 'member', '/cameras');
     await expect(page.getByRole('button', { name: /Open Yard/ })).toBeVisible();
     await expect(page.getByText('Live video settings')).toHaveCount(0);
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    await expect(page.getByRole('dialog', { name: 'Yard' })).toBeVisible();
+    await expect(page.getByTestId('camera-rotate')).toHaveCount(0);
+    clean(run);
+  });
+
+  test('Cameras: a camera on its side is shown turned, and an admin can turn one', async ({ page }, info) => {
+    const run = await open(page, 'admin', '/cameras');
+    // The Porch camera is set to a quarter turn: its picture is turned and still inside its tile.
+    const porch = page.getByRole('button', { name: /Open Porch/ });
+    const porchImg = porch.locator('img');
+    await expect(porchImg).toHaveAttribute('style', /rotate\(90deg\)/);
+    await porch.scrollIntoViewIfNeeded();
+    const [tileBox, imgBox] = [await porch.boundingBox(), await porchImg.boundingBox()];
+    expect(tileBox && imgBox).toBeTruthy();
+    // Turned, the picture's box matches its tile's (the quarter turn swapped its width and height first).
+    expect(Math.abs(imgBox!.width - tileBox!.width)).toBeLessThan(2);
+    expect(Math.abs(imgBox!.height - tileBox!.height)).toBeLessThan(2);
+    await page.getByRole('button', { name: /Open Yard/ }).click();
+    const viewer = page.getByRole('dialog', { name: 'Yard' });
+    const rotate = viewer.getByTestId('camera-rotate');
+    await expect(rotate).toHaveAccessibleName(/now 0°/);
+    const rotateBox = await rotate.boundingBox();
+    expect(rotateBox!.width).toBeGreaterThanOrEqual(44);
+    expect(rotateBox!.height).toBeGreaterThanOrEqual(44);
+    await rotate.click();
+    await expect.poll(() => run.mocks.posts.find((x) => x.path === '/api/homehub/entities/camera.yard')?.body)
+      .toEqual({ rotation: 90 });
+    await expect(rotate).toHaveAccessibleName(/now 90°/);
+    await expect(viewer.getByRole('img', { name: 'Yard live' })).toHaveAttribute('style', /rotate\(90deg\)/);
+    await expectFits(page, viewer);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'cameras-rotated');
     clean(run);
   });
 

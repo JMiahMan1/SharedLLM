@@ -295,6 +295,16 @@ def test_camera_list_says_what_each_camera_can_do(api):
     esp = cams["camera.garage_door_camera"]
     assert esp["recordings"] is False and esp["area"] == "Garage" and esp["stream"] == "snapshots"
     assert cams["camera.printer"]["stream"] == "camera"
+    assert {x["rotation"] for x in cams.values()} == {0}
+
+
+def test_camera_list_says_how_far_to_turn_each_picture(api):
+    c, hub, _drv = api
+    hub.entities["camera.garage_door_camera"].options = {"camera": {"rotation": 270}}
+    hub.entities["camera.printer"].options = {"camera": {"rotation": 45}}  # not a quarter turn: ignored
+    cams = {x["entity_id"]: x for x in c.get("/api/homehub/cameras", headers=H).json()}
+    assert cams["camera.garage_door_camera"]["rotation"] == 270
+    assert cams["camera.printer"]["rotation"] == 0
 
 
 def test_recordings_listing_defaults_caps_and_sorts(api):

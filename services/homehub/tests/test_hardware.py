@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from services.homehub import discovery, hardware
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
-from services.homehub.core import UNAVAILABLE, Area, ConfigEntry, DeviceEntry, EntityEntry, Hub
+from services.homehub.core import UNAVAILABLE, Area, ConfigEntry, DeviceEntry, EntityEntry, Hub, camera_rotation
 from services.homehub.discovery import DiscoveryManager
 from services.homehub.entries import EntryError
 from services.homehub.store import Store
@@ -172,6 +172,34 @@ async def test_entity_changes_are_checked(env):
     with pytest.raises(EntryError) as err:
         await hardware.update_entity(rt, "light.nope", {"name": "x"})
     assert err.value.status == 404
+
+
+async def test_a_cameras_picture_can_be_rotated_and_turned_back(env):
+    hub, store, rt, _sent = env
+    hub.entities["camera.porch"] = EntityEntry("camera.porch", "esphome", "cam1", "wiz1", "d-wiz",
+                                               options={"conversation": {"should_expose": False}})
+    await hardware.update_entity(rt, "camera.porch", {"rotation": 90})
+    ent = hub.entities["camera.porch"]
+    assert camera_rotation(ent) == 90 and ent.options["conversation"] == {"should_expose": False}
+    assert camera_rotation({e.entity_id: e for e in store.load_entities()}["camera.porch"]) == 90
+    assert rt.stopped == []  # only how Jarvis shows it changes; the camera is left alone
+    await hardware.update_entity(rt, "camera.porch", {"rotation": 0})
+    assert "camera" not in hub.entities["camera.porch"].options
+
+
+@pytest.mark.parametrize("rotation", [45, -90, 360, "90", None, True])
+async def test_a_rotation_must_be_a_quarter_turn(env, rotation):
+    hub, _store, rt, _sent = env
+    hub.entities["camera.porch"] = EntityEntry("camera.porch", "esphome", "cam1", "wiz1", "d-wiz")
+    with pytest.raises(EntryError):
+        await hardware.update_entity(rt, "camera.porch", {"rotation": rotation})
+    assert camera_rotation(hub.entities["camera.porch"]) == 0
+
+
+async def test_only_a_camera_can_be_rotated(env):
+    _hub, _store, rt, _sent = env
+    with pytest.raises(EntryError):
+        await hardware.update_entity(rt, "light.porch_light", {"rotation": 90})
 
 
 async def test_disabling_a_device_disables_its_entities_and_enabling_restores_only_those(env):

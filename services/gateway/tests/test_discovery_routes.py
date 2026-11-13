@@ -219,6 +219,8 @@ def test_hardware_calls_reach_the_hub(client, hub):
     assert client.get("/api/homehub/hardware", headers=ADMIN).json()["devices"] == [{"id": "dev1"}]
     client.patch("/api/homehub/entities/light.porch", headers=ADMIN, json={"name": "Lamp", "secret": "x"})
     assert seen[-1] == ("PATCH", "/hub/entities/light.porch", None, {"name": "Lamp"})
+    client.patch("/api/homehub/entities/camera.yard", headers=ADMIN, json={"rotation": 90})
+    assert seen[-1] == ("PATCH", "/hub/entities/camera.yard", None, {"rotation": 90})
     assert client.patch("/api/homehub/entities/not-an-id", headers=ADMIN, json={}).status_code == 404
     assert client.post("/api/homehub/entries/e1/disable", headers=ADMIN, json={"disabled": "yes"}).status_code == 400
     client.post("/api/homehub/entries/e1/disable", headers=ADMIN, json={"disabled": True})

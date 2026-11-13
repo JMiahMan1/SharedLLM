@@ -5,7 +5,9 @@ import {
   SkipForward, Volume2,
 } from 'lucide-react';
 import { useMediaToken } from '../../lib/mediaToken';
-import { cameraMediaUrl } from '../../lib/cameras';
+import { useQuery } from '@tanstack/react-query';
+import { cameraMediaUrl, cameraRotation, rotatedMediaStyle } from '../../lib/cameras';
+import { api } from '../../services/api';
 import {
   SETPOINT_DEBOUNCE_MS, modeVisual, numberAttr, setpointRange, snap, titleize, type ClimateAttributes,
 } from '../../lib/climate';
@@ -284,12 +286,16 @@ export function CameraTile({ entity }: { entity: HubEntity }) {
   const token = useMediaToken();
   const [failed, setFailed] = useState(false);
   const url = cameraMediaUrl(token, entity.entity_id, 'snapshot');
+  // The same list the Cameras page reads (shared cache), for how far to turn this camera's picture.
+  const cameras = useQuery({ queryKey: ['cameras'], queryFn: () => api.getCameras(), staleTime: 60_000 });
+  const rotation = cameraRotation(cameras.data?.find((c) => c.entity_id === entity.entity_id));
   return (
     <Link to={`/cameras?camera=${encodeURIComponent(entity.entity_id)}`}
       className="block overflow-hidden rounded-xl border border-white/10 bg-black/40" aria-label={`Open ${entity.name}`}>
-      <div className="aspect-video flex items-center justify-center">
+      <div className="relative aspect-video overflow-hidden flex items-center justify-center">
         {url && !failed ? (
-          <img src={url} alt={entity.name} loading="lazy" className="h-full w-full object-cover" onError={() => setFailed(true)} />
+          <img src={url} alt={entity.name} loading="lazy" className="absolute inset-0 h-full w-full object-cover"
+            style={rotatedMediaStyle(rotation)} onError={() => setFailed(true)} />
         ) : failed ? <CameraOff size={22} className="text-slate-600" /> : <Cctv size={22} className="text-slate-600" />}
       </div>
       <p className="px-2 py-1 text-xs text-slate-300 truncate">{entity.name}</p>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addDays, cameraMediaUrl, dayRange, formatDuration, fromDateInput, tileRefreshMs, toDateInput, triggerLabel,
+  addDays, cameraMediaUrl, cameraRotation, dayRange, nextRotation, rotatedMediaStyle, formatDuration, fromDateInput, tileRefreshMs, toDateInput, triggerLabel,
   type CameraInfo,
 } from './cameras';
 
@@ -45,5 +45,27 @@ describe('cameras helpers', () => {
     const cam = { entity_id: 'camera.x', name: 'X', platform: 'reolink', state: 'idle', recordings: true, live: [] } as CameraInfo;
     expect(tileRefreshMs({ ...cam, battery: true })).toBeNull();
     expect(tileRefreshMs(cam)).toBe(10_000);
+  });
+
+  it('reads only quarter turns as a rotation', () => {
+    expect(cameraRotation({ rotation: 90 })).toBe(90);
+    expect(cameraRotation({ rotation: 270 })).toBe(270);
+    expect(cameraRotation({ rotation: 45 })).toBe(0);
+    expect(cameraRotation({ rotation: null })).toBe(0);
+    expect(cameraRotation({})).toBe(0);
+    expect(cameraRotation(null)).toBe(0);
+  });
+
+  it('turns clockwise a quarter at a time and comes back round', () => {
+    expect([0, 90, 180, 270].map((r) => nextRotation(r as 0 | 90 | 180 | 270))).toEqual([90, 180, 270, 0]);
+  });
+
+  it('a quarter turn swaps the picture box so it still fills a 16:9 frame', () => {
+    expect(rotatedMediaStyle(0)).toBeUndefined();
+    expect(rotatedMediaStyle(180)).toEqual({ transform: 'rotate(180deg)' });
+    const side = rotatedMediaStyle(90);
+    expect(side).toMatchObject({ width: '56.25%', height: '177.78%', left: '50%', top: '50%' });
+    expect(side?.transform).toBe('translate(-50%, -50%) rotate(90deg)');
+    expect(rotatedMediaStyle(270, 4 / 3)).toMatchObject({ width: '75%', height: '133.33%' });
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, Volume2, VolumeX } from 'lucide-react';
-import type { CameraInfo } from '../../lib/cameras';
+import { cameraRotation, rotatedMediaStyle, type CameraInfo } from '../../lib/cameras';
 import type { MediaToken } from '../../lib/mediaToken';
 import {
   browserCaps, firstFrameTimeoutMs, mp4Url, mseSocketUrl, nextMode, noteModeFailed, noteModeWorked, pickQuality,
@@ -92,6 +92,7 @@ export default function RealtimePlayer({ camera, token, onGiveUp }: {
       <video
         ref={videoRef}
         className="absolute inset-0 h-full w-full object-contain"
+        style={rotatedMediaStyle(cameraRotation(camera))}
         autoPlay
         playsInline
         muted={muted}

@@ -286,6 +286,16 @@ class DeviceEntry:
         return d
 
 
+#: The turns a camera's picture can be given (clockwise degrees), for a camera mounted on its side or upside down.
+CAMERA_ROTATIONS = (0, 90, 180, 270)
+
+
+def camera_rotation(entity: EntityEntry) -> int:
+    """How far to turn this camera's picture, from its entity options (``{"camera": {"rotation": 90}}``)."""
+    value = ((entity.options or {}).get("camera") or {}).get("rotation", 0)
+    return int(value) if value in CAMERA_ROTATIONS and not isinstance(value, bool) else 0
+
+
 @dataclass
 class EntityEntry:
     entity_id: str

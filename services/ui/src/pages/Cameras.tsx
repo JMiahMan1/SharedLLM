@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BatteryMedium, CameraOff, Cctv, ChevronDown, ChevronLeft, ChevronRight, Film, Loader2, Moon, Play, RefreshCw, X,
+  BatteryMedium, CameraOff, Cctv, ChevronDown, ChevronLeft, ChevronRight, Film, Loader2, Moon, Pause, Play, RefreshCw,
+  RotateCw, X,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useMediaToken } from '../lib/mediaToken';
@@ -14,10 +15,11 @@ import { useAuth } from '../context/AuthContext';
 import { browserCaps, playbackModes } from '../lib/cameraLive';
 import RealtimePlayer from '../components/cameras/RealtimePlayer';
 import LiveVideoSettings from '../components/cameras/LiveVideoSettings';
+import { updateEntity } from '../lib/hardware';
 import {
-  addDays, cameraMediaUrl, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline, sameDay,
-  tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
-  type CameraInfo, type CameraRecording,
+  addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
+  nextRotation, rotatedMediaStyle, sameDay, tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
+  type CameraInfo, type CameraRecording, type CameraRotation,
 } from '../lib/cameras';
 
 const LIST_POLL_MS = 30_000;
@@ -81,7 +83,7 @@ function CameraTile({ camera, token, onOpen }: {
       <button
         type="button"
         onClick={() => onOpen(camera)}
-        className="relative block w-full aspect-video bg-slate-900/80 text-left"
+        className="relative block w-full aspect-video overflow-hidden bg-slate-900/80 text-left"
         aria-label={`Open ${name}`}
       >
         {src && !failed && (
@@ -89,6 +91,7 @@ function CameraTile({ camera, token, onOpen }: {
             src={src}
             alt=""
             className={`absolute inset-0 h-full w-full object-cover transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            style={rotatedMediaStyle(cameraRotation(camera))}
             onLoad={() => setLoaded(true)}
             onError={() => setFailed(true)}
           />
@@ -163,6 +166,7 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
             src={src}
             alt={`${displayName(camera)} live`}
             className="absolute inset-0 h-full w-full object-contain"
+            style={rotatedMediaStyle(cameraRotation(camera))}
             onLoad={() => setLoaded(true)}
             onError={() => setFailed(true)}
           />
@@ -209,6 +213,79 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
           : `A fresh picture about every ${Math.max(0.5, camera.snapshot_interval ?? 1)} s.`}
         {camera.battery ? ' Battery camera: live view stops after two minutes.' : ''}
       </p>
+    </div>
+  );
+}
+
+/**
+ * A recording. Unturned, it is the browser's own player. Turned, the video is
+ * rotated without its controls (a sideways scrub bar is no use), and play,
+ * pause and seeking sit under it the right way up.
+ */
+function RecordingPlayer({ src, rotation, label, onError }: {
+  src: string;
+  rotation: CameraRotation;
+  label: string;
+  onError: () => void;
+}) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  if (rotation === 0) {
+    return (
+      <video src={src} controls autoPlay playsInline preload="metadata"
+        className="w-full aspect-video rounded-xl bg-black" onError={onError} aria-label={label} />
+    );
+  }
+  const toggle = () => {
+    const v = ref.current;
+    if (!v) return;
+    if (v.paused) void v.play()?.catch?.(() => {}); else v.pause();
+  };
+  return (
+    <div className="space-y-1">
+      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black">
+        <video
+          ref={ref}
+          src={src}
+          autoPlay
+          playsInline
+          preload="metadata"
+          className="absolute inset-0 h-full w-full object-contain"
+          style={rotatedMediaStyle(rotation)}
+          onClick={toggle}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+          onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+          onDurationChange={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+          onError={onError}
+          aria-label={label}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`${TOUCH} flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10`}
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
+          {playing ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={duration || 0}
+          step={0.1}
+          value={Math.min(time, duration || 0)}
+          disabled={!duration}
+          onChange={(e) => { const v = ref.current; if (v) v.currentTime = Number(e.target.value); }}
+          className="min-h-11 flex-1 min-w-0 accent-cyan-400"
+          aria-label="Position"
+        />
+        <span className="text-xs text-slate-400 tabular-nums shrink-0">{formatDuration(time)} / {formatDuration(duration)}</span>
+      </div>
     </div>
   );
 }
@@ -265,16 +342,12 @@ function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnTy
       {playing && (
         <div className="space-y-1">
           {playUrl && !playError ? (
-            <video
+            <RecordingPlayer
               key={playing.file}
               src={playUrl}
-              controls
-              autoPlay
-              playsInline
-              preload="metadata"
-              className="w-full aspect-video rounded-xl bg-black"
+              rotation={cameraRotation(camera)}
+              label={`Recording at ${formatClock(playing.start)}`}
               onError={() => setPlayError(true)}
-              aria-label={`Recording at ${formatClock(playing.start)}`}
             />
           ) : (
             <div className="w-full aspect-video rounded-xl bg-black flex flex-col items-center justify-center gap-2 text-center p-4">
@@ -344,6 +417,17 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
   onView: (view: 'live' | 'recordings') => void;
   onClose: () => void;
 }) {
+  const isAdmin = Boolean(useAuth().user?.is_admin);
+  const queryClient = useQueryClient();
+  const rotation = cameraRotation(camera);
+  const rotate = useMutation({
+    mutationFn: (next: CameraRotation) => updateEntity(camera.entity_id, { rotation: next }),
+    onSuccess: (_out, next) => {
+      queryClient.setQueryData<CameraInfo[]>(['cameras'], (list) =>
+        list?.map((c) => (c.entity_id === camera.entity_id ? { ...c, rotation: next } : c)));
+      void queryClient.invalidateQueries({ queryKey: ['cameras'] });
+    },
+  });
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; }, [onClose]);
   useEffect(() => {
@@ -377,6 +461,19 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
             <p className="text-xs text-slate-400 truncate">{[camera.area, camera.model].filter(Boolean).join(' · ')}</p>
           </div>
           <CameraBadges camera={camera} />
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => rotate.mutate(nextRotation(rotation))}
+              disabled={rotate.isPending}
+              className={`${TOUCH} flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 disabled:opacity-50`}
+              aria-label={`Rotate ${displayName(camera)} (now ${rotation}°)`}
+              title="Rotate the picture a quarter turn, for everyone"
+              data-testid="camera-rotate"
+            >
+              {rotate.isPending ? <Loader2 size={18} className="animate-spin" /> : <RotateCw size={18} />}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -386,6 +483,9 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
             <X size={18} />
           </button>
         </div>
+        {rotate.isError && (
+          <p className="text-xs text-red-300" role="alert">{errorText(rotate.error, 'Couldn’t rotate the picture')}</p>
+        )}
         {camera.recordings && (
           <div className="flex gap-2 rounded-2xl bg-white/5 p-1" role="tablist">
             <button type="button" role="tab" aria-selected={tab === 'live'} className={tabClass(tab === 'live')} onClick={() => onView('live')}>

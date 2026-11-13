@@ -37,7 +37,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from services.homehub import capabilities, entries
-from services.homehub.core import UNAVAILABLE, DeviceEntry, EntityEntry
+from services.homehub.core import CAMERA_ROTATIONS, UNAVAILABLE, DeviceEntry, EntityEntry
 from services.homehub.discovery import current_host, norm_mac
 
 log = logging.getLogger("homehub.hardware")
@@ -394,14 +394,33 @@ def _clear_state(hub: Any, entity_id: str) -> None:
 
 
 async def update_entity(runtime: Any, entity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """``{"name"?: str|null, "area_id"?: str|null, "hidden"?: bool, "disabled"?: bool}``."""
+    """``{"name"?: str|null, "area_id"?: str|null, "hidden"?: bool, "disabled"?: bool, "rotation"?: int}``.
+
+    ``rotation`` (cameras only) turns the picture clockwise by 0, 90, 180 or 270 degrees wherever Jarvis
+    shows it, for a camera mounted on its side or upside down. The video itself is untouched.
+    """
     hub = runtime.hub
     ent = hub.entities.get(entity_id)
     if ent is None:
         raise entries.EntryError("No such entity", 404)
-    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled"})
+    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled", "rotation"})
     if unknown:
         raise entries.EntryError(f"An entity cannot change {', '.join(unknown)}")
+    if "rotation" in body:
+        rotation = body.get("rotation")
+        if ent.domain != "camera":
+            raise entries.EntryError("Only a camera's picture can be rotated")
+        if isinstance(rotation, bool) or rotation not in CAMERA_ROTATIONS:
+            raise entries.EntryError(f"rotation must be one of {', '.join(map(str, CAMERA_ROTATIONS))}")
+        options = dict(ent.options or {})
+        camera = {k: v for k, v in (options.get("camera") or {}).items() if k != "rotation"}
+        if rotation:
+            camera["rotation"] = int(rotation)
+        if camera:
+            options["camera"] = camera
+        else:
+            options.pop("camera", None)
+        ent.options = options
     reload_needed = False
     if "name" in body:
         name = body.get("name")

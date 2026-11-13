@@ -144,7 +144,8 @@ export async function setDeviceDisabled(id: string, disabled: boolean): Promise<
 }
 
 export async function updateEntity(entityId: string,
-  body: { name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean }): Promise<HardwareEntity> {
+  body: { name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean; rotation?: number },
+): Promise<HardwareEntity> {
   const resp = await apiClient.patch(`/api/homehub/entities/${encodeURIComponent(entityId)}`, body, { timeout: 60_000 });
   return resp.data;
 }

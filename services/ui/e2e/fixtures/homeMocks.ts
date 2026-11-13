@@ -108,7 +108,7 @@ const ENERGY_PREFS = {
 
 const CAMERAS = [
   { entity_id: 'camera.yard', name: 'Yard', area: 'Kitchen', platform: 'reolink', state: 'idle', recordings: true, live: ['mjpeg'], stream: 'camera' },
-  { entity_id: 'camera.porch', name: 'Porch', area: 'Front', platform: 'reolink', state: 'idle', recordings: false, live: ['mjpeg'], stream: 'camera', battery: true },
+  { entity_id: 'camera.porch', name: 'Porch', area: 'Front', platform: 'reolink', state: 'idle', recordings: false, live: ['mjpeg'], stream: 'camera', battery: true, rotation: 90 },
 ];
 
 const AUTOMATION = {
@@ -194,6 +194,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const unmocked: string[] = [];
   const posts: HomeMocks['posts'] = [];
   const profile = PROFILES[role];
+  // Camera turns an admin sets, so the list read after a rotate says the new one.
+  const rotations = new Map<string, number>();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -206,10 +208,16 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     const method = request.method();
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
     if (method !== 'GET') {
-      let body: unknown = null;
+      let body: unknown;
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      // Minted with a POST; without it no camera picture is ever signed.
+      if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: profile.username });
+      const entityPatch = /^\/api\/homehub\/entities\/([^/]+)$/.exec(p);
+      if (method === 'PATCH' && entityPatch && typeof (body as { rotation?: unknown })?.rotation === 'number') {
+        rotations.set(decodeURIComponent(entityPatch[1]), (body as { rotation: number }).rotation);
+      }
       if (p === '/api/homehub/bluetooth/map/sessions') {
         return json({ session_id: 'map-1', area_id: 'bedroom', tracker: 'sensor.robin_s_phone', ends_at: iso(1) });
       }
@@ -254,7 +262,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
         yaml: 'alias: Porch light at dusk\ntriggers: []\nactions: []\n', can_edit: role === 'admin' });
     }
     if (p === '/api/homehub/automations/remap') return json({ remap: {}, report: [] });
-    if (p === '/api/cameras') return json({ cameras: CAMERAS });
+    if (p === '/api/cameras') {
+      return json({ cameras: CAMERAS.map((c) => (rotations.has(c.entity_id) ? { ...c, rotation: rotations.get(c.entity_id) } : c)) });
+    }
     if (/^\/api\/cameras\/[^/]+\/recordings$/.test(p)) {
       return json({ recordings: [{ start: iso(-120), end: iso(-119), trigger: 'person', id: 'r1' }] });
     }
@@ -280,6 +290,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   });
   // Camera pictures: a 1x1 image instead of a network error.
   await page.route('**/api/media/cameras/**', (route) =>
-    route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') }));
+    route.fulfill({ contentType: 'image/png', body: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') }));
   return { unmocked, posts };
 }

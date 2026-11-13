@@ -37,7 +37,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     voice_api,  # /hub/voice: the voice satellites and their runs
 )
 from services.homehub.auth import Auth, Principal, bearer
-from services.homehub.core import DeviceUnavailable, HubError, State
+from services.homehub.core import DeviceUnavailable, HubError, State, camera_rotation
 from services.homehub.mobile_app_webhook import registry_view  # hides phones' webhook ids from non-admins
 from services.homehub.runtime import Runtime
 
@@ -438,6 +438,8 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             # "camera" when the stream is the camera's own video, "snapshots" when it is built from stills.
             "stream": "camera" if driver is not None and hasattr(driver, "async_open_mjpeg_stream") else "snapshots",
             "snapshot_interval": float(getattr(driver, "snapshot_interval", 1.0) or 1.0) if driver else None,
+            # Clockwise degrees to turn the picture by, for a camera mounted on its side or upside down.
+            "rotation": camera_rotation(ent),
         }
         out.update(live_video.camera_summary(hub, ent.entity_id))  # "realtime" when go2rtc can play it
         info = getattr(driver, "camera_info", None)
