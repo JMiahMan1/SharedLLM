@@ -180,6 +180,32 @@ async def test_media_status_states_and_attributes(setup):
     assert hub.states.get("media_player.office_tv_chrome").state == "unavailable"
 
 
+async def test_a_sleeping_tv_is_off_whatever_its_native_app_reports(setup):
+    """A Google TV in standby kept showing Spotify "paused" (and "playing" while a phone
+    played it) though nothing came out of its speakers."""
+    hub, drv, made = setup
+    await drv.async_setup()
+    FakeBrowser.instances[-1].appear(OFFICE, "Office TV")
+    await settle()
+    cc = made[OFFICE]
+    cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "AndroidNativeApp", "Spotify", True
+    ms = cc.media_controller.status
+    ms.player_state = "PLAYING"
+    ms.media_metadata = {"metadataType": 3, "title": "Someone else's song"}
+    drv.publish_key(OFFICE)
+    st = hub.states.get("media_player.office_tv_chrome")
+    assert st.state == "off"
+    assert "media_title" not in st.attributes and "app_name" not in st.attributes
+    cc.status.is_stand_by = False  # the TV is awake and showing Spotify: believe it
+    drv.publish_key(OFFICE)
+    st = hub.states.get("media_player.office_tv_chrome")
+    assert st.state == "playing" and st.attributes["media_title"] == "Someone else's song"
+    # the media receiver (Jarvis's own casts) is never hidden by the standby flag
+    cc.status.app_id, cc.status.display_name, cc.status.is_stand_by = "CC1AD845", "Default Media Receiver", True
+    drv.publish_key(OFFICE)
+    assert hub.states.get("media_player.office_tv_chrome").state == "playing"
+
+
 async def test_commands(setup):
     hub, drv, made = setup
     await drv.async_setup()

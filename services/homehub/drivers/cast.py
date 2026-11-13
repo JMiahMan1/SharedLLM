@@ -34,6 +34,8 @@ from services.homehub.core import UNAVAILABLE, DeviceUnavailable, Driver, Entity
 from services.homehub.drivers.media_common import F, clamp01, clean, mime_for
 
 MEDIA_RECEIVER_APP_ID = "CC1AD845"
+# An Android/Google TV reports its foreground Android app (Spotify, YouTube) under this id.
+ANDROID_NATIVE_APP_ID = "AndroidNativeApp"
 COMMAND_TIMEOUT_S = 10.0
 # Loading media may first switch the TV from another app (Spotify, YouTube) to the media receiver.
 LOAD_TIMEOUT_S = 30.0
@@ -178,7 +180,14 @@ class CastDriver(Driver):
         cs = cc.status
         ms = self._media_status(cc)
         app_id = getattr(cc, "app_id", None) or getattr(cs, "app_id", None)
-        if ms is not None and ms.player_state in ("PLAYING", "BUFFERING"):
+        # A sleeping Android TV still reports its last app's session: Spotify on a Google TV
+        # mirrors the account's player (paused, or "playing" while a phone plays it) though
+        # the TV makes no sound. Casting wakes the TV, so a real cast is never asleep.
+        asleep = app_id == ANDROID_NATIVE_APP_ID and getattr(cs, "is_stand_by", None) is True
+        if asleep:
+            ms = None
+            state = "off"
+        elif ms is not None and ms.player_state in ("PLAYING", "BUFFERING"):
             state = "playing"
         elif ms is not None and ms.player_is_paused:
             state = "paused"
