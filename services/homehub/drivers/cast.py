@@ -180,15 +180,13 @@ class CastDriver(Driver):
         cs = cc.status
         ms = self._media_status(cc)
         app_id = getattr(cc, "app_id", None) or getattr(cs, "app_id", None)
-        # An Android/Google TV's own apps report through Cast as "AndroidNativeApp", and what
-        # they report is not what the TV is playing: the Office TV's built-in Spotify app said
-        # Spotify was paused or "playing" though Spotify was never played on that TV, asleep
-        # or awake. Jarvis never casts through it (its casts and YouTube have their own app
-        # ids), so such a session is ignored: the TV is off or on, playing nothing.
-        native = app_id == ANDROID_NATIVE_APP_ID
-        if native:
-            ms, app_id = None, None
-            state = "off" if getattr(cs, "is_stand_by", None) is True or cc.is_idle else "on"
+        # A sleeping Android TV still reports its last app's session: Spotify on a Google TV
+        # mirrors the account's player (paused, or "playing" while a phone plays it) though
+        # the TV makes no sound. Casting wakes the TV, so a real cast is never asleep.
+        asleep = app_id == ANDROID_NATIVE_APP_ID and getattr(cs, "is_stand_by", None) is True
+        if asleep:
+            ms = None
+            state = "off"
         elif ms is not None and ms.player_state in ("PLAYING", "BUFFERING"):
             state = "playing"
         elif ms is not None and ms.player_is_paused:
@@ -205,7 +203,7 @@ class CastDriver(Driver):
         attrs: dict[str, Any] = {
             "volume_level": cs.volume_level, "is_volume_muted": cs.volume_muted,
         }
-        if state != "off" and not native:
+        if state != "off":
             attrs.update(app_id=app_id, app_name=getattr(cs, "display_name", None))
         if ms is not None and state in ("playing", "paused", "idle"):
             sf |= F.STOP
