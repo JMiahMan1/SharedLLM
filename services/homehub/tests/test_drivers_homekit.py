@@ -87,6 +87,9 @@ class FakePairing:
         self.subscribed = set(chars)
 
     async def get_characteristics(self, chars):
+        if getattr(self, "fail_next_reads", 0):
+            self.fail_next_reads -= 1
+            raise OSError("unable to perform operation on <TCPTransport closed=True>; the handler is closed")
         if self.fail_reads:
             raise OSError("no route to host")
         return {k: {"value": self.values.get(k)} for k in chars}
@@ -294,6 +297,20 @@ async def test_poll_failure_marks_unavailable_then_recovers():
     await driver.async_poll()
     assert hub.states.get("climate.hallway").state == "cool"
     assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
+
+
+async def test_a_connection_the_accessory_closed_is_not_a_drop(monkeypatch):
+    """A Honeywell T5 closes its connection now and then; the next read reconnects."""
+    monkeypatch.setattr(homekit, "POLL_RETRY_PAUSE_S", 0)
+    hub, driver, fake = await setup()
+    fake.fail_next_reads = 1
+    fake.values[(1, 19)] = 25.0
+    await driver.async_poll()
+    assert hub.states.get("climate.hallway").state == "cool"
+    assert hub.states.get("sensor.hallway_current_temperature").state == "77.0"
+    fake.fail_next_reads = 2  # gone for real: both reads fail
+    await driver.async_poll()
+    assert hub.states.get("climate.hallway").state == "unavailable"
 
 
 async def test_setup_raises_when_the_accessory_is_silent():

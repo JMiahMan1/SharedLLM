@@ -55,6 +55,10 @@ except ImportError:  # pragma: no cover - the image installs aiohomekit
 log = logging.getLogger("homehub.homekit_controller")
 
 REQUEST_TIMEOUT = 20.0
+#: An accessory closes an idle connection now and then (a Honeywell T5 every half hour or so):
+#: the first read after that fails and the library reconnects on the next one. One retry
+#: after this pause tells a closed connection from an accessory that has gone away.
+POLL_RETRY_PAUSE_S = 1.0
 
 # Characteristic and service types, as the short form of the HAP UUID (the
 # first segment without leading zeros). Vendor types keep their first segment.
@@ -293,7 +297,7 @@ class HomeKitDriver(Driver):
         if not readable or self._pairing is None:
             return
         try:
-            result = await asyncio.wait_for(self._pairing.get_characteristics(readable), REQUEST_TIMEOUT)
+            result = await self._read(readable)
         except Exception as exc:
             if self.available:
                 self.log.warning("%s: accessory stopped answering: %s", self.entry.title, exc)
@@ -305,6 +309,16 @@ class HomeKitDriver(Driver):
                 self.values[tuple(key)] = item["value"]  # type: ignore[index]
         self.available = True
         self.publish_all()
+
+    async def _read(self, readable: list) -> dict:
+        """Read once, and once more after a pause: the first read after the accessory closed
+        its connection fails while the library reconnects, which is not the accessory gone."""
+        try:
+            return await asyncio.wait_for(self._pairing.get_characteristics(readable), REQUEST_TIMEOUT)
+        except Exception as exc:
+            self.log.debug("%s: read failed, retrying once: %s", self.entry.title, exc)
+        await asyncio.sleep(POLL_RETRY_PAUSE_S)
+        return await asyncio.wait_for(self._pairing.get_characteristics(readable), REQUEST_TIMEOUT)
 
     async def async_unpair(self) -> None:
         """Remove our pairing from the accessory, so it can be paired again (by us or anyone)."""
