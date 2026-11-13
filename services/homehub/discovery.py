@@ -389,6 +389,7 @@ DHCP_MATCHERS: tuple[dict[str, str], ...] = (
     {"integration": "wiz", "macaddress": "6C29D2*"},
     {"integration": "wiz", "hostname": "wiz_*"},
     {"integration": "tasmota", "hostname": "tasmota-*"},
+    {"integration": "tasmota", "hostname": "tasmota_*"},  # firmware before 9.x names itself tasmota_XXXXXX-NNNN
 )
 #: Integrations a DHCP match alone is enough to offer (the others are found by
 #: their own protocol, which also tells what the device is).

@@ -273,6 +273,9 @@ def test_arp_and_dhcp_rules():
     assert discovery.dhcp_match("ec:71:db:00:00:30", None) == "reolink"
     assert discovery.dhcp_match("02:00:00:00:00:31", "roborock-vacuum-a1.lan") == "roborock"
     assert discovery.dhcp_match("02:00:00:00:00:31", "laptop") is None
+    # Tasmota's default host name, both spellings: newer "tasmota-", older "tasmota_"
+    assert discovery.dhcp_match("02:00:00:00:00:32", "tasmota-0A1B2C-1234") == "tasmota"
+    assert discovery.dhcp_match("02:00:00:00:00:33", "tasmota_0A1B2C-1234.lan") == "tasmota"
     assert discovery.parse_dhcp("192.0.2.40", "a8bb50000040", None) is None  # WiZ is found by its own protocol
 
 
