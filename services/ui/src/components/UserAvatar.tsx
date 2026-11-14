@@ -23,12 +23,15 @@ interface UserAvatarProps {
 export default function UserAvatar({ username, avatar, name, size = 40, className = '' }: UserAvatarProps) {
   const preset = presetFor(avatar);
   const uploaded = avatar?.startsWith('upload:') ? avatar : null;
-  const { data: blob } = useQuery({
+  const { data: blob, isError } = useQuery({
     queryKey: ['avatar-image', username, uploaded],
     queryFn: () => api.getAvatarImage(username, uploaded),
     enabled: Boolean(uploaded),
     staleTime: Infinity,
-    retry: false,
+    // A phone waking up drops the first request now and then; with no retry that one
+    // miss left the person's initials in place of their photo until the next reload.
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   });
   const src = useMemo(() => (blob ? URL.createObjectURL(blob) : null), [blob]);
   useEffect(() => () => {
@@ -41,6 +44,13 @@ export default function UserAvatar({ username, avatar, name, size = 40, classNam
 
   if (uploaded && src) {
     return <img src={src} alt={label} style={box} className={`${base} object-cover`} data-testid="user-avatar-photo" />;
+  }
+  if (uploaded && !isError) {
+    // The photo is on its way: a quiet circle, not initials that read as "no photo".
+    return (
+      <span role="img" aria-label={label} aria-busy="true" style={box}
+        className={`${base} animate-pulse bg-white/10`} data-testid="user-avatar-loading" />
+    );
   }
   if (preset) {
     return (

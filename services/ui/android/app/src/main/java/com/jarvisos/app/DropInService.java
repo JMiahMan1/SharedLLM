@@ -70,8 +70,12 @@ public class DropInService extends Service {
             }
         } catch (Exception e) {
             // Refused (no active Telecom call to vouch for us): the call can
-            // still go ahead while the app is on screen.
+            // still go ahead while the app is on screen, but not behind a
+            // locked screen. Said to the server, so a Drop In that drops is
+            // explained by the phone itself.
             Log.w(TAG, "foreground refused: " + e.getMessage());
+            DropInReport.send(this, room, "microphone_refused",
+                    e.getClass().getSimpleName() + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         }
         return START_NOT_STICKY;
     }

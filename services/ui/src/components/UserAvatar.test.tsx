@@ -52,6 +52,20 @@ describe('profile pictures', () => {
     expect(apiMock.getAvatarImage).toHaveBeenCalledWith('ben', 'upload:123');
   });
 
+  it('waits for a photo without showing initials, and a dropped first request is tried again', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:photo');
+    URL.revokeObjectURL = vi.fn();
+    apiMock.getAvatarImage
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
+    wrap(<UserAvatar username="ben" name="Ben Carter" avatar="upload:123" />);
+    // Not "BC": that reads as "no photo" while the photo is still on its way.
+    expect(screen.getByTestId('user-avatar-loading')).toHaveAccessibleName('Ben Carter');
+    expect(screen.queryByTestId('user-avatar-initials')).toBeNull();
+    expect(await screen.findByTestId('user-avatar-photo', {}, { timeout: 5000 })).toHaveAttribute('src', 'blob:photo');
+    expect(apiMock.getAvatarImage).toHaveBeenCalledTimes(2);
+  });
+
   it('saves a chosen character', async () => {
     const user = userEvent.setup();
     apiMock.chooseAvatar.mockResolvedValue({ username: 'mia', avatar: 'preset:zacchaeus' });

@@ -116,10 +116,17 @@ final class DropInCall {
         }
         joinedRoom = null;
         String how = "android-call";
+        // Which Telecom step refused, for the report: without Telecom vouching for the call Android
+        // will not let the microphone run behind a locked screen (DropInService), so the reason matters.
+        String step = "telecom";
         try {
             TelecomManager telecom = context.getSystemService(TelecomManager.class);
+            step = "register the Jarvis call account";
             PhoneAccountHandle handle = telecom == null ? null : account(context, telecom);
-            if (telecom != null && telecom.isIncomingCallPermitted(handle)) {
+            step = "check an incoming call is allowed";
+            boolean permitted = telecom != null && telecom.isIncomingCallPermitted(handle);
+            step = "add the incoming call";
+            if (permitted) {
                 Bundle extras = new Bundle();
                 extras.putString(EXTRA_ROOM, room);
                 extras.putString(EXTRA_NAME, name);
@@ -134,7 +141,10 @@ final class DropInCall {
         } catch (Exception e) {
             // No Telecom (some tablets) or it said no: join without it.
             Log.w(TAG, "joining without Telecom: " + e.getMessage());
-            how = "direct (" + e.getClass().getSimpleName() + ")";
+            String why = e.getMessage() == null ? "" : e.getMessage();
+            if (why.length() > 200) why = why.substring(0, 200);
+            how = "direct (" + e.getClass().getSimpleName() + " at: " + step
+                    + (why.isEmpty() ? "" : ": " + why) + ")";
             ding();
             join(context, room, name);
         }
