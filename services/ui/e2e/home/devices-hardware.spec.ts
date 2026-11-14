@@ -74,6 +74,40 @@ test.describe('Devices: the hardware list', () => {
     clean(run);
   });
 
+  test('an admin chooses which entities voice and chat may control', async ({ page }, info) => {
+    const run = await open(page);
+    const panel = page.getByTestId('hardware');
+    await panel.scrollIntoViewIfNeeded();
+    await panel.getByTestId('hardware-device').filter({ hasText: 'Reading lamp' }).click();
+    const dialog = page.getByRole('dialog');
+    const detail = dialog.getByTestId('hardware-detail');
+    const lamp = detail.getByRole('button', { name: 'Voice can control Reading lamp', exact: true });
+    await expect(lamp).toHaveAttribute('aria-pressed', 'true');
+    await expect(lamp).toContainText('Voice can control');
+    await settled(page, dialog);
+    await lamp.scrollIntoViewIfNeeded();
+    expect((await lamp.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectFits(page, dialog);
+    await snap(page, info, 'devices-hardware-voice');
+    await lamp.click();
+    await expect.poll(() => run.mocks.posts.find(
+      (p) => decodeURIComponent(p.path) === '/api/homehub/entities/light.reading_lamp')?.body)
+      .toEqual({ voice: false });
+    await expect(lamp).toHaveAttribute('aria-pressed', 'false');
+    await expect(lamp).toContainText('Voice cannot control');
+    // A diagnostic reading Home Assistant does not expose by default can be allowed too.
+    await detail.getByRole('button', { name: /Show settings, diagnostics/ }).click();
+    const power = detail.getByRole('button', { name: 'Voice can control Reading lamp Power', exact: true });
+    await expect(power).toHaveAttribute('aria-pressed', 'false');
+    await power.click();
+    await expect.poll(() => run.mocks.posts.find(
+      (p) => decodeURIComponent(p.path) === '/api/homehub/entities/sensor.reading_lamp_power')?.body)
+      .toEqual({ voice: true });
+    await expect(power).toHaveAttribute('aria-pressed', 'true');
+    await expectNoHorizontalOverflow(page);
+    clean(run);
+  });
+
   test('a device at a new address is offered as an update; adding by hand is grouped', async ({ page }, info) => {
     const run = await open(page);
     await page.getByRole('tab', { name: 'Add & fix' }).click();

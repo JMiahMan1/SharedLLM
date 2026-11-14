@@ -6,7 +6,7 @@
 | ``GET /hub/hardware`` | Every device from the live registry (``hardware.device_view``), plus the areas |
 | ``GET /hub/hardware/{device_id}`` | One device with its entities, their states and registry settings |
 | ``POST /hub/hardware/{device_id}/disable`` | ``{"disabled": bool}``; its entities follow (``disabled_by: device``) |
-| ``PATCH /hub/entities/{entity_id}`` | ``{"name"?, "area_id"?, "hidden"?, "disabled"?}`` |
+| ``PATCH /hub/entities/{entity_id}`` | ``{"name"?, "area_id"?, "hidden"?, "disabled"?, "rotation"?, "voice"?}`` |
 | ``POST /hub/entries/{id}/disable`` | ``{"disabled": bool}``: unload or start the entry |
 | ``POST /hub/entries/{id}/sync`` | Register the devices a loaded driver found that the registry lacks |
 | ``POST /hub/discovered/{id}/update-address`` | A known device found at a new address: move its entry there |

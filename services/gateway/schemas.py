@@ -59,6 +59,11 @@ class ResolvedCredentials(BaseModel):
     forbidden_branches: list[str] | None = None
     #: "voice" when the chat request's speaker was recognised by voice alone.
     identified_by: str | None = None
+    #: "assistant" when voice or chat (Jarvis itself) acts for the person: execution then only controls
+    #: the entities the hub exposes to voice (services/homehub/exposure.py). The app's own controls omit it.
+    via: str | None = None
+    #: The hub's ``assist_satellite.*`` entity a spoken request came from (execution satellite_timers.py).
+    voice_satellite: str | None = None
 
     @field_validator(
         "github_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass",

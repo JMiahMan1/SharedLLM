@@ -1112,6 +1112,8 @@ TRIGGER_SPECS = [
     # HA's device triggers, as its editor writes them; the hub runs each as the trigger it stands for.
     {"type": "device", "label": "A device does something",
      "fields": [*_DEVICE_FIELDS, _f("for", "For at least", "duration")]},
+    {"type": "tag", "label": "A tag is scanned",
+     "fields": [_f("tag_id", "Tag id", "text", required=True), _f("device_id", "Only from device (id)", "text")]},
 ]
 CONDITION_SPECS = [
     {"type": "state", "label": "Entity is in a state",

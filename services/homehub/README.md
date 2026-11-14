@@ -199,6 +199,25 @@ turns the pipeline off (`PATCH /hub/voice/{entry_id}` `{"enabled": false}` sets 
 (outcome, what ended it, per-stage timings) and last error. Transcripts and replies are logged at debug
 level only and never kept.
 
+### Sentence triggers and conversation services (`conversation.py`)
+
+An automation with `trigger: conversation` owns its sentences (HA template syntax: `[optional]`, `(a|b)`,
+`{slot}` wildcards; `<rules>` load the automation disabled). The gateway's `/api/chat` asks
+`POST /hub/conversation/triggers` `{"text", "satellite_id"?, "conversation_id"?}` before anything else, so
+typed chat and voice satellites both reach them. Every matching automation whose conditions pass runs, with
+`trigger.sentence`, `trigger.slots`, `trigger.details`, `trigger.device_id` (the satellite's device) and
+`trigger.user_input`; the reply is the first `set_conversation_response` (or "Done"), waited for up to 10 s.
+No match, or only failed conditions, answers `{"matched": false}` and Jarvis answers as usual.
+`trigger: tag` fires on `tag_scanned` (phones send it) for its `tag_id`, and only from `device_id` when given.
+`conversation.process` and `ai_task.generate_data` are answered by Jarvis at `HOMEHUB_VOICE_JARVIS_URL`;
+`ai_task` with a `structure` must get back one JSON object holding the required fields, or it fails.
+
+### Time and date sensors (`time_date.py`)
+
+`sensor.time`, `sensor.date`, `sensor.date_time`, `sensor.date_time_utc`, `sensor.date_time_iso`,
+`sensor.time_date` and `sensor.time_utc` are published on every hub at the start of each minute, in the
+household time zone, with HA's state text. HA's `time_date` entries load as replaced.
+
 ## New devices (discovery)
 
 `discovery.py` replaces HA's "Discovered" panel: mDNS continuously (ESPHome,

@@ -36,7 +36,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from services.homehub import capabilities, entries
+from services.homehub import capabilities, entries, exposure
 from services.homehub.core import CAMERA_ROTATIONS, UNAVAILABLE, DeviceEntry, EntityEntry
 from services.homehub.discovery import current_host, norm_mac
 
@@ -310,6 +310,8 @@ def entity_view(hub: Any, ent: EntityEntry) -> dict[str, Any]:
         "state": st, "capabilities": capabilities.entity_capabilities(hub, ent.entity_id) if not ent.disabled_by
         else None,
         "info_source": ent.info_source(),
+        # May voice and chat control it (Home Assistant's Assist exposure; exposure.py).
+        "voice": exposure.view(hub, ent.entity_id),
     }
 
 
@@ -401,17 +403,25 @@ async def update_entity(runtime: Any, entity_id: str, body: dict[str, Any]) -> d
 
     ``rotation`` (cameras only) turns the picture clockwise by 0, 90, 180 or 270 degrees wherever Jarvis
     shows it, for a camera mounted on its side or upside down. The video itself is untouched.
+
+    ``voice`` (``true``/``false``, or ``null`` for Home Assistant's default) says whether voice and chat
+    may control the entity (``exposure.py``); reading its state is never gated.
     """
     hub = runtime.hub
     ent = hub.entities.get(entity_id)
     if ent is None:
         raise entries.EntryError("No such entity", 404)
-    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled", "rotation", "labels"})
+    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled", "rotation", "labels", "voice"})
     if unknown:
         raise entries.EntryError(f"An entity cannot change {', '.join(unknown)}")
     from services.homehub import registries
 
     labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
+    if "voice" in body:
+        voice = body.get("voice")
+        if voice is not None and not isinstance(voice, bool):
+            raise entries.EntryError("voice must be true, false or null")
+        exposure.set_exposed(hub, entity_id, voice)
     if "rotation" in body:
         rotation = body.get("rotation")
         if ent.domain != "camera":

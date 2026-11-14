@@ -420,11 +420,62 @@ async def people_fixes(hub: Hub) -> dict[str, dict[str, Any]]:
 
 # -- notifications ------------------------------------------------------------------
 
+#: The gateway's push callback (services/gateway/push_callbacks.py) a tapped Home button runs: it fires
+#: ``mobile_app_notification_action`` here, as the companion app does in Home Assistant.
+ACTION_CALLBACK = "home_notification_action"
+#: Jarvis notices carry at most three buttons with labels of up to 40 characters (docs/PUSH.md).
+MAX_NOTICE_ACTIONS = 3
+ACTION_LABEL_MAX = 40
+
+
+def _notice_actions(extra: dict[str, Any]) -> list[dict[str, Any]]:
+    """HA's ``data.actions`` as Jarvis notice buttons.
+
+    An action with an id becomes a callback button (a reply button when its ``behavior`` is
+    ``textInput``) whose tap fires ``mobile_app_notification_action`` with that id and the notice's tag,
+    so a blueprint waiting for the answer (confirmable_notification) gets it. HA's ``URI`` action opens
+    its ``uri`` when that is a web address; any other URI (an HA dashboard path, ``app://``,
+    ``entityId:``) has no meaning in Jarvis and its button is left out, with a log line.
+    """
+    raw = extra.get("actions")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise HubError("notify: data.actions must be a list")
+    tag = str(extra["tag"]) if extra.get("tag") else None
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise HubError("notify: each of data.actions must be an object")
+        action = str(item.get("action") or "").strip()
+        label = str(item.get("title") or action).strip()[:ACTION_LABEL_MAX]
+        if not action or not label:
+            raise HubError("notify: an action needs an action id and a title")
+        if action.upper() == "URI":
+            uri = str(item.get("uri") or "").strip()
+            if uri.startswith("https://"):
+                out.append(jarvis_notify.view_action(uri, label))
+            else:
+                log.info("notify: left out the %r button, its uri %r cannot open in Jarvis", label, uri)
+            continue
+        params: dict[str, Any] = {"action": action}
+        if tag:
+            params["tag"] = tag
+        reply = str(item.get("behavior") or "").lower() == "textinput" or action.upper() == "REPLY"
+        out.append(jarvis_notify.callback_action(label, ACTION_CALLBACK, params, reply=reply))
+    if len(out) > MAX_NOTICE_ACTIONS:
+        raise HubError(f"notify: a Jarvis notice holds at most {MAX_NOTICE_ACTIONS} buttons, this one has {len(out)}")
+    return out
+
+
 def _notice_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     extra = data.get("data") if isinstance(data.get("data"), dict) else {}
     kw: dict[str, Any] = {}
     if extra.get("tag"):
         kw["tag"] = str(extra["tag"])
+    actions = _notice_actions(extra)
+    if actions:
+        kw["actions"] = actions
     if str(extra.get("priority") or "").lower() == "high" or extra.get("ttl") == 0:
         kw["priority"] = 4
     if extra.get("channel") == "alarm_stream":

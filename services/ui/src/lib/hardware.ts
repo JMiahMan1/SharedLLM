@@ -96,6 +96,14 @@ export interface HardwareEntity {
   capabilities: EntityCapabilities | null;
   /** Label ids the entity wears; absent from older hubs. */
   labels?: string[];
+  /** May voice and chat control it (the hub's Assist exposure): the answer, the default, and whether it was chosen. */
+  voice?: VoiceExposure;
+}
+
+export interface VoiceExposure {
+  exposed: boolean;
+  default: boolean;
+  chosen: boolean;
 }
 
 export interface HardwareDetail extends HardwareDevice {
@@ -148,7 +156,11 @@ export async function setDeviceDisabled(id: string, disabled: boolean): Promise<
 }
 
 export async function updateEntity(entityId: string,
-  body: { name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean; rotation?: number; labels?: string[] },
+  body: {
+    name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean; rotation?: number; labels?: string[];
+    /** Voice and chat may control it; null returns it to the default. */
+    voice?: boolean | null;
+  },
 ): Promise<HardwareEntity> {
   const resp = await apiClient.patch(`/api/homehub/entities/${encodeURIComponent(entityId)}`, body, { timeout: 60_000 });
   return resp.data;

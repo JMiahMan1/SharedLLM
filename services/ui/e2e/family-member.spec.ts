@@ -105,6 +105,7 @@ async function mockApi(page: Page, viewer: Viewer) {
     if (p === '/api/users/me') return json(PROFILES[viewer]);
     if (p === '/api/users/me/theme') return json({ theme: 'dark' });
     if (p === '/api/telemetry/notifications') return json({ notifications: [] });
+    if (p === '/api/push/action') return json({ status: 'SUCCESS', message: 'Sent.' });
     if (p === '/api/communication/calls') return json({ calls: [] });
     if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: viewer });
     if (p === '/api/activity') return json({ status: 'SUCCESS' });

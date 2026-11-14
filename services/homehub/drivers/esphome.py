@@ -81,6 +81,7 @@ from aioesphomeapi import (
     ValveInfo,
     ValveOperation,
     VoiceAssistantFeature,
+    VoiceAssistantTimerEventType,
 )
 
 from services.homehub.core import (
@@ -108,6 +109,13 @@ CAMERA_STREAM_RENEW_S = 4.0
 #: Frames waiting for a slow viewer; older ones are dropped so the picture stays live.
 CAMERA_STREAM_QUEUE = 2
 _MJPEG_BOUNDARY = "esphomeframe"
+#: ``assist_satellite.timer_event`` events -> the node's timer event types (a Jarvis timer's display and ring).
+TIMER_EVENTS = {
+    "started": VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_STARTED,
+    "updated": VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_UPDATED,
+    "cancelled": VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_CANCELLED,
+    "finished": VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_FINISHED,
+}
 SATELLITE_ANNOUNCE_TIMEOUT_S = 120.0  # a long announcement plays to the end before the node answers
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 
@@ -809,6 +817,8 @@ class ESPHomeDriver(Driver):
                 raise ServiceNotFound(f"assist_satellite.start_conversation needs the node's voice pipeline, which "
                                       f"{self.device_name} does not offer now; use assist_satellite.announce")
             return await self.voice.start_conversation(data)
+        if service == "timer_event":
+            return self._timer_event(data)
         if service != "announce":
             raise ServiceNotFound(f"assist_satellite.{service} is not supported")
         client = self._require_client()
@@ -829,6 +839,36 @@ class ESPHomeDriver(Driver):
         except TimeoutError as exc:
             raise DeviceUnavailable(f"ESPHome {self.device_name} did not finish the announcement") from exc
         return None
+
+    def _timer_event(self, data: dict[str, Any]) -> None:
+        """``assist_satellite.timer_event``: a Jarvis timer set through this satellite, for its display and ring.
+
+        HA sends a voice satellite ``VoiceAssistantTimerEvent`` for every timer set through it; Jarvis timers
+        live in execution (``services/execution/satellite_timers.py``), which calls this. ``event`` is
+        started, updated, cancelled or finished; the node must say it handles timers (feature TIMERS).
+        """
+        event = str(data.get("event") or "")
+        event_type = TIMER_EVENTS.get(event)
+        if event_type is None:
+            raise HubError(f"assist_satellite.timer_event needs event one of {', '.join(TIMER_EVENTS)}, not {event!r}")
+        timer_id = str(data.get("timer_id") or "").strip()
+        if not timer_id:
+            raise HubError("assist_satellite.timer_event needs a timer_id")
+        try:
+            total = int(data.get("total_seconds") or 0)
+            left = int(data.get("seconds_left") or 0)
+        except (TypeError, ValueError) as exc:
+            raise HubError("assist_satellite.timer_event: total_seconds and seconds_left must be whole numbers") from exc
+        client = self._require_client()
+        flags = int(getattr(self._device_info, "voice_assistant_feature_flags", 0) or 0)
+        if not flags & int(VoiceAssistantFeature.TIMERS):
+            raise ServiceNotFound(f"ESPHome {self.device_name} does not handle timers (firmware feature TIMERS)")
+        try:
+            client.send_voice_assistant_timer_event(
+                event_type, timer_id, str(data.get("name") or "") or None, max(0, total), max(0, left),
+                bool(data.get("is_active", event in ("started", "updated"))))
+        except APIConnectionError as exc:
+            raise DeviceUnavailable(f"ESPHome {self.device_name}: {exc}") from exc
 
     def _local_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "select" and service == "select_option" and (entity.unique_id or "").endswith("-wake_word"):

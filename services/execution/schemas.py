@@ -130,6 +130,11 @@ class UserContext(BaseModel):
     is_admin: bool = False
     #: "voice" when the person was recognised by their voice alone.
     identified_by: str | None = None
+    #: "assistant" when voice or chat acts: only entities the hub exposes to voice may be controlled
+    #: (entity_access.verify_entity_access, voice_exposure.py).
+    via: str | None = None
+    #: The hub's ``assist_satellite.*`` entity the request was spoken to (satellite_timers.py).
+    voice_satellite: str | None = None
     ha_url: str | None = None
     ha_token: str | None = None
     nextcloud_url: str | None = None

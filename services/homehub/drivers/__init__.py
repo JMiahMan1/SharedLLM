@@ -59,6 +59,15 @@ REPLACED: dict[str, str] = {
     "ollama": "a Home Assistant conversation agent; voice and chat go to Jarvis",
     "openai_conversation": "a Home Assistant conversation agent; voice and chat go to Jarvis",
     "bluetooth": "Home Assistant's Bluetooth adapter; the hub scans Bluetooth itself",
+    "heos": "Home Assistant's HEOS speakers; the entry had no entities, so there is nothing to drive",
+    "led_ble": "Home Assistant's Bluetooth LED strips; the entry had no entities, so there is nothing to drive",
+    "tuya": "Home Assistant's Tuya cloud; the entry had no entities, so there is nothing to drive",
+    "wemo": "Home Assistant's WeMo switches; the entry had no entities, so there is nothing to drive",
+    "radio_browser": "Home Assistant's internet radio browser; radio plays through Music Assistant",
+    "scheduler": "the scheduler card's component; the hub runs those schedules with its own scheduler",
+    "marketplace": "HACS, Home Assistant's community store; the hub needs no custom components",
+    "mqtt": "Home Assistant's MQTT broker link; Tasmota is driven over its HTTP API and nothing else used MQTT",
+    "time_date": "Home Assistant's time and date sensors; the hub publishes sensor.time, sensor.date and the rest itself",
 }
 #: Home Assistant's iBeacon integration is one entry with no data; here each beacon is its own entry.
 IBEACON_UMBRELLA = "Replaced by the hub: Home Assistant's iBeacon integration; the hub's Bluetooth presence tracks each beacon itself"

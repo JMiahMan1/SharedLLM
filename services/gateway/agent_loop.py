@@ -4166,6 +4166,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         # "voice" when recognised by voice alone: handlers refuse
                         # what a voice should not unlock (ha_client, chores).
                         "identified_by": getattr(creds, "identified_by", None),
+                        # The agent loop is always Jarvis acting: execution controls only the
+                        # entities the hub exposes to voice and chat (homehub exposure.py).
+                        "via": "assistant",
+                        # The voice satellite a spoken request came from (execution satellite_timers.py).
+                        "voice_satellite": getattr(creds, "voice_satellite", None),
                         "api_key": creds.api_key,
                         "ha_url": creds.ha_url,
                         "ha_token": creds.ha_token,

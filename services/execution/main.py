@@ -575,6 +575,16 @@ from services.execution.weather import router as weather_router  # noqa: E402
 
 app.include_router(weather_router)
 
+from services.execution.voice_exposure import EntityNotExposed  # noqa: E402
+
+
+@app.exception_handler(EntityNotExposed)
+async def not_exposed_handler(request, exc):
+    """Voice or chat asked for an entity the hub does not expose to them: a refusal Jarvis can say."""
+    return JSONResponse(status_code=403, content={"status": "FAILURE", "message": str(exc),
+                                                  "detail": str(exc), "service": "voice_exposure"})
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     err_msg = f"Execution Error: {type(exc).__name__}: {exc!s}"
@@ -1359,6 +1369,9 @@ async def execute_trigger(payload: dict[str, Any]):
 
     # Always notify on the person's phone (or all family members for household scope).
     await timer.notify_timer_done(effective_user, timer_data)
+    # A timer set by voice rings on the satellite that heard it (satellite_timers.py).
+    from services.execution import satellite_timers
+    await satellite_timers.send(timer_data, "finished", creds.get("ha_url"), creds.get("ha_token"))
 
     # Execute the actual alert across all assigned hardware devices (ESPHome + TVs + Home Assistant Speakers)
     try:
@@ -2675,7 +2688,7 @@ async def execute_entity_search(req: EntitySearchRequest):
 async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
 
-    if req.entity_id and not await verify_entity_access(ctx, req.entity_id):
+    if req.entity_id and not await verify_entity_access(ctx, req.entity_id, service=req.service):
         return _fail(
             f"Access denied to '{req.entity_id}' for user '{ctx.user}'.",
             "ha_service",
