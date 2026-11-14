@@ -146,6 +146,11 @@ browser would need ffmpeg in the image.
 - `POST /api/tts_get_url` speaks with Jarvis's voice and returns `{url, path}` (Music Assistant's text
   announcements use it). Spoken clips are served at `HOMEHUB_EXTERNAL_URL` or `http://$EXECUTION_EXTERNAL_HOST:8123`;
   with neither set, text to speech fails and says so (a loopback URL is useless to a speaker).
+- `tts.speak`'s `options.voice` is a Kokoro voice (`af_heart`, or a comma blend) or a cloned voice enrolled on
+  alpaca's audio server, by profile id or name. Clones are spoken through `ALPACA_WEB_URL` (`/api/audio/tts`
+  with `clone`); with it unset, or naming a profile nobody enrolled, the call fails and says which.
+  `GET /api/homehub/automations/voices` lists both kinds for the automation editor, with the reason a kind
+  could not be listed.
 - `assist_satellite.announce` on an ESPHome voice satellite plays the spoken message through the node's own
   announcement call. `start_conversation` speaks first and then listens, through the hub's voice pipeline
   (below); it is refused by name on a node that does not offer it.

@@ -298,3 +298,13 @@ def test_a_blueprint_path_cannot_climb_out(client, hub, perms):
     seen, _ = hub
     assert client.get("/api/homehub/automations/blueprints/someone/..secret.yaml").status_code == 404
     assert seen == []
+
+
+def test_the_voices_for_tts_speak_are_read_with_the_callers_own_token(client, hub, perms, member):
+    seen, answers = hub
+    answers["/api/homehub/automations/voices"] = (200, {"voices": [
+        {"id": "af_heart", "name": "af_heart", "kind": "kokoro"},
+        {"id": "pat-0a1b2c", "name": "Pat", "kind": "clone"}], "default": "af_heart", "errors": {}})
+    out = client.get("/api/homehub/automations/voices").json()
+    assert [v["kind"] for v in out["voices"]] == ["kokoro", "clone"]
+    assert seen[-1][:3] == ("GET", "/api/homehub/automations/voices", f"{TEST_HA_URL}|{TEST_HA_TOKEN}")
