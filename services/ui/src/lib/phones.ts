@@ -153,11 +153,33 @@ export function sensorText(s: PhoneSensor, timeZone?: string): string {
   return `${s.state}${s.unit ? ` ${s.unit}` : ''}`;
 }
 
+/** A battery reading older than this says how old it is: a phone that stopped reporting must not look current. */
+export const BATTERY_STALE_MS = 3 * 60 * 60 * 1000;
+
 /**
- * The phone's power and next alarm in a line each, or null when its app has
- * never reported them: "Charging (wireless)", "Next alarm Tue 6:30 AM".
+ * The battery level, "71%", or "35% (3 days ago)" when the phone has not reported for a while; null
+ * when it never reported one. Shown on its own: a phone whose app sends the level but not the
+ * charging state (older Jarvis builds) used to show no power line at all.
  */
-export function phoneStatus(phone: Phone, timeZone?: string): { power: string | null; alarm: string | null } {
+export function batteryText(phone: Phone, now = Date.now()): string | null {
+  const level = sensorWith(phone, '_battery_level');
+  if (!hasValue(level)) return null;
+  const pct = Number(level.state);
+  const text = Number.isFinite(pct) ? `${Math.round(pct)}%` : `${level.state}${level.unit ? ` ${level.unit}` : ''}`;
+  const at = level.last_updated ? Date.parse(level.last_updated) : NaN;
+  if (Number.isFinite(at) && now - at > BATTERY_STALE_MS) {
+    return `${text} (${lastSeenText(at / 1000, now).replace(/^reported /, '')})`;
+  }
+  return text;
+}
+
+/**
+ * The phone's battery, power and next alarm, each null when its app has never
+ * reported it: "71%", "Charging (wireless)", "Next alarm Tue 6:30 AM".
+ */
+export function phoneStatus(phone: Phone, timeZone?: string, now = Date.now()): {
+  battery: string | null; power: string | null; alarm: string | null;
+} {
   const state = sensorWith(phone, '_battery_state');
   const plug = sensorWith(phone, '_charger_type');
   const charging = sensorWith(phone, '_is_charging');
@@ -178,7 +200,10 @@ export function phoneStatus(phone: Phone, timeZone?: string): { power: string | 
     if (alarmSensor.state !== 'unavailable') alarm = `Next alarm ${alarmText(alarmSensor.state, timeZone)}`;
     else alarm = alarmSensor.reason ? 'Next alarm unavailable' : 'No alarm set';
   }
-  return { power, alarm };
+  const battery = batteryText(phone, now);
+  // With the level known, "Charging state unavailable" is noise: the level says enough (its reason stays in the tooltip).
+  if (battery && power?.endsWith('unavailable')) power = null;
+  return { battery, power, alarm };
 }
 
 /**

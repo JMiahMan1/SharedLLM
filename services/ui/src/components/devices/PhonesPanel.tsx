@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlarmClock, BatteryCharging, Bluetooth, ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
+import { AlarmClock, BatteryCharging, BatteryMedium, Bluetooth, ChevronDown, ChevronRight, Loader2, Plus, Settings2, Smartphone, Trash2 } from 'lucide-react';
 import { failureText } from '../../lib/discoveredDevices';
 import {
   addJarvisPhone,
@@ -48,7 +48,12 @@ function SensorLine({ s }: { s: PhoneSensor }) {
 function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState(phone.jarvis_user || '');
-  useEffect(() => setUser(phone.jarvis_user || ''), [phone.jarvis_user]);
+  // A new owner from the hub replaces the picker's value, adjusted while rendering rather than in an effect.
+  const [shownUser, setShownUser] = useState(phone.jarvis_user);
+  if (shownUser !== phone.jarvis_user) {
+    setShownUser(phone.jarvis_user);
+    setUser(phone.jarvis_user || '');
+  }
   const update = useMutation({
     mutationFn: (patch: { jarvis_user?: string | null; jarvis_fallback?: boolean }) => updatePhone(phone.entry_id, patch),
     onSuccess: () => onChanged(),
@@ -79,8 +84,13 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
               : 'Jarvis only (no companion app)'}
             {companion && (phone.push.local_channel || phone.push.relay) ? ' · push ready' : ''}
           </p>
-          {(status.power || status.alarm) && (
+          {(status.battery || status.power || status.alarm) && (
             <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-300">
+              {status.battery && (
+                <span className="inline-flex items-center gap-1" data-testid="phone-battery">
+                  <BatteryMedium size={12} className="text-emerald-400" aria-hidden /> {status.battery}
+                </span>
+              )}
               {status.power && (
                 <span className="inline-flex items-center gap-1" data-testid="phone-power"
                   title={phone.sensors.find((x) => x.entity_id.endsWith('_battery_state'))?.reason || undefined}>
@@ -176,10 +186,13 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
 function SettingsForm({ settings, onSaved }: { settings: PhoneSettings; onSaved: () => void }) {
   const [draft, setDraft] = useState(settings);
   const [relays, setRelays] = useState(settings.push_url_allowlist.join('\n'));
-  useEffect(() => {
+  // New settings from the hub replace the form, adjusted while rendering rather than in an effect.
+  const [shown, setShown] = useState(settings);
+  if (shown !== settings) {
+    setShown(settings);
     setDraft(settings);
     setRelays(settings.push_url_allowlist.join('\n'));
-  }, [settings]);
+  }
   const save = useMutation({
     mutationFn: () => savePhoneSettings({
       ...draft,

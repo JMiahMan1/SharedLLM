@@ -136,17 +136,26 @@ describe('PhonesPanel', () => {
     expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'discharging', 'jarvis'),
       sensor('sensor.x_charger_type', 'x', 'none', 'jarvis'),
       sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp')))).toEqual({
-      power: 'On battery', alarm: 'No alarm set' });
+      battery: null, power: 'On battery', alarm: 'No alarm set' });
     expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'full', 'jarvis'),
       sensor('sensor.x_charger_type', 'x', 'ac', 'jarvis'))).power).toBe('Full (AC)');
     expect(phones.phoneStatus(p(sensor('binary_sensor.x_is_charging', 'x', 'on', 'jarvis'))).power).toBe('Charging');
-    expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'unknown', 'jarvis')))).toEqual({ power: null, alarm: null });
+    expect(phones.phoneStatus(p(sensor('sensor.x_battery_state', 'x', 'unknown', 'jarvis')))).toEqual({
+      battery: null, power: null, alarm: null });
     // An app too old to report them: clearly unavailable, never "no alarm".
     const old = 'not reported by the Jarvis app on this phone (an older version; update the app)';
     expect(phones.phoneStatus(p({ ...sensor('sensor.x_battery_state', 'x', 'unavailable', 'jarvis'), reason: old },
       { ...sensor('sensor.x_charger_type', 'x', 'unavailable', 'jarvis'), reason: old },
       { ...sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'), reason: old }))).toEqual({
-      power: 'Charging state unavailable', alarm: 'Next alarm unavailable' });
+      battery: null, power: 'Charging state unavailable', alarm: 'Next alarm unavailable' });
+    // The level alone, as older Jarvis builds send it: shown, and the "unavailable" charging line dropped.
+    const now = Date.parse('2026-11-14T12:00:00Z');
+    const level = (at: string) => ({ ...sensor('sensor.x_battery_level', 'x', '71', 'jarvis', '%'), last_updated: at });
+    expect(phones.phoneStatus(p(level('2026-11-14T11:50:00Z'),
+      { ...sensor('sensor.x_battery_state', 'x', 'unavailable', 'jarvis'), reason: old }), undefined, now)).toEqual({
+      battery: '71%', power: null, alarm: null });
+    // A phone that stopped reporting says how old its reading is.
+    expect(phones.batteryText(p(level('2026-11-11T12:00:00Z')), now)).toBe('71% (3 days ago)');
     expect(phones.sensorText({ ...sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'),
       reason: old })).toBe('unavailable');
     expect(phones.sensorText(sensor('sensor.x_next_alarm', 'x', 'unavailable', 'jarvis', null, 'timestamp'))).toBe('None set');

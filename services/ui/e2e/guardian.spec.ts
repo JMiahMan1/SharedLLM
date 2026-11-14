@@ -223,6 +223,21 @@ test.describe('guardian page', () => {
     await expect(page.getByTestId('guardian-quick-options')).not.toContainText('+30');
     await page.screenshot({ path: info.outputPath('parent.png') });
 
+    // The title stays on one line on every screen (it used to wrap beside the Full page button).
+    const title = page.getByRole('heading', { level: 1, name: 'Family guardian' });
+    const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    expect((await title.boundingBox())?.height ?? 0).toBeLessThan(lineHeight * 1.5);
+
+    // A chore waiting for an answer shows its whole name, and both answers stay 44 px targets.
+    await page.getByTestId('guardian-area-time').click();
+    const check = page.getByTestId('chore-check').first();
+    await expect(check).toBeVisible();
+    const clipped = await check.locator('span').first().evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(clipped, 'the chore name is cut off').toBe(false);
+    for (const b of await check.getByRole('button').all()) {
+      expect((await b.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
     const o = await overflow(page);
     expect(o.doc).toBeLessThanOrEqual(o.client + 1);
     expect(unmocked).toEqual([]);

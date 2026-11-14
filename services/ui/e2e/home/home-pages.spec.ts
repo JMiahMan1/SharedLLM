@@ -376,7 +376,9 @@ test.describe('home pages', () => {
     await phone.scrollIntoViewIfNeeded();
     await expect(phone.getByTestId('phone-power')).toHaveText('Charging (wireless)');
     await expect(phone.getByTestId('phone-alarm')).toContainText('Next alarm');
-    for (const line of [phone.getByTestId('phone-power'), phone.getByTestId('phone-alarm')]) {
+    // The battery level shows on its own line item, whatever the app says about charging.
+    await expect(phone.getByTestId('phone-battery')).toContainText('64%');
+    for (const line of [phone.getByTestId('phone-battery'), phone.getByTestId('phone-power'), phone.getByTestId('phone-alarm')]) {
       const box = await line.boundingBox();
       expect((box?.x ?? 0) + (box?.width ?? 0), 'the status line stays on screen').toBeLessThanOrEqual(
         (page.viewportSize()?.width ?? 0) + 1);

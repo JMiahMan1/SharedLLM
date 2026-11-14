@@ -87,7 +87,9 @@ export default function ChoresCard({ username, name }: { username: string; name:
           <ul className="space-y-1.5">
             {waiting.map((check) => (
               <li key={check.id} className="flex flex-wrap items-center gap-2" data-testid="chore-check">
-                <span className="min-w-0 flex-1 truncate text-sm text-slate-100">
+                {/* On a phone the chore gets its own line and the two answers share the next one,
+                    instead of the buttons cutting its name to "Take out the tr...". */}
+                <span className="min-w-0 basis-full break-words text-sm text-slate-100 sm:basis-0 sm:flex-1 sm:truncate">
                   {check.title || 'A chore'}
                   {check.day !== today && (
                     <span className="ml-1 text-[11px] text-slate-400">
@@ -97,13 +99,13 @@ export default function ChoresCard({ username, name }: { username: string; name:
                 </span>
                 <button type="button" disabled={decide.isPending}
                   onClick={() => decide.mutate({ id: check.id, approve: true })}
-                  className="min-h-11 rounded-xl bg-emerald-500/20 px-3 text-xs font-semibold text-emerald-200 disabled:opacity-50"
+                  className="min-h-11 flex-1 rounded-xl bg-emerald-500/20 px-3 text-xs font-semibold text-emerald-200 disabled:opacity-50 sm:flex-none"
                   aria-label={`${check.title} was done right`}>
                   Done right
                 </button>
                 <button type="button" disabled={decide.isPending}
                   onClick={() => decide.mutate({ id: check.id, approve: false })}
-                  className="glass-button min-h-11 px-3 text-xs disabled:opacity-50"
+                  className="glass-button min-h-11 flex-1 px-3 text-xs disabled:opacity-50 sm:flex-none"
                   aria-label={`Ask ${name} to redo ${check.title}`}>
                   Redo it
                 </button>

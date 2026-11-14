@@ -93,14 +93,16 @@ function Header({ description, child }: { description: string; child?: FamilyRec
       <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-sky-500/10 blur-3xl" aria-hidden />
       <div className="relative flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3.5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/20 to-indigo-500/10 shadow-inner sm:h-12 sm:w-12" aria-hidden>
+          {/* On a phone the title, not the icon, gets the width: it used to wrap onto two lines. */}
+          <div className={`${child ? 'hidden sm:flex' : 'flex'} h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-sky-400/25 bg-gradient-to-br from-sky-500/20 to-indigo-500/10 shadow-inner sm:h-12 sm:w-12`} aria-hidden>
             <ShieldHalf size={22} className="text-sky-300" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Family guardian</h1>
+              <h1 className="whitespace-nowrap text-lg font-bold tracking-tight text-white sm:text-2xl">Family guardian</h1>
+              {/* The child's role, not the viewer's: on a phone it read as if the parent were the child. */}
               {child && (
-                <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-200">
+                <span className="hidden rounded-full border border-sky-400/25 bg-sky-400/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-200 sm:inline">
                   {ROLE_WORDS[child.family_role || ''] || 'Child'}
                 </span>
               )}
@@ -195,7 +197,8 @@ function ChildStatusBanner({ child, status }: { child: FamilyRecord; status?: Sc
           </div>
           <div className="flex shrink-0 flex-col items-center gap-0.5" data-testid="guardian-status-ring">
             <TimeRing used={status.used_min} limit={status.limit_min} size={40} label={false} />
-            <span className={`text-[10px] font-medium ${status.limit_min !== null && status.used_min > status.limit_min ? 'text-amber-300' : 'text-slate-400'}`} aria-hidden>
+            {/* The line beside it already says the minutes used; on a phone the ring alone is enough. */}
+            <span className={`hidden text-[10px] font-medium sm:inline ${status.limit_min !== null && status.used_min > status.limit_min ? 'text-amber-300' : 'text-slate-400'}`} aria-hidden>
               {duration(status.used_min * 60000)}
             </span>
           </div>
