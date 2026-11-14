@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { EyeOff, ExternalLink, Loader2, Pencil, Power, Trash2 } from 'lucide-react';
+import { EyeOff, ExternalLink, Loader2, Pencil, Power, Tag, Trash2 } from 'lucide-react';
 import Modal from '../ui/Modal';
+import LabelChips from './LabelChips';
 import { EntityControl, SensorChip } from '../dashboards/EntityControls';
 import { failureStatus, failureText, removeHubDevice, updateHubDevice } from '../../lib/discoveredDevices';
 import {
   STATUS_LABEL, STATUS_TONE, abilityLabel, ago, getHardwareDevice, setDeviceDisabled, updateEntity,
   type HardwareDetail, type HardwareEntity,
 } from '../../lib/hardware';
+import { LABELS_KEY, getLabels, type Label } from '../../lib/homeSetup';
 
 const BTN = 'inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-50';
 const INPUT = 'min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white';
@@ -25,8 +27,9 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EntityRow({ entity, onChanged }: { entity: HardwareEntity; onChanged: () => void }) {
+function EntityRow({ entity, labels, onChanged }: { entity: HardwareEntity; labels: Label[]; onChanged: () => void }) {
   const [renaming, setRenaming] = useState(false);
+  const [labelling, setLabelling] = useState(false);
   const [name, setName] = useState(entity.name_by_user || '');
   const save = useMutation({
     mutationFn: (body: Parameters<typeof updateEntity>[1]) => updateEntity(entity.entity_id, body),
@@ -71,7 +74,17 @@ function EntityRow({ entity, onChanged }: { entity: HardwareEntity; onChanged: (
               <EyeOff size={13} /> {disabled ? 'Enable' : 'Disable'}
             </button>
           )}
+          {labels.length > 0 && (
+            <button type="button" className={BTN} aria-expanded={labelling} onClick={() => setLabelling((v) => !v)}
+              aria-label={`Labels of ${entity.name}`}>
+              <Tag size={13} /> Labels{entity.labels?.length ? ` ${entity.labels.length}` : ''}
+            </button>
+          )}
         </div>
+      )}
+      {labelling && (
+        <LabelChips labels={labels} selected={entity.labels ?? []} name={entity.name} disabled={save.isPending}
+          onChange={(next) => save.mutate({ labels: next })} />
       )}
     </li>
   );
@@ -105,6 +118,13 @@ function Body({ device, areas, onChanged, onRemoved }: {
     onSuccess: (r) => { toast.success(r.warning ? `${device.name} was removed. ${r.warning}` : `${device.name} was removed.`); onRemoved(); },
     onError: (err) => { if (failureStatus(err) === 502) setUnreachable(failureText(err)); else toast.error(failureText(err)); },
   });
+  const labels = useQuery({ queryKey: LABELS_KEY, queryFn: getLabels, retry: false });
+  const label = useMutation({
+    mutationFn: (next: string[]) => updateHubDevice(device.id, { labels: next }),
+    onSuccess: onChanged,
+    onError: (err) => toast.error(failureText(err)),
+  });
+  const labelList = labels.data ?? [];
   const main = device.entity_list.filter((e) => !e.entity_category && !e.disabled_by);
   const extra = device.entity_list.filter((e) => e.entity_category || e.disabled_by);
 
@@ -145,6 +165,16 @@ function Body({ device, areas, onChanged, onRemoved }: {
         </select>
       </label>
 
+      <div>
+        <p className="text-[10px] uppercase tracking-wider text-slate-500">Labels</p>
+        <div className="mt-1">
+          {labels.error ? <p className="text-xs text-amber-300/90">{failureText(labels.error)}</p> : (
+            <LabelChips labels={labelList} selected={device.labels ?? []} name={device.name} disabled={label.isPending}
+              onChange={(next) => label.mutate(next)} />
+          )}
+        </div>
+      </div>
+
       {device.abilities.length > 0 && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500">It can</p>
@@ -160,14 +190,14 @@ function Body({ device, areas, onChanged, onRemoved }: {
         </h3>
         {device.entity_list.length === 0 && <p className="py-2 text-xs text-slate-500">This device has no entities.</p>}
         <ul className="divide-y divide-white/5">
-          {main.map((e) => <EntityRow key={e.entity_id} entity={e} onChanged={onChanged} />)}
+          {main.map((e) => <EntityRow key={e.entity_id} entity={e} labels={labelList} onChanged={onChanged} />)}
         </ul>
         {extra.length > 0 && (
           <>
             <button type="button" className="mt-1 min-h-11 text-xs text-slate-400 underline" onClick={() => setShowHidden((v) => !v)}>
               {showHidden ? 'Hide' : 'Show'} settings, diagnostics and disabled ({extra.length})
             </button>
-            {showHidden && <ul className="divide-y divide-white/5">{extra.map((e) => <EntityRow key={e.entity_id} entity={e} onChanged={onChanged} />)}</ul>}
+            {showHidden && <ul className="divide-y divide-white/5">{extra.map((e) => <EntityRow key={e.entity_id} entity={e} labels={labelList} onChanged={onChanged} />)}</ul>}
           </>
         )}
       </section>

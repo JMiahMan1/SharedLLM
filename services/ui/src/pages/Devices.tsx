@@ -28,6 +28,10 @@ import IntegrationsPanel from '../components/devices/IntegrationsPanel';
 import HardwarePanel from '../components/devices/HardwarePanel';
 import PhonesPanel from '../components/devices/PhonesPanel';
 import RoomMapPanel from '../components/devices/RoomMapPanel';
+import AreasPanel from '../components/devices/AreasPanel';
+import LabelsPanel from '../components/devices/LabelsPanel';
+import ZonesPanel from '../components/devices/ZonesPanel';
+import PersonsPanel from '../components/devices/PersonsPanel';
 import type { CompanionDevice, MdmDevice, MdmFolder, MdmMember, MemberGuardState } from '../types/api';
 import { confirmDialog } from '../components/ui/confirmDialog';
 
@@ -1365,7 +1369,8 @@ function AuditLogPanel() {
 const DEVICE_TABS = [
   { id: 'devices', label: 'Your devices', anchors: ['devices-hardware'] },
   { id: 'add', label: 'Add & fix', anchors: ['devices-new'] },
-  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-rooms'] },
+  { id: 'places', label: 'Rooms & places', anchors: ['devices-areas', 'devices-labels', 'devices-zones'] },
+  { id: 'setup', label: 'Setup', anchors: ['devices-integrations', 'devices-phones', 'devices-persons', 'devices-rooms'] },
   { id: 'family', label: 'Family', anchors: ['devices-family', 'devices-folders', 'devices-activity'] },
 ] as const;
 type DeviceTab = (typeof DEVICE_TABS)[number]['id'];
@@ -1526,10 +1531,18 @@ export default function Devices() {
       {user?.is_admin && tab === 'add' && (
         <div id="devices-tab-add" role="tabpanel"><div id="devices-new" className="scroll-mt-4"><NewDevicesPanel /></div></div>
       )}
+      {user?.is_admin && tab === 'places' && (
+        <div id="devices-tab-places" role="tabpanel" className="space-y-4">
+          <div id="devices-areas" className="scroll-mt-4"><AreasPanel /></div>
+          <div id="devices-labels" className="scroll-mt-4"><LabelsPanel /></div>
+          <div id="devices-zones" className="scroll-mt-4"><ZonesPanel /></div>
+        </div>
+      )}
       {user?.is_admin && tab === 'setup' && (
         <div id="devices-tab-setup" role="tabpanel" className="space-y-4">
           <div id="devices-integrations" className="scroll-mt-4"><IntegrationsPanel /></div>
           <div id="devices-phones" className="scroll-mt-4"><PhonesPanel /></div>
+          <div id="devices-persons" className="scroll-mt-4"><PersonsPanel /></div>
           <div id="devices-rooms" className="scroll-mt-4"><RoomMapPanel /></div>
         </div>
       )}

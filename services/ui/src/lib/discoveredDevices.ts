@@ -291,7 +291,8 @@ export async function removeEntry(entryId: string, force = false): Promise<Remov
   return resp.data;
 }
 
-export async function updateHubDevice(deviceId: string, body: { name_by_user?: string | null; area_id?: string | null }): Promise<HubDevice> {
+export async function updateHubDevice(deviceId: string,
+  body: { name_by_user?: string | null; area_id?: string | null; labels?: string[] }): Promise<HubDevice> {
   const resp = await apiClient.patch(`/api/homehub/devices/${encodeURIComponent(deviceId)}`, body);
   return resp.data;
 }

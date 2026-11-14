@@ -238,6 +238,8 @@ function statsStatus() {
   };
 }
 
+import { registryMocks } from './registryMocks';
+
 export interface HomeMocks {
   unmocked: string[];
   posts: Array<{ path: string; body: unknown }>;
@@ -252,6 +254,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const rotations = new Map<string, number>();
   // Device locks set from a camera's Who can watch, so the next read shows them.
   const locks = new Map<string, string[]>();
+  // Areas, floors, labels, zones and persons: kept in memory so a change shows on the next read.
+  const registries = registryMocks();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -267,6 +271,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       let body: unknown;
       try { body = request.postDataJSON(); } catch { body = null; }
       posts.push({ path: p, body });
+      const registry = registries.answer(method, p, body);
+      if (registry) return json(registry.body, registry.status);
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
       // Minted with a POST; without it no camera picture is ever signed.
       if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: profile.username });
@@ -388,6 +394,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       ] });
     }
     if (p === '/api/homehub/discovered') return json({ ...DISCOVERED, devices: [...DISCOVERED.devices, MOVED_FINDING] });
+    const registry = registries.answer(method, p, null);
+    if (registry) return json(registry.body, registry.status);
     if (p === '/api/homehub/hardware') return json(HARDWARE);
     if (p.startsWith('/api/homehub/hardware/')) return json(HARDWARE_DETAIL);
     if (p === '/api/homehub/entries') return json(ENTRIES);
