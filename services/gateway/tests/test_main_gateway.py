@@ -618,3 +618,43 @@ async def test_recreate_http_client_cooldown():
         main._http_clients.update(saved_clients)
         main._last_client_recreate = saved_ts
 
+
+
+# A study prompt carries Scripture and commentary; its words must not trip the gateway's keyword shortcuts.
+_STUDY_PROMPT = (
+    "Passage: Luke 7:2\nNotes from this edition: the centurion would add to the synagogue; "
+    "he found repose in his faith. Write it on your heart.\n\nQuestion:\nWhat is a centurion"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_grounded_study_question_never_takes_a_keyword_shortcut(client: TestClient, monkeypatch):
+    from services.gateway import main
+
+    assert main.wants_direct_code_orchestration(_STUDY_PROMPT)  # the shortcut it used to take
+    monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "household"}))
+    monkeypatch.setattr(main, "update_history", AsyncMock(return_value=None))
+    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "assistant_model": "m"}))
+    monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="m"))
+    monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.0"))  # any intent would be a fast path
+    monkeypatch.setattr(main, "select_system_instruction_for_query", lambda q, m: "# System instruction mock")
+    for shortcut in ("orchestrate_code_change", "handle_workspace_creation", "generate_workspace_readme_via_coding_model",
+                     "_child_week_answer", "_health_coach_answer", "_handle_voice_learning"):
+        monkeypatch.setattr(main, shortcut, AsyncMock(side_effect=AssertionError(f"{shortcut} must not run")))
+    queue = MagicMock()
+    queue.enqueue_job = AsyncMock(return_value="job-1")
+    queue.get_job_status = AsyncMock(return_value={"status": "completed", "result": "A soldier over a hundred men."})
+    queue.get_chunks = AsyncMock(return_value=["A soldier over a hundred men."])
+    monkeypatch.setattr(main, "job_queue", queue)
+
+    resp = client.post("/v1/chat/completions", json={
+        "model": "assistant",
+        "messages": [{"role": "system", "content": "You are a Bible study helper."},
+                     {"role": "user", "content": _STUDY_PROMPT}],
+        "grounded": True,
+        "stream": False,
+    }, headers={"X-Internal-Secret": "test-secret"})
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "A soldier over a hundred men."
+    queue.enqueue_job.assert_awaited_once()

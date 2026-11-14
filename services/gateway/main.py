@@ -3438,7 +3438,10 @@ async def chat_handler(request: Request, background_tasks=None):
     # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
     # turn (and the small model can overflow its 8k context with RAG context).
     # Both answers already exist in HA / the calendar handler; answer directly.
-    if is_watch_weather_query(query) or is_watch_calendar_query(query):
+    # A grounded caller (the Bible study service) sends a whole prompt: passage, notes, commentary and
+    # the question. None of the keyword shortcuts below may read it: words in Scripture ("edit" in
+    # "edition", "repo" in "repose") sent a study question to the code-editing path, which failed.
+    if not grounded and (is_watch_weather_query(query) or is_watch_calendar_query(query)):
         if is_watch_weather_query(query):
             watch_answer = await watch_weather_answer(creds)
             watch_kind = "watch_weather"
@@ -3451,10 +3454,10 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(watch_answer, selected_model, watch_kind)
         return _make_ollama_response(watch_answer, selected_model, watch_kind)
 
-    if _wants_voice_learning_stop(query) or _wants_voice_learning(query):
+    if not grounded and (_wants_voice_learning_stop(query) or _wants_voice_learning(query)):
         return await _handle_voice_learning(query, creds, user_id, selected_model, is_openai)
 
-    if is_time_or_date_query(query):
+    if not grounded and is_time_or_date_query(query):
         ans = await build_time_or_date_response(query)
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", ans)
@@ -3462,7 +3465,7 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(ans, selected_model, "datetime")
         return _make_ollama_response(ans, selected_model, "datetime")
 
-    recap_answer = await _child_week_answer(query, user_id)
+    recap_answer = None if grounded else await _child_week_answer(query, user_id)
     if recap_answer:
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", recap_answer)
@@ -3470,7 +3473,7 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(recap_answer, selected_model, "guardian_recap")
         return _make_ollama_response(recap_answer, selected_model, "guardian_recap")
 
-    coach_answer = await _health_coach_answer(query, user_id)
+    coach_answer = None if grounded else await _health_coach_answer(query, user_id)
     if coach_answer:
         await update_history(user_id, "user", query)
         await update_history(user_id, "assistant", coach_answer)
@@ -3478,7 +3481,7 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(coach_answer, selected_model, "health_coach")
         return _make_ollama_response(coach_answer, selected_model, "health_coach")
 
-    if wants_workspace_readme_generation(query):
+    if not grounded and wants_workspace_readme_generation(query):
         return await generate_workspace_readme_via_coding_model(
             body=body,
             user_id=user_id,
@@ -3488,7 +3491,7 @@ async def chat_handler(request: Request, background_tasks=None):
             is_openai=is_openai,
         )
 
-    if wants_workspace_creation(query):
+    if not grounded and wants_workspace_creation(query):
         return await handle_workspace_creation(
             body=body,
             user_id=user_id,
@@ -3498,7 +3501,7 @@ async def chat_handler(request: Request, background_tasks=None):
             is_openai=is_openai,
         )
 
-    if wants_direct_code_orchestration(query):
+    if not grounded and wants_direct_code_orchestration(query):
         return await orchestrate_code_change(
             body=body,
             user_id=user_id,
@@ -3519,7 +3522,7 @@ async def chat_handler(request: Request, background_tasks=None):
     except (ValueError, TypeError):
         engine.FAST_PATH_CONFIDENCE = _DEFAULT_FAST_PATH_THRESHOLD
 
-    is_fast_path = engine.is_fast_path(intent, confidence)
+    is_fast_path = not grounded and engine.is_fast_path(intent, confidence)
     log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
     resolved_entity = None
     cached_device_unavailable = False
