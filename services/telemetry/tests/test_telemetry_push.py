@@ -129,3 +129,21 @@ async def test_missing_pywebpush_degrades_loudly_without_raising(rc, caplog):
 
     assert result["webpush"] == 0
     assert any("pywebpush" in r.message for r in caplog.records)
+
+
+async def test_a_notices_buttons_and_tag_reach_the_browser(rc, monkeypatch):
+    """The service worker (push-sw.js) shows the buttons and answers them like the bell does."""
+    await push.save_subscription("alex", sub("https://push.example/1"))
+    seen = []
+
+    async def ok(_subscription, payload, _keys):
+        seen.append(payload)
+        return True
+
+    monkeypatch.setattr(push, "_send_webpush", ok)
+    buttons = [{"label": "Snooze 5 min", "type": "callback", "callback": "timer_snooze", "params": {"title": "Tea"}}]
+    await push.send_to_user("alex", "Timer: Tea", "Tea is done", {"url": "/family"}, actions=buttons, tag="timer:t1")
+    await push.send_to_user("alex", "Plain", "No buttons")
+    assert seen[0] == {"title": "Timer: Tea", "body": "Tea is done", "data": {"url": "/family"},
+                       "actions": buttons, "tag": "timer:t1"}
+    assert seen[1] == {"title": "Plain", "body": "No buttons", "data": {}}

@@ -35,8 +35,9 @@ def sent(monkeypatch):
     """Records web push and ntfy deliveries instead of making them."""
     out = {"webpush": [], "ntfy": []}
 
-    async def send(user, title, body, data=None):
+    async def send(user, title, body, data=None, **kw):
         out["webpush"].append(user)
+        out.setdefault("webpush_extras", []).append(kw)
         return {"webpush": 1, "fcm": False, "pruned": 0}
 
     async def publish(session, topic, notice):
@@ -88,6 +89,8 @@ def test_a_full_notice_reaches_the_outbox_web_push_and_ntfy(client, rc, sent, id
     stored = _outbox(client, "sam")[-1]
     assert stored["category"] == "chat" and stored["priority"] == 4 and stored["tag"] == "chat:abc123"
     assert sent["webpush"] == ["sam"]
+    # The browser's service worker shows the same buttons (push-sw.js).
+    assert sent["webpush_extras"][0] == {"actions": body["actions"], "tag": "chat:abc123"}
     topic, notice = sent["ntfy"][0]
     assert topic == "jarvis-sam-secret"
     assert notice["id"] == stored["id"] and notice["created_at"] == stored["created_at"]
@@ -228,7 +231,7 @@ def test_unreachable_identity_still_delivers_to_the_outbox(client, rc, sent):
 
 
 def test_ntfy_failure_does_not_fail_the_request_and_logs_once(client, rc, identity, monkeypatch, caplog):
-    async def send(user, title, body, data=None):
+    async def send(user, title, body, data=None, **_):
         return {}
 
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)

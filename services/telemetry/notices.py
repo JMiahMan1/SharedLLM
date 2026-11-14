@@ -242,7 +242,8 @@ async def deliver(rc, session: aiohttp.ClientSession, user: str, fields: dict[st
         raise
     delivered: dict[str, Any] = {}
     try:
-        delivered = await push.send_to_user(user, notice["title"], notice["body"], notice["data"])
+        delivered = await push.send_to_user(user, notice["title"], notice["body"], notice["data"],
+                                            actions=notice["actions"], tag=notice["tag"])
     except Exception as e:  # the outbox already has it
         log.warning("Push delivery failed for %s: %s", user, e)
     topic = await push_topic(session, user)

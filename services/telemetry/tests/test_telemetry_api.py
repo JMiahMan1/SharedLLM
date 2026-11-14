@@ -133,7 +133,7 @@ def test_notifications_endpoint(client, rc):
 def test_another_service_can_notify_a_user(client, rc, monkeypatch):
     sent = []
 
-    async def send(user, title, body, data=None):
+    async def send(user, title, body, data=None, **_):
         sent.append((user, title, body, data))
         return {"webpush": 1, "fcm": False, "pruned": 0}
     monkeypatch.setattr("services.telemetry.main.push.send_to_user", send)
@@ -154,7 +154,7 @@ def test_notify_needs_a_user_and_a_title(client, rc):
 def test_a_once_notice_is_sent_only_once(client, rc, monkeypatch):
     sent = []
 
-    async def send(user, title, body, data=None):
+    async def send(user, title, body, data=None, **_):
         sent.append(title)
         return {}
 

@@ -175,6 +175,14 @@ Every service keeps calling telemetry; nobody else talks to ntfy.
   request: it is logged once until a publish works again, and the outbox
   still has the notice. Code: `services/telemetry/notices.py`,
   `services/telemetry/ntfy.py`.
+- Browser web push carries the notice's `actions` and `tag`. The service
+  worker (`services/ui/public/push-sw.js`) shows the buttons the browser can
+  (Chrome shows two; the rest are in the bell). A `view` button opens its
+  `url`; `callback` and `reply` (typed in the notice where the browser can ask
+  for text) post `{callback, params, reply?}` to `POST /api/push/action`,
+  the same call the bell makes. The page hands the worker the signed-in
+  person's key (`lib/push.ts` `sharePushKey`) and takes it back on sign-out;
+  with no key, or a key the gateway refuses, the worker says so in a notice.
 
 ## Phones: the stream
 

@@ -14,6 +14,7 @@ import NotificationActions from './NotificationActions';
 import UserAvatar from '../UserAvatar';
 import { navPagesFor } from './navItems';
 import { useDialogFocus } from '../../lib/focusTrap';
+import { sharePushKey } from '../../lib/push';
 
 // Navigation search index: the header box is a *command-palette* style finder
 // for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
@@ -73,6 +74,11 @@ const Header = () => {
       (it.label + ' ' + it.keywords + ' ' + it.section).toLowerCase().includes(q)
     ).slice(0, 12);
   }, [navQuery, navItems]);
+
+  // A browser notice's buttons act as whoever is signed in here (public/push-sw.js).
+  useEffect(() => {
+    sharePushKey().catch((e: unknown) => console.warn('[push] could not hand the key to the push worker', e));
+  }, [user?.username]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
