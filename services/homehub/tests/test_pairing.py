@@ -487,7 +487,11 @@ async def test_the_builder_entry_loads_while_the_dashboard_answers():
             raise DeviceUnavailable("down")
         return answers.pop()
 
+    async def list_nodes(url, username=None, password=None):
+        return []
+
     drv.check = check
+    drv.list_nodes = list_nodes
     await drv.async_setup()
     await drv.async_poll()
     assert entry.state == "setup_retry" and "down" in entry.reason

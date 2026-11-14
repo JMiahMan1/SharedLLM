@@ -77,7 +77,8 @@ ABILITIES: dict[str, str] = {
     "remote_command": "sends remote commands", "learn_command": "learns remote commands", "activity": "runs activities",
     "notify": "takes notifications", "todo": "keeps a to-do list", "weather": "forecasts weather",
     "sense": "reports a reading", "detect": "reports on/off events", "track": "reports a location",
-    "event": "fires events", "update": "installs firmware",
+    "event": "fires events", "update": "installs firmware", "firmware": "reports its firmware version",
+    "set_time": "takes a time of day", "image": "shows a picture", "clean_area": "cleans the rooms you pick",
     "converse": "starts a spoken conversation and listens for the answer",
     "presence_room": "says which room a tracked person or device is in (Bluetooth)",
 }
@@ -95,8 +96,9 @@ COVER = {"open": 1, "close": 2, "set_position": 4, "stop": 8, "open_tilt": 16, "
 VALVE = {"open": 1, "close": 2, "set_position": 4, "stop": 8}
 FAN = {"set_speed": 1, "oscillate": 2, "direction": 4, "preset_mode": 8, "turn_off": 16, "turn_on": 32}
 LOCK = {"open_door": 1}
-VACUUM = {"pause": 4, "stop": 8, "return_home": 16, "fan_speed": 32, "locate": 512, "clean_spot": 1024,
-          "start": 8192}
+VACUUM = {"pause": 4, "stop": 8, "return_home": 16, "fan_speed": 32, "remote_command": 256, "locate": 512,
+          "clean_spot": 1024, "start": 8192, "clean_area": 16384}
+UPDATE = {"install": 1, "specific_version": 2, "progress": 4, "backup": 8, "release_notes": 16}
 SIREN = {"turn_on": 1, "turn_off": 2, "tones": 4, "volume": 8, "duration": 16}
 REMOTE = {"learn_command": 1, "activity": 4}
 CAMERA = {"on_off": 1, "stream": 2}
@@ -124,7 +126,7 @@ _ALWAYS: dict[str, list[str]] = {
     "camera": ["snapshot"], "remote": ["send_command", "turn_on", "turn_off", "toggle"],
     "scene": ["turn_on"], "script": ["turn_on", "turn_off", "toggle"],
     "weather": ["get_forecasts"], "notify": ["send_message"], "tts": ["speak"], "todo": ["get_items"],
-    "update": ["install", "skip"], "climate": ["set_hvac_mode"],
+    "update": ["skip", "clear_skipped"], "climate": ["set_hvac_mode"], "time": ["set_value"],
 }
 _ABILITY_SERVICES: dict[str, dict[str, list[str]]] = {
     "media_player": {"power": ["turn_on", "turn_off", "toggle"], "play_media": ["play_media"],
@@ -147,7 +149,8 @@ _ABILITY_SERVICES: dict[str, dict[str, list[str]]] = {
     "lock": {"open_door": ["open"]},
     "vacuum": {"vacuum_start": ["start"], "pause": ["pause"], "stop": ["stop"], "vacuum_return": ["return_to_base"],
                "locate": ["locate"], "clean_spot": ["clean_spot"], "fan_speed": ["set_fan_speed"],
-               "remote_command": ["send_command"]},
+               "remote_command": ["send_command"], "clean_area": ["send_command"]},
+    "update": {"update": ["install"]},
     "siren": {"power": ["turn_on", "turn_off", "toggle"]},
     "todo": {"todo": ["add_item", "update_item", "remove_item", "remove_completed_items"]},
     "assist_satellite": {"announce": ["announce"], "converse": ["start_conversation"]},
@@ -315,6 +318,10 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
         abilities |= {"vacuum_start" if x == "start" else "vacuum_return" if x == "return_home" else x for x in f}
         if attrs.get("fan_speed_list"):
             details["fan_speeds"] = list(attrs["fan_speed_list"])
+        if "clean_area" in abilities and not attrs.get("segments"):
+            abilities.discard("clean_area")  # a vacuum that has not said which rooms it knows cannot be sent to one
+        if attrs.get("segments"):
+            details["segments"] = list(attrs["segments"])
     elif domain == "siren":
         f = _flags(features, SIREN)
         abilities |= {"siren", "power"} | (f & {"tones", "volume"})
@@ -363,7 +370,17 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
         if attrs.get("event_types"):
             details["event_types"] = list(attrs["event_types"])
     elif domain == "update":
-        abilities.add("update")
+        # Every update entity reports a version; installing is only offered where the integration can do it.
+        abilities.add("firmware")
+        if features & UPDATE["install"]:
+            abilities.add("update")
+        for key in ("installed_version", "latest_version", "skipped_version", "release_url"):
+            if attrs.get(key):
+                details[key] = attrs[key]
+    elif domain == "time":
+        abilities.add("set_time")
+    elif domain == "image":
+        abilities.add("image")
     elif domain == "assist_satellite":
         # The device's flags when it published them; the driver's ``entity_abilities`` adds what it serves.
         f = _flags(features, ASSIST_SATELLITE)

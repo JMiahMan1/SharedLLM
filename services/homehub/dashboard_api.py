@@ -28,9 +28,12 @@ from services.homehub.auth import Auth, Principal, bearer
 from services.homehub.core import UNAVAILABLE
 
 PREFS_KEY = "dashboard_prefs"
-#: Domains a room card can show or control. Everything else (updates, buttons, numbers, automations) is setup, not use.
+#: Domains a room card can show or control. Everything else (updates, automations) is setup, not use. Buttons,
+#: numbers, selects, times and images are on a card only when their device says they are for use: one with an
+#: ``entity_category`` (config or diagnostic) stays in the device's sheet (``on_room_card``).
 ROOM_DOMAINS = ("light", "switch", "fan", "cover", "lock", "climate", "media_player", "camera", "vacuum",
-                "humidifier", "water_heater", "valve", "siren", "sensor", "binary_sensor", "remote", "scene")
+                "humidifier", "water_heater", "valve", "siren", "sensor", "binary_sensor", "remote", "scene",
+                "button", "number", "select", "time", "image")
 #: Sensor device classes worth a glance on a room card.
 ROOM_SENSOR_CLASSES = {"temperature", "humidity", "power", "battery", "illuminance", "pm25", "carbon_dioxide",
                        "moisture", "pressure", "aqi", "volatile_organic_compounds"}

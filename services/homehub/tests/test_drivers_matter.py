@@ -409,6 +409,21 @@ async def test_unsupported_service(setup):
         await drv.async_call(hub.entities["update.master_bedroom_lamp_left"], "update", "install", {})
 
 
+async def test_matter_firmware_is_reported_but_install_is_not_offered(setup):
+    """The hub runs no Matter OTA provider: the entity shows the running version and advertises nothing."""
+    from services.homehub import capabilities
+    from services.homehub.core import HubError
+
+    hub, _drv, _ = setup
+    upd = hub.states.get("update.master_bedroom_lamp_left")
+    assert upd.attributes["supported_features"] == 0
+    assert hub.entities["update.master_bedroom_lamp_left"].supported_features == 0  # the imported 23 is replaced
+    cap = capabilities.entity_capabilities(hub, "update.master_bedroom_lamp_left")
+    assert "update" not in cap["abilities"] and "update.install" not in cap["services"]
+    with pytest.raises(HubError, match="cannot be installed"):
+        await hub.call_service("update", "install", {"entity_id": "update.master_bedroom_lamp_left"})
+
+
 # -- config entities -----------------------------------------------------------
 
 async def test_number_writes_use_device_units(setup):

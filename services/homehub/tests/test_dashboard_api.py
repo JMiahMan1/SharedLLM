@@ -59,6 +59,23 @@ def test_rooms_group_by_area_and_skip_setup_entities(hub):
     assert out["floors"] == [{"floor_id": "ground", "name": "Ground", "level": 0}]
 
 
+def test_controls_for_use_reach_the_room_card_and_settings_stay_in_the_device_sheet(hub):
+    for eid in ("button.hall_chime", "number.hall_fan_level", "select.hall_scene", "time.hall_wake",
+                "image.hall_map"):
+        add(hub, eid, "unknown", area="hall")
+    for eid in ("button.hall_restart", "number.hall_led_brightness", "select.hall_power_on_behavior"):
+        add(hub, eid, "unknown", area="hall")
+        hub.entities[eid].entity_category = "config"
+    add(hub, "sensor.hall_uptime", "1", area="hall", dc="duration")
+    hub.entities["sensor.hall_uptime"].entity_category = "diagnostic"
+    hall = next(a for a in dashboard_api.rooms(hub, {"hidden": []})["areas"] if a["area_id"] == "hall")
+    ids = {e["entity_id"] for e in hall["entities"]}
+    assert {"button.hall_chime", "number.hall_fan_level", "select.hall_scene", "time.hall_wake",
+            "image.hall_map"} <= ids
+    assert not ids & {"button.hall_restart", "number.hall_led_brightness", "select.hall_power_on_behavior",
+                      "sensor.hall_uptime", "update.hall_fw"}
+
+
 def test_hidden_entities_stay_off_the_room_cards(hub):
     out = dashboard_api.rooms(hub, {"hidden": ["light.hall"]})
     hall = next(a for a in out["areas"] if a["area_id"] == "hall")

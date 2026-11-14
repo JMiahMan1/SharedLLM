@@ -937,6 +937,9 @@ app.include_router(calls.router)
 app.include_router(drawing.router)
 app.include_router(mdm.router)
 app.include_router(camera_routes.router)
+from services.gateway import image_routes  # noqa: E402  (image entities: a vacuum's map)
+
+app.include_router(image_routes.router)
 app.include_router(camera_live_routes.router)  # Real-time camera video (go2rtc)
 app.include_router(discovery_routes.router)  # New devices
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
