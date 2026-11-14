@@ -291,7 +291,8 @@ export function abilityLabel(ability: string): string {
 }
 
 /** Abilities worth a chip on a device row (readings and plumbing left out). */
-const QUIET_ABILITIES = new Set(['sense', 'detect', 'toggle', 'update', 'event', 'press', 'set_value', 'select_option']);
+const QUIET_ABILITIES = new Set(['sense', 'detect', 'toggle', 'update', 'event', 'press', 'set_value', 'select_option',
+  'firmware', 'set_time', 'image']);
 export function headlineAbilities(abilities: string[], max = 4): string[] {
   return abilities.filter((a) => !QUIET_ABILITIES.has(a)).slice(0, max);
 }

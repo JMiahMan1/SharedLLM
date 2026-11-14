@@ -12,8 +12,8 @@ import {
 
 const BTN = 'inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-50';
 const INPUT = 'min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white';
-/** Domains whose row is a reading (a chip), not a control. */
-const READINGS = new Set(['sensor', 'binary_sensor', 'weather', 'device_tracker', 'person', 'event', 'update']);
+/** Domains whose row is a reading (a chip), not a control. Updates have their own row: versions, notes, install. */
+const READINGS = new Set(['sensor', 'binary_sensor', 'weather', 'device_tracker', 'person', 'event']);
 
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === '') return null;

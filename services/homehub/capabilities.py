@@ -331,6 +331,8 @@ def entity_capabilities(hub: Any, entity_id: str) -> dict[str, Any]:
         abilities |= {"remote_command", "power", "toggle"} | _flags(features, REMOTE)
         if attrs.get("activity_list"):
             details["activities"] = list(attrs["activity_list"])
+        if attrs.get("command_list"):  # the key names its driver knows (not an HA attribute)
+            details["commands"] = list(attrs["command_list"])
     elif domain in ("button", "input_button"):
         abilities.add("press")
     elif domain in ("number", "input_number"):
