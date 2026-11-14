@@ -178,3 +178,100 @@ def test_a_fresh_hub_without_an_import_uses_the_defaults(tmp_path):
     hub.states.set("light.new_lamp", "off", {})
     hub.states.set("lock.new_lock", "locked", {})
     assert exposure.exposed_entities(hub) == ["light.new_lamp"]
+
+
+# HA's websocket commands (ha_ws_compat.py): what HA's own frontend and clients send.
+
+def _ws(client, token=SECRET):
+    ws = client.websocket_connect("/api/websocket")
+    sock = ws.__enter__()
+    assert sock.receive_json()["type"] == "auth_required"
+    sock.send_json({"type": "auth", "access_token": token})
+    assert sock.receive_json()["type"] == "auth_ok"
+    return ws, sock
+
+
+def _ask(sock, mid, **msg):
+    sock.send_json({"id": mid, **msg})
+    while True:
+        reply = sock.receive_json()
+        if reply.get("id") == mid:
+            return reply
+
+
+def _kid_token(store):
+    import time
+
+    import jwt
+
+    store.set_kv("users", [{"id": "u2", "name": "Kid", "is_active": True, "group_ids": []}])
+    store.save_refresh_token("rt2", {"user_id": "u2"}, "j" * 64)
+    now = int(time.time())
+    return jwt.encode({"iss": "rt2", "iat": now, "exp": now + 60}, "j" * 64, algorithm="HS256")
+
+
+def test_the_websocket_exposes_and_lists_like_home_assistant(env):
+    hub, store, rt = env
+    client = TestClient(build_app(rt, Auth(store, SECRET)))
+    ws, sock = _ws(client)
+    try:
+        r = _ask(sock, 1, type="homeassistant/expose_entity", assistants=["conversation"],
+                 entity_ids=["lock.side_door", "sensor.api_humidity"], should_expose=True)
+        assert r["success"] is True and r["result"] is None
+        assert exposure.view(hub, "lock.side_door") == {"exposed": True, "default": False, "chosen": True}
+        assert store.get_kv(exposure.KV_KEY)["entities"] == {"sensor.api_humidity": True}  # no registry row
+        r = _ask(sock, 2, type="homeassistant/expose_entity", assistants=["conversation"],
+                 entity_ids=["light.den_lamp"], should_expose=False)
+        listing = _ask(sock, 3, type="homeassistant/expose_entity/list")["result"]["exposed_entities"]
+        assert listing["lock.side_door"] == {"conversation": True}
+        assert listing["light.den_lamp"] == {"conversation": False}
+        assert listing["sensor.den_power"] == {"conversation": False}  # the default, listed too
+        assert set(listing) >= {"sensor.api_humidity", "switch.hidden_plug"}
+
+        assert _ask(sock, 4, type="homeassistant/expose_new_entities/get",
+                    assistant="conversation")["result"] == {"expose_new": True}
+        assert _ask(sock, 5, type="homeassistant/expose_new_entities/set", assistant="conversation",
+                    expose_new=False)["success"]
+        assert exposure.expose_new(hub) is False
+        assert not exposure.is_exposed(hub, "binary_sensor.den_window")  # nothing exposed by default now
+        assert exposure.is_exposed(hub, "lock.side_door")  # a choice stays a choice
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_the_websocket_refuses_what_it_cannot_keep(env):
+    hub, store, rt = env
+    client = TestClient(build_app(rt, Auth(store, SECRET)))
+    ws, sock = _ws(client)
+    try:
+        r = _ask(sock, 1, type="homeassistant/expose_entity", assistants=["cloud.alexa"],
+                 entity_ids=["light.den_lamp"], should_expose=True)
+        assert r["success"] is False and r["error"]["code"] == "not_supported"
+        assert "cloud.alexa" in r["error"]["message"]
+        r = _ask(sock, 2, type="homeassistant/expose_entity", assistants=["conversation"],
+                 entity_ids=["light.nowhere"], should_expose=True)
+        assert r["error"]["code"] == "not_found" and "light.nowhere" in r["error"]["message"]
+        r = _ask(sock, 3, type="homeassistant/expose_entity", assistants=["conversation"],
+                 entity_ids=["light.den_lamp"], should_expose="yes")
+        assert r["error"]["code"] == "invalid_format"
+        r = _ask(sock, 4, type="homeassistant/expose_new_entities/get", assistant="cloud.google_assistant")
+        assert r["error"]["code"] == "not_supported"
+        assert exposure.chosen(hub, "light.den_lamp") is None  # nothing was half-applied
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_only_an_admin_changes_exposure_over_the_websocket(env):
+    hub, store, rt = env
+    client = TestClient(build_app(rt, Auth(store, SECRET)))
+    ws, sock = _ws(client, _kid_token(store))
+    try:
+        r = _ask(sock, 1, type="homeassistant/expose_entity", assistants=["conversation"],
+                 entity_ids=["lock.side_door"], should_expose=True)
+        assert r["error"]["code"] == "unauthorized"
+        r = _ask(sock, 2, type="homeassistant/expose_new_entities/set", assistant="conversation", expose_new=False)
+        assert r["error"]["code"] == "unauthorized"
+        assert _ask(sock, 3, type="homeassistant/expose_entity/list")["success"]  # reading stays open
+        assert not exposure.is_exposed(hub, "lock.side_door")
+    finally:
+        ws.__exit__(None, None, None)
