@@ -1114,6 +1114,10 @@ TRIGGER_SPECS = [
      "fields": [*_DEVICE_FIELDS, _f("for", "For at least", "duration")]},
     {"type": "tag", "label": "A tag is scanned",
      "fields": [_f("tag_id", "Tag id", "text", required=True), _f("device_id", "Only from device (id)", "text")]},
+    # HA's sentence trigger: Jarvis's voice and chat run it when someone says one of the sentences
+    # (conversation.py: [optional] words, (either|or) choices, {slots}); one sentence per line.
+    {"type": "conversation", "label": "Someone says a sentence",
+     "fields": [_f("command", "Sentences", "lines", required=True)]},
 ]
 CONDITION_SPECS = [
     {"type": "state", "label": "Entity is in a state",
@@ -1165,7 +1169,43 @@ ACTION_SPECS = [
      "fields": [_f("scene", "Scene", "entity", domain="scene", required=True)]},
     {"type": "event", "label": "Fire an event", "fields": [_f("event", "Event type", "text", required=True),
                                                             _f("event_data", "Event data", "template")]},
+    # What Jarvis answers the person whose sentence ran this (a conversation trigger).
+    {"type": "set_conversation_response", "label": "Reply to the person speaking",
+     "fields": [_f("set_conversation_response", "Reply", "template", required=True)]},
+    # ``assist_satellite.timer_event``: a service call; the editor draws it with the fields in SERVICE_FIELDS.
+    {"type": "satellite_timer", "label": "Show a timer on a voice satellite", "service": "assist_satellite.timer_event",
+     "fields": []},
 ]
+
+#: Field descriptions (HA's ``services.yaml`` shape) for services the hub serves without registering a schema,
+#: so the editor can offer a form rather than a JSON box.
+SERVICE_FIELDS: dict[tuple[str, str], dict[str, Any]] = {
+    ("assist_satellite", "timer_event"): {
+        "event": {"name": "Event", "required": True,
+                  "selector": {"select": {"options": ["started", "updated", "cancelled", "finished"]}}},
+        "timer_id": {"name": "Timer id", "required": True, "selector": {"text": {}}},
+        "name": {"name": "Name", "selector": {"text": {}}},
+        "total_seconds": {"name": "Length (seconds)", "selector": {"number": {"min": 0}}},
+        "seconds_left": {"name": "Seconds left", "selector": {"number": {"min": 0}}},
+        "is_active": {"name": "Counting down", "selector": {"boolean": {}}},
+    },
+}
+
+
+def _services(hub: Any) -> list[dict[str, Any]]:
+    """The hub's services, with SERVICE_FIELDS filled in (and listed when the hub serves them on an entity)."""
+    out = [{"domain": d["domain"], "services": {k: dict(v) for k, v in d["services"].items()}}
+           for d in hub.list_services()]
+    by_domain = {d["domain"]: d for d in out}
+    for (domain, service), fields in SERVICE_FIELDS.items():
+        if domain not in by_domain:
+            if not hub.states.all(domain):
+                continue  # nothing on the hub could take it
+            by_domain[domain] = {"domain": domain, "services": {}}
+            out.append(by_domain[domain])
+        entry = by_domain[domain]["services"].setdefault(service, {"name": service, "description": ""})
+        entry["fields"] = {**(entry.get("fields") or {}), **fields}
+    return sorted(out, key=lambda d: d["domain"])
 
 
 def catalog(hub: Any) -> dict[str, Any]:
@@ -1190,7 +1230,7 @@ def catalog(hub: Any) -> dict[str, Any]:
                         "entities": hub.device_entities(dev.id)})
     return {
         "triggers": TRIGGER_SPECS, "conditions": CONDITION_SPECS, "actions": ACTION_SPECS,
-        "services": hub.list_services(), "entities": entities, "devices": devices,
+        "services": _services(hub), "entities": entities, "devices": devices,
         "areas": [{"area_id": a.area_id, "name": a.name} for a in sorted(hub.areas.values(), key=lambda a: a.name)],
         "zones": sorted(s.entity_id for s in hub.states.all("zone")),
         "persons": sorted(s.entity_id for s in hub.states.all("person")),
