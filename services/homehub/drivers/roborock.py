@@ -10,11 +10,23 @@ the LAN connection fails.
 Entities, by unique_id (HA's roborock integration):
 - ``{duid}``           the vacuum (HA lower-cases the duid in unique_ids)
 - ``{key}_{duid}``     a sensor, binary sensor, select, number, switch or time
-- ``{duid}_map_...``   map images (not drawn here; marked unavailable)
+- ``{duid}_map_{name}`` a map image (HA's image entity: the state is when the
+  picture was last drawn, ``entity_picture`` is ``/api/image_proxy/...`` with a
+  rotating access token, like a camera's)
 
 Status is polled every 30 s and also pushed by the device when it changes;
-consumables, totals, volume and do-not-disturb change slowly and are re-read
-every five minutes.
+consumables, totals, volume, do-not-disturb and the rooms change slowly and are
+re-read every five minutes.
+
+**Maps and rooms.** The library's ``map_content`` trait asks the vacuum for the
+map it is on now and renders it to a PNG; it is fetched when someone looks at it
+(at most every ``MAP_REFRESH_S``), never on a timer. Another saved map is served
+only when the library already holds its picture (``home.home_map_content``):
+drawing it would mean switching the vacuum to that map, which this driver never
+does behind a person's back. The ``rooms`` trait gives the current map's rooms
+(segment id and the name set in the Roborock app); they are published on the
+vacuum as ``segments`` (``[{"id", "name"}]``) and ``vacuum.send_command`` with
+``app_segment_clean`` checks the ids against them.
 
 What each entity is comes from the vacuum and this driver, never from the
 imported registry: the device's own mappings give the fan speeds, mop
@@ -26,18 +38,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from services.homehub.core import UNKNOWN, DeviceUnavailable, Driver, EntityEntry, HubError, ServiceNotFound
+from services.homehub.drivers.mjpeg import CameraTokens
 
 try:  # guarded so the tests can run the driver against fake devices
-    from roborock.data import UserData
+    from roborock.data import DnDTimer, UserData
     from roborock.devices.cache import InMemoryCache
     from roborock.devices.device_manager import UserParams, create_device_manager
     from roborock.exceptions import RoborockException
 except ImportError:  # pragma: no cover - the image installs python-roborock
-    UserData = InMemoryCache = UserParams = create_device_manager = None  # type: ignore[assignment,misc]
+    DnDTimer = UserData = InMemoryCache = UserParams = create_device_manager = None  # type: ignore[assignment,misc]
 
     class RoborockException(Exception):  # type: ignore[no-redef]
         pass
@@ -45,6 +60,10 @@ except ImportError:  # pragma: no cover - the image installs python-roborock
 SETUP_TIMEOUT = 90.0
 COMMAND_TIMEOUT = 20.0
 SLOW_REFRESH_S = 300.0
+#: A map picture is asked for again only when the last one is older than this (rendering it is real work).
+MAP_REFRESH_S = 60.0
+#: The command HA's Roborock integration (and the Roborock app) sends to clean chosen rooms.
+SEGMENT_CLEAN = "app_segment_clean"
 
 # HA's roborock vacuum: device state name -> vacuum activity.
 STATE_TO_ACTIVITY = {
@@ -129,6 +148,39 @@ def _charging(props: Any) -> Any:
         return None if name is None else name == "charging"
 
 
+def _map_name(info: Any) -> str:
+    return info.name or f"Map {info.map_flag}"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def segments(props: Any) -> list[dict[str, Any]]:
+    """The current map's rooms as ``[{"id", "name"}]`` (the ``rooms`` trait), in the vacuum's order."""
+    out = []
+    for room in _get(props, "rooms", "rooms") or []:
+        seg = getattr(room, "segment_id", None)
+        if seg is None:
+            continue
+        out.append({"id": int(seg), "name": str(getattr(room, "name", None) or f"Room {seg}")})
+    return out
+
+
+def segment_ids(params: Any) -> list[int]:
+    """The room ids in ``app_segment_clean`` params: ``[16, 17]`` or ``[{"segments": [16, 17], "repeat": 1}]``."""
+    items = params if isinstance(params, list) else [params]
+    ids: list[int] = []
+    for item in items:
+        values = item.get("segments") if isinstance(item, dict) else item
+        for v in values if isinstance(values, list) else [values]:
+            try:
+                ids.append(int(v))
+            except (TypeError, ValueError) as exc:
+                raise HubError(f"{SEGMENT_CLEAN} takes room ids (numbers), not {v!r}") from exc
+    return ids
+
+
 def _current_map_name(props: Any) -> str | None:
     info = _get(props, "maps", "current_map_info")
     if info is not None:
@@ -188,6 +240,9 @@ class RoborockDriver(Driver):
         self._slow_at: dict[str, float] = {}
         self._online: dict[str, bool] = {}
         self._unsubs: list[Any] = []
+        self._tokens = CameraTokens()
+        #: entity_id -> (monotonic time, UTC time) of the last map picture handed out.
+        self._map_drawn: dict[str, tuple[float, datetime]] = {}
 
     # -- setup ---------------------------------------------------------------
     async def _create_manager(self) -> Any:
@@ -246,7 +301,7 @@ class RoborockDriver(Driver):
         self._online[duid] = True
         if slow:
             self._slow_at[duid] = time.monotonic() + SLOW_REFRESH_S
-            for name in ("consumables", "clean_summary", "sound_volume", "dnd", "maps"):
+            for name in ("consumables", "clean_summary", "sound_volume", "dnd", "maps", "rooms"):
                 trait = getattr(props, name, None)
                 if trait is None:
                     continue
@@ -324,6 +379,7 @@ class RoborockDriver(Driver):
                 "battery_level": _get(status, "battery"),
                 "fan_speed": _get(status, "fan_speed_name"),
                 "supported_features": VACUUM_FEATURES,
+                "segments": segments(props),
             })
             self.publish(ent, activity(_get(status, "state_name")), attrs)
         elif ent.domain == "sensor" and key in SENSORS:
@@ -351,8 +407,64 @@ class RoborockDriver(Driver):
         elif ent.domain == "time" and key in TIMES:
             value = TIMES[key](props)
             self.publish(ent, UNKNOWN if value is None else value, attrs)
+        elif ent.domain == "image" and key == "map":
+            self.publish_map(ent)
         else:
             self.mark_unavailable([ent])
+
+    # -- map images (HA's image entity) ------------------------------------------
+    def access_tokens(self, entity_id: str) -> list[str]:
+        return self._tokens.valid(entity_id)
+
+    def publish_map(self, ent: EntityEntry) -> None:
+        if self._tokens.due(ent.entity_id):
+            self._tokens.rotate(ent.entity_id)
+        token = self._tokens.current(ent.entity_id)
+        drawn = self._map_drawn.get(ent.entity_id)
+        self.publish(ent, drawn[1].isoformat() if drawn else UNKNOWN, {
+            "access_token": token, "entity_picture": f"/api/image_proxy/{ent.entity_id}?token={token}",
+        })
+
+    def _map_info(self, ent: EntityEntry, props: Any) -> Any:
+        """The saved map an image entity shows (its unique_id ends in the map's name, as HA wrote it)."""
+        wanted = _slug(ent.unique_id.split("_map_", 1)[1]) if "_map_" in ent.unique_id else ""
+        for info in _get(props, "maps", "map_info") or []:
+            if wanted in (_slug(_map_name(info)), _slug(str(info.map_flag))):
+                return info
+        raise ServiceNotFound(f"{ent.entity_id} names a map this vacuum does not have")
+
+    async def async_image(self, entity: EntityEntry) -> tuple[bytes, str]:
+        """The map picture (PNG) for an image entity."""
+        split = self.split(entity)
+        if split is None or split[0] != "map" or entity.domain != "image":
+            raise ServiceNotFound(f"{entity.entity_id} is not a Roborock map")
+        duid = split[1]
+        if not self._online.get(duid, False):
+            raise DeviceUnavailable("the vacuum is not answering")
+        props = self.devices[duid].v1_properties
+        info = self._map_info(entity, props)
+        if info.map_flag == _get(props, "maps", "current_map"):
+            trait = getattr(props, "map_content", None)
+            if trait is None:
+                raise ServiceNotFound("this version of python-roborock cannot draw the map")
+            drawn = self._map_drawn.get(entity.entity_id)
+            if drawn is None or time.monotonic() - drawn[0] >= MAP_REFRESH_S or not trait.image_content:
+                try:
+                    await asyncio.wait_for(trait.refresh(), COMMAND_TIMEOUT)
+                except Exception as exc:
+                    raise DeviceUnavailable(f"the vacuum did not send its map: {exc}") from exc
+                self._map_drawn[entity.entity_id] = (time.monotonic(), datetime.now(UTC))
+                self.publish_map(entity)
+            image = trait.image_content
+        else:
+            content = (_get(props, "home", "home_map_content") or {}).get(info.map_flag)
+            image = getattr(content, "image_content", None)
+            if not image:
+                raise DeviceUnavailable(f"the vacuum only sends the map it is on now; switch it to "
+                                        f"{_map_name(info)!r} to see this one")
+        if not image:
+            raise DeviceUnavailable("the vacuum sent an empty map")
+        return bytes(image), "image/png"
 
     # -- services ------------------------------------------------------------
     async def _send(self, props: Any, command: str, params: Any = None) -> Any:
@@ -379,6 +491,8 @@ class RoborockDriver(Driver):
         elif entity.domain == "switch" and key == "dnd_switch" and service in ("turn_on", "turn_off", "toggle"):
             on = service == "turn_on" or (service == "toggle" and _get(props, "dnd", "enabled") != 1)
             await asyncio.wait_for(props.dnd.enable() if on else props.dnd.disable(), COMMAND_TIMEOUT)
+        elif entity.domain == "time" and key in TIMES and service == "set_value":
+            await self._set_dnd_time(props, key, data.get("time"))
         else:
             raise ServiceNotFound(f"roborock cannot run {domain}.{service} on {entity.entity_id}")
         await self.refresh_device(duid, slow=entity.domain != "vacuum")
@@ -398,8 +512,34 @@ class RoborockDriver(Driver):
             command = data.get("command")
             if not command:
                 raise HubError("send_command needs a command")
+            if command == SEGMENT_CLEAN:
+                ids = segment_ids(data.get("params"))
+                known = {s["id"] for s in segments(props)}
+                if not ids:
+                    raise HubError(f"{SEGMENT_CLEAN} needs at least one room")
+                if not known:
+                    raise DeviceUnavailable("the vacuum has not said which rooms its map has yet")
+                if unknown := sorted(set(ids) - known):
+                    rooms = ", ".join(f"{s['id']} ({s['name']})" for s in segments(props))
+                    raise HubError(f"this map has no room {', '.join(map(str, unknown))}; its rooms are {rooms}")
             return await self._send(props, str(command), data.get("params"))
         raise ServiceNotFound(f"roborock cannot run vacuum.{service}")
+
+    async def _set_dnd_time(self, props: Any, key: str, value: Any) -> None:
+        """``time.set_value`` on the do-not-disturb start or end: the device takes the whole window at once."""
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2})?", str(value or "").strip())
+        if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            raise HubError(f"time must be HH:MM or HH:MM:SS, not {value!r}")
+        if DnDTimer is None:
+            raise HubError("python-roborock is not installed")
+        dnd = props.dnd
+        window = {"start_hour": dnd.start_hour, "start_minute": dnd.start_minute,
+                  "end_hour": dnd.end_hour, "end_minute": dnd.end_minute}
+        side = "start" if key == "dnd_start_time" else "end"
+        window[f"{side}_hour"], window[f"{side}_minute"] = int(m.group(1)), int(m.group(2))
+        if any(v is None for v in window.values()):
+            raise DeviceUnavailable("the vacuum has not said its do-not-disturb window yet")
+        await asyncio.wait_for(dnd.set_dnd_timer(DnDTimer(**window, enabled=dnd.enabled)), COMMAND_TIMEOUT)
 
     async def _select(self, props: Any, key: str, option: str) -> None:
         status = props.status

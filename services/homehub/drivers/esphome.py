@@ -131,6 +131,12 @@ PLATFORMS: dict[str, str] = {
 }
 
 _NEW_UID = re.compile(r"^([0-9A-Fa-f:]{17})/(\d+)/([a-z_]+)/(.*)$", re.S)
+_MAC_UID = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+
+
+def _is_firmware_uid(entity: EntityEntry) -> bool:
+    """HA's dashboard-backed ``Firmware`` update entity: an ``update`` whose unique_id is just the node's MAC."""
+    return entity.domain == "update" and bool(_MAC_UID.match(entity.unique_id or ""))
 
 STATE_CLASSES = {SensorStateClass.MEASUREMENT: "measurement", SensorStateClass.TOTAL_INCREASING: "total_increasing",
                  SensorStateClass.TOTAL: "total"}
@@ -333,6 +339,7 @@ class ESPHomeDriver(Driver):
         except Exception:
             self.log.exception("ESPHome %s: subscribing to its voice assistant failed", self.device_name)
         self._attach_bluetooth(client, device_info)
+        self.publish_firmware_update()
         if self._was_connected:
             self.log.info("ESPHome %s (%s) reconnected", self.device_name, self.host)
         self._was_connected = True
@@ -444,6 +451,53 @@ class ESPHomeDriver(Driver):
         local = {e.entity_id for e in self.local_entities}
         return [e for e in self.entities if e.entity_id not in local]
 
+    # -- firmware through the ESPHome builder (drivers/esphome_builder.py) -------
+    def _firmware_entity(self) -> EntityEntry | None:
+        """HA's ``Firmware`` update entity for this node (its unique_id is the node's MAC)."""
+        from services.homehub.discovery import norm_mac
+
+        mac = norm_mac(getattr(self._device_info, "mac_address", "")) if self._device_info is not None else None
+        for e in self._device_entities():
+            if _is_firmware_uid(e) and (mac is None or norm_mac(e.unique_id) == mac):
+                return e
+        return None
+
+    def publish_firmware_update(self) -> None:
+        """Installed = the ESPHome version the node runs; latest and install come from the builder, if linked."""
+        from services.homehub.core import UPDATE_INSTALL
+        from services.homehub.drivers.esphome_builder import builder_for
+
+        ent = self._firmware_entity()
+        if ent is None or self._client is None or self._device_info is None:
+            return  # while disconnected it is unavailable with the node's other entities
+        node = str(getattr(self._device_info, "name", "") or self.device_name)
+        builder = builder_for(self.hub)
+        offer = builder.firmware_for(node) if builder is not None else None
+        attrs: dict[str, Any] = {
+            "installed_version": getattr(self._device_info, "esphome_version", "") or None,
+            "title": "ESPHome", "auto_update": False, "release_summary": None,
+        }
+        if offer is not None:
+            attrs.update(offer, supported_features=UPDATE_INSTALL)
+            self.publish(ent, "off", attrs)
+            return
+        attrs.update(latest_version=None, in_progress=False, release_url=None, supported_features=0,
+                     release_summary="The ESPHome Device Builder is not linked, so the latest version is not known."
+                     if builder is None else f"The ESPHome Device Builder has no config named {node}.")
+        self.publish(ent, UNKNOWN, attrs)
+
+    def _install_firmware(self, entity: EntityEntry, service: str) -> None:
+        from services.homehub.drivers.esphome_builder import builder_for
+
+        if service != "install":
+            raise ServiceNotFound(f"update.{service} on {entity.entity_id}")
+        builder = builder_for(self.hub)
+        if builder is None:
+            raise HubError("link the ESPHome Device Builder (Devices > Integrations) to install firmware")
+        if self._device_info is None:
+            raise DeviceUnavailable(f"ESPHome {self.device_name or self.host} is not connected")
+        builder.install(str(getattr(self._device_info, "name", "") or self.device_name))
+
     # -- entity mapping -------------------------------------------------------
     def _index(self, infos: list[Any]) -> None:
         self._infos = {(getattr(i, "device_id", 0) or 0, i.key): i for i in infos}
@@ -463,6 +517,8 @@ class ESPHomeDriver(Driver):
         for e in self._device_entities():
             uid = e.unique_id or ""
             info = None
+            if _is_firmware_uid(e):
+                continue  # the builder's firmware update, not a node entity (publish_firmware_update)
             if m := _NEW_UID.match(uid):
                 dev, plat, name = int(m.group(2)), m.group(3), m.group(4)
                 info = exact.get((dev, plat, name)) or by_name.get((plat, name.lower()))
@@ -776,6 +832,8 @@ class ESPHomeDriver(Driver):
     async def async_call(self, entity: EntityEntry, domain: str, service: str, data: dict[str, Any]) -> Any:
         if entity.domain == "assist_satellite" and domain == "assist_satellite":
             return await self._satellite_call(service, data)
+        if entity.domain == "update" and _is_firmware_uid(entity):
+            return self._install_firmware(entity, service)
         if entity in self.local_entities or any(e.entity_id == entity.entity_id for e in self.local_entities):
             result = self._local_call(entity, domain, service, data)
             return await result if inspect.isawaitable(result) else result

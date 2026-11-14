@@ -318,7 +318,8 @@ class SamsungTVDriver(Driver):
                     attrs.update(clean({"volume_level": self.volume, "is_volume_muted": self.muted}))
                 self.publish(e, "on" if self.is_on else "off", attrs)
             elif e.domain == "remote":
-                self.publish(e, "on" if self.is_on else "off", {"supported_features": 0})
+                self.publish(e, "on" if self.is_on else "off", {"supported_features": 0,
+                                                                "command_list": sorted(SAMSUNG_KEYS)})
 
     async def _keys(self, *keys: str, delay: float = 0.4) -> None:
         await self.bridge.send_keys(list(keys), delay)

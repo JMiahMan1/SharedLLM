@@ -72,6 +72,20 @@ class Dnd(Trait):
     async def disable(self):
         self.enabled = 0
 
+    async def set_dnd_timer(self, timer):
+        self.set_to = timer
+        self.start_hour, self.start_minute = timer.start_hour, timer.start_minute
+        self.end_hour, self.end_minute = timer.end_hour, timer.end_minute
+
+
+PNG = b"\x89PNG\r\n\x1a\nfake-map"
+
+
+class MapContent(Trait):
+    async def refresh(self):
+        await super().refresh()
+        self.image_content = PNG
+
 
 def make_props():
     return SimpleNamespace(
@@ -88,7 +102,10 @@ def make_props():
         sound_volume=Volume(volume=60),
         dnd=Dnd(enabled=1, start_hour=22, start_minute=0, end_hour=8, end_minute=30),
         maps=Trait(current_map_info=SimpleNamespace(name="Map 0", map_flag=0), current_map=0,
-                   map_info=[SimpleNamespace(name="Map 0", map_flag=0)]),
+                   map_info=[SimpleNamespace(name="Map 0", map_flag=0), SimpleNamespace(name="Upstairs", map_flag=1)]),
+        rooms=Trait(rooms=[SimpleNamespace(segment_id=16, name="Kitchen"),
+                           SimpleNamespace(segment_id=17, name="Hallway")]),
+        map_content=MapContent(image_content=None),
         command=Command(),
     )
 
@@ -135,6 +152,8 @@ ENTITIES = [
     ent("switch.roborock_s5_max_do_not_disturb", "dnd_switch"),
     ent("time.roborock_s5_max_do_not_disturb_begin", "dnd_start_time"),
     {"entity_id": "image.roborock_s5_max_map_0", "unique_id": f"{LDUID}_map_Map 0"},
+    {"entity_id": "image.roborock_s5_max_upstairs", "unique_id": f"{LDUID}_map_Upstairs"},
+    {"entity_id": "image.roborock_s5_max_gone", "unique_id": f"{LDUID}_map_Old Map"},
 ]
 
 DATA = {"base_url": "https://usiot.roborock.com", "username": "someone@example.com",
@@ -204,7 +223,9 @@ async def test_states_published_like_ha():
     assert s("number.roborock_s5_max_volume") == "60"
     assert s("switch.roborock_s5_max_do_not_disturb") == "on"
     assert s("time.roborock_s5_max_do_not_disturb_begin") == "22:00:00"
-    assert s("image.roborock_s5_max_map_0") == "unavailable"
+    # A map picture is drawn when someone looks at it; until then its state (when it was drawn) is unknown.
+    assert s("image.roborock_s5_max_map_0") == "unknown"
+    assert v.attributes["segments"] == [{"id": 16, "name": "Kitchen"}, {"id": 17, "name": "Hallway"}]
 
 
 @pytest.mark.parametrize("service,command", [
@@ -227,6 +248,98 @@ async def test_fan_speed_and_send_command():
     await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
                                                       "command": "app_segment_clean", "params": [16, 17]})
     assert props.command.sent[-1] == ("app_segment_clean", [16, 17])
+
+
+async def test_segment_clean_takes_only_the_rooms_the_map_has():
+    hub, _driver, props, _ = await setup()
+    params = [{"segments": [17], "repeat": 1}]
+    await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                      "command": "app_segment_clean", "params": params})
+    assert props.command.sent[-1] == ("app_segment_clean", params)
+    sent = len(props.command.sent)
+    with pytest.raises(HubError, match=r"no room 99.*16 \(Kitchen\)"):
+        await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                          "command": "app_segment_clean", "params": [99]})
+    with pytest.raises(HubError, match="at least one room"):
+        await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                          "command": "app_segment_clean", "params": []})
+    with pytest.raises(HubError, match="room ids"):
+        await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                          "command": "app_segment_clean", "params": ["kitchen"]})
+    assert len(props.command.sent) == sent  # nothing reached the vacuum
+
+
+async def test_segment_clean_is_refused_before_the_rooms_are_known():
+    props = make_props()
+    props.rooms.rooms = []
+    hub, _driver, props, _ = await setup(props)
+    with pytest.raises(HubError, match="not said which rooms"):
+        await hub.call_service("vacuum", "send_command", {"entity_id": "vacuum.roborock_s5_max",
+                                                          "command": "app_segment_clean", "params": [16]})
+
+
+async def test_clean_area_is_an_ability_with_the_rooms():
+    from services.homehub import capabilities
+
+    hub, _driver, props, _ = await setup()
+    cap = capabilities.entity_capabilities(hub, "vacuum.roborock_s5_max")
+    assert {"clean_area", "remote_command"} <= set(cap["abilities"])
+    assert cap["details"]["segments"][0] == {"id": 16, "name": "Kitchen"}
+    props.rooms.rooms = []
+    props.status.listener()
+    assert "clean_area" not in capabilities.entity_capabilities(hub, "vacuum.roborock_s5_max")["abilities"]
+
+
+async def test_the_current_map_is_served_as_an_image_with_a_token():
+    hub, driver, props, _ = await setup()
+    ent = hub.entities["image.roborock_s5_max_map_0"]
+    st = hub.states.get(ent.entity_id)
+    token = st.attributes["access_token"]
+    assert st.attributes["entity_picture"] == f"/api/image_proxy/{ent.entity_id}?token={token}"
+    assert token in driver.access_tokens(ent.entity_id)
+    body, ctype = await driver.async_image(ent)
+    assert (body, ctype) == (PNG, "image/png")
+    assert hub.states.get(ent.entity_id).state.startswith("20")  # when it was drawn
+    await driver.async_image(ent)
+    assert props.map_content.refreshes == 1  # a second look within a minute reuses the picture
+    driver._map_drawn[ent.entity_id] = (0.0, driver._map_drawn[ent.entity_id][1])
+    await driver.async_image(ent)
+    assert props.map_content.refreshes == 2
+
+
+async def test_other_maps_are_not_drawn_by_switching_the_vacuum():
+    from services.homehub.core import DeviceUnavailable, ServiceNotFound
+
+    hub, driver, props, _ = await setup()
+    with pytest.raises(DeviceUnavailable, match="only sends the map it is on"):
+        await driver.async_image(hub.entities["image.roborock_s5_max_upstairs"])
+    assert props.command.sent == []
+    props.home = SimpleNamespace(home_map_content={1: SimpleNamespace(image_content=b"upstairs-png")})
+    assert (await driver.async_image(hub.entities["image.roborock_s5_max_upstairs"]))[0] == b"upstairs-png"
+    with pytest.raises(ServiceNotFound, match="map this vacuum does not have"):
+        await driver.async_image(hub.entities["image.roborock_s5_max_gone"])
+
+
+async def test_a_map_the_vacuum_does_not_send_is_unavailable():
+    from services.homehub.core import DeviceUnavailable
+
+    hub, driver, props, _ = await setup()
+    props.map_content.fail = True
+    with pytest.raises(DeviceUnavailable, match="did not send its map"):
+        await driver.async_image(hub.entities["image.roborock_s5_max_map_0"])
+
+
+async def test_do_not_disturb_times_are_set_as_one_window(monkeypatch):
+    monkeypatch.setattr(rr, "DnDTimer", lambda **kw: SimpleNamespace(**kw))
+    hub, _driver, props, _ = await setup()
+    await hub.call_service("time", "set_value", {"entity_id": "time.roborock_s5_max_do_not_disturb_begin",
+                                                 "time": "21:15:00"})
+    t = props.dnd.set_to
+    assert (t.start_hour, t.start_minute, t.end_hour, t.end_minute, t.enabled) == (21, 15, 8, 30, 1)
+    assert hub.states.get("time.roborock_s5_max_do_not_disturb_begin").state == "21:15:00"
+    with pytest.raises(HubError, match="HH:MM"):
+        await hub.call_service("time", "set_value", {"entity_id": "time.roborock_s5_max_do_not_disturb_begin",
+                                                     "time": "25:00"})
 
 
 async def test_config_entities():

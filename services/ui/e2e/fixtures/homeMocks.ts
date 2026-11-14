@@ -588,5 +588,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     ? route.fulfill({ contentType: 'video/webm', body: Buffer.from(TINY_WEBM_BASE64, 'base64') }) :
     route.fulfill({ contentType: 'image/png', body: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') })));
+  // Image entities (a vacuum's map): a small picture through the same signed media route.
+  await page.route('**/api/media/images/**', (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') }));
   return { unmocked, posts };
 }

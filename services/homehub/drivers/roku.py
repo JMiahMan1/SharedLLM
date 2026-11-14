@@ -223,7 +223,8 @@ class RokuDriver(Driver):
                         }))
                 self.publish(e, self.state, attrs)
             elif e.domain == "remote":
-                self.publish(e, "off" if self.state == "standby" else "on", {"supported_features": 0})
+                self.publish(e, "off" if self.state == "standby" else "on", {"supported_features": 0,
+                                                                             "command_list": sorted(ROKU_KEYS)})
             elif e.domain == "binary_sensor":
                 key = uid[len(serial) + 1:] if serial and uid.startswith(serial + "_") else uid.split("_", 1)[-1]
                 field = BINARY_SENSORS.get(key)

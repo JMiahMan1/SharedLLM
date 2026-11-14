@@ -183,6 +183,7 @@ class AndroidTVRemoteDriver(Driver):
                     "supported_features": REMOTE_ACTIVITY,
                     "current_activity": app_name if is_on else None,
                     "activity_list": sorted(set(APP_NAMES.values())),
+                    "command_list": sorted(KEYS),
                 }))
 
     # -- services -----------------------------------------------------------------

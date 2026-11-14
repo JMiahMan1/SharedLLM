@@ -21,6 +21,10 @@ log = logging.getLogger("homehub")
 
 UNAVAILABLE = "unavailable"
 UNKNOWN = "unknown"
+#: HA's UpdateEntityFeature.INSTALL: the integration can really install the latest version.
+UPDATE_INSTALL = 1
+#: The update services the hub answers itself (a skipped version is the hub's record, not the device's).
+UPDATE_SKIP_SERVICES = ("skip", "clear_skipped")
 
 # Entity services a domain answers. A driver may support fewer; the hub only
 # refuses a service no driver of that domain could ever handle.
@@ -558,6 +562,8 @@ class Hub:
             caps = entry.trusted("capabilities") or {}
             if entry.domain == "sensor" and caps.get("state_class") and "state_class" not in attrs:
                 attrs["state_class"] = caps["state_class"]
+            if entry.domain == "update" and str(state) != UNAVAILABLE:
+                state = update_state(state, attrs, skipped_version(entry))
         return self.states.set(entity_id, state, attrs)
 
     def _confirm_from_state(self, entry: EntityEntry, attrs: dict[str, Any]) -> None:
@@ -716,6 +722,11 @@ class Hub:
             handler = self.services.get((domain, service))
             if handler is not None:
                 response = await handler(self, call)
+            elif domain == "update" and service in UPDATE_SKIP_SERVICES:
+                self._update_skip(call)
+            elif domain == "update" and service == "install":
+                self._check_installable(call)
+                await self._dispatch_entities(call)
             elif domain == "homeassistant" and service in ("turn_on", "turn_off", "toggle"):
                 await self._dispatch_entities(call, by_entity_domain=True)
             else:
@@ -723,6 +734,66 @@ class Hub:
         finally:
             unsub()
         return {"changed_states": changed, "response": response}
+
+    # -- update entities: the skipped version is the hub's own record ----------
+    def _update_targets(self, call: ServiceCall) -> list[EntityEntry]:
+        if not call.entity_ids:
+            raise ServiceNotFound(f"update.{call.service} needs a target entity")
+        out = []
+        for eid in call.entity_ids:
+            ent = self.entities.get(eid)
+            if ent is None or ent.disabled_by:
+                raise EntityNotFound(f"{eid}: unknown entity")
+            if ent.domain == "update":
+                out.append(ent)
+        if not out:
+            raise ServiceNotFound(f"update.{call.service} needs an update entity")
+        return out
+
+    def _update_skip(self, call: ServiceCall) -> None:
+        """``update.skip`` / ``update.clear_skipped`` with HA's rules, kept in the entity's options.
+
+        Every target is checked before any is changed, so a refused call changes nothing.
+        """
+        targets = self._update_targets(call)
+        skips: dict[str, str | None] = {}
+        for ent in targets:
+            st = self.states.get(ent.entity_id)
+            if st is None or st.state == UNAVAILABLE:
+                raise DeviceUnavailable(f"{ent.entity_id} is unavailable")
+            if call.service == "skip":
+                latest = st.attributes.get("latest_version")
+                if not latest or latest == st.attributes.get("installed_version"):
+                    raise HubError(f"{ent.entity_id} has no update to skip")
+                skips[ent.entity_id] = str(latest)
+            else:
+                skips[ent.entity_id] = None
+        for ent in targets:
+            opts = dict(ent.options or {})
+            upd = {k: v for k, v in dict(opts.get("update") or {}).items() if k != "skipped_version"}
+            if skips[ent.entity_id]:
+                upd["skipped_version"] = skips[ent.entity_id]
+            if upd:
+                opts["update"] = upd
+            else:
+                opts.pop("update", None)
+            ent.options = opts
+            self._save("entity", ent)
+            st = self.states.get(ent.entity_id)
+            if st is not None:
+                self.publish(ent, st.state, dict(st.attributes))
+
+    def _check_installable(self, call: ServiceCall) -> None:
+        """Refuse ``update.install`` on an entity whose integration cannot install (it does not advertise it)."""
+        for ent in self._update_targets(call):
+            st = self.states.get(ent.entity_id)
+            try:
+                features = int((st.attributes.get("supported_features") if st else None) or 0)
+            except (TypeError, ValueError):
+                features = 0
+            if not features & UPDATE_INSTALL:
+                raise HubError(f"{ent.entity_id} cannot be installed from the hub: its integration has no way "
+                               "to install firmware")
 
     async def _dispatch_entities(self, call: ServiceCall, by_entity_domain: bool = False) -> None:
         if not call.entity_ids:
@@ -776,6 +847,25 @@ class Hub:
         return [{"domain": d, "services": s} for d, s in sorted(by_domain.items())]
 
 
+def skipped_version(entity: EntityEntry) -> str | None:
+    """The version a person chose to skip for an update entity (``options.update.skipped_version``)."""
+    value = ((entity.options or {}).get("update") or {}).get("skipped_version")
+    return str(value) if value else None
+
+
+def update_state(state: Any, attrs: dict[str, Any], skipped: str | None) -> Any:
+    """HA's update state: ``on`` while a version newer than the installed one is offered and not skipped.
+
+    ``attrs`` gets the ``skipped_version`` the hub holds. Without both versions, or while the driver says it
+    does not know yet (``unknown``: it has not asked for the latest version), the driver's state stands.
+    """
+    attrs["skipped_version"] = skipped
+    latest, installed = attrs.get("latest_version"), attrs.get("installed_version")
+    if not latest or not installed or str(state) == UNKNOWN:
+        return state
+    return "on" if str(latest) != str(installed) and str(latest) != skipped else "off"
+
+
 ENTITY_SERVICES: dict[str, tuple[str, ...]] = {
     "light": ("turn_on", "turn_off", "toggle"),
     "switch": ("turn_on", "turn_off", "toggle"),
@@ -796,6 +886,7 @@ ENTITY_SERVICES: dict[str, tuple[str, ...]] = {
     "vacuum": ("start", "pause", "stop", "return_to_base", "locate", "clean_spot", "set_fan_speed",
                "send_command"),
     "time": ("set_value",),
+    "update": ("install", "skip", "clear_skipped"),
     "todo": ("add_item", "update_item", "remove_item", "remove_completed_items", "get_items"),
     "camera": ("snapshot",),
     "assist_satellite": ("announce",),

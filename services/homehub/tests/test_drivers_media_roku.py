@@ -56,6 +56,8 @@ async def test_playing_netflix_state_and_sensors():
     assert st.attributes["media_duration"] == 120
     assert st.attributes["supported_features"] & F.SELECT_SOURCE
     assert hub.states.get(REMOTE).state == "on"
+    # The keys it takes, so the app's remote pad offers them instead of a blank text field.
+    assert {"home", "up", "select", "volume_up"} <= set(hub.states.get(REMOTE).attributes["command_list"])
     assert hub.states.get("binary_sensor.bedroom_roku_tv_supports_airplay").state == "on"
     assert hub.states.get("binary_sensor.bedroom_roku_tv_headphones_connected").state == "off"
     assert hub.states.get("sensor.bedroom_roku_tv_active_app").state == "Netflix"

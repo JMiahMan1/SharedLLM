@@ -360,13 +360,15 @@ export function failureText(err: unknown, fallback = 'Something went wrong'): st
 /** The order a room card lists its things: what people touch first, then what they glance at. */
 export const DOMAIN_ORDER = [
   'climate', 'light', 'switch', 'fan', 'media_player', 'remote', 'cover', 'lock', 'vacuum', 'humidifier',
-  'water_heater', 'valve', 'siren', 'scene', 'camera', 'binary_sensor', 'sensor',
+  'water_heater', 'valve', 'siren', 'scene', 'button', 'select', 'number', 'time', 'image', 'camera',
+  'binary_sensor', 'sensor',
 ];
 
 export const DOMAIN_LABELS: Record<string, string> = {
   climate: 'Climate', light: 'Lights', switch: 'Switches', fan: 'Fans', media_player: 'Media', remote: 'Remotes',
   cover: 'Covers', lock: 'Locks', vacuum: 'Vacuums', humidifier: 'Humidifiers', water_heater: 'Water heaters',
-  valve: 'Valves', siren: 'Sirens', scene: 'Scenes', camera: 'Cameras', binary_sensor: 'Status', sensor: 'Sensors',
+  valve: 'Valves', siren: 'Sirens', scene: 'Scenes', button: 'Buttons', select: 'Choices', number: 'Levels',
+  time: 'Times', image: 'Pictures', camera: 'Cameras', binary_sensor: 'Status', sensor: 'Sensors',
 };
 
 export interface DomainGroup { domain: string; label: string; entities: HubEntity[] }

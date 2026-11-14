@@ -392,6 +392,22 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
             return _error(500, "Camera returned no image")
         return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
+    @api.get("/api/image_proxy/{entity_id}")
+    async def image_proxy(entity_id: str, request: Request) -> Response:
+        """HA's image entity picture: the state's rotating ``access_token`` or a signed-in caller."""
+        _camera_auth(request, entity_id)
+        ent = hub.entities.get(entity_id)
+        if ent is None or ent.domain != "image" or ent.disabled_by:
+            return _error(404, "Entity not found.")
+        driver = hub.drivers.get(ent.config_entry_id or "")
+        if driver is None or not hasattr(driver, "async_image"):
+            return _error(503, "Image is not available")
+        try:
+            body, content_type = await driver.async_image(ent)
+        except HubError as exc:
+            return _error(exc.status, str(exc))
+        return Response(body, media_type=content_type, headers={"Cache-Control": "no-store"})
+
     @api.get("/api/camera_proxy_stream/{entity_id}")
     async def camera_stream(entity_id: str, request: Request) -> Response:
         _camera_auth(request, entity_id)

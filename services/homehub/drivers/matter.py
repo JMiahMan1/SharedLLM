@@ -84,7 +84,10 @@ CC_MODE = {0: "hs", 1: "xy", 2: "color_temp"}
 EXECUTE_IF_OFF = 1
 
 LIGHT_FEATURE_TRANSITION = 32  # LightEntityFeature.TRANSITION
-UPDATE_FEATURES = 23  # what HA's Matter update entity advertises (the registry agrees)
+#: HA's Matter update entity advertises install, a chosen version, progress and release notes (23), because HA
+#: runs an OTA provider. The hub has none, so a Matter update entity only reports the running firmware: it
+#: advertises nothing, and update.install is refused instead of failing on the device.
+UPDATE_FEATURES = 0
 
 # A level of 1-254 maps onto brightness 1-255 the way Home Assistant does it.
 DEFAULT_MIN_LEVEL = 1
