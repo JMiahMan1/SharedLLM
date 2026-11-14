@@ -23,6 +23,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     camera_recording,
     camera_recording_api,
     capabilities_api,  # the capability index: which devices can do what
+    conversation,  # /hub/conversation/triggers: HA sentence triggers, asked by Jarvis first
     dashboard_api,
     discovery_api,
     entries_api,  # integrations: reconfigure, remove/unpair, add by address
@@ -462,6 +463,16 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
         principal(request)
         return [_camera_summary(e) for e in _camera_entities()]
 
+    @api.get("/api/homehub/exposed_entities")
+    async def homehub_exposed(request: Request, entity_id: str | None = None) -> dict[str, Any]:
+        """What voice and chat may control (``exposure.py``): one entity's answer, or the whole list."""
+        from services.homehub import exposure
+
+        principal(request)
+        if entity_id is not None:
+            return {"entity_id": entity_id, "exposed": exposure.is_exposed(hub, entity_id)}
+        return {"assistant": exposure.ASSISTANT, "entity_ids": exposure.exposed_entities(hub)}
+
     def _recording_driver(entity_id: str) -> tuple[Any, Any]:
         ent = hub.entities.get(entity_id)
         if ent is None or ent.domain != "camera" or ent.disabled_by:
@@ -581,6 +592,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(prune_api.build_router(runtime, auth))  # /hub/prune/plan, /hub/prune/apply
     app.include_router(service_logins_api.build_router(runtime, auth))  # service logins, Music Assistant link
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
+    app.include_router(conversation.build_router(runtime, auth))  # sentence triggers, asked by Jarvis first
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
 

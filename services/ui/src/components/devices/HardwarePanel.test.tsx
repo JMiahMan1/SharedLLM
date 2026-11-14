@@ -43,6 +43,7 @@ const detail: HardwareDetail = {
   entity_list: [
     { entity_id: 'light.porch_lamp', domain: 'light', platform: 'wiz', name: 'Porch lamp', name_by_user: null,
       original_name: null, entity_category: null, disabled_by: null, hidden_by: null, area_id: null, icon: null,
+      voice: { exposed: true, default: true, chosen: false },
       capabilities: { abilities: ['dim', 'power'], services: ['light.turn_on'], details: {}, protocol: {} },
       state: { entity_id: 'light.porch_lamp', domain: 'light', name: 'Porch lamp', state: 'on',
         attributes: { brightness: 128 }, device_class: null, unit: null, icon: null, area_id: 'porch',
@@ -109,6 +110,21 @@ describe('HardwarePanel', () => {
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { name: 'Front lamp' }));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Disable Porch lamp Power' }));
     await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('sensor.porch_lamp_power', { disabled: true }));
+  });
+
+  it('switches whether voice and chat may control an entity', async () => {
+    vi.mocked(hardware.updateEntity).mockResolvedValue(detail.entity_list[0]);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Porch lamp, Online' }));
+    const sheet = await screen.findByTestId('hardware-detail');
+    const toggle = within(sheet).getByRole('button', { name: 'Voice can control Porch lamp' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(toggle).toHaveAttribute('title', 'The default for this kind of entity');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(hardware.updateEntity).toHaveBeenCalledWith('light.porch_lamp', { voice: false }));
+    // An entity the hub reports no setting for (an older hub) shows no switch.
+    fireEvent.click(within(sheet).getByRole('button', { name: /Show settings, diagnostics/ }));
+    expect(within(sheet).queryByRole('button', { name: 'Voice can control Porch lamp Power' })).toBeNull();
   });
 
   it('moves, disables and removes the device from its sheet', async () => {

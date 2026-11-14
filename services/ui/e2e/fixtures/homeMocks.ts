@@ -250,6 +250,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const profile = PROFILES[role];
   // Camera turns an admin sets, so the list read after a rotate says the new one.
   const rotations = new Map<string, number>();
+  // "Voice can control" choices made in a device sheet, so the sheet read after a toggle shows them.
+  const voices = new Map<string, boolean>();
   // Device locks set from a camera's Who can watch, so the next read shows them.
   const locks = new Map<string, string[]>();
   await page.addInitScript((p) => {
@@ -284,6 +286,11 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (method === 'PATCH' && entityPatch && typeof (body as { rotation?: unknown })?.rotation === 'number') {
         rotations.set(decodeURIComponent(entityPatch[1]), (body as { rotation: number }).rotation);
       }
+      if (method === 'PATCH' && entityPatch && typeof (body as { voice?: unknown })?.voice === 'boolean') {
+        voices.set(decodeURIComponent(entityPatch[1]), (body as { voice: boolean }).voice);
+      }
+      // A notice button tapped in the bell (a Home question's Confirm).
+      if (p === '/api/push/action') return json({ status: 'SUCCESS', message: 'Sent.' });
       if (p === '/api/homehub/bluetooth/map/sessions') {
         return json({ session_id: 'map-1', area_id: 'bedroom', tracker: 'sensor.robin_s_phone', ends_at: iso(1) });
       }
@@ -389,7 +396,10 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     }
     if (p === '/api/homehub/discovered') return json({ ...DISCOVERED, devices: [...DISCOVERED.devices, MOVED_FINDING] });
     if (p === '/api/homehub/hardware') return json(HARDWARE);
-    if (p.startsWith('/api/homehub/hardware/')) return json(HARDWARE_DETAIL);
+    if (p.startsWith('/api/homehub/hardware/')) {
+      return json({ ...HARDWARE_DETAIL, entity_list: HARDWARE_DETAIL.entity_list.map((e) => (voices.has(e.entity_id)
+        ? { ...e, voice: { ...e.voice, exposed: voices.get(e.entity_id), chosen: true } } : e)) });
+    }
     if (p === '/api/homehub/entries') return json(ENTRIES);
     if (p === '/api/homehub/esphome-builder') return json({ configured: false });
     if (p === '/api/homehub/flows') return json({ flows: FLOWS });

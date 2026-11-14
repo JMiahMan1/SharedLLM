@@ -189,13 +189,21 @@ async def load_entity_permissions(
     return perms
 
 
-async def verify_entity_access(ctx, entity_id: str) -> bool:
+async def verify_entity_access(ctx, entity_id: str, *, service: str | None = None) -> bool:
     """May this user control this entity?
 
     Admins bypass. Identity unreachable with no cached answer means we cannot
     know, and we allow (availability first) -- but that is only reachable for a
     user we have never successfully looked up, and it is logged.
+
+    Voice and chat (``via == "assistant"``) first need the hub to expose the
+    entity to them, admins included, as in Home Assistant: that raises
+    ``voice_exposure.EntityNotExposed`` with the reason (``service`` lets a
+    ``get_*`` read through).
     """
+    from services.execution import voice_exposure
+
+    await voice_exposure.require_exposed(ctx, entity_id, service=service)
     if getattr(ctx, "is_admin", False):
         return True
     if not entity_id:

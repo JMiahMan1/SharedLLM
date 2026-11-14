@@ -54,6 +54,11 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
             service="security"
         )
 
+    # 2. Voice and chat may only act on what the hub exposes to them (raises with the reason).
+    from services.execution import voice_exposure
+
+    await voice_exposure.require_exposed(ctx, full_entity_id, service=service)
+
     assert ctx.ha_url is not None and ctx.ha_token is not None
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token,

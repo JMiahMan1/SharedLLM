@@ -4222,6 +4222,12 @@ export const api = {
     return resp.data;
   },
 
+  /** A notice's callback or reply button, answered as this person (gateway `POST /api/push/action`). */
+  async pushAction(callback: string, params: Record<string, unknown>, reply?: string): Promise<{ status?: string; message?: string }> {
+    const resp = await apiClient.post('/api/push/action', reply === undefined ? { callback, params } : { callback, params, reply });
+    return resp.data;
+  },
+
   async getPushPublicKey(): Promise<{ public_key: string | null }> {
     const resp = await apiClient.get('/api/telemetry/push/key');
     return resp.data;

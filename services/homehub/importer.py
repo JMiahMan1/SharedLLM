@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from services.homehub import ha_auth
+from services.homehub import exposure, ha_auth
 from services.homehub.core import Area, ConfigEntry, DeviceEntry, EntityEntry, State
 from services.homehub.store import Store
 
@@ -126,15 +126,28 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
     # -- entities -------------------------------------------------------------
     entities = (_read_storage(config_dir, "core.entity_registry") or {}).get("entities", [])
     registry_ids: dict[str, str] = {}
+    # Assist exposure (services/homehub/exposure.py): a registry row's own options win, as in Home Assistant;
+    # the storage file's choice fills a row that has none, and keeps the ones for entities with no row.
+    voice_settings, voice_choices = exposure.from_ha_storage(
+        _read_storage(config_dir, "homeassistant.exposed_entities"))
     for e in entities:
         doc = _only(EntityEntry, e)
         doc["unique_id"] = str(e.get("unique_id") or "")
         doc["aliases"] = [x for x in e.get("aliases") or [] if isinstance(x, str)]
         doc["supported_features"] = int(e.get("supported_features") or 0)
+        choice = voice_choices.pop(e.get("entity_id"), None)
+        if choice is not None:
+            options = dict(doc.get("options") or {})
+            conv = dict(options.get(exposure.ASSISTANT) or {})
+            conv.setdefault("should_expose", choice)
+            options[exposure.ASSISTANT] = conv
+            doc["options"] = options
         store.save_entity(EntityEntry(**doc))
         if e.get("id"):
             registry_ids[e["id"]] = e["entity_id"]
     store.set_kv("entity_registry_ids", registry_ids)
+    store.set_kv(exposure.KV_KEY, {**voice_settings, "entities": voice_choices})
+    report["voice_exposure_unregistered"] = len(voice_choices)
     report["entities"] = len(entities)
     report["entities_enabled"] = sum(1 for e in entities if not e.get("disabled_by"))
 

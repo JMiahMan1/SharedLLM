@@ -2802,6 +2802,17 @@ export interface TelemetryNotification {
   read: boolean;
   /** Where a tap goes (`data.url`, an in-app path), as on the phone. */
   data?: { url?: string } & Record<string, unknown>;
+  /** The notice's buttons (docs/PUSH.md), at most three. */
+  actions?: NoticeAction[];
+}
+
+/** A notice button: `view` opens `url`; `callback` and `reply` (text first) post to `/api/push/action`. */
+export interface NoticeAction {
+  label: string;
+  type: 'view' | 'callback' | 'reply';
+  url?: string;
+  callback?: string;
+  params?: Record<string, unknown>;
 }
 
 

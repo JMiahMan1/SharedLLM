@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { EyeOff, ExternalLink, Loader2, Pencil, Power, Trash2 } from 'lucide-react';
+import { EyeOff, ExternalLink, Loader2, Mic, MicOff, Pencil, Power, Trash2 } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { EntityControl, SensorChip } from '../dashboards/EntityControls';
 import { failureStatus, failureText, removeHubDevice, updateHubDevice } from '../../lib/discoveredDevices';
@@ -69,6 +69,16 @@ function EntityRow({ entity, onChanged }: { entity: HardwareEntity; onChanged: (
               onClick={() => save.mutate({ disabled: !disabled })}
               aria-label={`${disabled ? 'Enable' : 'Disable'} ${entity.name}`}>
               <EyeOff size={13} /> {disabled ? 'Enable' : 'Disable'}
+            </button>
+          )}
+          {entity.voice && !disabled && (
+            <button type="button" className={BTN} disabled={save.isPending} aria-pressed={entity.voice.exposed}
+              data-testid="voice-exposure"
+              title={entity.voice.chosen ? undefined : 'The default for this kind of entity'}
+              onClick={() => save.mutate({ voice: !entity.voice?.exposed })}
+              aria-label={`Voice can control ${entity.name}`}>
+              {entity.voice.exposed ? <Mic size={13} /> : <MicOff size={13} />}
+              {entity.voice.exposed ? 'Voice can control' : 'Voice cannot control'}
             </button>
           )}
         </div>
