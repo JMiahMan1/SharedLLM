@@ -350,9 +350,9 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
             value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
         {entry.reconfigure.map((f) => (
-          <label key={f.key} className="block text-xs text-slate-400">
-            {f.label}
-            {f.type === 'select' ? (
+          f.type === 'select' ? (
+            <label key={f.key} className="block text-xs text-slate-400">
+              {f.label}
               <select
                 className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white"
                 value={values[f.key] || ''}
@@ -360,7 +360,11 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
               >
                 {(f.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-            ) : (
+              {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}
+            </label>
+          ) : (
+            <label key={f.key} className="block text-xs text-slate-400">
+              {f.label}
               <input
                 className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-white"
                 type={f.type === 'password' ? 'password' : 'text'}
@@ -370,9 +374,9 @@ function ReconfigureDialog({ entry, onClose, onSaved }: { entry: HubEntry; onClo
                 autoComplete="off"
                 spellCheck={false}
               />
-            )}
-            {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}
-          </label>
+              {f.help && <span className="mt-1 block text-[11px] text-slate-500">{f.help}</span>}
+            </label>
+          )
         ))}
         {save.error && <p className="text-sm text-amber-300" role="alert">{failureText(save.error)}</p>}
         <div className="flex justify-end gap-2 pt-1">
