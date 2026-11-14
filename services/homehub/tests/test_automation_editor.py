@@ -431,3 +431,20 @@ async def test_scheduler_config_entry_is_created_when_missing(env: Env) -> None:
     entries = [e for e in env.hub.config_entries.values() if e.domain == "scheduler"]
     assert len(entries) == 1 and env.hub.entities[s.entity_id].config_entry_id == entries[0].entry_id
     assert isinstance(entries[0], ConfigEntry)
+
+
+async def test_a_blueprint_script_can_be_edited_and_saved(env: Env) -> None:
+    # The blueprint supplies the sequence; the editor used to refuse every such item.
+    env.engine.blueprints["example/announce.yaml"] = {
+        "blueprint": {"name": "Announce", "domain": "script", "input": {"light": {"default": "light.porch"}}},
+        "sequence": [{"action": "light.turn_on", "target": {"entity_id": {"__tag__": "!input", "value": "light"}}}],
+        "mode": "single",
+    }
+    conf = {"alias": "Announce", "use_blueprint": {"path": "example/announce.yaml", "input": {"light": "light.hall"}}}
+    res = await env.editor.save("script", "announce", conf, create=True)
+    assert res["item"]["runnable"] is True
+    conf["use_blueprint"]["input"]["light"] = "light.porch"
+    res = await env.editor.save("script", "announce", conf)
+    assert res["item"]["runnable"] is True and "light.porch" in res["item"]["entities"]
+    bad = env.editor.validate("script", {"alias": "x", "use_blueprint": {"input": {}}})
+    assert bad["valid"] is False and "path" in bad["errors"][0]

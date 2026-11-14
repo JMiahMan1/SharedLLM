@@ -488,7 +488,16 @@ class Editor:
         mode = str(conf.get("mode") or "single")
         if mode not in MODES:
             errors.append(f"mode must be one of {', '.join(MODES)}")
-        if kind == "automation":
+        use = conf.get("use_blueprint")
+        if use is not None:
+            # The blueprint supplies the triggers, actions or sequence: the build below expands
+            # it and says what is wrong. Checking the raw config refused every blueprint item
+            # ("A script needs a sequence of actions"), so none could be edited.
+            if not isinstance(use, dict) or not str(use.get("path") or "").strip():
+                errors.append("use_blueprint needs the blueprint's path")
+            elif kind == "automation" and not str(conf.get("alias") or "").strip():
+                errors.append("An automation needs a name (alias)")
+        elif kind == "automation":
             if not conf.get("triggers", conf.get("trigger")):
                 errors.append("An automation needs at least one trigger")
             if not conf.get("actions", conf.get("action")):
