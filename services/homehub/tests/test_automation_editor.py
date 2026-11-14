@@ -448,3 +448,107 @@ async def test_a_blueprint_script_can_be_edited_and_saved(env: Env) -> None:
     assert res["item"]["runnable"] is True and "light.porch" in res["item"]["entities"]
     bad = env.editor.validate("script", {"alias": "x", "use_blueprint": {"input": {}}})
     assert bad["valid"] is False and "path" in bad["errors"][0]
+
+
+# -- blueprints in the editor ----------------------------------------------------------------------------------
+
+def notify_blueprint() -> dict:
+    return {
+        "blueprint": {"name": "Light on motion", "domain": "automation", "description": "Turn a light on",
+                      "author": "Someone", "input": {
+                          "sensor": {"name": "Motion sensor", "selector": {"entity": {"domain": "binary_sensor"}}},
+                          "timing": {"name": "Timing", "input": {
+                              "wait": {"name": "Wait", "default": 30, "selector": {"number": {"min": 0, "max": 600}}}}},
+                          "light": {"name": "Light", "selector": {"entity": {"domain": "light"}}}}},
+        "triggers": [{"trigger": "state", "entity_id": {"__tag__": "!input", "value": "sensor"}, "to": "on"}],
+        "actions": [{"action": "light.turn_on", "target": {"entity_id": {"__tag__": "!input", "value": "light"}}}],
+        "mode": "restart",
+    }
+
+
+async def test_blueprint_items_refuse_step_keys_and_keep_the_blueprint_body(env: Env) -> None:
+    env.engine.blueprints["someone/motion.yaml"] = notify_blueprint()
+    conf = {"alias": "Hall motion", "use_blueprint": {"path": "someone/motion.yaml",
+                                                     "input": {"sensor": "binary_sensor.door", "light": "light.hall"}}}
+    res = await env.editor.save("automation", None, conf, create=True)
+    assert res["item"]["runnable"] and "light.hall" in res["item"]["entities"]
+    # What the old visual editor wrote: empty steps beside use_blueprint. Refused, with the reason.
+    for key in ("triggers", "actions", "sequence"):
+        bad = env.editor.validate("automation", {**conf, key: []})
+        assert bad["valid"] is False and key in bad["errors"][0] and "blueprint" in bad["errors"][0]
+    bad = env.editor.validate("automation", {**conf, "use_blueprint": {"path": "someone/motion.yaml", "input": []}})
+    assert bad["valid"] is False and "input must be a mapping" in bad["errors"][0]
+    # An item already stored that way still runs the blueprint's own steps.
+    item = env.engine._build_item("automation", "damaged", {**conf, "triggers": [], "conditions": [], "actions": []},
+                                  set())
+    assert item.runnable and item.triggers and item.actions[0]["action"] == "light.turn_on"
+
+
+async def test_blueprint_listing_and_inputs(env: Env) -> None:
+    env.engine.blueprints["someone/motion.yaml"] = notify_blueprint()
+    await env.editor.save("automation", "hall", {"alias": "Hall", "use_blueprint": {
+        "path": "someone/motion.yaml", "input": {"sensor": "binary_sensor.door", "light": "light.hall"}}}, create=True)
+    listed = env.editor.blueprints()
+    assert [b["path"] for b in listed] == ["someone/motion.yaml"]
+    one = env.editor.blueprint("someone/motion.yaml")
+    assert one["domain"] == "automation" and one["name"] == "Light on motion"
+    assert one["used_by"] == [{"kind": "automation", "id": "hall", "alias": "Hall"}]
+    inputs = {i["name"]: i for i in one["inputs"]}
+    assert inputs["sensor"]["required"] is True and inputs["sensor"]["selector"] == {"entity": {"domain": "binary_sensor"}}
+    assert inputs["wait"] == {"name": "wait", "label": "Wait", "description": "", "selector": {"number": {"min": 0, "max": 600}},
+                              "section": "Timing", "required": False, "default": 30}
+    with pytest.raises(EditorError) as exc:
+        env.editor.blueprint("nobody/none.yaml")
+    assert exc.value.status == 404
+
+
+async def test_blueprint_routes_are_admin_only(api: httpx.AsyncClient, env: Env) -> None:
+    env.engine.blueprints["someone/motion.yaml"] = notify_blueprint()
+    assert (await api.get("/api/homehub/automations/blueprints", headers=KID)).status_code == 401
+    r = await api.get("/api/homehub/automations/blueprints", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["blueprints"][0]["path"] == "someone/motion.yaml"
+    r = await api.get("/api/homehub/automations/blueprints/someone/motion.yaml", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["used_by"] == []
+    assert (await api.get("/api/homehub/automations/blueprints/x/y.yaml", headers=ADMIN)).status_code == 404
+
+
+async def test_catalog_has_device_steps_and_the_devices(api: httpx.AsyncClient, env: Env) -> None:
+    env.hub.devices["dev_lamp"] = DeviceEntry(id="dev_lamp", name="Desk lamp", area_id="office")
+    env.hub.entities["light.porch"].device_id = "dev_lamp"
+    cat = (await api.get("/api/homehub/automations/catalog", headers=KID)).json()
+    for group in ("triggers", "conditions", "actions"):
+        spec = next(s for s in cat[group] if s["type"] == "device")
+        assert {f["name"] for f in spec["fields"]} >= {"device_id", "domain", "type", "entity_id"}
+        assert next(f for f in spec["fields"] if f["name"] == "device_id")["kind"] == "device"
+    actions = {s["type"] for s in cat["actions"]}
+    assert {"sequence", "parallel", "wait_for_trigger", "condition"} <= actions
+    service = next(s for s in cat["actions"] if s["type"] == "service")
+    assert {"response_variable", "continue_on_error"} <= {f["name"] for f in service["fields"]}
+    assert cat["devices"] == [{"id": "dev_lamp", "name": "Desk lamp", "area": "Office", "entities": ["light.porch"]}]
+
+
+async def test_new_visual_steps_validate_and_run(env: Env) -> None:
+    calls = record(env.hub, "test.note", "test.other")
+    conf = {"alias": "Every step", "triggers": [{"trigger": "event", "event_type": "go"}],
+            "variables": {"greeting": "hi"},
+            "actions": [
+                {"sequence": [{"action": "test.note", "data": {"msg": "{{ greeting }}"},
+                               "response_variable": "answer", "continue_on_error": True}]},
+                {"parallel": [{"action": "test.other"}, {"sequence": [{"action": "test.other"}]}]},
+                {"condition": "template", "value_template": "{{ true }}"},
+                {"repeat": {"for_each": ["a", "b"], "sequence": [{"action": "test.note",
+                                                                   "data": {"msg": "{{ repeat.item }}"}}]}},
+                {"repeat": {"while": [{"condition": "template", "value_template": "{{ repeat.index < 2 }}"}],
+                            "sequence": [{"action": "test.other"}]}},
+                {"repeat": {"until": [{"condition": "template", "value_template": "{{ true }}"}],
+                            "sequence": [{"action": "test.other"}]}},
+                {"wait_for_trigger": [{"trigger": "event", "event_type": "never"}], "timeout": "00:00:01",
+                 "continue_on_timeout": True},
+            ]}
+    check = env.editor.validate("automation", conf)
+    assert check["valid"] and check["unsupported_reason"] is None, check
+    res = await env.editor.save("automation", None, conf, create=True)
+    await env.engine.trigger(res["item"]["id"])
+    await advance(env.engine, 2)
+    assert names(calls).count("test.note") == 3 and names(calls).count("test.other") >= 4
+    assert calls[0][1]["msg"] == "hi"

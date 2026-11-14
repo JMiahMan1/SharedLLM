@@ -87,7 +87,10 @@ DEFAULT_DAYS = 365
 MIN_DAYS = 30
 NOT_ACTIVITY = {"unavailable", "unknown", ""}
 #: Entity domains this module never removes as entities (automation/script go through their own rule).
-PROTECTED_ENTITY_DOMAINS = {"person", "zone", "scene", "automation", "script"}
+PROTECTED_ENTITY_DOMAINS = {"person", "zone", "scene", "automation", "script",
+                            # HA's helpers: the hub keeps them (helpers.py) and they have no device or entry.
+                            "input_boolean", "input_number", "input_text", "input_select", "input_datetime",
+                            "input_button", "counter", "timer"}
 #: Entries the hub itself uses without a driver.
 PROTECTED_ENTRY_DOMAINS = {"scheduler"}
 #: Statistics origins that count as activity (see the module docstring).

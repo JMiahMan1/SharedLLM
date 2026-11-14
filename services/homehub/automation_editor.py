@@ -39,6 +39,7 @@ import yaml
 from services.homehub import capabilities
 from services.homehub.automation import (
     ALWAYS_KNOWN,
+    BLUEPRINT_STEP_KEYS,
     MODES,
     WEEKDAYS,
     AutomationEngine,
@@ -495,8 +496,17 @@ class Editor:
             # ("A script needs a sequence of actions"), so none could be edited.
             if not isinstance(use, dict) or not str(use.get("path") or "").strip():
                 errors.append("use_blueprint needs the blueprint's path")
-            elif kind == "automation" and not str(conf.get("alias") or "").strip():
-                errors.append("An automation needs a name (alias)")
+            else:
+                if kind == "automation" and not str(conf.get("alias") or "").strip():
+                    errors.append("An automation needs a name (alias)")
+                if use.get("input") is not None and not isinstance(use.get("input"), dict):
+                    errors.append("use_blueprint input must be a mapping of input name to value")
+                # The blueprint's triggers, conditions and actions would be replaced by these:
+                # an editor that wrote them next to use_blueprint destroyed the item.
+                stray = [k for k in BLUEPRINT_STEP_KEYS if k in conf]
+                if stray:
+                    errors.append(f"This {kind} takes its triggers, conditions and actions from its blueprint; "
+                                  f"remove {', '.join(stray)} (or stop using the blueprint to write them yourself)")
         elif kind == "automation":
             if not conf.get("triggers", conf.get("trigger")):
                 errors.append("An automation needs at least one trigger")
@@ -519,6 +529,33 @@ class Editor:
         if reason and reason.startswith("invalid configuration"):
             return {"valid": False, "errors": [reason], "unsupported_reason": None, "warnings": item.warnings}
         return {"valid": True, "errors": [], "unsupported_reason": reason, "warnings": list(item.warnings)}
+
+    # -- blueprints ------------------------------------------------------------------
+    def blueprints(self) -> list[dict[str, Any]]:
+        """Every imported blueprint: path, domain, name, description and its inputs."""
+        return [self._blueprint_view(path, bp) for path, bp in sorted(self.engine.blueprints.items())]
+
+    def blueprint(self, path: str) -> dict[str, Any]:
+        bp = self.engine.blueprints.get(path)
+        if bp is None:
+            raise EditorError(f"No blueprint {path!r} was imported", 404)
+        view = self._blueprint_view(path, bp)
+        used = []
+        for kind in ("automation", "script"):
+            for item in self._pool(kind).values():
+                conf = self.stored_one(kind, item.id) or {}
+                if str((conf.get("use_blueprint") or {}).get("path") or "") == path:
+                    used.append({"kind": kind, "id": item.id, "alias": item.alias})
+        return {**view, "used_by": used}
+
+    @staticmethod
+    def _blueprint_view(path: str, bp: dict[str, Any]) -> dict[str, Any]:
+        meta = bp.get("blueprint") if isinstance(bp.get("blueprint"), dict) else {}
+        source = meta.get("source_url")
+        return {"path": path, "domain": str(meta.get("domain") or ""), "name": str(meta.get("name") or path),
+                "description": str(meta.get("description") or ""), "author": meta.get("author"),
+                "source_url": source if isinstance(source, str) else None,
+                "inputs": blueprint_inputs(meta.get("input") or {})}
 
     # -- writes ----------------------------------------------------------------------
     def new_id(self, kind: str, conf: dict[str, Any]) -> str:
@@ -1009,11 +1046,40 @@ class Editor:
         return s
 
 
+# -- blueprints -------------------------------------------------------------------------------------
+
+def blueprint_inputs(spec: Any, section: str | None = None) -> list[dict[str, Any]]:
+    """A blueprint's ``input`` block as a flat list for a form, input sections flattened (named in ``section``).
+
+    ``required`` is HA's rule: an input without a default must be given.
+    """
+    out: list[dict[str, Any]] = []
+    if not isinstance(spec, dict):
+        return out
+    for key, conf in spec.items():
+        conf = conf if isinstance(conf, dict) else {}
+        if isinstance(conf.get("input"), dict):
+            out += blueprint_inputs(conf["input"], str(conf.get("name") or key))
+            continue
+        row: dict[str, Any] = {"name": str(key), "label": str(conf.get("name") or key),
+                               "description": str(conf.get("description") or ""),
+                               "selector": conf.get("selector") if isinstance(conf.get("selector"), dict) else {},
+                               "section": section, "required": "default" not in conf}
+        if "default" in conf:
+            row["default"] = conf["default"]
+        out.append(row)
+    return out
+
+
 # -- the catalog ------------------------------------------------------------------------------------
 
 def _f(name: str, label: str, kind: str, **extra: Any) -> dict[str, Any]:
     return {"name": name, "label": label, "kind": kind, **extra}
 
+
+_DEVICE_FIELDS = [_f("device_id", "Device", "device", required=True), _f("domain", "Integration", "text", required=True),
+                  _f("type", "What happens", "text", required=True), _f("entity_id", "Entity", "entity"),
+                  _f("subtype", "Subtype", "text")]
 
 TRIGGER_SPECS = [
     {"type": "device_onoff", "label": "When a device turns on or off",
@@ -1043,6 +1109,9 @@ TRIGGER_SPECS = [
      "fields": [_f("event", "Event", "select", options=["start", "shutdown"], required=True)]},
     {"type": "event", "label": "An event fires",
      "fields": [_f("event_type", "Event type", "text", required=True), _f("event_data", "Event data", "template")]},
+    # HA's device triggers, as its editor writes them; the hub runs each as the trigger it stands for.
+    {"type": "device", "label": "A device does something",
+     "fields": [*_DEVICE_FIELDS, _f("for", "For at least", "duration")]},
 ]
 CONDITION_SPECS = [
     {"type": "state", "label": "Entity is in a state",
@@ -1062,6 +1131,8 @@ CONDITION_SPECS = [
                 _f("zone", "Zone", "entity", domain="zone", required=True)]},
     {"type": "template", "label": "Template is true",
      "fields": [_f("value_template", "Template", "template", required=True)]},
+    {"type": "device", "label": "A device is in a state",
+     "fields": [*_DEVICE_FIELDS, _f("for", "For at least", "duration")]},
     {"type": "and", "label": "All of", "fields": []},
     {"type": "or", "label": "Any of", "fields": []},
     {"type": "not", "label": "None of", "fields": []},
@@ -1069,14 +1140,23 @@ CONDITION_SPECS = [
 ACTION_SPECS = [
     {"type": "service", "label": "Call a service",
      "fields": [_f("action", "Service", "text", required=True), _f("target", "Targets", "entities"),
-                _f("data", "Data", "template")]},
+                _f("data", "Data", "template"), _f("response_variable", "Keep the answer as", "text"),
+                _f("continue_on_error", "Carry on if it fails", "boolean")]},
+    {"type": "device", "label": "Make a device do something", "fields": _DEVICE_FIELDS},
     {"type": "delay", "label": "Wait for a time", "fields": [_f("delay", "Duration", "duration", required=True)]},
     {"type": "wait_template", "label": "Wait until a template is true",
      "fields": [_f("wait_template", "Template", "template", required=True), _f("timeout", "Timeout", "duration"),
                 _f("continue_on_timeout", "Continue on timeout", "boolean")]},
+    {"type": "wait_for_trigger", "label": "Wait for a trigger",
+     "fields": [_f("timeout", "Timeout", "duration"), _f("continue_on_timeout", "Continue on timeout", "boolean")]},
+    {"type": "condition", "label": "Continue only if", "fields": []},
     {"type": "choose", "label": "Choose an option", "fields": []},
     {"type": "if", "label": "If, then, else", "fields": []},
-    {"type": "repeat", "label": "Repeat", "fields": [_f("count", "Times", "number")]},
+    {"type": "repeat", "label": "Repeat",
+     "fields": [_f("count", "Times", "number"), _f("while", "While", "conditions"), _f("until", "Until", "conditions"),
+                _f("for_each", "For each item", "template")]},
+    {"type": "sequence", "label": "Run steps in order", "fields": []},
+    {"type": "parallel", "label": "Run steps at the same time", "fields": []},
     {"type": "variables", "label": "Set variables", "fields": [_f("variables", "Variables", "template")]},
     {"type": "stop", "label": "Stop", "fields": [_f("stop", "Reason", "text"), _f("error", "As an error", "boolean")]},
     {"type": "scene", "label": "Activate a scene",
@@ -1099,9 +1179,16 @@ def catalog(hub: Any) -> dict[str, Any]:
                          # What it can do (capabilities.py), so an editor offers only the services it takes.
                          **{k: v for k, v in capabilities.entity_capabilities(hub, st.entity_id).items()
                             if k in ("abilities", "services")}})
+    devices = []
+    for dev in sorted(hub.devices.values(), key=lambda d: (d.display_name or d.id).lower()):
+        if dev.disabled_by:
+            continue
+        area = hub.areas.get(dev.area_id).name if dev.area_id and dev.area_id in hub.areas else None
+        devices.append({"id": dev.id, "name": dev.display_name or dev.id, "area": area,
+                        "entities": hub.device_entities(dev.id)})
     return {
         "triggers": TRIGGER_SPECS, "conditions": CONDITION_SPECS, "actions": ACTION_SPECS,
-        "services": hub.list_services(), "entities": entities,
+        "services": hub.list_services(), "entities": entities, "devices": devices,
         "areas": [{"area_id": a.area_id, "name": a.name} for a in sorted(hub.areas.values(), key=lambda a: a.name)],
         "zones": sorted(s.entity_id for s in hub.states.all("zone")),
         "persons": sorted(s.entity_id for s in hub.states.all("person")),

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -777,8 +778,9 @@ async def test_missing_helpers_and_entities_disable_with_reasons(hub: Hub, engin
     st = {s["id"]: s for s in engine.status()}
     assert st["speak"]["unsupported_reason"] is None and not st["speak"]["warnings"]
     assert "media_player.gone" in st["speak_nowhere"]["unsupported_reason"]
-    assert "timer integration" in st["timer"]["unsupported_reason"]
-    assert "input_text integration" in st["helper"]["unsupported_reason"]
+    # No helper of that kind on the hub: nothing could be named by the event or the template.
+    assert "needs a timer helper" in st["timer"]["unsupported_reason"]
+    assert "needs a input_text helper" in st["helper"]["unsupported_reason"]
     assert "none of which exist" in st["only_gone"]["unsupported_reason"]
     assert st["partly"]["enabled"] and "light.gone" in st["partly"]["warnings"][0]
     assert "script.nope" in st["noscript"]["unsupported_reason"]
@@ -990,7 +992,8 @@ async def test_household_configuration_loads_every_item_or_says_why() -> None:
         # The ones that must keep working.
         for alias in exp["enabled_aliases"]:
             assert by_alias[alias]["enabled"], (alias, by_alias[alias]["unsupported_reason"])
-        # HA Assist timers and their input_text helpers are gone.
+        # The Assist timer items name timer and input_text helpers nobody has created on the hub yet;
+        # test_household_helper_items_load_once_their_helpers_exist adds them.
         for want in exp["unsupported"]:
             if "alias" in want:
                 item = by_alias[want["alias"]]
@@ -1017,6 +1020,67 @@ async def test_household_configuration_loads_every_item_or_says_why() -> None:
             assert hub.states.get(eid).state == "off"
     finally:
         await eng.stop()
+
+
+_NAMED_MISSING = re.compile(r"names ([a-z_]+\.[a-z0-9_]+), which no longer exists")
+_DOMAIN_MISSING = re.compile(r"needs a ([a-z_]+) helper")
+
+
+@needs_household
+async def test_household_helper_items_load_once_their_helpers_exist() -> None:
+    """Each item the household lost with HA's helpers loads once the helper it names exists.
+
+    The helpers are worked out from the reasons themselves (a named entity, or a helper kind for a
+    templated target), so no household name is written here; each is created the way the Helpers
+    page would.
+    """
+    from services.homehub.helpers import STORE_KEY, Helpers
+
+    exp = household_expectations()
+    hub = household_hub()
+    store = FakeStore()
+    helpers = Helpers(hub, store)
+    await helpers.start()
+    eng = AutomationEngine(hub, store, clock=FakeClock(START))
+    try:
+        await eng.load_config_dir(FIXTURES)
+
+        def watched() -> list[dict]:
+            status = eng.status()
+            out = []
+            for want in exp["unsupported"]:
+                if "alias" in want:
+                    out.append(next(s for s in status if s["kind"] == "automation" and s["alias"] == want["alias"]))
+                else:
+                    out.append(next(s for s in status if s["kind"] == "script" and s["id"] == want["script_id"]))
+            return out
+
+        for _ in range(20):
+            missing = [s["unsupported_reason"] for s in watched() if s["unsupported_reason"]]
+            if not missing:
+                break
+            for reason in missing:
+                named, kind = _NAMED_MISSING.search(reason), _DOMAIN_MISSING.search(reason)
+                if named:
+                    domain, object_id = named.group(1).split(".", 1)
+                elif kind:
+                    domain, object_id = kind.group(1), "made_up_helper"
+                else:
+                    raise AssertionError(f"not a missing helper: {reason}")
+                conf = {"name": object_id.replace("_", " "), "id": object_id}
+                if domain == "timer":
+                    conf["duration"] = "0:05:00"
+                if any(h.entity_id == f"{domain}.{object_id}" for h in helpers.helpers.values()):
+                    raise AssertionError(f"{domain}.{object_id} exists and is still missing: {reason}")
+                await helpers.create(domain, conf)
+            await eng.reload()
+        assert store.get_kv(STORE_KEY)
+        for s in watched():
+            assert s["unsupported_reason"] is None, s
+            assert s["enabled"] or s["kind"] == "script", s
+    finally:
+        await eng.stop()
+        await helpers.stop()
 
 
 @needs_household

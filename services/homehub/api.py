@@ -29,6 +29,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     ha_auth_api,
     ha_ws_compat,
     hardware_api,  # the hardware list: integrations, devices, entities, disable, sync
+    helpers_api,  # /hub/helpers: HA's helpers (input_*, counter, timer)
     live_video,
     live_video_api,
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
@@ -585,6 +586,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(voice_api.build_router(runtime, auth))  # voice satellites (voice_pipeline.py)
     app.include_router(matter_ble.build_router(runtime, auth))  # the household Wi-Fi for new Matter devices
     app.include_router(bluetooth_api.build_router(runtime, auth))  # Bluetooth scanners, devices, room map
+    app.include_router(helpers_api.build_router(runtime, auth))  # HA's helpers
 
     @app.websocket("/api/websocket")
     async def websocket(ws: WebSocket) -> None:

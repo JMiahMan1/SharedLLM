@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Download, History, Loader2, Play, Plus, Search, Upload, Workflow, Wrench } from 'lucide-react';
+import {
+  AlertTriangle, Download, History, Loader2, Play, Plus, Search, SlidersHorizontal, Upload, Workflow, Wrench,
+} from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { CardSkeletons, EmptyState, ErrorRetry } from '../components/ui/StateViews';
 import Toggle from '../components/ui/Toggle';
@@ -9,13 +11,14 @@ import Modal from '../components/ui/Modal';
 import AutomationEditor from '../components/automations/AutomationEditor';
 import TraceViewer from '../components/automations/TraceViewer';
 import RepairsPanel from '../components/automations/RepairsPanel';
+import HelpersPanel from '../components/automations/HelpersPanel';
 import { Chip, Field, MessageList } from '../components/automations/FormBits';
 import { BUTTON, INPUT, PRIMARY } from '../components/automations/styles';
 import { errorText } from '../lib/errorText';
 import {
-  exportYaml, filterItems, getCatalog, importYaml, ITEM_KINDS, KIND_LABELS, listItems, relativeAgo, runItem,
-  setItemEnabled,
-  type AutomationItem, type ItemKind,
+  exportYaml, filterItems, getCatalog, importYaml, ITEM_KINDS, KIND_LABELS, listBlueprints, listItems, relativeAgo,
+  runItem, setItemEnabled,
+  type AutomationItem, type Blueprint, type ItemKind,
 } from '../lib/automations';
 
 const LIST_KEY = ['homehub-automations'];
@@ -33,7 +36,9 @@ export default function Automations() {
   const catalog = useQuery({ queryKey: ['homehub-automation-catalog'], queryFn: getCatalog, staleTime: 5 * 60_000, retry: false });
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<ItemKind | 'all'>('all');
-  const [editing, setEditing] = useState<{ kind: ItemKind; id: string | null } | null>(null);
+  const [editing, setEditing] = useState<{ kind: ItemKind; id: string | null; blueprint?: string } | null>(null);
+  const [pickingBlueprint, setPickingBlueprint] = useState(false);
+  const [showHelpers, setShowHelpers] = useState(false);
   const [tracing, setTracing] = useState<AutomationItem | null>(null);
   const [importing, setImporting] = useState(false);
   const [showRepairs, setShowRepairs] = useState(false);
@@ -68,24 +73,31 @@ export default function Automations() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 pb-24">
-      <PageHeader
-        icon={Workflow}
-        tone="text-sky-400"
-        title="Automations"
-        subtitle={canEdit ? 'Rules, scripts and scenes the hub runs on its own.' : 'Scenes and routines you can run.'}
-        actions={canEdit ? (
-          <>
-            <NewItemButton onPick={(k) => setEditing({ kind: k, id: null })} />
-            <button type="button" className={BUTTON} onClick={() => setImporting(true)}><Upload size={14} aria-hidden /> Import</button>
-            <button type="button" className={BUTTON} onClick={() => void exportAll()}><Download size={14} aria-hidden /> Export</button>
-            <button type="button" className={BUTTON} aria-pressed={showRepairs} onClick={() => setShowRepairs((v) => !v)}>
-              <Wrench size={14} aria-hidden /> Repairs
-            </button>
-          </>
-        ) : undefined}
-      />
+      {/* Above the list: the New menu opens over it (both panels are their own stacking layers). */}
+      <div className="relative z-20">
+        <PageHeader
+          icon={Workflow}
+          tone="text-sky-400"
+          title="Automations"
+          subtitle={canEdit ? 'Rules, scripts and scenes the hub runs on its own.' : 'Scenes and routines you can run.'}
+          actions={canEdit ? (
+            <>
+              <NewItemButton onPick={(k) => setEditing({ kind: k, id: null })} onBlueprint={() => setPickingBlueprint(true)} />
+              <button type="button" className={BUTTON} onClick={() => setImporting(true)}><Upload size={14} aria-hidden /> Import</button>
+              <button type="button" className={BUTTON} onClick={() => void exportAll()}><Download size={14} aria-hidden /> Export</button>
+              <button type="button" className={BUTTON} aria-pressed={showRepairs} onClick={() => setShowRepairs((v) => !v)}>
+                <Wrench size={14} aria-hidden /> Repairs
+              </button>
+              <button type="button" className={BUTTON} aria-pressed={showHelpers} onClick={() => setShowHelpers((v) => !v)}>
+                <SlidersHorizontal size={14} aria-hidden /> Helpers
+              </button>
+            </>
+          ) : undefined}
+        />
+      </div>
 
       {canEdit && showRepairs && <RepairsPanel onSaved={refresh} />}
+      {canEdit && showHelpers && <HelpersPanel />}
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <label className="relative flex-1">
@@ -133,12 +145,17 @@ export default function Automations() {
           id={editing.id}
           catalog={catalog.data}
           canEdit={canEdit}
+          blueprint={editing.blueprint}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); refresh(); }}
         />
       )}
       {tracing && <TraceViewer item={tracing} onClose={() => setTracing(null)} />}
       {importing && <ImportDialog onClose={() => setImporting(false)} onDone={refresh} />}
+      {pickingBlueprint && (
+        <BlueprintPicker onClose={() => setPickingBlueprint(false)}
+          onPick={(bp) => { setPickingBlueprint(false); setEditing({ kind: bp.domain as ItemKind, id: null, blueprint: bp.path }); }} />
+      )}
     </div>
   );
 }
@@ -192,7 +209,7 @@ function ItemRow({ item, canEdit, onOpen, onTraces, onRun, onEnabled, running }:
   );
 }
 
-function NewItemButton({ onPick }: { onPick: (kind: ItemKind) => void }) {
+function NewItemButton({ onPick, onBlueprint }: { onPick: (kind: ItemKind) => void; onBlueprint: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -205,6 +222,10 @@ function NewItemButton({ onPick }: { onPick: (kind: ItemKind) => void }) {
               {KIND_LABELS[k]}
             </button>
           ))}
+          <button type="button" className="min-h-11 w-full rounded-lg px-3 text-left text-sm text-slate-200 hover:bg-white/5"
+            onClick={() => { setOpen(false); onBlueprint(); }}>
+            From a blueprint
+          </button>
         </div>
       )}
     </div>
@@ -253,6 +274,41 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
           {busy && <Loader2 size={14} className="animate-spin" />} Import
         </button>
       </div>
+    </Modal>
+  );
+}
+
+/** Pick an imported blueprint to make a new automation or script from. */
+function BlueprintPicker({ onClose, onPick }: { onClose: () => void; onPick: (bp: Blueprint) => void }) {
+  const blueprints = useQuery({ queryKey: ['homehub-blueprints'], queryFn: listBlueprints, retry: false });
+  const usable = (blueprints.data ?? []).filter((b) => b.domain === 'automation' || b.domain === 'script');
+  return (
+    <Modal isOpen onClose={onClose} title="New from a blueprint" size="2xl">
+      {blueprints.isLoading ? (
+        <div className="flex justify-center py-6" role="status" aria-label="Loading blueprints"><Loader2 className="animate-spin text-slate-500" /></div>
+      ) : blueprints.isError ? (
+        <ErrorRetry title={errorText(blueprints.error, 'Could not load the blueprints')} onRetry={() => void blueprints.refetch()} />
+      ) : usable.length === 0 ? (
+        <EmptyState title="No blueprints" detail="Blueprints come over with your Home Assistant data." />
+      ) : (
+        <ul className="space-y-2" data-testid="blueprint-list">
+          {usable.map((bp) => (
+            <li key={bp.path}>
+              <button type="button" className="min-h-11 w-full rounded-xl border border-white/10 p-3 text-left hover:bg-white/5"
+                onClick={() => onPick(bp)}>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="break-words text-sm font-semibold text-white">{bp.name}</span>
+                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase text-slate-400">
+                    {KIND_LABELS[bp.domain as ItemKind] ?? bp.domain}
+                  </span>
+                </span>
+                {bp.description && <span className="mt-1 line-clamp-2 block break-words text-xs text-slate-400">{bp.description}</span>}
+                <span className="mt-1 block break-all text-[11px] text-slate-500">{bp.path}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Modal>
   );
 }

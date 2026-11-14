@@ -459,6 +459,9 @@ class Hub:
         self.areas: dict[str, Area] = {}
         self.floors: dict[str, dict[str, Any]] = {}
         self.drivers: dict[str, Driver] = {}
+        #: Drivers for entities with no config entry, by platform: HA's helpers (helpers.py) keep their
+        #: registry shape (no config entry), and their entity services reach the manager through this.
+        self.platform_drivers: dict[str, Any] = {}
         self.services: dict[tuple[str, str], ServiceHandler] = {}
         self.service_schemas: dict[tuple[str, str], dict[str, Any]] = {}
         self.time_zone = time_zone
@@ -743,7 +746,8 @@ class Hub:
             if not by_entity_domain and entry.domain != call.domain and call.domain != "homeassistant":
                 # HA silently skips entities of another domain; so do we.
                 continue
-            driver = self.drivers.get(entry.config_entry_id or "")
+            driver = self.drivers.get(entry.config_entry_id or "") if entry.config_entry_id \
+                else self.platform_drivers.get(entry.platform)
             if driver is None:
                 errors.append(f"{eid}: no driver is running for {entry.platform}")
                 continue

@@ -6,11 +6,13 @@ import Modal from '../ui/Modal';
 import { confirmDialog } from '../ui/confirmDialog';
 import { errorText } from '../../lib/errorText';
 import {
-  blankConfig, createItem, deleteItem, fromBuilder, getItem, importYaml, KIND_LABELS, toBuilder, updateItem,
-  validateConfig, validationErrors,
+  blankConfig, blueprintConfig, blueprintUse, createItem, deleteItem, fromBuilder, getItem, importYaml, KIND_LABELS,
+  omit, stripBlueprintSteps, toBuilder, updateItem, validateConfig, validationErrors,
   type Catalog, type Config, type ItemKind, type Step,
 } from '../../lib/automations';
+import BlueprintForm from './BlueprintForm';
 import { EntityPicker, Field, JsonBox, MessageList } from './FormBits';
+import { ScriptFieldsEditor, VariablesEditor } from './ItemExtras';
 import { StepList } from './StepEditor';
 import { BUTTON, DANGER, INPUT, PRIMARY } from './styles';
 
@@ -22,6 +24,8 @@ interface Props {
   id: string | null;
   catalog?: Catalog;
   canEdit: boolean;
+  /** A new item made from this blueprint (its path), when `id` is null. */
+  blueprint?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -36,14 +40,14 @@ interface Props {
  * Switching from the builder to YAML after an edit shows the config as JSON
  * (which is also valid YAML).
  */
-export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, onSaved }: Props) {
+export default function AutomationEditor({ kind, id, catalog, canEdit, blueprint, onClose, onSaved }: Props) {
   const detail = useQuery({
     queryKey: ['homehub-automation', kind, id],
     queryFn: () => getItem(kind, id as string),
     enabled: !!id,
     retry: false,
   });
-  const [config, setConfig] = useState<Config | null>(id ? null : blankConfig(kind));
+  const [config, setConfig] = useState<Config | null>(id ? null : blueprint ? blueprintConfig(kind, blueprint) : blankConfig(kind));
   const [mode, setMode] = useState<'visual' | 'yaml'>('visual');
   const [yaml, setYaml] = useState('');
   const [yamlLoaded, setYamlLoaded] = useState('');
@@ -66,8 +70,11 @@ export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, 
 
   const lists = useMemo(() => (config ? toBuilder(kind, config) : null), [kind, config]);
   const readOnly = !canEdit;
+  // A blueprint item is a form for the blueprint's inputs: its steps are the blueprint's, never written here.
+  const usesBlueprint = !!blueprintUse(config);
   const name = kind === 'scene' ? 'name' : 'alias';
-  const title = id ? `${canEdit ? 'Edit' : 'View'} ${KIND_LABELS[kind].toLowerCase()}` : `New ${KIND_LABELS[kind].toLowerCase()}`;
+  const title = id ? `${canEdit ? 'Edit' : 'View'} ${KIND_LABELS[kind].toLowerCase()}`
+    : `New ${KIND_LABELS[kind].toLowerCase()}${blueprint ? ' from a blueprint' : ''}`;
 
   const update = (next: Config) => { setConfig(next); setDirty(true); };
   const setLists = (part: 'triggers' | 'conditions' | 'actions', steps: Step[]) => {
@@ -108,6 +115,8 @@ export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, 
 
   async function save() {
     if (!config) return;
+    // An older editor stored empty step lists beside use_blueprint; saving drops them.
+    const toSave = stripBlueprintSteps(config);
     setBusy(true);
     setErrors([]);
     try {
@@ -119,15 +128,15 @@ export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, 
           return;
         }
       } else {
-        const check = await validateConfig(kind, config);
+        const check = await validateConfig(kind, toSave);
         setWarnings(check.warnings ?? []);
         setUnsupported(check.unsupported_reason);
         if (!check.valid) {
           setErrors(check.errors.length ? check.errors : ['The hub did not accept this configuration.']);
           return;
         }
-        if (id) await updateItem(kind, id, config);
-        else await createItem(kind, config);
+        if (id) await updateItem(kind, id, toSave);
+        else await createItem(kind, toSave);
       }
       toast.success('Saved');
       setDirty(false);
@@ -204,7 +213,8 @@ export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, 
                   </div>
                 )}
               </div>
-              {kind === 'automation' && (
+              {usesBlueprint && <BlueprintForm config={config} catalog={catalog} disabled={readOnly} onChange={update} />}
+              {kind === 'automation' && !usesBlueprint && (
                 <>
                   <StepList group="trigger" label="When" steps={lists.triggers} catalog={catalog} disabled={readOnly}
                     onChange={(s) => setLists('triggers', s)} />
@@ -212,9 +222,17 @@ export default function AutomationEditor({ kind, id, catalog, canEdit, onClose, 
                     onChange={(s) => setLists('conditions', s)} />
                 </>
               )}
-              {kind !== 'scene' && (
+              {kind !== 'scene' && !usesBlueprint && (
                 <StepList group="action" label="Do" steps={lists.actions} catalog={catalog} disabled={readOnly}
                   onChange={(s) => setLists('actions', s)} />
+              )}
+              {kind === 'script' && !usesBlueprint && (
+                <ScriptFieldsEditor value={config.fields} disabled={readOnly}
+                  onChange={(f) => update(f ? { ...config, fields: f } : omit(config, ['fields']))} />
+              )}
+              {kind !== 'scene' && (
+                <VariablesEditor value={config.variables} disabled={readOnly}
+                  onChange={(v) => update(v ? { ...config, variables: v } : omit(config, ['variables']))} />
               )}
               {kind === 'scene' && <SceneEntities config={config} catalog={catalog} disabled={readOnly} onChange={update} />}
             </>

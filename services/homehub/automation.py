@@ -8,10 +8,11 @@ hub's EventBus and StateMachine and calls services through
 ``hub.call_service``, so automations drive the same drivers Jarvis does.
 
 What does not carry over is reported, never guessed at. An automation that
-names an entity, a registry id or an integration that no longer exists (HA
-Assist timers, ``input_text`` helpers, a deleted thermostat) loads disabled
-with an ``unsupported_reason`` instead of failing the load or running half of
-itself against nothing.
+names an entity, a registry id or an integration that no longer exists (a
+timer or ``input_text`` helper nobody created on the hub, a deleted
+thermostat) loads disabled with an ``unsupported_reason`` instead of failing
+the load or running half of itself against nothing. Helpers themselves live in
+services/homehub/helpers.py.
 
 All timing (time triggers, ``for:``, delays, waits, the scheduler) goes through
 one :class:`Scheduler` on an injectable :class:`Clock`. Deadlines are absolute
@@ -403,9 +404,15 @@ def expand_blueprint(conf: dict[str, Any], blueprints: dict[str, dict[str, Any]]
     body = _substitute_inputs({k: v for k, v in bp.items() if k != "blueprint"}, inputs)
     merged = dict(body)
     for k, v in conf.items():
-        if k != "use_blueprint":
+        # An empty step list next to use_blueprint is what an editor that did not know blueprints wrote;
+        # it must not replace the blueprint's own triggers, conditions or actions.
+        if k != "use_blueprint" and not (k in BLUEPRINT_STEP_KEYS and v in (None, [], {})):
             merged[k] = v
     return merged
+
+
+#: The keys a blueprint supplies; an item using one carries only its inputs (and name, mode...).
+BLUEPRINT_STEP_KEYS = ("triggers", "trigger", "conditions", "condition", "actions", "action", "sequence")
 
 
 # -- the items ----------------------------------------------------------------------------
@@ -723,7 +730,9 @@ class AutomationEngine:
             item.enabled = bool(saved["enabled"])
         elif "initial_state" in conf:
             item.enabled = bool(conf["initial_state"])
-        elif item.kind == "automation" and prev is not None and prev.state == "off":
+        elif item.kind == "automation" and prev is not None and prev.state == "off" \
+                and not prev.attributes.get("unsupported_reason"):
+            # "off" while it could not run (a helper not created yet) was never a person's choice.
             item.enabled = False
         last = saved.get("last_triggered") or (prev.attributes.get("last_triggered") if prev else None)
         if last:
@@ -2375,8 +2384,10 @@ class _ParseContext:
                 raise Unsupported(f"{where} names {eid}, which no longer exists")
 
     def need_helper(self, domain: str, what: str) -> None:
+        # Only decides when nothing names the helper itself (a templated target, any timer's event):
+        # a helper named outright is checked as an entity like any other.
         if self.engine.helper_missing(domain):
-            raise Unsupported(f"{what} needs the {domain} integration, which has no entities any more")
+            raise Unsupported(f"{what} needs a {domain} helper, and the hub has none (add one under Helpers)")
 
     # triggers
     def trigger(self, raw: Any, idx: int) -> dict[str, Any] | None:

@@ -59,6 +59,8 @@ _PASS_THROUGH = {200, 400, 403, 404, 409, 422, 501, 503}
 _KIND = re.compile(r"^(automation|script|scene)$")
 _ITEM_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 _CLIMATE_ID = re.compile(r"^climate\.[a-z0-9_]+$")
+#: A blueprint's path as HA keys it (``author/name.yaml``); no ``..`` or leading slash.
+_BLUEPRINT_PATH = re.compile(r"^(?!/)(?!.*\.\.)[A-Za-z0-9_. /-]{1,300}$")
 
 
 # --------------------------------------------------------------------------- callers
@@ -224,8 +226,26 @@ async def catalog(request: Request):
     perms = await _permissions(creds)
     if not _unfiltered(perms):
         data = {**data, "entities": [e for e in data.get("entities") or [] if isinstance(e, dict)
-                                     and can_view(perms, str(e.get("entity_id") or ""))]}
+                                     and can_view(perms, str(e.get("entity_id") or ""))],
+                # A device is listed when the caller may view one of its entities.
+                "devices": [d for d in data.get("devices") or [] if isinstance(d, dict)
+                            and any(can_view(perms, e) for e in _strings(d.get("entities")))]}
     return data
+
+
+@router.get("/automations/blueprints")
+async def blueprints(request: Request):
+    """Imported blueprints and the inputs each takes (the editor's blueprint form)."""
+    await _admin(request)
+    return _answer(*await _hub("GET", "/api/homehub/automations/blueprints"))
+
+
+@router.get("/automations/blueprints/{path:path}")
+async def blueprint(path: str, request: Request):
+    await _admin(request)
+    if not _BLUEPRINT_PATH.match(path or ""):
+        raise HTTPException(status_code=404, detail="No such blueprint")
+    return _answer(*await _hub("GET", f"/api/homehub/automations/blueprints/{path}"))
 
 
 @router.post("/automations/validate")

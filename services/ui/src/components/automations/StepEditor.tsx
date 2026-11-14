@@ -4,16 +4,18 @@ import Toggle from '../ui/Toggle';
 import { Chip, EntityPicker, Field, JsonBox } from './FormBits';
 import { BUTTON, DANGER, INPUT } from './styles';
 import {
-  actionEntities, actionService, actionType, blankStep, conditionType, describeStep, omit, serviceFields,
-  entityTakesService, serviceNames, servicesForEntities, triggerType, withActionEntities,
-  type Catalog, type ServiceField, type Spec, type SpecField, type Step,
+  actionEntities, actionService, actionType, blankStep, conditionType, describeStep, forEachText, omit, parseForEach,
+  REPEAT_LABELS, REPEAT_MODES, repeatMode, serviceFields, entityTakesService, serviceNames, servicesForEntities,
+  triggerType, withActionEntities, withRepeatMode,
+  type Catalog, type RepeatMode, type ServiceField, type Spec, type SpecField, type Step,
 } from '../../lib/automations';
 import { WEEKDAYS, WEEKDAY_LABELS } from '../../lib/schedules';
 
 /**
  * The visual builder: a list of triggers, conditions or actions, each edited
  * with the fields the hub's catalog says its type takes. Nested steps (and/or/
- * not, choose, if/then/else, repeat) are the same list again. A type the
+ * not, choose, if/then/else, repeat, sequence, parallel, wait for a trigger)
+ * are the same list again. A type the
  * builder has no form for is edited as a JSON object, so nothing in a config
  * is ever out of reach or silently dropped.
  */
@@ -161,6 +163,17 @@ function StepBody({ group, type, spec, step, catalog, disabled, depth, onChange 
 
   if (group === 'action') {
     if (type === 'service') return <ServiceAction step={step} catalog={catalog} disabled={disabled} onChange={onChange} />;
+    if (type === 'condition') return <ConditionAction step={step} catalog={catalog} disabled={disabled} depth={depth} onChange={onChange} />;
+    if (type === 'sequence') return nested('sequence', 'action', 'In order');
+    if (type === 'parallel') return nested('parallel', 'action', 'All at the same time');
+    if (type === 'wait_for_trigger') {
+      return (
+        <div className="space-y-3">
+          {nested('wait_for_trigger', 'trigger', 'Until one of these happens')}
+          {spec && <SpecFields spec={spec} step={step} catalog={catalog} disabled={disabled} onChange={onChange} />}
+        </div>
+      );
+    }
     if (type === 'delay' && typeof step.delay !== 'object') {
       return (
         <Field label="Wait for (HH:MM:SS)">
@@ -180,19 +193,7 @@ function StepBody({ group, type, spec, step, catalog, disabled, depth, onChange 
     }
     if (type === 'choose') return <ChooseAction step={step} catalog={catalog} disabled={disabled} depth={depth} onChange={onChange} />;
     if (type === 'repeat' && step.repeat && typeof step.repeat === 'object') {
-      const repeat = step.repeat as Step;
-      return (
-        <div className="space-y-3">
-          {'count' in repeat && (
-            <Field label="Times">
-              <input className={INPUT} type="number" inputMode="numeric" value={String(repeat.count ?? '')} disabled={disabled}
-                onChange={(e) => onChange({ ...step, repeat: { ...repeat, count: Number(e.target.value) || 1 } })} />
-            </Field>
-          )}
-          <StepList group="action" steps={asSteps(repeat.sequence)} catalog={catalog} disabled={disabled} depth={depth + 1} label="Repeat these"
-            onChange={(next) => onChange({ ...step, repeat: { ...repeat, sequence: next } })} />
-        </div>
-      );
+      return <RepeatAction step={step} catalog={catalog} disabled={disabled} depth={depth} onChange={onChange} />;
     }
   }
 
@@ -220,6 +221,73 @@ export function SpecFields({ spec, step, catalog, disabled, onChange }: {
   );
 }
 
+/** repeat: a count, while or until conditions, or for each item of a list; then the steps to repeat. */
+function RepeatAction({ step, catalog, disabled, depth, onChange }: {
+  step: Step; catalog?: Catalog; disabled: boolean; depth: number; onChange: (s: Step) => void;
+}) {
+  const repeat = step.repeat as Step;
+  const mode = repeatMode(repeat);
+  const set = (next: Step) => onChange({ ...step, repeat: next });
+  return (
+    <div className="space-y-3">
+      <Field label="Repeat">
+        <select className={INPUT} disabled={disabled} value={mode}
+          onChange={(e) => set(withRepeatMode(repeat, e.target.value as RepeatMode))}>
+          {REPEAT_MODES.map((m) => <option key={m} value={m}>{REPEAT_LABELS[m]}</option>)}
+        </select>
+      </Field>
+      {mode === 'count' && (
+        <Field label="Times">
+          <input className={INPUT} type="number" inputMode="numeric" value={String(repeat.count ?? '')} disabled={disabled}
+            onChange={(e) => set({ ...repeat, count: Number(e.target.value) || 1 })} />
+        </Field>
+      )}
+      {(mode === 'while' || mode === 'until') && (
+        <StepList group="condition" steps={asSteps(repeat[mode])} catalog={catalog} disabled={disabled} depth={depth + 1}
+          label={mode === 'while' ? 'While all of these hold' : 'Until all of these hold'}
+          onChange={(next) => set({ ...repeat, [mode]: next })} />
+      )}
+      {mode === 'for_each' && (
+        <ForEachInput value={repeat.for_each} disabled={disabled} onChange={(v) => set({ ...repeat, for_each: v })} />
+      )}
+      <StepList group="action" steps={asSteps(repeat.sequence)} catalog={catalog} disabled={disabled} depth={depth + 1} label="Repeat these"
+        onChange={(next) => set({ ...repeat, sequence: next })} />
+    </div>
+  );
+}
+
+/** The items a for_each repeat walks, as typed text (kept as typed, so a new line can be started). */
+function ForEachInput({ value, disabled, onChange }: { value: unknown; disabled: boolean; onChange: (v: unknown) => void }) {
+  const [text, setText] = useState(() => forEachText(value));
+  return (
+    <Field label="Items" hint="One per line, a JSON list, or a template">
+      <textarea className={`${INPUT} font-mono text-xs`} rows={3} spellCheck={false} disabled={disabled}
+        value={text} onChange={(e) => { setText(e.target.value); onChange(parseForEach(e.target.value)); }} />
+    </Field>
+  );
+}
+
+/** A condition used as a step: pick its kind, then the same form as under "Only if". */
+function ConditionAction({ step, catalog, disabled, depth, onChange }: {
+  step: Step; catalog?: Catalog; disabled: boolean; depth: number; onChange: (s: Step) => void;
+}) {
+  const kind = conditionType(step);
+  const specs = catalog?.conditions ?? [];
+  return (
+    <div className="space-y-3">
+      <Field label="Continue only if">
+        <select className={INPUT} disabled={disabled} value={kind}
+          onChange={(e) => onChange(blankStep('condition', e.target.value, specFor(catalog, 'condition', e.target.value)))}>
+          {!specs.some((s) => s.type === kind) && <option value={kind}>{kind}</option>}
+          {specs.map((s) => <option key={s.type} value={s.type}>{s.label}</option>)}
+        </select>
+      </Field>
+      <StepBody group="condition" type={kind} spec={specFor(catalog, 'condition', kind)} step={step} catalog={catalog}
+        disabled={disabled} depth={depth} onChange={onChange} />
+    </div>
+  );
+}
+
 function domainsOf(field: SpecField): string[] | undefined {
   return field.domain ? field.domain.split(',').map((d) => d.trim()).filter(Boolean) : undefined;
 }
@@ -230,6 +298,24 @@ function SpecInput({ field, value, catalog, disabled, onChange }: {
   const label = `${field.label}${field.required ? '' : ' (optional)'}`;
   const entities = catalog?.entities ?? [];
   switch (field.kind) {
+    case 'device': {
+      const devices = catalog?.devices ?? [];
+      const current = typeof value === 'string' ? value : '';
+      return (
+        <div className="sm:col-span-2">
+          <Field label={label}>
+            <select className={INPUT} disabled={disabled} value={current} onChange={(e) => onChange(e.target.value || undefined)}>
+              <option value="">Choose a device</option>
+              {current && !devices.some((d) => d.id === current) && <option value={current}>Device not on the hub ({current})</option>}
+              {devices.map((d) => <option key={d.id} value={d.id}>{d.name}{d.area ? ` (${d.area})` : ''}</option>)}
+            </select>
+          </Field>
+        </div>
+      );
+    }
+    case 'conditions':
+      // Edited where the step that owns it is drawn (repeat while/until).
+      return null;
     case 'entity':
       return (
         <div className="sm:col-span-2">
@@ -375,6 +461,18 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
       <button type="button" className={BUTTON} onClick={() => setAsJson((v) => !v)}>
         {asJson ? 'Back to fields' : 'Edit data as JSON'}
       </button>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Keep the answer as (optional)" hint="A variable later steps can read">
+          <input className={INPUT} disabled={disabled} value={typeof step.response_variable === 'string' ? step.response_variable : ''}
+            placeholder="answer"
+            onChange={(e) => onChange(e.target.value ? { ...step, response_variable: e.target.value } : omit(step, ['response_variable']))} />
+        </Field>
+        <div className="flex min-h-11 items-center justify-between gap-3 sm:self-end">
+          <span className="text-xs text-slate-400">Carry on if it fails</span>
+          <Toggle checked={step.continue_on_error === true} disabled={disabled} ariaLabel="Carry on if it fails"
+            onChange={(v) => onChange(v ? { ...step, continue_on_error: true } : omit(step, ['continue_on_error']))} />
+        </div>
+      </div>
     </div>
   );
 }

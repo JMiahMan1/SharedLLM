@@ -166,6 +166,45 @@ const AUTOMATION = {
   mode: 'single', running: 0, entities: ['light.living_lamp'],
 };
 
+// Helpers the hub keeps (made-up names), and the types it describes.
+const HELPER_TYPES = [
+  { domain: 'input_boolean', label: 'Toggle', services: ['toggle', 'turn_off', 'turn_on'],
+    fields: [{ name: 'initial', label: 'Starts as on', kind: 'boolean' }] },
+  { domain: 'input_select', label: 'Dropdown', services: ['select_option'],
+    fields: [{ name: 'options', label: 'Options', kind: 'options', required: true }, { name: 'initial', label: 'Starting option', kind: 'text' }] },
+  { domain: 'counter', label: 'Counter', services: ['decrement', 'increment', 'reset', 'set_value'],
+    fields: [{ name: 'initial', label: 'Starting value', kind: 'number', default: 0 }, { name: 'step', label: 'Step', kind: 'number', default: 1 }] },
+  { domain: 'timer', label: 'Timer', services: ['cancel', 'change', 'finish', 'pause', 'start'],
+    fields: [{ name: 'duration', label: 'Duration (HH:MM:SS)', kind: 'duration', default: '0:00:00' },
+      { name: 'restore', label: 'Keep running across restarts', kind: 'boolean', default: false }] },
+];
+
+function helperRow(domain: string, id: string, name: string, state: string, attributes: Record<string, unknown> = {},
+  config: Record<string, unknown> = {}) {
+  return { domain, id, entity_id: `${domain}.${id}`, name, config: { id, name, ...config }, disabled: false,
+    state: { entity_id: `${domain}.${id}`, state, attributes } };
+}
+
+function initialHelpers() {
+  return [
+    helperRow('input_boolean', 'guest_mode', 'Guest mode', 'off'),
+    helperRow('counter', 'glasses_of_water_today_for_everyone', 'Glasses of water today for everyone in the house', '3',
+      { initial: 0, step: 1 }),
+    helperRow('timer', 'pasta', 'Pasta', 'idle', { duration: '0:10:00' }, { duration: '0:10:00' }),
+  ];
+}
+
+const BLUEPRINT = {
+  path: 'someone/motion_light.yaml', domain: 'automation', name: 'Motion-activated light with a long name for small screens',
+  description: 'Turn a light on when motion is seen, and off a while after it stops.',
+  inputs: [
+    { name: 'motion', label: 'Motion sensor', description: '', selector: { entity: { domain: 'binary_sensor' } }, section: null, required: true },
+    { name: 'light', label: 'Light', description: '', selector: { entity: { domain: 'light' } }, section: null, required: true },
+    { name: 'wait', label: 'Wait after the last motion', description: 'Seconds', selector: { number: { min: 0, max: 3600 } },
+      section: 'Timing', required: false, default: 120 },
+  ],
+};
+
 const DISCOVERED = {
   devices: [{
     id: 'esphome:aa01', integration: 'esphome', label: 'ESPHome', name: 'Garage sensor', model: null, manufacturer: null,
@@ -262,6 +301,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const locks = new Map<string, string[]>();
   // Areas, floors, labels, zones and persons: kept in memory so a change shows on the next read.
   const registries = registryMocks();
+  // Helpers an admin adds, changes or deletes, so the next read shows it.
+  let helpers = initialHelpers();
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -280,6 +321,40 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       const registry = registries.answer(method, p, body);
       if (registry) return json(registry.body, registry.status);
       if (p === '/api/homehub/climate/hold' || p === '/api/homehub/climate/resume') return json(SCHEDULED_THERMOSTAT);
+      if (p === '/api/homehub/automations/validate') return json({ valid: true, errors: [], unsupported_reason: null, warnings: [] });
+      if (method === 'POST' && /^\/api\/homehub\/automations\/(automation|script)$/.test(p)) {
+        return json({ item: { ...AUTOMATION, id: 'a2', alias: 'New' }, config: (body as { config?: unknown })?.config ?? {} });
+      }
+      const helperCall = /^\/api\/homehub\/helpers\/([a-z_]+)\/([a-z0-9_]+)\/call$/.exec(p);
+      if (helperCall) {
+        const row = helpers.find((h) => h.domain === helperCall[1] && h.id === helperCall[2]);
+        if (!row) return json({ detail: 'No such helper' }, 404);
+        const service = (body as { service?: string })?.service;
+        const st = row.state;
+        if (service === 'turn_on' || service === 'turn_off') st.state = service === 'turn_on' ? 'on' : 'off';
+        if (service === 'increment') st.state = String(Number(st.state) + 1);
+        if (service === 'decrement') st.state = String(Number(st.state) - 1);
+        if (service === 'start') { st.state = 'active'; st.attributes = { ...st.attributes, finishes_at: iso(10), remaining: '0:10:00' }; }
+        if (service === 'cancel' || service === 'finish') { st.state = 'idle'; st.attributes = { duration: st.attributes.duration }; }
+        return json(row);
+      }
+      const helperOne = /^\/api\/homehub\/helpers\/([a-z_]+)(?:\/([a-z0-9_]+))?$/.exec(p);
+      if (helperOne) {
+        const [, domain, id] = helperOne;
+        if (method === 'DELETE') {
+          helpers = helpers.filter((h) => !(h.domain === domain && h.id === id));
+          return json({ deleted: `${domain}.${id}` });
+        }
+        const conf = (body ?? {}) as Record<string, unknown>;
+        const name = String(conf.name ?? '');
+        if (!name) return json({ message: 'a helper needs a name', detail: 'a helper needs a name' }, 400);
+        const newId = id ?? name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const state = domain === 'input_select' ? String((conf.options as string[] | undefined)?.[0] ?? '')
+          : domain === 'timer' ? 'idle' : domain === 'counter' ? String(conf.initial ?? 0) : 'off';
+        const row = helperRow(domain, newId, name, state, domain === 'input_select' ? { options: conf.options } : {}, conf);
+        helpers = [...helpers.filter((h) => !(h.domain === domain && h.id === newId)), row];
+        return json(row);
+      }
       // Minted with a POST; without it no camera picture is ever signed.
       if (p === '/api/media/token') return json({ token: 'test-media-token', expires_at: 4102444800, user: profile.username });
       if (p === '/api/admin/cameras/recording') {
@@ -336,13 +411,30 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/homehub/schedules') return json({ schedules: [], can_edit: role === 'admin' });
     if (p === '/api/homehub/automations') return json({ items: [AUTOMATION], can_edit: role === 'admin' });
     if (p === '/api/homehub/automations/catalog') {
-      return json({ triggers: [], conditions: [], actions: [], services: [], entities: [], areas: [], zones: [], persons: [] });
+      return json({
+        triggers: [{ type: 'time', label: 'At a time', fields: [{ name: 'at', label: 'Time', kind: 'time', required: true }] }],
+        conditions: [{ type: 'template', label: 'Template is true',
+          fields: [{ name: 'value_template', label: 'Template', kind: 'template', required: true }] }],
+        actions: [
+          { type: 'repeat', label: 'Repeat', fields: [] },
+          { type: 'parallel', label: 'Run steps at the same time', fields: [] },
+          { type: 'wait_for_trigger', label: 'Wait for a trigger', fields: [{ name: 'timeout', label: 'Timeout', kind: 'duration' },
+            { name: 'continue_on_timeout', label: 'Continue on timeout', kind: 'boolean' }] },
+          { type: 'condition', label: 'Continue only if', fields: [] },
+        ],
+        services: [], entities: [], areas: [], zones: [], persons: [], devices: [],
+      });
     }
     if (p === '/api/homehub/automations/automation/a1') {
       return json({ item: AUTOMATION, config: { alias: AUTOMATION.alias, triggers: [], conditions: [], actions: [] },
         yaml: 'alias: Porch light at dusk\ntriggers: []\nactions: []\n', can_edit: role === 'admin' });
     }
     if (p === '/api/homehub/automations/remap') return json({ remap: {}, report: [] });
+    if (p === '/api/homehub/automations/blueprints') return json({ blueprints: [BLUEPRINT] });
+    if (p === `/api/homehub/automations/blueprints/${BLUEPRINT.path}`) return json({ ...BLUEPRINT, used_by: [] });
+    if (p === '/api/homehub/helpers') {
+      return json({ helpers, types: HELPER_TYPES, problems: ['input_number Old level: max must be greater than min'] });
+    }
     if (p === '/api/cameras') {
       return json({ cameras: CAMERAS.map((c) => (rotations.has(c.entity_id) ? { ...c, rotation: rotations.get(c.entity_id) } : c)) });
     }
