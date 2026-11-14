@@ -182,6 +182,9 @@ async def lifespan(app: FastAPI):
     yield
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="Control Plane Service", lifespan=lifespan)
 app.include_router(info_router)
 app.include_router(network_routes.router)

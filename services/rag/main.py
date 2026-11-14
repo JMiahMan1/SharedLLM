@@ -279,6 +279,9 @@ def _ensure_dimension_consistent(connection):
         connection.commit()
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="SharedLLM RAG Service", version="2.0.0", lifespan=lifespan)
 
 app.include_router(info_router)

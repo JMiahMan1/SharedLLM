@@ -233,6 +233,9 @@ DEFAULT_PROTECTED_BRANCH_PATTERNS = [
     if pattern.strip()
 ]
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="SharedLLM Workspace Runtime")
 
 # --- Response sanitization: never leak secrets to clients ---
@@ -829,7 +832,13 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         return ref.user_context
 
     payload = {}
-    if ref.rag_user:
+    if ref.rag_user == "household":
+        # The household is not a person: identity answers it as an explicit
+        # non-person identity and refuses it as a user name (401), which made
+        # every household listing a 500, and with it a household chat that
+        # sounded like a coding request.
+        payload["household"] = True
+    elif ref.rag_user:
         payload["rag_user"] = ref.rag_user
     if ref.voice_id:
         payload["voice_id"] = ref.voice_id

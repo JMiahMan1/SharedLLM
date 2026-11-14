@@ -328,6 +328,11 @@ def create_app():
             raise HTTPException(status_code=401, detail="Invalid internal secret")
         return True
 
+    from services.common.logging_utils import redact_access_log
+
+
+    redact_access_log()
+
     application = FastAPI(title="Telemetry Scheduler", lifespan=lifespan)
 
     @application.get("/health")

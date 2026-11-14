@@ -557,6 +557,9 @@ async def lifespan(app: FastAPI):
 
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(
     title="SharedLLM Execution Bridge",
     version="1.1.0",

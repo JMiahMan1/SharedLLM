@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
     task.cancel()
     alerts.cancel()
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="SOA Logging Service", lifespan=lifespan)
 
 app.include_router(info_router)

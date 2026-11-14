@@ -31,9 +31,21 @@
     }
 }
 
+# A deploy restarts a service for up to a minute. Without this, every request
+# in that window failed at once with a 502 (390 of them on 2026-11-13, all at
+# deploy times: long polls, the push stream, location) and the app showed
+# errors. Caddy now keeps retrying the connection for a while first; it only
+# retries when it could not connect, so no request is ever sent twice.
+(patient) {
+    lb_try_duration 45s
+    lb_try_interval 500ms
+}
+
 # Cross-Network Routes (Host Network → Bridge Network)
 :8001 {
-    reverse_proxy identity:8001
+    reverse_proxy identity:8001 {
+        import patient
+    }
 }
 
 :11435 {
@@ -59,51 +71,77 @@
         }
     }
     handle /v1/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /health {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /health/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /execute* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle / {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 }
 
 :8004 {
-    reverse_proxy rag:8004
+    reverse_proxy rag:8004 {
+        import patient
+    }
 }
 
 :8005 {
-    reverse_proxy storage:8005
+    reverse_proxy storage:8005 {
+        import patient
+    }
 }
 
 :8006 {
-    reverse_proxy logging:8006
+    reverse_proxy logging:8006 {
+        import patient
+    }
 }
 
 :8007 {
-    reverse_proxy workspace_runtime:8007
+    reverse_proxy workspace_runtime:8007 {
+        import patient
+    }
 }
 
 :8008 {
-    reverse_proxy control_plane:8008
+    reverse_proxy control_plane:8008 {
+        import patient
+    }
 }
 
 :8009 {
-    reverse_proxy geo:8009
+    reverse_proxy geo:8009 {
+        import patient
+    }
 }
 
 :8010 {
-    reverse_proxy bible:8010
+    reverse_proxy bible:8010 {
+        import patient
+    }
 }
 
 # The phones' Home Assistant companion app, at the host name the apps were set
@@ -168,49 +206,78 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
 
     # 2. Route Chat/Gateway API traffic
     handle /v1/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/chat* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/config* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/settings* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     handle /api/generate* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/history* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/discovery* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/communication* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/search* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/docs* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/workspaces* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/models* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/media* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/entities* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/sendspin {
         reverse_proxy gateway:11435 {
+            import patient
             # Caddy already forwards X-Forwarded-Proto and sets X-Real-IP from the
             # client, so repeating them here only earned a startup warning.
             header_up X-Real-IP {remote_host}
@@ -218,145 +285,214 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
     }
     handle /api/ma-jsonrpc {
         reverse_proxy gateway:11435 {
+            import patient
             # Caddy already forwards X-Forwarded-Proto and sets X-Real-IP from the
             # client, so repeating them here only earned a startup warning.
             header_up X-Real-IP {remote_host}
         }
     }
     handle /api/presence* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/integrations* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/groups* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/intercom* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
 
 
     # WebSocket stream authenticates via ?token= (user API key) on logging.
     handle /api/logs/stream* {
-        reverse_proxy logging:8006
+        reverse_proxy logging:8006 {
+            import patient
+        }
     }
 
     handle /api/admin/logs* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /execute* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /control_plane* {
         uri strip_prefix /control_plane
-        reverse_proxy control_plane:8008
+        reverse_proxy control_plane:8008 {
+            import patient
+        }
     }
 
     # 3. Route Identity/Auth API traffic
     handle /api/auth* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     # Location endpoints go through gateway so X-Internal-Secret is injected
     # (identity requires it; phone/UI never send it → 422 if hit directly).
     handle /api/users/*/location {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/users/location* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/users* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     # Gateway routes under /api/devices (the watch's Home favorites, pairing
     # a companion device); everything else under it is identity's. Caddy
     # tries the longer path first.
     handle /api/devices/favorites* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/devices/pair* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/devices* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     handle /api/resolve* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     handle /api/widgets* {
-        reverse_proxy identity:8001
+        reverse_proxy identity:8001 {
+            import patient
+        }
     }
     handle /api/telemetry* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     
     # Optional: Route other service APIs if needed
     handle /api/storage* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     # Root-level API routes (without /api/ prefix)
     handle /info* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /rag* {
-        reverse_proxy rag:8004
+        reverse_proxy rag:8004 {
+            import patient
+        }
     }
 
     handle /discovery* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /api/admin/raven* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/admin/services* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /api/raven* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     # Gateway routes under /api/admin; the rest of /api/admin is the
     # workspace runtime's (Caddy tries the longer path first).
     handle /api/admin/users/*/stars {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/admin/volumes* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/admin/dns* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
     handle /api/admin* {
-        reverse_proxy workspace_runtime:8007
+        reverse_proxy workspace_runtime:8007 {
+            import patient
+        }
     }
 
     handle /api/workspace* {
-        reverse_proxy workspace_runtime:8007
+        reverse_proxy workspace_runtime:8007 {
+            import patient
+        }
     }
 
     handle /api/webhook* {
-        reverse_proxy workspace_runtime:8007
+        reverse_proxy workspace_runtime:8007 {
+            import patient
+        }
     }
 
     handle /health {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     handle /health/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     # Safety net: any /api/* not matched above → gateway (prevents falling
     # through to the UI container, whose nginx proxies /api back to Caddy → loop)
     handle /api/* {
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            import patient
+        }
     }
 
     # UnifiedPush endpoints (docs/PUSH.md): outside servers POST to
@@ -381,6 +517,8 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
 
     # Catch-all: Route UI traffic to the React container
     handle /* {
-        reverse_proxy ui:8008
+        reverse_proxy ui:8008 {
+            import patient
+        }
     }
 }

@@ -566,6 +566,9 @@ async def lifespan(app: FastAPI):
             session.commit()
     yield
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
 
 app.add_middleware(

@@ -182,6 +182,9 @@ async def lifespan(app: FastAPI):
         reminders.cancel()
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="Jarvis Health Service", lifespan=lifespan)
 app.state.engine = None
 

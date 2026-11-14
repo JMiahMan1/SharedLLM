@@ -8,6 +8,7 @@ background, so Jarvis and the Fasting card see it without a full crawl.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -36,9 +37,22 @@ def _provider(library_path: str):
     return build_provider(ProviderConfig(kind="calibre", settings={"library_path": library_path}))
 
 
+@contextlib.asynccontextmanager
+async def _opened(library_path: str):
+    """The library's provider, closed afterwards: each request builds one, and its
+    Nextcloud session was left for the garbage collector ("Unclosed client
+    session" on every library request)."""
+    provider = _provider(library_path)
+    try:
+        yield provider
+    finally:
+        await provider.close()
+
+
 async def _catalog(library_path: str) -> dict[int, dict[str, Any]]:
     try:
-        return await _provider(library_path)._load_catalog(refresh=True)
+        async with _opened(library_path) as provider:
+            return await provider._load_catalog(refresh=True)
     except HTTPException:
         raise
     except Exception as exc:
@@ -220,11 +234,12 @@ class TagChange(BaseModel):
 async def change_tags(book_id: int, req: TagChange, background: BackgroundTasks):
     if not req.add and not req.remove:
         raise HTTPException(status_code=422, detail="Name a tag to add or remove.")
-    writer = LibraryWriter(_provider(req.library_path).client, req.library_path)
-    try:
-        result = await writer.set_tags(book_id, req.add, req.remove)
-    except LibraryWriteError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    async with _opened(req.library_path) as provider:
+        writer = LibraryWriter(provider.client, req.library_path)
+        try:
+            result = await writer.set_tags(book_id, req.add, req.remove)
+        except LibraryWriteError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     background.add_task(_rag_tags, book_id, result["tags"])
     return {"status": "SUCCESS", **result}
 
@@ -274,15 +289,16 @@ async def add_book(
     cover_url: str = Form(default=""),
 ):
     data = await file.read(MAX_BOOK_BYTES + 1)
-    writer = LibraryWriter(_provider(library_path).client, library_path)
     cover = await book_lookup.fetch_cover(cover_url) if cover_url else None
-    try:
-        result = await writer.add_book(
-            data, file.filename or "book", title=title, authors=[a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
-            tags=_list(tags), series=series, comments=comments, publisher=publisher, published=published,
-            isbn=isbn, language=language, cover=cover,
-        )
-    except LibraryWriteError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    async with _opened(library_path) as provider:
+        writer = LibraryWriter(provider.client, library_path)
+        try:
+            result = await writer.add_book(
+                data, file.filename or "book", title=title, authors=[a for a in re.split(r"\s*(?:&|;)\s*", authors) if a.strip()],
+                tags=_list(tags), series=series, comments=comments, publisher=publisher, published=published,
+                isbn=isbn, language=language, cover=cover,
+            )
+        except LibraryWriteError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     background.add_task(_index_folder, library_path, result["path"])
     return {"status": "SUCCESS", **result}

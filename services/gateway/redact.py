@@ -9,10 +9,11 @@ import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # "code": an OAuth authorization code (the Spotify link callback), single-use but a credential.
-SENSITIVE_QUERY_KEYS = frozenset({"token", "api_key", "access_token", "code"})
+# "mt": the media token the push and media-event streams carry in their URLs.
+SENSITIVE_QUERY_KEYS = frozenset({"token", "mt", "api_key", "access_token", "code"})
 
 _FALLBACK_RE = re.compile(
-    r"([?&](?:token|api_key|access_token|code)=)[^&#]*",
+    r"([?&](?:token|mt|api_key|access_token|code)=)[^&#]*",
     re.IGNORECASE,
 )
 

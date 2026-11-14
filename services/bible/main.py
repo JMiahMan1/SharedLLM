@@ -155,6 +155,9 @@ async def lifespan(app: FastAPI):
     context_task.cancel()
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="SOA Bible Service", lifespan=lifespan)
 
 

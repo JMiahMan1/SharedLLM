@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 #: How long a repeated failure stays quiet before it is worth saying again.
@@ -39,3 +40,33 @@ def warn_periodically(
         logger.warning(message, *args)
     else:
         logger.debug(message, *args)
+
+
+#: Query parameters whose values are credentials. A WebSocket or a webhook can
+#: only carry its secret in the URL, and uvicorn's access log writes the whole
+#: URL: the git-pull webhook token and the media token (``mt``) were both found
+#: in plain text in the service logs (2026-11-13).
+SECRET_QUERY_KEYS = ("token", "mt", "api_key", "access_token", "code", "key", "secret", "password")
+
+_SECRET_QUERY_RE = re.compile(r"([?&](?:" + "|".join(SECRET_QUERY_KEYS) + r")=)[^&#\s\"]*", re.IGNORECASE)
+
+
+def redact_query_secrets(text: str) -> str:
+    """``text`` with the value of every credential query parameter replaced by ``***``."""
+    return _SECRET_QUERY_RE.sub(r"\1***", text) if "=" in text else text
+
+
+class _RedactQuerySecrets(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and record.args:
+            record.args = tuple(redact_query_secrets(a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.msg, str):
+            record.msg = redact_query_secrets(record.msg)
+        return True
+
+
+def redact_access_log() -> None:
+    """Mask credential query parameters in uvicorn's access log. Call once at import."""
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _RedactQuerySecrets) for f in access.filters):
+        access.addFilter(_RedactQuerySecrets())

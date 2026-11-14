@@ -15,6 +15,10 @@ log = logging.getLogger("homehub.runtime")
 # Capped at a minute: devices on a switched outlet or wall switch come back
 # often, and waiting five minutes for one to show again felt broken.
 RETRY_DELAYS = (5, 10, 30, 60)
+# A device that stays off is retried every minute for as long as it is off, but
+# is only reported when it first fails, when the reason changes, and then once
+# an hour: seven unplugged gadgets were writing 2,500 warnings in 12 hours.
+RETRY_REPORT_EVERY_S = 3600.0
 HISTORY_KEEP_DAYS = 30
 
 
@@ -101,6 +105,8 @@ class Runtime:
             first.set()
             return
         attempt = 0
+        reported: tuple[str, float] | None = None  # (reason, when) last logged as a warning
+        loop = asyncio.get_running_loop()
         while True:
             driver: Driver = cls(self.hub, entry)
             try:
@@ -111,7 +117,12 @@ class Runtime:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 attempt += 1
                 entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {exc}"
-                log.warning("%s (%s) setup failed, retry in %ss: %s", entry.domain, entry.title, delay, exc)
+                now = loop.time()
+                loud = reported is None or reported[0] != entry.reason or now - reported[1] >= RETRY_REPORT_EVERY_S
+                if loud:
+                    reported = (entry.reason, now)
+                (log.warning if loud else log.debug)(
+                    "%s (%s) setup failed (attempt %d), retry in %ss: %s", entry.domain, entry.title, attempt, delay, exc)
                 driver.mark_unavailable()
                 with contextlib.suppress(Exception):
                     await driver.async_unload()
@@ -121,7 +132,9 @@ class Runtime:
             self.hub.drivers[entry.entry_id] = driver
             entry.state, entry.reason = "loaded", None
             first.set()
-            attempt = 0
+            if reported is not None:
+                log.info("%s (%s) is back after %d failed attempts", entry.domain, entry.title, attempt)
+            attempt, reported = 0, None
             log.info("%s (%s) loaded with %d entities", entry.domain, entry.title, len(driver.entities))
             if driver.poll_interval is None:
                 await asyncio.Event().wait()  # push-only: live until cancelled

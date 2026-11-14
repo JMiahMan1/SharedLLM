@@ -902,6 +902,9 @@ async def lifespan(app: FastAPI):
             await _fallback_http_client.close()
         _fallback_http_client = None
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
 

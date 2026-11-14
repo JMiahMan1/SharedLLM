@@ -75,12 +75,18 @@ def test_a_tag_change_is_written_and_sent_to_the_index(monkeypatch):
     async def rag(book_id, tags):
         patched.append((book_id, tags))
 
+    closed = []
+
     class Prov:
         client = object()
+
+        async def close(self):
+            closed.append(True)
 
     monkeypatch.setattr(library_api, "LibraryWriter", Writer)
     monkeypatch.setattr(library_api, "_provider", lambda path: Prov())
     monkeypatch.setattr(library_api, "_rag_tags", rag)
     body = client.post("/calibre/books/1/tags", json={**LIB, "add": ["fasting"]}, headers=H).json()
+    assert closed == [True]  # the request's Nextcloud session is closed, not left to the GC
     assert body["tags"] == ["Lent", "fasting"] and patched == [(1, ["Lent", "fasting"])]
     assert client.post("/calibre/books/1/tags", json=LIB, headers=H).status_code == 422

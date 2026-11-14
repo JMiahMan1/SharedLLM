@@ -69,6 +69,9 @@ async def lifespan(_app: FastAPI):
         purge_task.cancel()
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="Librarian Storage Service", lifespan=lifespan)
 
 app.include_router(info_router)

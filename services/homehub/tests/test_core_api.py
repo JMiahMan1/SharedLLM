@@ -369,3 +369,31 @@ def test_homehub_refuses_to_start_without_a_time_zone(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="No household time zone is configured.*TZ"):
         importlib.import_module("services.homehub.main")
     sys.modules.pop("services.homehub.main", None)
+
+
+async def test_a_device_that_stays_off_is_reported_once_not_on_every_retry(tmp_path, monkeypatch, caplog):
+    import asyncio
+    import logging
+
+    from services.homehub import runtime as rt
+
+    tries = []
+
+    class Off(Driver):
+        async def async_setup(self):
+            tries.append(1)
+            raise DeviceUnavailable("unreachable")
+
+    monkeypatch.setattr(rt, "driver_class", lambda domain: Off)
+    monkeypatch.setattr(rt, "RETRY_DELAYS", (0.001,))
+    hub = Hub()
+    hub.config_entries["x"] = ConfigEntry("x", "esphome")
+    runtime = Runtime(hub, Store(str(tmp_path / "h.db"), Fernet.generate_key().decode()))
+    with caplog.at_level(logging.DEBUG, logger="homehub.runtime"):
+        await runtime.start_all()
+        while len(tries) < 20:
+            await asyncio.sleep(0.005)
+        await runtime.shutdown()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "setup failed" in r.getMessage()]
+    assert len(warnings) == 1
+    assert hub.config_entries["x"].state == "setup_retry"

@@ -141,6 +141,9 @@ async def lifespan(app: FastAPI):
             await _redis.aclose()
 
 
+from services.common.logging_utils import redact_access_log  # noqa: E402
+
+redact_access_log()
 app = FastAPI(title="SOA Geo Service", lifespan=lifespan)
 
 

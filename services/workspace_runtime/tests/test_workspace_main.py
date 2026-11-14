@@ -209,3 +209,31 @@ def test_create_workspace_derived_id_from_display_name(client: TestClient):
     client.delete("/workspaces/project-alpha", headers=headers)
 
 
+
+
+def test_the_household_is_resolved_as_the_household_not_as_a_user_name(monkeypatch):
+    import asyncio
+
+    import services.workspace_runtime.main as main
+
+    sent = []
+
+    async def fake_post(url, json=None, headers=None, timeout=None, session=None):
+        sent.append(json)
+        return {"user": "household", "is_admin": False}
+
+    async def fake_session():
+        return None
+
+    loop = asyncio.new_event_loop()
+    import threading
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    monkeypatch.setattr(main, "_get_identity_loop", lambda: loop)
+    monkeypatch.setattr(main, "_ensure_identity_session", fake_session)
+    monkeypatch.setattr(main, "_http_post_async", fake_post)
+    try:
+        assert main._resolve_identity_context(main.WorkspaceRef(rag_user="household"))["user"] == "household"
+        main._resolve_identity_context(main.WorkspaceRef(rag_user="alex"))
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+    assert sent == [{"household": True}, {"rag_user": "alex"}]

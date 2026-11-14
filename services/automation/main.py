@@ -531,6 +531,11 @@ def _create_app():
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
+    from services.common.logging_utils import redact_access_log
+
+
+    redact_access_log()
+
     application = FastAPI(title="Automation Scheduler", lifespan=lifespan)
 
     @application.get("/health")
