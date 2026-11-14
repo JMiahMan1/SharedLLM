@@ -224,3 +224,67 @@ def test_controls_of_a_camera_the_viewer_may_not_watch_do_not_exist(client, upst
     assert client.get("/api/dashboard/cameras/camera.yard/controls").status_code == 404
     assert client.get("/api/dashboard/cameras/light.porch/controls").status_code == 404
     assert _sent(upstream, f"{TEST_HA_URL}/api/homehub/dashboard/cameras") == []
+
+
+LOG_ROWS = [
+    {"when": "2026-11-10T01:00:00+00:00", "entity_id": "light.kitchen_main", "state": "on", "name": "Kitchen main"},
+    {"when": "2026-11-10T03:00:00+00:00", "entity_id": "lock.back_door", "state": "unlocked", "name": "Back door"},
+    {"when": "2026-11-10T02:00:00+00:00", "entity_id": "switch.porch", "state": "off", "name": "Porch"},
+]
+
+
+def test_logbook_is_newest_first_and_leaves_out_what_the_caller_cannot_see(client, upstream, perms, member):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/logbook/", payload=LOG_ROWS)
+    resp = client.get("/api/dashboard/logbook")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [e["entity_id"] for e in body["entries"]] == ["switch.porch", "light.kitchen_main"]
+    assert body["entries"][0] == {"when": "2026-11-10T02:00:00+00:00", "entity_id": "switch.porch", "name": "Porch",
+                                  "state": "off"}
+    assert body["truncated"] is False
+    assert TEST_HA_TOKEN not in resp.text
+    (_url, kwargs), = _sent(upstream, f"{TEST_HA_URL}/api/logbook/")
+    assert kwargs["headers"]["Authorization"] == f"Bearer {TEST_HA_TOKEN}"
+    assert "entity" not in kwargs["params"]
+
+
+def test_logbook_for_one_entity_asks_the_hub_for_just_that_one(client, upstream, perms, member):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/logbook/", payload=LOG_ROWS[:1])
+    body = client.get("/api/dashboard/logbook", params={"entity_ids": "light.kitchen_main"}).json()
+    assert [e["entity_id"] for e in body["entries"]] == ["light.kitchen_main"]
+    (_url, kwargs), = _sent(upstream, f"{TEST_HA_URL}/api/logbook/")
+    assert kwargs["params"]["entity"] == "light.kitchen_main"
+
+
+def test_logbook_of_an_entity_the_caller_cannot_see_never_reaches_the_hub(client, upstream, perms, member):
+    body = client.get("/api/dashboard/logbook", params={"entity_ids": "lock.back_door"}).json()
+    assert body == {"entries": [], "truncated": False}
+    assert _sent(upstream, f"{TEST_HA_URL}/api/logbook/") == []
+
+
+def test_logbook_by_area_keeps_that_rooms_visible_entities(client, upstream, perms, member):
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/homehub/dashboard/rooms", payload=ROOMS, repeat=2)
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/logbook/", payload=LOG_ROWS)
+    body = client.get("/api/dashboard/logbook", params={"area_id": "kitchen"}).json()
+    # The back door lock is in the kitchen but not the member's; the porch is not in the kitchen.
+    assert [e["entity_id"] for e in body["entries"]] == ["light.kitchen_main"]
+    assert client.get("/api/dashboard/logbook", params={"area_id": "attic"}).status_code == 404
+
+
+def test_admins_see_every_change_and_long_logs_are_cut_to_the_newest(client, upstream, perms, monkeypatch):
+    monkeypatch.setattr(dashboard_routes, "MAX_LOGBOOK_ENTRIES", 2)
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/logbook/", payload=LOG_ROWS)
+    body = client.get("/api/dashboard/logbook").json()
+    assert [e["entity_id"] for e in body["entries"]] == ["lock.back_door", "switch.porch"]
+    assert body["truncated"] is True
+
+
+def test_logbook_limits(client, perms):
+    assert client.get("/api/dashboard/logbook", params={"entity_ids": "../etc"}).status_code == 400
+    assert client.get("/api/dashboard/logbook", params={"area_id": "Kitchen!"}).status_code == 400
+    assert client.get("/api/dashboard/logbook", params={
+        "start": "2026-01-01T00:00:00Z", "end": "2026-03-01T00:00:00Z"}).status_code == 400
+    assert client.get("/api/dashboard/logbook", params={
+        "start": "2026-03-01T00:00:00Z", "end": "2026-01-01T00:00:00Z"}).status_code == 400
+    many = ",".join(f"sensor.s{i}" for i in range(13))
+    assert client.get("/api/dashboard/logbook", params={"entity_ids": many}).status_code == 400

@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { History as HistoryIcon, House, Thermometer, Zap } from 'lucide-react';
-import { CalendarClock, Workflow } from 'lucide-react';
+import { CalendarClock, ListTodo, Workflow } from 'lucide-react';
 
 /**
  * The app's pages, in one list for every navigator: the desktop sidebar, the
@@ -94,6 +94,8 @@ export const NAV_PAGES: NavPage[] = [
   { icon: HistoryIcon, label: 'History', path: '/history', keywords: 'history graph chart sensor states timeline statistics', group: 'manage' },
   { icon: BookOpen, label: 'Bible', path: '/bible', keywords: 'scripture read verse devotional plan memorise quiz study blb', group: 'everyday' },
   { icon: StickyNote, label: 'Notes', path: '/notes', keywords: 'notes lists', group: 'everyday' },
+  // The household's to-do and shopping lists (the hub's todo lists), for every member.
+  { icon: ListTodo, label: 'Lists', path: '/lists', keywords: 'lists to-do todo shopping groceries reminders tasks checklist', group: 'everyday' },
   // The recipes page had a route but no entry anywhere, so the only way to it
   // was Family -> Create, which mounts the same screen inline.
   { icon: ChefHat, label: 'Recipes', path: '/recipes', keywords: 'recipes meals cooking food kitchen meal plan groceries ingredients', group: 'everyday' },

@@ -29,6 +29,16 @@ describe('nav pages', () => {
     expect(member?.path).toBe('/devices');
   });
 
+  it('offers the household lists to every role, next to Notes', () => {
+    const lists = NAV_PAGES.find((page) => page.path === '/lists');
+    expect(lists).toMatchObject({ label: 'Lists', group: 'everyday' });
+    expect(lists?.adminOnly).toBeUndefined();
+    expect(navPagesFor(false).some((page) => page.path === '/lists')).toBe(true);
+    const notes = NAV_PAGES.findIndex((page) => page.path === '/notes');
+    expect(NAV_PAGES[notes + 1]?.path).toBe('/lists');
+    expect(lists?.keywords).toMatch(/shopping/);
+  });
+
   it('offers the recipes page, which used to have a route but no way in', () => {
     // It was reachable only through Family -> Create.
     const recipes = NAV_PAGES.find((page) => page.path === '/recipes');

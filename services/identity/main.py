@@ -3887,6 +3887,10 @@ WIDGET_DEFAULT_SIZES: dict[str, str] = {
     'bible_daily': 'medium',
     'recommendations': 'medium',
     'weather': 'medium',
+    # Home Assistant's markdown and picture cards: a note in markdown and one
+    # picture, both empty until the person fills them, so off by default.
+    'note': 'medium',
+    'picture': 'medium',
 }
 _WIDGET_ORDER = {key: index for index, key in enumerate(WIDGET_DEFAULT_SIZES)}
 WIDGET_SIZES = frozenset({'small', 'medium', 'wide', 'tall'})
@@ -3906,13 +3910,60 @@ TEEN_WIDGETS = CHILD_WIDGETS | {'climate'}
 ADULT_HIDDEN_WIDGETS = frozenset({'workspaces', 'quick_assistant'})
 
 
+#: Widgets that start empty and only mean something once the person fills
+#: them in: hidden for everyone until added from the widget sheet.
+OPT_IN_WIDGETS = frozenset({'note', 'picture'})
+#: The note widget's markdown, and the picture widget's image: an https:// URL
+#: or a small uploaded image kept inline as a data URL.
+NOTE_MAX_CHARS = 10_000
+PICTURE_URL_MAX_CHARS = 2_000
+PICTURE_DATA_MAX_CHARS = 700_000
+_PICTURE_DATA_URL = re.compile(r'^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$')
+
+
+def widget_config_error(widget_key: str, config: dict | None) -> str | None:
+    """Why a note or picture widget's settings cannot be saved, or None when they can.
+
+    The page renders the note as markdown without raw HTML and shows the
+    picture in an ``<img>``, but the store is where a script or a huge blob is
+    refused, so no client can save one.
+    """
+    if not isinstance(config, dict):
+        return None
+    if widget_key == 'note':
+        text = config.get('markdown', '')
+        title = config.get('title', '')
+        if not isinstance(text, str) or not isinstance(title, str):
+            return 'The note must be text'
+        if len(text) > NOTE_MAX_CHARS:
+            return f'The note is longer than {NOTE_MAX_CHARS} characters'
+        if len(title) > 80:
+            return 'The title is longer than 80 characters'
+    if widget_key == 'picture':
+        src = config.get('src', '')
+        for key in ('caption', 'alt'):
+            if not isinstance(config.get(key, ''), str) or len(config.get(key, '')) > 200:
+                return f'The {key} must be text of at most 200 characters'
+        if not isinstance(src, str):
+            return 'The picture must be a link or an uploaded image'
+        if src.startswith('data:'):
+            if len(src) > PICTURE_DATA_MAX_CHARS:
+                return 'The uploaded picture is too large'
+            if not _PICTURE_DATA_URL.match(src):
+                return 'Only PNG, JPEG, WebP or GIF pictures can be uploaded'
+        elif src:
+            if len(src) > PICTURE_URL_MAX_CHARS or not src.lower().startswith('https://') or any(c in src for c in ' "<>'):
+                return 'A picture link must be an https:// address'
+    return None
+
+
 def _default_widget_visibility(widget_key: str, user: User) -> str:
     """The default for one widget when the person has no saved row for it.
 
     Only a default: any row the person saves wins, and Workspaces can be added
     back from the dashboard's widget sheet by anyone.
     """
-    if widget_key == 'quick_assistant':
+    if widget_key == 'quick_assistant' or widget_key in OPT_IN_WIDGETS:
         return 'hidden'
     if user.is_admin:
         return 'visible'
@@ -4001,6 +4052,9 @@ def update_widget_settings(
         raise HTTPException(status_code=400, detail=f"Invalid widget size '{body.size}'")
     if body.visibility is not None and body.visibility not in WIDGET_VISIBILITIES:
         raise HTTPException(status_code=400, detail=f"Invalid widget visibility '{body.visibility}'")
+    config_error = widget_config_error(widget_key, body.config)
+    if config_error:
+        raise HTTPException(status_code=400, detail=config_error)
     if body.quick_assistant_enabled is not None:
         setting = session.exec(
             select(UserWidget).where(

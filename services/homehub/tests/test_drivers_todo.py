@@ -140,3 +140,30 @@ async def test_empty_shopping_list_json_text():
     drv = todo.ShoppingListDriver(hub, entry)
     await drv.async_setup()
     assert hub.states.get("todo.shopping_list").state == "0"
+
+
+async def test_move_item_reorders_like_the_websocket_move():
+    store = FakeStore()
+    hub, _ = await reminders(store)
+    for name in ("First", "Second"):
+        await hub.call_service("todo", "add_item", {"entity_id": "todo.reminders", "item": name})
+
+    async def items():
+        res = await hub.call_service("todo", "get_items", {"entity_id": "todo.reminders"}, return_response=True)
+        return res["response"]["todo.reminders"]["items"]
+
+    # To the top: no previous item.
+    await hub.call_service("todo", "move_item", {"entity_id": "todo.reminders", "item": "Second",
+                                                 "previous_uid": None})
+    assert (await items())[0]["summary"] == "Second"
+    # After another item, both named by uid as HA's move takes them.
+    uid_of = {i["summary"]: i["uid"] for i in await items()}
+    await hub.call_service("todo", "move_item", {"entity_id": "todo.reminders", "item": uid_of["Second"],
+                                                 "previous_uid": uid_of["First"]})
+    assert [i["summary"] for i in await items()][-2:] == ["First", "Second"]
+    assert [i["summary"] for i in store.kv["todo:todo.reminders"]] == [i["summary"] for i in await items()]
+    with pytest.raises(HubError):
+        await hub.call_service("todo", "move_item", {"entity_id": "todo.reminders", "item": "First",
+                                                     "previous_uid": "First"})
+    with pytest.raises(HubError):
+        await hub.call_service("todo", "move_item", {"entity_id": "todo.reminders", "item": "nope"})

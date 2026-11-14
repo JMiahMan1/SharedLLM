@@ -203,6 +203,46 @@ export async function getHistory(entityIds: string[], start: Date, end: Date, at
   return ((await apiClient.get('/api/dashboard/history', { params })).data?.series ?? {}) as HistorySeries;
 }
 
+export interface LogbookEntry { when: string; entity_id: string; name: string; state: string }
+
+export interface LogbookResponse { entries: LogbookEntry[]; truncated: boolean }
+
+/** What changed, newest first (services/gateway/dashboard_routes.py `logbook`); History's permissions apply. */
+export async function getLogbook(opts: { entityIds?: string[]; areaId?: string | null; start: Date; end: Date }): Promise<LogbookResponse> {
+  const params: Record<string, string> = { start: opts.start.toISOString(), end: opts.end.toISOString() };
+  if (opts.entityIds?.length) params.entity_ids = opts.entityIds.join(',');
+  if (opts.areaId) params.area_id = opts.areaId;
+  const data = (await apiClient.get('/api/dashboard/logbook', { params })).data;
+  return { entries: data?.entries ?? [], truncated: Boolean(data?.truncated) };
+}
+
+/** Logbook entries under one heading per local day, newest day first, keeping the given (newest first) order. */
+export function logbookByDay(entries: LogbookEntry[], now: Date = new Date()): { day: string; entries: LogbookEntry[] }[] {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const label = (t: Date) => {
+    const start = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+    if (start === today) return 'Today';
+    if (start === today - 86_400_000) return 'Yesterday';
+    return t.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+  };
+  const out: { day: string; entries: LogbookEntry[] }[] = [];
+  for (const e of entries) {
+    const t = new Date(e.when);
+    const day = Number.isNaN(t.getTime()) ? 'Unknown time' : label(t);
+    const last = out[out.length - 1];
+    if (last && last.day === day) last.entries.push(e);
+    else out.push({ day, entries: [e] });
+  }
+  return out;
+}
+
+/** "turned on", "changed to 74.2" for a logbook line. */
+export function logbookPhrase(state: string): string {
+  if (state === 'on' || state === 'off') return `turned ${state}`;
+  if (state === 'unavailable') return 'became unavailable';
+  return `changed to ${state.replace(/_/g, ' ')}`;
+}
+
 export async function getEntities(domains?: string[]): Promise<PickerEntity[]> {
   const params = domains?.length ? { domains: domains.join(',') } : undefined;
   return (await apiClient.get('/api/dashboard/entities', { params })).data?.entities ?? [];

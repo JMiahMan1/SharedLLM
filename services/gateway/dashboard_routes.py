@@ -271,6 +271,61 @@ async def history(request: Request, entity_ids: str | None = None, start: str | 
     return {"series": series}
 
 
+#: Newest first; a busy house makes thousands of changes a day, and the page shows the most recent ones.
+MAX_LOGBOOK_ENTRIES = 500
+_AREA_ID = re.compile(r"^[a-z0-9_]+$")
+
+
+@router.get("/logbook")
+async def logbook(request: Request, entity_ids: str | None = None, area_id: str | None = None,
+                  start: str | None = None, end: str | None = None):
+    """What changed, newest first, over at most 31 days: ``{entries: [{when, entity_id, name, state}], truncated}``.
+
+    The same rules as History: an entity the caller may not see is left out as
+    if it never changed. ``entity_ids`` and ``area_id`` narrow it further (an
+    area is the entities the Rooms page lists in it, so its permissions too).
+    """
+    ids = _ids(entity_ids, _ENTITY_ID)
+    if len(ids) > MAX_HISTORY_ENTITIES:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_HISTORY_ENTITIES} entities at a time")
+    if area_id is not None and not _AREA_ID.match(area_id):
+        raise HTTPException(status_code=400, detail="Not an area id")
+    now = datetime.now(UTC)
+    end_dt = _time(end, now)
+    start_dt = _time(start, end_dt - timedelta(days=1))
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="The range must end after it starts")
+    if end_dt - start_dt > timedelta(days=MAX_HISTORY_DAYS):
+        raise HTTPException(status_code=400, detail=f"At most {MAX_HISTORY_DAYS} days at a time")
+    creds = await _caller(request)
+    perms = await _permissions(creds)
+    wanted: set[str] | None = set(ids) if ids else None
+    if area_id:
+        rooms_data = await _hub_get(creds, "/api/homehub/dashboard/rooms")
+        area = next((a for a in rooms_data.get("areas") or [] if a.get("area_id") == area_id), None)
+        if area is None:
+            raise HTTPException(status_code=404, detail="Area not found")
+        in_area = {str(e.get("entity_id")) for e in area.get("entities") or [] if isinstance(e, dict)}
+        wanted = in_area if wanted is None else wanted & in_area
+    if wanted is not None:
+        wanted = {i for i in wanted if can_view(perms, i)}
+        if not wanted:
+            return {"entries": [], "truncated": False}
+    params = {"end_time": end_dt.isoformat()}
+    if wanted is not None and len(wanted) == 1:
+        params["entity"] = next(iter(wanted))
+    data = await _hub_get(creds, f"/api/logbook/{start_dt.isoformat()}", params)
+    entries = []
+    for row in data if isinstance(data, list) else []:
+        eid = str((row or {}).get("entity_id") or "")
+        if not eid or (wanted is not None and eid not in wanted) or not can_view(perms, eid):
+            continue
+        entries.append({"when": row.get("when"), "entity_id": eid, "name": row.get("name") or eid,
+                        "state": row.get("state")})
+    entries.sort(key=lambda e: str(e["when"] or ""), reverse=True)
+    return {"entries": entries[:MAX_LOGBOOK_ENTRIES], "truncated": len(entries) > MAX_LOGBOOK_ENTRIES}
+
+
 @router.get("/statistics")
 async def statistics(request: Request, statistic_ids: str | None = None, start: str | None = None,
                      end: str | None = None, period: str = "hour", types: str | None = None,

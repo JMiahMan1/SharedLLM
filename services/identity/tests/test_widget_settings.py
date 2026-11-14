@@ -48,7 +48,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 16  # 16 known widget keys
+    assert len(settings["widgets"]) == len(main.WIDGET_DEFAULT_SIZES) == 18  # 18 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys
@@ -456,3 +456,41 @@ def test_a_saved_choice_wins_over_the_role_default(client: TestClient, session: 
     _acting_as(session, "teen")
     client.put("/api/widgets/settings/climate", json={"visibility": "hidden"})
     assert _visibility(client)["climate"] == "hidden"
+
+
+def test_note_and_picture_widgets_are_opt_in_for_everyone(client: TestClient, session: Session):
+    for role, admin in (("father", True), ("mother", False), ("child", False)):
+        _acting_as(session, role, is_admin=admin)
+        vis = _visibility(client)
+        assert vis["note"] == "hidden" and vis["picture"] == "hidden", role
+
+
+def test_a_note_and_a_picture_survive_a_round_trip(client: TestClient):
+    note = {"title": "House rules", "markdown": "# Hello\n\n- **Shoes** off"}
+    assert client.put("/api/widgets/settings/note", json={"visibility": "visible", "config": note}).status_code == 200
+    pic = {"src": "data:image/png;base64,iVBORw0KGgo=", "caption": "Our garden", "alt": "Flowers"}
+    assert client.put("/api/widgets/settings/picture", json={"config": pic}).status_code == 200
+    widgets = {w["widget_key"]: w for w in client.get("/api/widgets/settings").json()["widgets"]}
+    assert widgets["note"]["config"] == note and widgets["note"]["visibility"] == "visible"
+    assert widgets["picture"]["config"] == pic
+
+
+@pytest.mark.parametrize("key,config", [
+    ("note", {"markdown": "x" * 10_001}),
+    ("note", {"markdown": 5}),
+    ("picture", {"src": "javascript:alert(1)"}),
+    ("picture", {"src": "http://example.test/a.png"}),
+    ("picture", {"src": "https://example.test/a.png\" onerror=\"x"}),
+    ("picture", {"src": "data:image/svg+xml;base64,PHN2Zz4="}),
+    ("picture", {"src": "data:text/html;base64,PGI+"}),
+    ("picture", {"src": "data:image/png;base64," + "A" * 700_000}),
+    ("picture", {"src": "https://example.test/a.png", "caption": "c" * 201}),
+])
+def test_unsafe_or_oversized_notes_and_pictures_are_refused(client: TestClient, key, config):
+    resp = client.put(f"/api/widgets/settings/{key}", json={"config": config})
+    assert resp.status_code == 400, config
+
+
+def test_a_picture_link_must_be_https(client: TestClient):
+    ok = client.put("/api/widgets/settings/picture", json={"config": {"src": "https://example.test/photo.jpg"}})
+    assert ok.status_code == 200

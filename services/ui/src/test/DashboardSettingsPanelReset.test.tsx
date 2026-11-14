@@ -12,13 +12,13 @@ vi.mock('react-hot-toast', () => {
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
-import { defaultWidgetDefs, useWidgetStore } from '../stores/widgetStore';
+import { defaultVisibility, defaultWidgetDefs, useWidgetStore } from '../stores/widgetStore';
 import type { UserWidgetSettings } from '../types/widget';
 
 function defaults(): Record<string, UserWidgetSettings> {
   return Object.fromEntries(defaultWidgetDefs.map((def, i) => [def.key, {
     widget_key: def.key,
-    visibility: def.key === 'quick_assistant' ? 'hidden' : 'visible',
+    visibility: defaultVisibility(def.key),
     order_index: i,
     size: def.defaultSize,
     is_pinned: false,

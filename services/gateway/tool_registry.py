@@ -504,6 +504,12 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
      "Timers, alarms, and household reminders: create, list, pause, resume, reset, stop, cancel across one or multiple devices (speakers, ESPHome screens, mobile app).",
      "payload fields: action, type, id, query, title, duration_str, time_str, recurrence, target_device, target_devices, scope, emoji, sound, tts_enabled, esphome_script, flash_screen."),
+    ("TodoListRequest", SVC_EXECUTION, "POST", "/execute/todo", False,
+     "The home's to-do lists (the hub's shopping list and reminder lists): add items (\"add milk to the shopping "
+     "list\"), read what is on a list, tick an item off or back on, remove one, or name the lists. Every "
+     "household member may use them. Not for the recipe shopping list note (NoteRequest) or chores (ChoreRequest).",
+     "payload fields: action, list_name, item, items, include_completed. action is add, list, complete, uncomplete, "
+     "remove or lists; list_name is the list as the person said it (leave it out when they named none)."),
     ("TalkRequest", SVC_EXECUTION, "POST", "/execute/talk", False,
      "Conversations/voice: list conversations, read messages, send.",
      "payload fields: action, token, target_user, message, text_to_voice, limit."),
