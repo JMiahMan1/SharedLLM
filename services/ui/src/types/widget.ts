@@ -14,7 +14,9 @@ export type WidgetKey =
   | 'presence'
   | 'bible_daily'
   | 'recommendations'
-  | 'weather';
+  | 'weather'
+  | 'note'
+  | 'picture';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';
@@ -157,4 +159,18 @@ export interface ClimateConfig {
   /** climate.* entity ids shown by this widget, in display order. */
   devices?: string[];
   layout?: ClimateLayout;
+}
+
+/** The note widget (Home Assistant's markdown card): markdown, drawn without raw HTML. */
+export interface NoteConfig {
+  title?: string;
+  markdown?: string;
+}
+
+/** The picture widget (Home Assistant's picture card): an https link or a small uploaded image. */
+export interface PictureConfig {
+  /** `https://...`, or `data:image/...;base64,...` for an upload. */
+  src?: string;
+  caption?: string;
+  alt?: string;
 }

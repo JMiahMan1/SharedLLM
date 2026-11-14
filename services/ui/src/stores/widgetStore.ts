@@ -9,7 +9,7 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
-import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap, CloudSun } from 'lucide-react';
+import { Activity, BookOpen, HeartPulse, CalendarDays, Compass, LayoutDashboard, LayoutGrid, ListChecks, Music, Sparkles, StickyNote, Thermometer, Timer, Zap, CloudSun, Image as ImageIcon, NotebookPen } from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -19,10 +19,22 @@ export interface WidgetStateItem {
   config: Record<string, unknown>;
 }
 
+/**
+ * Widgets that start empty (a note, a picture) and only mean something once
+ * the person fills them in. They are off until added from the widget sheet;
+ * the identity service's OPT_IN_WIDGETS says the same.
+ */
+export const OPT_IN_WIDGETS: ReadonlySet<WidgetKey> = new Set<WidgetKey>(['note', 'picture']);
+
+/** A widget's visibility before the person has saved anything about it. */
+export function defaultVisibility(key: WidgetKey): 'visible' | 'hidden' {
+  return key === 'quick_assistant' || OPT_IN_WIDGETS.has(key) ? 'hidden' : 'visible';
+}
+
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
   return {
     widget_key: key,
-    visibility: key === 'quick_assistant' ? 'hidden' : 'visible',
+    visibility: defaultVisibility(key),
     order_index: order,
     // `defaultWidgetDefs` is the one source of default sizes (the identity
     // service mirrors it in WIDGET_DEFAULT_SIZES).
@@ -69,6 +81,10 @@ export const defaultWidgetDefs: WidgetDef[] = [
   // Open-Meteo forecast, the person's own weather reminders and, for admins,
   // weather against the household's energy use (docs/WEATHER.md).
   { key: 'weather', label: 'Weather', icon: CloudSun, minSize: 'small', defaultSize: 'medium' },
+  // Home Assistant's markdown and picture cards: the person's own words and
+  // one picture on their board. Off until added (OPT_IN_WIDGETS).
+  { key: 'note', label: 'Note', icon: NotebookPen, minSize: 'small', defaultSize: 'medium' },
+  { key: 'picture', label: 'Picture', icon: ImageIcon, minSize: 'small', defaultSize: 'medium' },
 ];
 
 /**

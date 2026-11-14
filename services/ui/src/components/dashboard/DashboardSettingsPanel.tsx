@@ -14,7 +14,7 @@ import {
   X,
   Settings2,
 } from 'lucide-react';
-import { useWidgetStore, defaultWidgetDefs } from '../../stores/widgetStore';
+import { useWidgetStore, defaultWidgetDefs, defaultVisibility } from '../../stores/widgetStore';
 import type { UserWidgetSettings, WidgetSize, WidgetVisibility } from '../../types/widget';
 import { api } from '../../services/api';
 import { focusableIn, trapTab } from '../../lib/focusTrap';
@@ -32,7 +32,7 @@ const WidgetCatalog = () => {
       {widgetRegistry.map((def) => {
         const settings = userWidgets[def.key];
         const visibility: WidgetVisibility =
-          settings?.visibility ?? (def.key === 'quick_assistant' ? 'hidden' : 'visible');
+          settings?.visibility ?? defaultVisibility(def.key);
         const shown = visibility === 'visible';
         const isPinned = settings?.is_pinned ?? false;
         const size = settings?.size ?? def.defaultSize;
@@ -103,7 +103,7 @@ const ExportSection = () => {
       quick_assistant_enabled: quickAssistantEnabled,
       widgets: widgetRegistry.map((def) => ({
         ...((userWidgets[def.key]) ?? {
-          visibility: 'visible',
+          visibility: defaultVisibility(def.key),
           order_index: 0,
           size: def.defaultSize,
           is_pinned: false,
@@ -269,9 +269,8 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
     const hasChanges = quickAssistantEnabled || Object.values(userWidgets).some((w) => {
       const entry = defaultByKey.get(w.widget_key as never);
       if (!entry) return false;
-      const defaultVisibility = w.widget_key === 'quick_assistant' ? 'hidden' : 'visible';
       return (
-        w.visibility !== defaultVisibility ||
+        w.visibility !== defaultVisibility(entry.def.key) ||
         w.is_pinned ||
         w.size !== entry.def.defaultSize ||
         w.order_index !== entry.index
@@ -293,7 +292,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
       const current = userWidgets[def.key];
       resetWidgets[def.key] = {
         widget_key: def.key,
-        visibility: def.key === 'quick_assistant' ? 'hidden' : 'visible',
+        visibility: defaultVisibility(def.key),
         order_index: i,
         size: def.defaultSize,
         is_pinned: false,
