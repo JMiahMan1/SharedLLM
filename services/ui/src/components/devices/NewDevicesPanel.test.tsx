@@ -130,7 +130,8 @@ describe('NewDevicesPanel', () => {
     fireEvent.change(within(dialog).getByLabelText(/Address/), { target: { value: '192.0.2.70' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /Add/ }));
     expect(await within(dialog).findByText('Accept on your TV')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
+    // The pairing polls before the dialog closes; under a full parallel run that took over the default 1 s.
+    await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull(), { timeout: 5000 });
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(1, 'samsungtv',
       { name: undefined, area_id: undefined, input: { host: '192.0.2.70' }, host: '192.0.2.70', url: undefined });
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(2, 'samsungtv',
