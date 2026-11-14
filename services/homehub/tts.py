@@ -7,6 +7,12 @@ URL on HA itself. The hub does the same with Jarvis's Kokoro engine
 unguessable ``/api/tts_proxy/<token>.wav`` URL and asks each media player to
 play it. It never calls Jarvis's announce flow, which can itself fall back to
 these services, so the two cannot loop.
+
+The engine is published as ``tts.jarvis`` (``TTS_ENTITY``), like HA's ``tts.piper``: its state is
+when it last spoke, so the automation editor can offer it as ``tts.speak``'s target on a hub that
+never imported one. ``tts.speak`` speaks with Jarvis whatever tts entity it names, so imported
+automations naming ``tts.piper`` keep working. ``options.voice`` is any voice of Jarvis's Kokoro
+engine (``/execute/tts/voices``); an unknown voice fails with the engine's error.
 """
 from __future__ import annotations
 
@@ -18,13 +24,14 @@ import time
 
 import aiohttp
 
-from services.homehub.core import DeviceUnavailable, Hub, HubError, ServiceCall
+from services.homehub.core import DeviceUnavailable, Hub, HubError, ServiceCall, utcnow
 
 log = logging.getLogger("homehub.tts")
 
 KEEP_S = 600.0
 SYNTH_TIMEOUT_S = 60.0
 DEFAULT_VOICE = "af_heart"
+TTS_ENTITY = "tts.jarvis"
 # Legacy per-engine services HA had; all speak the same way here.
 LEGACY_SERVICES = ("piper", "google_translate_say", "cloud_say", "speak_piper")
 
@@ -92,6 +99,7 @@ async def speak(hub: Hub, players: list[str], message: str, voice: str | None = 
     if not players:
         raise HubError("tts needs a media player to speak on")
     url = await make_clip(message, voice)
+    _publish_engine(hub, utcnow().isoformat())
     await hub.call_service("media_player", "play_media", {
         "entity_id": players, "media_content_id": url, "media_content_type": "music", "announce": True})
     return url
@@ -113,7 +121,13 @@ async def tts_legacy(hub: Hub, call: ServiceCall) -> None:
     await speak(hub, players, str(call.data.get("message") or ""), voice)
 
 
+def _publish_engine(hub: Hub, state: str) -> None:
+    hub.states.set(TTS_ENTITY, state, {"friendly_name": "Jarvis", "icon": "mdi:account-voice"})
+
+
 def register(hub: Hub) -> None:
+    if hub.states.get(TTS_ENTITY) is None:
+        _publish_engine(hub, "unknown")
     hub.register_service("tts", "speak", tts_speak, {"media_player_entity_id": {}, "message": {}, "options": {}})
     for name in LEGACY_SERVICES:
         hub.register_service("tts", name, tts_legacy, {"entity_id": {}, "message": {}})

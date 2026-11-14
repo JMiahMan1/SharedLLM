@@ -125,3 +125,24 @@ async def test_tts_fails_fast_without_a_lan_address(monkeypatch):
     monkeypatch.delenv("EXECUTION_SVC_URL", raising=False)
     with pytest.raises(HubError, match="EXECUTION_SVC_URL"):
         await tts.make_clip("hello")
+
+
+async def test_the_engine_is_a_tts_entity_that_records_when_it_spoke(hub):
+    assert hub.states.get(tts.TTS_ENTITY).state == "unknown"
+    assert hub.states.get(tts.TTS_ENTITY).attributes["friendly_name"] == "Jarvis"
+    await hub.call_service("tts", "speak", {"entity_id": tts.TTS_ENTITY, "media_player_entity_id": "media_player.kitchen",
+                                            "message": "Hello"})
+    assert hub.states.get(tts.TTS_ENTITY).state.startswith("20")
+    tts.register(hub)  # registering again (a re-import) keeps the last spoken time
+    assert hub.states.get(tts.TTS_ENTITY).state != "unknown"
+
+
+async def test_a_voice_the_engine_does_not_have_fails_the_call(hub, monkeypatch):
+    async def refuse(text, voice=None):
+        raise HubError(f"speech synthesis failed: unknown voice {voice}")
+
+    monkeypatch.setattr(tts, "synthesize", refuse)
+    with pytest.raises(HubError, match="unknown voice not_a_voice"):
+        await hub.call_service("tts", "speak", {"media_player_entity_id": "media_player.kitchen", "message": "x",
+                                                "options": {"voice": "not_a_voice"}})
+    assert not next(iter(hub.drivers.values())).played
