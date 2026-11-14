@@ -150,7 +150,9 @@ def setup_zones(hub: Hub, zones: list[dict[str, Any]], home: dict[str, Any]) -> 
             "radius": float(z.get("radius") or 100.0),
             "passive": bool(z.get("passive")),
             "icon": z.get("icon") or "mdi:map-marker",
-            "editable": True,
+            "editable": bool(z.get("editable", True)),
+            # "geo" for a zone mirrored from the family's saved places (services/homehub/registries.py).
+            **({"source": str(z["source"])} if z.get("source") else {}),
         })
     hub.zone_table = table  # type: ignore[attr-defined]
     refresh_zone_states(hub)
@@ -202,6 +204,7 @@ def refresh_zone_states(hub: Hub) -> None:
             "latitude": z["latitude"], "longitude": z["longitude"], "radius": z["radius"],
             "passive": z.get("passive", False), "persons": inside, "editable": z.get("editable", True),
             "icon": z.get("icon"), "friendly_name": z["name"],
+            **({"source": z["source"]} if z.get("source") else {}),
         })
 
 
@@ -219,6 +222,8 @@ class PersonManager:
                 "id": pid,
                 "name": str(p.get("name") or pid),
                 "user_id": p.get("user_id"),
+                # The Jarvis username whose fixes this person follows (none: the person's id, as imported).
+                "jarvis_user": str(p["jarvis_user"]).strip().lower() or None if p.get("jarvis_user") else None,
                 "device_trackers": list(p.get("device_trackers") or []),
                 "entity_id": _registry_id(hub, "person", pid, f"person.{slugify(p.get('name') or pid)}"),
             })
@@ -521,7 +526,7 @@ class MobileAppDriver(Driver):
             p = (mgr.person_for_tracker(tracker.entity_id) if tracker else None) \
                 or mgr.person_for_user_id(self.entry.data.get("user_id"))
             if p is not None:
-                return p["id"].lower()
+                return (p.get("jarvis_user") or p["id"]).lower()
         ha_users = getattr(self.hub, "ha_users", None) or {}
         name = ha_users.get(self.entry.data.get("user_id") or "")
         if name:
@@ -592,8 +597,9 @@ class MobileAppDriver(Driver):
         mgr = getattr(self.hub, "person_manager", None)
         if mgr is not None:
             for p in mgr.persons:
-                if not p["device_trackers"] and p["id"].lower() in fixes:
-                    mgr.update_from_fix(p, fixes[p["id"].lower()])
+                who = (p.get("jarvis_user") or p["id"]).lower()
+                if not p["device_trackers"] and who in fixes:
+                    mgr.update_from_fix(p, fixes[who])
         phones = self._manager()
         if phones is not None:
             with contextlib.suppress(Exception):

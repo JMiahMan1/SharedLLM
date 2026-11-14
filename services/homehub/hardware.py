@@ -184,6 +184,7 @@ def device_view(runtime: Any, dev: DeviceEntry, *, areas: dict[str, str] | None 
         "abilities": capabilities.device_capabilities(hub, dev.id)["abilities"],
         # Which of maker/model/firmware/serial/MAC the device itself reported, and which only the import holds.
         "info_source": dev.info_source(),
+        "labels": list(dev.labels),
     }
 
 
@@ -305,7 +306,7 @@ def entity_view(hub: Any, ent: EntityEntry) -> dict[str, Any]:
         "entity_id": ent.entity_id, "domain": ent.domain, "platform": ent.platform,
         "name": hub.friendly_name(ent), "name_by_user": ent.name, "original_name": ent.original_name,
         "entity_category": ent.entity_category, "disabled_by": ent.disabled_by, "hidden_by": ent.hidden_by,
-        "area_id": ent.area_id, "icon": ent.icon or ent.original_icon,
+        "area_id": ent.area_id, "icon": ent.icon or ent.original_icon, "labels": list(ent.labels),
         "state": st, "capabilities": capabilities.entity_capabilities(hub, ent.entity_id) if not ent.disabled_by
         else None,
         "info_source": ent.info_source(),
@@ -395,7 +396,8 @@ def _clear_state(hub: Any, entity_id: str) -> None:
 
 
 async def update_entity(runtime: Any, entity_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """``{"name"?: str|null, "area_id"?: str|null, "hidden"?: bool, "disabled"?: bool, "rotation"?: int}``.
+    """``{"name"?: str|null, "area_id"?: str|null, "hidden"?: bool, "disabled"?: bool, "rotation"?: int,
+    "labels"?: [label ids]}``.
 
     ``rotation`` (cameras only) turns the picture clockwise by 0, 90, 180 or 270 degrees wherever Jarvis
     shows it, for a camera mounted on its side or upside down. The video itself is untouched.
@@ -404,9 +406,12 @@ async def update_entity(runtime: Any, entity_id: str, body: dict[str, Any]) -> d
     ent = hub.entities.get(entity_id)
     if ent is None:
         raise entries.EntryError("No such entity", 404)
-    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled", "rotation"})
+    unknown = sorted(set(body) - {"name", "area_id", "hidden", "disabled", "rotation", "labels"})
     if unknown:
         raise entries.EntryError(f"An entity cannot change {', '.join(unknown)}")
+    from services.homehub import registries
+
+    labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
     if "rotation" in body:
         rotation = body.get("rotation")
         if ent.domain != "camera":
@@ -446,6 +451,8 @@ async def update_entity(runtime: Any, entity_id: str, body: dict[str, Any]) -> d
         elif not want and ent.disabled_by:
             ent.disabled_by = None
             reload_needed = True
+    if labels is not None:
+        ent.labels = labels
     runtime.store.save_entity(ent)
     hub.bus.fire("entity_registry_updated", {"action": "update", "entity_id": entity_id})
     st = hub.states.get(entity_id)

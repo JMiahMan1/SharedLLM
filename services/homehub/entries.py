@@ -258,11 +258,14 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
 # -- devices ------------------------------------------------------------------------------
 
 def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """``{"name_by_user"?: str|null, "area_id"?: str|null}`` (an area by id or name)."""
+    """``{"name_by_user"?: str|null, "area_id"?: str|null, "labels"?: [label ids]}`` (an area by id or name)."""
+    from services.homehub import registries
+
     hub = runtime.hub
     dev = hub.devices.get(device_id)
     if dev is None:
         raise EntryError("No such device", 404)
+    labels = registries.clean_label_ids(runtime, body["labels"]) if "labels" in body else None
     if "name_by_user" in body:
         name = body.get("name_by_user")
         dev.name_by_user = str(name).strip() or None if name is not None else None
@@ -275,6 +278,8 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
             if found is None:
                 raise EntryError(f"There is no area {area!r}")
             dev.area_id = found
+    if labels is not None:
+        dev.labels = labels
     runtime.store.save_device(dev)
     hub.bus.fire("device_registry_updated", {"action": "update", "device_id": dev.id})
     # Friendly names come from the device name: publish every entity again.
@@ -285,7 +290,8 @@ def update_device(runtime: Any, device_id: str, body: dict[str, Any]) -> dict[st
             attrs = dict(st.attributes)
             attrs["friendly_name"] = hub.friendly_name(ent)
             hub.states.set(eid, st.state, attrs)
-    return {"id": dev.id, "name": dev.display_name, "name_by_user": dev.name_by_user, "area_id": dev.area_id}
+    return {"id": dev.id, "name": dev.display_name, "name_by_user": dev.name_by_user, "area_id": dev.area_id,
+            "labels": list(dev.labels)}
 
 
 def _delete_row(store: Any, table: str, column: str, key: str) -> None:
@@ -417,11 +423,13 @@ async def _remove_matter_node(runtime: Any, entry: ConfigEntry, dev: DeviceEntry
 
 def _area_view(area: Area) -> dict[str, Any]:
     return {"area_id": area.area_id, "name": area.name, "aliases": list(area.aliases), "icon": area.icon,
-            "floor_id": area.floor_id}
+            "floor_id": area.floor_id, "labels": list(area.labels)}
 
 
-def _area_fields(body: dict[str, Any]) -> dict[str, Any]:
-    unknown = sorted(set(body) - {"name", "aliases", "icon", "floor_id"})
+def _area_fields(body: dict[str, Any], runtime: Any) -> dict[str, Any]:
+    from services.homehub import registries
+
+    unknown = sorted(set(body) - {"name", "aliases", "icon", "floor_id", "labels"})
     if unknown:
         raise EntryError(f"An area cannot have {', '.join(unknown)}")
     out: dict[str, Any] = {}
@@ -438,6 +446,10 @@ def _area_fields(body: dict[str, Any]) -> dict[str, Any]:
     for key in ("icon", "floor_id"):
         if key in body:
             out[key] = str(body[key]).strip() or None if body[key] is not None else None
+    if "floor_id" in out:
+        registries.check_floor(runtime, out["floor_id"])
+    if "labels" in body:
+        out["labels"] = registries.clean_label_ids(runtime, body["labels"])
     return out
 
 
@@ -452,7 +464,7 @@ def list_areas(runtime: Any) -> dict[str, Any]:
 def create_area(runtime: Any, body: dict[str, Any]) -> dict[str, Any]:
     """``{"name", "aliases"?, "icon"?, "floor_id"?}``; the id is made from the name (``living_room``)."""
     hub = runtime.hub
-    fields = _area_fields(body)
+    fields = _area_fields(body, runtime)
     if "name" not in fields:
         raise EntryError("An area needs a name")
     if _name_taken(hub, fields["name"]):
@@ -473,7 +485,7 @@ def update_area(runtime: Any, area_id: str, body: dict[str, Any]) -> dict[str, A
     area = hub.areas.get(area_id)
     if area is None:
         raise EntryError("No such area", 404)
-    fields = _area_fields(body)
+    fields = _area_fields(body, runtime)
     if "name" in fields and _name_taken(hub, fields["name"], area_id):
         raise EntryError(f"There is already an area named {fields['name']!r}", 409)
     for key, value in fields.items():

@@ -283,6 +283,16 @@ flow that probed the device set, plus `state` once a driver published it.
   finds WiZ, ESPHome, Cast, Roku and HomeKit devices, adds them with an MJPEG
   camera and an Emporia account, and drives them with an empty store. Areas
   are made with `GET|POST /hub/areas`, `PATCH|DELETE /hub/areas/{id}`.
+- Floors, labels, zones and persons are edited the same way (`/hub/floors`,
+  `/hub/labels`, `/hub/zones`, `/hub/persons`; `registries_api.py`). An area
+  picks a floor; areas, devices and entities carry `labels`. A zone is
+  published as `zone.*` for zone triggers; a rename keeps its entity id.
+  The family's shared saved places in Jarvis (geo `/zones`, `scope: family`)
+  are mirrored as read-only zones with `source: geo` every
+  `HOMEHUB_GEO_PLACES_EVERY_S` (300; 0 is off) and on `POST /hub/zones/sync`;
+  private places never become zones, and geo ignores the mirror. A person
+  links a Jarvis user (`jarvis_user`) and its `device_trackers`. The import
+  also keeps HA's categories and tags (`GET /hub/categories`, `/hub/tags`).
 
 The capability index also lists the live areas (`areas`), gives voice satellites
 `announce` (and `converse` only when the device publishes it and the hub can

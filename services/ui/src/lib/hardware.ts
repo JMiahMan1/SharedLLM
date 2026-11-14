@@ -52,6 +52,8 @@ export interface HardwareDevice {
   /** Views of one physical device share it (a TV seen by Roku, Cast and Music Assistant). */
   group_id?: string;
   group_primary?: boolean;
+  /** Label ids the device wears (homehub registries); absent from older hubs. */
+  labels?: string[];
 }
 
 export type DeviceKind = 'light' | 'media' | 'camera' | 'climate' | 'access' | 'power' | 'sensor' | 'vacuum'
@@ -92,6 +94,8 @@ export interface HardwareEntity {
   /** The current state, in the shape the Rooms page's controls take; null while disabled. */
   state: HubEntity | null;
   capabilities: EntityCapabilities | null;
+  /** Label ids the entity wears; absent from older hubs. */
+  labels?: string[];
 }
 
 export interface HardwareDetail extends HardwareDevice {
@@ -144,7 +148,7 @@ export async function setDeviceDisabled(id: string, disabled: boolean): Promise<
 }
 
 export async function updateEntity(entityId: string,
-  body: { name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean; rotation?: number },
+  body: { name?: string | null; area_id?: string | null; hidden?: boolean; disabled?: boolean; rotation?: number; labels?: string[] },
 ): Promise<HardwareEntity> {
   const resp = await apiClient.patch(`/api/homehub/entities/${encodeURIComponent(entityId)}`, body, { timeout: 60_000 });
   return resp.data;

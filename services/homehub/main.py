@@ -14,7 +14,7 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import automation_api, builtin, camera_recording, recorder_statistics, tts
+from services.homehub import automation_api, builtin, camera_recording, recorder_statistics, registries, tts
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -34,6 +34,8 @@ IMPORT_DIR = os.getenv("HOMEHUB_IMPORT_DIR", "/import")
 PORT = int(os.getenv("HOMEHUB_PORT", "8123"))
 # How long automations wait for the integrations to load before starting anyway.
 STARTUP_WAIT_S = float(os.getenv("HOMEHUB_STARTUP_WAIT_S", "60"))
+# How often the family's saved places (geo) are mirrored as zones; 0 turns the mirror off.
+GEO_PLACES_EVERY_S = float(os.getenv("HOMEHUB_GEO_PLACES_EVERY_S", "300"))
 
 
 def _household_time_zone(home: dict | None = None) -> str:
@@ -115,11 +117,15 @@ class Service:
         try:
             from services.homehub.drivers import mobile_app
 
-            home = {"name": (self.hub.location or {}).get("location_name", "Home"), **(self.hub.location or {})}
-            mobile_app.setup_zones(self.hub, self.store.get_kv("zones", []) or [], home)
+            registries.apply_zones(self.runtime)  # zone.home, the drawn zones and the saved-place zones
             await mobile_app.setup_persons(self.hub, self.store.get_kv("persons", []) or [])
         except Exception:
             log.exception("people and zones could not start")
+        geo = registries.geo_url()
+        if not geo:
+            log.warning("GEO_SVC_URL is not set: the family's saved places will not become zones")
+        elif GEO_PLACES_EVERY_S > 0:
+            self._bg.append(asyncio.create_task(registries.follow_places(self.runtime, geo, GEO_PLACES_EVERY_S)))
 
     async def _start_automations_when_ready(self) -> None:
         pending = await self.runtime.wait_first_setups(STARTUP_WAIT_S)

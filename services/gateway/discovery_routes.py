@@ -198,10 +198,10 @@ async def remove_entry(entry_id: str, request: Request, force: bool = False):
 
 @router.patch("/devices/{device_id}")
 async def update_device(device_id: str, request: Request):
-    """Rename a device or move it to an area: ``{"name_by_user"?, "area_id"?}``."""
+    """Rename a device, move it to an area or label it: ``{"name_by_user"?, "area_id"?, "labels"?}``."""
     await _admin(request)
     body = await _json(request)
-    payload = {k: body[k] for k in ("name_by_user", "area_id") if k in body}
+    payload = {k: body[k] for k in ("name_by_user", "area_id", "labels") if k in body}
     return _answer(*await _hub("PATCH", f"/hub/devices/{_rid(device_id, 'device')}", json=payload))
 
 
@@ -283,12 +283,12 @@ async def disable_device(device_id: str, request: Request):
 @router.patch("/entities/{entity_id}")
 async def update_entity(entity_id: str, request: Request):
     """Rename, move, hide or disable an entity, or turn a camera's picture:
-    ``{"name"?, "area_id"?, "hidden"?, "disabled"?, "rotation"?}``."""
+    ``{"name"?, "area_id"?, "hidden"?, "disabled"?, "rotation"?, "labels"?}``."""
     await _admin(request)
     if not _ENTITY_ID.match(entity_id or ""):
         raise HTTPException(status_code=404, detail="No such entity")
     body = await _json(request)
-    payload = {k: body[k] for k in ("name", "area_id", "hidden", "disabled", "rotation") if k in body}
+    payload = {k: body[k] for k in ("name", "area_id", "hidden", "disabled", "rotation", "labels") if k in body}
     return _answer(*await _hub("PATCH", f"/hub/entities/{entity_id}", json=payload, timeout=_SCAN_TIMEOUT))
 
 
