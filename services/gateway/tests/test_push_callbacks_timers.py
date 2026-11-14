@@ -59,3 +59,9 @@ async def test_stop_deletes_a_one_off_by_id_and_leaves_a_recurring_alarm(executi
     # Already fired and removed: stopping it is still a success
     answer.update(status="FAILURE", message="No matching timer found.")
     assert (await push_callbacks.PUSH_CALLBACKS["timer_stop"](object(), {"id": "t1"}, None))["status"] == "SUCCESS"
+
+
+async def test_a_snooze_names_the_timer_it_snoozes_so_its_satellite_hears(execution):
+    calls, _ = execution
+    await push_callbacks.PUSH_CALLBACKS["timer_snooze"](object(), {"title": "Pasta", "again_of": "t5"}, None)
+    assert calls[0][2]["again_of"] == "t5"

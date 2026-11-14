@@ -573,6 +573,9 @@ class TimerRequest(BaseRequest):
     esphome_script: str | None = None
     flash_screen: bool | None = None
     url: str | None = None  # add: the app page the notice opens (e.g. a note's /notes?note=…); in-app paths only
+    # add: the fired timer this one snoozes or extends (a phone notice's button). If that timer rang on a voice
+    # satellite, the satellite stops ringing it and shows the new one (handlers/timer.py remember_fired_satellite).
+    again_of: str | None = None
 
 
 class TalkFileRequest(BaseModel):

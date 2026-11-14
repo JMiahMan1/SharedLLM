@@ -1372,6 +1372,7 @@ async def execute_trigger(payload: dict[str, Any]):
     # A timer set by voice rings on the satellite that heard it (satellite_timers.py).
     from services.execution import satellite_timers
     await satellite_timers.send(timer_data, "finished", creds.get("ha_url"), creds.get("ha_token"))
+    await timer.remember_fired_satellite(timer_data)  # a Stop or Snooze from a phone still reaches it
 
     # Execute the actual alert across all assigned hardware devices (ESPHome + TVs + Home Assistant Speakers)
     try:
