@@ -15,6 +15,7 @@ first run) and :func:`start` once it runs.
 | ``GET .../{kind}/{id}/traces`` | read | the last runs |
 | ``GET .../export``, ``POST .../import`` | admin | YAML in HA's file shapes |
 | ``GET .../catalog`` | read | triggers, conditions, actions, services and entities for an editor |
+| ``GET .../blueprints``, ``GET .../blueprints/{path}`` | admin | imported blueprints and the inputs they take |
 | ``GET|PUT .../remap``, ``POST .../remap/preview``, ``POST .../remap/suggest`` | admin | renamed-entity repairs |
 | ``GET|POST /api/homehub/schedules``, ``GET|PUT|DELETE .../{id}``, ``POST .../{id}/enabled`` | read / admin | the nielsfaber scheduler |
 | ``GET /api/homehub/climate``, ``.../programs``, ``.../hold``, ``.../resume``, ``.../settings`` | read / admin | thermostat schedules |
@@ -184,6 +185,19 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
         import asyncio
 
         return await asyncio.to_thread(suggest_remap, editor(), recorder_path())
+
+    @router.get("/api/homehub/automations/blueprints")
+    async def list_blueprints(request: Request) -> dict[str, Any]:
+        admin(request)
+        return {"blueprints": editor().blueprints()}
+
+    @router.get("/api/homehub/automations/blueprints/{path:path}")
+    async def get_blueprint(path: str, request: Request) -> Any:
+        admin(request)
+        try:
+            return editor().blueprint(path)
+        except EditorError as exc:
+            return fail(exc)
 
     @router.post("/api/homehub/automations/{kind}")
     async def create_item(kind: str, request: Request) -> Any:

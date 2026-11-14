@@ -75,6 +75,7 @@ class Service:
         self.runtime.start_recording()
         builtin.register(self.hub)
         tts.register(self.hub)
+        await self._start_helpers()  # before the automations: they name the helpers
         await self._start_people()
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
@@ -85,6 +86,16 @@ class Service:
         self._bg.append(asyncio.create_task(self.runtime.housekeeping()))
         self._bg.append(asyncio.create_task(recorder_statistics.start(self.runtime)))  # recorder statistics
         await self._start_discovery()
+
+    async def _start_helpers(self) -> None:
+        """HA's helpers (input_*, counter, timer) with their restored values (services/homehub/helpers.py)."""
+        from services.homehub.helpers import Helpers
+
+        manager = Helpers(self.hub, self.store)
+        await manager.start()
+        self.runtime.helpers = manager  # the /hub/helpers API reads it from here
+        if manager.problems:
+            log.error("helpers left out: %s", "; ".join(manager.problems))
 
     async def _start_discovery(self) -> None:
         """New devices on the LAN (services/homehub/discovery.py); ``HOMEHUB_DISCOVERY=0`` turns it off."""
@@ -143,6 +154,10 @@ class Service:
             log.exception("automation engine could not start")
 
     async def stop(self) -> None:
+        helpers = getattr(self.runtime, "helpers", None)
+        if helpers is not None:
+            self.runtime.helpers = None
+            await helpers.stop()
         bluetooth = getattr(self.runtime, "bluetooth", None)
         if bluetooth is not None:
             self.runtime.bluetooth = None

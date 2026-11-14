@@ -63,6 +63,7 @@ from services.common.video_recommendations import recommend_video
 from services.gateway import calls, camera_live_routes, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
 from services.gateway import phone_routes, room_presence
 from services.gateway import automation_routes
+from services.gateway import helper_routes
 from services.gateway import dashboard_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
@@ -943,6 +944,7 @@ app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sens
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(automation_routes.router)  # Automations and schedules
+app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

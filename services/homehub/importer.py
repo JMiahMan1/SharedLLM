@@ -10,7 +10,8 @@ What is carried over:
   last known states, HA users and refresh tokens (so existing tokens keep
   working), persons, zones, automations/scripts/scenes, the scheduler's
   schedules, to-do lists, the Android TV remote certificate, and optionally
-  recent history from ``home-assistant_v2.db``.
+  recent history from ``home-assistant_v2.db``, and the helpers (input_*, counter, timer)
+  HA kept in ``.storage``.
 """
 from __future__ import annotations
 
@@ -209,6 +210,14 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
         store.set_kv("blueprints", load_blueprints(config_dir))
     except Exception:
         log.exception("blueprints could not be imported")
+    # HA's helpers (input_*, counter, timer) from their own storage files; the hub's stay when HA kept none.
+    from services.homehub.helpers import STORE_KEY as HELPERS_KEY
+    from services.homehub.helpers import from_ha_storage
+
+    helpers = from_ha_storage(config_dir)
+    if helpers is not None:
+        store.set_kv(HELPERS_KEY, helpers)
+        report["helpers"] = sum(len(v) for v in helpers.values())
     sched = _read_storage(config_dir, "scheduler.storage") or {}
     store.set_kv("scheduler", sched)
     report["automations"], report["scripts"] = len(autos or []), len(scripts or {})

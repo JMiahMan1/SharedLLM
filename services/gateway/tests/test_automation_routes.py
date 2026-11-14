@@ -34,7 +34,9 @@ CLIMATE = {
     "can_edit": True,
 }
 CATALOG = {"triggers": [], "conditions": [], "actions": [], "services": [],
-           "entities": [{"entity_id": "light.porch"}, {"entity_id": "climate.den"}], "persons": [], "zones": []}
+           "entities": [{"entity_id": "light.porch"}, {"entity_id": "climate.den"}], "persons": [], "zones": [],
+           "devices": [{"id": "d1", "name": "Porch lamp", "entities": ["light.porch"]},
+                       {"id": "d2", "name": "Den thermostat", "entities": ["climate.den"]}]}
 
 
 @pytest.fixture
@@ -98,6 +100,8 @@ WRITES = [
     ("get", "/api/homehub/automations/export"),
     ("post", "/api/homehub/automations/import"),
     ("get", "/api/homehub/automations/remap"),
+    ("get", "/api/homehub/automations/blueprints"),
+    ("get", "/api/homehub/automations/blueprints/someone/motion.yaml"),
     ("put", "/api/homehub/automations/remap"),
     ("post", "/api/homehub/automations/remap/preview"),
     ("post", "/api/homehub/automations/remap/suggest"),
@@ -159,8 +163,10 @@ def test_members_see_only_what_touches_their_entities(client, hub, perms, member
     schedules = client.get("/api/homehub/schedules").json()
     assert [s["schedule_id"] for s in schedules["schedules"]] == ["abc123"]
     assert client.get("/api/homehub/schedules/def456").status_code == 404
-    entities = client.get("/api/homehub/automations/catalog").json()["entities"]
-    assert [e["entity_id"] for e in entities] == ["light.porch"]
+    catalog = client.get("/api/homehub/automations/catalog").json()
+    assert [e["entity_id"] for e in catalog["entities"]] == ["light.porch"]
+    # A device is listed when one of its entities may be viewed.
+    assert [d["id"] for d in catalog["devices"]] == ["d1"]
 
 
 def test_climate_overview_is_filtered_for_members(client, hub, perms, member):
@@ -286,3 +292,9 @@ async def test_the_hub_is_reached_with_the_right_credentials(monkeypatch):
     with pytest.raises(HTTPException) as err:
         await automation_routes._hub("GET", "/x", creds={"ha_url": "", "ha_token": ""})
     assert err.value.status_code == 503
+
+
+def test_a_blueprint_path_cannot_climb_out(client, hub, perms):
+    seen, _ = hub
+    assert client.get("/api/homehub/automations/blueprints/someone/..secret.yaml").status_code == 404
+    assert seen == []
