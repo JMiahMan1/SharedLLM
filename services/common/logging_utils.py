@@ -56,6 +56,62 @@ def redact_query_secrets(text: str) -> str:
     return _SECRET_QUERY_RE.sub(r"\1***", text) if "=" in text else text
 
 
+#: Names whose value is a credential, in ``name=value``, ``name: value`` or ``"name": "value"``.
+_SECRET_NAME = (r"[\w-]*(?:password|passwd|secret|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token"
+                r"|auth[_-]?token|private[_-]?key|preshared[_-]?key|psk|token)")
+#: Only values that look like a credential (8+ token characters): "tokens: 512" stays readable.
+_SECRET_ASSIGN_RE = re.compile(
+    r"(?P<k>[\"']?\b" + _SECRET_NAME + r"\b[\"']?\s*[:=]\s*[\"']?)(?P<v>[A-Za-z0-9._~+/=-]{8,})", re.IGNORECASE)
+_SECRET_HEADER_RE = re.compile(
+    r"(?P<k>\b(?:authorization|x-internal-secret|x-api-key|cookie|set-cookie)\b[\"']?\s*[:=]\s*[\"']?)"
+    r"(?:(?:bearer|basic|token)\s+)?(?P<v>[^\s\"',;\[\]]{6,})", re.IGNORECASE)
+_SECRET_SHAPES = [
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}"),  # a JWT
+    re.compile(r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{20,})"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)", re.DOTALL),
+]
+
+
+def redact_secrets(text: str, known: tuple[str, ...] | list[str] = ()) -> str:
+    """``text`` with anything that looks like a credential replaced by ``***``.
+
+    For log text shown to people (the Admin log viewer): credential query
+    parameters, Authorization / X-Internal-Secret / cookie headers, Bearer
+    tokens, JWTs, GitHub/GitLab/OpenAI-style keys, PEM private keys,
+    ``password=`` / ``"token": "..."`` / ``PrivateKey = ...`` assignments, and
+    the exact ``known`` values (the reader's own secrets, 8+ characters).
+    A second line of defence: services should not log secrets at all.
+    """
+    if not text:
+        return text
+    for value in known:
+        if value and len(value) >= 8 and value in text:
+            text = text.replace(value, "***")
+    text = redact_query_secrets(text)
+    text = _SECRET_HEADER_RE.sub(lambda m: m.group("k") + "***", text)
+    text = _SECRET_ASSIGN_RE.sub(lambda m: m.group("k") + "***", text)
+    for shape in _SECRET_SHAPES:
+        text = shape.sub(lambda m: "Bearer ***" if m.group(0)[:6].lower() == "bearer" else "***", text)
+    return text
+
+
+#: Environment variables whose names say they hold a credential.
+_SECRET_ENV_NAME = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY|PSK|_KEY$|CREDENTIAL)", re.I)
+
+
+def secret_env_values(environ: dict[str, str] | None = None) -> tuple[str, ...]:
+    """The values of this process's secret-looking environment variables, for ``redact_secrets(known=...)``.
+
+    Read once at service start (the environment is not re-read per call).
+    """
+    import os
+
+    env = os.environ if environ is None else environ
+    return tuple(sorted({v for k, v in env.items() if _SECRET_ENV_NAME.search(k) and v and len(v) >= 8},
+                        key=len, reverse=True))
+
+
 class _RedactQuerySecrets(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple) and record.args:

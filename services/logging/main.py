@@ -16,6 +16,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from services.common.logging_utils import redact_secrets, secret_env_values
 from services.common.secrets import secret_matches
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
 from services.shared.info_endpoint import info_router
@@ -104,12 +105,17 @@ async def get_redis() -> redis.Redis:
         _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     return _redis_client
 
+#: This service's own secrets (read once at start); a log line that quotes one is masked.
+KNOWN_SECRETS = secret_env_values()
+
+
 def _sanitize_scalar(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     sanitized = value
     for pattern in SECRET_PATTERNS:
         sanitized = pattern.sub("[REDACTED]", sanitized)
+    sanitized = redact_secrets(sanitized, KNOWN_SECRETS)
     if len(sanitized) > MAX_LOG_FIELD_LENGTH:
         return sanitized[:MAX_LOG_FIELD_LENGTH] + "...[TRUNCATED]"
     return sanitized
@@ -179,6 +185,10 @@ async def _fetch_logs(
                 continue
             if wanted_levels and str(entry.get("level", "")).upper() not in wanted_levels:
                 continue
+            # Again on the way out: entries stored before a pattern existed are masked too.
+            entry["message"] = sanitize_log_payload(entry.get("message"))
+            if entry.get("context"):
+                entry["context"] = sanitize_log_payload(entry["context"])
             results.append(entry)
             if len(results) >= limit:
                 break

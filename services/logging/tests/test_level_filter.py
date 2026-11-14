@@ -44,3 +44,12 @@ def test_warn_alias_and_no_filter(monkeypatch):
     assert [e["message"] for e in out] == ["a"]
     out, fake = _run(monkeypatch, entries, user_id="admin", limit=10)
     assert len(out) == 2 and fake.num == 100
+
+
+def test_stored_entries_are_masked_again_on_the_way_out(monkeypatch):
+    # Written before a pattern existed: the viewer must still not show it. Made-up values.
+    entries = [{"level": "INFO", "message": "GET /hook?token=abcdef123456",
+                "context": {"note": "X-Internal-Secret: made-up-secret-value"}}]
+    out, _ = _run(monkeypatch, entries, user_id="admin", limit=10)
+    assert "abcdef123456" not in out[0]["message"]
+    assert "made-up-secret-value" not in json.dumps(out[0]["context"])

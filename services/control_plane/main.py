@@ -10,6 +10,7 @@ from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
+from services.common.logging_utils import redact_secrets, secret_env_values
 from services.common.secrets import secret_matches
 from services.config import GEO_SVC_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 from services.control_plane import disk_alerts, network_routes, osrm_map, registry
@@ -24,6 +25,8 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
 
 TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
+#: This service's own secrets (read once at start), masked wherever they appear in a container's log.
+KNOWN_SECRETS = secret_env_values()
 
 CONTAINER_PREFIX = "wsbox-"
 NETWORK_PREFIX = "wsnet-"
@@ -1045,7 +1048,9 @@ def get_container_logs(service_name: str, tail: int = 100):
         raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     try:
-        logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
+        # The Admin log viewer shows this to people: mask anything that looks like a credential
+        # (a webhook token sat in plain text in a service's access log for days, 2026-11-13).
+        logs = redact_secrets(container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8"), KNOWN_SECRETS)
         tb_matches = TRACEBACK_RE.findall(logs)
         has_tracebacks = len(tb_matches) > 0
         log.info(f"[logs] {container.name} tail={tail} tracebacks_found={len(tb_matches)}")
