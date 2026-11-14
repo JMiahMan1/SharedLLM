@@ -118,9 +118,12 @@ class Runtime:
                 attempt += 1
                 entry.state, entry.reason = "setup_retry", f"{type(exc).__name__}: {exc}"
                 now = loop.time()
-                loud = reported is None or reported[0] != entry.reason or now - reported[1] >= RETRY_REPORT_EVERY_S
+                # The same outage reads differently from try to try (a timeout has
+                # no text, a refusal names the socket): compare its headline only.
+                headline = f"{type(exc).__name__}: {str(exc).split(':', 1)[0]}"
+                loud = reported is None or reported[0] != headline or now - reported[1] >= RETRY_REPORT_EVERY_S
                 if loud:
-                    reported = (entry.reason, now)
+                    reported = (headline, now)
                 (log.warning if loud else log.debug)(
                     "%s (%s) setup failed (attempt %d), retry in %ss: %s", entry.domain, entry.title, attempt, delay, exc)
                 driver.mark_unavailable()

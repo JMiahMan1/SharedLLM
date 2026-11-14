@@ -382,7 +382,8 @@ async def test_a_device_that_stays_off_is_reported_once_not_on_every_retry(tmp_p
     class Off(Driver):
         async def async_setup(self):
             tries.append(1)
-            raise DeviceUnavailable("unreachable")
+            # a timeout and a refusal take turns, as a real unplugged device's do
+            raise DeviceUnavailable("Tasmota 10.0.0.9 unreachable: " + ("" if len(tries) % 2 else "Connect call failed"))
 
     monkeypatch.setattr(rt, "driver_class", lambda domain: Off)
     monkeypatch.setattr(rt, "RETRY_DELAYS", (0.001,))
