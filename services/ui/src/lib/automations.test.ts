@@ -88,3 +88,19 @@ describe('mergeRemap', () => {
     expect(mergeRemap({ only: ['a'] }, {})).toEqual({ only: ['a'] });
   });
 });
+
+describe('voice step types', () => {
+  it('knows a reply, a satellite timer and a sentence trigger', async () => {
+    const { actionType, blankStep, describeStep, sentenceList } = await import('./automations');
+    expect(actionType({ set_conversation_response: 'Hi' })).toBe('set_conversation_response');
+    expect(actionType({ action: 'assist_satellite.timer_event' })).toBe('satellite_timer');
+    expect(actionType({ service: 'assist_satellite.timer_event' })).toBe('satellite_timer');
+    expect(actionType({ action: 'assist_satellite.announce' })).toBe('service');
+    expect(blankStep('action', 'satellite_timer')).toEqual({ action: 'assist_satellite.timer_event', data: { event: 'started' } });
+    expect(blankStep('trigger', 'conversation')).toEqual({ trigger: 'conversation', command: [] });
+    expect(sentenceList(' good night ')).toEqual(['good night']);
+    expect(sentenceList(['a', '', ' b '])).toEqual(['a', 'b']);
+    expect(describeStep('trigger', { trigger: 'conversation', command: 'lights out' })).toBe('When someone says "lights out"');
+    expect(describeStep('trigger', { trigger: 'conversation' })).toBe('When someone says a sentence');
+  });
+});

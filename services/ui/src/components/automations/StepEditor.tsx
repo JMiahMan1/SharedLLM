@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import Toggle from '../ui/Toggle';
 import { Chip, EntityPicker, Field, JsonBox } from './FormBits';
 import { BUTTON, DANGER, INPUT } from './styles';
 import {
-  actionEntities, actionService, actionType, blankStep, conditionType, describeStep, forEachText, omit, parseForEach,
-  REPEAT_LABELS, REPEAT_MODES, repeatMode, serviceFields, entityTakesService, serviceNames, servicesForEntities,
-  triggerType, withActionEntities, withRepeatMode,
-  type Catalog, type RepeatMode, type ServiceField, type Spec, type SpecField, type Step,
+  actionEntities, actionService, actionType, blankStep, conditionType, describeStep, forEachText, getVoices, omit,
+  parseForEach, REPEAT_LABELS, REPEAT_MODES, repeatMode, SATELLITE_TIMER_SERVICE, sentenceList, serviceFields,
+  entityTakesService, serviceNames, servicesForEntities, triggerType, withActionEntities, withRepeatMode,
+  type Catalog, type RepeatMode, type ServiceField, type Spec, type SpecField, type Step, type TtsVoices,
 } from '../../lib/automations';
 import { WEEKDAYS, WEEKDAY_LABELS } from '../../lib/schedules';
 
@@ -163,6 +163,7 @@ function StepBody({ group, type, spec, step, catalog, disabled, depth, onChange 
 
   if (group === 'action') {
     if (type === 'service') return <ServiceAction step={step} catalog={catalog} disabled={disabled} onChange={onChange} />;
+    if (type === 'satellite_timer') return <SatelliteTimerAction step={step} catalog={catalog} disabled={disabled} onChange={onChange} />;
     if (type === 'condition') return <ConditionAction step={step} catalog={catalog} disabled={disabled} depth={depth} onChange={onChange} />;
     if (type === 'sequence') return nested('sequence', 'action', 'In order');
     if (type === 'parallel') return nested('parallel', 'action', 'All at the same time');
@@ -267,6 +268,21 @@ function ForEachInput({ value, disabled, onChange }: { value: unknown; disabled:
   );
 }
 
+/** A list typed one item per line (a conversation trigger's sentences), kept as typed so a new line can be started. */
+function LinesInput({ label, value, disabled, onChange }: {
+  label: string; value: unknown; disabled: boolean; onChange: (v: unknown) => void;
+}) {
+  const [text, setText] = useState(() => sentenceList(value).join('\n'));
+  return (
+    <div className="sm:col-span-2">
+      <Field label={label} hint="One per line. [optional] words, (this|that) choices and {name} slots work as in Home Assistant">
+        <textarea className={`${INPUT} text-sm`} rows={3} disabled={disabled} value={text}
+          onChange={(e) => { setText(e.target.value); const next = sentenceList(e.target.value.split('\n')); onChange(next.length ? next : undefined); }} />
+      </Field>
+    </div>
+  );
+}
+
 /** A condition used as a step: pick its kind, then the same form as under "Only if". */
 function ConditionAction({ step, catalog, disabled, depth, onChange }: {
   step: Step; catalog?: Catalog; disabled: boolean; depth: number; onChange: (s: Step) => void;
@@ -316,6 +332,8 @@ function SpecInput({ field, value, catalog, disabled, onChange }: {
     case 'conditions':
       // Edited where the step that owns it is drawn (repeat while/until).
       return null;
+    case 'lines':
+      return <LinesInput label={label} value={value} disabled={disabled} onChange={onChange} />;
     case 'entity':
       return (
         <div className="sm:col-span-2">
@@ -425,6 +443,10 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
     onChange(out);
   };
   const setService = (value: string) => onChange({ ...omit(step, ['service']), action: value });
+  // tts.speak takes its voice in options.voice: offered from the voices Jarvis has (Kokoro and cloned ones).
+  const speaks = domain === 'tts';
+  const options = (data.options && typeof data.options === 'object' ? data.options : {}) as Record<string, unknown>;
+  const dataFields = Object.entries(fields).filter(([name]) => name !== 'entity_id' && !(speaks && name === 'options'));
 
   return (
     <div className="space-y-3">
@@ -449,14 +471,23 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
       {asJson ? (
         <JsonBox label="Data (JSON)" value={data} disabled={disabled} onChange={setData} />
       ) : (
-        Object.entries(fields).filter(([name]) => name !== 'entity_id').length > 0 && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {Object.entries(fields).filter(([name]) => name !== 'entity_id').map(([name, f]) => (
-              <ServiceDataInput key={name} name={name} field={f} value={data[name]} disabled={disabled}
-                onChange={(v) => setData(v === undefined || v === '' ? omit(data, [name]) : { ...data, [name]: v })} />
-            ))}
-          </div>
-        )
+        <>
+          {dataFields.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {dataFields.map(([name, f]) => (
+                <ServiceDataInput key={name} name={name} field={f} value={data[name]} disabled={disabled}
+                  onChange={(v) => setData(v === undefined || v === '' ? omit(data, [name]) : { ...data, [name]: v })} />
+              ))}
+            </div>
+          )}
+          {speaks && (
+            <VoicePicker value={typeof options.voice === 'string' ? options.voice : ''} disabled={disabled}
+              onChange={(voice) => {
+                const nextOptions = voice ? { ...options, voice } : omit(options, ['voice']);
+                setData(Object.keys(nextOptions).length ? { ...data, options: nextOptions } : omit(data, ['options']));
+              }} />
+          )}
+        </>
       )}
       <button type="button" className={BUTTON} onClick={() => setAsJson((v) => !v)}>
         {asJson ? 'Back to fields' : 'Edit data as JSON'}
@@ -473,6 +504,74 @@ function ServiceAction({ step, catalog, disabled, onChange }: {
             onChange={(v) => onChange(v ? { ...step, continue_on_error: true } : omit(step, ['continue_on_error']))} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The voice a spoken message uses: Jarvis's own voices and the cloned voices enrolled on alpaca. */
+function VoicePicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const [voices, setVoices] = useState<TtsVoices | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    getVoices().then((v) => { if (live) setVoices(v); })
+      .catch((e: unknown) => { if (live) setFailed(e instanceof Error ? e.message : 'The voices could not be listed'); });
+    return () => { live = false; };
+  }, []);
+  const list = voices?.voices ?? [];
+  const kokoro = list.filter((v) => v.kind === 'kokoro');
+  const clones = list.filter((v) => v.kind === 'clone');
+  const problems = [
+    failed,
+    voices?.errors.kokoro && `Jarvis's voices: ${voices.errors.kokoro}`,
+    voices?.errors.clone && `Cloned voices: ${voices.errors.clone}`,
+  ].filter(Boolean) as string[];
+  return (
+    <div className="space-y-1" data-testid="tts-voice">
+      <Field label="Voice (optional)">
+        <select className={INPUT} disabled={disabled || !voices} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{voices?.default ? `Jarvis's usual voice (${voices.default})` : "Jarvis's usual voice"}</option>
+          {value && !list.some((v) => v.id === value) && <option value={value}>{value} (not found)</option>}
+          {clones.length > 0 && (
+            <optgroup label="Cloned voices">
+              {clones.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </optgroup>
+          )}
+          {kokoro.length > 0 && (
+            <optgroup label="Jarvis's voices">
+              {kokoro.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </optgroup>
+          )}
+        </select>
+      </Field>
+      {problems.map((p) => <p key={p} role="alert" className="text-xs text-amber-300">{p}</p>)}
+    </div>
+  );
+}
+
+/** Tell a voice satellite about a timer (its countdown ring and display): which satellite, then the event's fields. */
+function SatelliteTimerAction({ step, catalog, disabled, onChange }: {
+  step: Step; catalog?: Catalog; disabled: boolean; onChange: (s: Step) => void;
+}) {
+  const fields = Object.entries(serviceFields(catalog, SATELLITE_TIMER_SERVICE));
+  const data = (step.data && typeof step.data === 'object' ? step.data : {}) as Record<string, unknown>;
+  const setData = (next: Record<string, unknown>) => onChange(Object.keys(next).length ? { ...step, data: next } : omit(step, ['data']));
+  return (
+    <div className="space-y-3">
+      <Field group label="Voice satellite">
+        <EntityPicker entities={catalog?.entities ?? []} value={actionEntities(step)} domains={['assist_satellite']}
+          disabled={disabled} label="Voice satellite" onChange={(next) => onChange(withActionEntities(step, next.slice(0, 1)))} />
+      </Field>
+      {fields.length ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {fields.map(([name, f]) => (
+            <ServiceDataInput key={name} name={name} field={f} value={data[name]} disabled={disabled}
+              onChange={(v) => setData(v === undefined || v === '' ? omit(data, [name]) : { ...data, [name]: v })} />
+          ))}
+        </div>
+      ) : (
+        <JsonBox label="Timer event (JSON)" value={data} disabled={disabled} onChange={setData} />
+      )}
     </div>
   );
 }

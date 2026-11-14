@@ -66,7 +66,7 @@ export interface Trace {
 
 export type FieldKind =
   | 'entity' | 'entities' | 'text' | 'number' | 'time' | 'duration' | 'select' | 'template' | 'weekdays' | 'boolean'
-  | 'device' | 'conditions';
+  | 'device' | 'conditions' | 'lines';
 
 export interface SpecField {
   name: string;
@@ -81,6 +81,8 @@ export interface Spec {
   type: string;
   label: string;
   fields: SpecField[];
+  /** A step that is a call of this service (drawn with the service's own fields). */
+  service?: string;
 }
 
 export interface ServiceField {
@@ -208,6 +210,28 @@ export async function importYaml(kind: ItemKind, yaml: string, overwrite = false
 export async function exportYaml(kind: ItemKind, id?: string): Promise<{ yaml: string; count: number; filename: string }> {
   return (await apiClient.get(`${BASE}/export`, { params: id ? { kind, id } : { kind } })).data;
 }
+
+/** A voice `tts.speak` takes in `options.voice`: one of Jarvis's Kokoro voices, or a cloned voice on alpaca. */
+export interface TtsVoice {
+  id: string;
+  name: string;
+  kind: 'kokoro' | 'clone';
+}
+
+export interface TtsVoices {
+  voices: TtsVoice[];
+  default?: string;
+  /** Why a kind of voice could not be listed (a service down, ALPACA_WEB_URL unset), by kind. */
+  errors: Partial<Record<'kokoro' | 'clone', string>>;
+}
+
+export async function getVoices(): Promise<TtsVoices> {
+  const data = (await apiClient.get(`${BASE}/voices`)).data ?? {};
+  return { voices: Array.isArray(data.voices) ? data.voices : [], default: data.default, errors: data.errors ?? {} };
+}
+
+/** The service a voice satellite's timer display is told through (a Jarvis timer's countdown and ring). */
+export const SATELLITE_TIMER_SERVICE = 'assist_satellite.timer_event';
 
 export async function getCatalog(): Promise<Catalog> {
   return (await apiClient.get(`${BASE}/catalog`)).data;
@@ -436,13 +460,14 @@ export function conditionType(condition: Step): string {
 
 /** An action's type from the keys HA uses to tell them apart. */
 export function actionType(action: Step): string {
+  if ((action.action ?? action.service) === SATELLITE_TIMER_SERVICE) return 'satellite_timer';
   if (typeof action.action === 'string' || typeof action.service === 'string') return 'service';
   // HA's device action: the device, its integration and what to do (the hub runs it as the service it stands for).
   if ('device_id' in action && 'domain' in action && 'type' in action) return 'device';
   // A condition as a step: the sequence carries on only if it holds.
   if (typeof action.condition === 'string') return 'condition';
   for (const key of ['delay', 'wait_template', 'wait_for_trigger', 'choose', 'if', 'repeat', 'variables', 'stop',
-    'scene', 'event', 'sequence', 'parallel']) {
+    'scene', 'event', 'sequence', 'parallel', 'set_conversation_response']) {
     if (key in action) return key;
   }
   return 'raw';
@@ -618,10 +643,13 @@ export function blankStep(group: 'trigger' | 'condition' | 'action', type: strin
       case 'scene': step.scene = ''; break;
       case 'event': step.event = ''; break;
       case 'wait_template': step.wait_template = ''; break;
+      case 'set_conversation_response': step.set_conversation_response = ''; break;
+      case 'satellite_timer': step.action = SATELLITE_TIMER_SERVICE; step.data = { event: 'started' }; break;
       default: break;
     }
   }
   if (group === 'trigger' && type === 'device_onoff') step.to = 'on';
+  if (group === 'trigger' && type === 'conversation') step.command = [];
   if (group !== 'action' && type === 'device') Object.assign(step, { device_id: '', domain: '', type: '' });
   for (const field of spec?.fields ?? []) {
     if (field.kind === 'select' && field.options?.length && !(field.name in step)) step[field.name] = field.options[0];
@@ -730,6 +758,11 @@ export function describeStep(group: 'trigger' | 'condition' | 'action', step: St
     if (type === 'zone') return `When ${names(step.entity_id) || 'someone'} ${String(step.event ?? 'enter')}s ${names(step.zone)}`;
     if (type === 'template') return 'When a template becomes true';
     if (type === 'device') return `When ${deviceName(catalog, step.device_id)} ${humanType(step.type)}`;
+    if (type === 'conversation') {
+      const said = sentenceList(step.command);
+      if (!said.length) return 'When someone says a sentence';
+      return `When someone says "${said[0]}"${said.length > 1 ? ` or ${said.length - 1} more` : ''}`;
+    }
     return `${type} trigger`;
   }
   if (group === 'condition') {
@@ -764,7 +797,18 @@ export function describeStep(group: 'trigger' | 'condition' | 'action', step: St
   if (type === 'wait_for_trigger') return 'Wait for a trigger';
   if (type === 'stop') return `Stop: ${String(step.stop ?? '')}`;
   if (type === 'scene') return `Activate ${names(step.scene)}`;
+  if (type === 'set_conversation_response') return `Reply: ${String(step.set_conversation_response ?? '')}`;
+  if (type === 'satellite_timer') {
+    const data = (step.data ?? {}) as Record<string, unknown>;
+    return `Timer ${String(data.event ?? 'event')} on ${names(actionEntities(step)) || 'a voice satellite'}`;
+  }
   return type === 'raw' ? 'Custom step' : `${type} step`;
+}
+
+/** A conversation trigger's sentences (HA writes one as a string or several as a list). */
+export function sentenceList(value: unknown): string[] {
+  const all = Array.isArray(value) ? value.map(String) : typeof value === 'string' ? [value] : [];
+  return all.map((s) => s.trim()).filter(Boolean);
 }
 
 /** An empty config for a new item of a kind. */
