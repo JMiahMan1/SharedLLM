@@ -238,6 +238,38 @@ function statsStatus() {
   };
 }
 
+const TODO_FEATURES = { create: true, delete: true, update: true, move: true, due_date: false, due_datetime: false,
+  description: false };
+
+/** The hub's to-do lists (Lists page): made-up names, one with due dates and a long item for small phones. */
+function todoLists() {
+  return [
+    { entity_id: 'todo.reminders', name: 'Reminders', open: 2, available: true,
+      features: { ...TODO_FEATURES, due_date: true, due_datetime: true, description: true }, items: [
+        { uid: 'r1', summary: 'Book the boiler service', status: 'needs_action', due: iso(-60 * 24).slice(0, 10), description: null },
+        { uid: 'r2', summary: 'Return the library books before the end of the month please', status: 'needs_action',
+          due: null, description: 'Three of them' },
+      ] },
+    { entity_id: 'todo.shopping_list', name: 'Shopping List', open: 2, available: true, features: TODO_FEATURES, items: [
+      { uid: 's1', summary: 'Milk', status: 'needs_action', due: null, description: null },
+      { uid: 's2', summary: 'Bread', status: 'needs_action', due: null, description: null },
+      { uid: 's3', summary: 'Apples', status: 'completed', due: null, description: null },
+    ] },
+  ];
+}
+
+/** The Logbook tab: a few changes today and yesterday, one with a long name. */
+function logbook(areaId: string | null) {
+  const rows = [
+    { when: iso(-5), entity_id: 'light.living_lamp', name: 'Reading lamp', state: 'on' },
+    { when: iso(-40), entity_id: 'binary_sensor.back_door', name: 'Back door', state: 'off' },
+    { when: iso(-90), entity_id: 'sensor.living_temperature', name: 'Living room temperature sensor with a long name', state: '74.2' },
+    { when: iso(-60 * 26), entity_id: 'light.kitchen_pendants', name: 'Pendants', state: 'off' },
+  ];
+  const inArea = areaId ? new Set(ROOMS.areas.find((a) => a.area_id === areaId)?.entities.map((e) => e.entity_id) ?? []) : null;
+  return { entries: inArea ? rows.filter((r) => inArea.has(r.entity_id)) : rows, truncated: false };
+}
+
 export interface HomeMocks {
   unmocked: string[];
   posts: Array<{ path: string; body: unknown }>;
@@ -252,6 +284,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
   const rotations = new Map<string, number>();
   // Device locks set from a camera's Who can watch, so the next read shows them.
   const locks = new Map<string, string[]>();
+  // The to-do lists, changed by the page's writes so the next read shows them.
+  const lists = todoLists();
+  const listOf = (id: string) => lists.find((l) => l.entity_id === id);
   await page.addInitScript((p) => {
     localStorage.setItem('jarvis_api_key', 'test-key');
     localStorage.setItem('jarvis_user', JSON.stringify(p));
@@ -284,6 +319,29 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (method === 'PATCH' && entityPatch && typeof (body as { rotation?: unknown })?.rotation === 'number') {
         rotations.set(decodeURIComponent(entityPatch[1]), (body as { rotation: number }).rotation);
       }
+      const listWrite = /^\/api\/lists\/([^/]+)\/(items|clear_completed)(?:\/([^/]+))?(?:\/(move))?$/.exec(p);
+      if (listWrite && listOf(decodeURIComponent(listWrite[1]))) {
+        const list = listOf(decodeURIComponent(listWrite[1]))!;
+        const uid = listWrite[3] ? decodeURIComponent(listWrite[3]) : null;
+        const b = (body ?? {}) as { summary?: string; status?: string; previous_uid?: string | null };
+        if (listWrite[2] === 'clear_completed') list.items = list.items.filter((i) => i.status !== 'completed');
+        else if (method === 'POST' && !uid) {
+          list.items.push({ uid: `n${list.items.length + 1}`, summary: String(b.summary), status: 'needs_action', due: null,
+            description: null });
+        } else if (method === 'DELETE') list.items = list.items.filter((i) => i.uid !== uid);
+        else if (listWrite[4] === 'move') {
+          const item = list.items.find((i) => i.uid === uid)!;
+          list.items = list.items.filter((i) => i.uid !== uid);
+          const at = b.previous_uid ? list.items.findIndex((i) => i.uid === b.previous_uid) + 1 : 0;
+          list.items.splice(at, 0, item);
+        } else if (method === 'PATCH') {
+          const item = list.items.find((i) => i.uid === uid)!;
+          if (b.status) item.status = b.status;
+          if (b.summary) item.summary = b.summary;
+        }
+        list.open = list.items.filter((i) => i.status !== 'completed').length;
+        return json(list);
+      }
       if (p === '/api/homehub/bluetooth/map/sessions') {
         return json({ session_id: 'map-1', area_id: 'bedroom', tracker: 'sensor.robin_s_phone', ends_at: iso(1) });
       }
@@ -308,6 +366,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/dashboard/rooms') return json(ROOMS);
     if (p === '/api/dashboard/climate') return json({ thermostats: [DASH_THERMOSTAT] });
     if (p === '/api/dashboard/history') return json({ series: {} });
+    if (p === '/api/dashboard/logbook') return json(logbook(url.searchParams.get('area_id')));
+    if (p === '/api/lists') return json({ lists });
     if (p === '/api/dashboard/statistics') return json({ statistics: {} });
     if (p === '/api/dashboard/statistics/status') return json(statsStatus());
     if (p === '/api/dashboard/entities') {

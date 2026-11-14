@@ -10,8 +10,9 @@ import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
-  DOMAIN_LABELS, HISTORY_PRESETS, MAX_HISTORY_ENTITIES, failureText, getEntities, getHistory, getStatistics, isNumericSeries,
-  mergeNumericSeries, numericPoints, parseEntityParam, rangeFromParams, seriesColour, stateColour, timelineSegments,
+  DOMAIN_LABELS, HISTORY_PRESETS, MAX_HISTORY_ENTITIES, failureText, getEntities, getHistory, getLogbook, getRooms,
+  getStatistics, isNumericSeries, logbookByDay, logbookPhrase, mergeNumericSeries, numericPoints, parseEntityParam,
+  rangeFromParams, seriesColour, stateColour, timelineSegments,
   type HistorySeries, type PickerEntity, type StatRow,
 } from '../lib/dashboards';
 
@@ -98,12 +99,72 @@ function Timeline({ name, points, startMs, endMs }: { name: string; points: Hist
   );
 }
 
+/**
+ * The Logbook (Home Assistant's logbook): what changed, newest first, for the
+ * whole house, a room, or the devices picked above, over the same range.
+ * Members see only what History shows them: the gateway leaves out anything
+ * they may not use.
+ */
+function Logbook({ selected, areaId, range, onArea }: {
+  selected: string[]; areaId: string | null; range: { start: Date; end: Date; key: string }; onArea: (id: string | null) => void;
+}) {
+  const { data: rooms } = useQuery({ queryKey: ['dashboard', 'rooms'], queryFn: getRooms });
+  const areas = (rooms?.areas ?? []).filter((a) => a.entities.length > 0);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['dashboard', 'logbook', selected.join(','), areaId ?? '', range.key,
+      range.key === 'custom' ? range.start.toISOString() : '', range.key === 'custom' ? range.end.toISOString() : ''],
+    refetchInterval: range.key === 'custom' ? false : 60_000,
+    queryFn: () => getLogbook({ entityIds: selected, areaId, start: range.start, end: range.end }),
+  });
+  const days = logbookByDay(data?.entries ?? []);
+  return (
+    <section className="glass-card rounded-2xl p-4 space-y-3" aria-label="Logbook" data-testid="logbook">
+      <label className="flex flex-wrap items-center gap-2 text-xs text-slate-400">Room
+        <select value={areaId ?? ''} onChange={(e) => onArea(e.target.value || null)} aria-label="Room"
+          className="min-h-11 min-w-0 max-w-full flex-1 rounded-xl bg-white/5 border border-white/10 px-2 text-sm text-white">
+          <option value="">Whole house</option>
+          {areas.map((a) => <option key={a.area_id} value={a.area_id}>{a.name}</option>)}
+        </select>
+      </label>
+      {isLoading && <CardSkeletons count={1} className="grid" height="h-40" label="Loading the logbook" />}
+      {error && <ErrorRetry title={failureText(error, 'Could not load the logbook')} onRetry={() => void refetch()} />}
+      {data && data.entries.length === 0 && (
+        <p className="text-sm text-slate-400 py-4">Nothing changed in this range.</p>
+      )}
+      {days.map(({ day, entries }) => (
+        <div key={day}>
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 py-2">{day}</h3>
+          <ol className="divide-y divide-white/5">
+            {entries.map((e, i) => (
+              <li key={`${e.entity_id}-${e.when}-${i}`} className="flex gap-3 py-2 text-sm" data-testid="logbook-entry">
+                <time dateTime={e.when} className="w-16 shrink-0 text-xs text-slate-400 pt-0.5">
+                  {new Date(e.when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </time>
+                <span className="min-w-0 break-words">
+                  <span className="font-medium text-white">{e.name}</span>{' '}
+                  <span className="text-slate-300">{logbookPhrase(e.state)}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
+      {data?.truncated && (
+        <p className="text-xs text-slate-500">Showing the newest {data.entries.length}. Pick a room, a device or a shorter range to see more.</p>
+      )}
+    </section>
+  );
+}
+
 export default function History() {
   const isAdmin = Boolean(useAuth().user?.is_admin);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [params, setParams] = useSearchParams();
   const selected = parseEntityParam(params.get('e'));
   const range = rangeFromParams(params);
+  const view = params.get('view') === 'logbook' ? 'logbook' : 'charts';
+  const areaParam = params.get('area');
+  const areaId = areaParam && /^[a-z0-9_]+$/.test(areaParam) ? areaParam : null;
   const { data: all } = useQuery({ queryKey: ['dashboard', 'entities'], queryFn: () => getEntities() });
   const meta = useMemo(() => new Map((all ?? []).map((e) => [e.entity_id, e])), [all]);
   const useStats = (range.end.getTime() - range.start.getTime()) / HOUR_MS > STATISTICS_AFTER_HOURS;
@@ -120,7 +181,7 @@ export default function History() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'history', selected.join(','), range.key, range.key === 'custom' ? range.start.toISOString() : '',
       range.key === 'custom' ? range.end.toISOString() : ''],
-    enabled: selected.length > 0,
+    enabled: selected.length > 0 && view === 'charts',
     refetchInterval: range.key === 'custom' ? false : 60_000,
     queryFn: async (): Promise<Loaded> => {
       let stats: Record<string, StatRow[]> = {};
@@ -172,7 +233,17 @@ export default function History() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 pb-24" data-testid="history-page">
       <PageHeader icon={HistoryIcon} tone="text-sky-400" title="History"
-        subtitle="How any device or sensor changed over time." />
+        subtitle="How any device or sensor changed over time, and everything that happened.">
+        <div role="tablist" aria-label="History views" className="flex gap-2">
+          {([['charts', 'Charts'], ['logbook', 'Logbook']] as const).map(([key, label]) => (
+            <button key={key} type="button" role="tab" aria-selected={view === key}
+              onClick={() => update({ view: key === 'charts' ? null : key })}
+              className={`min-h-11 rounded-xl px-4 text-sm ${view === key ? 'bg-sky-500/20 text-sky-100 font-semibold' : 'bg-white/5 text-slate-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </PageHeader>
       <div className="glass-card rounded-2xl p-4 space-y-3">
         <EntityPicker selected={selected} onChange={(ids) => update({ e: ids.join(',') || null })} />
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Range">
@@ -192,14 +263,18 @@ export default function History() {
         </div>
       </div>
 
-      {selected.length === 0 && (
+      {view === 'logbook' && (
+        <Logbook selected={selected} areaId={areaId} range={range} onArea={(id) => update({ area: id })} />
+      )}
+
+      {view === 'charts' && selected.length === 0 && (
         <EmptyState icon={<HistoryIcon size={28} />} title="Pick something to chart"
           detail="Search above for a device or sensor, a thermostat or a power circuit, and add up to twelve at once." />
       )}
-      {isLoading && selected.length > 0 && <CardSkeletons count={1} className="grid" height="h-64" label="Loading history" />}
-      {error && <ErrorRetry title={failureText(error, 'Could not load the history')} onRetry={() => void refetch()} />}
+      {view === 'charts' && isLoading && selected.length > 0 && <CardSkeletons count={1} className="grid" height="h-64" label="Loading history" />}
+      {view === 'charts' && error && <ErrorRetry title={failureText(error, 'Could not load the history')} onRetry={() => void refetch()} />}
 
-      {charts.byUnit.map(({ unit, ids, rows }) => (
+      {view === 'charts' && charts.byUnit.map(({ unit, ids, rows }) => (
         <section key={unit || 'none'} className="glass-card rounded-2xl p-4" aria-label={unit ? `Values in ${unit}` : 'Values'}>
           {unit && <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">{unit}</h2>}
           <div className="h-64" data-testid="history-chart">
@@ -222,7 +297,7 @@ export default function History() {
         </section>
       ))}
 
-      {charts.timelines.length > 0 && data && (
+      {view === 'charts' && charts.timelines.length > 0 && data && (
         <section className="glass-card rounded-2xl p-4 space-y-3" aria-label="States">
           {charts.timelines.map((id) => (
             <Timeline key={id} name={nameOf(id)} points={data.history[id]} startMs={data.startMs} endMs={data.endMs} />

@@ -68,6 +68,7 @@ from services.execution.handlers import docker_logs as docker_logs_handler
 from services.execution.handlers import gh as gh_handler
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import ha_config as ha_config_handler
+from services.execution.handlers import todo_list as todo_list_handler
 from services.execution.handlers import volumes as volume_handler
 from services.execution.handlers.telemetry import power_watts
 from services.execution.media_links import media_file_url
@@ -125,6 +126,7 @@ from services.execution.schemas import (
     TalkFileRequest,
     TalkRequest,
     TimerRequest,
+    TodoListRequest,
     TTSRequest,
     TVCastRequest,
     UserContext,
@@ -1004,6 +1006,10 @@ async def execute_activity(req: ActivityRequest):
 @app.post("/execute/timer", response_model=ExecutionResult)
 async def execute_timer(req: TimerRequest):
     return await timer.handle_timer(req)
+
+@app.post("/execute/todo", response_model=ExecutionResult)
+async def execute_todo(req: TodoListRequest):
+    return await todo_list_handler.handle_todo_list(req)
 
 @app.post("/execute/talk", response_model=ExecutionResult)
 async def execute_talk(req: TalkRequest):

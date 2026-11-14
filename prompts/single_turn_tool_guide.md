@@ -59,6 +59,17 @@ Family chores on the Skylight chore chart.
   - `{"tool": "ChoreRequest", "action": "approve", "title": "trash", "assignee": "<child's name as spoken>"}`
   - `{"tool": "ChoreRequest", "action": "checks"}`
 
+### TodoListRequest
+The home's to-do lists: the hub's shopping list and reminder lists (the Lists page).
+- Fields: `tool`, `action`: `add`, `list`, `complete`, `uncomplete`, `remove` or `lists`; `list_name` as the person said it; `item` (or `items` for several at once); optional `include_completed` for `list`.
+- Leave `list_name` out when the person named no list: with one list it is used, with more the reply asks which. Never pick one for them.
+- Every household member may add to and read these lists. Chores are ChoreRequest; the recipe shopping list built from the week plan is a note (NoteRequest).
+- Examples:
+  - `{"tool": "TodoListRequest", "action": "add", "list_name": "shopping list", "items": ["milk", "eggs"]}`
+  - `{"tool": "TodoListRequest", "action": "list", "list_name": "reminders"}`
+  - `{"tool": "TodoListRequest", "action": "complete", "list_name": "shopping list", "item": "milk"}`
+  - `{"tool": "TodoListRequest", "action": "lists"}`
+
 ### WorkspaceCreateRequest
 Create a new isolated workspace environment.
 - Fields: `tool`, `display_name` (or `name`), optional `id`.

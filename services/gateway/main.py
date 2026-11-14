@@ -64,6 +64,7 @@ from services.gateway import calls, camera_live_routes, camera_routes, cookbook,
 from services.gateway import phone_routes, room_presence
 from services.gateway import automation_routes
 from services.gateway import dashboard_routes
+from services.gateway import todo_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -942,6 +943,7 @@ app.include_router(discovery_routes.router)  # New devices
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
+app.include_router(todo_routes.router)  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
 
 @app.exception_handler(Exception)

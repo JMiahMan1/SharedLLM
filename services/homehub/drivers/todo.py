@@ -4,6 +4,9 @@ Each list is one ``todo.*`` entity whose state is the number of items still to
 do, as HA shows it. The services are HA's: ``todo.add_item``,
 ``todo.update_item``, ``todo.remove_item``, ``todo.remove_completed_items`` and
 ``todo.get_items`` (with ``return_response``: ``{entity_id: {"items": [...]}}``).
+HA reorders an item only over its WebSocket (``todo/item/move``: ``uid`` and
+``previous_uid``, None for the top); the hub offers the same move as the service
+``todo.move_item`` (``item`` and ``previous_uid``) so a REST caller can reorder too.
 Items have HA's shape: ``summary``, ``uid``, ``status`` (``needs_action`` or
 ``completed``) and, on Reminders, ``due`` and ``description``.
 
@@ -28,7 +31,7 @@ from services.homehub.core import Driver, EntityEntry, Hub, HubError, ServiceCal
 # HA's TodoListEntityFeature.
 CREATE, DELETE, UPDATE, MOVE, SET_DUE_DATE, SET_DUE_DATETIME, SET_DESCRIPTION = 1, 2, 4, 8, 16, 32, 64
 NEEDS_ACTION, COMPLETED = "needs_action", "completed"
-SERVICES = ("add_item", "update_item", "remove_item", "remove_completed_items", "get_items")
+SERVICES = ("add_item", "update_item", "remove_item", "remove_completed_items", "get_items", "move_item")
 
 
 # -- iCalendar (only what local_todo writes) ------------------------------------
@@ -249,6 +252,18 @@ class TodoDriver(Driver):
             targets = [self._find(r) for r in refs]
             uids = {t["uid"] for t in targets}
             self.items = [i for i in self.items if i.get("uid") not in uids]
+            return None
+        if service == "move_item":
+            if not self.supported_features & MOVE:
+                raise HubError(f"{self.entry.title} does not support reordering")
+            item = self._find(data.get("item"))
+            prev_ref = data.get("previous_uid")
+            prev = self._find(prev_ref) if prev_ref not in (None, "") else None
+            if prev is item:
+                raise HubError("an item cannot be moved after itself")
+            self.items.remove(item)
+            at = self.items.index(prev) + 1 if prev is not None else 0
+            self.items.insert(at, item)
             return None
         if service == "remove_completed_items":
             self.items = [i for i in self.items if i.get("status") != COMPLETED]

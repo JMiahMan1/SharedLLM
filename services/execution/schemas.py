@@ -333,6 +333,24 @@ class LogbookRequest(BaseRequest):
     days: int = Field(1, ge=1, le=7)
 
 
+class TodoListRequest(BaseRequest):
+    """The home's to-do lists (homehub ``todo.*``: Reminders-style lists and the shopping list).
+
+    ``add`` puts ``item`` (or each of ``items``) on ``list_name``; ``list``
+    reads what is still to do (``include_completed`` for the rest);
+    ``complete`` / ``uncomplete`` tick an item off or back on and ``remove``
+    deletes it, found by its words; ``lists`` names every list. With one list
+    in the home ``list_name`` may be left out; with more, the reply asks which.
+    """
+
+    user_context: UserContext
+    action: Literal["add", "list", "complete", "uncomplete", "remove", "lists"] = "list"
+    list_name: str | None = None
+    item: str | None = None
+    items: list[str] | None = None
+    include_completed: bool = False
+
+
 # Announcements
 class AnnouncementRequest(BaseRequest):
     user_context: UserContext

@@ -45,6 +45,7 @@ def index_capabilities():
         "BibleRequest": "Holy Bible reader, read-only: read passages, search verses, fetch study notes by edition, verse of the day, catalogue of installed translations (actions: read, search, study_notes, votd, catalogue). No state or mark writes.",
         "CalibreRequest": "Read-only personal Calibre book library: list the shelf, search by title/author/tag words, fetch one book's metadata or its text (actions: list, search, get_book, fetch_text). No delete or write actions exist.",
         "TimerRequest": "Sets, lists, or deletes timers and alarms.",
+        "TodoListRequest": "Adds to, reads, ticks off and removes items on the home's to-do lists (the hub's shopping list and reminder lists), found by the name the person used; every household member may use them.",
         "TalkRequest": "Manages messaging, voice messages, and user presence via Nextcloud Talk.",
         "WebSearchRequest": "Performs a web search via the private search engine.",
         "WebReadRequest": "Fetches and converts a webpage to markdown.",
