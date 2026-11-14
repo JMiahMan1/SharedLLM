@@ -237,6 +237,62 @@ async def test_notify_without_a_mapped_user_fails_loudly(geo, sent):
         await hub.call_service("notify", "mobile_app_truck_f250", {"message": "x"})
 
 
+async def test_actionable_notify_keeps_its_buttons_in_the_jarvis_notice(geo, sent):
+    """The confirmable_notification blueprint's buttons survive the fall back to a Jarvis notice: each
+    becomes a callback the gateway turns back into mobile_app_notification_action with the same id."""
+    hub = family_hub()
+    await ma.setup_persons(hub, PERSONS)
+    drv = add_phone(hub, "n1", "Alexs Phone", "device_tracker.alexs_phone")
+    await drv.async_setup()
+    await hub.call_service("notify", "mobile_app_alexs_phone", {
+        "title": "Front door", "message": "Lock the front door?",
+        "data": {"tag": "door-check", "actions": [
+            {"action": "CONFIRM_ctx1", "title": "Lock it"},
+            {"action": "DISMISS_ctx1", "title": "Leave it"},
+            {"action": "REPLY", "title": "Say why", "behavior": "textInput"},
+        ]}})
+    assert sent[-1]["actions"] == [
+        {"label": "Lock it", "type": "callback", "callback": "home_notification_action",
+         "params": {"action": "CONFIRM_ctx1", "tag": "door-check"}},
+        {"label": "Leave it", "type": "callback", "callback": "home_notification_action",
+         "params": {"action": "DISMISS_ctx1", "tag": "door-check"}},
+        {"label": "Say why", "type": "reply", "callback": "home_notification_action",
+         "params": {"action": "REPLY", "tag": "door-check"}},
+    ]
+
+
+async def test_notify_uri_buttons_open_web_addresses_only(geo, sent):
+    hub = family_hub()
+    await ma.setup_persons(hub, PERSONS)
+    drv = add_phone(hub, "n2", "Alexs Phone", "device_tracker.alexs_phone")
+    await drv.async_setup()
+    await hub.call_service("notify", "mobile_app_alexs_phone", {"message": "Camera saw someone", "data": {"actions": [
+        {"action": "URI", "title": "Open clip", "uri": "https://cams.example.test/clip/1"},
+        {"action": "URI", "title": "Dashboard", "uri": "/lovelace/cameras"},
+        {"action": "OK", "title": "A very long button title that goes well past forty characters"},
+    ]}})
+    actions = sent[-1]["actions"]
+    assert actions[0] == {"label": "Open clip", "type": "view", "url": "https://cams.example.test/clip/1"}
+    assert len(actions) == 2  # the HA dashboard path has nothing to open in Jarvis
+    assert len(actions[1]["label"]) == 40 and "tag" not in actions[1]["params"]
+
+
+@pytest.mark.parametrize("actions", [
+    "CONFIRM",
+    ["CONFIRM"],
+    [{"title": "No id"}],
+    [{"action": f"A{i}", "title": f"Button {i}"} for i in range(4)],
+])
+async def test_notify_with_bad_actions_fails_loudly(geo, sent, actions):
+    hub = family_hub()
+    await ma.setup_persons(hub, PERSONS)
+    drv = add_phone(hub, "n3", "Alexs Phone", "device_tracker.alexs_phone")
+    await drv.async_setup()
+    with pytest.raises(HubError):
+        await hub.call_service("notify", "mobile_app_alexs_phone", {"message": "x", "data": {"actions": actions}})
+    assert sent == []
+
+
 def test_parse_people_keeps_only_jarvis_fixes():
     payload = fixes_payload(sam=(39.5725, -104.4257, {"battery": 80}))
     payload["features"].append({"geometry": {"coordinates": [0, 0]},

@@ -114,6 +114,38 @@ async def timer_add_minute(request: Request, params: dict, reply: str | None) ->
     return await _again(request, params, "1m")
 
 
+# Home (the device hub's notify.mobile_app_* sends these when a phone has no companion app push channel)
+
+#: Home Assistant's event for a tapped notification button; automations and blueprints
+#: (confirmable_notification) wait for it with the action id they sent.
+HOME_ACTION_EVENT = "mobile_app_notification_action"
+_HOME_ACTION_MAX = 255
+
+
+@push_callback("home_notification_action")
+async def home_notification_action(request: Request, params: dict, reply: str | None) -> dict:
+    """Fire ``mobile_app_notification_action`` in the device hub with the button's action id, the
+    notice's tag and, for a reply button, ``reply_text``, as the companion app does in Home
+    Assistant. ``params`` is ``{"action", "tag"?}`` (services/homehub/drivers/mobile_app.py)."""
+    from services.gateway.phone_routes import _hub
+
+    action = params.get("action")
+    if not isinstance(action, str) or not action.strip() or len(action) > _HOME_ACTION_MAX:
+        raise HTTPException(status_code=422, detail="params.action is required")
+    data: dict[str, Any] = {"action": action}
+    tag = params.get("tag")
+    if tag is not None:
+        if not isinstance(tag, str) or len(tag) > _HOME_ACTION_MAX:
+            raise HTTPException(status_code=422, detail="params.tag must be text")
+        data["tag"] = tag
+    if reply is not None:
+        data["reply_text"] = reply
+    status, _body = await _hub("POST", f"/api/events/{HOME_ACTION_EVENT}", json=data)
+    if status != 200:
+        raise HTTPException(status_code=502, detail="The device hub did not take the answer")
+    return {"status": "SUCCESS", "message": "Sent."}
+
+
 # Raven (notices.mission_needs_approval sends these buttons)
 
 

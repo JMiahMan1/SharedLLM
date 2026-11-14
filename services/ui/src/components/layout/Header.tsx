@@ -10,6 +10,7 @@ import { useSystemHealth } from '../../hooks/useSystemHealth';
 import { relativeTime } from '../../lib/wanderTrips';
 import { useClearedAt, useDismissed, newerThan } from '../../lib/clearedAt';
 import SwipeToDismiss from '../ui/SwipeToDismiss';
+import NotificationActions from './NotificationActions';
 import UserAvatar from '../UserAvatar';
 import { navPagesFor } from './navItems';
 import { useDialogFocus } from '../../lib/focusTrap';
@@ -279,13 +280,28 @@ const Header = () => {
                           <p className="text-[10px] text-slate-500 mt-1.5">{relativeTime(n.created_at)}</p>
                         </>
                       );
+                      const open = (path: string) => {
+                        setShowNotifications(false);
+                        navigate(path);
+                      };
+                      if (n.actions?.length) {
+                        // A notice with buttons (a Home question, a timer): the buttons
+                        // sit under the message, never inside the tap target.
+                        return (
+                          <div className="p-3 pr-10 rounded-xl bg-white/5 border border-white/5" data-testid="notification-with-actions">
+                            {target ? (
+                              <button type="button" onClick={() => open(target)} className="block w-full text-left" data-testid="notification-open">
+                                {content}
+                              </button>
+                            ) : content}
+                            <NotificationActions actions={n.actions} onOpen={open} />
+                          </div>
+                        );
+                      }
                       return target ? (
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowNotifications(false);
-                            navigate(target);
-                          }}
+                          onClick={() => open(target)}
                           className="block w-full p-3 pr-10 rounded-xl bg-white/5 border border-white/5 text-left hover:bg-white/10 hover:border-white/15"
                           data-testid="notification-open"
                         >
