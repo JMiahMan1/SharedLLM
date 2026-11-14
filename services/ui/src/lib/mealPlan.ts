@@ -64,12 +64,6 @@ export function planLevel(body: string): string {
   return match ? match[1] : '';
 }
 
-/** Take one random title out of the pool (the week's surprise fill). */
-export function pickSurprise(pool: string[]): string | undefined {
-  if (pool.length === 0) return undefined;
-  return pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-}
-
 /** The chat message a shared week plan becomes: one line per planned day. */
 export function planShareText(plan: WeeklyPlan, note?: string): string {
   const lines: string[] = [];

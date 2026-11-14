@@ -3,8 +3,9 @@ import toast from 'react-hot-toast';
 import { CalendarDays, Check, Download, Loader2, Plus, Search, Send, Share2, ShoppingCart, Shuffle, Utensils, X } from 'lucide-react';
 import { api } from '../../services/api';
 import type { CookbookRecipe } from '../../types/api';
-import { PLAN_DAYS, pickSurprise, planDayOf, planShareText, type PlanDay, type WeeklyPlan } from '../../lib/mealPlan';
+import { PLAN_DAYS, planDayOf, planShareText, type PlanDay, type WeeklyPlan } from '../../lib/mealPlan';
 import { plannedPushDays, weekDates } from '../../lib/skylightMeals';
+import { fillWeek } from '../../lib/dinnerFill';
 import { buildShoppingList, ingredientLines } from '../../lib/shoppingList';
 import { readShoppingList, saveShoppingList } from '../../lib/shoppingListStore';
 import { downloadBlobUrl } from '../../lib/artifactKinds';
@@ -80,21 +81,13 @@ export default function WeekPlan({
   };
 
   const surprise = async () => {
-    const pool = recipes.filter((r) => r.meal === 'main' || r.meal === 'soup').map((r) => r.title).filter((t) => !planned.includes(t));
-    const choices = pool.length ? pool : recipes.map((r) => r.title).filter((t) => !planned.includes(t));
-    if (choices.length === 0) {
-      toast.error('Every recipe is already in the week');
+    const { plan: next, filled, easy } = fillWeek(plan, recipes);
+    if (filled.length === 0) {
+      toast.error(PLAN_DAYS.every((day) => plan[day].title) ? 'Every day already has a dinner' : 'Every recipe is already in the week');
       return;
     }
-    const next = { ...plan };
-    for (const day of PLAN_DAYS) {
-      if (next[day].title || choices.length === 0) continue;
-      // pickSurprise takes the pick out of the pool, so no day repeats it.
-      const pick = pickSurprise(choices);
-      if (!pick) break;
-      next[day] = { title: pick, cooked: false };
-    }
     await save(next);
+    toast.success(`Planned ${filled.length} ${filled.length === 1 ? 'dinner' : 'dinners'}, ${easy} of them quick and easy`);
   };
 
   const buildList = async () => {
