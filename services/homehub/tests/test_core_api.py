@@ -292,11 +292,28 @@ async def test_service_starts_people_and_zones(tmp_path, monkeypatch):
     svc.store = Store(str(tmp_path / "hub.db"), Fernet.generate_key().decode())
     svc.store.set_kv("zones", [{"id": "work", "name": "Work", "latitude": 40.0725, "longitude": -105.4257, "radius": 200}])
     svc.store.set_kv("persons", [{"id": "sam", "name": "Sam", "user_id": "u", "device_trackers": []}])
-    errors = []
+    svc.runtime = Runtime(svc.hub, svc.store)
+    svc._bg = []
+    errors, warnings = [], []
     monkeypatch.setattr(main.log, "exception", lambda *a, **k: errors.append(a))
+    monkeypatch.setattr(main.log, "warning", lambda *a, **k: warnings.append(a))
+    monkeypatch.setattr(main.registries, "geo_url", lambda: "")
     await svc._start_people()
     assert not errors
     assert svc.hub.states.get("zone.home") is not None and svc.hub.states.get("zone.work") is not None
+    # No geo: the saved-place mirror says it is off instead of quietly doing nothing.
+    assert not svc._bg and any("GEO_SVC_URL" in str(w[0]) for w in warnings)
+
+    monkeypatch.setattr(main.registries, "geo_url", lambda: "http://geo.test")
+    followed = []
+
+    async def follow(runtime, base, every):
+        followed.append((base, every))
+
+    monkeypatch.setattr(main.registries, "follow_places", follow)
+    await svc._start_people()
+    await svc._bg[0]
+    assert followed == [("http://geo.test", main.GEO_PLACES_EVERY_S)]
 
 
 async def test_runtime_reports_when_every_entry_has_tried_to_load(tmp_path, monkeypatch):

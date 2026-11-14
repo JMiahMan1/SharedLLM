@@ -34,6 +34,7 @@ from services.homehub import (  # HA companion apps: login, webhooks, pushes
     matter_ble,  # new Wi-Fi Matter devices over Bluetooth, and their household Wi-Fi
     mobile_app_api,
     prune_api,  # dry-run and apply pruning of stale imported HA data
+    registries_api,  # floors, labels, categories, zones, persons, tags
     service_logins_api,
     statistics_api,
     voice_api,  # /hub/voice: the voice satellites and their runs
@@ -570,6 +571,7 @@ def build_app(runtime: Runtime, auth: Auth, *, admin_hooks: dict[str, Any] | Non
     app.include_router(discovery_api.build_router(runtime, auth))
     app.include_router(automation_api.build_router(runtime, auth))
     app.include_router(entries_api.build_router(runtime, auth))
+    app.include_router(registries_api.build_router(runtime, auth))
     app.include_router(hardware_api.build_router(runtime, auth))
     app.include_router(capabilities_api.build_router(runtime, auth))
     app.include_router(live_video_api.build_router(runtime, auth))  # real-time camera video (go2rtc)
@@ -709,6 +711,10 @@ class WSConnection:
                                         for a in hub.areas.values()])
             elif kind == "config/floor_registry/list":
                 await self.result(mid, list(hub.floors.values()))
+            elif kind == "config/label_registry/list":
+                from services.homehub import registries
+
+                await self.result(mid, registries.list_labels(self.runtime)["labels"])
             elif kind == "config/device_registry/list":
                 await self.result(mid, [d.public() for d in hub.devices.values()])
             elif kind == "config/entity_registry/list":

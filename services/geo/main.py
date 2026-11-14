@@ -230,7 +230,12 @@ async def _ha_get_states() -> list:
 
 
 def _filter_entities(states: list, domain: str) -> list:
-    return [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
+    out = [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
+    if domain == "zone":
+        # The hub mirrors the family's saved places as zones (``source: geo``) for its automations;
+        # geo already knows those places as ``place.<id>``, so the mirror is not a second zone here.
+        out = [s for s in out if (s.get("attributes") or {}).get("source") != "geo"]
+    return out
 
 
 @app.get("/health")

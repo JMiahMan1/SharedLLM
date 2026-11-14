@@ -5,7 +5,7 @@ YAML files), never a live HA. Everything keeps HA's ids, so entity ids,
 device ids, area ids and the automations that name them carry over unchanged.
 
 What is carried over:
-  core.config, areas, floors, devices, entities (disabled ones too, so a
+  core.config, areas, floors, labels, categories, tags, devices, entities (disabled ones too, so a
   later enable keeps its id), config entries with their credentials (sealed),
   last known states, HA users and refresh tokens (so existing tokens keep
   working), persons, zones, automations/scripts/scenes, the scheduler's
@@ -110,7 +110,20 @@ def import_config_dir(store: Store, config_dir: str, *, history_days: int = 0) -
                              labels=a.get("labels") or []))
     floors = (_read_storage(config_dir, "core.floor_registry") or {}).get("floors", [])
     store.set_kv("floors", {f.get("floor_id") or f.get("id"): f for f in floors})
-    report["areas"] = len(areas)
+    report["areas"], report["floors"] = len(areas), len(floors)
+
+    # -- labels, categories, tags -----------------------------------------------
+    labels = (_read_storage(config_dir, "core.label_registry") or {}).get("labels", [])
+    store.set_kv("labels", {lb["label_id"]: {k: lb.get(k) for k in ("label_id", "name", "color", "icon", "description")}
+                            for lb in labels if lb.get("label_id")})
+    categories = (_read_storage(config_dir, "core.category_registry") or {}).get("categories", {})
+    store.set_kv("categories", {scope: [{k: c.get(k) for k in ("category_id", "name", "icon")} for c in items or []]
+                                for scope, items in (categories.items() if isinstance(categories, dict) else [])})
+    tags = (_read_storage(config_dir, "tag") or {}).get("items", [])
+    store.set_kv("tags", [{"id": t.get("id") or t.get("tag_id"), "name": t.get("name"),
+                           "last_scanned": t.get("last_scanned")} for t in tags if t.get("id") or t.get("tag_id")])
+    report["labels"], report["tags"] = len(labels), len(tags)
+    report["categories"] = sum(len(v or []) for v in categories.values()) if isinstance(categories, dict) else 0
 
     # -- devices --------------------------------------------------------------
     devices = (_read_storage(config_dir, "core.device_registry") or {}).get("devices", [])
