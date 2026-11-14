@@ -1,6 +1,6 @@
 import { test, expect as baseExpect, type Page } from '@playwright/test';
 import { mockHome, type HomeMocks, type Role } from '../fixtures/homeMocks';
-import { controlsOffScreen, expectLayoutSound, expectNoHorizontalOverflow, expectTapTargets, isPhoneShell } from '../fixtures/layoutChecks';
+import { controlsOffScreen, expectLayoutSound, expectNoHorizontalOverflow, expectTapTargets, isPhoneShell, snap } from '../fixtures/layoutChecks';
 
 const expect = baseExpect.configure({ timeout: 15_000 });
 
@@ -69,6 +69,29 @@ test.describe('lists and logbook', () => {
     // Up past Bread: right after the done Milk the hub still keeps above it.
     expect(writes[2].body).toEqual({ previous_uid: 's1' });
     await expectNoHorizontalOverflow(page);
+    clean(run);
+  });
+
+  test('Lists: edit an item\'s notes on a list that keeps them', async ({ page }, info) => {
+    const run = await open(page, 'member', '/lists?list=todo.reminders', 'lists-page');
+    const list = page.getByTestId('todo-list');
+    await expect(list.getByRole('heading', { name: 'Reminders' })).toBeVisible();
+    await list.getByRole('button', { name: 'Edit Book the boiler service' }).click();
+    const form = list.getByTestId('todo-item-edit');
+    await form.getByRole('textbox', { name: 'Notes for Book the boiler service' }).fill('Ask for the morning slot');
+    await expectTapTargets(form);
+    await expectNoHorizontalOverflow(page);
+    expect(await controlsOffScreen(page)).toEqual([]);
+    await snap(page, info, 'lists-edit-notes');
+    await form.getByRole('button', { name: 'Save' }).click();
+    await expect(form).toHaveCount(0);
+    await expect(list.getByText('Ask for the morning slot')).toBeVisible();
+    const write = run.mocks.posts.find((p) => p.path === '/api/lists/todo.reminders/items/r1');
+    expect(write?.body).toEqual({ description: 'Ask for the morning slot' });
+    // The shopping list keeps no notes: its items only rename.
+    await page.getByRole('tab', { name: /Shopping List/ }).click();
+    await list.getByRole('button', { name: 'Rename Bread' }).click();
+    await expect(list.getByRole('textbox', { name: /Notes for/ })).toHaveCount(0);
     clean(run);
   });
 

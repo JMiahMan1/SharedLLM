@@ -155,8 +155,11 @@ function ItemRow({ list, item, act, canUp, canDown }: {
 }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(item.summary);
+  const [notes, setNotes] = useState(item.description ?? '');
   const id = list.entity_id;
   const done = item.status === 'completed';
+  // A list that keeps notes (Home Assistant's description) edits name and notes together.
+  const hasNotes = list.features.description;
 
   const move = (dir: -1 | 1) => {
     const previous = previousForMove(list.items, item.uid, dir);
@@ -172,9 +175,23 @@ function ItemRow({ list, item, act, canUp, canDown }: {
     }
     await act(() => updateItem(id, item.uid, { summary }), 'Could not rename that');
   };
+  const startEditing = () => { setName(item.summary); setNotes(item.description ?? ''); setRenaming(true); };
+  const saveEdit = async () => {
+    const summary = name.trim();
+    if (!summary) {
+      toast.error('An item needs a name');
+      return;
+    }
+    const change: { summary?: string; description?: string | null } = {};
+    if (summary !== item.summary) change.summary = summary;
+    const description = notes.trim() || null;
+    if (description !== (item.description || null)) change.description = description;
+    setRenaming(false);
+    if (Object.keys(change).length) await act(() => updateItem(id, item.uid, change), 'Could not save that');
+  };
 
   return (
-    <li className="flex items-center gap-1 py-1" data-testid="todo-item">
+    <li className={`flex gap-1 py-1 ${renaming && hasNotes ? 'items-start' : 'items-center'}`} data-testid="todo-item">
       <button type="button" aria-label={done ? `Mark ${item.summary} not done` : `Mark ${item.summary} done`}
         aria-pressed={done}
         onClick={() => void act(() => updateItem(id, item.uid, { status: done ? 'needs_action' : 'completed' }),
@@ -183,15 +200,33 @@ function ItemRow({ list, item, act, canUp, canDown }: {
         {done ? <Check size={18} /> : <Circle size={18} />}
       </button>
       <div className="min-w-0 flex-1">
-        {renaming ? (
+        {renaming && hasNotes ? (
+          <form className="space-y-2 py-1" data-testid="todo-item-edit" onSubmit={(e) => { e.preventDefault(); void saveEdit(); }}>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={255}
+              aria-label={`Rename ${item.summary}`} autoFocus
+              className="w-full min-h-11 rounded-lg bg-white/5 border border-white/10 px-2 text-sm" />
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} rows={3}
+              aria-label={`Notes for ${item.summary}`} placeholder="Notes (optional)"
+              className="w-full rounded-lg bg-white/5 border border-white/10 px-2 py-2 text-sm" />
+            <div className="flex gap-2">
+              <button type="submit" className="min-h-11 flex-1 rounded-lg bg-emerald-500/20 px-3 text-sm font-semibold text-emerald-100">
+                Save
+              </button>
+              <button type="button" onClick={() => setRenaming(false)}
+                className="min-h-11 flex-1 rounded-lg bg-white/5 px-3 text-sm text-slate-300">
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : renaming ? (
           <form onSubmit={(e) => { e.preventDefault(); void rename(); }}>
             <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void rename()} maxLength={255}
               aria-label={`Rename ${item.summary}`} autoFocus
               className="w-full min-h-11 rounded-lg bg-white/5 border border-white/10 px-2 text-sm" />
           </form>
         ) : (
-          <button type="button" onClick={() => { setName(item.summary); setRenaming(true); }}
-            aria-label={`Rename ${item.summary}`}
+          <button type="button" onClick={startEditing}
+            aria-label={hasNotes ? `Edit ${item.summary}` : `Rename ${item.summary}`}
             className={`w-full min-h-11 text-left text-sm break-words ${done ? 'text-slate-500 line-through' : 'text-white'}`}>
             {item.summary}
             {item.due && (
@@ -203,23 +238,23 @@ function ItemRow({ list, item, act, canUp, canDown }: {
           </button>
         )}
       </div>
-      {canUp && (
+      {!(renaming && hasNotes) && canUp && (
         <button type="button" aria-label={`Move ${item.summary} up`} onClick={() => move(-1)}
           className="min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:bg-white/5">
           <ArrowUp size={16} />
         </button>
       )}
-      {canDown && (
+      {!(renaming && hasNotes) && canDown && (
         <button type="button" aria-label={`Move ${item.summary} down`} onClick={() => move(1)}
           className="min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:bg-white/5">
           <ArrowDown size={16} />
         </button>
       )}
-      <button type="button" aria-label={`Delete ${item.summary}`}
+      {!(renaming && hasNotes) && <button type="button" aria-label={`Delete ${item.summary}`}
         onClick={() => void act(() => removeItem(id, item.uid), 'Could not delete that')}
         className="min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-300 hover:bg-white/5">
         <Trash2 size={16} />
-      </button>
+      </button>}
     </li>
   );
 }

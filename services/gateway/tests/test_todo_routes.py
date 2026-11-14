@@ -156,3 +156,20 @@ def test_the_hubs_refusal_is_passed_on(client, upstream, perms, member):
                   payload={"message": "invalid due date 'soon'"})
     resp = client.post("/api/lists/todo.reminders/items", json={"summary": "Vet", "due_date": "soon"})
     assert resp.status_code == 400 and resp.json()["detail"] == "invalid due date 'soon'"
+
+
+def test_notes_are_edited_only_where_the_list_keeps_them(client, upstream, perms, member):
+    """The Lists page's notes field: update_item's description, set, cleared, or refused."""
+    mock_upstream(upstream, "POST", f"{TEST_HA_URL}/api/services/todo/update_item", payload=[], repeat=2)
+    mock_upstream(upstream, "GET", f"{TEST_HA_URL}/api/states", payload=STATES, repeat=20)
+    mock_upstream(upstream, "POST", f"{TEST_HA_URL}/api/services/todo/get_items",
+                  payload=_items(("todo.reminders", [{"uid": "r1", "summary": "Call the vet", "status": "needs_action"}]),
+                                 ("todo.shopping_list", SHOPPING)), repeat=20)
+    assert client.patch("/api/lists/todo.reminders/items/r1",
+                        json={"description": "  Ask about the booster "}).status_code == 200
+    assert client.patch("/api/lists/todo.reminders/items/r1", json={"description": None}).status_code == 200
+    sent = [p["json"] for p in _posts(upstream, "/api/services/todo/update_item")]
+    assert sent == [{"entity_id": "todo.reminders", "item": "r1", "description": "Ask about the booster"},
+                    {"entity_id": "todo.reminders", "item": "r1", "description": None}]
+    resp = client.patch("/api/lists/todo.shopping_list/items/u1", json={"description": "x"})
+    assert resp.status_code == 400 and resp.json()["detail"] == "This list has no descriptions"

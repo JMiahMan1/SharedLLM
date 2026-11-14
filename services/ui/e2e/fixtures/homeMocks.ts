@@ -411,7 +411,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (listWrite && listOf(decodeURIComponent(listWrite[1]))) {
         const list = listOf(decodeURIComponent(listWrite[1]))!;
         const uid = listWrite[3] ? decodeURIComponent(listWrite[3]) : null;
-        const b = (body ?? {}) as { summary?: string; status?: string; previous_uid?: string | null };
+        const b = (body ?? {}) as { summary?: string; status?: string; previous_uid?: string | null; description?: string | null };
         if (listWrite[2] === 'clear_completed') list.items = list.items.filter((i) => i.status !== 'completed');
         else if (method === 'POST' && !uid) {
           list.items.push({ uid: `n${list.items.length + 1}`, summary: String(b.summary), status: 'needs_action', due: null,
@@ -426,6 +426,11 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
           const item = list.items.find((i) => i.uid === uid)!;
           if (b.status) item.status = b.status;
           if (b.summary) item.summary = b.summary;
+          if ('description' in b) {
+            // The gateway refuses notes on a list that keeps none (todo_routes._due_fields).
+            if (!list.features.description) return json({ detail: 'This list has no descriptions' }, 400);
+            item.description = b.description ?? null;
+          }
         }
         list.open = list.items.filter((i) => i.status !== 'completed').length;
         return json(list);
