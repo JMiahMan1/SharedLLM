@@ -357,6 +357,18 @@ test.describe('home pages', () => {
       const box = await remove.boundingBox();
       expect((box?.x ?? 0) + (box?.width ?? 0), 'Remove stays on screen').toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
     }
+    // Reconfigure offers the integration's own fields: text with help, a secret, and a choice.
+    await page.getByRole('button', { name: 'Reconfigure Music server' }).click();
+    const reconf = page.getByTestId('reconfigure-dialog');
+    await expect(reconf.getByRole('combobox')).toBeVisible();
+    await expect(reconf).toContainText('Where Music Assistant runs');
+    const screenH = page.viewportSize()?.height ?? 0;
+    await expect.poll(async () => { const b = await page.getByRole('dialog').boundingBox(); return b ? b.y + b.height : screenH + 99; })
+      .toBeLessThanOrEqual(screenH + 1);
+    await expectFits(page, page.getByRole('dialog'));
+    await expectTapTargets(reconf);
+    await snap(page, info, 'devices-reconfigure');
+    await reconf.getByRole('button', { name: 'Cancel' }).click();
     await expectTapTargets(page.getByTestId('devices-sections'));
     await expectLayoutSound(page, info, 'devices');
     // Phones: charging and the next alarm from the Jarvis app, on every screen size.

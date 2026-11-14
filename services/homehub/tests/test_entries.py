@@ -244,3 +244,21 @@ def test_a_pending_pairing_answers_with_its_session(env, monkeypatch):
     assert r.status_code == 200 and body["status"] == "pending" and body["step"] == "accept_on_tv"
     assert body["session"] and body["poll_ms"] > 0
     pairing.drop_session(body["session"])
+
+
+async def test_an_integrations_own_setup_fields_can_be_changed_after_setup(env):
+    hub, _store, rt = env
+    entry = ConfigEntry("srp1", "srp_energy", "Energy account",
+                        {"id": "000000000", "username": "someone", "password": "pw", "is_tou": False})
+    hub.config_entries["srp1"] = entry
+    fields = {f["key"]: f for f in entries.summary(rt, entry)["reconfigure"]}
+    assert {"id", "username", "password", "is_tou"} <= set(fields)
+    assert fields["is_tou"]["type"] == "select" and fields["is_tou"]["value"] == ""
+    assert "pw" not in str(fields)
+    await entries.reconfigure_entry(rt, "srp1", {"data": {"is_tou": "1"}})
+    assert hub.config_entries["srp1"].data["is_tou"] is True
+    with pytest.raises(entries.EntryError, match="choose one"):
+        await entries.reconfigure_entry(rt, "srp1", {"data": {"is_tou": "maybe"}})
+    # what identifies a paired device or account is not offered
+    matter = ConfigEntry("m1", "matter", "Matter", {"url": "ws://192.0.2.5:5580/ws"})
+    assert not {"code", "method"} & {f["key"] for f in entries.reconfigure_fields(matter, hub)}

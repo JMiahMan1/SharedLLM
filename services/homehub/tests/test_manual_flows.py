@@ -234,6 +234,28 @@ async def test_roborock_emails_a_code_then_signs_in(rt, monkeypatch):
     assert rt.hub.config_entries[out["entry_id"]].data["user_data"] == {"token": "t"}
 
 
+async def test_an_expired_roborock_login_signs_in_again_and_keeps_its_entry(rt, monkeypatch):
+    tokens = iter([{"token": "first"}, {"token": "second"}])
+
+    async def request(_email):
+        return None
+
+    async def login(_email, _code):
+        return next(tokens), "https://example.com"
+
+    monkeypatch.setattr(manual_flows, "roborock_request_code", request)
+    monkeypatch.setattr(manual_flows, "roborock_code_login", login)
+    from services.homehub import hardware
+
+    monkeypatch.setattr(hardware, "SYNC_WAIT_S", 0.0)
+    first = await add(rt, "roborock", {"email": "sam@example.com", "code": "123456"})
+    entries_before = set(rt.hub.config_entries)
+    again = await add(rt, "roborock", {"email": "Sam@Example.com", "code": "654321"})
+    assert again["entry_id"] == first["entry_id"] and set(rt.hub.config_entries) == entries_before
+    assert rt.hub.config_entries[first["entry_id"]].data["user_data"] == {"token": "second"}
+    assert "signed in again" in again["message"]
+
+
 async def test_go2rtc_is_one_per_hub(rt, monkeypatch):
     async def get(url, **_):
         return 200, "application/json", b"{}"

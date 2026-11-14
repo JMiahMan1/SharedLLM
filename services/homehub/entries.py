@@ -69,19 +69,63 @@ def _home_of(entry: ConfigEntry, key: str) -> str | None:
     return None
 
 
-def reconfigure_fields(entry: ConfigEntry) -> list[dict[str, Any]]:
-    out = []
-    for key, meta in RECONFIGURABLE.items():
-        home = _home_of(entry, key)
-        if home is None:
+#: Setup fields that identify what was paired rather than how to reach it: changing one would
+#: describe another device or account, so it is set up again instead.
+PAIRING_ONLY: dict[str, set[str]] = {"matter": {"method", "code"}, "roborock": {"email", "username"}}
+
+
+def _spec_fields(entry: ConfigEntry, hub: Any = None) -> dict[str, dict[str, Any]]:
+    """The integration's own setup fields (manual_flows.SPECS), so each can be changed after setup."""
+    from services.homehub.manual_flows import SPECS  # manual_flows imports this module's neighbours
+
+    spec = SPECS.get(entry.domain) or {}
+    fields = spec.get("fields") or []
+    if callable(fields):
+        if hub is None:
+            return {}
+        fields = fields(hub)
+    skip = PAIRING_ONLY.get(entry.domain, set())
+    out: dict[str, dict[str, Any]] = {}
+    for f in fields:
+        key = str(f.get("key") or "")
+        if not key or key in skip:
             continue
+        meta = {"label": f.get("label") or key, "type": f.get("type") or "text",
+                "secret": f.get("type") == "password"}
+        if f.get("options"):
+            meta["options"] = f["options"]
+        if f.get("help"):
+            meta["help"] = f["help"]
+        out[key] = meta
+    return out
+
+
+def _field_meta(entry: ConfigEntry, key: str, hub: Any = None) -> dict[str, Any] | None:
+    return RECONFIGURABLE.get(key) or _spec_fields(entry, hub).get(key)
+
+
+def reconfigure_fields(entry: ConfigEntry, hub: Any = None) -> list[dict[str, Any]]:
+    """What an admin may change: the generic keys the entry has, then its integration's setup fields."""
+    out = []
+    seen: set[str] = set()
+    candidates = [(k, m) for k, m in RECONFIGURABLE.items() if _home_of(entry, k) is not None]
+    candidates += [(k, m) for k, m in _spec_fields(entry, hub).items() if k not in RECONFIGURABLE]
+    for key, meta in candidates:
+        if key in seen:
+            continue
+        seen.add(key)
+        home = _home_of(entry, key) or "data"
         value = (entry.data if home == "data" else entry.options).get(key)
-        field = {"key": key, "label": meta["label"], "type": meta["type"]}
+        field: dict[str, Any] = {"key": key, "label": meta["label"], "type": meta["type"]}
+        for extra in ("options", "help"):
+            if meta.get(extra):
+                field[extra] = meta[extra]
         if meta.get("secret"):
             field["set"] = bool(value)
         else:
             current = entry.options.get(key) if key == "host" and entry.options.get("host") else value
-            field["value"] = "" if current is None else str(current)
+            field["value"] = "" if current is None else ("1" if current is True else "" if current is False
+                                                          else str(current))
         out.append(field)
     return out
 
@@ -118,7 +162,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
         "offline_since": offline_since(runtime, entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
-        "entities": len(ents), "reconfigure": reconfigure_fields(entry),
+        "entities": len(ents), "reconfigure": reconfigure_fields(entry, hub),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
         "syncs": entry.domain in _syncers(),
     }
@@ -160,7 +204,7 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
     changes = body.get("data") or {}
     if not isinstance(changes, dict):
         raise EntryError("data must be an object")
-    allowed = {f["key"] for f in reconfigure_fields(entry)}
+    allowed = {f["key"] for f in reconfigure_fields(entry, runtime.hub)}
     unknown = sorted(set(changes) - allowed)
     if unknown:
         raise EntryError(f"{label(entry.domain)} cannot change {', '.join(unknown)}"
@@ -170,18 +214,24 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
     for key, value in changes.items():
         text = "" if value is None else str(value).strip()
         target = kept_options if _home_of(entry, key) == "options" else data
-        if RECONFIGURABLE[key].get("secret") and not text:
+        meta = _field_meta(entry, key, runtime.hub) or {"label": key}
+        if meta.get("secret") and not text:
             continue  # an empty secret field means "keep the stored one"
         if key in ("host", "url", "mjpeg_url") and not text:
-            raise EntryError(f"{RECONFIGURABLE[key]['label']} cannot be empty")
+            raise EntryError(f"{meta['label']} cannot be empty")
         if key in ("url", "mjpeg_url", "still_image_url") and text and not text.lower().startswith(("http://", "https://", "rtsp://", "rtsps://")):
-            raise EntryError(f"{RECONFIGURABLE[key]['label']} must start with http:// or https://")
+            raise EntryError(f"{meta['label']} must start with http:// or https://")
+        if meta.get("options") and text not in {str(o.get("value")) for o in meta["options"]}:
+            raise EntryError(f"{meta['label']}: choose one of the offered values")
+        if isinstance(entry.data.get(key), bool):
+            data[key] = text in ("1", "true", "yes")  # a yes/no setting (SRP's time-of-use plan)
+            continue
         if key == "port":
             if text and not text.isdigit():
                 raise EntryError("Port must be a number")
             data[key] = int(text) if text else None
             continue
-        target[key] = text if key not in ("password",) else str(value)
+        target[key] = str(value) if meta.get("secret") else text
     title = str(body.get("title") or "").strip()
     if "title" in body and not title:
         raise EntryError("The name cannot be empty")

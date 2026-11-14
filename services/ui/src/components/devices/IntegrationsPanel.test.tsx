@@ -48,6 +48,8 @@ const LIST: EntriesList = {
       reconfigure: [
         { key: 'host', label: 'Address', type: 'text', value: '192.0.2.90' },
         { key: 'password', label: 'Password', type: 'password', set: true },
+        { key: 'is_tou', label: 'Time-of-use plan', type: 'select', value: '', help: 'Bills by the hour.',
+          options: [{ value: '', label: 'No' }, { value: '1', label: 'Yes' }] },
       ],
       devices: [],
     },
@@ -114,6 +116,17 @@ describe('IntegrationsPanel', () => {
     fireEvent.change(within(dialog).getByLabelText('Address'), { target: { value: '192.0.2.91' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(hub.reconfigureEntry).toHaveBeenCalledWith('rl1', { data: { host: '192.0.2.91' } }));
+  });
+
+  it('offers a choice as a menu with its help, and sends what was picked', async () => {
+    vi.mocked(hub.reconfigureEntry).mockResolvedValue(LIST.entries[1]);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconfigure Camera Hub' }));
+    const dialog = await screen.findByTestId('reconfigure-dialog');
+    expect(within(dialog).getByText('Bills by the hour.')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: '1' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(hub.reconfigureEntry).toHaveBeenCalledWith('rl1', { data: { is_tou: '1' } }));
   });
 
   it('unpairs, and offers to remove anyway when the accessory cannot be reached', async () => {

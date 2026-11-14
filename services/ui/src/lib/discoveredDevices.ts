@@ -184,11 +184,14 @@ export async function addByAddress(domain: string, body: AdoptRequest & { host?:
 export interface ReconfigureField {
   key: string;
   label: string;
-  type: 'text' | 'password';
+  type: 'text' | 'password' | 'select';
   /** Current value (never for secrets). */
   value?: string;
   /** For secrets: whether one is stored. */
   set?: boolean;
+  /** For `select`: the allowed values. */
+  options?: { value: string; label: string }[];
+  help?: string;
 }
 
 export interface HubDevice {

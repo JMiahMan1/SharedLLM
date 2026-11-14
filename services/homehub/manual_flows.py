@@ -470,6 +470,23 @@ async def adopt_srp(runtime: Any, finding: dict[str, Any], name: str | None, are
     return await commit(runtime, plan)
 
 
+async def _relogin(runtime: Any, entry: ConfigEntry, login: dict[str, Any]) -> dict[str, Any]:
+    """Replace an existing cloud entry's login and reconnect it; nothing else about it changes."""
+    old = dict(entry.data)
+    entry.data = {**entry.data, **login}
+    try:
+        runtime.store.save_config_entry(entry)
+    except RuntimeError as exc:
+        entry.data = old
+        raise FlowError(str(exc), 503) from exc
+    await runtime.stop_entry(entry.entry_id)
+    if not entry.disabled_by:
+        runtime.start_entry(entry)
+    log.info("%s %s signed in again", entry.domain, entry.title)
+    return {"status": "adopted", "entry_id": entry.entry_id, "domain": entry.domain, "title": entry.title,
+            "name": entry.title, "entities": [], "message": f"{entry.title} is signed in again."}
+
+
 async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None, area_id: str | None,
                          user_input: dict[str, Any]) -> dict[str, Any]:
     """Email, then the code Roborock emails (HA's flow); the vacuums are read once the account connects."""
@@ -480,8 +497,9 @@ async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None
     code = str(user_input.get("code") or "").strip()
     if not email:
         raise NeedsInput([EMAIL], "Enter the email of the Roborock app account.")
-    if _existing_entry(hub, "roborock", email.lower()):
-        raise FlowError("This Roborock account is already set up", 409)
+    # An account already set up signs in again (HA's reauth): its login has expired or was
+    # revoked. The entry, its devices and entities stay; only the login is replaced.
+    existing = _existing_entry(hub, "roborock", email.lower())
     code_field = {"key": "code", "label": "Code from the email", "type": "text",
                   "help": "Roborock emailed a code to this address."}
     if not code:
@@ -498,6 +516,8 @@ async def adopt_roborock(runtime: Any, finding: dict[str, Any], name: str | None
             raise NeedsInput([EMAIL, code_field], "Enter the code Roborock emailed.",
                              "That code was not accepted.") from exc
         raise FlowError(f"Roborock did not answer: {exc or name_}", 502) from exc
+    if existing is not None:
+        return await _relogin(runtime, existing, {"username": email, "user_data": user_data, "base_url": base_url})
     entry = ConfigEntry(entry_id=_new_entry_id(), domain="roborock", title=name or email, source="user",
                         unique_id=email.lower(), data={"username": email, "user_data": user_data, "base_url": base_url})
     result = await commit(runtime, Plan(hub, entry))

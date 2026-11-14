@@ -184,7 +184,13 @@ const ENTRIES = {
         model: 'Cam', via_device_id: null, entities: ['camera.yard'] }] },
     { entry_id: 'e2', domain: 'music_assistant', label: 'Music Assistant', title: 'Music server', state: 'setup_retry',
       reason: 'Could not connect', source: 'user', disabled_by: null, offline_since: iso(-3 * 24 * 60), entities: 0, unpairs: false,
-      shared: false, reconfigure: [], devices: [] },
+      shared: false, devices: [], reconfigure: [
+        { key: 'url', label: 'Server URL', type: 'text', value: 'http://192.0.2.40:8095',
+          help: 'Where Music Assistant runs, e.g. http://<server>:8095' },
+        { key: 'token', label: 'Token', type: 'password', set: true },
+        { key: 'mode', label: 'Connection', type: 'select', value: '',
+          options: [{ value: '', label: 'Automatic' }, { value: 'ws', label: 'WebSocket only' }] },
+      ] },
     // A long unbroken name, to check the offline list on a small phone.
     { entry_id: 'e3', domain: 'esphome', label: 'ESPHome', title: 'string-lights-backyard-pergola-kauf-plug-2', state: 'setup_retry',
       reason: 'DeviceUnavailable: unreachable', source: 'user', disabled_by: null, offline_since: iso(-50), entities: 1,
