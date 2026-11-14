@@ -14,7 +14,15 @@ from typing import Any
 
 import uvicorn
 
-from services.homehub import automation_api, builtin, camera_recording, recorder_statistics, tts
+from services.homehub import (
+    automation_api,
+    builtin,
+    camera_recording,
+    conversation,
+    recorder_statistics,
+    time_date,
+    tts,
+)
 from services.homehub.api import build_app
 from services.homehub.auth import Auth
 from services.homehub.core import Hub
@@ -75,6 +83,9 @@ class Service:
         self.runtime.start_recording()
         builtin.register(self.hub)
         tts.register(self.hub)
+        conversation.register(self.hub)  # conversation.process and ai_task.generate_data, answered by Jarvis
+        # HA's time_date sensors on every hub, imported or not (services/homehub/time_date.py).
+        self._bg.append(asyncio.create_task(time_date.run(self.hub)))
         await self._start_people()
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()

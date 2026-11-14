@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from services.homehub import templating
+from services.homehub import conversation, templating, time_date
 from services.homehub.core import (
     UNAVAILABLE,
     UNKNOWN,
@@ -55,7 +55,7 @@ MAX_SLEEP = 30.0
 MODES = ("single", "restart", "queued", "parallel")
 DEFAULT_MAX = 10
 # Entities that exist without a registry entry.
-ALWAYS_KNOWN = {"zone.home", "sun.sun"}
+ALWAYS_KNOWN = {"zone.home", "sun.sun", *(f"sensor.{oid}" for oid in time_date.SENSORS)}
 # Helper integrations whose entities HA kept in its own storage. When none of
 # their entities came across, a service or event of that domain has nothing to
 # act on (the household's Assist timers are the case in point).
@@ -64,8 +64,10 @@ HELPER_DOMAINS = {"timer", "input_text", "input_number", "input_boolean", "input
 TOGGLE_DOMAINS = {"light", "switch", "fan", "input_boolean", "humidifier", "remote", "siren", "media_player",
                   "automation", "script"}
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-UNSUPPORTED_TRIGGERS = {"mqtt", "webhook", "tag", "calendar", "conversation", "geo_location",
-                        "persistent_notification", "sentence", "update"}
+UNSUPPORTED_TRIGGERS = {"mqtt", "webhook", "calendar", "geo_location", "persistent_notification", "sentence",
+                        "update"}
+#: The run variable a conversation-triggered run keeps its reply in (``set_conversation_response``).
+CONVERSATION_REPLY = "__conversation_reply"
 
 
 class Unsupported(Exception):
@@ -936,7 +938,8 @@ class AutomationEngine:
         task.add_done_callback(self._tasks.discard)
 
     async def _handle_trigger(self, item: Item, trig_vars: dict[str, Any], *, skip_condition: bool = False,
-                              extra: dict[str, Any] | None = None) -> None:
+                              extra: dict[str, Any] | None = None) -> asyncio.Task | None:
+        """Check the conditions and start a run; returns the run, or None when none started."""
         variables: dict[str, Any] = {"this": templating.wrap_state(self.hub, self.hub.states.get(item.entity_id)),
                                      "trigger": trig_vars}
         variables.update(self._render_variables(item.trigger_variables, variables))
@@ -946,16 +949,17 @@ class AutomationEngine:
             if not skip_condition and not self.check_conditions(item.conditions, variables):
                 if self.tracer is not None:
                     self.tracer.not_run(item, variables, "conditions did not pass")
-                return
+                return None
         except Exception as exc:
             item.last_error = f"condition or variables failed: {exc}"
             log.warning("%s: %s", item.entity_id, item.last_error)
             self._publish(item)
-            return
+            return None
         item.last_triggered = self.clock.now()
         self._persist(item)
-        self._start_run(item, variables)
+        task = self._start_run(item, variables)
         self._publish(item)
+        return task
 
     # -- runs ----------------------------------------------------------------------
     def _start_run(self, item: Item, variables: dict[str, Any]) -> asyncio.Task | None:
@@ -1105,6 +1109,11 @@ class AutomationEngine:
             raise _StopScript(response, str(step["stop"]) if step.get("error") else None)
         elif kind == "scene":
             await self.hub.call_service("scene", "turn_on", {"entity_id": self.render(step["scene"], v)})
+        elif kind == "set_conversation_response":
+            reply = v.get(CONVERSATION_REPLY)
+            if isinstance(reply, dict):  # only a run a sentence started has someone to answer
+                value = self.render(step["set_conversation_response"], v)
+                reply["response"] = None if value is None else str(value)
         else:  # pragma: no cover - the parser only produces the kinds above
             raise HubError(f"unknown step {kind}")
 
@@ -1685,6 +1694,61 @@ class AutomationEngine:
 
     def _trig_homeassistant(self, t: dict[str, Any], cb: Callable, variables: dict[str, Any]) -> Callable[[], None]:
         return lambda: None  # fired by start() and stop()
+
+    def _trig_tag(self, t: dict[str, Any], cb: Callable, variables: dict[str, Any]) -> Callable[[], None]:
+        """HA's tag trigger: a ``tag_scanned`` event for one of ``tag_id``, from one of ``device_id`` when given."""
+        tags = {str(x) for x in _as_list(self.render(t["tag_id"], variables))}
+        devices = {str(x) for x in _as_list(self.render(t.get("device_id"), variables))}
+
+        def on_event(_et: str, data: dict[str, Any]) -> None:
+            tag_id, device_id = str(data.get("tag_id") or ""), data.get("device_id")
+            if tag_id not in tags or (devices and str(device_id) not in devices):
+                return
+            cb({"tag_id": tag_id, "device_id": device_id, "description": "Tag scanned",
+                "event": {"event_type": "tag_scanned", "data": data, "origin": "LOCAL",
+                          "time_fired": self.clock.now().isoformat()}})
+        return self.hub.bus.subscribe(on_event, "tag_scanned")
+
+    def _trig_conversation(self, t: dict[str, Any], cb: Callable, variables: dict[str, Any]) -> Callable[[], None]:
+        return lambda: None  # matched and run by handle_conversation, which waits for the reply
+
+    async def handle_conversation(self, text: str, context: dict[str, Any], *,
+                                  wait_s: float = 10.0) -> dict[str, Any]:
+        """Run every automation with a sentence ``text`` says (services/homehub/conversation.py)."""
+        if not self._running:
+            return {"matched": False}
+        started: list[tuple[Item, asyncio.Task, dict[str, Any]]] = []
+        for item in self.automations.values():
+            if not item.enabled or not item.runnable:
+                continue
+            for trig in item.triggers:
+                if trig["trigger"] != "conversation":
+                    continue
+                hit = next(((s, slots) for s in conversation.compile_command(trig.get("command"))
+                            if (slots := s.match(text)) is not None), None)
+                if hit is None:
+                    continue
+                sentence, slots = hit
+                reply: dict[str, Any] = {"response": None}
+                tv = {"platform": "conversation", "trigger": "conversation", "id": trig["id"], "idx": trig["idx"],
+                      "alias": trig.get("alias"), "sentence": text, "slots": slots,
+                      "details": {k: {"name": k, "text": v, "value": v} for k, v in slots.items()},
+                      "device_id": context.get("device_id"), "satellite_id": context.get("satellite_id"),
+                      "user_input": {"text": text, "language": context.get("language") or "en",
+                                     "conversation_id": context.get("conversation_id"),
+                                     "device_id": context.get("device_id"),
+                                     "satellite_id": context.get("satellite_id")},
+                      "description": f"sentence {sentence.template!r}"}
+                task = await self._handle_trigger(item, tv, extra={CONVERSATION_REPLY: reply})
+                if task is not None:
+                    started.append((item, task, reply))
+                break  # one run per automation, as HA fires an automation once per sentence
+        if not started:
+            return {"matched": False}
+        await conversation.wait_runs([t for _, t, _ in started], wait_s)
+        response = next((r["response"] for _, _, r in started if r["response"]), None)
+        return {"matched": True, "response": response or conversation.DEFAULT_RESPONSE,
+                "automations": [item.entity_id for item, _, _ in started]}
 
     def _schedule_series(self, first_after: datetime, nxt: Callable[[datetime], datetime | None],
                          fire: Callable[[datetime], None]) -> Callable[[], None]:
@@ -2356,7 +2420,7 @@ def _reproduce(entity_id: str, spec: Any, transition: Any) -> list[tuple[str, st
 # -- parsing ---------------------------------------------------------------------------------
 
 _ACTION_KEYS = ("delay", "wait_template", "wait_for_trigger", "choose", "if", "repeat", "variables", "stop",
-                "condition", "event", "parallel", "sequence", "scene")
+                "condition", "event", "parallel", "sequence", "scene", "set_conversation_response")
 
 
 class _ParseContext:
@@ -2442,6 +2506,14 @@ class _ParseContext:
         elif kind == "homeassistant":
             if t.get("event") not in ("start", "shutdown"):
                 raise Unsupported(f"homeassistant trigger event {t.get('event')!r}")
+        elif kind == "tag":
+            if not [x for x in _as_list(t.get("tag_id")) if str(x).strip()]:
+                raise Unsupported("tag trigger without tag_id")
+        elif kind == "conversation":
+            try:
+                conversation.compile_command(t.get("command"))
+            except conversation.SentenceError as exc:
+                raise Unsupported(f"conversation trigger: {exc}") from exc
         else:
             raise Unsupported(f"{kind!r} triggers are not supported")
         return t
@@ -2768,3 +2840,6 @@ class _ParseContext:
 
     def act_scene(self, a: dict[str, Any]) -> dict[str, Any]:
         return {**a, "_kind": "scene"}
+
+    def act_set_conversation_response(self, a: dict[str, Any]) -> dict[str, Any]:
+        return {**a, "_kind": "set_conversation_response"}

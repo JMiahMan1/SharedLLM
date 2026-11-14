@@ -3294,6 +3294,9 @@ def _voice_context_from(request: Request, body: dict) -> dict | None:
     out = {k: text(k) for k in ("area", "area_id", "satellite_name", "device_name", "conversation_id")}
     out["asked"] = text("asked", 500)
     out["extra_system_prompt"] = text("extra_system_prompt", 1000)
+    # The satellite's entity: a timer set by voice shows and rings there (execution satellite_timers.py).
+    satellite = text("satellite")
+    out["satellite"] = satellite if satellite and re.fullmatch(r"assist_satellite\.[a-z0-9_]+", satellite) else None
     return {k: v for k, v in out.items() if v}
 
 
@@ -3421,10 +3424,14 @@ async def chat_handler(request: Request, background_tasks=None):
     try:
         creds_data = await resolve_identity(body)
         creds = ResolvedCredentials(**creds_data)
+        # Everything this chat turn controls is Jarvis acting: only entities exposed to voice (exposure.py).
+        creds.via = "assistant"
         user_id = creds.user
         if voice_speaker_name and creds.user == voice_speaker_name:
             creds.identified_by = "voice"
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
+        if voice_context and voice_context.get("satellite"):
+            creds.voice_satellite = voice_context["satellite"]
     except HTTPException as he:
         if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
@@ -3439,6 +3446,19 @@ async def chat_handler(request: Request, background_tasks=None):
             return _make_openai_response(msg, selected_model, "degraded")
         return _make_ollama_response(msg, selected_model, "degraded")
     log.info(f"Chat request from {user_id} query='{query}'")
+
+    # A sentence an automation in the device hub owns (HA's conversation trigger) is answered by that
+    # automation, before any shortcut or model (services/gateway/sentence_triggers.py).
+    if not grounded:
+        from services.gateway import sentence_triggers
+
+        handled = await sentence_triggers.ask_hub(str(query), voice_context)
+        if handled:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", handled["response"])
+            if is_openai:
+                return _make_openai_response(handled["response"], selected_model, "sentence_trigger")
+            return _make_ollama_response(handled["response"], selected_model, "sentence_trigger")
 
     # The watch's weather and calendar buttons must not wait on a 35-75 s LLM
     # turn (and the small model can overflow its 8k context with RAG context).

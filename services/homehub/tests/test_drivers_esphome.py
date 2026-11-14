@@ -603,3 +603,51 @@ async def test_assist_satellite_announce_speaks_on_the_node(driver, monkeypatch)
                                                                           "start_message": "Hi"})
     with pytest.raises(HubError, match="message or a media_id"):
         await hub.call_service("assist_satellite", "announce", {"entity_id": sat.entity_id})
+
+
+async def test_assist_satellite_timer_event_drives_the_nodes_timer_display(driver):
+    """A Jarvis timer set through a satellite reaches the node as VoiceAssistantTimerEvent (display and ring)."""
+    from aioesphomeapi import VoiceAssistantFeature, VoiceAssistantTimerEventType
+
+    from services.homehub.core import EntityEntry
+
+    hub, drv = driver
+    sat = EntityEntry(entity_id="assist_satellite.den_speaker", platform="esphome", unique_id=f"{MAC}-assist_satellite",
+                      config_entry_id=drv.entry.entry_id, device_id="dev1")
+    hub.entities[sat.entity_id] = sat
+    await drv.async_setup()
+    sent = []
+    drv._client.send_voice_assistant_timer_event = lambda *a: sent.append(a)
+
+    # A node that does not say it handles timers is told so, not silently skipped.
+    with pytest.raises(ServiceNotFound, match="TIMERS"):
+        await hub.call_service("assist_satellite", "timer_event", {
+            "entity_id": sat.entity_id, "event": "started", "timer_id": "t1", "total_seconds": 60, "seconds_left": 60})
+    assert sent == []
+
+    drv._device_info = DeviceInfo(name="smart-speaker", mac_address=MAC,
+                                  voice_assistant_feature_flags=int(VoiceAssistantFeature.VOICE_ASSISTANT
+                                                                    | VoiceAssistantFeature.TIMERS))
+    await hub.call_service("assist_satellite", "timer_event", {
+        "entity_id": sat.entity_id, "event": "started", "timer_id": "t1", "name": "Pasta",
+        "total_seconds": 600, "seconds_left": 600, "is_active": True})
+    await hub.call_service("assist_satellite", "timer_event", {
+        "entity_id": sat.entity_id, "event": "updated", "timer_id": "t1", "name": "Pasta",
+        "total_seconds": 600, "seconds_left": 420, "is_active": False})
+    await hub.call_service("assist_satellite", "timer_event", {
+        "entity_id": sat.entity_id, "event": "finished", "timer_id": "t1", "total_seconds": 600, "seconds_left": 0,
+        "is_active": False})
+    assert sent == [
+        (VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_STARTED, "t1", "Pasta", 600, 600, True),
+        (VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_UPDATED, "t1", "Pasta", 600, 420, False),
+        (VoiceAssistantTimerEventType.VOICE_ASSISTANT_TIMER_FINISHED, "t1", None, 600, 0, False),
+    ]
+    with pytest.raises(HubError, match="event one of"):
+        await hub.call_service("assist_satellite", "timer_event", {"entity_id": sat.entity_id, "event": "rang",
+                                                                   "timer_id": "t1"})
+    with pytest.raises(HubError, match="timer_id"):
+        await hub.call_service("assist_satellite", "timer_event", {"entity_id": sat.entity_id, "event": "cancelled"})
+    with pytest.raises(HubError, match="whole numbers"):
+        await hub.call_service("assist_satellite", "timer_event", {
+            "entity_id": sat.entity_id, "event": "updated", "timer_id": "t1", "seconds_left": "soon"})
+    assert len(sent) == 3

@@ -1043,6 +1043,8 @@ TRIGGER_SPECS = [
      "fields": [_f("event", "Event", "select", options=["start", "shutdown"], required=True)]},
     {"type": "event", "label": "An event fires",
      "fields": [_f("event_type", "Event type", "text", required=True), _f("event_data", "Event data", "template")]},
+    {"type": "tag", "label": "A tag is scanned",
+     "fields": [_f("tag_id", "Tag id", "text", required=True), _f("device_id", "Only from device (id)", "text")]},
 ]
 CONDITION_SPECS = [
     {"type": "state", "label": "Entity is in a state",

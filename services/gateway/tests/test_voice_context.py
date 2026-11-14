@@ -24,6 +24,17 @@ def test_voice_context_is_trusted_only_with_the_internal_secret(monkeypatch):
                    "extra_system_prompt": "Keep it short."}
 
 
+def test_the_satellite_entity_is_kept_only_when_it_is_one(monkeypatch):
+    """A timer set by voice rings on the satellite that heard it, so its entity id travels on (well formed only)."""
+    monkeypatch.setattr(gateway_main, "INTERNAL_SECRET", "s3cret")
+    ctx = gateway_main._voice_context_from(_request("s3cret"), {"voice_context": {
+        "satellite": "assist_satellite.den_speaker", "area": "Den"}})
+    assert ctx == {"satellite": "assist_satellite.den_speaker", "area": "Den"}
+    for bad in ("light.den", "assist_satellite.Den Speaker", "assist_satellite.", 7):
+        ctx = gateway_main._voice_context_from(_request("s3cret"), {"voice_context": {"satellite": bad, "area": "Den"}})
+        assert ctx == {"area": "Den"}, bad
+
+
 def test_the_note_names_the_room_and_what_was_asked():
     note = gateway_main._voice_context_note({"area": "Den", "area_id": "den", "satellite_name": "Den speaker",
                                              "asked": "Which light?"})

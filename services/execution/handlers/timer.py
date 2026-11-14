@@ -15,6 +15,7 @@ import redis.asyncio as redis
 
 from services.common.links import app_link  # shared with geo's place reminders
 from services.config import REDIS_URL
+from services.execution import satellite_timers
 from services.execution.schemas import ExecutionResult, TimerRequest
 
 log = logging.getLogger("execution.timer")
@@ -852,6 +853,9 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             link = app_link(req.url)
             if link:
                 timer_obj["url"] = link
+            satellite = satellite_timers.valid_satellite(req.user_context.voice_satellite)
+            if satellite:
+                timer_obj["satellite"] = satellite  # set by voice: the satellite shows and rings it
 
             bucket = HOUSEHOLD_BUCKET if is_household else user_id
             await r.set(f"timer:{bucket}:{timer_id}", json.dumps(timer_obj))
@@ -859,17 +863,16 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             local_expires = expires_at.astimezone()
             scope_note = " (household)" if is_household else ""
             msg = f"Set {req.type}{scope_note} '{timer_obj['title']}' for {local_expires.strftime('%I:%M %p')}."
-            return ExecutionResult(
-                status="SUCCESS",
-                message=msg,
-                service="timer_add",
-                detail={
-                    "timer_id": timer_id,
-                    "scope": timer_obj["scope"],
-                    "target_devices": devices,
-                    "expires_at": timer_obj["expires_at"],
-                },
-            )
+            detail = {
+                "timer_id": timer_id,
+                "scope": timer_obj["scope"],
+                "target_devices": devices,
+                "expires_at": timer_obj["expires_at"],
+            }
+            told = await _tell_satellite(timer_obj, "started", req)
+            if told is not None:
+                detail["satellite"] = told
+            return ExecutionResult(status="SUCCESS", message=msg, service="timer_add", detail=detail)
 
         elif action == "list":
             user_id = req.user_context.user
@@ -898,10 +901,12 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     if t.get("id") == req.id:
                         await r.delete(k)
                         await stop_ringing_devices(r, timer_id=req.id, user_id=user_id, ha_url=ha_url, ha_token=ha_token)
+                        await _tell_satellite(t, "cancelled", req)
                         deleted_count += 1
                 elif req.title and req.title.lower() in t["title"].lower():
                     await r.delete(k)
                     await stop_ringing_devices(r, timer_id=t.get("id"), user_id=user_id, ha_url=ha_url, ha_token=ha_token)
+                    await _tell_satellite(t, "cancelled", req)
                     deleted_count += 1
 
             if deleted_count > 0:
@@ -926,6 +931,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     if _targets(t, req):
                         if not t.get("recurrence"):
                             await r.delete(k)
+                            await _tell_satellite(t, "cancelled", req)
                         break
             return ExecutionResult(
                 status="SUCCESS",
@@ -941,6 +947,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     t["active"] = False
                     t["paused_at"] = datetime.now(UTC).isoformat()
                     await r.set(k, json.dumps(t))
+                    await _tell_satellite(t, "updated", req)
                     return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No active matching timer found to pause.", service="timer_pause")
 
@@ -968,6 +975,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     t["active"] = True
                     t.pop("paused_at", None)
                     await r.set(k, json.dumps(t))
+                    await _tell_satellite(t, "updated", req)
                     return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No paused matching timer found to resume.", service="timer_resume")
 
@@ -981,6 +989,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     t["active"] = True
                     t.pop("paused_at", None)
                     await r.set(k, json.dumps(t))
+                    await _tell_satellite(t, "updated", req)
                     return ExecutionResult(
                         status="SUCCESS",
                         message=f"Reset timer '{t['title']}'.",
@@ -994,6 +1003,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
     except Exception as e:
         log.error(f"Timer error: {e}")
         return ExecutionResult(status="FAILURE", message=f"Timer error: {e!s}", service="timer")
+
+
+async def _tell_satellite(timer: dict, event: str, req: TimerRequest) -> dict | None:
+    """Send ``event`` to the voice satellite that set this timer (satellite_timers.py); None when none did."""
+    return await satellite_timers.send(timer, event, req.user_context.ha_url, req.user_context.ha_token)
 
 
 def _targets(timer: dict, req) -> bool:

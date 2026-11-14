@@ -83,6 +83,8 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     # Mock dependencies to avoid real network/ML calls
     monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"}))
     monkeypatch.setattr(main, "fetch_ha_entities", AsyncMock(return_value=[]))
+    from services.gateway import sentence_triggers
+    monkeypatch.setattr(sentence_triggers, "ask_hub", AsyncMock(return_value=None))  # no automation owns the sentence
     monkeypatch.setattr(main, "update_history", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "get_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(main, "contextualize_query", AsyncMock(return_value="hello"))
