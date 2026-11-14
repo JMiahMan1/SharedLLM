@@ -2511,8 +2511,15 @@ class _ParseContext:
             types = _as_list(t.get("event_type"))
             if not types:
                 raise Unsupported("event trigger without event_type")
+            data = t.get("event_data") if isinstance(t.get("event_data"), dict) else {}
+            # A helper the event names (``timer.finished`` with ``event_data.entity_id: timer.pasta``) is
+            # referenced like any entity, so a deleted helper turns the automation off with that reason.
+            named = [e for e in _entity_list(data.get("entity_id")) if not _is_template(e)
+                     and e.split(".", 1)[0] in HELPER_DOMAINS]
+            self.need_entities(named, "event trigger event_data")
             for et in types:
-                if isinstance(et, str) and "." in et:
+                if isinstance(et, str) and "." in et and not any(e.startswith(et.split(".", 1)[0] + ".")
+                                                                 for e in named):
                     self.need_helper(et.split(".", 1)[0], f"event trigger {et}")
         elif kind == "homeassistant":
             if t.get("event") not in ("start", "shutdown"):
