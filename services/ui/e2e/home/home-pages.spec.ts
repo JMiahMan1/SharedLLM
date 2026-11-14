@@ -351,7 +351,8 @@ test.describe('home pages', () => {
     const offline = page.getByTestId('offline-entries');
     await expect(offline.getByTestId('offline-entry')).toHaveCount(2);
     await expect(offline).toContainText('Not answering for 3 days');
-    await expect(offline).toContainText('Not answering for 50 minutes');
+    // Hours, not minutes: the fixture's time is fixed when it loads, and a slow run turned "50" into "51".
+    await expect(offline).toContainText('Not answering for 5 hours');
     await expectTapTargets(offline);
     for (const remove of await offline.getByRole('button', { name: /it is not answering/ }).all()) {
       const box = await remove.boundingBox();

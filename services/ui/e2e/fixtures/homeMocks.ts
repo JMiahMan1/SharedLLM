@@ -193,7 +193,7 @@ const ENTRIES = {
       ] },
     // A long unbroken name, to check the offline list on a small phone.
     { entry_id: 'e3', domain: 'esphome', label: 'ESPHome', title: 'string-lights-backyard-pergola-kauf-plug-2', state: 'setup_retry',
-      reason: 'DeviceUnavailable: unreachable', source: 'user', disabled_by: null, offline_since: iso(-50), entities: 1,
+      reason: 'DeviceUnavailable: unreachable', source: 'user', disabled_by: null, offline_since: iso(-5 * 60), entities: 1,
       unpairs: false, shared: false, reconfigure: [], devices: [] },
   ],
 };
