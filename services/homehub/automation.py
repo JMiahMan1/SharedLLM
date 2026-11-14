@@ -284,6 +284,13 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+#: Services whose target names the engine to use, not something acted on: the hub speaks
+#: with Jarvis's own voice whichever text-to-speech entity an imported automation names
+#: (tts.piper, tts.google_en_com), so a missing one must not disable it. The speaker it
+#: sends ``media_player_entity_id`` to is still checked.
+ENGINE_TARGET_SERVICES = frozenset({"tts.speak"})
+
+
 def _entity_list(value: Any) -> list[str]:
     out: list[str] = []
     for v in _as_list(value):
@@ -2622,6 +2629,7 @@ class _ParseContext:
         """A call none of whose targets exist can only fail; one with some missing just warns."""
         if not self.engine._check_refs:
             return
+        engine_target = name in ENGINE_TARGET_SERVICES
         hub = self.engine.hub
         sources = [a, a.get("target") or {}, a.get("data") or {}]
         if any(isinstance(s, dict) and _is_template(str(s.get("entity_id") or "")) for s in sources):
@@ -2632,7 +2640,7 @@ class _ParseContext:
             if not isinstance(src, dict):
                 continue
             for eid in _entity_list(src.get("entity_id")):
-                if eid == "all" or eid.startswith(("script.", "automation.", "scene.")):
+                if eid == "all" or eid.startswith(("script.", "automation.", "scene.")) or engine_target:
                     continue
                 named.append(eid)
                 if self.engine.known_entity(eid):

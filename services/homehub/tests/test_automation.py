@@ -755,6 +755,7 @@ async def test_restored_off_state_disables_an_automation_with_no_saved_flag(hub:
 
 async def test_missing_helpers_and_entities_disable_with_reasons(hub: Hub, engine: AutomationEngine) -> None:
     hub.entities["light.real"] = EntityEntry("light.real", "wiz", "r")
+    hub.entities["media_player.real"] = EntityEntry("media_player.real", "cast", "m")
     await run(engine, [
         auto([{"trigger": "event", "event_type": "timer.finished"}], [NOTE], id="timer"),
         auto([{"trigger": "event", "event_type": "go"}], [{"action": "input_text.set_value", "data": {"value": ""},
@@ -765,8 +766,17 @@ async def test_missing_helpers_and_entities_disable_with_reasons(hub: Hub, engin
                                                            "target": {"entity_id": ["light.gone", "light.real"]}}],
              id="partly"),
         auto([{"trigger": "event", "event_type": "go"}], [{"action": "script.nope"}], id="noscript"),
+        # tts.speak's target is the engine: the hub speaks with its own voice whatever it names.
+        auto([{"trigger": "event", "event_type": "go"}], [{"action": "tts.speak", "target": {"entity_id": "tts.gone"},
+                                                           "data": {"media_player_entity_id": "media_player.real",
+                                                                    "message": "hi"}}], id="speak"),
+        auto([{"trigger": "event", "event_type": "go"}], [{"action": "tts.speak", "target": {"entity_id": "tts.gone"},
+                                                           "data": {"media_player_entity_id": "media_player.gone",
+                                                                    "message": "hi"}}], id="speak_nowhere"),
     ])
     st = {s["id"]: s for s in engine.status()}
+    assert st["speak"]["unsupported_reason"] is None and not st["speak"]["warnings"]
+    assert "media_player.gone" in st["speak_nowhere"]["unsupported_reason"]
     assert "timer integration" in st["timer"]["unsupported_reason"]
     assert "input_text integration" in st["helper"]["unsupported_reason"]
     assert "none of which exist" in st["only_gone"]["unsupported_reason"]
