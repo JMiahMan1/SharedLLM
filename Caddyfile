@@ -23,6 +23,26 @@
     # it was 1400+ lines a day (measured 2026-10-26) drowning the warnings that
     # matter. Real failures from that logger are ERROR, so this raises its level
     # without touching the access log or any other logger.
+    # Error logs ("http.log.error.*", e.g. a 502 while a service restarts) are
+    # written by the default logger, not the site's access log, so the site's
+    # token filter never saw them and the push stream's token was logged in
+    # full. The same filter applies here.
+    log default {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri query {
+                    replace token REDACTED
+                    replace mt REDACTED
+                }
+                request>headers>Authorization delete
+                request>headers>Cookie delete
+            }
+        }
+        exclude http.handlers.reverse_proxy
+    }
+
     log reverse_proxy_noise {
         output stdout
         format json
