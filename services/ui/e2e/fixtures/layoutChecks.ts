@@ -107,3 +107,28 @@ export async function expectLayoutSound(page: Page, info: TestInfo, name: string
   await expectClearOfBottomBar(page);
   await snap(page, info, name);
 }
+
+
+/**
+ * Every visible control whose box runs past the left or right edge of the
+ * screen. A clipped (overflow-hidden) parent hides this from a page-width
+ * check, so each control is measured; one inside a sideways scroller is fine.
+ */
+export async function controlsOffScreen(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    return Array.from(document.querySelectorAll<HTMLElement>('button, a[href], input, select, [role="tab"]')).flatMap((el) => {
+      const box = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      if (!box.width || !box.height || style.visibility === 'hidden' || style.display === 'none') return [];
+      if (el.closest('.sr-only')) return [];
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const o = getComputedStyle(p).overflowX;
+        if ((o === 'auto' || o === 'scroll') && p.scrollWidth > p.clientWidth) return [];
+      }
+      if (box.left >= -1 && box.right <= width + 1) return [];
+      const name = el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 30) || el.tagName;
+      return [`${name} (${Math.round(box.left)}-${Math.round(box.right)} of ${width})`];
+    });
+  });
+}

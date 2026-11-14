@@ -634,6 +634,8 @@ export default function ReferenceBar({
 
   return (
     <div className="relative" data-testid="bible-reference-bar">
+      {/* The pills give way (and truncate) before the icons: on a narrow phone, or with a large system font, the
+          icons must never be pushed off the right edge. */}
       <div className="flex min-w-0 items-center gap-1.5" data-testid={isPhone ? 'bible-phone-bar' : undefined}>
         <button
           type="button"
@@ -641,7 +643,7 @@ export default function ReferenceBar({
           aria-expanded={panel === 'passage'}
           aria-label={`Choose a passage. Now reading ${passageLabel}.`}
           data-testid="bible-browse-open"
-          className={`${PILL} min-w-0 max-w-[50%] sm:max-w-none`}
+          className={`${PILL} min-w-0 flex-initial !shrink`}
         >
           <span className="truncate">{passageLabel}</span>
           <ChevronDown size={15} className="shrink-0 text-slate-400" aria-hidden />
@@ -652,10 +654,10 @@ export default function ReferenceBar({
           aria-expanded={panel === 'version'}
           aria-label={`Translation: ${selectedVersion?.name ?? versionLabel}. Change it`}
           data-testid="bible-version-open"
-          className={PILL}
+          className={`${PILL} min-w-0 max-w-[7.5rem] !shrink`}
         >
-          {isFavorite && <Star size={12} className="fill-amber-300 text-amber-300" aria-hidden />}
-          <span className="tabular-nums">{versionLabel}</span>
+          {isFavorite && <Star size={12} className="shrink-0 fill-amber-300 text-amber-300" aria-hidden />}
+          <span className="truncate tabular-nums">{versionLabel}</span>
           <ChevronDown size={15} className="shrink-0 text-slate-400" aria-hidden />
         </button>
         <div className="ml-auto flex shrink-0 items-center">

@@ -933,9 +933,22 @@ export const api = {
     return normalizeUser(resp.data);
   },
 
-  async uploadAvatar(dataUrl: string): Promise<UserProfile> {
-    const resp = await apiClient.post('/api/users/me/avatar/image', { data_url: dataUrl });
+  /**
+   * Save a profile photo. ``extra.original_url`` and ``extra.crop`` keep the
+   * photo it was cut from and where, so it can be moved later; a crop alone
+   * re-cuts the original already kept.
+   */
+  async uploadAvatar(
+    dataUrl: string,
+    extra?: { original_url?: string; crop?: { x: number; y: number; zoom: number } },
+  ): Promise<UserProfile> {
+    const resp = await apiClient.post('/api/users/me/avatar/image', { data_url: dataUrl, ...extra });
     return normalizeUser(resp.data);
+  },
+
+  /** Your uploaded photo's original and crop, to move or zoom it. */
+  async getAvatarSource(): Promise<{ original_url: string; crop: { x: number; y: number; zoom: number } | null; kept_original: boolean }> {
+    return (await apiClient.get('/api/users/me/avatar/source')).data;
   },
 
   async removeAvatar(): Promise<UserProfile> {

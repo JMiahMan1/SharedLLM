@@ -147,12 +147,12 @@ export default function BibleMemorize({ page }: { page?: string }) {
           onChange={(e) => setRef(e.target.value)}
           placeholder="Add a verse, e.g. Psalm 119:11"
           aria-label="Verse to memorise"
-          className="min-h-11 flex-1 rounded-xl border border-white/10 bg-black/40 px-3 text-sm text-white placeholder-slate-500 outline-none focus:border-fuchsia-400"
+          className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/40 px-3 text-sm text-white placeholder-slate-500 outline-none focus:border-fuchsia-400"
         />
         <button
           type="submit"
           disabled={!ref.trim() || busy !== null}
-          className="min-h-11 rounded-xl bg-white/10 px-4 text-sm text-white flex items-center gap-1.5 disabled:opacity-40"
+          className="min-h-11 shrink-0 rounded-xl bg-white/10 px-4 text-sm text-white flex items-center gap-1.5 disabled:opacity-40"
         >
           {busy === 'ref' ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
         </button>

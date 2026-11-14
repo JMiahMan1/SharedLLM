@@ -25,6 +25,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPExcepti
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
+from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -261,6 +262,11 @@ def _ensure_schema_upgrades() -> None:
         # once at mint time and never stored.
         _add_column("device", "agent_key_hash", "ALTER TABLE device ADD COLUMN agent_key_hash VARCHAR NOT NULL DEFAULT ''")
         _add_column("device", "agent_key_created_at", "ALTER TABLE device ADD COLUMN agent_key_created_at VARCHAR")
+
+    if _table_exists("useravatarimage"):
+        _add_column("useravatarimage", "original", "ALTER TABLE useravatarimage ADD COLUMN original BLOB")
+        _add_column("useravatarimage", "original_mime", "ALTER TABLE useravatarimage ADD COLUMN original_mime VARCHAR")
+        _add_column("useravatarimage", "crop", "ALTER TABLE useravatarimage ADD COLUMN crop VARCHAR")
 
     if _table_exists("deviceassignment"):
         _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
@@ -1127,6 +1133,8 @@ def skylight_status(session: Session, user: User) -> str:
 # profile pictures
 
 AVATAR_MAX_BYTES = 1_500_000
+#: The original a crop is cut from: shrunk on the device to at most 1600 px, so a few hundred kB.
+AVATAR_ORIGINAL_MAX_BYTES = 4_000_000
 _AVATAR_PRESET = re.compile(r"^[a-z0-9-]{1,40}$")
 _IMAGE_MAGIC = {
     b"\x89PNG\r\n\x1a\n": "image/png",
@@ -1139,9 +1147,22 @@ class AvatarChoice(BaseModel):
     preset: str
 
 
+class AvatarCrop(BaseModel):
+    """Which square of the original the picture is: its centre and zoom."""
+
+    x: float = PydField(ge=0, le=1)
+    y: float = PydField(ge=0, le=1)
+    zoom: float = PydField(ge=1, le=8)
+
+
 class AvatarUpload(BaseModel):
     #: A data URL ("data:image/png;base64,...") as a canvas or file reader makes it.
     data_url: str
+    #: The whole photo it was cut from, so the crop can be changed later. Sent with a new photo;
+    #: left out when only the crop of the kept original changed.
+    original_url: str | None = None
+    #: Where in the original the square was cut. With no original_url, the kept original stays.
+    crop: AvatarCrop | None = None
 
 
 def _image_type(data: bytes) -> str | None:
@@ -1151,6 +1172,23 @@ def _image_type(data: bytes) -> str | None:
                 return None
             return mime
     return None
+
+
+def _decoded_image(data_url: str, limit: int, limit_text: str) -> tuple[bytes, str]:
+    """The bytes and type of a base64 data URL holding a PNG, JPEG or WebP picture."""
+    head, _, payload = data_url.partition(",")
+    if not head.startswith("data:") or ";base64" not in head:
+        raise HTTPException(status_code=422, detail="Send the picture as a base64 data URL.")
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=422, detail="That picture could not be read.") from exc
+    if len(data) > limit:
+        raise HTTPException(status_code=413, detail=f"That picture is too large; the limit is {limit_text}.")
+    mime = _image_type(data)
+    if mime is None:
+        raise HTTPException(status_code=415, detail="Use a PNG, JPEG or WebP picture.")
+    return data, mime
 
 
 @app.put("/api/users/me/avatar", response_model=UserRead)
@@ -1179,21 +1217,28 @@ def upload_avatar(
     user: User = Depends(require_api_key),
     session: Session = Depends(get_session),
 ):
-    """Keep an uploaded photo as the profile picture (PNG, JPEG or WebP)."""
-    head, _, payload = body.data_url.partition(",")
-    if not head.startswith("data:") or ";base64" not in head:
-        raise HTTPException(status_code=422, detail="Send the picture as a base64 data URL.")
-    try:
-        data = base64.b64decode(payload, validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise HTTPException(status_code=422, detail="That picture could not be read.") from exc
-    if len(data) > AVATAR_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="That picture is too large; the limit is 1.5 MB.")
-    mime = _image_type(data)
-    if mime is None:
-        raise HTTPException(status_code=415, detail="Use a PNG, JPEG or WebP picture.")
-    row = session.get(UserAvatarImage, user.username) or UserAvatarImage(username=user.username, mime=mime, data=data)
+    """Keep an uploaded photo as the profile picture (PNG, JPEG or WebP).
+
+    ``data_url`` is the square everyone sees. A new photo also sends the
+    original and where the square sits in it, so the picture can be moved or
+    zoomed later; changing only the crop sends the new square and crop and
+    keeps the original. An upload with neither is a photo with no original to
+    go back to.
+    """
+    data, mime = _decoded_image(body.data_url, AVATAR_MAX_BYTES, "1.5 MB")
+    row = session.get(UserAvatarImage, user.username)
+    original = original_mime = None
+    if body.original_url is not None:
+        original, original_mime = _decoded_image(body.original_url, AVATAR_ORIGINAL_MAX_BYTES, "4 MB")
+    elif body.crop is not None:
+        if row is None or row.original is None:
+            raise HTTPException(status_code=409, detail="There is no original photo to crop again; upload the photo.")
+        original, original_mime = row.original, row.original_mime
+    if row is None:
+        row = UserAvatarImage(username=user.username, mime=mime, data=data)
     row.mime, row.data, row.updated_at = mime, data, datetime.now(UTC)
+    row.original, row.original_mime = original, original_mime
+    row.crop = body.crop.model_dump_json() if body.crop is not None and original is not None else None
     session.add(row)
     user.avatar = f"upload:{int(time.time())}"
     session.add(user)
@@ -1215,6 +1260,27 @@ def remove_avatar(request: Request, user: User = Depends(require_api_key), sessi
     session.refresh(user)
     _audit(request, session, "user.avatar", user.username, actor=user, note="removed")
     return get_me(user, session)
+
+
+@app.get("/api/users/me/avatar/source")
+def avatar_source(user: User = Depends(require_api_key), session: Session = Depends(get_session)):
+    """Your own uploaded photo's original and crop, to move or zoom the picture.
+
+    With no original kept (a photo uploaded before originals were), the
+    picture itself is the original, uncropped.
+    """
+    row = session.get(UserAvatarImage, user.username)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No uploaded picture.")
+    if row.original is None:
+        image, mime, crop = row.data, row.mime, None
+    else:
+        image, mime, crop = row.original, row.original_mime or row.mime, json.loads(row.crop) if row.crop else None
+    return {
+        "original_url": f"data:{mime};base64,{base64.b64encode(image).decode()}",
+        "crop": crop,
+        "kept_original": row.original is not None,
+    }
 
 
 @app.get("/api/users/{username}/avatar/image")

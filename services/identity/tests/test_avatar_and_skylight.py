@@ -73,6 +73,42 @@ def test_removing_the_picture_deletes_the_photo(client, session):
     assert client.get("/api/users/sam/avatar/image").status_code == 404
 
 
+JPEG = b"\xff\xd8\xff" + b"\x01" * 64
+
+
+def test_a_photo_keeps_its_original_and_crop_so_it_can_be_moved_later(client, session):
+    crop = {"x": 0.3, "y": 0.25, "zoom": 2.0}
+    client.post("/api/users/me/avatar/image",
+                json={"data_url": _data_url(PNG), "original_url": _data_url(JPEG, "image/jpeg"), "crop": crop})
+    source = client.get("/api/users/me/avatar/source").json()
+    assert source["original_url"] == _data_url(JPEG, "image/jpeg")
+    assert source["crop"] == crop and source["kept_original"] is True
+    # Moving it later sends only the new square and crop: the original stays.
+    moved = {"x": 0.6, "y": 0.5, "zoom": 1.5}
+    square = PNG + b"\x02"
+    assert client.post("/api/users/me/avatar/image", json={"data_url": _data_url(square), "crop": moved}).status_code == 200
+    source = client.get("/api/users/me/avatar/source").json()
+    assert source["original_url"] == _data_url(JPEG, "image/jpeg") and source["crop"] == moved
+    assert client.get("/api/users/sam/avatar/image").content == square
+
+
+def test_a_photo_without_an_original_is_its_own_original(client):
+    assert client.get("/api/users/me/avatar/source").status_code == 404
+    client.post("/api/users/me/avatar/image", json={"data_url": _data_url(PNG)})
+    source = client.get("/api/users/me/avatar/source").json()
+    assert source == {"original_url": _data_url(PNG), "crop": None, "kept_original": False}
+    # With no original kept, a crop alone has nothing to be cut from.
+    again = client.post("/api/users/me/avatar/image", json={"data_url": _data_url(PNG), "crop": {"x": 0.5, "y": 0.5, "zoom": 1}})
+    assert again.status_code == 409
+
+
+def test_a_crop_out_of_range_or_an_original_that_is_not_a_picture_is_refused(client):
+    bad_crop = {"data_url": _data_url(PNG), "original_url": _data_url(JPEG, "image/jpeg"), "crop": {"x": 2, "y": 0.5, "zoom": 1}}
+    assert client.post("/api/users/me/avatar/image", json=bad_crop).status_code == 422
+    not_image = {"data_url": _data_url(PNG), "original_url": _data_url(b"<svg/>", "image/png"), "crop": {"x": 0.5, "y": 0.5, "zoom": 1}}
+    assert client.post("/api/users/me/avatar/image", json=not_image).status_code == 415
+
+
 def test_skylight_reads_not_set_up_until_the_household_account_is(client, session):
     assert client.get("/api/users/me").json()["skylight_status"] == "not_set_up"
     admin = session.get(User, 1)

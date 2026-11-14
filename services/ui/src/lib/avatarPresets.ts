@@ -906,21 +906,3 @@ export function presetSvgHtml(preset: AvatarPreset): string {
     `</svg>`
   );
 }
-
-/**
- * A picked photo, scaled to a 512px square JPEG in the browser so the upload
- * is small and every avatar has the same shape. The centre of the photo is
- * kept, the way a phone's contact photo crop does it.
- */
-export async function squarePhoto(file: File, size = 512): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const side = Math.min(bitmap.width, bitmap.height);
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('This device cannot prepare the picture.');
-  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
-  bitmap.close?.();
-  return canvas.toDataURL('image/jpeg', 0.85);
-}

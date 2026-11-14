@@ -250,34 +250,41 @@ export default function BibleToday({
       <BiblePlans onOpenRef={onOpenRef} />
 
       {onReminderTime && (
-        <section className="glass-panel rounded-2xl p-4 border border-white/10 flex flex-wrap items-center gap-3" data-testid="bible-reminder">
-          {reminderTime ? <Bell size={16} className="text-amber-300" /> : <BellOff size={16} className="text-slate-500" />}
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-white">Daily reminder</p>
-            <p className="text-xs text-slate-400">
-              {reminderTime
-                ? "If you haven't read by then, Jarvis sends one nudge with today's reading."
-                : 'Off. Pick a time to get one nudge on days you have not read yet.'}
-            </p>
+        // On a phone: what it is on top, the time and its off switch in a row under it; side by side from a tablet up.
+        <section className="glass-panel rounded-2xl border border-white/10 p-4 sm:flex sm:items-center sm:gap-4" data-testid="bible-reminder">
+          <div className="flex min-w-0 items-start gap-3 sm:flex-1">
+            <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${reminderTime ? 'bg-amber-500/15 text-amber-300' : 'bg-white/5 text-slate-500'}`}>
+              {reminderTime ? <Bell size={16} aria-hidden /> : <BellOff size={16} aria-hidden />}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white">Daily reminder</p>
+              <p className="text-xs leading-relaxed text-slate-400">
+                {reminderTime
+                  ? "If you haven't read by then, Jarvis sends one nudge with today's reading."
+                  : 'Off. Pick a time to get one nudge on days you have not read yet.'}
+              </p>
+            </div>
           </div>
-          <input
-            type="time"
-            value={reminderTime}
-            onChange={(e) => onReminderTime(e.target.value)}
-            aria-label="Reminder time"
-            data-testid="bible-reminder-time"
-            className="min-h-11 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white"
-          />
-          {reminderTime && (
-            <button
-              type="button"
-              onClick={() => onReminderTime('')}
-              className="min-h-11 rounded-xl px-3 text-xs text-slate-300 hover:bg-white/5"
-              data-testid="bible-reminder-off"
-            >
-              Turn off
-            </button>
-          )}
+          <div className="mt-3 flex items-center gap-2 sm:mt-0 sm:shrink-0">
+            <input
+              type="time"
+              value={reminderTime}
+              onChange={(e) => onReminderTime(e.target.value)}
+              aria-label="Reminder time"
+              data-testid="bible-reminder-time"
+              className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white sm:w-36 sm:flex-none"
+            />
+            {reminderTime && (
+              <button
+                type="button"
+                onClick={() => onReminderTime('')}
+                className="min-h-11 shrink-0 rounded-xl border border-white/10 px-3 text-xs text-slate-300 hover:bg-white/5"
+                data-testid="bible-reminder-off"
+              >
+                Turn off
+              </button>
+            )}
+          </div>
         </section>
       )}
 

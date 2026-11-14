@@ -727,8 +727,14 @@ class UserAvatarImage(SQLModel, table=True):  # type: ignore
     __table_args__ = {"extend_existing": True}
     username: str = Field(primary_key=True)
     mime: str
+    #: The square picture everyone sees, cut from the original on the uploader's device.
     data: bytes
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    #: The photo as chosen (shrunk on the device), kept so the crop can be changed later without uploading again.
+    original: bytes | None = None
+    original_mime: str | None = None
+    #: The square chosen from the original, as JSON {"x", "y", "zoom"}: the centre (0-1 of the width and height) and the zoom (1 = the whole short side).
+    crop: str | None = None
 
 
 class UserNotificationPreference(SQLModel, table=True):  # type: ignore
