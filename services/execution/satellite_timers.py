@@ -17,6 +17,10 @@ The contract:
   on that entity with ``event`` (started, updated, cancelled, finished),
   ``timer_id``, ``name``, ``total_seconds``, ``seconds_left`` and ``is_active``.
   The hub's ESPHome driver sends the node's ``VoiceAssistantTimerEvent``.
+* A fired timer has left Redis, so its satellite is kept for an hour
+  (``handlers/timer.py`` ``remember_fired_satellite``). Stop on the phone's
+  notice cancels the ring there, and Snooze or +1 min (``again_of``) cancels it
+  and starts the new timer on the same satellite.
 
 The timer itself never fails because a satellite could not be told: the result
 says so (``detail["satellite"]``) and a warning names the reason.

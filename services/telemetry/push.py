@@ -207,10 +207,20 @@ async def _send_fcm(user: str, title: str, body: str) -> bool:
         return False
 
 
-async def send_to_user(user: str, title: str, body: str, data: dict | None = None) -> dict:
-    """Best-effort push to every registered device. Never raises."""
+async def send_to_user(user: str, title: str, body: str, data: dict | None = None, *,
+                       actions: list[dict] | None = None, tag: str | None = None) -> dict:
+    """Best-effort push to every registered device. Never raises.
+
+    ``actions`` are the notice's buttons (docs/PUSH.md); a browser's service worker (``push-sw.js``) shows
+    them and answers a callback or reply button with ``POST /api/push/action``, as the bell does. ``tag``
+    lets a later notice replace this one (a timer's "done" notice per timer).
+    """
     result = {"webpush": 0, "fcm": False, "pruned": 0}
-    payload = {"title": title, "body": body, "data": data or {}}
+    payload: dict[str, Any] = {"title": title, "body": body, "data": data or {}}
+    if actions:
+        payload["actions"] = actions
+    if tag:
+        payload["tag"] = tag
 
     subscriptions = await list_subscriptions(user)
     if subscriptions:

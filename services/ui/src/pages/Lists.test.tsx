@@ -106,6 +106,43 @@ describe('the Lists page', () => {
     await waitFor(() => expect(lists.updateItem).toHaveBeenCalledWith('todo.shopping_list', 'u1', { summary: 'Oat milk' }));
   });
 
+  it('edits an item\'s notes where the list keeps them, and its name with them', async () => {
+    vi.mocked(lists.updateItem).mockResolvedValue(REMINDERS);
+    wrap('/lists?list=todo.reminders');
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Call the vet' }));
+    const notes = screen.getByRole('textbox', { name: 'Notes for Call the vet' });
+    fireEvent.change(notes, { target: { value: '  Ask about the booster  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(lists.updateItem).toHaveBeenCalledWith('todo.reminders', 'r1',
+      { description: 'Ask about the booster' }));
+    vi.mocked(lists.updateItem).mockClear();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Call the vet' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Rename Call the vet' }), { target: { value: 'Call the vet at 9' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(lists.updateItem).toHaveBeenCalledWith('todo.reminders', 'r1', { summary: 'Call the vet at 9' }));
+  });
+
+  it('clears notes, and saves nothing when nothing changed', async () => {
+    const withNotes: TodoList = { ...REMINDERS, items: [{ ...REMINDERS.items[0], description: 'Old note' }] };
+    vi.mocked(lists.getLists).mockResolvedValue([withNotes]);
+    vi.mocked(lists.updateItem).mockClear().mockResolvedValue(REMINDERS);
+    wrap();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Call the vet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(lists.updateItem).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Call the vet' }));
+    expect(screen.queryByRole('button', { name: 'Delete Call the vet' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Notes for Call the vet' }), { target: { value: ' ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(lists.updateItem).toHaveBeenCalledWith('todo.reminders', 'r1', { description: null }));
+  });
+
+  it('a list without notes keeps the plain rename', async () => {
+    wrap('/lists?list=todo.shopping_list');
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Milk' }));
+    expect(screen.queryByRole('textbox', { name: /Notes for/ })).toBeNull();
+  });
+
   it('a list that cannot be reordered offers no move buttons', async () => {
     vi.mocked(lists.getLists).mockResolvedValue([{ ...SHOPPING, features: features({ move: false }) }]);
     wrap();

@@ -61,6 +61,8 @@ _AGAIN_FIELDS = (
     "scope",
     "tts_enabled",
     "url",
+    # The fired timer: if it rang on a voice satellite, the satellite stops it and shows the new one.
+    "again_of",
 )
 
 

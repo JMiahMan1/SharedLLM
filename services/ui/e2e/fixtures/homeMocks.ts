@@ -411,7 +411,7 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
       if (listWrite && listOf(decodeURIComponent(listWrite[1]))) {
         const list = listOf(decodeURIComponent(listWrite[1]))!;
         const uid = listWrite[3] ? decodeURIComponent(listWrite[3]) : null;
-        const b = (body ?? {}) as { summary?: string; status?: string; previous_uid?: string | null };
+        const b = (body ?? {}) as { summary?: string; status?: string; previous_uid?: string | null; description?: string | null };
         if (listWrite[2] === 'clear_completed') list.items = list.items.filter((i) => i.status !== 'completed');
         else if (method === 'POST' && !uid) {
           list.items.push({ uid: `n${list.items.length + 1}`, summary: String(b.summary), status: 'needs_action', due: null,
@@ -426,6 +426,11 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
           const item = list.items.find((i) => i.uid === uid)!;
           if (b.status) item.status = b.status;
           if (b.summary) item.summary = b.summary;
+          if ('description' in b) {
+            // The gateway refuses notes on a list that keeps none (todo_routes._due_fields).
+            if (!list.features.description) return json({ detail: 'This list has no descriptions' }, 400);
+            item.description = b.description ?? null;
+          }
         }
         list.open = list.items.filter((i) => i.status !== 'completed').length;
         return json(list);
@@ -478,7 +483,9 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/homehub/automations') return json({ items: [AUTOMATION], can_edit: role === 'admin' });
     if (p === '/api/homehub/automations/catalog') {
       return json({
-        triggers: [{ type: 'time', label: 'At a time', fields: [{ name: 'at', label: 'Time', kind: 'time', required: true }] }],
+        triggers: [{ type: 'time', label: 'At a time', fields: [{ name: 'at', label: 'Time', kind: 'time', required: true }] },
+          { type: 'conversation', label: 'Someone says a sentence',
+            fields: [{ name: 'command', label: 'Sentences', kind: 'lines', required: true }] }],
         conditions: [{ type: 'template', label: 'Template is true',
           fields: [{ name: 'value_template', label: 'Template', kind: 'template', required: true }] }],
         actions: [
@@ -487,13 +494,31 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
           { type: 'wait_for_trigger', label: 'Wait for a trigger', fields: [{ name: 'timeout', label: 'Timeout', kind: 'duration' },
             { name: 'continue_on_timeout', label: 'Continue on timeout', kind: 'boolean' }] },
           { type: 'condition', label: 'Continue only if', fields: [] },
+          { type: 'service', label: 'Call a service', fields: [] },
+          { type: 'set_conversation_response', label: 'Reply to the person speaking',
+            fields: [{ name: 'set_conversation_response', label: 'Reply', kind: 'template', required: true }] },
+          { type: 'satellite_timer', label: 'Show a timer on a voice satellite', service: 'assist_satellite.timer_event', fields: [] },
         ],
-        services: [], entities: [], areas: [], zones: [], persons: [], devices: [],
+        services: [
+          { domain: 'assist_satellite', services: { timer_event: { name: 'timer_event', fields: {
+            event: { name: 'Event', required: true, selector: { select: { options: ['started', 'updated', 'cancelled', 'finished'] } } },
+            timer_id: { name: 'Timer id', required: true, selector: { text: {} } },
+            total_seconds: { name: 'Length (seconds)', selector: { number: { min: 0 } } },
+          } } } },
+          { domain: 'tts', services: { speak: { name: 'speak', fields: { media_player_entity_id: {}, message: {}, options: {} } } } },
+        ],
+        entities: [{ entity_id: 'assist_satellite.den_voice', name: 'Den voice', domain: 'assist_satellite' }],
+        areas: [], zones: [], persons: [], devices: [],
       });
     }
     if (p === '/api/homehub/automations/automation/a1') {
       return json({ item: AUTOMATION, config: { alias: AUTOMATION.alias, triggers: [], conditions: [], actions: [] },
         yaml: 'alias: Porch light at dusk\ntriggers: []\nactions: []\n', can_edit: role === 'admin' });
+    }
+    // The voices tts.speak takes: Jarvis's Kokoro voices and a made-up cloned voice on alpaca.
+    if (p === '/api/homehub/automations/voices') {
+      return json({ voices: [{ id: 'af_heart', name: 'af_heart', kind: 'kokoro' }, { id: 'am_adam', name: 'am_adam', kind: 'kokoro' },
+        { id: 'pat-0a1b2c', name: 'Pat', kind: 'clone' }], default: 'af_heart', errors: {} });
     }
     if (p === '/api/homehub/automations/remap') return json({ remap: {}, report: [] });
     if (p === '/api/homehub/automations/blueprints') return json({ blueprints: [BLUEPRINT] });

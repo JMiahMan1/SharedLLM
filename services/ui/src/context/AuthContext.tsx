@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import axios from 'axios';
 import { storageGet, storageSet, storageRemove, storageInit, mirrorNativeCredentials } from '../lib/storage';
 import { registerThisDevice } from '../lib/deviceRegistration';
+import { sharePushKey } from '../lib/push';
 import { mirrorIdentity } from '../lib/locationTracking';
 
 interface AuthContextType {
@@ -109,6 +110,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       storageRemove('jarvis_guard_seen_on'),
       storageRemove('jarvis_location_tracking_enabled'),
       storageRemove('jarvis_steps_backfilled_through'),
+      // The browser's notice buttons acted with this key (public/push-sw.js); the next person must not.
+      sharePushKey(null).catch((e: unknown) => { console.warn('[push] could not clear the push worker key', e); return false; }),
     ]);
     window.location.href = '/login';
   }, [queryClient]);

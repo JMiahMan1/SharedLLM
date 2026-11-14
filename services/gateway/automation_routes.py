@@ -233,6 +233,13 @@ async def catalog(request: Request):
     return data
 
 
+@router.get("/automations/voices")
+async def voices(request: Request):
+    """The voices ``tts.speak`` takes in ``options.voice`` (Kokoro and alpaca's cloned voices)."""
+    creds = await _caller(request)
+    return _answer(*await _hub("GET", "/api/homehub/automations/voices", creds=creds))
+
+
 @router.get("/automations/blueprints")
 async def blueprints(request: Request):
     """Imported blueprints and the inputs each takes (the editor's blueprint form)."""

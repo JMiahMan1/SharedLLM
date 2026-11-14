@@ -786,6 +786,40 @@ async def test_missing_helpers_and_entities_disable_with_reasons(hub: Hub, engin
     assert "script.nope" in st["noscript"]["unsupported_reason"]
 
 
+async def test_an_event_trigger_naming_a_helper_references_it(hub: Hub, engine: AutomationEngine) -> None:
+    """``timer.finished`` with ``event_data.entity_id`` names that timer: missing, it disables with a reason."""
+    hub.entities["timer.other"] = EntityEntry("timer.other", "timer", "o")  # a timer exists, but not the named one
+    hub.entities["timer.tea"] = EntityEntry("timer.tea", "timer", "t")
+    await run(engine, [
+        auto([{"trigger": "event", "event_type": "timer.finished", "event_data": {"entity_id": "timer.pasta"}}],
+             [NOTE], id="gone"),
+        auto([{"trigger": "event", "event_type": "timer.finished", "event_data": {"entity_id": "timer.tea"}}],
+             [NOTE], id="there"),
+        # Not a helper: the event's data is left alone, as before.
+        auto([{"trigger": "event", "event_type": "go", "event_data": {"entity_id": "light.gone"}}], [NOTE],
+             id="not_helper"),
+        auto([{"trigger": "event", "event_type": "timer.finished", "event_data": {"entity_id": "{{ t }}"}}],
+             [NOTE], id="templated"),
+    ])
+    st = {s["id"]: s for s in engine.status()}
+    assert st["gone"]["unsupported_reason"] == "event trigger event_data names timer.pasta, which no longer exists"
+    assert st["gone"]["enabled"] is False
+    assert st["there"]["unsupported_reason"] is None and st["there"]["enabled"]
+    assert st["not_helper"]["unsupported_reason"] is None
+    assert st["templated"]["unsupported_reason"] is None
+
+
+async def test_an_event_trigger_naming_a_helper_loads_once_it_is_created(hub: Hub, engine: AutomationEngine) -> None:
+    hub.entities["light.real"] = EntityEntry("light.real", "wiz", "r")  # a hub with entities checks references
+    await run(engine, [auto([{"trigger": "event", "event_type": "timer.finished",
+                              "event_data": {"entity_id": "timer.pasta"}}], [NOTE], id="gone")])
+    assert "timer.pasta" in engine.status()[0]["unsupported_reason"]
+    hub.entities["timer.pasta"] = EntityEntry("timer.pasta", "timer", "p")
+    await run(engine, [auto([{"trigger": "event", "event_type": "timer.finished",
+                              "event_data": {"entity_id": "timer.pasta"}}], [NOTE], id="gone")])
+    assert engine.status()[0]["unsupported_reason"] is None
+
+
 async def test_blueprint_scripts_expand_inputs(hub: Hub, engine: AutomationEngine) -> None:
     calls = record(hub, "tts.speak")
     bp = {"blueprint": {"name": "Announce", "domain": "script", "input": {

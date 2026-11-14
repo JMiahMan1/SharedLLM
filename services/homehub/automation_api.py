@@ -15,6 +15,7 @@ first run) and :func:`start` once it runs.
 | ``GET .../{kind}/{id}/traces`` | read | the last runs |
 | ``GET .../export``, ``POST .../import`` | admin | YAML in HA's file shapes |
 | ``GET .../catalog`` | read | triggers, conditions, actions, services and entities for an editor |
+| ``GET .../voices`` | read | the voices ``tts.speak`` takes (Kokoro and alpaca's cloned voices), and why a kind is missing |
 | ``GET .../blueprints``, ``GET .../blueprints/{path}`` | admin | imported blueprints and the inputs they take |
 | ``GET|PUT .../remap``, ``POST .../remap/preview``, ``POST .../remap/suggest`` | admin | renamed-entity repairs |
 | ``GET|POST /api/homehub/schedules``, ``GET|PUT|DELETE .../{id}``, ``POST .../{id}/enabled`` | read / admin | the nielsfaber scheduler |
@@ -123,6 +124,13 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
     async def get_catalog(request: Request) -> dict[str, Any]:
         who(request)
         return catalog(runtime.hub)
+
+    @router.get("/api/homehub/automations/voices")
+    async def get_voices(request: Request) -> dict[str, Any]:
+        who(request)
+        from services.homehub import tts
+
+        return await tts.voices()
 
     @router.get("/api/homehub/automations/export")
     async def export(request: Request, kind: str = "automation", id: str | None = None) -> Any:

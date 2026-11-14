@@ -22,6 +22,9 @@ log = logging.getLogger("execution.timer")
 
 HOUSEHOLD_BUCKET = "__household__"
 RINGING_TTL_SECONDS = 600
+#: How long a fired timer's voice satellite is remembered, so a Stop or Snooze tapped on a phone
+#: (the timer itself is gone by then) still reaches the satellite that is ringing it.
+FIRED_SATELLITE_TTL_SECONDS = 3600
 
 _DURATION_PART = re.compile(
     r"(\d+(?:\.\d+)?)\s*(h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)(?![a-z])",
@@ -537,6 +540,9 @@ async def notify_timer_done(user: str, timer_data: dict) -> bool:
         again["esphome_script"] = timer_data.get("esphome_script")
     if scope == "household":
         again["scope"] = "household"
+    if timer_id and satellite_timers.valid_satellite(timer_data.get("satellite")):
+        # The snooze stops this ring on the voice satellite and counts down there (remember_fired_satellite).
+        again["again_of"] = timer_id
     # A reminder made from a note opens that note; a snooze keeps the link.
     # Otherwise a tap opens the Family page's Announcements tab, where timers
     # and alarms are listed. It used to default to `/communication`, which
@@ -854,6 +860,12 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             if link:
                 timer_obj["url"] = link
             satellite = satellite_timers.valid_satellite(req.user_context.voice_satellite)
+            fired = await _take_fired_satellite(r, req.again_of, user_id) if req.again_of else None
+            if fired is not None:
+                # A snooze or +1 min from a phone: the old timer stops ringing on its satellite
+                # and the new one counts down there, as if it had been set by voice.
+                await _tell_satellite(fired, "cancelled", req)
+                satellite = satellite or satellite_timers.valid_satellite(fired.get("satellite"))
             if satellite:
                 timer_obj["satellite"] = satellite  # set by voice: the satellite shows and rings it
 
@@ -910,9 +922,14 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     deleted_count += 1
 
             if deleted_count > 0:
+                await _forget_fired_satellite(r, req.id)
                 return ExecutionResult(status="SUCCESS", message=f"Deleted {deleted_count} timer(s).", service="timer_delete")
             if req.id:
                 await stop_ringing_devices(r, timer_id=req.id, user_id=user_id, ha_url=ha_url, ha_token=ha_token)
+                # Already fired (Stop on the phone's notice): its satellite may still be ringing it.
+                fired = await _take_fired_satellite(r, req.id, user_id)
+                if fired is not None:
+                    await _tell_satellite(fired, "cancelled", req)
             return ExecutionResult(status="FAILURE", message="No matching timer found.", service="timer_delete")
 
         elif action == "stop":
@@ -926,13 +943,19 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 ha_token=req.user_context.ha_token,
             )
             # If a one-off timer is still in Redis, delete it; leave recurring alarms scheduled.
+            told = False
             if req.id or req.title:
                 for k, t in await _load_timers(r, user_id):
                     if _targets(t, req):
                         if not t.get("recurrence"):
                             await r.delete(k)
                             await _tell_satellite(t, "cancelled", req)
+                            told = True
                         break
+            if req.id:
+                fired = await _take_fired_satellite(r, req.id, user_id)
+                if fired is not None and not told:
+                    await _tell_satellite(fired, "cancelled", req)
             return ExecutionResult(
                 status="SUCCESS",
                 message="Stopped.",
@@ -1008,6 +1031,55 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
 async def _tell_satellite(timer: dict, event: str, req: TimerRequest) -> dict | None:
     """Send ``event`` to the voice satellite that set this timer (satellite_timers.py); None when none did."""
     return await satellite_timers.send(timer, event, req.user_context.ha_url, req.user_context.ha_token)
+
+
+def _fired_key(timer_id: str) -> str:
+    return f"timer_fired_satellite:{timer_id}"
+
+
+async def remember_fired_satellite(timer_data: dict) -> None:
+    """Keep a fired timer that rang on a voice satellite for an hour (FIRED_SATELLITE_TTL_SECONDS).
+
+    The timer leaves Redis when it fires, so without this a Stop or Snooze tapped on a phone could
+    not tell the satellite that is still ringing it. A failure is logged, never raised: the ring
+    itself has already happened.
+    """
+    satellite = satellite_timers.valid_satellite(timer_data.get("satellite"))
+    timer_id = str(timer_data.get("id") or "")
+    if not satellite or not timer_id:
+        return
+    record = {k: timer_data.get(k) for k in ("id", "title", "duration_sec", "user_id", "created_by", "scope")}
+    record.update(satellite=satellite, expires_at=timer_data.get("expires_at"), active=False)
+    try:
+        r = await get_redis()
+        await r.set(_fired_key(timer_id), json.dumps(record), ex=FIRED_SATELLITE_TTL_SECONDS)
+    except Exception as exc:
+        log.warning("[satellite timer] could not remember that %s rang on %s: %s", timer_id, satellite, exc)
+
+
+async def _take_fired_satellite(r, timer_id: str | None, user_id: str | None) -> dict | None:
+    """The fired timer ``timer_id`` if it rang on a satellite and belongs to ``user_id``; it is forgotten.
+
+    A household timer belongs to everyone who got its notice. Anyone else's id finds nothing.
+    """
+    if not timer_id:
+        return None
+    raw = await r.get(_fired_key(timer_id))
+    if not raw:
+        return None
+    try:
+        record = json.loads(raw)
+    except ValueError:
+        return None
+    if record.get("scope") != "household" and record.get("user_id") != user_id:
+        return None
+    await r.delete(_fired_key(timer_id))
+    return record
+
+
+async def _forget_fired_satellite(r, timer_id: str | None) -> None:
+    if timer_id:
+        await r.delete(_fired_key(timer_id))
 
 
 def _targets(timer: dict, req) -> bool:

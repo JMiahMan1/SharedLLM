@@ -527,6 +527,33 @@ async def test_catalog_has_device_steps_and_the_devices(api: httpx.AsyncClient, 
     assert cat["devices"] == [{"id": "dev_lamp", "name": "Desk lamp", "area": "Office", "entities": ["light.porch"]}]
 
 
+async def test_catalog_offers_sentences_replies_and_satellite_timers(api: httpx.AsyncClient, env: Env) -> None:
+    cat = (await api.get("/api/homehub/automations/catalog", headers=KID)).json()
+    trig = next(s for s in cat["triggers"] if s["type"] == "conversation")
+    assert trig["fields"] == [{"name": "command", "label": "Sentences", "kind": "lines", "required": True}]
+    reply = next(s for s in cat["actions"] if s["type"] == "set_conversation_response")
+    assert reply["fields"][0]["name"] == "set_conversation_response"
+    timer = next(s for s in cat["actions"] if s["type"] == "satellite_timer")
+    assert timer["service"] == "assist_satellite.timer_event"
+    # No satellite on this hub: the service is not offered.
+    assert "assist_satellite" not in {d["domain"] for d in cat["services"]}
+    env.hub.states.set("assist_satellite.den_voice", "idle", {})
+    cat = (await api.get("/api/homehub/automations/catalog", headers=KID)).json()
+    sat = next(d for d in cat["services"] if d["domain"] == "assist_satellite")["services"]["timer_event"]
+    assert sat["fields"]["event"]["selector"]["select"]["options"] == ["started", "updated", "cancelled", "finished"]
+    assert {"timer_id", "name", "total_seconds", "seconds_left", "is_active"} <= set(sat["fields"])
+
+
+async def test_a_sentence_automation_from_the_editor_validates(api: httpx.AsyncClient, env: Env) -> None:
+    conf = {"alias": "Good night", "triggers": [{"trigger": "conversation", "command": ["good night", "[it's] bed time"]}],
+            "actions": [{"set_conversation_response": "Sleep well"},
+                        {"action": "assist_satellite.timer_event", "target": {"entity_id": "assist_satellite.x"},
+                         "data": {"event": "started", "timer_id": "t1", "total_seconds": 60}}]}
+    r = await api.post("/api/homehub/automations/validate", headers=ADMIN, json={"kind": "automation", "config": conf})
+    assert r.status_code == 200
+    assert r.json()["valid"] is True and r.json()["errors"] == []
+
+
 async def test_new_visual_steps_validate_and_run(env: Env) -> None:
     calls = record(env.hub, "test.note", "test.other")
     conf = {"alias": "Every step", "triggers": [{"trigger": "event", "event_type": "go"}],

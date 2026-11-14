@@ -122,6 +122,19 @@ def set_exposed(hub: Any, entity_id: str, exposed: bool | None) -> None:
     hub.store.set_kv(KV_KEY, settings)
 
 
+def expose_new(hub: Any) -> bool:
+    """Home Assistant's "expose new entities" switch (on unless turned off)."""
+    return _settings(hub).get("expose_new") is not False
+
+
+def set_expose_new(hub: Any, value: bool) -> None:
+    if not isinstance(value, bool):
+        raise ValueError("expose_new must be true or false")
+    if hub.store is None:
+        raise ValueError("the hub has no store to keep the expose new entities switch")
+    hub.store.set_kv(KV_KEY, {**_settings(hub), "expose_new": value})
+
+
 def exposed_entities(hub: Any) -> list[str]:
     """Every entity with a state that voice and chat may control, sorted."""
     return sorted(eid for eid in hub.states.entity_ids() if is_exposed(hub, eid))
