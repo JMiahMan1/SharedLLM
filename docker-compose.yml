@@ -88,6 +88,8 @@ services:
       - "8010:8010"  # Host:8010 -> Caddy -> bible:8010
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      # The deploy's "Jarvis is updating" flag (scripts/deploy_remote.sh), served at /api/deploy-status.
+      - ./data/deploy_status:/srv/deploy_status:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

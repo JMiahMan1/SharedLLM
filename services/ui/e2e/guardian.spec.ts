@@ -161,6 +161,8 @@ async function mockApi(page: Page, viewer: Viewer) {
       return viewer === 'dad' ? json(DEVICES) : json({ detail: 'Only the father or an admin can see device details' }, 403);
     }
 
+    // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
+    if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
     unmocked.push(`${route.request().method()} ${p}`);
     return route.fulfill({ json: [] });
   });

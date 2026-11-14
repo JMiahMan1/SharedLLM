@@ -221,6 +221,8 @@ export interface HubEntry {
   shared: boolean;
   /** Its driver finds devices of its own after setup; "Sync devices" registers new ones. */
   syncs?: boolean;
+  /** When it last answered (ISO), while it is not loaded; null when it works or is disabled. */
+  offline_since?: string | null;
 }
 
 export interface HubArea {
@@ -260,6 +262,17 @@ export function entriesNeedingAttention<T extends { state: string; disabled_by?:
   return entries
     .filter((e) => e.state !== 'loaded' && !e.disabled_by)
     .sort((a, b) => rank(a.state) - rank(b.state) || a.title.localeCompare(b.title));
+}
+
+/** "Not answering for 3 days" from an entry's offline_since; empty when it is not known. */
+export function offlineSince(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return '';
+  const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  if (Number.isNaN(minutes)) return '';
+  if (minutes < 2) return 'Not answering since just now';
+  const [n, unit] = minutes < 90 ? [minutes, 'minute'] : minutes < 36 * 60 ? [Math.round(minutes / 60), 'hour']
+    : [Math.round(minutes / 1440), 'day'];
+  return `Not answering for ${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 export async function getEntries(): Promise<EntriesList> {

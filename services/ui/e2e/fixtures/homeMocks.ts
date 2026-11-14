@@ -183,7 +183,12 @@ const ENTRIES = {
       devices: [{ id: 'd1', name: 'Yard', original_name: 'Yard', name_by_user: null, area_id: 'kitchen', manufacturer: 'Example',
         model: 'Cam', via_device_id: null, entities: ['camera.yard'] }] },
     { entry_id: 'e2', domain: 'music_assistant', label: 'Music Assistant', title: 'Music server', state: 'setup_retry',
-      reason: 'Could not connect', source: 'user', disabled_by: null, entities: 0, unpairs: false, shared: false, reconfigure: [], devices: [] },
+      reason: 'Could not connect', source: 'user', disabled_by: null, offline_since: iso(-3 * 24 * 60), entities: 0, unpairs: false,
+      shared: false, reconfigure: [], devices: [] },
+    // A long unbroken name, to check the offline list on a small phone.
+    { entry_id: 'e3', domain: 'esphome', label: 'ESPHome', title: 'string-lights-backyard-pergola-kauf-plug-2', state: 'setup_retry',
+      reason: 'DeviceUnavailable: unreachable', source: 'user', disabled_by: null, offline_since: iso(-50), entities: 1,
+      unpairs: false, shared: false, reconfigure: [], devices: [] },
   ],
 };
 
@@ -398,6 +403,8 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
     if (p === '/api/mdm/files') return json({ folders: [] });
     if (p === '/api/mdm/audit') return json({ events: [] });
 
+    // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
+    if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
     unmocked.push(`${method} ${p}`);
     return route.fulfill({ json: [] });
   });

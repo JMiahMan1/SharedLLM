@@ -425,6 +425,23 @@ if ssh $SSH_OPTS "$HOST" << EOF | tee "$REMOTE_LOG"
         docker compose up -d --force-recreate $SERVICES
     }
 
+    # Jarvis is updating: while this file says so the app shows a banner
+    # instead of a silent pause. Caddy serves it at /api/deploy-status, so it
+    # answers while the services restart. Cleared on every exit from here on
+    # (success, failure or rollback); the app also ignores one older than 15
+    # minutes, in case this session dies before it can clear it. "app" says
+    # whether the web app itself is in this deploy (a browser can reload).
+    mkdir -p data/deploy_status
+    deploy_status() {
+        printf '{"updating": %s, "at": %s, "app": %s}\n' "\$1" "\$(date +%s)" "\$2" > data/deploy_status/.status.json.tmp \
+            && mv -f data/deploy_status/.status.json.tmp data/deploy_status/status.json \
+            || echo "[WARN] Could not write the deploy status for the app's banner."
+    }
+    UI_IN_DEPLOY=false
+    case " $SERVICES " in *" ui "*) UI_IN_DEPLOY=true ;; esac
+    deploy_status true \$UI_IN_DEPLOY
+    trap 'deploy_status false \$UI_IN_DEPLOY' EXIT
+
     # shellcheck disable=SC2086
     # NO --remove-orphans: see deploy_local_build.sh. It deletes any container
     # missing from this checkout's compose file, including another author's

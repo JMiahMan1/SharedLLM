@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from datetime import datetime
 from typing import Any
 
-from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub
+from services.homehub.core import UNAVAILABLE, ConfigEntry, Driver, Hub, utcnow
 from services.homehub.drivers import driver_class, replaced_reason
 from services.homehub.store import Store
 
@@ -31,6 +32,8 @@ class Runtime:
         self._tasks: dict[str, asyncio.Task] = {}
         #: Set once an entry's first setup attempt has finished, loaded or not.
         self._first_attempt: dict[str, asyncio.Event] = {}
+        #: When each entry that is failing now first failed (this run of the hub).
+        self.failing_since: dict[str, datetime] = {}
         self._unsub_record = None
         self.automations: Any = None  # set by main once the engine is loaded
 
@@ -83,6 +86,7 @@ class Runtime:
 
     async def stop_entry(self, entry_id: str) -> None:
         task = self._tasks.pop(entry_id, None)
+        self.failing_since.pop(entry_id, None)
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -124,6 +128,7 @@ class Runtime:
                 loud = reported is None or reported[0] != headline or now - reported[1] >= RETRY_REPORT_EVERY_S
                 if loud:
                     reported = (headline, now)
+                self.failing_since.setdefault(entry.entry_id, utcnow())
                 (log.warning if loud else log.debug)(
                     "%s (%s) setup failed (attempt %d), retry in %ss: %s", entry.domain, entry.title, attempt, delay, exc)
                 driver.mark_unavailable()
@@ -134,6 +139,7 @@ class Runtime:
                 continue
             self.hub.drivers[entry.entry_id] = driver
             entry.state, entry.reason = "loaded", None
+            self.failing_since.pop(entry.entry_id, None)
             first.set()
             if reported is not None:
                 log.info("%s (%s) is back after %d failed attempts", entry.domain, entry.title, attempt)

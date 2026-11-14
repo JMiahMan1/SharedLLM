@@ -12,6 +12,7 @@ import NativeBridge from './components/NativeBridge';
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
 import MobileShell from './components/layout/MobileShell';
+import DeployBanner from './components/layout/DeployBanner';
 import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
 import GuardWatch from './components/layout/GuardWatch';
@@ -106,6 +107,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden relative">
         <Header />
+        <DeployBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8 scroll-smooth">
           {children}
         </main>

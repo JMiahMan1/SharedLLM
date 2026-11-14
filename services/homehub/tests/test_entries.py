@@ -71,6 +71,25 @@ def test_list_shows_devices_and_reconfigurable_fields_without_secrets(env):
     assert [a["name"] for a in out["areas"]] == ["Den", "Porch"]
 
 
+def test_an_entry_that_stopped_answering_says_since_when(env):
+    hub, _store, rt = env
+    by_id = lambda: {e["entry_id"]: e for e in entries.list_entries(rt)["entries"]}  # noqa: E731
+    assert by_id()["tv1"]["offline_since"] is None  # loaded entries are not offline
+    for eid in ("tv1", "rl1"):
+        hub.config_entries[eid].state = "setup_retry"
+    hub.states.set("media_player.den_tv", "unavailable", {})
+    gone = hub.states.get("media_player.den_tv").last_changed
+    # an entity that went unavailable says when; the same state set again keeps that time
+    hub.states.set("media_player.den_tv", "unavailable", {})
+    assert by_id()["tv1"]["offline_since"] == gone.isoformat()
+    # an entry with no entities falls back to when this run of the hub saw it fail
+    assert by_id()["rl1"]["offline_since"] is None
+    rt.failing_since = {"rl1": gone}
+    assert by_id()["rl1"]["offline_since"] == gone.isoformat()
+    hub.config_entries["rl1"].disabled_by = "user"
+    assert by_id()["rl1"]["offline_since"] is None  # switched off on purpose is not offline
+
+
 async def test_reconfigure_changes_the_address_and_keeps_secrets_left_blank(env):
     hub, store, rt = env
     await entries.reconfigure_entry(rt, "rl1", {"data": {"host": "192.0.2.91", "password": ""}, "title": "Garage hub"})

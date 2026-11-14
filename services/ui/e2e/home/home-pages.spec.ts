@@ -347,6 +347,16 @@ test.describe('home pages', () => {
     await expect(page.getByTestId('hardware')).toBeVisible();
     await page.getByRole('tab', { name: 'Setup' }).click();
     await expect(page.getByTestId('integrations-health')).toContainText('Music server');
+    // What is not answering, for how long, with a Remove button that stays on screen.
+    const offline = page.getByTestId('offline-entries');
+    await expect(offline.getByTestId('offline-entry')).toHaveCount(2);
+    await expect(offline).toContainText('Not answering for 3 days');
+    await expect(offline).toContainText('Not answering for 50 minutes');
+    await expectTapTargets(offline);
+    for (const remove of await offline.getByRole('button', { name: /it is not answering/ }).all()) {
+      const box = await remove.boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0), 'Remove stays on screen').toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+    }
     await expectTapTargets(page.getByTestId('devices-sections'));
     await expectLayoutSound(page, info, 'devices');
     // Phones: charging and the next alarm from the Jarvis app, on every screen size.

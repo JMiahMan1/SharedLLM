@@ -12,6 +12,7 @@ vi.mock('../../lib/discoveredDevices', async (importOriginal) => {
     failureText: real.failureText,
     failureStatus: real.failureStatus,
     entriesNeedingAttention: real.entriesNeedingAttention,
+    offlineSince: real.offlineSince,
     getEntries: vi.fn(),
     getBuilderLink: vi.fn(),
     getManualFlows: vi.fn(),
@@ -43,7 +44,7 @@ const LIST: EntriesList = {
     },
     {
       entry_id: 'rl1', domain: 'reolink', label: 'Reolink', title: 'Camera Hub', state: 'setup_retry', reason: 'login failed',
-      source: 'user', disabled_by: null, entities: 0, unpairs: false, shared: false,
+      source: 'user', disabled_by: null, offline_since: new Date(Date.now() - 3 * 86_400_000).toISOString(), entities: 0, unpairs: false, shared: false,
       reconfigure: [
         { key: 'host', label: 'Address', type: 'text', value: '192.0.2.90' },
         { key: 'password', label: 'Password', type: 'password', set: true },
@@ -134,5 +135,13 @@ describe('IntegrationsPanel', () => {
     expect(within(health).getByText('1 connection needs attention')).toBeInTheDocument();
     fireEvent.click(within(health).getByRole('button', { name: /Camera Hub: login failed/ }));
     expect(screen.getByRole('button', { name: /Camera Hub/, expanded: true })).toBeInTheDocument();
+  });
+
+  it('lists what is not answering with how long, and removes it from there', async () => {
+    wrap();
+    const row = await screen.findByTestId('offline-entry');
+    expect(within(row).getByText('Reolink · Not answering for 3 days')).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove Camera Hub, it is not answering' }));
+    expect(within(screen.getByTestId('remove-dialog')).getByText(/Camera Hub/)).toBeInTheDocument();
   });
 });

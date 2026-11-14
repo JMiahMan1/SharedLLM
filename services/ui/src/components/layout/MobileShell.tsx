@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import BottomNav from './BottomNav';
 import Header from './Header';
 import ServerConfigBanner from './ServerConfigBanner';
+import DeployBanner from './DeployBanner';
 
 let shellsMounted = 0;
 
@@ -32,6 +33,7 @@ const MobileShell = ({ children }: MobileShellProps) => {
       <div className="safe-area-top app-bar backdrop-blur-md z-40 border-b border-white/5 transition-all duration-300">
         <ServerConfigBanner />
         <Header />
+        <DeployBanner />
       </div>
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-clear-bottom-bar scroll-smooth transition-all duration-300">
         {children}

@@ -394,7 +394,9 @@ async def test_a_device_that_stays_off_is_reported_once_not_on_every_retry(tmp_p
         await runtime.start_all()
         while len(tries) < 20:
             await asyncio.sleep(0.005)
+        since = runtime.failing_since["x"]  # the first failure, kept through the retries
         await runtime.shutdown()
+    assert since is not None and "x" not in runtime.failing_since
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "setup failed" in r.getMessage()]
     assert len(warnings) == 1
     assert hub.config_entries["x"].state == "setup_retry"

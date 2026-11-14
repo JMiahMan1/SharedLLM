@@ -14,6 +14,7 @@ import {
   entriesNeedingAttention,
   getEntries,
   getManualFlows,
+  offlineSince,
   reconfigureEntry,
   reloadEntry,
   removeEntry,
@@ -139,21 +140,36 @@ export default function IntegrationsPanel() {
             All {list.data.entries.length} connections are working.
           </p>
         ) : (
-          <div className="space-y-1 px-4 pt-3" role="status" data-testid="integrations-health">
+          <div className="px-4 pt-3" role="status" data-testid="integrations-health">
             <p className="text-xs font-semibold text-amber-200">
               {down.length} connection{down.length === 1 ? ' needs' : 's need'} attention
             </p>
-            <ul className="flex flex-wrap gap-2">
+            {/* What is not answering and since when, so one that is gone for good can be removed here. */}
+            <ul className="mt-2 divide-y divide-amber-500/10 rounded-xl border border-amber-500/30 bg-amber-500/5" data-testid="offline-entries">
               {down.map((entry) => (
-                <li key={entry.entry_id}>
+                <li key={entry.entry_id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2" data-testid="offline-entry">
                   <button
                     type="button"
                     onClick={() => setOpen((o) => ({ ...o, [entry.entry_id]: true }))}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-left text-xs text-amber-100"
+                    className="flex min-h-11 min-w-0 flex-1 flex-col justify-center text-left"
                     title={entry.reason || undefined}
+                    aria-label={`${entry.title}: ${entry.reason || entry.state.replace('_', ' ')}`}
                   >
-                    {entry.title}: {entry.reason || entry.state.replace('_', ' ')}
+                    <span className="block truncate text-sm font-semibold text-amber-100">{entry.title}</span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {[entry.label, offlineSince(entry.offline_since)].filter(Boolean).join(' · ')}
+                    </span>
                   </button>
+                  {!entry.shared && (
+                    <button
+                      type="button"
+                      onClick={() => setRemoval({ kind: 'entry', entry })}
+                      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-rose-500/30 px-3 text-xs text-rose-200 hover:bg-rose-500/10"
+                      aria-label={`Remove ${entry.title}, it is not answering`}
+                    >
+                      <Trash2 size={14} /> {entry.unpairs ? 'Unpair' : 'Remove'}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

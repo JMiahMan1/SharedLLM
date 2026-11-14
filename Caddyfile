@@ -224,6 +224,16 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
         }
     }
 
+    # "Jarvis is updating" (scripts/deploy_remote.sh writes it; the app's
+    # banner reads it). Served from a file here, not by a service, so it still
+    # answers while the services restart. No file yet: 404, read as "not updating".
+    handle /api/deploy-status {
+        root * /srv/deploy_status
+        rewrite * /status.json
+        header Cache-Control "no-store"
+        file_server
+    }
+
     # 2. Route Chat/Gateway API traffic
     handle /v1/* {
         reverse_proxy gateway:11435 {

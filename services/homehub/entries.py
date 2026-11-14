@@ -21,7 +21,7 @@ import logging
 import re
 from typing import Any
 
-from services.homehub.core import Area, ConfigEntry, DeviceEntry, HubError
+from services.homehub.core import UNAVAILABLE, Area, ConfigEntry, DeviceEntry, HubError
 from services.homehub.discovery import LABELS
 
 log = logging.getLogger("homehub.entries")
@@ -86,6 +86,22 @@ def reconfigure_fields(entry: ConfigEntry) -> list[dict[str, Any]]:
     return out
 
 
+def offline_since(runtime: Any, entry: ConfigEntry) -> str | None:
+    """When an entry that is not answering last answered, as ISO time; None while it works.
+
+    Its entities' "unavailable" states keep the time they turned unavailable across hub
+    restarts (they are restored, then set to the same state), so that is the first
+    choice; an entry with none falls back to when this run of the hub saw it fail.
+    """
+    if entry.state == "loaded" or entry.disabled_by:
+        return None
+    hub = runtime.hub
+    gone = [s.last_changed for e in hub.entities.values() if e.config_entry_id == entry.entry_id
+            and (s := hub.states.get(e.entity_id)) is not None and s.state == UNAVAILABLE]
+    when = max(gone) if gone else getattr(runtime, "failing_since", {}).get(entry.entry_id)
+    return when.isoformat() if when is not None else None
+
+
 def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
     hub = runtime.hub
     devices = [d for d in hub.devices.values() if entry.entry_id in d.config_entries]
@@ -100,6 +116,7 @@ def summary(runtime: Any, entry: ConfigEntry) -> dict[str, Any]:
     return {
         "entry_id": entry.entry_id, "domain": entry.domain, "label": label(entry.domain), "title": entry.title,
         "state": entry.state, "reason": entry.reason, "source": entry.source, "disabled_by": entry.disabled_by,
+        "offline_since": offline_since(runtime, entry),
         "devices": sorted((dev_view(d) for d in devices), key=lambda d: d["name"].lower()),
         "entities": len(ents), "reconfigure": reconfigure_fields(entry),
         "unpairs": entry.domain in _unpair_hooks(), "shared": entry.domain in SHARED_ENTRIES,
