@@ -65,7 +65,8 @@ export interface Trace {
 }
 
 export type FieldKind =
-  | 'entity' | 'entities' | 'text' | 'number' | 'time' | 'duration' | 'select' | 'template' | 'weekdays' | 'boolean';
+  | 'entity' | 'entities' | 'text' | 'number' | 'time' | 'duration' | 'select' | 'template' | 'weekdays' | 'boolean'
+  | 'device' | 'conditions';
 
 export interface SpecField {
   name: string;
@@ -108,12 +109,21 @@ export interface CatalogEntity {
   services?: string[];
 }
 
+export interface CatalogDevice {
+  id: string;
+  name: string;
+  area?: string | null;
+  entities?: string[];
+}
+
 export interface Catalog {
   triggers: Spec[];
   conditions: Spec[];
   actions: Spec[];
   services: { domain: string; services: Record<string, ServiceInfo> }[];
   entities: CatalogEntity[];
+  /** The hub's devices, for HA's device triggers, conditions and actions (older hubs leave it out). */
+  devices?: CatalogDevice[];
   areas: { area_id: string; name: string }[];
   zones: string[];
   persons: string[];
@@ -201,6 +211,118 @@ export async function exportYaml(kind: ItemKind, id?: string): Promise<{ yaml: s
 
 export async function getCatalog(): Promise<Catalog> {
   return (await apiClient.get(`${BASE}/catalog`)).data;
+}
+
+// --------------------------------------------------------------------------- blueprints
+
+/** One input a blueprint takes, flattened out of HA's input sections (`section` names the section). */
+export interface BlueprintInput {
+  name: string;
+  label: string;
+  description: string;
+  selector: Record<string, unknown>;
+  section: string | null;
+  required: boolean;
+  default?: unknown;
+}
+
+export interface Blueprint {
+  path: string;
+  domain: 'automation' | 'script' | string;
+  name: string;
+  description: string;
+  author?: string | null;
+  source_url?: string | null;
+  inputs: BlueprintInput[];
+  used_by?: { kind: ItemKind; id: string; alias: string }[];
+}
+
+export async function listBlueprints(): Promise<Blueprint[]> {
+  return ((await apiClient.get(`${BASE}/blueprints`)).data?.blueprints ?? []) as Blueprint[];
+}
+
+export async function getBlueprint(path: string): Promise<Blueprint> {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  return (await apiClient.get(`${BASE}/blueprints/${encoded}`)).data;
+}
+
+/** The keys a blueprint supplies; an item that uses one never carries them (the hub refuses them). */
+export const BLUEPRINT_STEP_KEYS = ['triggers', 'trigger', 'conditions', 'condition', 'actions', 'action', 'sequence'];
+
+/** The blueprint an item uses, or null. */
+export function blueprintUse(config: Config | null | undefined): { path: string; input: Record<string, unknown> } | null {
+  const use = config?.use_blueprint;
+  if (!use || typeof use !== 'object' || Array.isArray(use)) return null;
+  const u = use as Record<string, unknown>;
+  const input = u.input && typeof u.input === 'object' && !Array.isArray(u.input) ? u.input as Record<string, unknown> : {};
+  return { path: String(u.path ?? ''), input };
+}
+
+/** A new item built from a blueprint: a name, and the blueprint with no inputs yet. */
+export function blueprintConfig(kind: ItemKind, path: string): Config {
+  const base: Config = { alias: '', use_blueprint: { path, input: {} } };
+  return kind === 'automation' ? { ...base, description: '' } : base;
+}
+
+/** The item with one input set (an empty value removes it, so the blueprint's default applies). */
+export function withBlueprintInput(config: Config, name: string, value: unknown): Config {
+  const use = blueprintUse(config);
+  if (!use) return config;
+  const input = { ...use.input };
+  if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) delete input[name];
+  else input[name] = value;
+  return { ...config, use_blueprint: { ...(config.use_blueprint as Record<string, unknown>), input } };
+}
+
+/** What a blueprint item saves: its own keys and inputs, never step lists (an older editor wrote empty ones). */
+export function stripBlueprintSteps(config: Config): Config {
+  return blueprintUse(config) ? omit(config, BLUEPRINT_STEP_KEYS) : config;
+}
+
+/** The kind of form a blueprint input's selector needs. */
+export type SelectorKind =
+  | 'entity' | 'device' | 'number' | 'boolean' | 'select' | 'text' | 'time' | 'duration' | 'action' | 'condition'
+  | 'trigger' | 'template' | 'object';
+
+export function selectorKind(selector: Record<string, unknown> | undefined): SelectorKind {
+  const key = Object.keys(selector ?? {})[0] ?? 'text';
+  if (key === 'entity' || key === 'target') return 'entity';
+  if (key === 'device') return 'device';
+  if (key === 'number') return 'number';
+  if (key === 'boolean') return 'boolean';
+  if (key === 'select') return 'select';
+  if (key === 'time') return 'time';
+  if (key === 'duration') return 'duration';
+  if (key === 'action') return 'action';
+  if (key === 'condition') return 'condition';
+  if (key === 'trigger') return 'trigger';
+  if (key === 'template') return 'template';
+  if (key === 'object') return 'object';
+  return 'text';
+}
+
+/** What a selector restricts an entity pick to: domains, and whether several may be picked. */
+export function entitySelector(selector: Record<string, unknown> | undefined): { domains?: string[]; multiple: boolean } {
+  const raw = (selector?.entity ?? selector?.target ?? {}) as Record<string, unknown>;
+  const filters = [raw, ...(Array.isArray(raw.filter) ? raw.filter : raw.filter ? [raw.filter] : [])] as Record<string, unknown>[];
+  const domains = new Set<string>();
+  for (const f of filters) {
+    const d = f?.domain;
+    for (const x of Array.isArray(d) ? d : d ? [d] : []) domains.add(String(x));
+    const e = f?.entity as Record<string, unknown> | undefined;
+    const ed = e?.domain;
+    for (const x of Array.isArray(ed) ? ed : ed ? [ed] : []) domains.add(String(x));
+  }
+  return { domains: domains.size ? [...domains] : undefined, multiple: raw.multiple === true || 'target' in (selector ?? {}) };
+}
+
+/** A select selector's options as value/label pairs. */
+export function selectOptions(selector: Record<string, unknown> | undefined): { value: string; label: string }[] {
+  const raw = ((selector?.select ?? {}) as Record<string, unknown>).options;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) => (typeof o === 'object' && o
+    ? { value: String((o as Record<string, unknown>).value), label: String((o as Record<string, unknown>).label ?? (o as Record<string, unknown>).value) }
+    : { value: String(o), label: String(o) }));
 }
 
 export async function getRemap(): Promise<{ remap: Remap; report: RemapRow[] }> {
@@ -315,11 +437,101 @@ export function conditionType(condition: Step): string {
 /** An action's type from the keys HA uses to tell them apart. */
 export function actionType(action: Step): string {
   if (typeof action.action === 'string' || typeof action.service === 'string') return 'service';
-  for (const key of ['delay', 'wait_template', 'choose', 'if', 'repeat', 'variables', 'stop', 'scene', 'event']) {
+  // HA's device action: the device, its integration and what to do (the hub runs it as the service it stands for).
+  if ('device_id' in action && 'domain' in action && 'type' in action) return 'device';
+  // A condition as a step: the sequence carries on only if it holds.
+  if (typeof action.condition === 'string') return 'condition';
+  for (const key of ['delay', 'wait_template', 'wait_for_trigger', 'choose', 'if', 'repeat', 'variables', 'stop',
+    'scene', 'event', 'sequence', 'parallel']) {
     if (key in action) return key;
   }
   return 'raw';
 }
+
+/** How a repeat step repeats: a count, while or until conditions hold, or once for each item. */
+export type RepeatMode = 'count' | 'while' | 'until' | 'for_each';
+export const REPEAT_MODES: RepeatMode[] = ['count', 'while', 'until', 'for_each'];
+export const REPEAT_LABELS: Record<RepeatMode, string> = {
+  count: 'A number of times', while: 'While conditions hold', until: 'Until conditions hold', for_each: 'For each item',
+};
+
+export function repeatMode(repeat: Record<string, unknown>): RepeatMode {
+  for (const mode of ['while', 'until', 'for_each'] as const) if (mode in repeat) return mode;
+  return 'count';
+}
+
+/** The repeat switched to another mode, keeping its steps. */
+export function withRepeatMode(repeat: Record<string, unknown>, mode: RepeatMode): Record<string, unknown> {
+  const rest = omit(repeat, ['count', 'while', 'until', 'for_each']);
+  if (mode === 'count') return { ...rest, count: 2 };
+  if (mode === 'for_each') return { ...rest, for_each: [] };
+  return { ...rest, [mode]: [] };
+}
+
+/**
+ * A `for_each` list as text (one item per line) and back. A template stays a template;
+ * anything else that is not a plain list of words is shown as JSON.
+ */
+export function forEachText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string' && !v.includes('\n'))) return value.join('\n');
+  return JSON.stringify(value ?? []);
+}
+
+export function parseForEach(text: string): unknown {
+  const t = text.trim();
+  if (t.startsWith('{{')) return t;
+  if (t.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(t);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // not JSON: one item per line
+    }
+  }
+  return t.split('\n').map((l) => l.trim()).filter(Boolean);
+}
+
+/** Variables (an item's or a step's) as rows for an editor, values as typed text, and back. */
+export function variableRows(value: unknown): { key: string; value: string }[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).map(([key, v]) => ({
+    key, value: typeof v === 'string' ? v : JSON.stringify(v),
+  }));
+}
+
+/** A row's text as a value: JSON when it is JSON (numbers, lists, true), else the text itself. */
+export function variableValue(text: string): unknown {
+  const t = text.trim();
+  if (!t) return '';
+  if (/^(-?\d+(\.\d+)?|true|false|null|\[.*\]|\{(?!\{).*\})$/s.test(t)) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
+export function rowsToVariables(rows: { key: string; value: string }[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const r of rows) if (r.key.trim()) out[r.key.trim()] = variableValue(r.value);
+  return out;
+}
+
+/** One of a script's fields (what a caller passes in), as HA writes it. */
+export interface ScriptField {
+  name?: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  example?: unknown;
+  selector?: Record<string, unknown>;
+}
+
+/** The selector types the script field editor offers (HA has more; others stay as they are). */
+export const FIELD_SELECTORS = ['text', 'number', 'boolean', 'entity', 'time', 'duration', 'select', 'object'];
 
 /** A copy of an object without some keys (typed as the input, since the keys dropped are optional ones). */
 export function omit<T extends object>(value: T, keys: string[]): T {
@@ -360,6 +572,7 @@ export function listOf(config: Config, plural: string, singular: string): Step[]
 
 /** Config to the builder's three lists (for an automation; scripts use `sequence`). */
 export function toBuilder(kind: ItemKind, config: Config): { triggers: Step[]; conditions: Step[]; actions: Step[] } {
+  if (blueprintUse(config)) return { triggers: [], conditions: [], actions: [] };
   if (kind === 'script') return { triggers: [], conditions: [], actions: listOf(config, 'sequence', 'sequence') };
   return {
     triggers: listOf(config, 'triggers', 'trigger').map(toBuilderTrigger),
@@ -370,6 +583,8 @@ export function toBuilder(kind: ItemKind, config: Config): { triggers: Step[]; c
 
 /** The builder's lists back into the config, written with HA's current plural keys. */
 export function fromBuilder(kind: ItemKind, config: Config, lists: { triggers: Step[]; conditions: Step[]; actions: Step[] }): Config {
+  // A blueprint item's steps are the blueprint's: writing any here would replace them.
+  if (blueprintUse(config)) return stripBlueprintSteps(config);
   if (kind === 'script') return { ...config, sequence: lists.actions };
   return {
     ...omit(config, ['trigger', 'condition', 'action']),
@@ -389,6 +604,11 @@ export function blankStep(group: 'trigger' | 'condition' | 'action', type: strin
   } else {
     switch (type) {
       case 'service': step.action = ''; break;
+      case 'device': step.device_id = ''; step.domain = ''; step.type = ''; break;
+      case 'condition': step.condition = 'template'; step.value_template = ''; break;
+      case 'sequence': step.sequence = []; break;
+      case 'parallel': step.parallel = []; break;
+      case 'wait_for_trigger': step.wait_for_trigger = []; break;
       case 'delay': step.delay = '00:00:30'; break;
       case 'choose': step.choose = [{ conditions: [], sequence: [] }]; break;
       case 'if': step.if = []; step.then = []; break;
@@ -402,6 +622,7 @@ export function blankStep(group: 'trigger' | 'condition' | 'action', type: strin
     }
   }
   if (group === 'trigger' && type === 'device_onoff') step.to = 'on';
+  if (group !== 'action' && type === 'device') Object.assign(step, { device_id: '', domain: '', type: '' });
   for (const field of spec?.fields ?? []) {
     if (field.kind === 'select' && field.options?.length && !(field.name in step)) step[field.name] = field.options[0];
   }
@@ -475,6 +696,17 @@ export function servicesForEntities(catalog: Catalog | undefined, entityIds: str
   return Array.from(new Set<string>(common ?? [])).sort();
 }
 
+/** A device id -> its catalog name, else "a device". */
+export function deviceName(catalog: Catalog | undefined, deviceId: unknown): string {
+  if (!deviceId) return 'a device';
+  return catalog?.devices?.find((d) => d.id === deviceId)?.name || 'a device';
+}
+
+/** HA's device step types ("turned_on", "is_off") in words. */
+export function humanType(type: unknown): string {
+  return String(type ?? '').replace(/_/g, ' ').trim() || 'does something';
+}
+
 /** "light.porch" -> its catalog name, else the id. */
 export function entityName(catalog: Catalog | undefined, entityId: string): string {
   return catalog?.entities.find((e) => e.entity_id === entityId)?.name || entityId;
@@ -497,6 +729,7 @@ export function describeStep(group: 'trigger' | 'condition' | 'action', step: St
     if (type === 'sun') return `At ${String(step.event ?? 'sunset')}${step.offset ? ` ${String(step.offset)}` : ''}`;
     if (type === 'zone') return `When ${names(step.entity_id) || 'someone'} ${String(step.event ?? 'enter')}s ${names(step.zone)}`;
     if (type === 'template') return 'When a template becomes true';
+    if (type === 'device') return `When ${deviceName(catalog, step.device_id)} ${humanType(step.type)}`;
     return `${type} trigger`;
   }
   if (group === 'condition') {
@@ -508,6 +741,7 @@ export function describeStep(group: 'trigger' | 'condition' | 'action', step: St
     if (type === 'state') return `${names(step.entity_id) || 'An entity'} is ${String(step.state ?? '?')}`;
     if (type === 'numeric_state') return `${names(step.entity_id) || 'A value'} is in range`;
     if (type === 'time') return `Time is ${step.after ? `after ${String(step.after)}` : ''}${step.after && step.before ? ' and ' : ''}${step.before ? `before ${String(step.before)}` : ''}`;
+    if (type === 'device') return `${deviceName(catalog, step.device_id)} ${humanType(step.type)}`;
     return `${type} condition`;
   }
   const type = actionType(step);
@@ -518,7 +752,16 @@ export function describeStep(group: 'trigger' | 'condition' | 'action', step: St
   if (type === 'delay') return `Wait ${typeof step.delay === 'object' ? JSON.stringify(step.delay) : String(step.delay)}`;
   if (type === 'choose') return 'Choose';
   if (type === 'if') return 'If, then, else';
-  if (type === 'repeat') return 'Repeat';
+  if (type === 'repeat') {
+    const repeat = (step.repeat ?? {}) as Record<string, unknown>;
+    const mode = repeatMode(repeat);
+    return mode === 'count' ? `Repeat ${String(repeat.count ?? '')} times` : `Repeat ${REPEAT_LABELS[mode].toLowerCase()}`;
+  }
+  if (type === 'device') return `${deviceName(catalog, step.device_id)}: ${humanType(step.type)}`;
+  if (type === 'condition') return `Continue only if: ${describeStep('condition', step, catalog)}`;
+  if (type === 'sequence') return `Run ${Array.isArray(step.sequence) ? step.sequence.length : 0} steps in order`;
+  if (type === 'parallel') return `Run ${Array.isArray(step.parallel) ? step.parallel.length : 0} steps at once`;
+  if (type === 'wait_for_trigger') return 'Wait for a trigger';
   if (type === 'stop') return `Stop: ${String(step.stop ?? '')}`;
   if (type === 'scene') return `Activate ${names(step.scene)}`;
   return type === 'raw' ? 'Custom step' : `${type} step`;

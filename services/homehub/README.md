@@ -41,6 +41,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | `importer.py` | Imports an HA config directory (read-only) |
 | `templating.py` | HA's Jinja template API (`/api/template`, automations) |
 | `automation.py` | Automations, scripts, scenes, blueprints and the nielsfaber scheduler |
+| `helpers.py`, `helpers_api.py` | HA's helpers (toggles, numbers, texts, dropdowns, dates, buttons, counters, timers) and `/hub/helpers` |
 | `automation_editor.py`, `automation_api.py`, `climate_schedule.py` | Editing automations/scripts/scenes/schedules while running (one item rebuilt at a time), run traces, the stored entity remap (`/api/homehub/automations/remap`), and thermostat programs with holds, away and an energy rule (`/api/homehub/climate`); routes in `automation_api.py`'s docstring |
 | `builtin.py` | `device_tracker.see` (Jarvis's location relay), `homeassistant.update_entity`, notifications |
 | `statistics.py`, `statistics_api.py`, `energy.py`, `dashboard_api.py` | HA's recorder statistics (5-minute and hourly, `statistics.db`), `recorder/*` and `energy/*` WS commands, the HA statistics importer (`POST /hub/statistics/import`), energy settings and the Rooms/Energy/Climate pages' data; see each module's docstring |
@@ -395,8 +396,15 @@ went quiet after mapping (map the rooms again).
   `camera.garage_door_garage_camera` to see the door.
 
 Not carried over: HA Assist (whisper, piper, wake word, voice satellites'
-pipelines), timers and `input_*` helpers. Automations that need them load
-disabled with the reason in `/hub/status`.
+pipelines).
+
+Helpers (`input_boolean`, `input_number`, `input_text`, `input_select`,
+`input_datetime`, `input_button`, `counter`, `timer`) are kept by the hub
+(`helpers.py`, routes in `helpers_api.py`): HA's services, states and timer
+events, restored on restart, imported from HA's `.storage` files and managed
+under Automations > Helpers in the app. An automation that names a helper which
+does not exist loads disabled and says which one; creating it reloads the
+automations so it loads.
 
 ## Running
 
