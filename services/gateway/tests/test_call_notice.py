@@ -155,6 +155,21 @@ def test_ringing_a_call_rings_the_rooms_other_members(monkeypatch):
     assert notices == []
 
 
+def test_a_video_call_rings_as_a_video_call(monkeypatch):
+    from services.gateway import calls
+
+    notices = _setup(monkeypatch)
+    monkeypatch.setattr(calls, "hub", calls.CallHub())
+    client = TestClient(app)
+    _joined("room-family")
+    rang = client.post("/api/communication/calls/room-family/ring", json={"video": True}).json()
+    assert rang["ringing"] == ["jordan"] and rang["video"] is True
+    [notice] = notices
+    assert notice["title"] == "Sam is video calling"
+    assert notice["data"]["url"] == "/family?tab=calls&answer=room-family&video=1"
+    assert notice["data"]["video"] is True
+
+
 def _joined(room, username="sam"):
     import asyncio
 

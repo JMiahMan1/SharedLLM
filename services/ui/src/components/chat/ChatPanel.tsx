@@ -5,7 +5,7 @@ import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, Square, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, Square, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -489,9 +489,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     onError: (error: Error) => toast.error(error.message || 'Voice message failed'),
   });
 
-  const openCall = () => {
+  const openCall = (video = false) => {
     if (!activeToken) return;
-    void startCall(activeToken, activeConversation?.display_name || 'Family call');
+    void startCall(activeToken, activeConversation?.display_name || 'Family call', { video });
   };
 
   const react = async (message: TalkMessage, emoji: string) => {
@@ -658,20 +658,33 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
             </div>
           </button>
           {activeToken && (
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
-              onClick={openCall}
-              aria-label="Drop in to the family call"
-              title="Drop in to the family call"
-            >
-              <Phone size={17} />
-            </button>
+            <>
+              <button
+                type="button"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
+                onClick={() => openCall(false)}
+                aria-label={`Call ${name}`}
+                title="Call"
+                data-testid="chat-call"
+              >
+                <Phone size={17} />
+              </button>
+              <button
+                type="button"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
+                onClick={() => openCall(true)}
+                aria-label={`Video call ${name}`}
+                title="Video call"
+                data-testid="chat-video-call"
+              >
+                <Video size={17} />
+              </button>
+            </>
           )}
           {activeConversation && (
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"
               aria-label="Conversation details"
               onClick={() => setInfoOpen(true)}
             >

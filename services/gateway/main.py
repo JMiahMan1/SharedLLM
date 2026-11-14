@@ -8828,12 +8828,17 @@ async def ring_family_call(room: str, request: Request):
     display, recipients = found
     if not recipients:
         return {"ringing": [], "reason": "Nobody else in this conversation has a Jarvis account."}
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    video = bool(isinstance(body, dict) and body.get("video") is True)
     drop_in = await _calls.drop_in_recipients(me, recipients)
-    if not await _calls.hub.ring(room, me, display, recipients, drop_in):
+    if not await _calls.hub.ring(room, me, display, recipients, drop_in, video=video):
         log.info("[call-notice] room %s already rang (or the call ended); not ringing again", room)
         return {"ringing": []}
-    log.info("[call-notice] %s rang %s in %s (drop-in: %s)", me, ", ".join(sorted(recipients)), room,
-             ", ".join(sorted(drop_in)) or "none")
+    log.info("[call-notice] %s rang %s in %s (%s, drop-in: %s)", me, ", ".join(sorted(recipients)), room,
+             "video" if video else "audio", ", ".join(sorted(drop_in)) or "none")
 
     group = len(recipients) > 1
     name = await _calls.hub.room_name(room)
@@ -8842,25 +8847,26 @@ async def ring_family_call(room: str, request: Request):
     def link(person: str) -> str:
         # The phone answers by itself only when this person lets the caller
         # drop in (DropInCall.java reads drop_in=1 from the link).
-        return f"{answer}&drop_in=1" if person in drop_in else answer
+        url = f"{answer}&video=1" if video else answer
+        return f"{url}&drop_in=1" if person in drop_in else url
 
     await _notify.send_many(
         sorted(recipients),
         lambda person: _notify.notice(
             person,
             "call",
-            f"{display} is calling",
+            f"{display} is video calling" if video else f"{display} is calling",
             f"Family call in {name}. Tap to answer." if group and name else "Tap to answer.",
             url=link(person),
             tag=f"call:{room}",
             # 4 pops up on the "Family calls" channel; 5 would go to the
             # urgent SOS channel as an alarm.
             priority=4,
-            data={"call": room, "caller": display, "drop_in": person in drop_in},
+            data={"call": room, "caller": display, "drop_in": person in drop_in, "video": video},
             actions=[_notify.view_action(link(person), "Answer")],
         ),
     )
-    return {"ringing": sorted(recipients), "drop_in": sorted(drop_in)}
+    return {"ringing": sorted(recipients), "drop_in": sorted(drop_in), "video": video}
 
 
 @app.post("/api/communication/talk/call")

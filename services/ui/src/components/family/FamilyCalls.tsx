@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Phone, RefreshCw, Users } from 'lucide-react';
+import { Loader2, Phone, RefreshCw, Users, Video } from 'lucide-react';
 import { api } from '../../services/api';
 import type { ExecutionResponse, TalkConversation } from '../../types/api';
 import { useCall } from '../../context/CallContext';
@@ -28,15 +28,18 @@ export default function FamilyCalls() {
   const [starting, setStarting] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const answer = searchParams.get('answer');
+  // The notice of a video call links with video=1: answering it turns the camera on.
+  const answerVideo = searchParams.get('video') === '1';
 
   useEffect(() => {
     if (!answer) return;
     const params = new URLSearchParams(searchParams);
     params.delete('answer');
+    params.delete('video');
     setSearchParams(params, { replace: true });
     const ringing = activeCalls.find((active) => active.token === answer);
-    void startCall(answer, ringing?.name || 'Family call');
-  }, [answer, activeCalls, searchParams, setSearchParams, startCall]);
+    void startCall(answer, ringing?.name || 'Family call', { video: answerVideo || Boolean(ringing?.video) });
+  }, [answer, answerVideo, activeCalls, searchParams, setSearchParams, startCall]);
   const {
     data: conversations = [],
     isLoading,
@@ -66,10 +69,10 @@ export default function FamilyCalls() {
     return (b.last_activity ?? 0) - (a.last_activity ?? 0);
   });
 
-  const start = async (conversation: TalkConversation) => {
+  const start = async (conversation: TalkConversation, video = false) => {
     setStarting(conversation.token);
     try {
-      await startCall(conversation.token, conversation.display_name);
+      await startCall(conversation.token, conversation.display_name, { video });
     } finally {
       setStarting(null);
     }
@@ -171,8 +174,24 @@ export default function FamilyCalls() {
                 }`}
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Phone size={15} />}
-                {busy ? 'Calling…' : inThisCall ? 'Open' : active ? 'Join' : 'Call'}
+                {busy || inThisCall || active
+                  ? (busy ? 'Calling…' : inThisCall ? 'Open' : 'Join')
+                  // On the narrowest phones the icon alone, so the conversation's name keeps its room.
+                  : <span className="max-[379px]:sr-only">Call</span>}
               </button>
+              {!active && !inThisCall && (
+                <button
+                  type="button"
+                  onClick={() => void start(conversation, true)}
+                  disabled={busy || conversation.can_start_call === false}
+                  aria-label={`Video call ${conversation.display_name}`}
+                  title="Video call"
+                  data-testid={`family-video-call-${conversation.token}`}
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.08] text-slate-100 transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Video size={16} />
+                </button>
+              )}
             </div>
           );
         })}

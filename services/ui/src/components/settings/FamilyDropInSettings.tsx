@@ -101,6 +101,32 @@ export default function FamilyDropInSettings() {
     }
   };
 
+  const saveDeviceVideo = async (setting: DropInSetting, deviceKey: string, on: boolean) => {
+    if (on && deviceKey === thisDevice) {
+      // A drop-in cannot ask for the camera while the phone sits locked: ask now, while someone is here to allow it.
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        toast.error('Allow Jarvis to use the camera first (the phone asks, or Settings > Apps > Jarvis > Permissions).');
+        return;
+      }
+    }
+    const before = data;
+    setData((d) => d && {
+      ...d,
+      settings: d.settings.map((s) => (s.username === setting.username
+        ? { ...s, devices: s.devices.map((dev) => (dev.device_key === deviceKey ? { ...dev, drop_in_video: on } : dev)) }
+        : s)),
+    });
+    try {
+      await api.setDeviceDropInVideo(setting.username, deviceKey, on);
+    } catch (err) {
+      setData(before);
+      toast.error(errorText(err, 'Could not save the device setting.'));
+    }
+  };
+
   const mine = data?.settings.find((s) => s.username === data.me);
   const kids = data?.settings.filter((s) => s.username !== data.me) ?? [];
 
@@ -113,6 +139,7 @@ export default function FamilyDropInSettings() {
       <p className="px-1 text-xs text-slate-400">
         A call from someone you let drop in is answered by your phone by itself after a short chime,
         microphone and speaker on, like a walkie-talkie. Anyone else&apos;s call rings, and you answer or decline.
+        A video Drop In turns the camera on only on devices with &quot;Camera on for a video Drop In&quot; switched on.
       </p>
 
       {error && (
@@ -159,6 +186,7 @@ export default function FamilyDropInSettings() {
           note={mine.can_edit ? undefined : 'A parent chooses who can drop in on you.'}
           onList={(allow) => void saveList(mine, allow)}
           onDevice={(key, on) => void saveDevice(mine, key, on)}
+          onDeviceVideo={(key, on) => void saveDeviceVideo(mine, key, on)}
         />
       )}
       {data && kids.map((kid) => (
@@ -170,6 +198,7 @@ export default function FamilyDropInSettings() {
           thisDevice={thisDevice}
           onList={(allow) => void saveList(kid, allow)}
           onDevice={(key, on) => void saveDevice(kid, key, on)}
+          onDeviceVideo={(key, on) => void saveDeviceVideo(kid, key, on)}
         />
       ))}
       <p className="px-1 text-[11px] leading-relaxed text-slate-500">
@@ -188,6 +217,7 @@ function PersonDropIn({
   note,
   onList,
   onDevice,
+  onDeviceVideo,
 }: {
   title: string;
   setting: DropInSetting;
@@ -196,6 +226,7 @@ function PersonDropIn({
   note?: string;
   onList: (allow: string[]) => void;
   onDevice: (deviceKey: string, on: boolean) => void;
+  onDeviceVideo: (deviceKey: string, on: boolean) => void;
 }) {
   const others = people.filter((p) => p.username !== setting.username);
   const allowed = new Set(setting.allow_from);
@@ -235,20 +266,36 @@ function PersonDropIn({
 
       {setting.devices.length > 0 && (
         <div className="pt-1 space-y-1">
-          <p className="text-[11px] uppercase tracking-wider text-slate-500">Devices that answer by themselves</p>
+          <p className="text-[11px] uppercase tracking-wider text-slate-500">Devices</p>
           {setting.devices.map((device) => (
-            <div key={device.device_key} className="flex items-center justify-between gap-3 py-1">
-              <span className="min-w-0 truncate text-sm text-slate-200">
+            <div key={device.device_key} className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2" data-testid={`drop-in-device-row-${device.device_key}`}>
+              <p className="break-words text-sm font-medium text-slate-200">
                 {device.label}
-                {device.device_key === thisDevice && <span className="text-slate-500"> (this device)</span>}
-              </span>
-              <Toggle
-                checked={device.drop_in}
-                disabled={!setting.can_edit}
-                onChange={(next) => onDevice(device.device_key, next)}
-                ariaLabel={`${device.label} answers drop-ins`}
-                testId={`drop-in-device-${device.device_key}`}
-              />
+                {device.device_key === thisDevice && <span className="font-normal text-slate-500"> (this device)</span>}
+              </p>
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <span className="min-w-0 text-xs text-slate-400">Answers Drop In by itself</span>
+                <Toggle
+                  checked={device.drop_in}
+                  disabled={!setting.can_edit}
+                  onChange={(next) => onDevice(device.device_key, next)}
+                  ariaLabel={`${device.label} answers drop-ins`}
+                  testId={`drop-in-device-${device.device_key}`}
+                />
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <span className="min-w-0 text-xs text-slate-400">
+                  Camera on for a video Drop In
+                  <span className="block text-[11px] text-slate-500">Off: the microphone only, until you tap the camera.</span>
+                </span>
+                <Toggle
+                  checked={Boolean(device.drop_in_video)}
+                  disabled={!setting.can_edit || !device.drop_in}
+                  onChange={(next) => onDeviceVideo(device.device_key, next)}
+                  ariaLabel={`${device.label} turns its camera on for a video drop-in`}
+                  testId={`drop-in-video-${device.device_key}`}
+                />
+              </div>
             </div>
           ))}
         </div>

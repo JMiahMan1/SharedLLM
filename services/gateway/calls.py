@@ -138,6 +138,8 @@ class Ring:
     declined: set[str] = field(default_factory=set)
     #: Recipients who let the caller drop in: their devices answer by themselves.
     drop_in: set[str] = field(default_factory=set)
+    #: A video call: answering turns the camera on (a drop-in only on a device switched to video drop-in).
+    video: bool = False
 
     def rings(self, username: str, now: float) -> bool:
         return (
@@ -200,6 +202,7 @@ class CallHub:
     async def ring(
         self, room: str, caller: str, caller_name: str, recipients: set[str],
         drop_in: set[str] | None = None,
+        video: bool = False,
     ) -> bool:
         """Start ringing a call's other members. False if it already rang or ended.
 
@@ -213,7 +216,8 @@ class CallHub:
             present = {p.username for p in room_peers.values()}
             self._members[room] = {caller, *recipients}
             self._rings[room] = Ring(
-                caller, caller_name, set(recipients) - present, drop_in=set(drop_in or ()) & set(recipients)
+                caller, caller_name, set(recipients) - present, drop_in=set(drop_in or ()) & set(recipients),
+                video=video,
             )
             return True
 
@@ -258,6 +262,8 @@ class CallHub:
                         "caller": ring.caller_name if ring else "",
                         # This person lets the caller drop in: answer by itself.
                         "drop_in": bool(ring and username in ring.drop_in),
+                        # A video call: answering shows the camera.
+                        "video": bool(ring and ring.video),
                     }
                 )
             calls.sort(key=lambda c: c["started_at"], reverse=True)
@@ -402,6 +408,7 @@ async def list_calls(device_key: str = "", user: dict[str, Any] = Depends(_calle
     out: dict[str, Any] = {"calls": await hub.snapshot(str(user.get("username") or ""))}
     if device_key and len(device_key) <= 128:
         out["device_drop_in"] = (await device_drop_in([device_key]))[device_key]
+        out["device_drop_in_video"] = (await device_drop_in_video([device_key]))[device_key]
     return out
 
 
@@ -433,6 +440,9 @@ DROP_IN_KEY = "calls:drop_in"
 #: so the account's list decides. Room speakers (ESPHome assistants) can be
 #: devices here too, keyed by their device_key like a phone.
 DROP_IN_DEVICES_KEY = "calls:drop_in_devices"
+#: Per device: "1" means a video drop-in turns this device's camera on by itself. Absent is off: the
+#: drop-in connects with the microphone only and the camera waits for a tap.
+DROP_IN_VIDEO_DEVICES_KEY = "calls:drop_in_video_devices"
 PARENT_ROLES = frozenset({"father", "mother"})
 MINOR_ROLES = frozenset({"child", "teen"})
 
@@ -488,6 +498,21 @@ async def device_drop_in(device_keys: list[str]) -> dict[str, bool]:
         log.warning(f"[calls] device drop-in settings unavailable: {type(e).__name__}: {e}")
         return {k: True for k in device_keys}
     return {k: v != "0" for k, v in zip(device_keys, raw, strict=True)}
+
+
+async def device_drop_in_video(device_keys: list[str]) -> dict[str, bool]:
+    """Whether each device shows its camera by itself on a video drop-in (off unless switched on)."""
+    if not device_keys:
+        return {}
+    from services.gateway.notices import _redis
+
+    try:
+        async with _redis() as conn:
+            raw = await conn.hmget(DROP_IN_VIDEO_DEVICES_KEY, device_keys)
+    except Exception as e:
+        log.warning(f"[calls] device video drop-in settings unavailable: {type(e).__name__}: {e}")
+        return {k: False for k in device_keys}
+    return {k: v == "1" for k, v in zip(device_keys, raw, strict=True)}
 
 
 async def _owned_devices(username: str) -> list[dict[str, Any]]:
@@ -555,7 +580,9 @@ async def get_drop_in(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]
     visible = [u for u in family if u["username"] == me or (is_parent(user) and is_minor(u))]
     lists = await drop_in_lists([u["username"] for u in visible])
     owned = {u["username"]: await _owned_devices(u["username"]) for u in visible}
-    switches = await device_drop_in([d["device_key"] for ds in owned.values() for d in ds])
+    keys = [d["device_key"] for ds in owned.values() for d in ds]
+    switches = await device_drop_in(keys)
+    video = await device_drop_in_video(keys)
     return {
         "me": me,
         "people": [_person(u) for u in family],
@@ -571,6 +598,7 @@ async def get_drop_in(user: dict[str, Any] = Depends(_caller)) -> dict[str, Any]
                         "label": str(d.get("label") or d.get("kind") or "Device"),
                         "kind": str(d.get("kind") or ""),
                         "drop_in": switches.get(d["device_key"], True),
+                        "drop_in_video": video.get(d["device_key"], False),
                     }
                     for d in owned[u["username"]]
                 ],
@@ -639,14 +667,19 @@ async def put_drop_in(username: str, request: Request, user: dict[str, Any] = De
 async def put_device_drop_in(
     username: str, device_key: str, request: Request, user: dict[str, Any] = Depends(_caller)
 ) -> dict[str, Any]:
-    """Switch one of ``username``'s devices answering drop-ins by itself on or off."""
+    """Switch one of ``username``'s devices answering drop-ins by itself (``drop_in``), or showing its
+    camera by itself on a video drop-in (``drop_in_video``), on or off. Either or both may be sent."""
     try:
         body = await request.json()
     except ValueError:
         body = None
-    on = body.get("drop_in") if isinstance(body, dict) else None
-    if not isinstance(on, bool):
-        raise HTTPException(status_code=422, detail="drop_in must be true or false.")
+    body = body if isinstance(body, dict) else {}
+    on = body.get("drop_in")
+    video_on = body.get("drop_in_video")
+    if on is None and video_on is None:
+        raise HTTPException(status_code=422, detail="Send drop_in or drop_in_video, true or false.")
+    if any(v is not None and not isinstance(v, bool) for v in (on, video_on)):
+        raise HTTPException(status_code=422, detail="drop_in and drop_in_video must be true or false.")
     family = {u["username"]: u for u in await _family()}
     target = family.get(username)
     if target is None:
@@ -659,14 +692,22 @@ async def put_device_drop_in(
 
     try:
         async with _redis() as conn:
-            if on:
+            if on is True:
                 await conn.hdel(DROP_IN_DEVICES_KEY, device_key)
-            else:
+            elif on is False:
                 await conn.hset(DROP_IN_DEVICES_KEY, device_key, "0")
+            if video_on is True:
+                await conn.hset(DROP_IN_VIDEO_DEVICES_KEY, device_key, "1")
+            elif video_on is False:
+                await conn.hdel(DROP_IN_VIDEO_DEVICES_KEY, device_key)
     except Exception as e:
         log.warning(f"[calls] could not save device drop-in: {type(e).__name__}: {e}")
         raise HTTPException(status_code=503, detail="Could not save. Try again.") from e
-    return {"device_key": device_key, "drop_in": on}
+    return {
+        "device_key": device_key,
+        "drop_in": (await device_drop_in([device_key]))[device_key],
+        "drop_in_video": (await device_drop_in_video([device_key]))[device_key],
+    }
 
 
 @router.websocket("/api/communication/calls/ws")

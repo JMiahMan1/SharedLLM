@@ -1102,6 +1102,8 @@ export interface ActiveCall {
   caller?: string;
   /** This person lets the caller drop in: a device with drop-in on answers by itself. */
   drop_in?: boolean;
+  /** A video call: answering turns the camera on (a drop-in only where video drop-in is on). */
+  video?: boolean;
 }
 
 export interface DropInPerson {
@@ -1117,6 +1119,8 @@ export interface DropInDevice {
   kind: string;
   /** This device answers allowed drop-ins by itself. */
   drop_in: boolean;
+  /** On a video drop-in this device turns its camera on by itself (off: microphone only until tapped). */
+  drop_in_video?: boolean;
 }
 
 export interface DropInSetting extends DropInPerson {

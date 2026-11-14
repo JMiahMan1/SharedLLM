@@ -2553,13 +2553,14 @@ export const api = {
    * The family calls, and with `deviceKey` whether this device answers
    * drop-ins by itself (a parent may switch it from another phone).
    */
-  async getCallList(deviceKey?: string): Promise<{ calls: ActiveCall[]; deviceDropIn?: boolean }> {
+  async getCallList(deviceKey?: string): Promise<{ calls: ActiveCall[]; deviceDropIn?: boolean; deviceDropInVideo?: boolean }> {
     const query = deviceKey ? `?device_key=${encodeURIComponent(deviceKey)}` : '';
     const resp = await apiClient.get(`/api/communication/calls${query}`);
     const data = resp.data ?? {};
     return {
       calls: Array.isArray(data.calls) ? data.calls : [],
       deviceDropIn: typeof data.device_drop_in === 'boolean' ? data.device_drop_in : undefined,
+      deviceDropInVideo: typeof data.device_drop_in_video === 'boolean' ? data.device_drop_in_video : undefined,
     };
   },
 
@@ -2580,9 +2581,17 @@ export const api = {
     );
   },
 
-  /** Ring the conversation's other members for a call you just started. */
-  async ringCall(room: string): Promise<{ ringing: string[]; reason?: string }> {
-    const resp = await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`);
+  /** Whether one of ``username``'s devices turns its camera on by itself on a video drop-in. */
+  async setDeviceDropInVideo(username: string, deviceKey: string, on: boolean): Promise<void> {
+    await apiClient.put(
+      `/api/communication/calls/drop-in/${encodeURIComponent(username)}/devices/${encodeURIComponent(deviceKey)}`,
+      { drop_in_video: on },
+    );
+  },
+
+  /** Ring the conversation's other members for a call you just started; ``video`` rings it as a video call. */
+  async ringCall(room: string, opts: { video?: boolean } = {}): Promise<{ ringing: string[]; reason?: string }> {
+    const resp = await apiClient.post(`/api/communication/calls/${encodeURIComponent(room)}/ring`, { video: Boolean(opts.video) });
     const data = resp.data ?? {};
     return {
       ringing: Array.isArray(data.ringing) ? data.ringing : [],

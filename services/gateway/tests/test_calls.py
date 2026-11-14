@@ -326,6 +326,39 @@ def test_a_ring_marks_drop_in_only_for_who_allows_the_caller(one_loop_client, dr
         dad.send({"type": "websocket.disconnect", "code": 1000})
 
 
+def test_video_drop_in_is_its_own_switch_off_until_turned_on(one_loop_client, drop_in_store):
+    c = one_loop_client
+    url = "/api/communication/calls/drop-in/kid/devices/kid-phone"
+    poll = lambda: c.get("/api/communication/calls?device_key=kid-phone", headers=_auth("kid")).json()  # noqa: E731
+    assert poll()["device_drop_in_video"] is False  # off until someone turns it on
+    assert c.put(url, json={"drop_in_video": True}, headers=_auth("kid")).status_code == 403  # a parent chooses
+    saved = c.put(url, json={"drop_in_video": True}, headers=_auth("mom")).json()
+    assert saved == {"device_key": "kid-phone", "drop_in": True, "drop_in_video": True}
+    assert poll()["device_drop_in_video"] is True and poll()["device_drop_in"] is True
+    seen = c.get("/api/communication/calls/drop-in", headers=_auth("mom")).json()
+    kid = next(s for s in seen["settings"] if s["username"] == "kid")
+    assert kid["devices"][0]["drop_in_video"] is True
+    # Each switch moves alone.
+    c.put(url, json={"drop_in": False}, headers=_auth("mom"))
+    assert poll()["device_drop_in"] is False and poll()["device_drop_in_video"] is True
+    c.put(url, json={"drop_in_video": False}, headers=_auth("dad"))
+    assert poll()["device_drop_in_video"] is False
+    assert c.put(url, json={}, headers=_auth("mom")).status_code == 422
+    assert c.put(url, json={"drop_in_video": "yes"}, headers=_auth("mom")).status_code == 422
+
+
+def test_a_video_ring_says_so_to_everyone_it_rings(one_loop_client, drop_in_store):
+    c = one_loop_client
+    import asyncio
+
+    with c.websocket_connect("/api/communication/calls/ws?token=dad-token&room=vid&name=Family") as dad:
+        dad.receive_json()
+        assert asyncio.run(calls.hub.ring("vid", "dad", "Dad", {"mom"}, {"mom"}, video=True)) is True
+        [for_mom] = _calls_for(c, "mom-token")
+        assert for_mom["video"] is True and for_mom["drop_in"] is True
+        dad.send({"type": "websocket.disconnect", "code": 1000})
+
+
 def test_a_phone_reports_what_it_did_with_a_drop_in(one_loop_client, caplog):
     c = one_loop_client
     body = {"event": "rang", "detail": "the phone is unlocked and Jarvis may not open over other apps",

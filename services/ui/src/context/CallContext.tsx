@@ -33,6 +33,8 @@ import { setApkUpdateBusyCheck } from '../lib/appUpdater';
 const ACTIVE_CALL_REFRESH_MS = 5_000;
 const RING_INTERVAL_MS = 2_500;
 /** How long someone who joined another person's call stays once everyone else has left. */
+/** How long a drop-in Android answered waits to learn whether it is a video one, at most. */
+const VIDEO_LOOKUP_MS = 1500;
 const ALONE_HANGUP_MS = 15_000;
 /** A drop-in answered from the background asks for the microphone this often, this many times (about 8 s). */
 const DROP_IN_MIC_RETRY_MS = 800;
@@ -60,6 +62,8 @@ export interface CallInfo {
   outgoing?: boolean;
   /** People who declined the ring. */
   declined?: string[];
+  /** Started or answered as a video call: the camera came on with it. */
+  video?: boolean;
   /** This phone joined by itself (Drop In); when it ends the app goes back to chat. */
   dropIn?: boolean;
 }
@@ -71,7 +75,8 @@ interface CallContextValue {
   activeCalls: ActiveCall[];
   muted: boolean;
   cameraOn: boolean;
-  startCall: (room: string, name: string) => Promise<void>;
+  /** Join or start a call; ``video`` turns the camera on with it (and rings it as a video call). */
+  startCall: (room: string, name: string, options?: { auto?: boolean; video?: boolean }) => Promise<void>;
   endCall: () => void;
   toggleMute: () => void;
   toggleCamera: () => Promise<void>;
@@ -924,21 +929,28 @@ function CallOverlay({
 }
 
 /** Full-screen incoming call: answer or decline, like a phone call. */
-function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswer: () => void; onDecline: () => void }) {
+function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswer: (video: boolean) => void; onDecline: () => void }) {
   const caller = call.caller || call.participants[0]?.name || 'Someone';
   const person = useFamilyDirectory()(call.participants[0]?.username || caller);
   const group = call.name && call.name !== caller ? call.name : '';
+  const video = Boolean(call.video);
+  const verb = video ? 'is video calling' : 'is calling';
+  const round = 'flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95';
   return (
     <div
       className="fixed inset-0 z-[140] flex flex-col items-center justify-between bg-gradient-to-b from-emerald-950 via-slate-950 to-slate-950 px-6 text-center sm:inset-auto sm:bottom-5 sm:right-5 sm:w-[360px] sm:rounded-3xl sm:border sm:border-emerald-400/30 sm:py-6 sm:shadow-2xl"
       style={{ paddingTop: 'max(3.5rem, env(safe-area-inset-top))', paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
       role="alertdialog"
       aria-modal="true"
-      aria-label={`${caller} is calling`}
+      aria-label={`${caller} ${verb}`}
       data-testid="incoming-call"
+      data-video={video || undefined}
     >
       <div className="flex flex-col items-center gap-3 sm:gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Family call</p>
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+          {video ? <Video size={14} aria-hidden /> : null}
+          {video ? 'Family video call' : 'Family call'}
+        </p>
         <span className="relative mt-4 flex h-28 w-28 items-center justify-center sm:mt-2 sm:h-20 sm:w-20">
           <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400/20" />
           <span className="relative flex h-full w-full items-center justify-center">
@@ -946,29 +958,25 @@ function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswe
               size={112} className="h-full w-full" />
           </span>
         </span>
-        <p className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-xl">{caller}</p>
-        <p className="text-sm text-slate-300">{group ? `is calling ${group}` : 'is calling you'}</p>
+        <p className="mt-2 max-w-full break-words text-3xl font-bold tracking-tight text-white sm:text-xl">{caller}</p>
+        <p className="text-sm text-slate-300">{group ? `${verb} ${group}` : `${verb} you`}</p>
       </div>
-      <div className="flex w-full max-w-xs items-center justify-around sm:mt-6">
-        <button
-          type="button"
-          onClick={onDecline}
-          aria-label="Decline"
-          className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300"
-        >
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-500 text-white shadow-lg transition active:scale-95 hover:bg-rose-400">
-            <PhoneOff size={26} />
-          </span>
+      <div className="flex w-full max-w-xs items-start justify-around gap-2 sm:mt-6">
+        <button type="button" onClick={onDecline} aria-label="Decline" className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300">
+          <span className={`${round} bg-rose-500 hover:bg-rose-400`}><PhoneOff size={26} /></span>
           Decline
         </button>
-        <button
-          type="button"
-          onClick={onAnswer}
-          aria-label="Answer"
-          className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300"
-        >
-          <span className="flex h-16 w-16 animate-bounce items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg transition active:scale-95 hover:bg-emerald-400">
-            <Phone size={26} />
+        {video && (
+          <button type="button" onClick={() => onAnswer(false)} aria-label="Answer with sound only"
+            className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300" data-testid="incoming-call-audio">
+            <span className={`${round} bg-slate-700 hover:bg-slate-600`}><Phone size={24} /></span>
+            Audio only
+          </button>
+        )}
+        <button type="button" onClick={() => onAnswer(video)} aria-label={video ? 'Answer with video' : 'Answer'}
+          className="flex flex-col items-center gap-2 text-xs font-semibold text-slate-300" data-testid="incoming-call-answer">
+          <span className={`${round} animate-bounce bg-emerald-500 hover:bg-emerald-400`}>
+            {video ? <Video size={26} /> : <Phone size={26} />}
           </span>
           Answer
         </button>
@@ -1008,6 +1016,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [cameraOn, setCameraOn] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [autoDropIn, setAutoDropIn] = useState(false);
+  /** This device turns its camera on by itself on a video drop-in (from the call list poll). */
+  const autoDropInVideoRef = useRef(false);
+  /** The last call list, for a drop-in Android answered before React saw it ring. */
+  const activeCallsRef = useRef<ActiveCall[]>([]);
   const [now, setNow] = useState(() => Date.now());
 
   // An automatic app update restarts the app: never in the middle of a call.
@@ -1094,11 +1106,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const deviceKey = await getDeviceKey().catch(() => '');
-        const { calls, deviceDropIn } = await api.getCallList(deviceKey || undefined);
+        const { calls, deviceDropIn, deviceDropInVideo } = await api.getCallList(deviceKey || undefined);
         if (cancelled) return;
         // A malformed answer must not take the banner down with it.
         const list = Array.isArray(calls) ? calls : [];
         setActiveCalls(list);
+        activeCallsRef.current = list;
+        if (deviceDropInVideo !== undefined) autoDropInVideoRef.current = deviceDropInVideo;
         if (deviceDropIn !== undefined && deviceDropIn !== autoDropInRef.current) {
           autoDropInRef.current = deviceDropIn;
           setAutoDropIn(deviceDropIn);
@@ -1163,7 +1177,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
-  const startCall = useCallback(async (room: string, name: string, options?: { auto?: boolean }) => {
+  const startCall = useCallback(async (room: string, name: string, options?: { auto?: boolean; video?: boolean }) => {
     const apiToken = tokenRef.current;
     if (!apiToken) {
       if (!options?.auto) {
@@ -1191,6 +1205,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       error: null,
       startedAt: Date.now(),
       ...(options?.auto ? { dropIn: true } : {}),
+      ...(options?.video ? { video: true } : {}),
     });
     setPeers([]);
     setLocalStream(null);
@@ -1236,8 +1251,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setCall((current) => current
         ? { ...current, status: 'connected', name: session.roomName || current.name, outgoing, startedAt: Date.now() }
         : current);
+      if (options?.video) {
+        // A video call: the camera comes on with it. Without one the call goes on with sound.
+        void session.setCamera(true).then(() => {
+          if (sessionRef.current !== session) return;
+          cameraRef.current = true;
+          setCameraOn(true);
+        }).catch((error) => {
+          if (sessionRef.current === session) toast.error(`Camera unavailable, so this call is sound only. ${messageError(error)}`);
+        });
+      }
       if (outgoing) {
-        void api.ringCall(room).then(({ ringing, reason }) => {
+        void api.ringCall(room, { video: options?.video }).then(({ ringing, reason }) => {
           // A ring that reached nobody must not look like one nobody answered.
           if (ringing.length === 0 && reason && sessionRef.current === session) {
             toast.error(`Nobody was rung: ${reason}`);
@@ -1264,7 +1289,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     autoJoinRef.current = (active) => {
-      void startCall(active.token, active.name || 'Family call', { auto: true });
+      // A video drop-in shows this device's camera only where video drop-in is switched on.
+      void startCall(active.token, active.name || 'Family call', { auto: true, video: Boolean(active.video && autoDropInVideoRef.current) });
     };
   }, [startCall]);
 
@@ -1276,7 +1302,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
       autoTriedRef.current.add(room);
       // The one sound a drop-in makes. Newer APKs ding by themselves as they answer; older ones do not.
       void nativeDropInStatus().then((status) => { if (!status) playDropInChime(); });
-      void startCall(room, name, { auto: true }).then(() => {
+      // Whether it is a video drop-in this device shows its camera for. Never worth delaying the join:
+      // without an answer in VIDEO_LOOKUP_MS (or signed out) it joins with sound.
+      const videoOf = async (): Promise<boolean> => {
+        const known = activeCallsRef.current.find((active) => active.token === room);
+        if (known) return Boolean(known.video && autoDropInVideoRef.current);
+        if (!tokenRef.current) return false;
+        const lookup = (async () => {
+          const deviceKey = await getDeviceKey().catch(() => '');
+          const fresh = await api.getCallList(deviceKey || undefined).catch(() => null);
+          if (fresh?.deviceDropInVideo !== undefined) autoDropInVideoRef.current = fresh.deviceDropInVideo;
+          return Boolean(fresh?.calls.find((active) => active.token === room)?.video && autoDropInVideoRef.current);
+        })();
+        const giveUp = new Promise<boolean>((resolve) => { window.setTimeout(() => resolve(false), VIDEO_LOOKUP_MS); });
+        return Promise.race([lookup, giveUp]);
+      };
+      void videoOf().then((video) => startCall(room, name, { auto: true, video })).then(() => {
         // Signed out, or already in another call: nothing joined, so the
         // native call must not stay up holding the microphone.
         if (callRef.current?.room !== room) reportDropInEnded();
@@ -1403,7 +1444,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       {incomingCall && typeof document !== 'undefined' && createPortal(
         <IncomingCall
           call={incomingCall}
-          onAnswer={() => void startCall(incomingCall.token, incomingCall.name || 'Family call')}
+          onAnswer={(video) => void startCall(incomingCall.token, incomingCall.name || 'Family call', { video })}
           onDecline={() => decline(incomingCall.token)}
         />,
         document.body,

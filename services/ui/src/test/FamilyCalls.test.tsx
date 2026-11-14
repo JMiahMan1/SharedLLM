@@ -39,7 +39,7 @@ describe('family calls', () => {
     expect(within(calls).queryByText(/microphone or speaker/i)).not.toBeInTheDocument();
 
     await user.click(within(calls).getByRole('button', { name: 'Call Family' }));
-    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-family', 'Family'));
+    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-family', 'Family', { video: false }));
   });
 
   it('offers to join a call that is already running', async () => {
@@ -77,7 +77,7 @@ describe('family calls', () => {
 
     renderWithProviders(<Family />, { route: '/family?tab=calls&answer=room-sam' });
 
-    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-sam', 'Family call'));
+    await waitFor(() => expect(startCall).toHaveBeenCalledWith('room-sam', 'Family call', { video: false }));
     expect(startCall).toHaveBeenCalledTimes(1);
   });
 });
