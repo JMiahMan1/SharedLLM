@@ -42,6 +42,16 @@ def warn_periodically(
         logger.debug(message, *args)
 
 
+def describe_exc(exc: BaseException) -> str:
+    """``TimeoutError`` or ``ClientOSError: [Errno 104] ...``: an exception as a log line can show it.
+
+    ``f"{exc}"`` is empty for a timeout or a dropped connection, which left lines such
+    as "request attempt 1/3 failed: " with nothing to say what went wrong.
+    """
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 #: Query parameters whose values are credentials. A WebSocket or a webhook can
 #: only carry its secret in the URL, and uvicorn's access log writes the whole
 #: URL: the git-pull webhook token and the media token (``mt``) were both found

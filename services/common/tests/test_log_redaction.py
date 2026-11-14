@@ -56,3 +56,10 @@ def test_the_readers_own_secrets_are_masked_wherever_they_appear():
 def test_secret_env_values_takes_only_secret_looking_names():
     env = {"INTERNAL_SECRET": "x" * 12, "GH_TOKEN": "y" * 20, "HOME": "/home/someone", "NC_PASSWORD": "short"}
     assert secret_env_values(env) == ("y" * 20, "x" * 12)
+
+
+def test_describe_exc_names_errors_that_have_no_text():
+    from services.common.logging_utils import describe_exc
+
+    assert describe_exc(TimeoutError()) == "TimeoutError"
+    assert describe_exc(OSError(104, "Connection reset by peer")) == "OSError: [Errno 104] Connection reset by peer"

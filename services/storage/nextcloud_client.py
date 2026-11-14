@@ -7,6 +7,8 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 
+from services.common.logging_utils import describe_exc
+
 try:
     from .models import StorageEntry
 except ImportError:
@@ -233,7 +235,7 @@ class NextCloudClient:
                     raise Exception(f"HTTP {resp.status}")
                 return await resp.read()
         except Exception as e:
-            log.error(f"Failed to fetch bytes for {remote_path}: {e}")
+            log.error(f"Failed to fetch bytes for {remote_path}: {describe_exc(e)}")
             return None
 
     async def ensure_directory(self, remote_path: str) -> None:

@@ -11,6 +11,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
+from services.common.logging_utils import describe_exc
+
 try:
     from personal_data import missing_account_message, resolve_personal_data_provider
     from schemas import ExecutionResult, TalkRequest
@@ -99,10 +101,10 @@ async def _talk_request_with_retry(provider: Any, method: str, endpoint: str, *,
             return await provider.request(method, endpoint, params=params, data=data, timeout=timeout)
         except Exception as e:
             last_exc = e
-            log.warning(f"[talk] request attempt {attempt + 1}/{_TALK_RETRIES} failed: {e}")
+            log.warning(f"[talk] request attempt {attempt + 1}/{_TALK_RETRIES} failed: {describe_exc(e)}")
             if attempt < _TALK_RETRIES - 1:
                 await asyncio.sleep(_TALK_RETRY_DELAY)
-    return False, None, f"Talk request failed after {_TALK_RETRIES} attempts: {last_exc}"
+    return False, None, f"Talk request failed after {_TALK_RETRIES} attempts: {describe_exc(last_exc) if last_exc else 'unknown'}"
 
 
 def _decode_audio(audio_base64: str) -> bytes:
