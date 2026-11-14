@@ -91,7 +91,10 @@ test.describe('note and picture widgets', () => {
     await expect(pic.getByText('Garden')).toBeVisible();
     expect(run.saves.filter((x) => x.key === 'picture')).toEqual([{ key: 'picture', body: { config: {
       src: 'https://photos.example.test/garden.png', caption: 'Garden', alt: '' } } }]);
-    expect(run.pictures).toEqual(['https://photos.example.test/garden.png']);
+    // Phones may fetch it again on a re-render; only ever the saved picture.
+    await expect.poll(() => run.pictures.length).toBeGreaterThan(0);
+    await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    expect(new Set(run.pictures)).toEqual(new Set(['https://photos.example.test/garden.png']));
     await expectNoHorizontalOverflow(page);
     await snap(page, info, 'picture-widget');
     expect(run.errors).toEqual([]);
