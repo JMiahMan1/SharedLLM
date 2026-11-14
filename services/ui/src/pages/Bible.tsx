@@ -18,6 +18,7 @@ import ReferenceBar from '../components/bible/ReferenceBar';
 import ChapterReader from '../components/bible/ChapterReader';
 import ParallelReader from '../components/bible/ParallelReader';
 import FocusReader from '../components/bible/FocusReader';
+import AutoScrollControl from '../components/reading/AutoScrollControl';
 import { pageStyle, toneOf } from '../components/bible/readingPage';
 import { anchorAt, measureVerses, scrollTopFor } from '../components/bible/verseAnchor';
 import { useSwipe } from '../lib/useSwipe';
@@ -804,8 +805,22 @@ function BibleReaderPane({
           onNext={() => step(1)}
           onClose={() => setFocusing(false)}
           onVerseTap={setActiveVerse}
+          autoScrollPaused={Boolean(activeVerse)}
         />
       )}
+
+      {/* Two linked panes scroll themselves; focus mode has its own control. */}
+      {passage && !searching && !parallel && !focusing ? (
+        <>
+          {/* Room under the last verse, so the floating control never covers it. */}
+          <div aria-hidden className="h-14" />
+          <AutoScrollControl
+            target={() => scrollParent(surfaceRef.current)}
+            paused={Boolean(activeVerse)}
+            testId="bible-auto-scroll"
+          />
+        </>
+      ) : null}
 
       {activeVerse && (
         <VerseActionSheet

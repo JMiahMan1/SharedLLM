@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
 import type { BibleMark, BibleVerse } from '../../types/api';
 import { ambienceFor } from './focusAmbience';
 import { MARK_WASH, pageStyle, toneOf } from './readingPage';
 import { highlightOn } from './verseMarks';
 import { useSwipe } from '../../lib/useSwipe';
+import AutoScrollControl from '../reading/AutoScrollControl';
 
 /**
  * A chapter read as a page rather than a screen.
@@ -39,6 +40,8 @@ export interface FocusReaderProps {
   onClose: () => void;
   /** Open the verse's actions (highlight, note, share, ask), as in the reader. */
   onVerseTap?: (verse: BibleVerse) => void;
+  /** Hold auto scroll, e.g. while a verse's actions are open over the page. */
+  autoScrollPaused?: boolean;
 }
 
 
@@ -55,13 +58,16 @@ export default function FocusReader({
   onNext,
   onClose,
   onVerseTap,
+  autoScrollPaused = false,
 }: FocusReaderProps) {
   const [chrome, setChrome] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
   const tone = toneOf(page);
   const swipe = useSwipe(onNext, onPrev);
 
   return (
     <div
+      ref={rootRef}
       className={`fixed inset-0 z-40 overflow-y-auto ${
         tone === 'dark' ? `bg-gradient-to-b ${ambienceFor(new Date().getHours())}` : ''
       }`}
@@ -153,7 +159,10 @@ export default function FocusReader({
             </button>
           );
         })}
+        {/* Room under the last verse, so the floating control never covers it. */}
+        <div aria-hidden className="h-14" />
       </div>
+      <AutoScrollControl target={() => rootRef.current} paused={autoScrollPaused} testId="bible-focus-auto-scroll" />
     </div>
   );
 }

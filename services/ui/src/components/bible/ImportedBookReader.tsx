@@ -29,6 +29,7 @@ import { useSwipe } from '../../lib/useSwipe';
 import ShareToChatSheet from './ShareToChatSheet';
 import { cleanBookPage, type BookPage } from './readerText';
 import { PAGE_TONES, PAGE_TONE_ORDER, pageStyle, toneOf } from './readingPage';
+import AutoScrollControl from '../reading/AutoScrollControl';
 
 type ReadingPreferences = Pick<BiblePreferences, 'page' | 'font_scale' | 'line_height' | 'theme'>;
 
@@ -350,6 +351,7 @@ export default function ImportedBookReader({
         </div>
       </header>
 
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={textRef}
         className="flex-1 overflow-y-auto overscroll-contain"
@@ -466,6 +468,14 @@ export default function ImportedBookReader({
             </>
           )}
         </article>
+      </div>
+
+      <AutoScrollControl
+        target={() => textRef.current}
+        paused={askOpen || shareOpen || contentsOpen}
+        placement="absolute"
+        testId="bible-study-auto-scroll"
+      />
       </div>
 
       <footer className="shrink-0 border-t border-[var(--page-rule)] bg-[var(--page-paper)] pb-[max(0.25rem,env(safe-area-inset-bottom))]">
