@@ -15,6 +15,8 @@ import os
 
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, DummyCookieJar, TCPConnector
 
+from services.common.http import INTERNAL_KEEPALIVE_S
+
 log = logging.getLogger("execution.http")
 
 _DEFAULT_TIMEOUT = ClientTimeout(total=30, connect=5)
@@ -236,6 +238,7 @@ async def get_session(host: str, verify: bool = True) -> ClientSession:
         enable_cleanup_closed=True,
         ttl_dns_cache=_DNS_TTL,
         ssl=ssl_param,
+        keepalive_timeout=INTERNAL_KEEPALIVE_S,
     )
 
     previous = _SESSION_CACHE.get(cache_key)

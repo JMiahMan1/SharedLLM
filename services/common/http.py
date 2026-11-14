@@ -19,6 +19,11 @@ import asyncio
 import aiohttp
 
 _DNS_TTL = 60
+#: How long a pooled connection may sit idle before it is dropped. Below uvicorn's own
+#: keep-alive (5 s, the default every service runs with): aiohttp's default of 15 s reused
+#: connections the service had already closed, and the request failed with "Server
+#: disconnected" or "Connection reset by peer" (gateway and execution, 2026-11-14).
+INTERNAL_KEEPALIVE_S = 4.0
 
 #: One session per (TLS verification, event loop). A session belongs to the
 #: loop that created it, so a worker thread running its own loop (RavenWorker)
@@ -45,7 +50,8 @@ class NonClosingSessionWrapper:
 def _make(verify: bool) -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(
-            limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL, ssl=verify
+            limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL, ssl=verify,
+            keepalive_timeout=INTERNAL_KEEPALIVE_S,
         )
     )
 

@@ -15,6 +15,7 @@ from typing import Any, cast
 import aiohttp
 import redis.asyncio as redis
 
+from services.common.http import INTERNAL_KEEPALIVE_S
 from services.gateway.artifacts import create_artifact as create_artifact_record
 from services.gateway.config import (
     CONTROL_PLANE_URL,
@@ -1976,7 +1977,7 @@ def get_http_client() -> aiohttp.ClientSession:
         if _http_client_dead(_fallback_http_client):
             _fallback_http_client = _original_async_client(
                 timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-                connector=aiohttp.TCPConnector(limit=100),
+                connector=aiohttp.TCPConnector(limit=100, keepalive_timeout=INTERNAL_KEEPALIVE_S),
             )
         return _fallback_http_client
 
@@ -1984,7 +1985,7 @@ def get_http_client() -> aiohttp.ClientSession:
     if _http_client_dead(client):
         client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100),
+            connector=aiohttp.TCPConnector(limit=100, keepalive_timeout=INTERNAL_KEEPALIVE_S),
         )
         _http_clients[current_loop] = client
     return client

@@ -260,3 +260,34 @@ async def test_udp_request_times_out_with_device_unavailable(monkeypatch):
             await udp_request("127.0.0.1", "getPilot", port=port, timeout=0.3)
     finally:
         transport.close()
+
+
+async def test_one_missed_poll_does_not_make_a_working_bulb_unavailable(monkeypatch, caplog):
+    monkeypatch.setattr(wiz, "RECHECK_AFTER_S", 0)
+    bulb = FakeBulb()
+    hub, drv = make_driver(bulb)
+    await drv.async_setup()
+    misses = iter([True])
+    real = bulb.__call__
+
+    async def flaky(method, params=None):
+        if method == "getPilot" and next(misses, False):
+            raise DeviceUnavailable("WiZ bulb did not answer getPilot")
+        return await real(method, params)
+
+    drv._request = flaky
+    await drv.async_poll()
+    assert hub.states.get(f"light.wiz_{MAC}").state == "on"
+    assert "unreachable" not in caplog.text
+    assert drv.poll_interval == wiz.ONLINE_POLL_S
+
+
+async def test_an_unreachable_bulb_names_the_error_even_when_it_has_no_text(monkeypatch):
+    loop = asyncio.get_running_loop()
+
+    async def times_out(*_a, **_k):
+        raise TimeoutError()
+
+    monkeypatch.setattr(loop, "create_datagram_endpoint", times_out)
+    with pytest.raises(DeviceUnavailable, match=r"unreachable: TimeoutError$"):
+        await udp_request("192.0.2.5", "getPilot", timeout=0.1)

@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
 from services.common import active_minutes as _active_minutes
+from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common import device_noun as _device_noun
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
@@ -642,7 +643,8 @@ def _new_http_client() -> aiohttp.ClientSession:
     return _original_async_client(
         headers={"X-Request-Source": "shared-llm/app"},
         timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-        connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL),
+        connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL,
+                                     keepalive_timeout=INTERNAL_KEEPALIVE_S),
     )
 
 
@@ -18747,10 +18749,13 @@ async def sendspin_proxy(websocket: WebSocket):
                             client_goodbye_sent.set()
                     except (json.JSONDecodeError, AttributeError):
                         pass
-                    log.info(f"[sendspin] Proxy: browser→MA ({len(text_data)} chars)")
+                    log.debug(f"[sendspin] Proxy: browser→MA ({len(text_data)} chars)")
                     await ma_ws.send(text_data)
             except WebSocketDisconnect:
                 log.info("[sendspin] Proxy: Browser disconnected from gateway")
+            except websockets.exceptions.ConnectionClosedOK as e:
+                # Music Assistant closed normally (1000/1001): the end of a session, not an error.
+                log.info(f"[sendspin] Proxy: Client→MA closed normally: {e}")
             except Exception as e:
                 log.error(f"[sendspin] Proxy: Client→MA forward error: {e}", exc_info=True)
             finally:
@@ -18764,13 +18769,16 @@ async def sendspin_proxy(websocket: WebSocket):
                 while True:
                     message = await ma_ws.recv()
                     if isinstance(message, str):
-                        log.info(f"[sendspin] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
+                        log.debug(f"[sendspin] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
                         await websocket.send_text(message)
                     else:
-                        log.info(f"[sendspin] Proxy: MA→browser ({len(message)} bytes binary)")
+                        log.debug(f"[sendspin] Proxy: MA→browser ({len(message)} bytes binary)")
                         await websocket.send_bytes(message)
             except WebSocketDisconnect:
                 log.info("[sendspin] Proxy: Browser disconnected from gateway (MA→browser)")
+            except websockets.exceptions.ConnectionClosedOK as e:
+                # Music Assistant closed normally (1000/1001): the end of a session, not an error.
+                log.info(f"[sendspin] Proxy: MA→Client closed normally: {e}")
             except Exception as e:
                 log.error(f"[sendspin] Proxy: MA→Client forward error: {e}", exc_info=True)
             finally:
@@ -19008,10 +19016,13 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                             )
                             await websocket.send_text(scope_error)
                             continue
-                        log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(text_data)} chars)")
+                        log.debug(f"[ma-jsonrpc] Proxy: browser→MA ({len(text_data)} chars)")
                         await ma_ws.send(text_data)
                 except WebSocketDisconnect:
                     log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway")
+                except websockets.exceptions.ConnectionClosedOK as e:
+                    # Music Assistant closed normally (1000/1001): the end of a session, not an error.
+                    log.info(f"[ma-jsonrpc] Proxy: Client→MA closed normally: {e}")
                 except Exception as e:
                     log.error(f"[ma-jsonrpc] Proxy: Client→MA forward error: {e}", exc_info=True)
                 finally:
@@ -19024,14 +19035,17 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                     while True:
                         message = await ma_ws.recv()
                         if isinstance(message, str):
-                            log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
+                            log.debug(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
                             await websocket.send_text(message)
                         else:
-                            log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} bytes binary)")
+                            log.debug(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} bytes binary)")
                             await websocket.send_bytes(message)
                 except WebSocketDisconnect:
                     # Browser closed the tab/moved on; expected, not an error.
                     log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway (MA→browser)")
+                except websockets.exceptions.ConnectionClosedOK as e:
+                    # Music Assistant closed normally (1000/1001): the end of a session, not an error.
+                    log.info(f"[ma-jsonrpc] Proxy: MA→Client closed normally: {e}")
                 except Exception as e:
                     log.error(f"[ma-jsonrpc] Proxy: MA→Client forward error: {e}", exc_info=True)
                 finally:

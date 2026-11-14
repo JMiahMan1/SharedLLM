@@ -87,7 +87,7 @@ async def udp_request(host: str, method: str, params: dict[str, Any] | None = No
         transport, _ = await asyncio.wait_for(
             loop.create_datagram_endpoint(lambda: proto, remote_addr=(host, port)), timeout)
     except (OSError, TimeoutError) as exc:
-        raise DeviceUnavailable(f"WiZ bulb {host} unreachable: {exc}") from exc
+        raise DeviceUnavailable(f"WiZ bulb {host} unreachable: {type(exc).__name__} {exc}".rstrip()) from exc
     try:
         deadline = loop.time() + timeout
         while True:
@@ -112,6 +112,10 @@ async def udp_request(host: str, method: str, params: dict[str, Any] | None = No
 #: Poll period while a bulb answers, and while it does not (off at the switch).
 ONLINE_POLL_S = 30.0
 OFFLINE_POLL_S = 5.0
+#: A bulb that was answering is asked once more, this long after a miss, before it is called
+#: unavailable: three bulbs missed every other poll and answered 5 s later, so the app showed
+#: them flicking to unavailable and back every minute (2026-11-14).
+RECHECK_AFTER_S = 1.0
 
 
 class WizDriver(Driver):
@@ -245,10 +249,17 @@ class WizDriver(Driver):
         try:
             self.pilot = await self._request("getPilot")
         except DeviceUnavailable as exc:
-            if self._online:
-                self.log.warning("WiZ %s (%s) unreachable: %s", self.entry.title, self.host, exc)
-            self._went_offline()
-            return
+            if not self._online:
+                self._went_offline()
+                return
+            self.log.debug("WiZ %s (%s) missed a poll, asking again: %s", self.entry.title, self.host, exc)
+            await asyncio.sleep(RECHECK_AFTER_S)
+            try:
+                self.pilot = await self._request("getPilot")
+            except DeviceUnavailable as again:
+                self.log.warning("WiZ %s (%s) unreachable: %s", self.entry.title, self.host, again)
+                self._went_offline()
+                return
         if not self._online:
             self.log.info("WiZ %s (%s) is back", self.entry.title, self.host)
             await self._identify()
