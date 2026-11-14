@@ -60,6 +60,8 @@ export interface CallInfo {
   outgoing?: boolean;
   /** People who declined the ring. */
   declined?: string[];
+  /** This phone joined by itself (Drop In); when it ends the app goes back to chat. */
+  dropIn?: boolean;
 }
 
 interface CallContextValue {
@@ -1188,6 +1190,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       status: 'connecting',
       error: null,
       startedAt: Date.now(),
+      ...(options?.auto ? { dropIn: true } : {}),
     });
     setPeers([]);
     setLocalStream(null);

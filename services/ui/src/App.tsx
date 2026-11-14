@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CallProvider } from './context/CallContext';
+import DropInReturn from './components/family/DropInReturn';
 import { LocationProvider } from './context/LocationContext';
 import { MediaPlayerProvider } from './context/MediaPlayerContext';
 import MediaOverlays from './features/media/components/MediaOverlays';
@@ -159,6 +160,7 @@ function App() {
           <GuardWatch />
 <MediaSessionSync />
 <CommsSync />
+          <DropInReturn />
           <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
