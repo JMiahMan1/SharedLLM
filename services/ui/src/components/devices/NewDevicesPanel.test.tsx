@@ -120,9 +120,12 @@ describe('NewDevicesPanel', () => {
     vi.mocked(discovered.getManualFlows).mockResolvedValue([
       { domain: 'samsungtv', label: 'Samsung TV', fields: [{ key: 'host', label: 'Address', type: 'text' }] },
     ]);
+    // The TV's answer is held until the waiting screen has been seen: with a
+    // 10 ms poll, a busy test run could finish pairing before anyone looked.
+    let accept: (value: Awaited<ReturnType<typeof discovered.addByAddress>>) => void = () => {};
     vi.mocked(discovered.addByAddress)
       .mockResolvedValueOnce({ status: 'pending', session: 's1', step: 'accept_on_tv', message: 'Choose Allow on the TV.', poll_ms: 10 })
-      .mockResolvedValueOnce({ status: 'adopted', entry_id: 'tv1', name: 'Den TV', entities: ['media_player.den_tv'] });
+      .mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
     wrap();
     fireEvent.click(await screen.findByRole('button', { name: /Add by address/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Samsung TV' }));
@@ -130,8 +133,9 @@ describe('NewDevicesPanel', () => {
     fireEvent.change(within(dialog).getByLabelText(/Address/), { target: { value: '192.0.2.70' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /Add/ }));
     expect(await within(dialog).findByText('Accept on your TV')).toBeInTheDocument();
-    // The pairing polls before the dialog closes; under a full parallel run that took over the default 1 s.
-    await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(discovered.addByAddress).toHaveBeenCalledTimes(2));
+    accept({ status: 'adopted', entry_id: 'tv1', name: 'Den TV', entities: ['media_player.den_tv'] });
+    await waitFor(() => expect(screen.queryByTestId('adopt-dialog')).toBeNull());
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(1, 'samsungtv',
       { name: undefined, area_id: undefined, input: { host: '192.0.2.70' }, host: '192.0.2.70', url: undefined });
     expect(discovered.addByAddress).toHaveBeenNthCalledWith(2, 'samsungtv',
