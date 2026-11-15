@@ -301,26 +301,38 @@ class TestBundleOlderThanApk:
     installed the new APK in between was handed the old bundle, which ran the
     old pages over the new native code."""
 
-    def _paths(self, client):
+    @staticmethod
+    def _offer(client):
+        return client.get("/api/app-updates/version").json()
+
+    def test_a_new_apk_after_the_bundle_withholds_it_until_the_next_bundle(self, client):
+        import os
+
         from services.gateway import main
 
+        bundle = main.APP_UPDATES_DIR / "bundle.zip"
+        apk = main.APP_UPDATES_DIR / "jarvis-os.apk"
         TestVersionEndpoint()._publish_apk(client, 700)
-        return main.APP_UPDATES_DIR / "bundle.zip", main.APP_UPDATES_DIR / "jarvis-os.apk"
-
-    def test_a_bundle_published_before_the_apk_is_not_offered(self, client):
-        import os
-
-        bundle, apk = self._paths(client)
         _write_bundle(bundle)
+        assert self._offer(client)["bundle_available"] is True  # first look: nothing known, nothing withheld
+        TestVersionEndpoint()._publish_apk(client, 701)  # a new APK, after the bundle
         os.utime(bundle, (apk.stat().st_mtime - 300, apk.stat().st_mtime - 300))
-        data = client.get("/api/app-updates/version").json()
-        assert data["bundle_available"] is False
-        assert data["apk_available"] is True
+        assert self._offer(client)["bundle_available"] is False
+        _write_bundle(bundle, "def5678")  # the deploy publishes the matching bundle
+        os.utime(bundle, (apk.stat().st_mtime + 300, apk.stat().st_mtime + 300))
+        assert self._offer(client)["bundle_available"] is True
 
-    def test_a_bundle_published_after_the_apk_is_offered(self, client):
+    def test_re_copying_the_same_apk_does_not_withhold_the_bundle(self, client):
         import os
 
-        bundle, apk = self._paths(client)
+        from services.gateway import main
+
+        bundle = main.APP_UPDATES_DIR / "bundle.zip"
+        apk = main.APP_UPDATES_DIR / "jarvis-os.apk"
+        TestVersionEndpoint()._publish_apk(client, 700)
         _write_bundle(bundle)
-        os.utime(bundle, (apk.stat().st_mtime + 300, apk.stat().st_mtime + 300))
-        assert client.get("/api/app-updates/version").json()["bundle_available"] is True
+        assert self._offer(client)["bundle_available"] is True
+        later = bundle.stat().st_mtime + 600
+        os.utime(apk, (later, later))  # a deploy syncs the same build again
+        main.clear_apk_version_cache() if hasattr(main, "clear_apk_version_cache") else None
+        assert self._offer(client)["bundle_available"] is True

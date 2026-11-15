@@ -16666,10 +16666,37 @@ def _read_bundle_version(bundle_path: Path) -> dict:
     return {}
 
 
-def _bundle_predates_apk(bundle: Path, apk: Path) -> bool:
-    """Whether the web bundle on offer was published before the APK on offer."""
+def _apk_changed_at(apk: Path, digest: str) -> float:
+    """When the APK on offer took its current contents (seconds since the epoch).
+
+    Kept in a sidecar by digest, because the file's own mtime moves whenever a
+    deploy re-copies the same APK (it syncs the newest finished build, which
+    is often the one already published), and that is not a new APK. A digest
+    seen for the first time takes the file's mtime, which is when it was
+    copied in. With no record at all (the first look after this shipped) the
+    answer is 0, "long ago", so nothing is withheld on a guess.
+    """
+    sidecar = apk.parent / "apk_published.json"
     try:
-        return bundle.stat().st_mtime < apk.stat().st_mtime
+        known = json.loads(sidecar.read_text())
+    except (OSError, ValueError):
+        known = None
+    if isinstance(known, dict) and known.get("sha256") == digest:
+        return float(known.get("at") or 0)
+    at = 0.0 if known is None else apk.stat().st_mtime
+    try:
+        tmp = sidecar.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"sha256": digest, "at": at}))
+        tmp.replace(sidecar)
+    except OSError as e:
+        log.warning(f"[AppUpdates] Could not record when the APK changed: {e}")
+    return at
+
+
+def _bundle_predates_apk(bundle: Path, apk: Path, digest: str) -> bool:
+    """Whether the web bundle on offer was published before the APK's contents changed."""
+    try:
+        return bundle.stat().st_mtime < _apk_changed_at(apk, digest)
     except OSError:
         return False
 
@@ -16795,7 +16822,7 @@ async def get_app_update_version(request: Request):
             apk_available = False
             apk_size = 0
 
-    if bundle_available and apk_available and local_bundle.exists() and _bundle_predates_apk(local_bundle, apk_file):
+    if bundle_available and apk_available and apk_sha256 and local_bundle.exists() and _bundle_predates_apk(local_bundle, apk_file, apk_sha256):
         # A deploy publishes the new APK minutes before the new web bundle. A
         # phone that installed that APK and was then offered the old bundle ran
         # the old pages over the new native code (a fix that needed both did
