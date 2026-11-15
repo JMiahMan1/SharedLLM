@@ -105,6 +105,8 @@ async function mockApi(page: Page, viewer: Viewer) {
     // The shell's own calls (theme, notices, calls, media token, activity beacon).
     if (p === '/api/users/me') return json(PROFILES[viewer]);
     if (p === '/api/users/me/theme') return json({ theme: 'dark' });
+    // The Devices section compares each device's build with the APK on offer.
+    if (p === '/api/app-updates/version') return json({ version: '1.0.0', git_sha: 'e2e', apk_available: true, apk_version_code: 100 });
     if (p === '/api/telemetry/notifications') return json({ notifications: [] });
     if (p === '/api/push/action') return json({ status: 'SUCCESS', message: 'Sent.' });
     if (p === '/api/communication/calls') return json({ calls: [] });
