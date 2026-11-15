@@ -5,7 +5,7 @@ import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
 import { useLocation as useRouterLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
+import { User, Shield, Bell, Moon, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Check, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import LocationPanel from '../components/location/LocationPanel';
 import LocationPausePanel from '../components/settings/LocationPausePanel';
@@ -29,6 +29,7 @@ import { isAdminPinSet, setAdminPin, clearAdminPin, verifyAdminPin } from '../li
 import { disablePush, enablePush, permissionState, pushSupported } from '../lib/push';
 import {
   checkForAppUpdates,
+  updateNeedsOk,
   checkApkUpdate,
   downloadAndInstallApk,
   downloadApkWithProgress,
@@ -619,6 +620,16 @@ const AppUpdatesSection = () => {
     return () => { active = false; };
   }, []);
 
+  // A background update Android held for an OK: said here, never popped up.
+  const [needsOk, setNeedsOk] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void updateNeedsOk().then((v) => {
+      if (active) setNeedsOk(v);
+    });
+    return () => { active = false; };
+  }, []);
+
   // Notice the pending APK on arrival rather than only after "Check Now".
   useEffect(() => {
     let active = true;
@@ -673,7 +684,7 @@ const AppUpdatesSection = () => {
   // this feel like a broken multi-step dance. Re-checked on return from
   // Settings so the button flips without a manual refresh.
   useEffect(() => {
-    if (!apkPending) return;
+    if (!native) return;
     let active = true;
     const probe = () => {
       void getApkInstallPermission().then((p) => {
@@ -689,7 +700,7 @@ const AppUpdatesSection = () => {
       active = false;
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [apkPending]);
+  }, [native]);
 
   // The web bundle arrives over OTA, so this UI can be newer than the APK it
   // is running on. Only offer the verified download when this build has it AND
@@ -764,6 +775,38 @@ const AppUpdatesSection = () => {
         </div>
       </div>
 
+      {native && perm?.known && (
+        <div
+          data-testid="background-updates-row"
+          className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-white/10 bg-white/5"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-200">Background updates</p>
+            <p className="text-xs text-slate-400">
+              {perm.allowed
+                ? 'On: new versions install by themselves while Jarvis is not on screen.'
+                : 'Off: Android has not let Jarvis install its own updates. Allow it once and they install by themselves.'}
+            </p>
+          </div>
+          {perm.allowed ? (
+            <span data-testid="background-updates-on" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-300">
+              <Check size={13} /> Allowed
+            </span>
+          ) : (
+            <button
+              data-testid="background-updates-allow"
+              onClick={() => {
+                trigger('medium');
+                void openApkInstallSettings();
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+            >
+              <SettingsIcon size={13} />
+              <span>Allow updates</span>
+            </button>
+          )}
+        </div>
+      )}
       {apkPending && apk && (
         <div
           data-testid="apk-update-notice"
@@ -779,10 +822,10 @@ const AppUpdatesSection = () => {
                 {apk.nativeBuildNumber !== undefined && ` You are on build ${apk.nativeBuildNumber}.`}
                 {apkSize && ` ${apkSize} download.`}
               </p>
-              {perm?.known && !perm.allowed && (
-                <p className="text-[11px] text-amber-200/70 mt-1">
-                  One-time setup: Android needs permission to install updates. Allow it once,
-                  then come back and tap Install.
+              {needsOk && (
+                <p data-testid="apk-needs-ok" className="text-[11px] text-amber-200/90 mt-1">
+                  Android asked for your OK before installing this update, so it waited here
+                  instead of interrupting you. Tap Install to finish it.
                 </p>
               )}
             </div>
@@ -840,16 +883,10 @@ const AppUpdatesSection = () => {
                 ) : null}
               </div>
             ) : (apkPhase === 'ready' || apkPhase === 'installing') && perm?.known && !perm.allowed ? (
-              <button
-                onClick={() => {
-                  trigger('medium');
-                  void openApkInstallSettings();
-                }}
-                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
-              >
-                <SettingsIcon size={13} />
-                <span>Allow updates</span>
-              </button>
+              // One button only: "Allow updates" lives in the Background updates row above.
+              <p data-testid="apk-allow-first" className="text-[11px] text-amber-200/90">
+                Turn on Background updates above, then tap Install.
+              </p>
             ) : apkPhase === 'ready' || apkPhase === 'installing' ? (
               <button
                 data-testid="apk-install-button"
@@ -893,16 +930,9 @@ const AppUpdatesSection = () => {
                 <span>Download</span>
               </button>
             ) : canVerify === false && perm?.known && !perm.allowed ? (
-              <button
-                onClick={() => {
-                  trigger('medium');
-                  void openApkInstallSettings();
-                }}
-                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
-              >
-                <SettingsIcon size={13} />
-                <span>Allow updates</span>
-              </button>
+              <p data-testid="apk-allow-first" className="text-[11px] text-amber-200/90">
+                Turn on Background updates above, then tap Install.
+              </p>
             ) : canVerify === false && perm?.known ? (
               // An APK older than the verified flow, or no digest published:
               // the unverified in-app install, never a browser.

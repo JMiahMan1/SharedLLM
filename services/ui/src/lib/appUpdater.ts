@@ -492,6 +492,8 @@ interface ApkInstallPlugin {
   installDownloadedApk?(): Promise<{ message: string }>;
   backgroundUpdates?(): Promise<{ native: boolean }>;
   selfUpdateSupported?(): Promise<{ supported: boolean }>;
+  /** A background update Android would only install with the person's OK (builds after 682). */
+  updateNeedsOk?(): Promise<{ needsOk: boolean; versionCode: number }>;
   isApkDownloaded?(): Promise<{ downloaded: boolean }>;
   clearDownloadedApk?(): Promise<void>;
   addListener?(event: 'downloadProgress', cb: (p: ApkDownloadProgress) => void): Promise<{ remove(): Promise<void> }>;
@@ -568,6 +570,22 @@ export interface ApkInstallPermission {
  * the grant is surfaced *before* the user commits to installing, turning a
  * confusing mid-flow jump into Settings into a single deliberate step.
  */
+/**
+ * Whether a background update stopped because Android wants the person's OK.
+ * Jarvis never puts that on screen by itself: Settings, App update says so and
+ * the Install button there finishes it. False on builds that cannot tell.
+ */
+export async function updateNeedsOk(): Promise<boolean> {
+  const ApkInstall = getApkInstallPlugin();
+  if (!ApkInstall || typeof ApkInstall.updateNeedsOk !== 'function') return false;
+  try {
+    return (await ApkInstall.updateNeedsOk()).needsOk === true;
+  } catch (err) {
+    console.warn('[AppUpdater] update-needs-OK probe failed:', err);
+    return false;
+  }
+}
+
 export async function getApkInstallPermission(): Promise<ApkInstallPermission> {
   const ApkInstall = getApkInstallPlugin();
   if (!ApkInstall) return { allowed: false, known: false };

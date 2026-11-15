@@ -115,6 +115,9 @@ final class NativeUpdater {
             clearStaged(context);
             return;
         }
+        if (SelfUpdate.needsOk(context) == code) {
+            return; // Android wants the person's OK for this one: Settings offers it, nothing pops up
+        }
         if (PushNotifier.appVisible || DropInCall.isActive() || SelfUpdate.inProgress(context)) {
             Log.i(TAG, "APK " + code + " waits: Jarvis is in use");
             return;
@@ -122,6 +125,11 @@ final class NativeUpdater {
         if (SelfUpdate.install(context, apk, "background")) {
             Log.i(TAG, "APK " + code + " handed to the installer");
         }
+    }
+
+    /** The version code of the verified download waiting to be installed, or 0. */
+    static long stagedCode(Context context) {
+        return GuardApi.prefs(context).getLong(KEY_STAGED_CODE, 0);
     }
 
     private static void clearStaged(Context context) {

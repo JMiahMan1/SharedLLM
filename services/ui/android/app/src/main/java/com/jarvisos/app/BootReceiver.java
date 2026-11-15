@@ -41,23 +41,8 @@ public class BootReceiver extends BroadcastReceiver {
         } catch (Exception e) {
             Log.w(TAG, "could not resume background work after " + a, e);
         }
-        if (updated) relaunch(app);
-    }
-
-    /**
-     * After the app updates itself, bring it back to the front. The update
-     * kills the process, so only a manifest-declared receiver sees this. Some
-     * Android builds block starting an activity from here; the installer's own
-     * "Open" button covers that, and background work above resumes anyway.
-     */
-    private static void relaunch(Context context) {
-        Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
-        if (launch == null) return;
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        try {
-            context.startActivity(launch);
-        } catch (Exception e) {
-            Log.i(TAG, "relaunch after update not allowed here: " + e.getMessage());
-        }
+        // Never brought back to the front after an update: an update happens
+        // in the background with nothing on screen (the owner's rule). The
+        // services above resume by themselves.
     }
 }

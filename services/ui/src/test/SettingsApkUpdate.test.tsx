@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Settings from '../pages/Settings';
 import { renderWithProviders } from './render';
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   hasVerifiedInstallFlow: vi.fn(),
   openApkInstallSettings: vi.fn(),
   getRunningVersion: vi.fn(),
+  updateNeedsOk: vi.fn(),
   native: true,
 }));
 
@@ -33,6 +34,7 @@ vi.mock('../lib/appUpdater', () => ({
   hasVerifiedInstallFlow: mocks.hasVerifiedInstallFlow,
   openApkInstallSettings: mocks.openApkInstallSettings,
   getRunningVersion: mocks.getRunningVersion,
+  updateNeedsOk: mocks.updateNeedsOk,
 }));
 
 const SHA = 'a'.repeat(64);
@@ -67,8 +69,9 @@ async function findControl(testId: string) {
 
 /** The same, for a control matched by accessible name and role. */
 async function findControlByName(name: RegExp, role: 'button' | 'link' = 'button') {
-  await screen.findByTestId('apk-update-notice', undefined, { timeout: CONTROL_TIMEOUT_MS });
-  return screen.findByRole(role, { name }, { timeout: CONTROL_TIMEOUT_MS });
+  // Inside the notice: Settings also has a permanent "Allow updates" row.
+  const notice = await screen.findByTestId('apk-update-notice', undefined, { timeout: CONTROL_TIMEOUT_MS });
+  return within(notice).findByRole(role, { name }, { timeout: CONTROL_TIMEOUT_MS });
 }
 
 const status = (over: Record<string, unknown> = {}) => ({
@@ -89,6 +92,7 @@ const pending = status({
 describe('Settings APK update notice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.updateNeedsOk.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(status());
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
@@ -206,6 +210,7 @@ describe('Settings APK update notice', () => {
 describe('Settings APK install permission', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.updateNeedsOk.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(pending);
     mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
@@ -227,9 +232,9 @@ describe('Settings APK install permission', () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
 
-    expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
+    expect(await findControl('apk-allow-first')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /allow updates/i })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/one-time setup/i)).toBeInTheDocument();
   });
 
   it('installs directly when the permission is already granted', async () => {
@@ -248,7 +253,7 @@ describe('Settings APK install permission', () => {
   it('opens install settings from the grant button', async () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
-    await userEvent.click(await findControlByName(/allow updates/i));
+    await userEvent.click(await screen.findByTestId('background-updates-allow', undefined, { timeout: CONTROL_TIMEOUT_MS }));
 
     await waitFor(() => expect(mocks.openApkInstallSettings).toHaveBeenCalled());
     expect(mocks.downloadAndInstallApk).not.toHaveBeenCalled();
@@ -277,6 +282,7 @@ describe('Settings APK verified download flow', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.updateNeedsOk.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(verified);
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
@@ -380,7 +386,9 @@ describe('Settings APK verified download flow', () => {
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
     renderWithProviders(<Settings />);
     await userEvent.click(await findControl('apk-download-button'));
-    expect(await findControlByName(/allow updates/i)).toBeInTheDocument();
+    // The only Allow updates button is the Background updates row's.
+    expect(await findControl('apk-allow-first')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /allow updates/i })).toHaveLength(1);
     expect(screen.queryByTestId('apk-install-button')).not.toBeInTheDocument();
   });
 
@@ -422,5 +430,40 @@ describe('Settings APK verified download flow', () => {
     renderWithProviders(<Settings />);
     expect(await findControlByName(/install update/i)).toBeInTheDocument();
     expect(await findControl('apk-install-nodigest')).toHaveTextContent(/no checksum/i);
+  });
+});
+
+describe('background updates row', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.native = true;
+    mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
+    mocks.checkApkUpdate.mockResolvedValue(status());
+    mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
+    mocks.openApkInstallSettings.mockResolvedValue(true);
+  });
+
+  it('shows the permission is on even when no update is waiting', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
+    renderWithProviders(<Settings />);
+    expect(await screen.findByTestId('background-updates-on', undefined, { timeout: CONTROL_TIMEOUT_MS })).toHaveTextContent('Allowed');
+    expect(screen.queryByTestId('apk-update-notice')).toBeNull();
+  });
+
+  it('offers Allow updates whenever the permission is off', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
+    renderWithProviders(<Settings />);
+    const allow = await screen.findByTestId('background-updates-allow', undefined, { timeout: CONTROL_TIMEOUT_MS });
+    await userEvent.click(allow);
+    expect(mocks.openApkInstallSettings).toHaveBeenCalled();
+  });
+
+  it('says when a background update waited for an OK instead of popping up', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
+    mocks.updateNeedsOk.mockResolvedValue(true);
+    mocks.checkApkUpdate.mockResolvedValue(status({ updateAvailable: true, apkUrl: '/api/app-updates/jarvis-os.apk', apkVersionCode: 99 }));
+    renderWithProviders(<Settings />);
+    expect(await screen.findByTestId('apk-needs-ok', undefined, { timeout: CONTROL_TIMEOUT_MS })).toBeInTheDocument();
   });
 });

@@ -275,6 +275,16 @@ public class ApkInstallPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /** A background update Android would only install with the person's OK (Settings shows it). */
+    @PluginMethod
+    public void updateNeedsOk(PluginCall call) {
+        JSObject ret = new JSObject();
+        long code = SelfUpdate.needsOk(getContext());
+        ret.put("needsOk", code > 0);
+        ret.put("versionCode", code);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void selfUpdateSupported(PluginCall call) {
         JSObject ret = new JSObject();

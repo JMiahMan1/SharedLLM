@@ -23,6 +23,31 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+/** Reading the phone's own storage at start; never the server. */
+const STORAGE_TIMEOUT_MS = 3000;
+/** The server is retried this often at start while it cannot be reached (capped). */
+const RETRY_MS = [1000, 2000, 4000, 8000, 15000, 30000];
+
+function retryDelay(attempt: number): number {
+  return RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
+}
+
+/** The server said no to the stored key: the only reason to sign someone out at start. */
+function isSignInRefused(error: unknown): boolean {
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+  return status === 401 || status === 403;
+}
+
+function parseStoredUser(raw: string | null): UserProfile | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as UserProfile;
+    return parsed && typeof parsed === 'object' && parsed.username ? parsed : null;
+  } catch {
+    return null; // an old build stored the bare username: confirm with the server instead
+  }
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -45,52 +70,83 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }), [queryClient]);
 
   useEffect(() => {
-    const hardTimeout = setTimeout(() => {
+    // Only reading the phone's own storage is timed: a server that is slow to
+    // answer (the network waking up after an app update) must never send a
+    // signed-in person to the login screen.
+    const storageTimeout = setTimeout(() => {
       setInitError('Initialization timed out. Please restart the app.');
       setIsLoading(false);
-    }, 3000);
+    }, STORAGE_TIMEOUT_MS);
+    let cancelled = false;
+
+    const signedIn = async (storedToken: string, profile: UserProfile) => {
+      setToken(storedToken);
+      setUser(profile);
+      setInitError(null);
+      queryClient.setQueryData(['me'], profile);
+      await storageSet('jarvis_user', JSON.stringify(profile));
+      // Register here too, not only on an explicit login: a user who installed
+      // an update and kept using the app was otherwise never registered.
+      // Fire-and-forget: it must never block the session.
+      void registerThisDevice();
+      // The background location service reads the key, server and username
+      // from TokenBridge, which only an explicit login used to fill.
+      void mirrorNativeCredentials();
+      if (profile.username) void mirrorIdentity(profile.username);
+    };
 
     const initAuth = async () => {
+      let storedToken: string | null;
       try {
         await storageInit();
-        const storedToken = await storageGet('jarvis_api_key');
-        if (storedToken) {
-          try {
-            const profile = await api.getMe();
-            setToken(storedToken);
-            setUser(profile);
-            // A restore that succeeded must clear the timeout message: it was
-            // set once and never reset, so a slow first load left the app
-            // bouncing back to the login screen after a successful sign-in.
-            setInitError(null);
-            queryClient.setQueryData(['me'], profile);
-            await storageSet('jarvis_user', JSON.stringify(profile));
-            // Register here too, not only on an explicit login. Registering
-            // only in login() meant a user who installed an update and simply
-            // kept using the app was never registered at all -- which is
-            // exactly why nobody's phone showed up in the panel. Fire-and-forget
-            // for the same reason as below: it must never block the session.
-            void registerThisDevice();
-            // Same reason for the native side: the background location
-            // service reads the key, server and username from TokenBridge,
-            // which only an explicit login used to fill.
-            void mirrorNativeCredentials();
-            if (profile.username) void mirrorIdentity(profile.username);
-          } catch {
-            setInitError('Session expired. Please log in again.');
-            setToken(null);
-            storageRemove('jarvis_api_key');
-            storageRemove('jarvis_user');
-          }
-        }
+        storedToken = await storageGet('jarvis_api_key');
       } catch (e) {
+        clearTimeout(storageTimeout);
         setInitError(`Auth init failed: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        clearTimeout(hardTimeout);
+        setIsLoading(false);
+        return;
+      }
+      clearTimeout(storageTimeout);
+      if (!storedToken) {
+        setIsLoading(false);
+        return;
+      }
+      // Start at once as the person last signed in here: the app opens on its
+      // page instead of a login form (whose password field also made Android's
+      // password manager ask for the phone's credentials after every update).
+      const cached = parseStoredUser(await storageGet('jarvis_user').catch(() => null));
+      if (cached) {
+        setToken(storedToken);
+        setUser(cached);
+        queryClient.setQueryData(['me'], cached);
         setIsLoading(false);
       }
+      // Confirm with the server, retrying quietly while it cannot be reached.
+      // Only the server refusing the key (401/403) signs out.
+      for (let attempt = 0; !cancelled; attempt += 1) {
+        try {
+          const profile = await api.getMe();
+          if (!cancelled) await signedIn(storedToken, profile);
+          break;
+        } catch (error) {
+          if (isSignInRefused(error)) {
+            setInitError('Session expired. Please log in again.');
+            setToken(null);
+            setUser(null);
+            storageRemove('jarvis_api_key');
+            storageRemove('jarvis_user');
+            break;
+          }
+          await new Promise((r) => setTimeout(r, retryDelay(attempt)));
+        }
+      }
+      setIsLoading(false);
     };
-    initAuth();
+    void initAuth();
+    return () => {
+      cancelled = true;
+      clearTimeout(storageTimeout);
+    };
   }, [queryClient]);
 
   const logout = useCallback(async () => {

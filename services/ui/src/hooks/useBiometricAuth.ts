@@ -1,6 +1,18 @@
 import { useState, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
+import { apiClient } from '../services/api';
+
+/**
+ * Jarvis asking for a fingerprint or the phone's PIN is reported (with the
+ * page) next to the app-update reports: a prompt right after an update was
+ * blamed on the update, and this says which part of Jarvis raised it.
+ */
+function reportPrompt(reason: string): void {
+  void apiClient
+    .post('/api/app-updates/install-report', { event: 'biometric_prompt', path: window.location.pathname, message: reason })
+    .catch(() => undefined);
+}
 
 export interface BiometricResult {
   success: boolean;
@@ -32,6 +44,7 @@ export function useBiometricAuth() {
       return { success: false, error: 'Biometrics not available on web' };
     }
 
+    reportPrompt(reason);
     try {
       await BiometricAuth.authenticate({
         reason,

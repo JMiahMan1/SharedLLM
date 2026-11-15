@@ -46,6 +46,15 @@ final class SelfUpdate {
     private static final int NOTIFICATION_ID = 0x5E1F;
 
     static final String EXTRA_CONFIRM = "jarvis_self_update_confirm";
+    /** Who started the install in progress: "button" (the person, in Settings) or "background". */
+    private static final String KEY_PATH = "self_update_path";
+    /** A background update Android would only install with the person's OK: left for Settings. */
+    static final String KEY_NEEDS_OK = "self_update_needs_ok";
+
+    /** The update waiting for the person's OK in Settings, or 0. */
+    static long needsOk(Context context) {
+        return GuardApi.prefs(context).getLong(KEY_NEEDS_OK, 0L);
+    }
 
     private SelfUpdate() {}
 
@@ -97,12 +106,6 @@ final class SelfUpdate {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 params.setPackageSource(PackageInstaller.PACKAGE_SOURCE_OTHER);
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Android 14+: Jarvis keeps the update ownership of itself, so
-                // no other installer (a browser, Files) takes it over and makes
-                // the next update ask again.
-                params.setRequestUpdateOwnership(true);
-            }
             int sessionId = installer.createSession(params);
             session = installer.openSession(sessionId);
             try (InputStream in = new FileInputStream(apk);
@@ -117,6 +120,7 @@ final class SelfUpdate {
             Intent status = new Intent(context, Receiver.class).setAction(ACTION_STATUS);
             PendingIntent pi = PendingIntent.getBroadcast(context, sessionId, status, flags);
             open(context);
+            GuardApi.prefs(context).edit().putString(KEY_PATH, path).apply();
             session.commit(pi.getIntentSender());
             session.close();
             Log.i(TAG, "update session " + sessionId + " committed");
@@ -147,6 +151,16 @@ final class SelfUpdate {
                     "status", status,
                     "message", intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)));
             if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                String path = GuardApi.prefs(context).getString(KEY_PATH, "");
+                if (!"button".equals(path)) {
+                    // Nothing appears on screen for an update nobody asked for:
+                    // Settings, App update says it needs an OK and offers Install.
+                    close(context);
+                    GuardApi.prefs(context).edit()
+                            .putLong(KEY_NEEDS_OK, NativeUpdater.stagedCode(context)).apply();
+                    Log.i(TAG, "update needs the person's OK: left for Settings");
+                    return;
+                }
                 Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm == null) return;
                 open(context); // the person may take a moment to tap Install
@@ -161,6 +175,7 @@ final class SelfUpdate {
             }
             close(context);
             if (status == PackageInstaller.STATUS_SUCCESS) {
+                GuardApi.prefs(context).edit().remove(KEY_NEEDS_OK).apply();
                 Log.i(TAG, "updated");
             } else {
                 Log.w(TAG, "update not installed (" + status + "): "
