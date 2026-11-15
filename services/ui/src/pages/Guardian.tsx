@@ -29,6 +29,7 @@ import RecapCard from '../components/guardian/RecapCard';
 import GuidanceCard from '../components/guardian/GuidanceCard';
 import JournalCard from '../components/guardian/JournalCard';
 import RequestsCard from '../components/guardian/RequestsCard';
+import AppsCard from '../components/guardian/AppsCard';
 import ChoresCard from '../components/guardian/ChoresCard';
 import LockedSectionsCard from '../components/guardian/LockedSectionsCard';
 import TalkRequestCard from '../components/guardian/TalkRequestCard';
@@ -515,6 +516,8 @@ function GuardianChildren() {
             </div>
             <RequestsCard username={child.username} name={name} />
             <ConcernsCard username={child.username} name={name} />
+            {/* The apps on the child's devices, questionable ones first: their parents only. */}
+            {status?.can_manage && <AppsCard username={child.username} name={name} />}
           </div>
         </section>
       )}

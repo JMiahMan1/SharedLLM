@@ -1,7 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { NotifyLevel } from '../types/api';
+import type { AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
@@ -1176,6 +1176,42 @@ export const api = {
   /** A parent answers; a site is allowed for `minutes` or `always`. */
   async decideGuardRequest(id: number, body: { approve: boolean; minutes?: number; always?: boolean }): Promise<{ request: GuardRequest }> {
     const resp = await apiClient.post(`/api/guard/requests/${id}`, body);
+    return resp.data;
+  },
+
+  /** App vetting: a child's installed apps with their verdicts (their parents and admins only). */
+  async getGuardianApps(username: string): Promise<GuardianApps> {
+    const resp = await apiClient.get(`/api/guardian/apps/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
+  /** The age rule: a birth date, a rating limit other than the age's (null clears), unused days. */
+  async putAppPolicy(
+    username: string,
+    body: { birth_date?: string | null; max_rating?: AppRating | null; unused_days?: number },
+  ): Promise<AppPolicy> {
+    const resp = await apiClient.put(`/api/guardian/apps/${encodeURIComponent(username)}/policy`, body);
+    return resp.data;
+  },
+
+  /** A parent's choice for one app: always allow, always flag, or (null) the rules decide. */
+  async putAppOverride(username: string, pkg: string, mode: 'allow' | 'flag' | null): Promise<AppPolicy> {
+    const resp = await apiClient.put(`/api/guardian/apps/${encodeURIComponent(username)}/apps/${encodeURIComponent(pkg)}`, { mode });
+    return resp.data;
+  },
+
+  /** "Reviewed, keep" a flagged app (its verdict's fingerprint) or a removal suggestion; `undo` takes it back. */
+  async dismissApp(
+    username: string,
+    body: { package: string; kind: 'flag' | 'unused'; fingerprint?: string; undo?: boolean },
+  ): Promise<AppPolicy> {
+    const resp = await apiClient.post(`/api/guardian/apps/${encodeURIComponent(username)}/dismiss`, body);
+    return resp.data;
+  },
+
+  /** Block or unblock an app on every device, or queue / cancel its removal (device-owner devices only). */
+  async appAction(username: string, pkg: string, action: AppAction): Promise<AppPolicy> {
+    const resp = await apiClient.post(`/api/guardian/apps/${encodeURIComponent(username)}/action`, { package: pkg, action });
     return resp.data;
   },
 

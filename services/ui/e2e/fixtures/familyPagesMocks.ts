@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import { isServerCall } from './serverCalls';
+import { REQUEST_VETTING, appVettingAnswer } from './appVettingMocks';
 
 /**
  * A made-up family for the Family hub (chat, calls, announce, games, create),
@@ -378,7 +379,7 @@ function memberAnswer(p: string, url: URL): unknown {
   if (p === '/api/guard/requests') {
     return { requests: url.searchParams.get('status') === 'pending' ? [{ id: 3, username: 'jordan', kind: 'app',
       target: 'com.example.blocks', label: 'Block Builder Adventure Deluxe Edition', note: '', status: 'pending', until: null,
-      decided_by: null, created_at: iso(), decided_at: null }] : [] };
+      decided_by: null, created_at: iso(), decided_at: null, vetting: REQUEST_VETTING }] : [] };
   }
   if (p === '/api/guard/offline-code') return { set: true, updated_at: null, can_set: true };
   if (member && p.endsWith('/status')) return memberStatus(member);
@@ -398,6 +399,7 @@ function memberAnswer(p: string, url: URL): unknown {
   }
   if (p.startsWith('/api/guardian/journal/')) return { notes: [] };
   if (p.startsWith('/api/guardian/activity/')) return MEMBER_ACTIVITY;
+  if (p.startsWith('/api/guardian/apps/')) return appVettingAnswer(p, 'GET');
   if (p.startsWith('/api/recommendation-lanes/')) {
     return { username: p.split('/').pop(), lanes: { music: true, video: true, podcast: true, book: true, game: true, activity: true },
       can_manage: true };

@@ -1,5 +1,6 @@
 import { test, expect as baseExpect, type Page, type Route } from '@playwright/test';
 import { isServerCall } from './fixtures/serverCalls';
+import { REQUEST_VETTING, appVettingAnswer } from './fixtures/appVettingMocks';
 
 // The page fills in from many small reads (fourteen nights of sleep alone), so a
 // card can take a few seconds on a loaded machine.
@@ -122,7 +123,7 @@ async function mockApi(page: Page, viewer: Viewer) {
       return json({ requests: url.searchParams.get('status') === 'pending' ? [{ id: 7, username: 'sam', day: day(), minutes: 30, note: 'finish the level', status: 'pending', granted_minutes: 0, created_at: new Date().toISOString() }] : [] });
     }
     if (p === '/api/guard/requests') {
-      return json({ requests: url.searchParams.get('status') === 'pending' ? [{ id: 3, username: 'sam', kind: 'app', target: 'com.mojang.minecraftpe', label: 'Minecraft', note: '', status: 'pending', until: null, decided_by: null, created_at: new Date().toISOString(), decided_at: null }] : [] });
+      return json({ requests: url.searchParams.get('status') === 'pending' ? [{ id: 3, username: 'sam', kind: 'app', target: 'com.mojang.minecraftpe', label: 'Minecraft', note: '', status: 'pending', until: null, decided_by: null, created_at: new Date().toISOString(), decided_at: null, vetting: REQUEST_VETTING }] : [] });
     }
     if (p === '/api/guard/offline-code') return json({ set: viewer === 'dad', updated_at: null, can_set: true });
     if (member && p.endsWith('/status')) return json(status(member, viewer === 'dad'));
@@ -137,6 +138,7 @@ async function mockApi(page: Page, viewer: Viewer) {
       return json({ status: 'SUCCESS', recap: { week: { start: day(-6), end: day() }, has_data: false, screen: null, top_apps: [], media: [], web: { top: [], blocked: [] }, comms: { calls: 0, call_contacts: 0, messages: 0, message_contacts: 0 }, faith: { bible_days: 0 }, concerns: [], highlights: [] } });
     }
     if (p.startsWith('/api/guardian/journal/')) return json({ notes: [] });
+    if (p.startsWith('/api/guardian/apps/')) return json(appVettingAnswer(p, route.request().method()));
     if (p.startsWith('/api/guardian/activity/')) return json(ACTIVITY);
     if (p.startsWith('/api/recommendation-lanes/')) return json({ username: member, lanes: { music: true, video: true, podcast: true, book: true, game: true, activity: true }, can_manage: true });
     if (p === '/api/health/family') {
