@@ -1,3 +1,5 @@
+import { saveObjectUrl } from './saveFile';
+
 export const AUDIO_RE = /\.(mp3|wav|ogg|oga|opus|flac|aac|m4a|wma|aiff|aif)$/i;
 export const VIDEO_RE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpg|mpeg|ts|m2ts)$/i;
 export const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
@@ -16,11 +18,9 @@ export function artifactKind(path: string): ArtifactKind {
   return 'other';
 }
 
+/** Save the file behind an object URL (natively in the Android app). */
 export function downloadBlobUrl(url: string, filename: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename.split('/').pop() || 'download';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  saveObjectUrl(url, filename).catch((err: unknown) => {
+    console.error('download failed', err);
+  });
 }

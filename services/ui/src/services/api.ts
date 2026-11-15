@@ -1332,6 +1332,20 @@ export const api = {
     return resp.data;
   },
 
+  /** Clear one concern, with its review and any kept image (parents and admins). */
+  async clearGuardianConcern(username: string, concernId: string): Promise<{ cleared: string[] }> {
+    const resp = await apiClient.delete(
+      `/api/guardian/concerns/${encodeURIComponent(username)}/${encodeURIComponent(concernId)}`,
+    );
+    return resp.data;
+  },
+
+  /** Clear every concern the viewer can see on a child's list. */
+  async clearGuardianConcerns(username: string): Promise<{ cleared: string[] }> {
+    const resp = await apiClient.delete(`/api/guardian/concerns/${encodeURIComponent(username)}`);
+    return resp.data;
+  },
+
   /** Download one concern's image as a file. It is never shown inside Jarvis. */
   async downloadGuardianConcernImage(
     username: string,

@@ -165,6 +165,10 @@ def pages_parent(concern: dict[str, Any], sensitivity: str | None) -> bool:
     mode = sensitivity or "severe"
     if mode == "off":
         return False
+    if concern.get("feature") == "media" and (concern.get("review") or {}).get("verdict") == "confirmed":
+        # A picture the vision model confirmed is on the child's device now;
+        # a weekly recap is too late for it, whatever level it was given.
+        return True
     if mode == "all":
         return concern.get("level") in ("high", "severe")
     return concern.get("level") == "severe"

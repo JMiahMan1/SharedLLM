@@ -389,3 +389,53 @@ def test_a_review_stays_on_its_concern_while_the_list_moves():
         assert await _store.review_concern(rc, "kid", "a", "dismissed", "dad") is None  # trimmed away
 
     asyncio.run(go())
+
+
+def test_a_confirmed_image_pages_the_parents_even_when_rated_high(wired, monkeypatch):
+    """A flagged picture is on the child's device now: it does not wait for the recap."""
+    client, _fake, sent = wired
+
+    async def _vision_settings(_session):
+        return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "vl"}
+
+    async def _vision_chat(_session, url, payload, timeout):
+        return '{"concern": true, "category": "sexual", "level": "high", "description": "Suggestive photo", "reason": "nudity"}'
+
+    monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
+    monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
+    resp = client.post("/api/telemetry/media/scan", headers=HEADERS,
+                       json={"user": "kid", "file_name": "p.jpg", "media_type": "image", "image_b64": "ZXNwaG9tZQ=="})
+    assert resp.json()["level"] == "high"
+    assert [n["user"] for n in sent] == ["dad", "mom"]
+
+
+def test_clearing_removes_the_concern_its_review_and_its_image_and_nothing_else():
+    import asyncio
+    import json as _json
+
+    from services.telemetry import store as _store
+    from services.telemetry.tests.fakes import FakeRedis
+
+    async def go():
+        rc = FakeRedis()
+        key = f"{_store.CONCERNS_PREFIX}kid"
+        for cid in ("a", "b"):
+            await rc.rpush(key, _json.dumps({"id": cid, "category": "x"}))
+        await rc.rpush(key, _json.dumps({"category": "old"}))  # stored before concerns had ids
+        await _store.review_concern(rc, "kid", "a", "confirmed", "dad")
+        await rc.set(f"{_store.CONCERN_IMAGE_PREFIX}kid:a", "token")
+        legacy = next(c["id"] for c in await _store.list_concerns(rc, "kid") if c["category"] == "old")
+        assert legacy.startswith("legacy-")
+        assert legacy == next(c["id"] for c in await _store.list_concerns(rc, "kid") if c["category"] == "old")
+        assert sorted(await _store.clear_concerns(rc, "kid", ["a", legacy, "missing"])) == sorted(["a", legacy])
+        assert [c["id"] for c in await _store.list_concerns(rc, "kid")] == ["b"]
+        assert await rc.hgetall(f"{_store.CONCERN_REVIEWS_PREFIX}kid") == {}
+        assert await rc.get(f"{_store.CONCERN_IMAGE_PREFIX}kid:a") is None
+
+    asyncio.run(go())
+
+
+def test_the_clear_route_needs_ids(wired):
+    client, _fake, _sent = wired
+    assert client.post("/api/telemetry/concerns/kid/clear", headers=HEADERS, json={"ids": []}).status_code == 422
+    assert client.post("/api/telemetry/concerns/kid/clear", headers=HEADERS, json={"ids": ["x"]}).json()["cleared"] == []

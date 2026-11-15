@@ -6772,6 +6772,51 @@ async def guardian_concern_review(
         return await _proxy_json_response(resp)
 
 
+async def _clear_concern_ids(client, user: str, ids: list[str], viewer: str) -> dict:
+    resp = await client.post(
+        f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}/clear",
+        json={"ids": ids},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    if resp.status != 200:
+        raise HTTPException(status_code=502, detail=f"Concerns could not be cleared (telemetry answered {resp.status})")
+    data = (await resp.json(content_type=None)) or {}
+    log.info("concern clear: viewer=%s subject=%s count=%d", viewer, user, len(data.get("cleared") or []))
+    return data
+
+
+@app.delete("/api/guardian/concerns/{user}/{concern_id}")
+async def guardian_concern_clear(request: Request, user: str, concern_id: str):
+    """Clear one concern, with its review and any kept image."""
+    viewer, access = await _concerns_reviewer(request, user, "clear")
+    async with borrow_http_client() as client:
+        await _visible_concern(client, user, concern_id, access)
+        data = await _clear_concern_ids(client, user, [concern_id], viewer)
+    if not data.get("cleared"):
+        raise HTTPException(status_code=404, detail="concern not found")
+    return {"status": "SUCCESS", "cleared": data["cleared"]}
+
+
+@app.delete("/api/guardian/concerns/{user}")
+async def guardian_concerns_clear_all(request: Request, user: str):
+    """Clear every concern this viewer can see on the child's list."""
+    viewer, access = await _concerns_reviewer(request, user, "clear")
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{TELEMETRY_SVC}/api/telemetry/concerns/{quote(user, safe='')}",
+            params={"limit": 300},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail=f"Concerns could not be read (telemetry answered {resp.status})")
+        listed = (await resp.json(content_type=None) or {}).get("concerns") or []
+        ids = [str(c["id"]) for c in _concerns_for(access, listed) if c.get("id")]
+        if not ids:
+            return {"status": "SUCCESS", "cleared": []}
+        data = await _clear_concern_ids(client, user, ids, viewer)
+    return {"status": "SUCCESS", "cleared": data.get("cleared") or []}
+
+
 @app.get("/api/guardian/concerns/{user}/{concern_id}/image")
 async def guardian_concern_image(request: Request, user: str, concern_id: str):
     """Export one concern's image as an attachment. It is never shown inline."""

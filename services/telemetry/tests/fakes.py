@@ -70,6 +70,14 @@ class FakeRedis:
         items = self.lists.get(key, [])
         return items[start:] if end == -1 else items[start:end + 1]
 
+    async def lrem(self, key, count, value):
+        items = self.lists.get(key, [])
+        removed = 0
+        while value in items and (count == 0 or removed < count):
+            items.remove(value)
+            removed += 1
+        return removed
+
     async def lset(self, key, index, value):
         self.lists.setdefault(key, [])[index] = value
         return True

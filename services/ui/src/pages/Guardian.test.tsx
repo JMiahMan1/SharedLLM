@@ -32,6 +32,8 @@ vi.mock('../services/api', async (importOriginal) => {
       getGuardianConcerns: vi.fn(),
       reviewGuardianConcern: vi.fn(),
       downloadGuardianConcernImage: vi.fn(),
+      clearGuardianConcern: vi.fn(),
+      clearGuardianConcerns: vi.fn(),
       getGuardianJournal: vi.fn(),
       addGuardianJournal: vi.fn(),
       getGuardRequests: vi.fn(),
@@ -200,6 +202,37 @@ describe('The family guardian page (a parent)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /download image/i }));
     expect(await screen.findByText('image expired or unavailable')).toBeInTheDocument();
+  });
+
+  it('clears one concern only after the parent confirms', async () => {
+    const concern: GuardianConcern = {
+      id: 'c3', category: 'violence', label: 'Violence', level: 'high', excerpt: 'flagged picture',
+      feature: 'media', at: new Date().toISOString(),
+    };
+    auth.user = { username: 'dad', is_minor: false, is_admin: true };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
+    vi.mocked(api.clearGuardianConcern).mockResolvedValue({ cleared: ['c3'] });
+    wrap(<Guardian />);
+
+    fireEvent.click(await screen.findByTestId('concern-clear'));
+    expect(api.clearGuardianConcern).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('concern-clear-confirm'));
+    await waitFor(() => expect(api.clearGuardianConcern).toHaveBeenCalledWith(expect.any(String), 'c3'));
+  });
+
+  it('clears every concern from Clear all, after confirming', async () => {
+    const concern: GuardianConcern = {
+      id: 'c4', category: 'violence', label: 'Violence', level: 'high', excerpt: 'x',
+      feature: 'media', at: new Date().toISOString(),
+    };
+    auth.user = { username: 'dad', is_minor: false, is_admin: true };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
+    vi.mocked(api.clearGuardianConcerns).mockResolvedValue({ cleared: ['c4'] });
+    wrap(<Guardian />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^clear all$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, clear all/i }));
+    await waitFor(() => expect(api.clearGuardianConcerns).toHaveBeenCalledTimes(1));
   });
 
   it('explains itself to someone who is not a parent', async () => {

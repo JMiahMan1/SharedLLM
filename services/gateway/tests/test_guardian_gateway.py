@@ -257,6 +257,8 @@ def export_wired(monkeypatch):
 
         async def post(self, url, **kw):
             calls.append({"url": url, **kw})
+            if url.endswith("/clear"):
+                return _Resp({"status": "SUCCESS", "cleared": kw["json"]["ids"]})
             return _Resp({"status": "SUCCESS", "concern": state["concerns"][0]})
 
     @asynccontextmanager
@@ -381,3 +383,29 @@ def test_concern_ids_are_escaped_into_the_telemetry_path(export_wired):
     client.post("/api/guardian/concerns/kid/a%3Fb/review", json={"verdict": "dismissed"})
     posted = [c["url"] for c in calls if c["url"].endswith("/review")]
     assert posted and posted[0].endswith("/concerns/kid/a%3Fb/review")
+
+
+def test_a_parent_can_clear_one_concern(export_wired):
+    client, calls, _state = export_wired
+    r = client.delete("/api/guardian/concerns/kid/c1")
+    assert r.status_code == 200 and r.json()["cleared"] == ["c1"]
+    cleared = next(c for c in calls if c["url"].endswith("/concerns/kid/clear"))
+    assert cleared["json"] == {"ids": ["c1"]}
+
+
+def test_clear_all_reaches_only_the_concerns_the_viewer_can_see(export_wired):
+    client, calls, state = export_wired
+    state["is_admin"], state["parents"], state["comms"] = True, [], False
+    state["concerns"] = state["concerns"] + [{"id": "c2", "category": "violence", "feature": "browser"}]
+    r = client.delete("/api/guardian/concerns/kid")
+    assert r.status_code == 200
+    cleared = next(c for c in calls if c["url"].endswith("/concerns/kid/clear"))
+    assert cleared["json"] == {"ids": ["c2"]}  # the message concern stays: this viewer cannot see it
+
+
+def test_a_non_parent_cannot_clear_concerns(export_wired):
+    client, calls, state = export_wired
+    state["parents"] = ["mom"]
+    assert client.delete("/api/guardian/concerns/kid/c1").status_code == 403
+    assert client.delete("/api/guardian/concerns/kid").status_code == 403
+    assert not [c for c in calls if c["url"].endswith("/clear")]

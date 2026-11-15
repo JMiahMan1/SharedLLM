@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import uuid
@@ -462,15 +463,51 @@ async def add_concerns(rc, user: str, concerns: list[dict[str, Any]]) -> None:
 CONCERN_REVIEWS_PREFIX = "tel:concern-reviews:"
 
 
-async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+def _legacy_concern_id(raw: str) -> str:
+    """A stable id for a concern stored before concerns carried one, so it can
+    be reviewed and cleared like any other. The stored text never changes, so
+    neither does the id."""
+    return "legacy-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+
+async def _concern_rows(rc, user: str) -> list[tuple[str, dict[str, Any]]]:
+    """(stored text, concern) for every readable concern, oldest first."""
+    out: list[tuple[str, dict[str, Any]]] = []
     for raw in await rc.lrange(f"{CONCERNS_PREFIX}{user}", 0, -1):
         try:
             item = json.loads(raw)
         except (TypeError, ValueError):
             continue
         if isinstance(item, dict):
-            out.append(item)
+            if not item.get("id"):
+                item["id"] = _legacy_concern_id(raw)
+            out.append((raw, item))
+    return out
+
+
+async def clear_concerns(rc, user: str, concern_ids: list[str]) -> list[str]:
+    """Remove these concerns with their reviews and any kept image.
+
+    Each one is removed by its exact stored text (LREM), never by position, so
+    a concern recorded meanwhile cannot be removed in its place. Returns the
+    ids that were found and cleared.
+    """
+    wanted = {str(i) for i in concern_ids if i}
+    cleared: list[str] = []
+    key = f"{CONCERNS_PREFIX}{user}"
+    for raw, item in await _concern_rows(rc, user):
+        concern_id = str(item["id"])
+        if concern_id not in wanted:
+            continue
+        await rc.lrem(key, 1, raw)
+        await rc.hdel(f"{CONCERN_REVIEWS_PREFIX}{user}", concern_id)
+        await rc.delete(f"{CONCERN_IMAGE_PREFIX}{user}:{concern_id}")
+        cleared.append(concern_id)
+    return cleared
+
+
+async def list_concerns(rc, user: str) -> list[dict[str, Any]]:
+    out = [item for _, item in await _concern_rows(rc, user)]
     reviews = await rc.hgetall(f"{CONCERN_REVIEWS_PREFIX}{user}")
     if reviews:
         for item in out:

@@ -521,6 +521,16 @@ def create_app():
             raise HTTPException(status_code=404, detail="concern not found")
         return {"status": "SUCCESS", "concern": concern}
 
+    @application.post("/api/telemetry/concerns/{user}/clear")
+    async def clear_concerns(user: str, body: dict[str, Any], _: bool = Depends(require_internal)):
+        """Remove concerns by id, with their reviews and kept images. The
+        gateway decides which ids the asking parent may clear."""
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i for i in ids):
+            raise HTTPException(status_code=422, detail="ids must be a non-empty list of concern ids")
+        cleared = await store.clear_concerns(_redis(), user, ids)
+        return {"status": "SUCCESS", "cleared": cleared}
+
     @application.post("/api/telemetry/media/scan")
     async def scan_media(
         body: dict[str, Any], _: bool = Depends(require_internal)

@@ -52,6 +52,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(DeviceInfoPlugin.class);
         registerPlugin(DropInPlugin.class);
         registerPlugin(BleBeaconPlugin.class);
+        registerPlugin(SaveFilePlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

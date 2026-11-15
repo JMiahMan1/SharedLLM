@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertOctagon, AlertTriangle, Check, Download, Info, ShieldAlert, X } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, Check, Download, Info, ShieldAlert, Trash2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { downloadBlobUrl } from '../../lib/artifactKinds';
+import { saveBlob } from '../../lib/saveFile';
 import { errorText } from '../../lib/errorText';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
@@ -50,12 +50,6 @@ function whenText(value?: string): string {
  * way to see one. The server checks all of this again; this only keeps the
  * controls off everyone else's screen.
  */
-/** Save a downloaded blob, then release its object URL. */
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  downloadBlobUrl(url, filename);
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
 
 /** The server's reason for a failed download. A blob request's error body is a
  *  Blob, so it is read and parsed before errorText can see its `detail`. */
@@ -79,6 +73,9 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
   const [exporting, setExporting] = useState<'csv' | 'json' | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
+  /** 'all' or one concern's id while its Clear asks to be confirmed. */
+  const [confirmClear, setConfirmClear] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [imageBusy, setImageBusy] = useState<string | null>(null);
@@ -95,7 +92,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     try {
       const blob = await api.exportGuardianConcerns(username, format);
       const stamp = new Date().toISOString().slice(0, 10);
-      saveBlob(blob, `jarvis-concerns-${username}-${stamp}.${format}`);
+      await saveBlob(blob, `jarvis-concerns-${username}-${stamp}.${format}`);
     } catch (err) {
       setExportError(await downloadError(err, 'The export could not be downloaded.'));
     } finally {
@@ -121,13 +118,28 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     }
   }
 
+  async function clearConcerns(target: string) {
+    setClearing(true);
+    setReviewError(null);
+    try {
+      if (target === 'all') await api.clearGuardianConcerns(username);
+      else await api.clearGuardianConcern(username, target);
+      setConfirmClear(null);
+      await queryClient.invalidateQueries({ queryKey: ['guardian-concerns', username] });
+    } catch (err) {
+      setReviewError(errorText(err, 'The concerns could not be cleared.'));
+    } finally {
+      setClearing(false);
+    }
+  }
+
   async function downloadImage(concern: GuardianConcern) {
     if (!concern.id) return;
     setImageBusy(concern.id);
     setReviewError(null);
     try {
       const { blob, filename } = await api.downloadGuardianConcernImage(username, concern.id);
-      saveBlob(blob, filename);
+      await saveBlob(blob, filename);
     } catch (err) {
       setReviewError(await downloadError(err, 'The image could not be downloaded.'));
     } finally {
@@ -171,6 +183,28 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
         <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-300" data-testid="concerns-export-error">
           {exportError}
         </p>
+      )}
+      {canExport && total > 0 && (
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5" data-testid="concerns-clear-all">
+          {confirmClear === 'all' ? (
+            <>
+              <span className="text-[11px] text-slate-300">Clear all {total} concerns and their images?</span>
+              <button type="button" onClick={() => void clearConcerns('all')} disabled={clearing}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70">
+                <Trash2 size={11} /> {clearing ? 'Clearing…' : 'Yes, clear all'}
+              </button>
+              <button type="button" onClick={() => setConfirmClear(null)} disabled={clearing}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={() => setConfirmClear('all')} disabled={clearing}
+              className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40 hover:text-white">
+              <Trash2 size={11} /> Clear all
+            </button>
+          )}
+        </div>
       )}
       {reviewError && (
         <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-300" data-testid="concerns-review-error">
@@ -254,6 +288,25 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   >
                     <X size={11} /> False alarm
                   </button>
+                  {confirmClear === c.id ? (
+                    <>
+                      <button type="button" onClick={() => void clearConcerns(c.id!)} disabled={clearing}
+                        className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70"
+                        data-testid="concern-clear-confirm">
+                        <Trash2 size={11} /> {clearing ? 'Clearing…' : 'Yes, clear'}
+                      </button>
+                      <button type="button" onClick={() => setConfirmClear(null)} disabled={clearing}
+                        className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmClear(c.id!)} disabled={clearing}
+                      className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40"
+                      data-testid="concern-clear">
+                      <Trash2 size={11} /> Clear
+                    </button>
+                  )}
                   <input
                     value={currentNote}
                     onChange={(event) => setNotes((current) => ({ ...current, [c.id!]: event.target.value }))}
