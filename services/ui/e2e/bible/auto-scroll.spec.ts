@@ -17,7 +17,13 @@ async function openReader(page: Page) {
   const unknown = await mockBible(page);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
+  // The shell asks for /api/deploy-status, which is a 404 whenever no deploy is under way: that is not a page error.
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    const text = m.text();
+    if (/deploy-status/.test(text) || (/Failed to load resource: .* 404/.test(text) && /deploy-status/.test(m.location().url))) return;
+    errors.push(text.slice(0, 300));
+  });
   await page.goto('/bible?ref=Genesis+1');
   await expect(page.getByText(/Made-up verse 1:/).first()).toBeVisible();
   return { mocks, unknown, errors };

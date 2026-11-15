@@ -131,7 +131,7 @@ export default function CoachCard() {
             )}
             {room && open.length > 0 && (
               <div className="flex flex-wrap items-end gap-2">
-                <label className="text-[11px] text-slate-500">
+                <label className="flex flex-col text-[11px] text-slate-500">
                   Or choose
                   <select
                     value={chosenKind}
@@ -145,7 +145,7 @@ export default function CoachCard() {
                     ))}
                   </select>
                 </label>
-                <label className="text-[11px] text-slate-500">
+                <label className="flex flex-col text-[11px] text-slate-500">
                   Days
                   <select value={target} onChange={(event) => setTarget(Number(event.target.value))} className="glass-input mt-1 min-h-11 px-2 text-base sm:text-sm">
                     {[1, 2, 3, 4, 5, 6, 7].map((value) => (
@@ -180,7 +180,8 @@ export default function CoachCard() {
             const clock = clocks[def.kind] ?? '';
             return (
               <li key={def.kind} className="flex flex-wrap items-end gap-2 text-xs" data-testid={`reminder-${def.kind}`}>
-                <div className="min-w-0 flex-1">
+                {/* A phone gives the name and hint their own line; squeezed beside the time, they wrapped a word per line. */}
+                <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                   <p className="text-slate-300">
                     {def.emoji} {def.label}
                   </p>
@@ -193,7 +194,7 @@ export default function CoachCard() {
                   value={clock}
                   onChange={(event) => setClocks((current) => ({ ...current, [def.kind]: event.target.value }))}
                   aria-label={`${def.label} reminder time`}
-                  className="glass-input min-h-11 px-2 text-base sm:text-sm"
+                  className="glass-input min-h-11 min-w-0 flex-1 px-2 text-base sm:flex-none sm:text-sm"
                 />
                 <button
                   type="button"

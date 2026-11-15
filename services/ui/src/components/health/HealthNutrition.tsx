@@ -233,7 +233,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
           <button
             type="button"
             onClick={() => setDay(localDay())}
-            className="text-[10px] text-purple-300 underline underline-offset-2"
+            className="inline-flex min-h-11 items-center px-2 text-[10px] text-purple-300 underline underline-offset-2 sm:min-h-0"
           >
             Today
           </button>
@@ -367,7 +367,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
         <section className="glass-panel rounded-2xl border border-purple-500/20 p-4" data-testid="add-food-panel">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-white">Add to {MEAL_LABELS[addingMeal]}</h3>
-            <button type="button" onClick={resetAdd} className="text-[11px] text-slate-400 hover:text-white">
+            <button type="button" onClick={resetAdd} className="-my-2 min-h-11 px-2 text-[11px] text-slate-400 hover:text-white sm:my-0 sm:min-h-0 sm:px-0">
               Cancel
             </button>
           </div>
@@ -390,7 +390,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
                   setSelected(null);
                   if (id !== 'manual') setPhotoRead(null);
                 }}
-                className={`min-h-9 rounded-lg px-3 text-xs font-semibold ${
+                className={`min-h-9 pointer-coarse:min-h-11 rounded-lg px-3 text-xs font-semibold ${
                   mode === id
                     ? 'bg-purple-500/20 text-purple-200 border border-purple-500/30'
                     : 'text-slate-400 border border-transparent hover:text-white'

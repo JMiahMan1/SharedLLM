@@ -182,7 +182,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
           disabled={create.isPending || !studyReference}
           aria-label={studyReference ? `Start a Bible study on ${studyReference}` : 'Start a Bible study'}
           title={studyReference ? `Start a saved study on ${studyReference}` : 'Open a passage in the reader first'}
-          className="min-h-10 rounded-xl bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="min-h-10 pointer-coarse:min-h-11 rounded-xl bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {create.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
           {studyReference ? `Study ${studyReference}` : 'Start a study'}
@@ -204,7 +204,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
             value={memoryQuery}
             onChange={(event) => setMemoryQuery(event.target.value)}
             placeholder="Search past studies and answers…"
-            className="min-h-10 min-w-0 flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-500"
+            className="min-h-10 pointer-coarse:min-h-11 min-w-0 flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-500"
           />
         </div>
         {memoryQuery.trim().length >= 2 ? (
@@ -289,7 +289,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
               id="bible-study-export-workspace"
               value={exportWorkspace}
               onChange={(event) => setExportWorkspace(event.target.value)}
-              className="min-h-10 min-w-0 flex-1 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
+              className="min-h-10 pointer-coarse:min-h-11 min-w-0 flex-1 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-200"
             >
               <option value="">Choose a workspace…</option>
               {(workspaces.data ?? []).map((workspace) => (
@@ -302,7 +302,7 @@ export default function BibleStudySessions({ reference, version, edition, onOpen
               type="button"
               onClick={() => void exportStudy()}
               disabled={!(exportWorkspace || workspaces.data?.length)}
-              className="min-h-10 rounded-lg bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="min-h-10 pointer-coarse:min-h-11 rounded-lg bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
             >
               <Download size={13} />
               Export to workspace

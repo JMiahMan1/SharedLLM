@@ -635,7 +635,7 @@ export default function HealthCycle() {
                     type="button"
                     aria-label={`Stop sharing cycle data with ${entry.viewer}`}
                     onClick={() => share.mutate({ viewer: entry.viewer, enabled: false })}
-                    className="text-slate-500 hover:text-red-300"
+                    className="-my-3 -mr-2 flex h-11 w-11 items-center justify-center text-slate-500 hover:text-red-300 sm:my-0 sm:mr-0 sm:h-auto sm:w-auto"
                   >
                     <X size={10} />
                   </button>

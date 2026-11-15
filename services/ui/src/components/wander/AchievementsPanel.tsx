@@ -76,7 +76,7 @@ export default function AchievementsPanel({ userId }: AchievementsPanelProps) {
         </div>
         <button
           type="button"
-          className="glass-button px-2.5 py-1 text-[11px]"
+          className="glass-button min-h-11 px-2.5 py-1 text-[11px] sm:min-h-0"
           onClick={() => (editingGoals ? setEditingGoals(false) : startEditing())}
         >
           <Target size={12} /> Goals

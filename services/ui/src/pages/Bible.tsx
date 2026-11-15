@@ -579,6 +579,7 @@ function BibleReaderPane({
           onFocus={() => setFocusing(true)}
           listening={listening}
           onListen={() => setListening((on) => !on)}
+          readingVersion={version}
         />
       </div>
       {passage?.reference && !searching ? (
