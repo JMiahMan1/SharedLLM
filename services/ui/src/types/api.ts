@@ -1718,16 +1718,6 @@ export interface ServiceLogsResponse {
   service: string;
 }
 
-export interface ContainerExecRequest {
-  cmd: string[];
-  env?: Record<string, string>;
-}
-
-export interface ContainerExecResponse {
-  output: string;
-  exit_code: number;
-}
-
 export interface RagIndexedPathsResponse {
   paths: string[];
 }

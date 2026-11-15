@@ -487,6 +487,20 @@ http://{$HOMEHUB_EXTERNAL_HOST:homehub.invalid} {
             import patient
         }
     }
+    # Camera settings for admins (who can watch, live video, motion
+    # recording) live in the gateway. Without this the catch-all below sent
+    # them to workspace_runtime, which answered 404, so none of them worked.
+    # The account audit trail (Admin > Account audit) is identity's.
+    handle /api/admin/audit* {
+        reverse_proxy identity:8001 {
+            import patient
+        }
+    }
+    handle /api/admin/cameras* {
+        reverse_proxy gateway:11435 {
+            import patient
+        }
+    }
     handle /api/admin* {
         reverse_proxy workspace_runtime:8007 {
             import patient

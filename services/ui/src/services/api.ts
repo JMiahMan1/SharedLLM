@@ -116,7 +116,6 @@ import type {
   GitLogResponse,
   VolumesResponse,
   ServiceLogsResponse,
-  ContainerExecResponse,
   RagIndexedPathsResponse,
   RagSyncFilesRequest,
   WorkspaceLintRequest,
@@ -4957,12 +4956,6 @@ export const api = {
   async getServiceLogs(serviceName: string, lines?: number): Promise<ServiceLogsResponse> {
     const params = lines ? { lines } : {};
     const resp = await apiClient.get(`/api/admin/services/${serviceName}/logs`, { params });
-    return resp.data;
-  },
-
-  // Control plane exec
-  async execContainer(serviceName: string, cmd: string[], env?: Record<string, string>): Promise<ContainerExecResponse> {
-    const resp = await apiClient.post(`/api/containers/${serviceName}/exec`, { cmd, env });
     return resp.data;
   },
 
