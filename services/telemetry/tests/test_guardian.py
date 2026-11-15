@@ -94,6 +94,24 @@ def test_sunday_evening_sends_each_recap_once(wired):
     assert [n["user"] for n in sent] == ["dad", "mom"]
     assert sent[0]["title"] == "Emma's week" and sent[0]["kind"] == "recap"
     assert sent[0]["body"] == "Nothing was reported from Emma's phone this week."
+    # The notice opens the recap it announces, not the member page.
+    assert sent[0]["data"]["url"] == "/guardian?member=kid&week=2026-10-19"
+
+
+def test_a_finished_week_reads_as_the_recap_that_was_sent(wired, monkeypatch):
+    client, fake, _ = wired
+    import json as _json
+
+    kept = {"week": {"start": "2026-10-19", "end": "2026-10-25"}, "has_data": True, "kept": True}
+    asyncio.run(fake.hset("tel:recap:kid", "2026-10-19", _json.dumps(kept)))
+    asyncio.run(fake.hset("tel:recap:kid", "2026-10-12", _json.dumps({**kept, "week": {"start": "2026-10-12"}})))
+    monkeypatch.setattr(guardian, "household_now", lambda: datetime(2026, 11, 4, 9, 0, tzinfo=ZoneInfo("Etc/GMT+7")))
+    past = client.get("/api/telemetry/recap/kid", headers=HEADERS, params={"day": "2026-10-21"}).json()
+    assert past["recap"]["kept"] is True and past["saved"] is True and past["current"] is False
+    assert past["weeks"] == ["2026-10-19", "2026-10-12"]
+    now = client.get("/api/telemetry/recap/kid", headers=HEADERS).json()
+    assert now["current"] is True and now["saved"] is False
+    assert now["recap"]["week"]["start"] == "2026-11-02"
 
 
 def test_a_tablet_is_called_a_tablet(wired, monkeypatch):

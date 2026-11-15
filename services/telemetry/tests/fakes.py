@@ -92,6 +92,9 @@ class FakeRedis:
     async def hgetall(self, key):
         return dict(self.hashes.get(key, {}))
 
+    async def hkeys(self, key):
+        return list(self.hashes.get(key, {}).keys())
+
     async def hlen(self, key):
         return len(self.hashes.get(key, {}))
 

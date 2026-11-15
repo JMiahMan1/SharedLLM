@@ -465,13 +465,33 @@ def create_app():
 
     @application.get("/api/telemetry/recap/{user}")
     async def get_recap(user: str, day: str = Query(default=""), _: bool = Depends(require_internal)):
-        """A child's weekly recap for the week holding ``day`` (today by default), built now."""
+        """A child's weekly recap for the week holding ``day`` (today by default).
+
+        This week is built now (so far). A finished week is the recap kept on
+        the Sunday it was sent, so it reads the same as the notice did even
+        after the raw activity has aged out; a finished week never kept is
+        built now. ``weeks`` lists every kept week, newest first, so a parent
+        can step back through them.
+        """
         try:
-            when = date.fromisoformat(day) if day else guardian.household_now().date()
+            today = guardian.household_now().date()
+            when = date.fromisoformat(day) if day else today
         except ValueError:
             raise HTTPException(status_code=422, detail="day must be YYYY-MM-DD") from None
         rc = _redis()
-        return {"status": "SUCCESS", "recap": await guardian.build_recap(rc, user, when)}
+        week = guardian.guardian_recap.week_bounds(when)[0]
+        current = week == guardian.guardian_recap.week_bounds(today)[0]
+        recap = None if current else await store.get_saved_recap(rc, user, week.isoformat())
+        saved = recap is not None
+        if recap is None:
+            recap = await guardian.build_recap(rc, user, when)
+        return {
+            "status": "SUCCESS",
+            "recap": recap,
+            "current": current,
+            "saved": saved,
+            "weeks": await store.saved_recap_weeks(rc, user),
+        }
 
     @application.get("/api/telemetry/concerns/{user}")
     async def get_concerns(user: str, limit: int = Query(default=50, le=300), _: bool = Depends(require_internal)):

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, BookOpen, CalendarRange, Clock, Globe, MessageSquare, Moon, PlayCircle, Smartphone, Sparkles } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { AlertTriangle, BookOpen, CalendarRange, ChevronLeft, ChevronRight, Clock, Globe, MessageSquare, Moon, PlayCircle, Smartphone, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { appName, duration } from '../../lib/phoneUsageFormat';
 import { formatDayLabel } from '../../lib/healthHub';
@@ -12,18 +14,40 @@ const LEVEL_STYLE: Record<ConcernLevel, string> = {
   medium: 'border-white/10 bg-white/[0.04] text-slate-200',
 };
 
+/** The Monday `days` days after `iso` (a Monday), as YYYY-MM-DD. */
+function shiftWeek(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /**
- * A child's week for their parents (Phase 11 step 6): built on demand from
- * what the phone and Jarvis reported; anything not reported is left out.
+ * A child's week for their parents (Phase 11 step 6). This week is built on
+ * demand ("so far"); a finished week is the recap that was sent that Sunday.
+ * Previous and Next step through the weeks, and the Sunday notice opens its
+ * own week (?week=). Before, only this week could be seen, so the recaps that
+ * were sent never showed anywhere.
  */
 export default function RecapCard({ username, name }: { username: string; name: string }) {
   const device = useMemberDeviceNoun(username);
+  const [params] = useSearchParams();
+  const [week, setWeek] = useState<string | null>(() => params.get('week'));
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['guardian-recap', username],
-    queryFn: () => api.getGuardianRecap(username),
+    queryKey: ['guardian-recap', username, week ?? 'current'],
+    queryFn: () => api.getGuardianRecap(username, week ?? undefined),
     retry: false,
   });
   const recap = data?.recap;
+  const current = data?.current ?? week === null;
+  const weeks = data?.weeks ?? [];
+  const shown = recap?.week.start;
+  const oldest = weeks.length ? weeks[weeks.length - 1] : null;
+  const canGoBack = Boolean(shown && oldest && shown > oldest);
+  const step = (days: number) => {
+    if (!shown) return;
+    const next = shiftWeek(shown, days);
+    setWeek(days > 0 && weeks.length && next > weeks[0] ? null : next);
+  };
 
   return (
     <section className="glass-panel min-w-0 rounded-2xl border border-white/10 p-4 sm:p-5 space-y-4" data-testid="guardian-recap">
@@ -35,9 +59,29 @@ export default function RecapCard({ username, name }: { username: string; name: 
           <span>{name}&apos;s week</span>
         </h2>
         {recap && (
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300">
-            {formatDayLabel(recap.week.start)} - {formatDayLabel(recap.week.end)}
-          </span>
+          <div className="flex items-center gap-1" data-testid="guardian-recap-weeks">
+            <button
+              type="button"
+              onClick={() => step(-7)}
+              disabled={!canGoBack}
+              aria-label="Previous week"
+              className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 disabled:opacity-30"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300" data-testid="guardian-recap-range">
+              {formatDayLabel(recap.week.start)} - {formatDayLabel(recap.week.end)}{current ? ' (so far)' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={() => step(7)}
+              disabled={current}
+              aria-label="Next week"
+              className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-300 hover:bg-white/10 disabled:opacity-30"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -47,7 +91,7 @@ export default function RecapCard({ username, name }: { username: string; name: 
         <p className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-300">The week could not be loaded.</p>
       ) : !recap.has_data ? (
         <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400" data-testid="guardian-recap-empty">
-          Nothing reported from {name}&apos;s {device} yet this week.
+          {current ? <>Nothing reported from {name}&apos;s {device} yet this week.</> : <>Nothing was reported from {name}&apos;s {device} that week.</>}
         </p>
       ) : (
         <div className="space-y-4">

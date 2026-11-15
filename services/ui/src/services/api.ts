@@ -1371,7 +1371,14 @@ export const api = {
   },
 
   /** A child's week (parents only). */
-  async getGuardianRecap(username: string, day?: string): Promise<{ recap: GuardianRecap }> {
+  /**
+   * A child's week (parents only): this week so far, or a finished week as the
+   * recap that was sent. `weeks` lists every kept week, newest first.
+   */
+  async getGuardianRecap(
+    username: string,
+    day?: string,
+  ): Promise<{ recap: GuardianRecap; current?: boolean; saved?: boolean; weeks?: string[] }> {
     const resp = await apiClient.get(`/api/guardian/recap/${encodeURIComponent(username)}`, { params: day ? { day } : {} });
     return resp.data;
   },

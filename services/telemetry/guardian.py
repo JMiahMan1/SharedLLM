@@ -346,7 +346,8 @@ async def send_weekly_recaps(rc, session, deliver: Deliver, now: datetime) -> in
                     "title": f"{child.get('display_name') or child['username']}'s week",
                     "body": line,
                     "tag": f"recap:{child['username']}:{week}",
-                    "data": {"url": f"/family/member/{child['username']}", "child": child["username"], "week": week},
+                    # Opens this recap itself, not the member page.
+                    "data": {"url": f"/guardian?member={child['username']}&week={week}", "child": child["username"], "week": week},
                 })
             except Exception as exc:
                 log.warning("recap notice to %s failed: %s", parent, exc)

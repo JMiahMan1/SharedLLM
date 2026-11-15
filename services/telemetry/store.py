@@ -605,6 +605,21 @@ async def review_concern(
     return concern
 
 
+async def get_saved_recap(rc, user: str, week: str) -> dict[str, Any] | None:
+    """The recap kept on the Sunday it was sent, or None."""
+    raw = await rc.hget(f"{RECAP_PREFIX}{user}", week)
+    try:
+        parsed = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+async def saved_recap_weeks(rc, user: str) -> list[str]:
+    """The weeks (Monday, ISO) with a kept recap, newest first."""
+    return sorted(await rc.hkeys(f"{RECAP_PREFIX}{user}"), reverse=True)
+
+
 async def save_recap(rc, user: str, week: str, recap: dict[str, Any]) -> None:
     key = f"{RECAP_PREFIX}{user}"
     await rc.hset(key, week, json.dumps(recap))

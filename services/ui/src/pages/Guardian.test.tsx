@@ -262,6 +262,18 @@ describe('The family guardian page (a parent)', () => {
     expect(screen.queryByTestId('concern-notify-level')).not.toBeInTheDocument();
   });
 
+  it('steps back to the recap that was sent, and opens the week a notice names', async () => {
+    vi.mocked(api.getGuardianRecap).mockImplementation(async (_user, day) => (day
+      ? { recap: { ...recap, week: { start: '2026-10-12', end: '2026-10-18' } }, current: false, saved: true, weeks: ['2026-10-19', '2026-10-12'] }
+      : { recap, current: true, saved: false, weeks: ['2026-10-19', '2026-10-12'] }));
+    wrap(<Guardian />);
+    expect(await screen.findByTestId('guardian-recap-range')).toHaveTextContent('(so far)');
+    expect(screen.getByRole('button', { name: 'Next week' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous week' }));
+    await waitFor(() => expect(api.getGuardianRecap).toHaveBeenCalledWith(expect.any(String), '2026-10-12'));
+    await waitFor(() => expect(screen.getByTestId('guardian-recap-range')).not.toHaveTextContent('(so far)'));
+  });
+
   it('explains itself to someone who is not a parent', async () => {
     vi.mocked(api.getFamily).mockRejectedValue(Object.assign(new Error('no'), { isAxiosError: true, response: { status: 403 } }));
     wrap(<Guardian />);
