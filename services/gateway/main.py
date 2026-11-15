@@ -51,6 +51,7 @@ from services.common.podcast_recommendations import podcast_events, recommend_po
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
+    chore_answer_tag,
     chore_answer_words,
     evaluate as evaluate_screen_time,
     wants_progress as screen_time_wants_progress,
@@ -7978,8 +7979,14 @@ async def decide_chore_check(request: Request, check_id: int, payload: dict) -> 
                 params={"user": check.get("username") or ""},
             )
             body["unticked"] = bool(unticked and unticked.get("status") == "SUCCESS")
-        heading, line = chore_answer_words(check.get("status") == "approved", title)
-        await _screen_time_notice(body.get("notify") or [], heading, line, "/fitness")
+        approved = check.get("status") == "approved"
+        heading, line = chore_answer_words(approved, title, body.get("approved_today"))
+        for child in body.get("notify") or []:
+            try:
+                await _notify.send(_notify.notice(child, "family_safety", heading, line, url="/fitness",
+                                                  tag=chore_answer_tag(child, approved), replace=approved))
+            except Exception as exc:  # a missed notice never fails the answer
+                log.warning("[screen-time] chore notice to %s failed: %s", child, exc)
     return status, body
 
 

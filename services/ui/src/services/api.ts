@@ -1206,6 +1206,12 @@ export const api = {
   },
 
   /** A child's devices with their technical side: the father's and admins' only (403 for anyone else). */
+  /** The APK the server offers now (its build number tells how far behind a device is). */
+  async getAppUpdateOffer(): Promise<{ apk_available?: boolean; apk_version_code?: number }> {
+    const resp = await apiClient.get('/api/app-updates/version');
+    return resp.data;
+  },
+
   async getMemberDevices(username: string): Promise<MemberDevices> {
     const resp = await apiClient.get(`/api/family/member/${encodeURIComponent(username)}/devices`);
     return resp.data;

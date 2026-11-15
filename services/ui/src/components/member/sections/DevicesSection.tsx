@@ -31,6 +31,7 @@ const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'webFilterActive', label: 'Web filter running' },
   { key: 'usageAccess', label: 'Usage access' },
   { key: 'jarvisNotifications', label: 'Jarvis notifications (family chat, alerts)' },
+  { key: 'installUpdates', label: 'May install Jarvis updates' },
   { key: 'notificationAccess', label: 'Notification access (media, chat apps)' },
   { key: 'callLogAccess', label: 'Call log' },
   { key: 'smsAccess', label: 'Text messages' },
@@ -46,10 +47,21 @@ function State({ on }: { on: boolean | undefined }) {
   );
 }
 
-function DeviceCard({ device }: { device: MemberDevice }) {
+/** Builds behind the offered APK before a device is flagged as not updating. */
+const BEHIND_BUILDS = 3;
+
+/** How many builds ``device`` is behind ``latest`` (0 when current or unknown). */
+function buildsBehind(device: MemberDevice, latest: number | undefined): number {
+  const own = Number(device.app_build);
+  if (!latest || !Number.isFinite(own) || own <= 0) return 0;
+  return Math.max(0, latest - own);
+}
+
+function DeviceCard({ device, latest }: { device: MemberDevice; latest?: number }) {
   const esphome = isEsphomeDevice(device);
   const noun = deviceNoun(device.kind);
   const guard = device.capabilities?.guard;
+  const behind = esphome ? 0 : buildsBehind(device, latest);
   const facts: Array<[string, string]> = esphome
     ? [
         ['Platform', `ESPHome · ${deviceKindLabel(device.kind)}`],
@@ -96,6 +108,14 @@ function DeviceCard({ device }: { device: MemberDevice }) {
           </div>
         ))}
       </dl>
+      {behind >= BEHIND_BUILDS && (
+        <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-2 text-xs text-amber-200" data-testid="member-device-behind">
+          This {noun} is {behind} builds behind (build {device.app_build}, latest {latest}) and is not updating itself.
+          {guard?.installUpdates === false
+            ? ` On the ${noun}, open Jarvis, then Settings, App update, tap Allow updates and turn on "Allow from this source".`
+            : ` On the ${noun}, open Jarvis, then Settings, App update, and tap Install once; after that it updates on its own.`}
+        </p>
+      )}
       {esphome ? (
         <div className="space-y-1 border-t border-white/5 pt-2 text-xs" data-testid="member-device-esphome">
           <p className="text-[10px] uppercase tracking-wider text-indigo-300">ESPHome companion node</p>
@@ -218,6 +238,8 @@ function TamperCard({ username, name, tamper }: { username: string; name: string
  */
 export default function DevicesSection({ username, name }: { username: string; name: string }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['member-devices', username], queryFn: () => api.getMemberDevices(username), retry: false });
+  const offer = useQuery({ queryKey: ['app-update-offer'], queryFn: () => api.getAppUpdateOffer(), staleTime: 5 * 60_000, retry: false });
+  const latest = offer.data?.apk_available ? offer.data.apk_version_code : undefined;
   const refused = isAxiosError(error) && error.response?.status === 403;
   if (isLoading || error || !data || data.devices.length === 0) {
     return (
@@ -236,7 +258,7 @@ export default function DevicesSection({ username, name }: { username: string; n
   return (
     <>
       {data.devices.map((d) => (
-        <DeviceCard key={d.device_key} device={d} />
+        <DeviceCard key={d.device_key} device={d} latest={latest} />
       ))}
       <TamperCard username={username} name={name} tamper={data.tamper} />
       <MemberCard title="Offline unlock codes" icon={KeyRound} tone="text-amber-300" testId="member-offline-codes" empty={parents.length === 0 ? 'No parents linked.' : null}>

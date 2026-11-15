@@ -43,12 +43,16 @@ def notice(
     data: dict | None = None,
     kind: str | None = None,
     audience: str = "all",
+    replace: bool = False,
 ) -> dict[str, Any]:
     """The JSON body telemetry's notify takes. ``url`` is where a tap goes.
 
     ``audience`` is ``"all"`` (everyone, the default) or ``"parents"``: telemetry
     refuses to deliver a parents-only notice (updates, system and ops notices)
     to a minor. Any other value is rejected by telemetry.
+
+    ``replace`` (with a ``tag``) also drops earlier unread notices with that tag
+    from the person's notification list, as the phone already replaces them.
     """
     payload: dict[str, Any] = {
         "user": user,
@@ -68,6 +72,8 @@ def notice(
         payload["once"] = once
     if audience and audience != "all":
         payload["audience"] = audience
+    if replace and tag:
+        payload["replace"] = True
     return payload
 
 

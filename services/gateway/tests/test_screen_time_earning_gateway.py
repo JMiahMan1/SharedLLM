@@ -168,6 +168,16 @@ def test_an_approval_does_not_untick(wired):
     assert client.post("/api/screen-time/chore-checks/2", json={"approve": True}).status_code == 200
     assert not any(c["url"].endswith("/uncomplete") for c in calls)
     assert sent[0]["title"] == "Chore approved"
+    assert sent[0]["tag"] == "chores-approved:kid" and sent[0]["replace"] is True
+
+
+def test_a_second_approval_the_same_day_is_one_merged_notice(wired):
+    client, calls, sent, world = wired
+    world["decide"] = (200, {"check": {"id": 2, "username": "kid", "chore_id": "50", "title": "Trash", "status": "approved"},
+                             "notify": ["kid"], "untick": False, "approved_today": ["Bed", "Trash"]})
+    assert client.post("/api/screen-time/chore-checks/2", json={"approve": True}).status_code == 200
+    assert sent[0]["title"] == "2 chores approved today"
+    assert "\u201cBed\u201d and \u201cTrash\u201d" in sent[0]["body"]
 
 
 def test_a_refused_answer_is_passed_on(wired):

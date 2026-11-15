@@ -159,7 +159,7 @@ async def _answer_checks(req: ChoreRequest, names: list[str], by_voice: bool) ->
     check, so any family's names work; nothing here knows who lives in the house.
     """
     from services.common import notify
-    from services.common.screen_time import chore_answer_words
+    from services.common.screen_time import chore_answer_tag, chore_answer_words
     from services.execution import main
 
     ctx = req.user_context
@@ -203,9 +203,10 @@ async def _answer_checks(req: ChoreRequest, names: list[str], by_voice: bool) ->
             unticked = await main.uncomplete_skylight_chore(chore_id=decided["chore_id"], user=child, x_internal_secret=None)
             if unticked.get("status") != "SUCCESS":
                 log.warning(f"[chores] could not untick {decided.get('chore_id')} for {child}: {unticked.get('message')}")
-        heading, line = chore_answer_words(approve, decided.get("title"))
+        heading, line = chore_answer_words(approve, decided.get("title"), answer.get("approved_today"))
         try:
-            await notify.send(notify.notice(child, "family_safety", heading, line, url="/fitness", tag=f"screen-time:{child}"))
+            await notify.send(notify.notice(child, "family_safety", heading, line, url="/fitness",
+                                            tag=chore_answer_tag(child, approve), replace=approve))
             if by_voice and approve:
                 # Approved from a voice alone: the parents hear, so a misheard or imitated voice shows.
                 for parent in answer.get("parents") or []:

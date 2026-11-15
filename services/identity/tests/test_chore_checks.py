@@ -105,6 +105,7 @@ def test_a_parent_approves_or_asks_for_a_redo(family):
     assert mom.get("/api/screen-time/chore-checks").json()["checks"][0]["username"] == "kid"
     ok = mom.post(f"/api/screen-time/chore-checks/{trash}", json={"approve": True}).json()
     assert ok["check"]["status"] == "approved" and ok["untick"] is False and ok["notify"] == ["kid"]
+    assert ok["approved_today"] == ["Trash"]
     redo = mom.post(f"/api/screen-time/chore-checks/{dishes}", json={"approve": False}).json()
     assert redo["check"]["status"] == "declined" and redo["untick"] is True
     assert mom.post(f"/api/screen-time/chore-checks/{trash}", json={"approve": False}).status_code == 409
@@ -153,3 +154,13 @@ def test_the_assistant_lists_and_answers_as_the_parent_who_spoke(family):
     assert set(ok["parents"]) == {"dad", "mom"} and ok["display_name"] == "kid"
     again = client.post(f"/api/internal/chore-checks/{check}/decide", json={"by": "dad", "approve": False})
     assert again.status_code == 409
+
+
+def test_the_days_approvals_come_back_so_the_child_gets_one_notice(family):
+    first = sync(family("dad"), [{"id": "60", "title": "Bed"}, {"id": "61", "title": "Teeth"}, {"id": "62", "title": "Toys"}])
+    ids = [c["id"] for c in first["new"]]
+    mom = family("mom")
+    mom.post(f"/api/screen-time/chore-checks/{ids[0]}", json={"approve": True})
+    assert mom.post(f"/api/screen-time/chore-checks/{ids[1]}", json={"approve": False}).json()["approved_today"] == []
+    last = mom.post(f"/api/screen-time/chore-checks/{ids[2]}", json={"approve": True}).json()
+    assert last["approved_today"] == ["Bed", "Toys"]

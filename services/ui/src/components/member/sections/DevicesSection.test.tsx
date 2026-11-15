@@ -8,7 +8,7 @@ import { api } from '../../../services/api';
 vi.mock('../../ui/confirmDialog', () => ({ confirmDialog: vi.fn().mockResolvedValue(true) }));
 vi.mock('../../../services/api', async (orig) => {
   const actual = (await orig()) as { api: Record<string, unknown> };
-  return { api: { ...actual.api, getMemberDevices: vi.fn(), clearMemberTamper: vi.fn() } };
+  return { api: { ...actual.api, getMemberDevices: vi.fn(), clearMemberTamper: vi.fn(), getAppUpdateOffer: vi.fn().mockResolvedValue({ apk_available: true, apk_version_code: 700 }) } };
 });
 
 const report = (i: number) => ({ id: i, event: 'guard_tamper', at: new Date(Date.now() - i * 60_000).toISOString(), extra: { event: 'guard_disabled' }, device_key: null });
@@ -49,5 +49,30 @@ describe('tamper reports', () => {
     setup([]);
     await screen.findByTestId('member-tamper-empty');
     expect(screen.queryByTestId('member-tamper-clear')).toBeNull();
+  });
+});
+
+describe('a device that is not updating', () => {
+  function withDevice(device: Record<string, unknown>) {
+    vi.mocked(api.getMemberDevices).mockResolvedValue({ username: 'kid', devices: [device], tamper: [], offline_code: {} } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <DevicesSection username="kid" name="Kid" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('is flagged when it is several builds behind, with how to fix it', async () => {
+    withDevice({ device_key: 'kid-tablet-000000001', kind: 'tablet', app_build: '690', capabilities: { guard: { installUpdates: false } } });
+    const note = await screen.findByTestId('member-device-behind');
+    expect(note).toHaveTextContent('10 builds behind (build 690, latest 700)');
+    expect(note).toHaveTextContent('Allow from this source');
+  });
+
+  it('is not flagged when it is nearly current', async () => {
+    withDevice({ device_key: 'kid-phone-0000000001', kind: 'phone', app_build: '699', capabilities: {} });
+    await screen.findByTestId('member-device-kid-phone-0000000001');
+    expect(screen.queryByTestId('member-device-behind')).toBeNull();
   });
 });

@@ -1366,8 +1366,13 @@ async def _notify_presence(r, person: str, kind: str, zone: dict) -> None:
     # chosen for it; everyone else gets the ordinary arrival or departure.
     place = await _place_alert(r, zone["entity_id"])
     chosen = set(place.get("notify") or []) if place.get("important") else set()
+    # Children and teens do not hear where everyone else comes and goes,
+    # unless a parent named them on an important place's list.
+    minors = set(await _guardian_children_cached())
     for viewer in await _alert_recipients(r):
         if viewer == person or viewer in notified_parents or viewer in co_travelers or not await _viewer_may_see(viewer, person):
+            continue
+        if viewer in minors and not (place.get("important") and viewer in chosen):
             continue
         if place.get("important") and (not chosen or viewer in chosen):
             await _send_notice(notify.notice(
@@ -3284,7 +3289,7 @@ async def _sweep_visit_stays(r, now: float | None = None) -> int:
 
 
 async def _sweep_long_stops(r, now: float | None = None) -> int:
-    """Tell the family once when someone has stayed put for LONG_STOP_S
+    """Tell the family's adults once when someone has stayed put for LONG_STOP_S
     somewhere that is not a zone (a known place); returns how many stops
     were announced. Only in LONG_STOP_ACTIVE_HOURS, so a sleepover is not a
     midnight alarm."""
@@ -3306,8 +3311,10 @@ async def _sweep_long_stops(r, now: float | None = None) -> int:
         title = f"{person.title()} has been stopped for {hours:.0f} h"
         body = f"At {place}, which is not a saved place."
         url = f"/wander?person={person}"
+        # A long stop is for the grown-ups: children and teens are not told.
+        minors = set(await _guardian_children_cached())
         for viewer in await _alert_recipients(r):
-            if viewer == person or not await _viewer_may_see(viewer, person):
+            if viewer == person or viewer in minors or not await _viewer_may_see(viewer, person):
                 continue
             await _send_notice(notify.notice(
                 viewer, "family_safety", title, body, url=url, priority=4,

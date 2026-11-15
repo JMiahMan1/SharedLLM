@@ -15,6 +15,8 @@ export interface GuardStatus {
   privateDnsHost?: string;
   /** Names of installed apps that get around the web filter (a VPN, Tor, Opera...). */
   bypassApps?: string[];
+  /** Android lets Jarvis install its own updates ("Install unknown apps"). */
+  installUpdates?: boolean;
 }
 
 /**

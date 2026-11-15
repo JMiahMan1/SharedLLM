@@ -68,6 +68,8 @@ def sent(monkeypatch):
     monkeypatch.setattr(geo, "_viewer_may_see", may_see)
     monkeypatch.setattr(geo, "_resolve_place_name_cached", place)
     geo._zone_cache.update({"at": time.time() + 3600, "zones": [HOME]})
+    monkeypatch.setitem(geo._guardian_children_cache, "at", time.monotonic() + 3600)
+    monkeypatch.setitem(geo._guardian_children_cache, "children", {})
     yield out
     geo._zone_cache.update({"at": 0.0, "zones": []})
 
@@ -93,6 +95,42 @@ async def test_two_hours_somewhere_unknown_tells_the_family_once(sent):
     assert "Desert Ridge Mall" in notice["body"]
     assert notice["data"]["url"] == "/wander?person=sam"
     assert await geo._sweep_long_stops(r, start + 3 * 3600) == 0, "at most once per stop"
+
+
+@pytest.mark.asyncio
+async def test_children_are_not_told_about_someone_elses_long_stop(sent, monkeypatch):
+    monkeypatch.setitem(geo._guardian_children_cache, "children", {"alex": {"username": "alex", "parents": []}})
+    r = R()
+    start = at(2026, 10, 14, 10)
+    await _stay(r, "sam", 40.1725, -105.3257, start, 2.1)
+    await geo._sweep_long_stops(r, start + 2.2 * 3600)
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_children_hear_arrivals_only_at_a_place_they_were_named_for(sent, monkeypatch):
+    monkeypatch.setitem(geo._guardian_children_cache, "children", {"alex": {"username": "alex", "parents": []}})
+
+    async def nobody(r, person):
+        return set()
+
+    place = {}
+
+    async def place_alert(r, entity_id):
+        return place
+
+    monkeypatch.setattr(geo, "_co_travelers", nobody)
+    monkeypatch.setattr(geo, "_place_alert", place_alert)
+    monkeypatch.setattr(geo.notify, "family", lambda **kw: _async(["alex", "sam"]))
+    await geo._notify_presence(R(), "sam", "arrived", HOME)
+    assert sent == [], "an ordinary arrival is not sent to a child"
+    place.update({"important": True, "notify": ["alex"]})
+    await geo._notify_presence(R(), "sam", "arrived", {**HOME, "entity_id": "zone.school", "name": "School"})
+    assert [n["user"] for n in sent] == ["alex"]
+
+
+async def _async(value):
+    return value
 
 
 @pytest.mark.asyncio

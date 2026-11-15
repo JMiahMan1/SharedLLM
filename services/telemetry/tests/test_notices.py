@@ -316,3 +316,12 @@ def test_a_failed_outbox_write_does_not_mark_the_notice_sent(rc, sent, identity,
         assert await notices.deliver(rc, None, "sam", fields) == {"duplicate": True}
 
     asyncio.run(run())
+
+
+def test_a_replacing_notice_supersedes_unread_ones_with_its_tag(client, rc, sent, identity):
+    base = {"user": "sam", "category": "family_safety", "tag": "chores-approved:sam", "replace": True}
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "Chore approved"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={"user": "sam", "title": "Other", "tag": "other"})
+    client.post("/api/telemetry/notify", headers=HEADERS, json={**base, "title": "2 chores approved today"})
+    titles = [n["title"] for n in _outbox(client, "sam")]
+    assert titles.count("Chore approved") == 0 and "2 chores approved today" in titles and "Other" in titles

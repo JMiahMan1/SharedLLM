@@ -5464,8 +5464,18 @@ def _decide_chore_check(session: Session, check_id: int, caller: User, approve: 
     session.add(check)
     session.commit()
     session.refresh(check)
+    # Every chore of that day approved so far, oldest first: the child gets one
+    # notice that grows ("3 chores approved") instead of one per chore.
+    approved_today = [
+        c.title for c in sorted(
+            session.exec(select(ChoreCheck).where(
+                ChoreCheck.username == check.username, ChoreCheck.day == check.day,
+                ChoreCheck.status == "approved")).all(),
+            key=lambda c: c.decided_at or "")
+    ] if approve else []
     return {
         "check": _chore_check_read(check), "notify": [check.username], "untick": not approve,
+        "approved_today": approved_today,
         "display_name": subject.display_name or subject.username,
         "parents": _parents_of(session, subject),
     }
@@ -7705,9 +7715,11 @@ async def update_user_location(
                 row.username.lower(): _activity_sharing_data(row)
                 for row in session.exec(select(UserActivitySharing)).all()
             }
+            # Children and teens are not told about someone else's battery.
             family = [
                 u.username for u in session.exec(select(User)).all()
-                if not u.is_system_default and _location_visible_to(session, u, person.lower(), grants)
+                if not u.is_system_default and u.family_role not in roles.MINOR_FAMILY_ROLES
+                and _location_visible_to(session, u, person.lower(), grants)
             ]
             low_battery = (person, (owner.display_name if owner else "") or person.title(), family,
                            _device_word(session, person))
@@ -8424,7 +8436,8 @@ def ingest_telemetry(
         if announced_at is not None:
             owner_username = device.owner_username or caller.username
             owner = session.exec(select(User).where(User.username == owner_username)).first()
-            family = [u.username for u in session.exec(select(User)).all() if not u.is_system_default]
+            family = [u.username for u in session.exec(select(User)).all()
+                      if not u.is_system_default and u.family_role not in roles.MINOR_FAMILY_ROLES]
             label = device.label or f"{(owner.display_name if owner else owner_username.title())}'s watch"
             watch_alert = (device.device_key, label, announced_at, family, owner_username)
 

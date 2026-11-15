@@ -65,6 +65,17 @@ def test_dropping_below_15_tells_the_rest_of_the_family_once(family):
     assert notice["once"] == f"battery:leo:{date.today().isoformat()}"
 
 
+def test_children_and_teens_are_not_told_about_someone_elses_battery(family):
+    report, sent = family
+    with Session(identity_main.engine) as session:
+        sam = session.exec(select(User).where(User.username == "sam")).one()
+        sam.family_role = "teen"
+        session.add(sam)
+        session.commit()
+    report(14)
+    assert [n["user"] for n in sent] == ["alex"]
+
+
 def test_a_tablet_is_called_a_tablet(family):
     report, sent = family
     with Session(identity_main.engine) as session:

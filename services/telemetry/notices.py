@@ -114,6 +114,7 @@ def parse(body: dict[str, Any]) -> dict[str, Any]:
         "actions": _actions(body.get("actions")),
         "once": str(body.get("once") or "").strip()[:200],
         "audience": audience,
+        "replace": body.get("replace") is True,
     }
 
 
@@ -234,6 +235,8 @@ async def deliver(rc, session: aiohttp.ClientSession, user: str, fields: dict[st
         "created_at": utcnow_iso(),
     }
     try:
+        if fields.get("replace") and notice["tag"]:
+            await store.drop_unread_tagged(rc, user, notice["tag"])
         await store.push_notification(rc, user, {**notice, "read": False})
     except Exception:
         # Not recorded, so not sent: a retry must not count as a duplicate.

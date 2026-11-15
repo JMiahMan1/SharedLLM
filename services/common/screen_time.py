@@ -540,12 +540,34 @@ def carried_over(rules: dict[str, Any] | None, past_days: list[dict[str, Any]] |
     return bank
 
 
-def chore_answer_words(approved: bool, title: str | None) -> tuple[str, str]:
-    """What the child is told when a parent answers a ticked-off chore (title, body)."""
+#: How many chore names a merged approval lists before "and N more".
+CHORES_NAMED = 3
+
+
+def chore_answer_words(approved: bool, title: str | None,
+                       approved_today: list[str] | None = None) -> tuple[str, str]:
+    """What the child is told when a parent answers a ticked-off chore (title, body).
+
+    ``approved_today`` is every chore of that day approved so far (identity
+    sends it): with more than one, the approval is one merged notice that
+    replaces the last one, so a child does not get a stack of "Chore approved".
+    """
     name = f"\u201c{title or 'your chore'}\u201d"
-    if approved:
+    if not approved:
+        return "Have another go", f"A parent asked you to redo {name}. It's back on your list."
+    done = [t or "a chore" for t in (approved_today or [])]
+    if len(done) <= 1:
         return "Chore approved", f"{name} was done right. Nice work!"
-    return "Have another go", f"A parent asked you to redo {name}. It's back on your list."
+    named = [f"\u201c{t}\u201d" for t in done[:CHORES_NAMED]]
+    rest = len(done) - CHORES_NAMED
+    head, last = (named, f"{rest} more") if rest > 0 else (named[:-1], named[-1])
+    listed = f"{', '.join(head)} and {last}"
+    return f"{len(done)} chores approved today", f"{listed} were done right. Nice work!"
+
+
+def chore_answer_tag(child: str, approved: bool) -> str:
+    """Approvals share one tag per child, so each merged notice replaces the last."""
+    return f"chores-approved:{child}" if approved else f"screen-time:{child}"
 
 
 def evaluate(

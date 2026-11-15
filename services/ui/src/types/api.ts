@@ -552,6 +552,8 @@ export interface MemberGuardState {
   notificationAccess?: boolean;
   /** Jarvis may post its own notices here (family chat, alerts); off means they never show. */
   jarvisNotifications?: boolean;
+  /** Android lets Jarvis install its own updates ("Install unknown apps"). */
+  installUpdates?: boolean;
   callLogAccess?: boolean;
   smsAccess?: boolean;
   activityAccess?: boolean;

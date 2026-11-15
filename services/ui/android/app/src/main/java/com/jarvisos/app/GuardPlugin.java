@@ -101,6 +101,10 @@ public class GuardPlugin extends Plugin {
         // Whether Jarvis's own notices (family chat, alerts) can show on this device.
         JSObject notices = PushPlugin.notificationState(getContext());
         out.put("jarvisNotifications", notices.optBoolean("app", true) && notices.optBoolean("chat", true));
+        // Whether Android lets Jarvis install its own updates ("Install unknown
+        // apps"): without it the background updater can never update this device.
+        out.put("installUpdates", android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O
+                || getContext().getPackageManager().canRequestPackageInstalls());
         call.resolve(out);
     }
 

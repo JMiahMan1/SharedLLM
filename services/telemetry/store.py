@@ -218,6 +218,24 @@ async def push_notification(rc, user: str, notification: dict[str, Any]) -> None
     await rc.ltrim(key, -NOTIFICATION_HISTORY, -1)
 
 
+async def drop_unread_tagged(rc, user: str, tag: str) -> int:
+    """Remove ``user``'s unread notices carrying ``tag``; how many went.
+
+    A notice sent with ``replace`` supersedes them (a merged "3 chores
+    approved" replaces "2 chores approved"). Read ones stay as history.
+    """
+    key = f"{NOTIFY_PREFIX}{user}"
+    removed = 0
+    for raw in await rc.lrange(key, 0, -1):
+        try:
+            item = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(item, dict) and item.get("tag") == tag and not item.get("read"):
+            removed += int(await rc.lrem(key, 1, raw) or 0)
+    return removed
+
+
 async def list_notifications(rc, user: str, limit: int = 20) -> list[dict[str, Any]]:
     raw = await rc.lrange(f"{NOTIFY_PREFIX}{user}", -limit, -1)
     return [json.loads(r) for r in raw if r]

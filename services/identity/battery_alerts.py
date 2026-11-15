@@ -3,7 +3,7 @@
 Every location upload carries the phone's (or tablet's) battery percentage (and, from newer
 app builds, whether it is charging). The first reading below LOW_BATTERY_PCT
 that is not charging sends one ``family_safety`` notice to the rest of the
-family. Only a charging phone, or a reading of at least LOW_BATTERY_PCT +
+family's adults (children and teens are not told; the caller leaves them out). Only a charging phone, or a reading of at least LOW_BATTERY_PCT +
 REARM_MARGIN (it was charged), arms it again for the next discharge: a reading
 that wobbles around the threshold, or two phones on one account reporting in
 turn, must not announce again. The state rides along in the stored location
