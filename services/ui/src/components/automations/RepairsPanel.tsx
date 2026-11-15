@@ -28,11 +28,17 @@ export default function RepairsPanel({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   const [evidence, setEvidence] = useState<RemapEvidence[] | null>(null);
 
+  // Seed the editor from the stored remap once, when it first arrives. Keyed on
+  // the text being empty, emptying the box (to paste a new remap) put the old
+  // one straight back.
+  const [seeded, setSeeded] = useState(false);
   useEffect(() => {
-    // Seed the editor from the stored remap once it arrives.
+    const data = remap.data;
+    if (seeded || !data) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time seed from the query
-    if (remap.data && !text) setText(JSON.stringify(remap.data.remap ?? {}, null, 2));
-  }, [remap.data, text]);
+    setSeeded(true);
+    setText((current) => current || JSON.stringify(data.remap ?? {}, null, 2));
+  }, [remap.data, seeded]);
 
   const parsed = (): Remap | null => {
     try {

@@ -91,4 +91,18 @@ describe('HelpersPanel', () => {
     await userEvent.click(within(screen.getByTestId('helper-form')).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(helpers.deleteHelper).toHaveBeenCalledWith('input_boolean', 'guests'));
   });
+
+  it('keeps the list, and the value being typed, when one poll fails', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><HelpersPanel /></QueryClientProvider>);
+    const box = await screen.findByRole('textbox', { name: /Run Pasta for/ });
+    await userEvent.type(box, '0:00:4');
+    vi.mocked(helpers.listHelpers).mockRejectedValueOnce(new Error('hub timed out'));
+    await client.refetchQueries();
+    await waitFor(() => expect(client.getQueryState(['homehub-helpers'])?.status).toBe('error'));
+    expect(screen.queryByText('hub timed out')).toBeNull();
+    expect(screen.getByRole('textbox', { name: /Run Pasta for/ })).toBe(box);
+    expect(document.activeElement).toBe(box);
+    expect((box as HTMLInputElement).value).toBe('0:00:4');
+  });
 });

@@ -53,9 +53,17 @@ export default function RavenOpsPanel() {
 
   const updateConfigMutation = useMutation({
     mutationFn: (newConfig: Partial<RavenConfig>) => api.updateRavenConfig(newConfig),
-    onSuccess: () => {
+    onSuccess: (_result, saved) => {
       queryClient.invalidateQueries({ queryKey: ['raven-config'] });
-      setDraftConfig({});
+      // Drop only what was saved: clearing every draft threw away a number
+      // typed in one box when another setting was saved or toggled.
+      setDraftConfig((draft) => {
+        const next = { ...draft };
+        for (const key of Object.keys(saved) as Array<keyof RavenConfig>) {
+          if (next[key] === saved[key]) delete next[key];
+        }
+        return next;
+      });
       toast.success('Raven settings saved');
     },
     onError: (err: unknown) => toast.error(errorText(err, 'Failed to save Raven settings')),

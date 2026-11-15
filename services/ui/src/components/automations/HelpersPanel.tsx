@@ -58,7 +58,10 @@ export default function HelpersPanel() {
       <MessageList tone="warning" title="Left out (the hub could not read them)" items={list.data?.problems ?? []} />
       {list.isLoading ? (
         <div className="flex justify-center py-4" role="status" aria-label="Loading helpers"><Loader2 className="animate-spin text-slate-500" /></div>
-      ) : list.isError ? (
+      ) : list.isError && !list.data ? (
+        // Only with nothing to show: one failed 5 s poll used to swap the list
+        // for this, unmounting every helper and the value being typed into it
+        // (closing a phone's keyboard). The next poll brings the list back.
         <ErrorRetry title={errorText(list.error, 'Could not reach the hub')} onRetry={() => void list.refetch()} />
       ) : (list.data?.helpers.length ?? 0) === 0 ? (
         <EmptyState title="No helpers yet" detail="Add one, or import them with your Home Assistant data." />

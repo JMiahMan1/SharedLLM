@@ -112,17 +112,27 @@ export default function MotionRecordingSettings() {
   });
   const [cams, setCams] = useState<Record<string, CameraRecordingSettings>>({});
 
+  const sd = settings.data;
+  const stored = sd && {
+    form: {
+      account: sd.account ?? (sd.household_account ? 'household' : 'custom'),
+      url: sd.url, username: sd.username, password: '', folder: sd.folder, enabled: sd.configured ? sd.enabled : true,
+    } as AccountForm,
+    cams: Object.fromEntries(sd.cameras.map((c) => [c.entity_id, { ...c.settings }])) as Record<string, CameraRecordingSettings>,
+  };
+  const storedKey = stored ? JSON.stringify(stored) : '';
   useEffect(() => {
-    const s = settings.data;
-    if (!s) return;
-    // A fresh read from the hub replaces whatever was typed.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the form mirrors the server
-    setForm({
-      account: s.account ?? (s.household_account ? 'household' : 'custom'),
-      url: s.url, username: s.username, password: '', folder: s.folder, enabled: s.configured ? s.enabled : true,
-    });
-    setCams(Object.fromEntries(s.cameras.map((c) => [c.entity_id, { ...c.settings }])));
-  }, [settings.data]);
+    // Seed from what the hub stores, and again only when that changes. The
+    // reply also carries live status (running, starting, errors) that changes
+    // on every refetch, including the one when the app comes back to the
+    // front; keyed on the whole reply, each of those wiped what was typed (on
+    // a phone, a password copied from another app was gone on return).
+    if (!stored) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the form mirrors what the hub stores
+    setForm(stored.form);
+    setCams(stored.cams);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the stored values, not the reply
+  }, [storedKey]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -139,6 +149,7 @@ export default function MotionRecordingSettings() {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(QUERY_KEY, data);
+      setForm((f) => ({ ...f, password: '' }));  // sent; never kept in the form
       void queryClient.invalidateQueries({ queryKey: ['cameras'] });  // a camera may now have a Recordings tab
       toast.success('Motion recording saved');
     },
@@ -148,7 +159,7 @@ export default function MotionRecordingSettings() {
   if (settings.isLoading) {
     return <div className="flex justify-center py-6" role="status" aria-label="Loading"><Loader2 className="animate-spin text-slate-500" /></div>;
   }
-  if (settings.isError || !settings.data) {
+  if (!settings.data) {
     return <p className="text-sm text-red-300">{errorText(settings.error, 'Couldn’t read the motion recording settings')}</p>;
   }
   const s = settings.data;

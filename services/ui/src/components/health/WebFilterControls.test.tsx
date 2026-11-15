@@ -7,7 +7,8 @@ import type { ScreenRules } from '../../types/api';
 
 vi.mock('../../services/api', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
-  return { ...actual, api: { ...(actual.api as Record<string, unknown>), setScreenRules: vi.fn() } };
+  return { ...actual, api: { ...(actual.api as Record<string, unknown>), setScreenRules: vi.fn(),
+    getScreenTimeStatus: vi.fn().mockResolvedValue({ device_kinds: ['phone'] }) } };
 });
 
 const wrap = (rules: ScreenRules) =>
@@ -46,5 +47,17 @@ describe('WebFilterControls (a parent)', () => {
     expect(vi.mocked(api.setScreenRules).mock.calls[0][1].web_filter).toEqual({
       enabled: true, adult: true, safe_search: false, categories: [], block: ['tiktok.com', 'www.reddit.com'], allow: ['khanacademy.org'],
     });
+  });
+
+  it('keeps a block list being typed when a toggle is flipped and saved', async () => {
+    wrap({ web_filter: { enabled: true, adult: true, safe_search: false } });
+    const box = screen.getByPlaceholderText('tiktok.com') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'example.com\nanother.example' } });
+    fireEvent.click(screen.getByTestId('web-filter-safe_search'));
+    await waitFor(() => expect(api.setScreenRules).toHaveBeenCalledTimes(1));
+    // The toggle's save has landed: the list is still there, and still unsaved.
+    await waitFor(() => expect(screen.getByTestId('web-filter-safe_search')).not.toBeDisabled());
+    expect(box.value).toBe('example.com\nanother.example');
+    expect(screen.getByTestId('web-filter-save')).toBeTruthy();
   });
 });

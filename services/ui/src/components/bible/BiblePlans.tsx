@@ -452,10 +452,13 @@ function PlanReflection({ planId, day }: { planId: string; day: number }) {
   const saved = data?.reflections.find((r) => r.day === day)?.text ?? '';
   const [text, setText] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: () => api.saveBiblePlanReflection(planId, day, (text ?? saved).trim()),
-    onSuccess: () => {
-      setText(null);
-      void queryClient.invalidateQueries({ queryKey: key });
+    mutationFn: (sent: string) => api.saveBiblePlanReflection(planId, day, sent.trim()),
+    // Let go of the draft only once the saved copy is back, and only if
+    // nothing was typed meanwhile: clearing it at once showed the old
+    // reflection until the refetch landed, and dropped words typed after Save.
+    onSuccess: async (_result, sent) => {
+      await queryClient.invalidateQueries({ queryKey: key });
+      setText((current) => (current === sent ? null : current));
     },
   });
   const value = text ?? saved;
@@ -474,7 +477,7 @@ function PlanReflection({ planId, day }: { planId: string; day: number }) {
         <button
           type="button"
           disabled={!text.trim() || save.isPending}
-          onClick={() => save.mutate()}
+          onClick={() => save.mutate(text ?? saved)}
           className="min-h-11 rounded-xl border border-white/10 px-3 text-xs text-sky-200 disabled:opacity-50"
         >
           Save reflection
