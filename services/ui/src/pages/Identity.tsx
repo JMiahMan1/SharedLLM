@@ -893,12 +893,12 @@ const Identity = () => {
                <h3 className="font-bold text-white mb-4 text-xs tracking-widest uppercase">Family accounts</h3>
                <div className="space-y-3">
                   {usersList?.map((u) => (
-                    <div key={u.id} className="flex items-center justify-between p-3 glass-card text-xs">
-                       <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${u.is_admin ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]' : 'bg-slate-600'}`} />
-                          <span className="font-bold text-slate-300">@{u.username}</span>
+                    <div key={u.id} className="flex items-center justify-between gap-2 p-3 glass-card text-xs">
+                       <div className="flex min-w-0 items-center gap-3">
+                          <div className={`w-2 h-2 shrink-0 rounded-full ${u.is_admin ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]' : 'bg-slate-600'}`} />
+                          <span className="min-w-0 break-all font-bold text-slate-300">@{u.username}</span>
                        </div>
-                       <span className="text-[8px] uppercase font-black px-2 py-0.5 rounded-full bg-white/5 text-slate-500">{u.is_admin ? 'Admin' : 'User'}</span>
+                       <span className="shrink-0 text-[8px] uppercase font-black px-2 py-0.5 rounded-full bg-white/5 text-slate-500">{u.is_admin ? 'Admin' : 'User'}</span>
                     </div>
                   ))}
                </div>

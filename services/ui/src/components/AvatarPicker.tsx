@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Camera, Check, Crop, Loader2, Trash2, X } from 'lucide-react';
@@ -50,6 +50,15 @@ export default function AvatarPicker({ user, onClose }: { user: UserProfile; onC
     onError: (e) => toast.error(errorText(e, 'That did not work')),
   });
   const remove = useMutation({ mutationFn: () => api.removeAvatar(), onSuccess: saved, onError: (e) => toast.error(errorText(e, 'That did not work')) });
+  // Escape closes the picker, as it does every other dialog (the open cropper handles its own).
+  const editingNow = editing !== null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !editingNow) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editingNow, onClose]);
   const busy = choose.isPending || upload.isPending || remove.isPending || preparing;
   const current = user.avatar ?? null;
 

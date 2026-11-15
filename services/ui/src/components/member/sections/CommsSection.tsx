@@ -128,7 +128,7 @@ export default function CommsSection({ username, name }: { username: string; nam
               type="button"
               aria-pressed={days === d}
               onClick={() => setDays(d)}
-              className={`min-h-10 rounded-lg px-4 text-xs font-medium transition-colors ${days === d ? 'bg-[var(--site-accent-soft)] text-[var(--site-accent-text)]' : 'text-slate-400 hover:text-slate-200'}`}
+              className={`min-h-11 rounded-lg px-4 text-xs sm:min-h-10 font-medium transition-colors ${days === d ? 'bg-[var(--site-accent-soft)] text-[var(--site-accent-text)]' : 'text-slate-400 hover:text-slate-200'}`}
             >
               {d === 1 ? 'Today' : `${d} days`}
             </button>

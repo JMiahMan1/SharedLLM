@@ -33,7 +33,8 @@ function BookTags({ book, isAdmin }: { book: LibraryBook; isAdmin: boolean }) {
               onClick={() => change.mutate({ add: [], remove: [tag] })}
               disabled={change.isPending}
               aria-label={`Remove tag ${tag} from ${book.title}`}
-              className="text-indigo-300/70 hover:text-white"
+              // A thumb-sized target on a touch screen, without making the pill taller.
+              className="inline-flex items-center justify-center text-indigo-300/70 hover:text-white pointer-coarse:-my-4 pointer-coarse:min-h-11 pointer-coarse:min-w-8"
             >
               <X size={11} />
             </button>
@@ -411,7 +412,7 @@ export default function LibraryPanel({ isAdmin }: { isAdmin: boolean }) {
       </form>
 
       <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Filter by tag">
-        <button type="button" onClick={() => { setUntagged(!untagged); setTag(''); setPage(0); }} aria-pressed={untagged} className={`min-h-9 rounded-full border px-3 text-xs ${untagged ? 'border-indigo-400/60 bg-indigo-500/25 text-white' : 'border-white/10 text-slate-300'}`}>
+        <button type="button" onClick={() => { setUntagged(!untagged); setTag(''); setPage(0); }} aria-pressed={untagged} className={`min-h-9 pointer-coarse:min-h-11 rounded-full border px-3 text-xs ${untagged ? 'border-indigo-400/60 bg-indigo-500/25 text-white' : 'border-white/10 text-slate-300'}`}>
           Untagged
         </button>
         {(tags.data?.tags ?? []).slice(0, 24).map((t) => (
@@ -420,7 +421,7 @@ export default function LibraryPanel({ isAdmin }: { isAdmin: boolean }) {
             type="button"
             onClick={() => { setTag(tag === t.name ? '' : t.name); setUntagged(false); setPage(0); }}
             aria-pressed={tag === t.name}
-            className={`min-h-9 rounded-full border px-3 text-xs ${tag === t.name ? 'border-indigo-400/60 bg-indigo-500/25 text-white' : 'border-white/10 text-slate-300'}`}
+            className={`min-h-9 pointer-coarse:min-h-11 rounded-full border px-3 text-xs ${tag === t.name ? 'border-indigo-400/60 bg-indigo-500/25 text-white' : 'border-white/10 text-slate-300'}`}
           >
             <Tag size={10} className="mr-1 inline" aria-hidden />{t.name} <span className="text-slate-500">{t.books}</span>
           </button>

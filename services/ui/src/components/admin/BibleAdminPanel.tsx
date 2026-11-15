@@ -141,7 +141,7 @@ export default function BibleAdminPanel() {
                 data-testid={`bible-admin-version-${version.code}`}
               >
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm text-white font-medium">{version.name}</span>
+                  <span className="min-w-0 text-sm text-white font-medium [overflow-wrap:anywhere]">{version.name}</span>
                   {version.primary ? (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 flex items-center gap-1">
                       <Star size={9} /> Primary

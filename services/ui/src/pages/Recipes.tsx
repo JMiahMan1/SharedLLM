@@ -230,7 +230,7 @@ export default function Recipes() {
     <div className="space-y-4" data-testid="recipes">
       {!inDetail && (
         <header className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex flex-wrap items-center gap-3">
             <div className="mr-auto flex items-center gap-2">
               <BookOpen size={20} className="text-orange-300" />
               <h1 className="text-xl font-bold text-white">Family cookbook</h1>
@@ -253,7 +253,9 @@ export default function Recipes() {
             <button type="button" onClick={() => go({ add: '1' })} className="glass-button min-h-11 bg-purple-500/20 px-4 text-sm font-semibold text-white">
               <Plus size={16} /> <span className="sm:hidden">Add</span><span className="hidden sm:inline">Add a recipe</span>
             </button>
-            <div className="relative">
+            {/* On a phone the menu lines up with the header's right edge (the button can sit anywhere in the
+                wrapped row, and a menu hung from it ran off one side or the other). */}
+            <div className="relative max-sm:static">
               <button type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label="More cookbook actions" className="glass-button flex h-11 w-11 items-center justify-center p-0">
                 {busy === 'teach' ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
               </button>

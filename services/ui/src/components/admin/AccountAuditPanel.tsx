@@ -60,7 +60,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
             return (
               <li key={event.id} className="glass-card p-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm text-slate-100">
+                  <p className="min-w-0 text-sm text-slate-100 [overflow-wrap:anywhere]">
                     {secretTouched && <KeyRound size={13} className="mr-1.5 inline text-amber-300" aria-label="touched a credential" />}
                     {describeEvent(event)}
                   </p>
@@ -69,7 +69,7 @@ export default function AccountAuditPanel({ users }: { users: string[] }) {
                   </time>
                 </div>
                 {event.changes.length > 0 ? (
-                  <p className="mt-1 text-xs text-slate-300">{event.changes.map(describeChange).join(' · ')}</p>
+                  <p className="mt-1 text-xs text-slate-300 [overflow-wrap:anywhere]">{event.changes.map(describeChange).join(' · ')}</p>
                 ) : (
                   event.action.startsWith('user.') && <p className="mt-1 text-xs text-slate-500">Saved with no changes</p>
                 )}

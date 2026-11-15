@@ -400,7 +400,7 @@ const TelemetryAdminPanel = () => {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => setActiveEntity(enrollment.entity_id)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                      className="p-2 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                       title="View data"
                       aria-label={`View data for ${enrollment.entity_id}`}
                     >
@@ -409,7 +409,7 @@ const TelemetryAdminPanel = () => {
                     <button
                       onClick={() => snapshotTelemetryMutation.mutate(enrollment.entity_id)}
                       disabled={snapshotTelemetryMutation.isPending}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                      className="p-2 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                       title="Trigger snapshot"
                       aria-label={`Trigger snapshot for ${enrollment.entity_id}`}
                     >
@@ -417,7 +417,7 @@ const TelemetryAdminPanel = () => {
                     </button>
                     <button
                       onClick={() => startEdit(enrollment)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                      className="p-2 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                       title="Edit"
                       aria-label={`Edit telemetry settings for ${enrollment.entity_id}`}
                     >
@@ -425,7 +425,7 @@ const TelemetryAdminPanel = () => {
                     </button>
                     <button
                       onClick={() => unenrollTelemetryMutation.mutate(enrollment.entity_id)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                      className="p-2 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
                       title="Unenroll"
                       aria-label={`Unenroll ${enrollment.entity_id}`}
                     >

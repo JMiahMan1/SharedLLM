@@ -307,7 +307,7 @@ const RichNoteEditor = forwardRef<
       // Keep the selection while the button is pressed.
       onMouseDown={(e) => e.preventDefault()}
       onClick={onPress}
-      className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10"
+      className="flex h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10"
     >
       {icon}
     </button>
@@ -328,7 +328,9 @@ const RichNoteEditor = forwardRef<
           onKeyDown={onKeyDown}
           onClick={onClick}
           onScroll={measure}
-          className="note-rich glass-input min-h-48 max-h-[50vh] w-full overflow-y-auto p-3 text-base sm:text-sm"
+          // On a touch screen a checklist row is as tall as its thumb-sized grip and delete
+          // buttons, with room beside it for both (important: index.css sets the row unlayered).
+          className="note-rich glass-input pointer-coarse:[&_[data-task]]:min-h-11! pointer-coarse:[&_[data-task]]:pr-24! min-h-48 max-h-[50vh] w-full overflow-y-auto p-3 text-base sm:text-sm"
         />
         {renderAttachment &&
           attachmentBlocks.map((block, index) =>
@@ -349,7 +351,7 @@ const RichNoteEditor = forwardRef<
                 title="Drag to move, or use the arrow keys"
                 // The grip is the only place a touch drags instead of scrolling.
                 style={{ touchAction: 'none' }}
-                className={`pointer-events-auto flex h-8 w-8 cursor-grab items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 ${
+                className={`pointer-events-auto flex h-8 w-8 pointer-coarse:h-11 pointer-coarse:w-11 cursor-grab items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100 ${
                   drag?.from === index ? 'bg-white/10 text-slate-100' : ''
                 }`}
                 onMouseDown={(e) => e.preventDefault()}
@@ -384,7 +386,7 @@ const RichNoteEditor = forwardRef<
                 type="button"
                 aria-label={`Delete “${row.text || 'empty item'}”`}
                 title="Delete item"
-                className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-rose-300"
+                className="pointer-events-auto flex h-8 w-8 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-rose-300"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => deleteTask(index)}
               >
@@ -429,7 +431,7 @@ const RichNoteEditor = forwardRef<
                   run('foreColor', c.value || CLEAR);
                   setMenu(null);
                 }}
-                className="flex h-10 w-10 items-center justify-center"
+                className="flex h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center"
               >
                 <span className="h-6 w-6 rounded-full border border-white/30" style={{ background: c.value || 'transparent' }} />
               </button>
@@ -445,7 +447,7 @@ const RichNoteEditor = forwardRef<
                   run('hiliteColor', c.value || CLEAR);
                   setMenu(null);
                 }}
-                className="flex h-10 w-10 items-center justify-center"
+                className="flex h-10 w-10 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center"
               >
                 <span className="h-6 w-6 rounded-full border border-white/30" style={{ background: c.value || 'transparent' }} />
               </button>
@@ -460,7 +462,7 @@ const RichNoteEditor = forwardRef<
                   run('fontSize', s.command);
                   setMenu(null);
                 }}
-                className="glass-button min-h-10 px-3 py-1 text-xs"
+                className="glass-button min-h-10 pointer-coarse:min-h-11 px-3 py-1 text-xs"
               >
                 {s.label}
               </button>

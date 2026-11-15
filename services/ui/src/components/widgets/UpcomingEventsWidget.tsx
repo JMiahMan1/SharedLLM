@@ -203,7 +203,7 @@ const formatTime = (hour: number, minute: number): string => {
       settingsButton={settingsButton}
       isExpandable={true}
       icon="📅"
-      actions={events.length > 0 ? <span className="text-xs text-slate-400">Next {events.length}</span> : undefined}
+      actions={events.length > 0 ? <span className="text-xs text-slate-400 whitespace-nowrap">Next {events.length}</span> : undefined}
       expandedChildren={
         <div className="space-y-6 py-2">
           <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">

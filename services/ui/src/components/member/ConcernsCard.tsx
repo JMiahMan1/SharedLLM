@@ -197,7 +197,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   onClick={() => void exportConcerns(format)}
                   disabled={exporting !== null}
                   title={`Download all ${total} retained concerns as ${format.toUpperCase()}`}
-                  className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-200 transition hover:border-sky-300/40 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                  className="relative max-sm:before:absolute max-sm:before:inset-x-0 max-sm:before:-inset-y-2.5 max-sm:before:content-[''] inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 py-1 text-[10px] sm:py-0.5 font-semibold uppercase tracking-wide text-slate-200 transition hover:border-sky-300/40 hover:text-white disabled:cursor-wait disabled:opacity-50"
                 >
                   <Download size={10} />
                   {exporting === format ? '…' : format}
@@ -249,17 +249,17 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
             <>
               <span className="text-[11px] text-slate-300">Clear all {total} concerns and their images?</span>
               <button type="button" onClick={() => void clearConcerns('all')} disabled={clearing}
-                className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70">
+                className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70">
                 <Trash2 size={11} /> {clearing ? 'Clearing…' : 'Yes, clear all'}
               </button>
               <button type="button" onClick={() => setConfirmClear(null)} disabled={clearing}
-                className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
+                className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
                 Cancel
               </button>
             </>
           ) : (
             <button type="button" onClick={() => setConfirmClear('all')} disabled={clearing}
-              className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40 hover:text-white">
+              className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40 hover:text-white">
               <Trash2 size={11} /> Clear all
             </button>
           )}
@@ -356,18 +356,18 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
                   {confirmClear === c.id ? (
                     <>
                       <button type="button" onClick={() => void clearConcerns(c.id!)} disabled={clearing}
-                        className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70"
+                        className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-red-300/40 bg-red-400/15 text-red-100 hover:border-red-200/70"
                         data-testid="concern-clear-confirm">
                         <Trash2 size={11} /> {clearing ? 'Clearing…' : 'Yes, clear'}
                       </button>
                       <button type="button" onClick={() => setConfirmClear(null)} disabled={clearing}
-                        className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
+                        className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/40">
                         Cancel
                       </button>
                     </>
                   ) : (
                     <button type="button" onClick={() => setConfirmClear(c.id!)} disabled={clearing}
-                      className="inline-flex min-h-8 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40"
+                      className="inline-flex min-h-11 items-center sm:min-h-8 gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 border-white/10 bg-white/5 text-slate-200 hover:border-red-300/40"
                       data-testid="concern-clear">
                       <Trash2 size={11} /> Clear
                     </button>

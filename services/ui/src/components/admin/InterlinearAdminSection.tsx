@@ -63,7 +63,7 @@ export default function InterlinearAdminSection() {
         </p>
         <p className="text-[11px] text-slate-500">
           Upload the TAGNT (New Testament) and TAHOT (Old Testament) .txt files from{' '}
-          <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer" className="text-sky-300 hover:text-sky-200">
+          <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center align-middle text-sky-300 hover:text-sky-200 sm:min-h-0">
             STEPBible-Data
           </a>{' '}
           (CC BY 4.0). Six files cover the whole Bible; re-uploading one replaces those books.

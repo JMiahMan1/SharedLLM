@@ -573,7 +573,7 @@ export function ClimateControl({ entity, onChanged, compact = false }: {
             const active = shown.state === m;
             return (
               <button key={m} type="button" aria-pressed={active} disabled={unavailable}
-                className={`min-h-9 rounded-lg px-2 text-xs flex items-center gap-1 border ${active ? 'border-white/30 bg-white/10' : 'border-white/5 bg-white/5'}`}
+                className={`min-h-11 sm:min-h-9 rounded-lg px-2 text-xs flex items-center gap-1 border ${active ? 'border-white/30 bg-white/10' : 'border-white/5 bg-white/5'}`}
                 onClick={() => act('climate', 'set_hvac_mode', { hvac_mode: m }, { state: m })}>
                 <v.Icon size={13} className={v.tone} aria-hidden />{v.label}
               </button>

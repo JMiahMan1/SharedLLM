@@ -149,7 +149,8 @@ export default function HardwarePanel() {
           {list.data && <span className="font-semibold normal-case tracking-normal text-slate-400">{devices.length} devices</span>}
         </span>
         <span className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-          <label className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+          {/* A row of its own on a phone: beside both dropdowns it was squeezed to "Searc". */}
+          <label className="relative min-w-0 flex-1 basis-full sm:w-56 sm:flex-none sm:basis-auto">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search devices"
               aria-label="Search devices"

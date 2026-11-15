@@ -35,14 +35,15 @@ export default function VerseBanner() {
   return (
     <div className="flex shrink-0 items-center gap-2 bg-gradient-to-r from-indigo-900/90 via-purple-900/90 to-fuchsia-900/80 px-3 py-2" data-testid="chat-verse-banner">
       <BookOpen size={15} className="shrink-0 text-amber-200" />
-      <p className="min-w-0 flex-1 truncate text-[13px] text-slate-100">
-        <span className="font-semibold text-amber-100">{verse.reference}</span>
-        <span className="text-slate-300">: {verse.text}</span>
+      {/* The reference stays whole; the verse is cut with an ellipsis inside its own box. */}
+      <p className="flex min-w-0 flex-1 text-[13px] text-slate-100">
+        <span className="shrink-0 font-semibold text-amber-100">{verse.reference}</span>
+        <span className="min-w-0 truncate text-slate-300">: {verse.text}</span>
       </p>
       <button
         type="button"
         onClick={() => navigate(`/bible?ref=${encodeURIComponent(verse.reference)}`)}
-        className="shrink-0 rounded-full bg-sky-400 px-3 py-1 text-[12px] font-bold text-slate-950 hover:bg-sky-300"
+        className="relative max-sm:before:absolute max-sm:before:inset-x-0 max-sm:before:-inset-y-2.5 max-sm:before:content-[''] shrink-0 rounded-full bg-sky-400 px-3 py-1 text-[12px] font-bold text-slate-950 hover:bg-sky-300"
       >
         Read
       </button>
@@ -57,7 +58,7 @@ export default function VerseBanner() {
           }
           setHidden(true);
         }}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-300 hover:bg-white/10"
+        className="relative max-sm:before:absolute max-sm:before:inset-x-0 max-sm:before:-inset-y-2.5 max-sm:before:content-[''] flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-300 hover:bg-white/10"
       >
         <X size={14} />
       </button>

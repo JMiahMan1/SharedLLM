@@ -91,7 +91,7 @@ function PlaceReminderSection({
             aria-label="Reminder place"
             value={chosen?.zone ?? ''}
             onChange={(e) => setZone(e.target.value)}
-            className="glass-input min-h-9 px-2 py-1 text-base sm:text-xs"
+            className="glass-input min-h-9 pointer-coarse:min-h-11 px-2 py-1 text-base sm:text-xs"
           >
             {!chosen && <option value="">Pick a place</option>}
             {places.map((p) => (
@@ -104,7 +104,7 @@ function PlaceReminderSection({
             aria-label="Remind me when I"
             value={on}
             onChange={(e) => setOn(e.target.value === 'leave' ? 'leave' : 'arrive')}
-            className="glass-input min-h-9 px-2 py-1 text-base sm:text-xs"
+            className="glass-input min-h-9 pointer-coarse:min-h-11 px-2 py-1 text-base sm:text-xs"
           >
             <option value="arrive">arrive</option>
             <option value="leave">leave</option>
@@ -112,7 +112,7 @@ function PlaceReminderSection({
           <button
             type="button"
             disabled={busy || !chosen}
-            className="glass-button min-h-9 px-3 py-1 text-xs"
+            className="glass-button min-h-9 pointer-coarse:min-h-11 px-3 py-1 text-xs"
             onClick={() => chosen && void run(() => onSet(chosen, on))}
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}{' '}
@@ -122,7 +122,7 @@ function PlaceReminderSection({
             <button
               type="button"
               disabled={busy}
-              className="min-h-9 rounded-xl px-3 py-1 text-xs text-rose-300 hover:bg-white/5"
+              className="min-h-9 pointer-coarse:min-h-11 rounded-xl px-3 py-1 text-xs text-rose-300 hover:bg-white/5"
               onClick={() => void run(onClear)}
             >
               <BellOff size={13} className="mr-1 inline" /> Remove place reminder
@@ -228,7 +228,7 @@ export default function ReminderPanel({
             key={pick.label}
             type="button"
             disabled={busy}
-            className="glass-button min-h-9 px-3 py-1 text-xs"
+            className="glass-button min-h-9 pointer-coarse:min-h-11 px-3 py-1 text-xs"
             onClick={() => set(pick.at)}
           >
             {pick.label}
@@ -242,12 +242,12 @@ export default function ReminderPanel({
           onChange={(e) => setValue(e.target.value)}
           // Its own row on a phone: a date-and-time field will not shrink below
           // its contents, which ran off the screen with larger text.
-          className="glass-input min-h-9 w-full min-w-0 max-w-full px-2 py-1 text-base sm:w-auto sm:text-xs"
+          className="glass-input min-h-9 pointer-coarse:min-h-11 w-full min-w-0 max-w-full px-2 py-1 text-base sm:w-auto sm:text-xs"
         />
         <button
           type="button"
           disabled={busy}
-          className="glass-button min-h-9 px-3 py-1 text-xs"
+          className="glass-button min-h-9 pointer-coarse:min-h-11 px-3 py-1 text-xs"
           onClick={() => set(new Date(value))}
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Bell size={13} />} {reminder ? 'Change reminder' : 'Set reminder'}
@@ -256,7 +256,7 @@ export default function ReminderPanel({
           <button
             type="button"
             disabled={busy}
-            className="min-h-9 rounded-xl px-3 py-1 text-xs text-rose-300 hover:bg-white/5"
+            className="min-h-9 pointer-coarse:min-h-11 rounded-xl px-3 py-1 text-xs text-rose-300 hover:bg-white/5"
             onClick={() => void run(onClear)}
           >
             <BellOff size={13} className="mr-1 inline" /> Remove

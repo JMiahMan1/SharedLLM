@@ -75,7 +75,7 @@ const SystemStoragePanel = () => {
                 <div key={row.user} className="p-4 flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="text-sm font-semibold text-white">{row.user}</p>
+                      <p className="min-w-0 break-all text-sm font-semibold text-white">{row.user}</p>
                       <p className="text-xs text-slate-400">
                         {formatBytes(row.used) || '0 B'} of {formatBytes(row.quota) || '0 B'} · {row.count} file{row.count === 1 ? '' : 's'}
                       </p>
@@ -100,7 +100,7 @@ const SystemStoragePanel = () => {
                   <button
                     onClick={() => save(row)}
                     aria-label={`Save quota for ${row.user}`}
-                    className="px-2.5 py-1.5 rounded-lg text-xs bg-purple-600/80 hover:bg-purple-600 text-white flex items-center gap-1.5"
+                    className="px-2.5 py-1.5 min-h-11 sm:min-h-0 rounded-lg text-xs bg-purple-600/80 hover:bg-purple-600 text-white flex items-center gap-1.5"
                   >
                     <Save size={13} /> Save
                   </button>

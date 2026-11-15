@@ -981,7 +981,7 @@ const Wander = () => {
             aria-pressed={mergeNearby}
             onClick={() => setMergeNearby((on) => !on)}
             title={mergeNearby ? 'Show everyone separately' : 'Merge people who are in the same place'}
-            className={`glass-button min-h-9 px-3 text-xs flex items-center gap-1.5 ${
+            className={`glass-button min-h-11 sm:min-h-9 px-3 text-xs flex items-center gap-1.5 ${
               mergeNearby ? 'ring-1 ring-purple-400/50 text-purple-200' : 'text-slate-400'
             }`}
           >
@@ -1270,7 +1270,7 @@ const Wander = () => {
                     type="button"
                     onClick={() => void handleOpenSuggestions(field.target)}
                     disabled={suggestLoading && suggestTarget === field.target}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors disabled:opacity-50"
+                    className="inline-flex max-sm:min-h-11 items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors disabled:opacity-50"
                   >
                     {suggestLoading && suggestTarget === field.target ? (
                       <Loader2 size={13} className="animate-spin" />
@@ -1292,7 +1292,7 @@ const Wander = () => {
                           key={`${s.kind}-${s.name}`}
                           type="button"
                           onClick={() => applySuggestion(s)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors max-w-full"
+                          className="inline-flex max-sm:min-h-11 items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors max-w-full"
                         >
                           <span className="truncate">{s.name}</span>
                           <span className="text-slate-500 shrink-0">
@@ -1449,7 +1449,7 @@ const Wander = () => {
                 type="button"
                 onClick={() => setEditingTrip(null)}
                 disabled={isSavingTrip}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all"
+                className="max-sm:min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all"
               >
                 Cancel
               </button>
@@ -1536,7 +1536,7 @@ const Wander = () => {
                 type="button"
                 onClick={() => setSharingTrip(null)}
                 disabled={isSavingShare}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all"
+                className="max-sm:min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-all"
               >
                 Cancel
               </button>

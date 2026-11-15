@@ -111,7 +111,7 @@ export default function NoteHistory({
                 type="button"
                 aria-pressed={selected === version.id}
                 onClick={() => setSelected(selected === version.id ? null : version.id)}
-                className={`flex min-h-9 w-full items-center justify-between gap-2 rounded-lg px-2 text-left text-xs ${
+                className={`flex min-h-9 pointer-coarse:min-h-11 w-full items-center justify-between gap-2 rounded-lg px-2 text-left text-xs ${
                   selected === version.id ? 'bg-white/10 text-slate-100' : 'text-slate-300 hover:bg-white/5'
                 }`}
               >
@@ -142,7 +142,7 @@ export default function NoteHistory({
           )}
           <button
             type="button"
-            className="glass-button min-h-9 px-3 py-1 text-xs"
+            className="glass-button min-h-9 pointer-coarse:min-h-11 px-3 py-1 text-xs"
             disabled={restoring || !preview.isSuccess}
             onClick={() => void restore(chosen)}
           >
