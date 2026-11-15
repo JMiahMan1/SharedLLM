@@ -26,6 +26,16 @@ export interface PrivateChatStatus {
   min_iterations: number;
 }
 
+/**
+ * Whether the signed-in person may use (or even hear of) the private chat: an
+ * adult father or mother. Everyone else, and anyone not known yet, gets no
+ * private-chat request and no private-chat UI; the server enforces the same
+ * rule (and answers anyone else with an empty status).
+ */
+export function mayUsePrivateChat(me?: { family_role?: string | null; is_minor?: boolean | null; is_system_default?: boolean | null } | null): boolean {
+  return Boolean(me && (me.family_role === 'father' || me.family_role === 'mother') && me.is_minor !== true && !me.is_system_default);
+}
+
 /** The shortest password the create form accepts. */
 export const MIN_PASSWORD_LENGTH = 8;
 

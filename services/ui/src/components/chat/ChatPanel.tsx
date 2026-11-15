@@ -16,7 +16,7 @@ import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
 import PrivateChatThread from './PrivateChatThread';
 import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
-import { errorText } from './privateChatModel';
+import { errorText, mayUsePrivateChat } from './privateChatModel';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
@@ -169,6 +169,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     },
     staleTime: 60_000,
     retry: false,
+    // Only an adult father or mother ever asks; nobody else hears of the feature.
+    enabled: mayUsePrivateChat(me),
   });
   const privateInfo = privateStatus.data?.chats.find((c) => c.token === activeToken);
   const privateInfoError = !isPrivate
@@ -181,6 +183,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           : privateStatus.data.reason || 'Private chats are only for the parents.'
         : undefined;
   const canStartPrivate = Boolean(
+    mayUsePrivateChat(me) &&
     privateStatus.data?.eligible && privateStatus.data.partners.length > 0 && privateStatus.data.chats.length === 0,
   );
 

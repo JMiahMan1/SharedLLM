@@ -382,4 +382,31 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-feed')).toBeVisible();
     done(run);
   });
+
+  test('a child account: no private chat anywhere, and never a private-chat request', async ({ page }, info) => {
+    const asked: string[] = [];
+    page.on('request', (req) => {
+      if (/\/api\/private-chat\//.test(new URL(req.url()).pathname)) asked.push(req.url());
+    });
+    await quietHotReload(page);
+    const mocks = await mockHome(page, 'member');
+    await mockHealth(page);
+    await mockBible(page);
+    await mockFamilyPages(page);
+    const run: Run = { mocks, errors: [], found: [] };
+    page.on('pageerror', (e) => run.errors.push(e.message));
+    await page.goto('/family');
+    await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="private-lock"]')).toHaveCount(0);
+    await check(page, info, run, 'child chat list', page.locator('main'));
+
+    await page.getByTestId('chat-new').click();
+    const sheet = page.getByRole('dialog').last();
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('new-private-chat-open')).toHaveCount(0);
+    await expect(sheet.getByText(/private/i)).toHaveCount(0);
+    await check(page, info, run, 'child new chat', sheet);
+    expect(asked).toEqual([]);
+    done(run);
+  });
 });

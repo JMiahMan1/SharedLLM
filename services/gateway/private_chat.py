@@ -119,6 +119,9 @@ _ALLOWED_ACTIONS = frozenset({
     "participants", "mentions", "call_join", "call_leave", "send", "edit_message",
 })
 
+#: The only error text anyone outside the feature can reach: it names nothing.
+NOT_AVAILABLE = "Not available."
+
 _create_lock = asyncio.Lock()
 _password_lock = asyncio.Lock()
 
@@ -134,7 +137,7 @@ class Store:
 
     def _chat_path(self, token: str) -> Path:
         if not _TOKEN.match(token or ""):
-            raise HTTPException(status_code=404, detail="No such private chat.")
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
         return self.root / "chats" / f"{token}.json"
 
     def _blob_dir(self, token: str) -> Path:
@@ -200,6 +203,12 @@ def private_tokens() -> set[str]:
     return get_store().tokens()
 
 
+def members(token: str | None) -> list[str]:
+    """The chat's two members (empty for anything that is not a private chat)."""
+    chat = get_store().get(str(token or ""))
+    return [str(m) for m in chat.get("members", [])] if chat else []
+
+
 def is_private(token: str | None) -> bool:
     return bool(token) and get_store().get(str(token)) is not None
 
@@ -256,14 +265,15 @@ async def _caller(request: Request) -> tuple[str, dict[str, dict[str, Any]]]:
 async def _member_chat(request: Request, token: str) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
     """The caller, the chat and the directory, for a member who is (still) a parent.
 
-    A chat the caller is not in answers 404, as if it did not exist.
+    A chat the caller is not in answers 404, as if it did not exist, and
+    nothing the caller can reach names the feature.
     """
     user, people = await _caller(request)
     chat = get_store().get(token)
     if not chat or user not in chat.get("members", []):
-        raise HTTPException(status_code=404, detail="No such private chat.")
+        raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
     if not is_parent(people.get(user)):
-        raise HTTPException(status_code=403, detail="Private chats are only for the parents.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     return user, chat, people
 
 
@@ -393,9 +403,10 @@ def guard_talk(token: str | None, action: str, message: str | None = None) -> No
     if not token or not is_private(token):
         return
     if action not in _ALLOWED_ACTIONS:
-        raise HTTPException(status_code=403, detail="That is not available in a private chat.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     if action in ("send", "edit_message") and not is_sealed(message):
-        raise HTTPException(status_code=403, detail="A private chat only takes encrypted messages. Unlock it in Jarvis to write.")
+        # Generic on purpose: someone outside the chat who knows its token learns nothing.
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
 
 
 def scrub_conversations(content: dict[str, Any]) -> dict[str, Any]:
@@ -424,25 +435,23 @@ def scrub_conversations(content: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/status")
 async def status(request: Request):
-    """Whether the caller may use private chats, their chats, and who they could start one with."""
+    """The caller's private chats and who they could start one with.
+
+    Anyone who may not use the feature (not a father or mother, a minor, no
+    chat account) gets exactly ``{"eligible": false, "chats": [], "partners": []}``:
+    no reason and nothing else that says the feature exists.
+    """
     user, people = await _caller(request)
     me = people.get(user)
-    eligible = is_parent(me)
-    chats = [_public(c, user, people) for c in get_store().all() if user in c.get("members", [])] if eligible else []
-    partners = (
-        [
-            {"username": name, "display_name": _display(p)}
-            for name, p in sorted(people.items())
-            if name != user and is_parent(p)
-        ]
-        if eligible
-        else []
-    )
-    reason = None
-    if not eligible:
-        reason = "Private chats are only for the parents (family role father or mother) with a chat account."
-    return {"eligible": eligible, "reason": reason, "chats": chats, "partners": partners,
-            "min_iterations": MIN_ITERATIONS}
+    if not is_parent(me):
+        return {"eligible": False, "chats": [], "partners": []}
+    chats = [_public(c, user, people) for c in get_store().all() if user in c.get("members", [])]
+    partners = [
+        {"username": name, "display_name": _display(p)}
+        for name, p in sorted(people.items())
+        if name != user and is_parent(p)
+    ]
+    return {"eligible": True, "chats": chats, "partners": partners, "min_iterations": MIN_ITERATIONS}
 
 
 @router.post("/chats")
@@ -462,13 +471,13 @@ async def create_chat(request: Request):
     user, people = await _caller(request)
     me = people.get(user)
     if not is_parent(me):
-        raise HTTPException(status_code=403, detail="Private chats are only for the parents.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     partner = str(body.get("partner") or "")
     if not _USER.match(partner) or partner == user:
         raise HTTPException(status_code=422, detail="Choose the other parent.")
     other = people.get(partner)
     if not is_parent(other):
-        raise HTTPException(status_code=403, detail="A private chat can only be with the other parent.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     params = _wrapping(body)
     params["auth_hash"] = _auth_hash(_auth(body.get("auth"), "auth"))
     members = sorted([user, partner])
@@ -660,7 +669,7 @@ async def change_password(token: str, request: Request):
         store = get_store()
         chat = store.get(token)
         if not chat or user not in chat.get("members", []):
-            raise HTTPException(status_code=404, detail="No such private chat.")
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
         now = time.time()
         attempts = _recent_attempts(chat, now)
         if len(attempts) >= PASSWORD_CHANGE_LIMIT:

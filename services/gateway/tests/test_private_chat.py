@@ -199,8 +199,34 @@ def test_status_says_who_may_use_it(env):
     assert parent["eligible"] is True
     assert [c["token"] for c in parent["chats"]] == ["room123abc"]
     assert [p["username"] for p in parent["partners"]] == ["alex"]
-    kid = env["client"].get("/api/private-chat/status", headers=_as("kid")).json()
-    assert kid["eligible"] is False and kid["chats"] == [] and kid["partners"] == [] and kid["reason"]
+
+
+@pytest.mark.parametrize("caller", ["kid", "teen", "gran", "uncle", "nochat"])
+def test_anyone_else_gets_exactly_the_empty_answer(env, caller):
+    _create(env)
+    resp = env["client"].get("/api/private-chat/status", headers=_as(caller))
+    assert resp.status_code == 200
+    # Nothing that says the feature exists: no reason, no partners, no parameters.
+    assert resp.json() == {"eligible": False, "chats": [], "partners": []}
+
+
+@pytest.mark.parametrize("caller", ["kid", "teen", "gran", "uncle"])
+def test_what_an_outsider_can_reach_names_nothing(env, caller):
+    _create(env)
+    c = env["client"]
+    answers = [
+        _create(env, user=caller),
+        c.get("/api/private-chat/chats/room123abc", headers=_as(caller)),
+        c.delete("/api/private-chat/chats/room123abc", headers=_as(caller)),
+        c.post("/api/private-chat/chats/room123abc/nudge", headers=_as(caller)),
+        c.post("/api/private-chat/chats/room123abc/password", json={}, headers=_as(caller)),
+        c.post("/api/private-chat/chats/room123abc/blobs", content=b"x" * 64, headers=_as(caller)),
+        c.get("/api/private-chat/chats/nosuchroom/blobs/" + "a" * 32, headers=_as(caller)),
+    ]
+    for resp in answers:
+        assert resp.status_code in (403, 404), resp.text
+        assert resp.json()["detail"] == "Not available.", resp.text
+        assert "private" not in resp.text.lower()
 
 
 def test_a_member_who_stops_being_a_parent_loses_access(env, monkeypatch):
@@ -298,6 +324,7 @@ def talk_routes(env, monkeypatch):
 def test_nothing_readable_goes_into_a_private_room(talk_routes, path, body):
     resp = talk_routes["client"].post(path, json={"token": "room123abc", **body})
     assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == "Not available."
     assert talk_routes["sent"] == []
 
 
@@ -348,6 +375,7 @@ def test_a_nudge_says_who_and_nothing_else(env):
     assert resp.json()["nudged"] == ["sam"]
     (notice,) = env["notices"]
     assert notice["user"] == "sam"
+    assert {n["user"] for n in env["notices"]} <= {"alex", "sam"}
     assert notice["title"] == "Private chat"
     assert notice["body"] == "Alex nudged you in your private chat"
     assert notice["data"]["url"] == "/family?chat=room123abc"
@@ -574,6 +602,7 @@ def test_the_other_parent_gets_a_notice_with_no_content(env):
     assert _change(env, user="alex").status_code == 200
     (notice,) = env["notices"]
     assert notice["user"] == "sam"
+    assert {n["user"] for n in env["notices"]} <= set(_saved(env)["members"])
     assert notice["title"] == "Private chat"
     assert notice["body"] == "Alex changed the private chat password"
     assert notice["data"]["url"] == "/family?chat=room123abc"
@@ -589,3 +618,72 @@ def test_an_undelivered_notice_does_not_undo_the_change(env):
     resp = _change(env)
     assert resp.status_code == 200 and resp.json()["notified"] == []
     assert _saved(env)["version"] == 2
+
+
+# --- Message notices go to the two members only ---------------------------------
+
+
+class _Resp:
+    def __init__(self, body):
+        self.status = 200
+        self._body = body
+
+    async def json(self, content_type=None):
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Client:
+    def __init__(self, conversations):
+        self.conversations = conversations
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        if url.endswith("/api/resolve"):
+            return _Resp({"nextcloud_user": json["rag_user"]})
+        return _Resp({"status": "SUCCESS", "detail": {"conversations": self.conversations}})
+
+
+class _AsyncRedis:
+    def __init__(self):
+        self.seen = {"room123abc": "1"}
+
+    async def hgetall(self, key):
+        return dict(self.seen)
+
+    async def get(self, key):
+        return "1"
+
+    async def hset(self, key, field, value):
+        self.seen[field] = value
+
+    async def set(self, key, value):
+        return True
+
+
+@pytest.mark.parametrize("user,expected", [("sam", 1), ("kid", 0), ("gran", 0)])
+def test_a_private_message_notice_reaches_only_a_member(env, monkeypatch, user, expected):
+    import asyncio
+
+    _create(env)
+    sent: list[dict] = []
+
+    async def send(notice, **kw):
+        sent.append(notice)
+        return True
+
+    monkeypatch.setattr(notify, "send", send)
+    conv = _conv(last_message_actor_id="alex", last_message_actor="Alex")
+    count = asyncio.run(chat_notify._check_user(
+        _AsyncRedis(), _Client([conv]), user, identity="i", execution="e", telemetry="t",
+        headers={"X-Internal-Secret": "s"}, timeout=None))
+    assert count == expected and len(sent) == expected
+    assert all(n["user"] in ("alex", "sam") for n in sent)
+    # The notice carries the message id (for a phone that shows previews) and never content.
+    for n in sent:
+        assert n["data"]["message_id"] == 9
+        assert "BBBB" not in json.dumps(n)
