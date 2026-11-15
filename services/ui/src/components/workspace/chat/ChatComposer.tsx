@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CornerDownLeft, ListPlus, Send, Square, X } from 'lucide-react';
 import type { WorkspaceAskMode } from '../../../types/api';
 import { ASK_MODES, askModeMeta } from './askModes';
+import { isImeKey } from '../../../lib/keyboard';
 
 interface ChatComposerProps {
   onSend: (text: string, mode: WorkspaceAskMode) => void;
@@ -93,7 +94,7 @@ export default function ChatComposer({
           autoFocus={autoFocus}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === 'Enter' && !e.shiftKey && !isImeKey(e)) {
               e.preventDefault();
               submit();
             }

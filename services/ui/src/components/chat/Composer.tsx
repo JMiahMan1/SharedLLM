@@ -22,6 +22,7 @@ import SendAsSelector from './SendAsSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { blobToBase64 } from '../../lib/base64';
 import type { SendAs } from './sendAsPref';
+import { isImeKey } from '../../lib/keyboard';
 
 interface VoicePayload {
   audio_base64: string;
@@ -57,6 +58,13 @@ interface ComposerProps {
   onSendAsChange: (next: SendAs) => void;
   /** Shortcuts shown as chips above the input (verse, games, create...). */
   quickActions?: QuickAction[];
+  /**
+   * Unsent text per conversation, owned by the chat so it outlives this box
+   * (the box is not shown while a private chat is open). Without it the text
+   * typed for one conversation stayed in the box when another was opened, and
+   * went to the wrong people.
+   */
+  drafts?: Map<string, string>;
 }
 
 export interface QuickAction {
@@ -103,11 +111,38 @@ export default function Composer({
   quickActions = [],
   sendAs,
   onSendAsChange,
+  drafts,
 }: ComposerProps) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(() => drafts?.get(token) ?? '');
   const [caret, setCaret] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [clip, setClip] = useState<{ url: string; base64: string; mimeType: string } | null>(null);
+  const [caption, setCaption] = useState('');
+
+  // Another conversation opened: show its own unsent text, and drop a recorded
+  // clip, which was meant for the conversation it was recorded in. Adjusted
+  // during render, so the old text is never painted under the new name. The
+  // text typed before the first conversation loaded (token '') is kept.
+  const [draftToken, setDraftToken] = useState(token);
+  if (draftToken !== token) {
+    setDraftToken(token);
+    if (draftToken) {
+      setDraft(drafts?.get(token) ?? '');
+      setCaret(0);
+    }
+    setMenuOpen(false);
+    if (clip) {
+      URL.revokeObjectURL(clip.url);
+      setClip(null);
+      setCaption('');
+    }
+  }
+  // Remember the text as it is typed (never a message being edited, which is
+  // not a draft and is gone once the edit ends).
+  const editingNow = Boolean(editing);
+  useEffect(() => {
+    if (drafts && token && !editingNow) drafts.set(token, draft);
+  }, [drafts, token, draft, editingNow]);
   const recorder = useAudioRecorder({
     // Preview before sending: recording is easy to do by accident, and a
     // caption often carries the point of a voice note.
@@ -123,7 +158,6 @@ export default function Composer({
       ),
   });
   const recording = recorder.recording;
-  const [caption, setCaption] = useState('');
   const [mentionOptions, setMentionOptions] = useState<MentionOption[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -427,7 +461,7 @@ export default function Composer({
           }}
           onSelect={(event) => setCaret((event.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(event) => {
-            if (mentionOptions.length > 0) {
+            if (mentionOptions.length > 0 && !isImeKey(event)) {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
                 const step = event.key === 'ArrowDown' ? 1 : -1;
@@ -444,7 +478,7 @@ export default function Composer({
                 return;
               }
             }
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.key === 'Enter' && !event.shiftKey && !isImeKey(event)) {
               event.preventDefault();
               void submit();
             }

@@ -379,6 +379,9 @@ export default function DrawCanvas() {
               aria-label="Drawing board code"
               value={board}
               maxLength={64}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(event) => setBoard(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64))}
               className="glass-input w-28 px-2 py-1.5 text-sm"
             />

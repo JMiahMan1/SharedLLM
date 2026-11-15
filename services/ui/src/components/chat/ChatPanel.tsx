@@ -138,6 +138,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const isGroup = activeConversation?.type !== 1;
   const isPrivate = Boolean(activeConversation?.private);
 
+  // A reply, an edit, staged files and a half-written poll belong to the
+  // conversation they were started in. select() drops them, but a tapped
+  // notification (?chat=) or a conversation that disappears also changes the
+  // conversation on screen, and the reply then went to the wrong room. The
+  // unsent text is kept per conversation (the composer swaps it).
+  const [drafts] = useState(() => new Map<string, string>());
+  const [shownToken, setShownToken] = useState(activeToken);
+  if (shownToken !== activeToken) {
+    setShownToken(activeToken);
+    if (shownToken) {
+      setReplyTo(null);
+      setEditing(null);
+      setStaged([]);
+      setShowPollForm(false);
+    }
+  }
+
   // The parents' private chats: who may start one, and each chat's key parameters.
   const privateStatus = useQuery({
     queryKey: ['private-chat-status'],
@@ -885,6 +902,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
         <Composer
           token={activeToken}
+          drafts={drafts}
           disabled={!activeToken}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}

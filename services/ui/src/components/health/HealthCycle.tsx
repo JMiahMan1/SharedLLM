@@ -324,8 +324,10 @@ export default function HealthCycle() {
   }
   // A failed fetch used to be indistinguishable from "not applicable": the
   // panel just vanished, so a parent had no way to tell a broken request from
-  // a child who has not turned cycle tracking on.
-  if (cycleQuery.isError) {
+  // a child who has not turned cycle tracking on. Only when nothing loaded,
+  // though: a failed background refetch (coming back to the app) replaced the
+  // whole panel, and the day's note being typed with it.
+  if (cycleQuery.isError && !cycleQuery.data) {
     return (
       <section className="glass-panel rounded-2xl border border-amber-500/30 p-4">
         <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">

@@ -52,7 +52,9 @@ export default function Schedules() {
 
       {tab === 'other' ? <OtherSchedules catalog={catalog.data} /> : climate.isLoading ? (
         <CardSkeletons count={2} className="grid grid-cols-1 gap-3 lg:grid-cols-2" height="h-48" label="Loading" />
-      ) : climate.isError ? (
+      ) : climate.isError && !climate.data ? (
+        // Only with nothing to show: a failed 30 s poll swapped the page for
+        // this, unmounting the settings and hold forms being filled in.
         <ErrorRetry title={errorText(climate.error, 'Could not reach the hub')} onRetry={() => void climate.refetch()} />
       ) : climate.data && (
         <>

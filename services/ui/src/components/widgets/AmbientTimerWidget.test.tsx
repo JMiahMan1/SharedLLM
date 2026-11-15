@@ -330,7 +330,10 @@ describe('AmbientTimerWidget', () => {
     fireEvent.change(durationInput, { target: { value: '60' } });
     const buttons = screen.getAllByRole('button');
     const addButton = buttons[buttons.length - 1];
-    fireEvent.click(addButton);
+    // Let the refused create settle inside act: the fallback lands after a rejected promise.
+    await act(async () => {
+      fireEvent.click(addButton);
+    });
 
     // The server refused, so the timer runs locally instead of being lost.
     expect(await screen.findByText('Timer 1', undefined, { timeout: 5000 })).toBeInTheDocument();

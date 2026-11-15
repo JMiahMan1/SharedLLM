@@ -31,15 +31,25 @@ export default function LiveVideoSettings() {
   const [form, setForm] = useState<LiveVideoChange>({});
   const [cams, setCams] = useState<Record<string, CameraSettings>>({});
 
+  const stored = settings.data && {
+    form: { enabled: settings.data.configured ? settings.data.enabled : true, url: settings.data.url,
+      webrtc_host: settings.data.options.webrtc_host, webrtc_port: settings.data.options.webrtc_port,
+      default_quality: settings.data.options.default_quality } as LiveVideoChange,
+    cams: Object.fromEntries(settings.data.cameras.map((c) => [c.entity_id, { ...c.settings }])) as Record<string, CameraSettings>,
+  };
+  const storedKey = stored ? JSON.stringify(stored) : '';
   useEffect(() => {
-    const s = settings.data;
-    if (!s) return;
-    // A fresh read from the hub replaces whatever was typed.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the form mirrors the server
-    setForm({ enabled: s.configured ? s.enabled : true, url: s.url, webrtc_host: s.options.webrtc_host,
-      webrtc_port: s.options.webrtc_port, default_quality: s.options.default_quality });
-    setCams(Object.fromEntries(s.cameras.map((c) => [c.entity_id, { ...c.settings }])));
-  }, [settings.data]);
+    // Seed from what the hub stores, and again only when that changes. The
+    // reply also carries live status (running, starting, errors) that changes
+    // on every refetch, including the one when the app comes back to the
+    // front; keyed on the whole reply, each of those wiped what was typed (on
+    // a phone, a password copied from another app was gone on return).
+    if (!stored) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the form mirrors what the hub stores
+    setForm(stored.form);
+    setCams(stored.cams);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the stored values, not the reply
+  }, [storedKey]);
 
   const save = useMutation({
     mutationFn: () => saveLiveVideoSettings({ ...form, cameras: cams }),
@@ -55,7 +65,7 @@ export default function LiveVideoSettings() {
   if (settings.isLoading) {
     return <div className="flex justify-center py-6" role="status" aria-label="Loading"><Loader2 className="animate-spin text-slate-500" /></div>;
   }
-  if (settings.isError || !settings.data) {
+  if (!settings.data) {
     return <p className="text-sm text-red-300">{errorText(settings.error, 'Couldn’t read the live video settings')}</p>;
   }
   const s = settings.data;

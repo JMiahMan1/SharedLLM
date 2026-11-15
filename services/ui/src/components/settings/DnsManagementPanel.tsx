@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { GlobalSetting } from '../../types/api';
 import { confirmDialog } from '../ui/confirmDialog';
+import NumberField from '../ui/NumberField';
 
 interface DnsRecord {
   id: number;
@@ -233,10 +234,10 @@ export default function DnsManagementPanel() {
 
           <div>
             <label htmlFor="dns-ttl" className="block text-xs text-slate-400 mb-1">TTL (seconds)</label>
-            <input id="dns-ttl"
-              type="number"
+            <NumberField id="dns-ttl"
+              inputMode="numeric"
               value={form.ttl}
-              onChange={(e) => setForm({ ...form, ttl: parseInt(e.target.value) || 300 })}
+              onValue={(n) => setForm({ ...form, ttl: n ? Math.round(n) : 300 })}
               className="glass-input w-32 text-sm"
               min={60}
               max={86400}

@@ -8,6 +8,7 @@ import { formatMinutes } from '../../lib/healthHub';
 import { errorText } from '../../lib/errorText';
 import { fastClock, formatCountdown, localWhen, startedAtFromClock } from '../../lib/fastingClock';
 import FastingGuide from './FastingGuide';
+import NumberField from '../ui/NumberField';
 
 /** An instant as a `datetime-local` value in this device's time. */
 function localInput(iso: string): string {
@@ -271,12 +272,10 @@ export default function FastingCard() {
               {chosen.pattern.type === 'days' && (
                 <label className="block text-[11px] text-slate-500">
                   Days
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
+                  <NumberField
+                    inputMode="numeric"
                     value={days ?? chosen.pattern.days}
-                    onChange={(e) => setDays(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                    onValue={(n) => setDays(Math.max(1, Math.min(50, Math.round(n ?? 1))))}
                     className="glass-input mt-1 min-h-11 w-full px-2 text-base sm:text-sm"
                   />
                 </label>

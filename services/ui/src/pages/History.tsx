@@ -254,11 +254,18 @@ export default function History() {
           ))}
           <label className="text-xs text-slate-400 flex items-center gap-1">From
             <input type="datetime-local" className="min-h-11 rounded-xl bg-white/5 px-2 text-sm" value={toLocalInput(range.start)}
-              onChange={(e) => update({ from: new Date(e.target.value).toISOString(), to: range.end.toISOString(), r: null })} />
+              onChange={(e) => {
+                // A part of the date being retyped reads as '' (no date yet): wait for a whole one.
+                const at = new Date(e.target.value);
+                if (!Number.isNaN(at.getTime())) update({ from: at.toISOString(), to: range.end.toISOString(), r: null });
+              }} />
           </label>
           <label className="text-xs text-slate-400 flex items-center gap-1">To
             <input type="datetime-local" className="min-h-11 rounded-xl bg-white/5 px-2 text-sm" value={toLocalInput(range.end)}
-              onChange={(e) => update({ to: new Date(e.target.value).toISOString(), from: range.start.toISOString(), r: null })} />
+              onChange={(e) => {
+                const at = new Date(e.target.value);
+                if (!Number.isNaN(at.getTime())) update({ to: at.toISOString(), from: range.start.toISOString(), r: null });
+              }} />
           </label>
         </div>
       </div>

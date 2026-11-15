@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import NumberField from '../ui/NumberField';
 import { Download, Loader2, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import {
   MONTH_NAMES, WEEKDAY_NAMES, describePeriod, emptyPeriod, failureText, getEnergyCandidates, getEnergyPrefs,
@@ -11,12 +12,6 @@ import {
 
 const INPUT = 'min-h-11 rounded-xl bg-white/5 border border-white/10 px-3 text-sm';
 const BTN = 'min-h-11 rounded-xl px-3 text-sm flex items-center gap-1';
-
-function numOrNull(v: string): number | null {
-  if (v.trim() === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 function StatSelect({ value, options, onChange, label, allowEmpty = false }: {
   value: string | null | undefined; options: EnergyCandidate[]; onChange: (v: string | null) => void; label: string;
@@ -41,8 +36,8 @@ function PeriodEditor({ period, onChange, onRemove }: {
       <div className="flex flex-wrap gap-2">
         <input aria-label="Period name" className={`${INPUT} flex-1 min-w-32`} placeholder="On-peak" value={period.name}
           onChange={(e) => onChange({ ...period, name: e.target.value })} />
-        <input aria-label="Price per kWh" className={`${INPUT} w-28`} inputMode="decimal" placeholder="Price"
-          value={period.price ?? ''} onChange={(e) => onChange({ ...period, price: numOrNull(e.target.value) })} />
+        <NumberField aria-label="Price per kWh" className={`${INPUT} w-28`} placeholder="Price"
+          value={period.price} onValue={(price) => onChange({ ...period, price })} />
         <input aria-label="Starts" type="time" className={INPUT} value={period.start}
           onChange={(e) => onChange({ ...period, start: e.target.value })} />
         <input aria-label="Ends" className={`${INPUT} w-24`} placeholder="HH:MM" value={period.end}
@@ -151,9 +146,9 @@ export default function EnergySettings({ onClose, onSaved }: { onClose: () => vo
               onChange={(v) => setGrids(grids.map((x, j) => j === i ? { ...x, stat_energy_from: v } : x))} />
             <StatSelect label="Cost statistic" allowEmpty value={g.stat_cost} options={utilities.filter((u) => u.stat_cost).map((u) => ({ ...u, stat_energy: u.stat_cost as string, name: `${u.name} cost` }))}
               onChange={(v) => setGrids(grids.map((x, j) => j === i ? { ...x, stat_cost: v } : x))} />
-            <input aria-label="Fixed price per kWh" className={INPUT} inputMode="decimal" placeholder="Price/kWh"
-              value={g.number_energy_price ?? ''}
-              onChange={(e) => setGrids(grids.map((x, j) => j === i ? { ...x, number_energy_price: numOrNull(e.target.value) } : x))} />
+            <NumberField aria-label="Fixed price per kWh" className={INPUT} placeholder="Price/kWh"
+              value={g.number_energy_price}
+              onValue={(price) => setGrids(grids.map((x, j) => j === i ? { ...x, number_energy_price: price } : x))} />
             <button type="button" aria-label="Remove grid source" className={`${BTN} bg-white/5`}
               onClick={() => setGrids(grids.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
           </div>
@@ -206,14 +201,16 @@ export default function EnergySettings({ onClose, onSaved }: { onClose: () => vo
         <h3 className="text-sm font-semibold text-slate-300">Rate plan</h3>
         <div className="flex flex-wrap gap-2">
           <input aria-label="Currency" className={`${INPUT} w-24`} placeholder="USD" value={tariff.currency ?? ''}
-            onChange={(e) => setTariff({ currency: e.target.value.toUpperCase() || null })} />
-          <input aria-label="Flat price per kWh" className={`${INPUT} w-36`} inputMode="decimal" placeholder="Flat price/kWh"
-            value={tariff.flat_price ?? ''} onChange={(e) => setTariff({ flat_price: numOrNull(e.target.value) })} />
+            autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+            onChange={(e) => setTariff({ currency: e.target.value || null })}
+            onBlur={(e) => setTariff({ currency: e.target.value.trim().toUpperCase() || null })} />
+          <NumberField aria-label="Flat price per kWh" className={`${INPUT} w-36`} placeholder="Flat price/kWh"
+            value={tariff.flat_price} onValue={(flat_price) => setTariff({ flat_price })} />
           <input aria-label="Name for all other hours" className={`${INPUT} w-36`} value={tariff.default_period.name}
             onChange={(e) => setTariff({ default_period: { ...tariff.default_period, name: e.target.value } })} />
-          <input aria-label="Price for all other hours" className={`${INPUT} w-36`} inputMode="decimal" placeholder="Their price/kWh"
-            value={tariff.default_period.price ?? ''}
-            onChange={(e) => setTariff({ default_period: { ...tariff.default_period, price: numOrNull(e.target.value) } })} />
+          <NumberField aria-label="Price for all other hours" className={`${INPUT} w-36`} placeholder="Their price/kWh"
+            value={tariff.default_period.price}
+            onValue={(price) => setTariff({ default_period: { ...tariff.default_period, price } })} />
         </div>
         <p className="text-xs text-slate-500">
           Time-of-use periods, first match wins; every other hour is "{tariff.default_period.name || 'Off-peak'}".

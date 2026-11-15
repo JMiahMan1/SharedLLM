@@ -128,4 +128,34 @@ test.describe('automations: helpers, blueprints, more steps', () => {
     });
     clean(run);
   });
+
+  test('Helpers: a value being typed survives the 5 s poll, even one that fails', async ({ page }) => {
+    const run = await open(page);
+    await page.getByRole('button', { name: 'Helpers' }).click();
+    const panel = page.getByTestId('helpers-panel');
+    await expect(panel.getByTestId('helper-row')).toHaveCount(3);
+    // The hub stops answering for a while: every poll fails until it is back.
+    let failing = false;
+    let failed = 0;
+    await page.route(/\/api\/homehub\/helpers$/, (route) => {
+      if (failing && route.request().method() === 'GET') {
+        failed += 1;
+        // A 500 (the API client retries a 504 by itself, so that would not reach the page).
+        return route.fulfill({ status: 500, json: { detail: 'hub timed out' } });
+      }
+      return route.fallback();
+    });
+    const box = panel.getByRole('textbox', { name: /Run Pasta for/ });
+    await box.click();
+    await page.keyboard.type('0:0');
+    failing = true;
+    await expect.poll(() => failed, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+    await page.waitForTimeout(500);  // the failed answer has reached the page
+    await page.keyboard.type('0:45');
+    await expect(box).toBeFocused();
+    await expect(box).toHaveValue('0:00:45');
+    await expect(panel.getByText('hub timed out')).toHaveCount(0);
+    failing = false;
+    expect(run.errors).toEqual([]);
+  });
 });

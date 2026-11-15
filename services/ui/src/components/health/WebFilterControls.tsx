@@ -44,10 +44,16 @@ export default function WebFilterControls({ username, name, rules }: { username:
       delete rest.paused_until;
       return api.setScreenRules(username, { ...rest, web_filter: next });
     },
-    onSuccess: () => {
-      setBlock(null);
-      setAllow(null);
-      void queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
+    // One save serves every toggle and the site lists. Clearing both lists'
+    // drafts on any save threw away a list still being typed when a toggle was
+    // flipped. A draft goes only once what it says was saved, and only after
+    // the fresh rules are here, so the box never flashes back to the old list.
+    onSuccess: async (_result, sent) => {
+      await queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
+      const saved = (draft: string | null, list: string[] | undefined) =>
+        draft !== null && lines(draft).join('\n') === (list || []).join('\n');
+      setBlock((draft) => (saved(draft, sent.block) ? null : draft));
+      setAllow((draft) => (saved(draft, sent.allow) ? null : draft));
     },
   });
   const current: WebFilterRules = { enabled: false, adult: true, safe_search: true, categories: [], block: [], allow: [], ...wf };

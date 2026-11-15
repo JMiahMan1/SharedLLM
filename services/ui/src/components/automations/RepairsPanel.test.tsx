@@ -53,4 +53,19 @@ describe('RepairsPanel', () => {
     const summary = await screen.findByText('Advanced: edit the remap by hand');
     expect(summary.closest('details')).not.toHaveAttribute('open');
   });
+
+  it('lets the hand-edited remap be emptied to paste a new one', async () => {
+    wrap();
+    fireEvent.click(await screen.findByText('Advanced: edit the remap by hand'));
+    const box = await waitFor(() => {
+      const el = document.querySelector('textarea') as HTMLTextAreaElement;
+      expect(el.value).toContain('light.a_old');
+      return el;
+    });
+    fireEvent.change(box, { target: { value: '' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(box.value).toBe('');
+    fireEvent.change(box, { target: { value: '{"entities": {}}' } });
+    expect(box.value).toBe('{"entities": {}}');
+  });
 });
