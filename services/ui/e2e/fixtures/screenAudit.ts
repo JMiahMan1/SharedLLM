@@ -8,6 +8,8 @@ import type { Locator, Page, TestInfo } from '@playwright/test';
 export interface Findings {
   small: string[];
   clipped: string[];
+  /** Anything drawn past the edge of the card, dialog or panel it sits in. */
+  escaped: string[];
 }
 
 /** Whether this project is a phone (the 44px rule applies to touch-sized screens). */
@@ -15,7 +17,25 @@ export function isPhone(page: Page): boolean {
   return (page.viewportSize()?.width ?? 1440) < 600;
 }
 
+/**
+ * Android's WebView draws date and time fields with a native control much
+ * wider than desktop Chrome's (and Samsung's large fonts widen it further). A
+ * field with no width of its own keeps that preferred width even in a narrow
+ * grid column (form fields do not stretch or shrink there like text boxes), so
+ * one that fit here ran past its card on a phone. This gives the fields here
+ * the same preferred width, in the base layer, so a width the app sets itself
+ * still wins, exactly as on the phone.
+ */
+export const ANDROID_WIDE_FIELDS = `
+  @layer base {
+    input[type="time"], input[type="date"], input[type="datetime-local"],
+    input[type="month"], input[type="week"] { width: 13rem; }
+  }
+`;
+
 export async function audit(scope: Locator, phone: boolean, min = 44): Promise<Findings> {
+  await scope.page().addStyleTag({ content: ANDROID_WIDE_FIELDS });
+  await scope.page().waitForTimeout(50);
   return scope.evaluate((root, args) => {
     const visible = (el: HTMLElement) => {
       const b = el.getBoundingClientRect();
@@ -48,7 +68,43 @@ export async function audit(scope: Locator, phone: boolean, min = 44): Promise<F
       const hiddenX = s.overflowX === 'hidden' || s.overflowX === 'clip';
       if (hiddenX && el.scrollWidth > el.clientWidth + 1) clipped.push(`${label(el)} (${el.scrollWidth}>${el.clientWidth})`);
     }
-    return { small, clipped };
+    // Something that sticks out of its own box: a time field running past a
+    // dialog's edge, a button hanging off a card. The page can still fit the
+    // screen, so the page-overflow check never saw these.
+    const escaped: string[] = [];
+    const paints = (s: CSSStyleDeclaration) =>
+      parseFloat(s.borderLeftWidth) > 0 || parseFloat(s.borderRightWidth) > 0
+      || (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent')
+      || s.backgroundImage !== 'none';
+    const isBox = (el: HTMLElement) => {
+      if (el.getAttribute('role') === 'dialog' || el.tagName === 'DIALOG') return true;
+      const s = getComputedStyle(el);
+      return paints(s) && parseFloat(s.borderTopLeftRadius) >= 6;
+    };
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
+      if (!visible(el)) continue;
+      const s = getComputedStyle(el);
+      if (s.position === 'fixed') continue;
+      const text = Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? '').trim().length > 0);
+      const control = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) && (el as HTMLInputElement).type !== 'hidden';
+      if (!text && !control && !(paints(s) && /^(BUTTON|A)$/.test(el.tagName))) continue;
+      let box: HTMLElement | null = el.parentElement;
+      let scrolls = false;
+      while (box && box !== root.parentElement && !isBox(box)) {
+        const o = getComputedStyle(box).overflowX;
+        if (o === 'auto' || o === 'scroll') scrolls = true;
+        box = box.parentElement;
+      }
+      if (!box || scrolls) continue;
+      const bs = getComputedStyle(box).overflowX;
+      if (bs === 'auto' || bs === 'scroll') continue;
+      const b = el.getBoundingClientRect();
+      const c = box.getBoundingClientRect();
+      if (b.right > c.right + 1 || b.left < c.left - 1) {
+        escaped.push(`${label(el)} (${Math.round(b.left)}..${Math.round(b.right)} outside ${Math.round(c.left)}..${Math.round(c.right)})`);
+      }
+    }
+    return { small, clipped, escaped };
   }, { phone, min });
 }
 

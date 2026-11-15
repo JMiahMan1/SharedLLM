@@ -6,6 +6,19 @@
 
 @import "tailwindcss";
 
+/* Android's WebView gives date, time and select fields a native preferred
+   width much wider than desktop Chrome's, and a field with no width of its
+   own keeps it even in a narrow grid column: the chore time on the Guardian
+   page ran past its card. Never wider than the space it sits in; a width the
+   page sets still wins (this is the base layer). */
+@layer base {
+  input[type="time"], input[type="date"], input[type="datetime-local"],
+  input[type="month"], input[type="week"], select {
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+
 body {
   font-family: 'Outfit', 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

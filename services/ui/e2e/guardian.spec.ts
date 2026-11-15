@@ -1,5 +1,6 @@
 import { test, expect as baseExpect, type Page, type Route } from '@playwright/test';
 import { isServerCall } from './fixtures/serverCalls';
+import { audit, isPhone } from './fixtures/screenAudit';
 
 const expect = baseExpect.configure({ timeout: 15_000 });
 
@@ -282,6 +283,25 @@ test.describe('guardian page', () => {
     await group.screenshot({ path: info.outputPath(`notify-level-${info.project.name}.png`) });
     const o = await overflow(page);
     expect(o.doc).toBeLessThanOrEqual(o.client + 1);
+    expect(unmocked).toEqual([]);
+  });
+
+  test('nothing in any area sticks out of its card or dialog, with every section opened', async ({ page }) => {
+    const { unmocked } = await mockApi(page, 'dad');
+    const found: string[] = [];
+    for (const area of ['overview', 'heart', 'time', 'safety']) {
+      await page.goto(`/guardian?area=${area}&member=sam`);
+      await expect(page.getByTestId('guardian-child-status')).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      // Open every folded section, so what is inside is checked too.
+      for (const summary of await page.locator('main details:not([open]) > summary').all()) {
+        await summary.click().catch(() => {});
+      }
+      await page.waitForTimeout(200);
+      const f = await audit(page.locator('main'), isPhone(page));
+      found.push(...f.escaped.map((e) => `${area}: ${e}`), ...f.clipped.map((e) => `${area}: clipped ${e}`));
+    }
+    expect(found).toEqual([]);
     expect(unmocked).toEqual([]);
   });
 
