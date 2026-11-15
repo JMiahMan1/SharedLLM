@@ -44,6 +44,26 @@ public class PhoneUsagePlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * The apps a person installed on this device, for app vetting on a child's
+     * device ({@link AppInventory}). Read off the main thread: a phone with a
+     * few hundred apps takes a moment. Resolves {@code {apps, usageAccess}}.
+     */
+    @PluginMethod
+    public void getInstalledApps(PluginCall call) {
+        Context context = bridge.getContext();
+        new Thread(() -> {
+            try {
+                JSObject ret = new JSObject();
+                ret.put("apps", AppInventory.collect(context));
+                ret.put("usageAccess", hasUsageAccess(context));
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Could not list the installed apps", e);
+            }
+        }, "app-inventory").start();
+    }
+
     @PluginMethod
     public void getToday(PluginCall call) {
         long now = System.currentTimeMillis();
