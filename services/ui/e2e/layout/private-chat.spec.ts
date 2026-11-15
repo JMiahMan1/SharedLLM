@@ -409,4 +409,41 @@ test.describe('private chat on every form factor', () => {
     expect(asked).toEqual([]);
     done(run);
   });
+
+  test('lock timing: kept open for a minute after leaving, locked at once by default', async ({ page }, info) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    const privateRow = page.getByRole('button', { name: /Private chat/ }).first();
+    const leaveAndComeBack = async () => {
+      const back = page.getByRole('button', { name: 'Back to chats' });
+      if (await back.isVisible()) await back.click();
+      await page.getByText('Camping trip planning').first().click();
+      if (await back.isVisible()) await back.click();
+      await privateRow.click();
+    };
+
+    await privateRow.click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    await page.getByTestId('private-security-open').click();
+    const menu = page.getByTestId('private-security');
+    await expect(menu.getByTestId('private-lock-after-leave')).toHaveAttribute('aria-checked', 'true');
+    await menu.getByTestId('private-lock-after-1m').click();
+    await expect(menu.getByTestId('private-lock-after-1m')).toHaveAttribute('aria-checked', 'true');
+    await check(page, info, run, 'private lock setting', page.getByRole('dialog').last());
+    await menu.getByRole('button', { name: 'Close' }).last().click();
+
+    // Leaving and coming back within the minute: still open, no password asked.
+    await leaveAndComeBack();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    await expect(page.getByTestId('private-lock')).toHaveCount(0);
+
+    // Back to the default: leaving locks at once.
+    await page.getByTestId('private-security-open').click();
+    await page.getByTestId('private-lock-after-leave').click();
+    await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
+    await leaveAndComeBack();
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    done(run);
+  });
 });

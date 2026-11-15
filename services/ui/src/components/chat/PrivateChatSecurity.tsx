@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ChevronRight, Fingerprint, KeyRound, Loader2, TriangleAlert } from 'lucide-react';
+import { ChevronRight, Fingerprint, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { changePasswordRequest } from '../../lib/privateChatCrypto';
+import { getLockAfter, LOCK_OPTIONS, setLockAfter, type LockAfter } from '../../lib/privateChatSession';
 import { enableDeviceUnlock } from '../../lib/privateChatDeviceUnlock';
 import { deviceUnlockAvailable, deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import Sheet from './Sheet';
@@ -57,6 +58,7 @@ export default function PrivateChatSecurity({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<Mode>('menu');
+  const [lockAfter, setLockAfterState] = useState<LockAfter>(() => getLockAfter(token));
   const [phone, setPhone] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
@@ -127,6 +129,15 @@ export default function PrivateChatSecurity({
     } finally {
       setCurrent('');
       setBusy(false);
+    }
+  };
+
+  const chooseLock = (value: LockAfter) => {
+    try {
+      setLockAfter(token, value);
+      setLockAfterState(value);
+    } catch (e) {
+      setError(errorText(e, 'Could not save the lock setting'));
     }
   };
 
@@ -239,8 +250,37 @@ export default function PrivateChatSecurity({
   }
 
   return (
-    <Sheet title="Password and unlock" onClose={onClose} testId="private-security">
+    <Sheet title="Lock and password" onClose={onClose} testId="private-security">
       <div className="space-y-2">
+        <fieldset className="rounded-xl border border-white/10 bg-white/[0.04] p-3" data-testid="private-lock-after">
+          <legend className="sr-only">Lock the chat</legend>
+          <p className="flex items-center gap-2 text-sm font-semibold text-white" aria-hidden>
+            <Timer size={16} className="shrink-0 text-rose-200" /> Lock the chat
+          </p>
+          <div role="radiogroup" aria-label="Lock the chat" className="mt-2 grid grid-cols-1 gap-1">
+            {LOCK_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={lockAfter === option.value}
+                onClick={() => chooseLock(option.value)}
+                data-testid={`private-lock-after-${option.value}`}
+                className={`flex min-h-11 items-center gap-3 rounded-lg px-2 text-left text-sm ${
+                  lockAfter === option.value ? 'bg-rose-500/15 text-white' : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${lockAfter === option.value ? 'border-rose-300' : 'border-slate-500'}`}>
+                  {lockAfter === option.value && <span className="h-2 w-2 rounded-full bg-rose-300" />}
+                </span>
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            On this device only. Closing Jarvis always locks it, and screenshots stay blocked while the chat is on screen.
+          </p>
+        </fieldset>
         <button
           type="button"
           onClick={() => reset('password')}

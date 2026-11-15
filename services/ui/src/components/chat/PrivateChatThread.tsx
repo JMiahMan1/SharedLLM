@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
+import { chatLeft, chatShown, lockNow, vaultFor } from '../../lib/privateChatSession';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
 import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
@@ -69,8 +70,9 @@ export default function PrivateChatThread({
   onUnlockedChange,
   onChanged,
 }: PrivateChatThreadProps) {
-  // One vault per mounted chat (the panel remounts this per conversation).
-  const [vault] = useState(() => new PrivateVault());
+  // One vault per chat in this app's memory: it outlives this screen by this
+  // device's lock setting (privateChatSession), never the app.
+  const [vault] = useState(() => vaultFor(conversation.token));
   const subscribe = useCallback((fn: () => void) => vault.subscribe(fn), [vault]);
   const unlocked = useSyncExternalStore(subscribe, () => vault.unlocked);
   const [opened, setOpened] = useState<Record<string, Opened>>({});
@@ -85,26 +87,30 @@ export default function PrivateChatThread({
     onKeyAdopted?.();
   }, [adoptKey, vault, onKeyAdopted]);
 
-  // Lock on leaving: this screen going away, the tab or app going to the background.
+  // Leaving (this screen going away, the tab or app going to the background)
+  // locks now or starts the lock timer; coming back cancels a pending lock.
   useEffect(() => {
+    chatShown(token);
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') vault.lock();
+      if (document.visibilityState === 'hidden') chatLeft(token);
+      else chatShown(token);
     };
     document.addEventListener('visibilitychange', onVisibility);
-    let pause: { remove: () => Promise<void> } | undefined;
+    const handles: Array<{ remove: () => Promise<void> }> = [];
     if (Capacitor.isNativePlatform()) {
-      void CapacitorApp.addListener('pause', () => vault.lock())
-        .then((handle) => {
-          pause = handle;
-        })
+      void CapacitorApp.addListener('pause', () => chatLeft(token))
+        .then((handle) => handles.push(handle))
+        .catch(() => {});
+      void CapacitorApp.addListener('resume', () => chatShown(token))
+        .then((handle) => handles.push(handle))
         .catch(() => {});
     }
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      void pause?.remove();
-      vault.lock();
+      for (const handle of handles) void handle.remove();
+      chatLeft(token);
     };
-  }, [vault]);
+  }, [token]);
 
   // Gone from the screen is locked: the panel must not mark it read behind the lock.
   useEffect(() => () => onUnlockedChange(false), [onUnlockedChange]);
@@ -447,16 +453,16 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         <button
           type="button"
           onClick={() => setSecurityOpen(true)}
-          aria-label="Password and unlock"
-          title="Password and unlock"
+          aria-label="Lock and password"
+          title="Lock and password"
           data-testid="private-security-open"
           className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
         >
-          <KeyRound size={14} aria-hidden /> <span className="hidden sm:inline">Password</span>
+          <KeyRound size={14} aria-hidden /> <span className="hidden sm:inline">Security</span>
         </button>
         <button
           type="button"
-          onClick={() => vault.lock()}
+          onClick={() => lockNow(token)}
           data-testid="private-lock-now"
           className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
         >
@@ -657,6 +663,8 @@ function PrivatePicture({
 }) {
   const [url, setUrl] = useState('');
   const [failed, setFailed] = useState(false);
+  // Pictures are released when the chat goes off the screen; decrypt again when it is back.
+  const epoch = useSyncExternalStore(useCallback((fn: () => void) => vault.subscribe(fn), [vault]), () => vault.epoch);
   useEffect(() => {
     let live = true;
     void api
@@ -671,7 +679,7 @@ function PrivatePicture({
     return () => {
       live = false;
     };
-  }, [token, payload.blob, payload.mime, vault]);
+  }, [token, payload.blob, payload.mime, vault, epoch]);
 
   if (failed) return <span className="italic opacity-80">This picture could not be opened.</span>;
   if (!url) {

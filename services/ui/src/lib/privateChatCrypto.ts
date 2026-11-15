@@ -426,10 +426,23 @@ export class PrivateVault {
     return this.urls.size;
   }
 
+  /** Bumped whenever decrypted pictures are released, so a screen redraws its pictures. */
+  epoch = 0;
+
+  /** Revoke every decrypted picture's object URL but keep the key (the chat went off the screen). */
+  releasePictures(): void {
+    if (!this.urls.size) return;
+    for (const url of this.urls) URL.revokeObjectURL(url);
+    this.urls.clear();
+    this.epoch += 1;
+    this.emit();
+  }
+
   lock(): void {
     this.key = null;
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls.clear();
+    this.epoch += 1;
     this.emit();
   }
 
