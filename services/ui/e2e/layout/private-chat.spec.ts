@@ -28,6 +28,7 @@ interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
 interface Server {
   chats: Array<Record<string, unknown>>;
   changes?: Array<Record<string, unknown>>;
+  uploads?: Buffer[];
   messages: Array<Record<string, unknown>>;
   blobs: Record<string, Buffer>;
   posted: string[];
@@ -61,6 +62,13 @@ async function serve(page: Page, server: Server): Promise<void> {
       const kdf = body.kdf as Record<string, unknown>;
       server.chats[0] = { ...server.chats[0], version: 2, kdf: { name: 'PBKDF2-SHA256', ...kdf }, wrapped_key: body.wrapped_key };
       return route.fulfill({ json: { ...server.chats[0], notified: ['robin'] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/blobs` && req.method() === 'POST') {
+      const body = req.postDataBuffer() ?? Buffer.alloc(0);
+      (server.uploads ??= []).push(body);
+      const id = (server.uploads.length).toString(16).padStart(32, '0');
+      server.blobs[id] = body;
+      return route.fulfill({ json: { id, size: body.length } });
     }
     const blob = /^\/api\/private-chat\/chats\/[^/]+\/blobs\/([0-9a-f]+)$/.exec(p);
     if (blob) {
@@ -483,6 +491,53 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'true');
     await page.getByTestId('private-preview-toggle').click();
     await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'false');
+    done(run);
+  });
+
+  test('a pasted or dropped photo is encrypted before it leaves the device, and a non-photo is refused', async ({ page }) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    const png = [...PNG];
+
+    await page.getByTestId('private-input').evaluate((el, bytes) => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array(bytes)], 'pasted.png', { type: 'image/png' }));
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, png);
+    await expect.poll(() => server.posted.length).toBe(1);
+
+    await page.getByTestId('private-feed').evaluate((el, bytes) => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array(bytes)], 'dropped.png', { type: 'image/png' }));
+      el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    }, png);
+    await expect.poll(() => server.posted.length).toBe(2);
+
+    // Uploads are ciphertext (no PNG signature, IV + tag longer), messages are sealed envelopes naming no file.
+    expect(server.uploads).toHaveLength(2);
+    for (const upload of server.uploads!) {
+      expect(upload.length).toBe(PNG.length + 12 + 16);
+      expect(upload.includes(PNG.subarray(0, 8))).toBe(false);
+    }
+    for (const posted of server.posted) {
+      expect(posted).toContain('```jarvis-envelope');
+      expect(posted).not.toContain('pasted.png');
+      expect(posted).not.toContain('dropped.png');
+    }
+
+    // A file that is not a photo is refused, and nothing is uploaded.
+    await page.getByTestId('private-feed').evaluate((el) => {
+      const data = new DataTransfer();
+      data.items.add(new File(['secret notes'], 'notes.txt', { type: 'text/plain' }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await expect(page.getByText('Only photos can be sent in a private chat')).toBeVisible();
+    expect(server.uploads).toHaveLength(2);
+    expect(page.url()).toContain('/family');
     done(run);
   });
 });

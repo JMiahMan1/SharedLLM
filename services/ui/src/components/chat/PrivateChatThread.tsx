@@ -384,6 +384,30 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     }
   };
 
+  /**
+   * Send picture bytes: encrypted here before anything leaves the device,
+   * uploaded as an opaque blob (never a Talk file share), and the plaintext
+   * copy overwritten with zeros once encrypted.
+   */
+  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string) => {
+    let blob = '';
+    try {
+      let sealed: Uint8Array<ArrayBuffer>;
+      try {
+        sealed = await vault.encrypt(plain);
+      } finally {
+        plain.fill(0);
+      }
+      blob = (await api.uploadPrivateBlob(token, sealed)).id;
+      await post({ t: 'image', blob, mime, ...(name ? { name } : {}) });
+      onChanged();
+    } catch (error) {
+      if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
+      throw error;
+    }
+  };
+
+  /** A photo from the picker, a paste or a drop. Anything that is not a photo is refused. */
   const sendPicture = async (file: File) => {
     if (!IMAGE_TYPES.has(file.type)) {
       toast.error('Only photos can be sent in a private chat');
@@ -394,18 +418,17 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
       return;
     }
     setSending(true);
-    let blob = '';
     try {
-      const sealed = await vault.encrypt(new Uint8Array(await file.arrayBuffer()));
-      blob = (await api.uploadPrivateBlob(token, sealed)).id;
-      await post({ t: 'image', blob, mime: file.type, name: file.name });
-      onChanged();
+      await sendImageBytes(new Uint8Array(await file.arrayBuffer()), file.type, file.name);
     } catch (error) {
-      if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
       toast.error(errorText(error, 'Could not send the picture'));
     } finally {
       setSending(false);
     }
+  };
+
+  const sendFiles = async (files: File[]) => {
+    for (const file of files) await sendPicture(file);
   };
 
   const remove = async (message: TalkMessage) => {
@@ -435,7 +458,20 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="private-chat">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="private-chat"
+      // A dropped photo is encrypted like any other; nothing dropped here is ever opened by the browser.
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void sendFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
       <div className="flex shrink-0 items-center gap-2 border-b border-white/5 bg-rose-500/[0.06] px-3 py-1.5">
         <Lock size={13} className="shrink-0 text-rose-200" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs text-rose-100">Only the two of you can read this</span>
@@ -591,6 +627,13 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
               event.preventDefault();
               void sendText(event);
             }
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (!files.length) return;
+            // A pasted picture goes the same encrypted way as a picked one.
+            event.preventDefault();
+            void sendFiles(files);
           }}
           rows={1}
           placeholder="Private message"

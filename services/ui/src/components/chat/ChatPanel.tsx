@@ -667,16 +667,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         }`}
         data-testid="chat-thread"
         onDragOver={(event) => {
-          // A private chat's photos go through its own encrypted picker, never a Talk file share.
-          if (!activeToken || isPrivate || !event.dataTransfer.types.includes('Files')) return;
+          if (!activeToken || !event.dataTransfer.types.includes('Files')) return;
+          // Taken in every chat, so a drop never opens the file in the browser. A private
+          // chat's photos are encrypted by its own thread, never sent as a Talk file share.
           event.preventDefault();
-          setDragging(true);
+          if (!isPrivate) setDragging(true);
         }}
         onDragLeave={(event) => {
           if (event.currentTarget === event.target) setDragging(false);
         }}
         onDrop={(event) => {
-          if (isPrivate || !event.dataTransfer.files.length) return;
+          if (isPrivate) {
+            // The private thread encrypts what is dropped on it; anywhere else in a
+            // private chat a drop must not open the file in the browser.
+            if (event.dataTransfer.files.length) event.preventDefault();
+            return;
+          }
+          if (!event.dataTransfer.files.length) return;
           event.preventDefault();
           setDragging(false);
           const files = Array.from(event.dataTransfer.files).filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
