@@ -28,7 +28,8 @@ describe('AuthContext', () => {
         <AuthProvider><Avatar /></AuthProvider>
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId('avatar')).toHaveTextContent('preset:noah'));
+    // Sign-in runs several async steps first; a busy full run took over the default 1 s.
+    await waitFor(() => expect(screen.getByTestId('avatar')).toHaveTextContent('preset:noah'), { timeout: 5000 });
 
     act(() => { client.setQueryData(['me'], { username: 'dad', avatar: 'upload:123' }); });
     await waitFor(() => expect(screen.getByTestId('avatar')).toHaveTextContent('upload:123'));
