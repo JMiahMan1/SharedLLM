@@ -116,3 +116,33 @@ async def test_monitor_carries_the_room_context_into_the_job(worker):
         {"role": "user", "content": "Kiddo: the fort survived the night!"},
         {"role": "assistant", "content": "It survived the night."},
     ]
+
+
+SEALED = '\U0001f512 Encrypted message\n\n```jarvis-envelope\n{"kind":"sealed","title":"Encrypted message","v":1,"iv":"AAAA","ct":"@jarvis"}\n```'
+
+
+@pytest.mark.asyncio
+async def test_monitor_never_reads_a_private_chat(worker, monkeypatch):
+    from services.gateway import private_chat
+
+    monkeypatch.setattr(private_chat, "private_tokens", lambda: {"room1"})
+    w = worker([{"id": 7, "actor_id": "sam", "message": "@Jarvis what's for dinner?"}])
+    r = _Redis()
+    r.store["jarvis:talk:last_msg:room1"] = "6"
+    await bw.RavenWorker._check_talk_once(w, r)
+    w.job_queue.enqueue_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_monitor_skips_sealed_messages_and_keeps_them_out_of_context(worker):
+    w = worker([
+        {"id": 7, "actor_id": "sam", "message": SEALED},
+        {"id": 8, "actor_id": "sam", "message": "@Jarvis what's for dinner?"},
+    ])
+    r = _Redis()
+    r.store["jarvis:talk:last_msg:room1"] = "6"
+    await bw.RavenWorker._check_talk_once(w, r)
+    w.job_queue.enqueue_job.assert_awaited_once()
+    payload = w.job_queue.enqueue_job.await_args.kwargs["payload"]
+    assert payload["query"] == "what's for dinner?"
+    assert payload["history"] == []

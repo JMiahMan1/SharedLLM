@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from services.common.logging_utils import describe_exc
+from services.common.sealed import is_sealed
 
 try:
     from personal_data import missing_account_message, resolve_personal_data_provider
@@ -334,6 +335,9 @@ async def _room_context(provider: Any, token: str, limit: int = 20) -> list[dict
         if summary["deleted"] or summary["system_message"]:
             continue
         text = str(summary["message"] or "").strip()
+        if is_sealed(text):
+            # A private chat's ciphertext: nothing for the assistant to read.
+            continue
         if not text:
             continue
         if ENVELOPE_FENCE in text:
@@ -1146,13 +1150,16 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
             text = (req.message or "").strip()
-            stop_line = _stop_game(req.token, req.user_context.user) if _STOP_GAME.match(text) else None
+            # A private chat's encrypted message is passed through untouched:
+            # never a game answer, a stop word or a question for Jarvis.
+            sealed = is_sealed(text)
+            stop_line = _stop_game(req.token, req.user_context.user) if not sealed and _STOP_GAME.match(text) else None
             # A short message can be an answer to a family game running here.
             # It is judged on arrival, before the post below, so the first
             # answer to reach the server is the one that counts.
             judged = (
                 _judge_game_answer(req.token, req.user_context.user, text)
-                if stop_line is None and text and len(text) <= 120 and not text.startswith("/") and not validate_jarvis_mention(req.message)
+                if not sealed and stop_line is None and text and len(text) <= 120 and not text.startswith("/") and not validate_jarvis_mention(req.message)
                 else None
             )
             ok, data, message = await _talk_request_with_retry(
@@ -1165,7 +1172,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to send message.", service="talk_send")
 
             # Check for @Jarvis mention and run background task
-            if validate_jarvis_mention(req.message):
+            if not sealed and validate_jarvis_mention(req.message):
                 query = req.message.lstrip()[len("@Jarvis"):].strip()
                 question_id = data.get("id") if isinstance(data, dict) else None
                 await _claim_jarvis_question(req.token, question_id)

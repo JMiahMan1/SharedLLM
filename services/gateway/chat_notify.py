@@ -21,6 +21,7 @@ from typing import Any
 import aiohttp
 
 from services.common import notify
+from services.common.sealed import is_sealed
 
 log = logging.getLogger("gateway.chat_notify")
 
@@ -52,12 +53,19 @@ def preview(message: str | None) -> str:
     return text or "New message"
 
 
-def notice_for(conv: dict[str, Any], me: str, user: str = "") -> dict[str, Any] | None:
+def notice_for(conv: dict[str, Any], me: str, user: str = "", *, private: bool = False) -> dict[str, Any] | None:
     """The notice for ``user`` (Nextcloud login ``me``) a conversation summary
-    deserves, or None."""
+    deserves, or None.
+
+    A private chat (``private``, or a sealed last message) gets a notice with no
+    content at all: who wrote, never what, and no inline Reply (a reply typed
+    in a notification would be plain text in an encrypted chat).
+    """
     actor = (conv.get("last_message_actor_id") or "").lower()
     if not conv.get("last_message_id") or conv.get("last_message_system"):
         return None
+    if private or is_sealed(conv.get("last_message")):
+        return _private_notice(conv, me, user)
     # Jarvis answering is news for everyone -- including the person who asked,
     # whose login it is posted under (so Talk counts it as already read).
     jarvis = bool(_ASSISTANT.search(conv.get("last_message") or ""))
@@ -88,6 +96,25 @@ def notice_for(conv: dict[str, Any], me: str, user: str = "") -> dict[str, Any] 
             "unread": unread,
             "mention": bool(conv.get("unread_mention")),
         },
+        once=f"chat:{token}:{conv.get('last_message_id')}",
+    )
+
+
+def _private_notice(conv: dict[str, Any], me: str, user: str) -> dict[str, Any] | None:
+    actor = (conv.get("last_message_actor_id") or "").lower()
+    if actor == me.lower() or not int(conv.get("unread_messages") or 0):
+        return None
+    sender = conv.get("last_message_actor") or actor or "your partner"
+    token = conv.get("token")
+    url = f"/family?chat={token}"
+    return notify.notice(
+        user, "chat", "Private chat", f"New private message from {sender}",
+        url=url,
+        priority=4,
+        tag=f"chat:{token}",
+        actions=[notify.view_action(url)],
+        data={"token": token, "message_id": conv.get("last_message_id"), "private": True,
+              "unread": int(conv.get("unread_messages") or 0)},
         once=f"chat:{token}:{conv.get('last_message_id')}",
     )
 
@@ -137,6 +164,9 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
     seen = await r.hgetall(key) or {}
     primed = bool(await r.get(PRIMED_KEY.format(user=username)))
     me = creds["nextcloud_user"]
+    from services.gateway.private_chat import private_tokens
+
+    private = private_tokens()
     sent = 0
     for conv in conversations:
         token, msg_id = conv.get("token"), conv.get("last_message_id")
@@ -145,7 +175,7 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
         before = seen.get(token)
         if before is not None and int(before) >= int(msg_id):
             continue
-        notice = None if (before is None and not primed) else notice_for(conv, me, username)
+        notice = None if (before is None and not primed) else notice_for(conv, me, username, private=token in private)
         if notice is not None:
             if not await notify.send(notice, client=client, telemetry=telemetry,
                                      secret=headers["X-Internal-Secret"]):
