@@ -34,6 +34,7 @@ import SharedWithYouCard from './SharedWithYouCard';
 import MealsCard from './MealsCard';
 import ShareToChatSheet from '../bible/ShareToChatSheet';
 import { healthDayLines, healthDayShareText } from '../../lib/healthShare';
+import { healthSourceName } from '../../lib/healthSource';
 import { errorText } from '../../lib/errorText';
 
 interface Props {
@@ -57,9 +58,11 @@ function ScaleRow({
   testId: string;
 }) {
   return (
+    // A fixed label column and five equal cells, so the rows line up under each
+    // other whatever the label's length (Soreness pushed its row out of line).
     <div className="flex items-center justify-between gap-2" data-testid={testId}>
-      <span className="text-xs text-slate-400">{label}</span>
-      <div className="flex gap-1" role="group" aria-label={label}>
+      <span className="w-16 shrink-0 text-xs text-slate-400">{label}</span>
+      <div className="grid min-w-0 max-w-[16rem] flex-1 grid-cols-5 gap-1" role="group" aria-label={label}>
         {[1, 2, 3, 4, 5].map((score) => (
           <button
             key={score}
@@ -351,7 +354,7 @@ export default function HealthToday({ onNavigate }: Props) {
                   {sleepWindowLabel(sleep.last_night.bedtime, sleep.last_night.wake_time) ??
                     (sleep.last_night.quality ? `Felt ${sleep.last_night.quality}/5` : 'Times not recorded')}
                   {' · '}
-                  {sleep.last_night.source === 'manual' ? 'hand logged' : sleep.last_night.source}
+                  {healthSourceName(sleep.last_night.source)}
                 </p>
                 {sleep.score && (
                   <p className="mt-1 text-[11px] text-slate-400">{sleep.score.label} · {sleep.score.detail}</p>

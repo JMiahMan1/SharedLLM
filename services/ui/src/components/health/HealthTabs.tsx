@@ -24,7 +24,9 @@ interface Props {
  *
  * The old page had no navigation because it was one surface; adding tabs here
  * rather than a second route means every tab shares the same header, the same
- * data freshness and the phone's back behaviour.
+ * data freshness and the phone's back behaviour. On a phone each tab stacks its
+ * icon over its label so all five fit across the screen; side by side, the last
+ * one or two were scrolled out of sight on a small phone.
  */
 export default function HealthTabs({ value, onChange }: Props) {
   return (
@@ -47,7 +49,7 @@ export default function HealthTabs({ value, onChange }: Props) {
             aria-controls={`health-panel-${tab.id}`}
             data-testid={`health-tab-${tab.id}`}
             onClick={() => onChange(tab.id)}
-            className={`flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors pointer-coarse:min-h-11 ${
+            className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] font-semibold transition-colors sm:min-h-10 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs pointer-coarse:min-h-11 ${
               selected
                 ? 'bg-purple-500/20 text-purple-200 border border-purple-500/30'
                 : 'border border-transparent text-slate-400 hover:text-white'

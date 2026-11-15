@@ -48,7 +48,7 @@ const HelpTooltip: React.FC<HelpTooltipProps> = ({ docName, sectionTitle, label 
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="inline-flex items-center justify-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors ml-1 p-1.5 -m-0.5 pointer-coarse:p-3 pointer-coarse:-m-2"
+        className="inline-flex items-center justify-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors ml-1 p-1.5 -m-0.5 pointer-coarse:p-[15px] pointer-coarse:-m-[11px]"
         title={`Help with ${label || 'this field'}`}
         aria-label={`Help with ${label || 'this field'}`}
       >

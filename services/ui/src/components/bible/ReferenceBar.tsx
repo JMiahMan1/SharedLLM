@@ -35,6 +35,8 @@ interface ReferenceBarProps {
   /** Whether the read-aloud player is showing, and how to show or hide it. */
   listening?: boolean;
   onListen?: () => void;
+  /** The translation on the page; with none saved it names the pill (it read "V..." on a phone). */
+  readingVersion?: string;
 }
 
 type Panel = 'passage' | 'version' | 'compare' | 'display';
@@ -92,6 +94,7 @@ export default function ReferenceBar({
   onFocus,
   listening = false,
   onListen,
+  readingVersion = '',
 }: ReferenceBarProps) {
   const { trigger } = useHaptics();
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -112,7 +115,7 @@ export default function ReferenceBar({
   const comparing = Boolean(preferences.compare_version);
   const comparableVersions = versions.filter((v) => v.installed && v.code !== preferences.default_version);
   const passageLabel = `${book?.name ?? position.book} ${position.chapter}:${position.verse}`;
-  const versionLabel = (preferences.default_version || '').toUpperCase() || 'Version';
+  const versionLabel = (preferences.default_version || readingVersion).toUpperCase() || 'Version';
   const layout = preferences.layout ?? 'flow';
 
   const open = (next: Panel) => {

@@ -40,7 +40,7 @@ export default function JarvisUseCard() {
               type="button"
               aria-pressed={days === window}
               onClick={() => setDays(window)}
-              className={`min-h-9 shrink-0 rounded-lg border px-2.5 text-[11px] ${
+              className={`min-h-11 min-w-11 shrink-0 rounded-lg border px-2.5 text-[11px] sm:min-h-9 sm:min-w-0 ${
                 days === window ? 'border-purple-400/40 bg-purple-400/10 text-white' : 'border-white/10 bg-white/[0.03] text-slate-400'
               }`}
             >

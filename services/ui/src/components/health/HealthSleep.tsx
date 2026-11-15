@@ -10,6 +10,7 @@ import {
   scoreTone,
   sleepWindowLabel,
 } from '../../lib/healthHub';
+import { healthSourceName } from '../../lib/healthSource';
 import type { SleepEstimate, SleepSession } from '../../types/api';
 
 const QUALITY_WORDS = ['', 'Rough', 'Poor', 'Okay', 'Good', 'Great'];
@@ -26,7 +27,7 @@ function clockTime(iso: string | null): string {
 function sourceLabel(source: string, long = false): string {
   if (source === 'manual') return long ? 'Logged by hand' : 'hand logged';
   if (source === ESTIMATE_SOURCE) return long ? 'Estimated from device use' : 'estimated from device use';
-  return long ? `Imported from ${source}` : source;
+  return long ? `Imported from ${healthSourceName(source)}` : healthSourceName(source);
 }
 
 /**

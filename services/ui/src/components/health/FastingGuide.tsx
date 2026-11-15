@@ -33,7 +33,7 @@ function Verse({ reference, open: startOpen = false }: { reference: string; open
           ) : text ? (
             <>
               <p>{text}</p>
-              <Link to={`/bible?ref=${encodeURIComponent(reference)}`} className="mt-1 inline-block text-[11px] text-purple-300 hover:underline">
+              <Link to={`/bible?ref=${encodeURIComponent(reference)}`} className="mt-1 inline-flex min-h-11 items-center text-[11px] text-purple-300 hover:underline sm:min-h-0">
                 Read in the Bible{passage.data?.version ? ` (${passage.data.version})` : ''}
               </Link>
             </>

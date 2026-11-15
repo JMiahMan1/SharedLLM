@@ -443,7 +443,7 @@ export default function ImportedBookReader({
                 <button
                   type="button"
                   onClick={openAsk}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)]"
+                  className="inline-flex min-h-10 pointer-coarse:min-h-11 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)]"
                 >
                   <Sparkles size={14} /> Ask about this page
                 </button>
@@ -451,7 +451,7 @@ export default function ImportedBookReader({
                   type="button"
                   onClick={savePage}
                   disabled={saveNote.isPending || !chapter.data}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)] disabled:opacity-50"
+                  className="inline-flex min-h-10 pointer-coarse:min-h-11 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)] disabled:opacity-50"
                 >
                   {saveNote.isPending ? <Loader2 size={14} className="animate-spin" /> : <NotebookPen size={14} />}
                   Save page
@@ -460,7 +460,7 @@ export default function ImportedBookReader({
                   type="button"
                   onClick={sharePage}
                   disabled={!chapter.data}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)] disabled:opacity-50"
+                  className="inline-flex min-h-10 pointer-coarse:min-h-11 items-center gap-1.5 rounded-xl border border-[var(--page-rule)] px-3 text-xs text-[var(--page-ink)] hover:bg-[var(--page-hover)] disabled:opacity-50"
                 >
                   <Share2 size={14} /> Share page
                 </button>

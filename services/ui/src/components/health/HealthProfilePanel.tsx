@@ -8,6 +8,7 @@ import { errorText } from '../../lib/errorText';
 import { confirmDialog } from '../ui/confirmDialog';
 import { isKidMode } from '../../lib/healthSwitches';
 import { Toggle } from '../ui/Toggle';
+import { healthSourceName } from '../../lib/healthSource';
 import type { HealthMetricSwitch, HealthProfile, HealthShare } from '../../types/api';
 
 const ACTIVITY_OPTIONS: Array<[HealthProfile['activity_level'], string]> = [
@@ -489,7 +490,7 @@ export default function HealthProfilePanel() {
                 {formatMeasure(key, sample.value, sample.unit)}
               </p>
               <p className="text-[10px] text-slate-500">
-                {formatDayLabel(sample.recorded_at.slice(0, 10))} · {sample.source}
+                {formatDayLabel(sample.recorded_at.slice(0, 10))} · {healthSourceName(sample.source)}
                 {key === 'resting_hr' && summaryQuery.data?.resting_hr_baseline
                   ? ` · baseline ${Math.round(summaryQuery.data.resting_hr_baseline)} bpm`
                   : ''}
@@ -498,7 +499,7 @@ export default function HealthProfilePanel() {
                 type="button"
                 onClick={() => setHistoryFor(historyFor === key ? null : key)}
                 aria-expanded={historyFor === key}
-                className="mt-1 text-[10px] font-semibold text-sky-300 underline hover:text-sky-200"
+                className="mt-1 inline-flex min-h-11 items-center text-[10px] font-semibold text-sky-300 underline hover:text-sky-200 sm:min-h-0"
               >
                 {historyFor === key ? 'Hide history' : 'History'}
               </button>
@@ -519,7 +520,7 @@ export default function HealthProfilePanel() {
                 type="button"
                 onClick={() => setHistoryFor(null)}
                 aria-label="Close history"
-                className="text-slate-500 hover:text-slate-300"
+                className="-my-3 -mr-3 flex h-11 w-11 items-center justify-center text-slate-500 hover:text-slate-300 sm:my-0 sm:mr-0 sm:h-auto sm:w-auto"
               >
                 <X size={14} />
               </button>
@@ -537,7 +538,7 @@ export default function HealthProfilePanel() {
                 <button
                   type="button"
                   onClick={() => void historyQuery.refetch()}
-                  className="mt-1 text-xs font-semibold text-amber-300 underline hover:text-amber-200"
+                  className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-amber-300 underline hover:text-amber-200 sm:min-h-0"
                 >
                   Try again
                 </button>
@@ -557,14 +558,14 @@ export default function HealthProfilePanel() {
                       {formatMeasure(historyFor, sample.value, sample.unit)}
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      {formatDayLabel(sample.recorded_at.slice(0, 10))} · {sample.source}
+                      {formatDayLabel(sample.recorded_at.slice(0, 10))} · {healthSourceName(sample.source)}
                     </span>
                     <button
                       type="button"
                       onClick={() => void removeReading(sample.id)}
                       disabled={deleteMetric.isPending}
                       aria-label={`Delete the ${formatMeasure(historyFor, sample.value, sample.unit)} reading`}
-                      className="text-slate-500 hover:text-red-300 disabled:opacity-50"
+                      className="-my-2 flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-red-300 disabled:opacity-50 sm:my-0 sm:h-auto sm:w-auto"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -682,7 +683,7 @@ export default function HealthProfilePanel() {
                   onClick={() =>
                     share.mutate({ viewer: entry.viewer, scope: entry.scope, enabled: false })
                   }
-                  className="text-slate-500 hover:text-red-300"
+                  className="-my-3 -mr-2 flex h-11 w-11 items-center justify-center text-slate-500 hover:text-red-300 sm:my-0 sm:mr-0 sm:h-auto sm:w-auto"
                 >
                   <X size={11} />
                 </button>

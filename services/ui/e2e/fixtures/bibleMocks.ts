@@ -126,6 +126,19 @@ export async function mockBible(page: Page) {
       return json({ book_id: 7, ordinal: Number(p.split('/').pop()), label: 'Session 1', text: STUDY_TEXT, questions: [] });
     }
     if (p === '/voices') return json({ voices: [], count: 0 });
+    // The verse sheet's study links: a made-up lexicon and a one-verse interlinear.
+    if (p === '/lexicon/status') return json({ installed: true, entries: 10, occurrences: 40, source: 'test' });
+    if (p === '/lexicon/verse') return json({ reference: url.searchParams.get('ref') ?? '', source: 'concordance', words: [], tokens: [] });
+    if (p === '/blb/link') {
+      return json({ ref: url.searchParams.get('ref') ?? '', url: 'https://example.invalid/blb', tool: url.searchParams.get('tool') });
+    }
+    if (p === '/interlinear') {
+      return json({ ref: url.searchParams.get('ref') ?? '', available: true, attribution: 'Test interlinear', verses: [{
+        reference: url.searchParams.get('ref') ?? '', language: 'greek', words: [
+          { w: 'λόγος', t: 'logos', e: 'word', s: 'G3056', g: 'N-NSM', l: 'λόγος', d: 'a word' },
+          { w: 'ἀγάπη', t: 'agape', e: 'love', s: 'G0026', g: 'N-NSF', l: 'ἀγάπη', d: 'love' },
+        ] }] });
+    }
     if (p === '/study/notes') {
       return json({ version: 'tst', edition: '', edition_name: '', requested: null, reference: 'Genesis 1', kinds: [],
         available_kinds: {}, cross_version: false, other_translations: [], editions: [], notes: [], count: 0, note: null });
