@@ -113,6 +113,9 @@ dependencies {
     // Fused location and Activity Recognition for LocationTrackingService. The
     // same version the Geolocation plugin already ships, so the APK gains no copy.
     implementation "com.google.android.gms:play-services-location:21.3.0"
+    // BiometricPrompt with a Keystore CryptoObject for the private chat's phone-lock unlock
+    // (DeviceUnlockPlugin). The same version the biometric-auth plugin already ships.
+    implementation "androidx.biometric:biometric:1.1.0"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     // android.jar's org.json is stubs only; the push stream parsing tests need the real one.

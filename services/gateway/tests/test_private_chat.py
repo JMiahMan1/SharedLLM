@@ -1,12 +1,14 @@
 """The parents' private chat: who may be in it, what the server keeps, and what it never says.
 
-The server holds only public key-derivation parameters, a verifier and
-encrypted pictures; these tests check it enforces membership itself (not only
-the app), refuses minors and other relatives, serves pictures to members only,
-keeps every Talk write in the room encrypted, rate-limits nudges, and puts no
-content in any notice.
+The server holds only public key-derivation parameters, a wrapped key, a
+verifier, a hash of the password proof and encrypted pictures; these tests
+check it enforces membership itself (not only the app), refuses minors and
+other relatives, serves pictures to members only, keeps every Talk write in the
+room encrypted, rate-limits nudges and password changes, keeps the old key
+records for a rollback, and puts no content in any notice.
 """
 import base64
+import hashlib
 import json
 
 import pytest
@@ -34,8 +36,22 @@ def _b64(n: int) -> str:
     return base64.b64encode(bytes(range(n))).decode()
 
 
+def _fill(n: int, byte: int) -> str:
+    return base64.b64encode(bytes([byte]) * n).decode()
+
+
+VERIFIER = {"iv": _b64(12), "ct": _b64(47)}
+AUTH_1 = _fill(32, 1)
+
+
 def _params(**over):
-    body = {"salt": _b64(16), "iterations": 600_000, "verifier": {"iv": _b64(12), "ct": _b64(40)}}
+    """A v2 key record as a device makes it."""
+    body = {
+        "kdf": {"salt": _b64(16), "iterations": 600_000},
+        "wrapped_key": {"iv": _fill(12, 7), "ct": _fill(48, 7)},
+        "verifier": dict(VERIFIER),
+        "auth": AUTH_1,
+    }
     body.update(over)
     return body
 
@@ -118,11 +134,18 @@ def test_a_parent_starts_one_with_the_other_parent_and_the_server_keeps_no_key(e
     chat = resp.json()
     assert chat["token"] == "room123abc"
     assert chat["members"] == ["alex", "sam"]
+    assert chat["version"] == 2
     assert chat["kdf"] == {"name": "PBKDF2-SHA256", "salt": _b64(16), "iterations": 600_000}
+    assert chat["wrapped_key"] == {"iv": _fill(12, 7), "ct": _fill(48, 7)}
+    assert "auth_hash" not in chat and "auth" not in chat and "history" not in chat
     create = next(c for c in env["calls"] if c["action"] == "create_group")
     assert create["participants"] == ["sam"]
     saved = json.loads((env["root"] / "chats" / "room123abc.json").read_text())
-    assert set(saved) == {"token", "members", "created_by", "created_at", "salt", "iterations", "verifier"}
+    assert set(saved) == {"token", "members", "created_by", "created_at", "version", "kdf", "wrapped_key",
+                          "verifier", "auth_hash"}
+    # Only a hash of the password proof is kept, never the proof itself.
+    assert saved["auth_hash"] == hashlib.sha256(bytes([1]) * 32).hexdigest()
+    assert AUTH_1 not in json.dumps(saved)
     # The other parent sees it too, with the same parameters to derive the key.
     other = env["client"].get("/api/private-chat/chats/room123abc", headers=_as("sam")).json()
     assert other["verifier"] == chat["verifier"] and other["partner"] == "alex"
@@ -150,12 +173,21 @@ def test_not_with_yourself_and_only_once_per_pair(env):
 
 
 @pytest.mark.parametrize("over", [
-    {"iterations": 100_000},
-    {"iterations": "600000"},
-    {"salt": _b64(8)},
-    {"salt": "not base64!"},
+    {"kdf": {"salt": _b64(16), "iterations": 100_000}},
+    {"kdf": {"salt": _b64(16), "iterations": "600000"}},
+    {"kdf": {"salt": _b64(16), "iterations": 20_000_000}},
+    {"kdf": {"salt": _b64(8), "iterations": 600_000}},
+    {"kdf": {"salt": "not base64!", "iterations": 600_000}},
+    {"kdf": None},
+    {"wrapped_key": {"iv": _b64(12), "ct": _b64(32)}},
+    {"wrapped_key": {"iv": _b64(16), "ct": _b64(48)}},
+    {"wrapped_key": None},
     {"verifier": {"iv": _b64(16), "ct": _b64(40)}},
     {"verifier": {"iv": _b64(12), "ct": _b64(8)}},
+    {"auth": None},
+    {"auth": _b64(16)},
+    # A v1 body from an old app: the server only makes v2 chats now.
+    {"kdf": None, "wrapped_key": None, "auth": None, "salt": _b64(16), "iterations": 600_000},
 ])
 def test_weak_or_malformed_key_parameters_are_refused(env, over):
     assert _create(env, **over).status_code == 422
@@ -384,3 +416,176 @@ def test_a_private_message_notice_has_no_content_and_no_reply(private, message):
 
 def test_my_own_private_message_is_not_announced_to_me():
     assert chat_notify.notice_for(_conv(last_message_actor_id="alex"), "alex", "alex", private=True) is None
+
+
+# --- Changing the password ------------------------------------------------------
+
+
+V1_SALT = _fill(16, 3)
+
+
+def _seed_v1(env) -> dict:
+    """A chat as the first version made it (the one already in use): no wrapped key, no auth."""
+    chat = {"token": "room123abc", "members": ["alex", "sam"], "created_by": "alex", "created_at": 1_700_000_000,
+            "salt": V1_SALT, "iterations": 600_000, "verifier": dict(VERIFIER)}
+    private_chat.get_store().save(chat)
+    return chat
+
+
+def _change(env, user="alex", n=2, auth=None, **over):
+    body = {
+        "kdf": {"salt": _fill(16, 10 + n), "iterations": 600_000},
+        "wrapped_key": {"iv": _fill(12, 10 + n), "ct": _fill(48, 10 + n)},
+        "verifier": dict(VERIFIER),
+        "new_auth": _fill(32, n),
+    }
+    if auth is not None:
+        body["auth"] = auth
+    body.update(over)
+    return env["client"].post("/api/private-chat/chats/room123abc/password", json=body, headers=_as(user))
+
+
+def _saved(env) -> dict:
+    return json.loads((env["root"] / "chats" / "room123abc.json").read_text())
+
+
+def test_a_v1_chat_is_shown_as_v1(env):
+    _seed_v1(env)
+    chat = env["client"].get("/api/private-chat/chats/room123abc", headers=_as("sam")).json()
+    assert chat["version"] == 1
+    assert chat["kdf"] == {"name": "PBKDF2-SHA256", "salt": V1_SALT, "iterations": 600_000}
+    assert "wrapped_key" not in chat
+
+
+def test_a_v1_chat_takes_a_change_from_a_member_with_the_same_verifier_and_becomes_v2(env):
+    _seed_v1(env)
+    resp = _change(env, user="sam")
+    assert resp.status_code == 200, resp.text
+    chat = resp.json()
+    assert chat["version"] == 2 and chat["verifier"] == VERIFIER
+    assert chat["kdf"] == {"name": "PBKDF2-SHA256", "salt": _fill(16, 12), "iterations": 600_000}
+    assert chat["notified"] == ["alex"]
+    saved = _saved(env)
+    assert saved["version"] == 2 and "salt" not in saved and "iterations" not in saved
+    assert saved["auth_hash"] == hashlib.sha256(bytes([2]) * 32).hexdigest()
+    assert saved["password_changed_by"] == "sam"
+    (old,) = saved["history"]
+    assert old["version"] == 1 and old["salt"] == V1_SALT and old["iterations"] == 600_000
+    assert old["verifier"] == VERIFIER and old["replaced_by"] == "sam"
+    # Unlocking now asks the other parent's device for the new parameters.
+    other = env["client"].get("/api/private-chat/chats/room123abc", headers=_as("alex")).json()
+    assert other["version"] == 2 and other["wrapped_key"] == {"iv": _fill(12, 12), "ct": _fill(48, 12)}
+    assert "auth_hash" not in other and "history" not in other
+
+
+def test_a_v1_change_that_would_change_the_key_is_refused(env):
+    _seed_v1(env)
+    resp = _change(env, verifier={"iv": _fill(12, 9), "ct": _b64(47)})
+    assert resp.status_code == 409
+    saved = _saved(env)
+    assert saved.get("version") is None and saved["salt"] == V1_SALT and "history" not in saved
+    assert env["notices"] == []
+
+
+@pytest.mark.parametrize("outsider,code", [("kid", 404), ("gran", 404), ("uncle", 404), ("teen", 404)])
+def test_only_a_member_may_change_it(env, outsider, code):
+    _seed_v1(env)
+    assert _change(env, user=outsider).status_code == code
+    assert _saved(env)["salt"] == V1_SALT and env["notices"] == []
+
+
+def test_a_member_who_is_no_longer_a_parent_may_not_change_it(env, monkeypatch):
+    _seed_v1(env)
+
+    async def changed():
+        return {**PEOPLE, "sam": {**PEOPLE["sam"], "family_role": "other"}}
+
+    monkeypatch.setattr(private_chat, "_people", changed)
+    assert _change(env, user="sam").status_code == 403
+    assert _saved(env)["salt"] == V1_SALT
+
+
+def test_a_v2_change_needs_the_current_auth(env):
+    _create(env)
+    assert _change(env).status_code == 403  # no proof
+    assert _change(env, auth=_fill(32, 9)).status_code == 403  # the wrong one
+    assert _saved(env)["auth_hash"] == hashlib.sha256(bytes([1]) * 32).hexdigest()
+    assert env["notices"] == []
+    resp = _change(env, auth=AUTH_1)
+    assert resp.status_code == 200, resp.text
+    assert _saved(env)["auth_hash"] == hashlib.sha256(bytes([2]) * 32).hexdigest()
+    # The old proof no longer works; the new one does.
+    assert _change(env, n=3, auth=AUTH_1).status_code == 403
+    assert _change(env, n=3, auth=_fill(32, 2)).status_code == 200
+
+
+def test_a_v2_change_with_a_different_verifier_is_refused(env):
+    _create(env)
+    resp = _change(env, auth=AUTH_1, verifier={"iv": _fill(12, 9), "ct": _b64(47)})
+    assert resp.status_code == 409
+
+
+@pytest.mark.parametrize("over", [
+    {"new_auth": _b64(16)},
+    {"new_auth": None},
+    {"kdf": {"salt": _b64(16), "iterations": 1000}},
+    {"wrapped_key": {"iv": _b64(12), "ct": _b64(47)}},
+    {"verifier": None},
+])
+def test_a_malformed_change_is_refused(env, over):
+    _seed_v1(env)
+    assert _change(env, **over).status_code == 422
+    assert _saved(env)["salt"] == V1_SALT
+
+
+def test_history_keeps_the_last_five_records(env, monkeypatch):
+    monkeypatch.setattr(private_chat, "PASSWORD_CHANGE_LIMIT", 100)
+    _seed_v1(env)
+    assert _change(env, n=2).status_code == 200
+    for n in range(3, 9):
+        assert _change(env, n=n, auth=_fill(32, n - 1)).status_code == 200
+    history = _saved(env)["history"]
+    assert len(history) == private_chat.PASSWORD_HISTORY_KEEP == 5
+    # Newest last: the v1 record and the first v2 one have aged out.
+    assert [h["kdf"]["salt"] for h in history] == [_fill(16, 10 + n) for n in range(3, 8)]
+    assert all("history" not in h for h in history)
+
+
+def test_password_changes_are_rate_limited_per_chat(env):
+    _create(env)
+    assert private_chat.PASSWORD_CHANGE_LIMIT == 5
+    for n in range(2, 7):
+        assert _change(env, n=n, auth=_fill(32, n - 1) if n > 2 else AUTH_1).status_code == 200
+    resp = _change(env, n=7, auth=_fill(32, 6))
+    assert resp.status_code == 429
+    assert int(resp.headers["retry-after"]) > 0 and resp.json()["retry_after"] > 0
+    assert _saved(env)["auth_hash"] == hashlib.sha256(bytes([6]) * 32).hexdigest()
+
+
+def test_refused_attempts_count_toward_the_limit(env):
+    _create(env)
+    for _ in range(private_chat.PASSWORD_CHANGE_LIMIT):
+        assert _change(env, auth=_fill(32, 9)).status_code == 403
+    assert _change(env, auth=AUTH_1).status_code == 429
+
+
+def test_the_other_parent_gets_a_notice_with_no_content(env):
+    _seed_v1(env)
+    assert _change(env, user="alex").status_code == 200
+    (notice,) = env["notices"]
+    assert notice["user"] == "sam"
+    assert notice["title"] == "Private chat"
+    assert notice["body"] == "Alex changed the private chat password"
+    assert notice["data"]["url"] == "/family?chat=room123abc"
+    text = json.dumps(notice)
+    for secret in (_fill(16, 12), _fill(48, 12), _fill(32, 2), VERIFIER["ct"]):
+        assert secret not in text
+    assert not any(a.get("type") == "reply" for a in notice.get("actions", []))
+
+
+def test_an_undelivered_notice_does_not_undo_the_change(env):
+    _seed_v1(env)
+    env["state"]["deliver"] = False
+    resp = _change(env)
+    assert resp.status_code == 200 and resp.json()["notified"] == []
+    assert _saved(env)["version"] == 2

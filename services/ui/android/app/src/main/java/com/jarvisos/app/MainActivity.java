@@ -54,6 +54,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(BleBeaconPlugin.class);
         registerPlugin(SaveFilePlugin.class);
         registerPlugin(SecureWindowPlugin.class);
+        registerPlugin(DeviceUnlockPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

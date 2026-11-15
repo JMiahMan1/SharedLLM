@@ -9,7 +9,10 @@ export interface PrivateChatInfo {
   partner_name: string;
   created_by: string;
   created_at: number;
+  /** 1: the key is the password's (the first chats); 2: the key is wrapped and the password can change. */
+  version?: 1 | 2;
   kdf: { name: 'PBKDF2-SHA256'; salt: string; iterations: number };
+  wrapped_key?: { iv: string; ct: string };
   verifier: { iv: string; ct: string };
 }
 

@@ -4,15 +4,16 @@ import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
-import { encryptBytes, newChatSecrets, sealMessage, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import { deriveKey, encryptBytes, makeVerifier, randomBytes, sealMessage, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
 /**
  * The parents' private chat on every form factor: starting one (the create
  * sheet), the lock screen, a wrong password, the unlocked chat with an
- * encrypted photo and the Nudge, the photo viewer, and locking again when the
- * app goes to the background. Every screen gets the shared audit (nothing past
+ * encrypted photo and the Nudge, the photo viewer, locking again when the
+ * app goes to the background, changing the password, and the phone-lock
+ * unlock (with a stand-in for the Android plugin). Every screen gets the shared audit (nothing past
  * its card or dialog, no clipped text, nothing off the screen, 44px targets on
  * phones). Hermetic: the server is mocked, the ciphertext is real.
  */
@@ -26,6 +27,7 @@ interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
 
 interface Server {
   chats: Array<Record<string, unknown>>;
+  changes?: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   blobs: Record<string, Buffer>;
   posted: string[];
@@ -46,9 +48,19 @@ async function serve(page: Page, server: Server): Promise<void> {
       const body = req.postDataJSON() as Record<string, unknown>;
       server.created.push(body);
       const chat = { token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'parent',
-        created_at: SEC, kdf: { name: 'PBKDF2-SHA256', salt: body.salt, iterations: body.iterations }, verifier: body.verifier };
+        created_at: SEC, version: 2, kdf: { name: 'PBKDF2-SHA256', ...(body.kdf as object) }, wrapped_key: body.wrapped_key, verifier: body.verifier };
       server.chats.push(chat);
       return route.fulfill({ json: chat });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') {
+      return route.fulfill({ json: server.chats[0] });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/password` && req.method() === 'POST') {
+      const body = req.postDataJSON() as Record<string, unknown>;
+      (server.changes ??= []).push(body);
+      const kdf = body.kdf as Record<string, unknown>;
+      server.chats[0] = { ...server.chats[0], version: 2, kdf: { name: 'PBKDF2-SHA256', ...kdf }, wrapped_key: body.wrapped_key };
+      return route.fulfill({ json: { ...server.chats[0], notified: ['robin'] } });
     }
     const blob = /^\/api\/private-chat\/chats\/[^/]+\/blobs\/([0-9a-f]+)$/.exec(p);
     if (blob) {
@@ -75,6 +87,30 @@ async function serve(page: Page, server: Server): Promise<void> {
     }
     return route.fallback();
   });
+}
+
+/** A chat as the first version made it (the one already in use): its key is the password's. */
+async function v1Chat(password: string): Promise<{ key: CryptoKey; salt: string; iterations: number; verifier: { iv: string; ct: string } }> {
+  const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
+  const key = await deriveKey(password, kdf);
+  return { key, ...kdf, verifier: await makeVerifier(key) };
+}
+
+async function v1Server(): Promise<{ server: Server; key: CryptoKey }> {
+  const secrets = await v1Chat(PASSWORD);
+  const server: Server = {
+    chats: [{ token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin', created_at: SEC - 86400,
+      version: 1, kdf: { name: 'PBKDF2-SHA256', salt: secrets.salt, iterations: secrets.iterations }, verifier: secrets.verifier }],
+    messages: [{ id: 1, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 600,
+      message_type: 'comment', message: await sealMessage(secrets.key, { t: 'text', text: 'Sent before any change' }) }],
+    blobs: {}, posted: [], created: [], nudges: 0, changes: [],
+  };
+  return { server, key: secrets.key };
+}
+
+async function unlockWith(page: Page, password: string): Promise<void> {
+  await page.getByTestId('private-password').fill(password);
+  await page.getByTestId('private-unlock').click();
 }
 
 async function open(page: Page, server: Server): Promise<Run> {
@@ -137,10 +173,10 @@ test.describe('private chat on every form factor', () => {
     await sheet.getByTestId('private-create').click();
     await expect(sheet).toHaveCount(0);
 
-    // Only public parameters went to the server: a 16-byte salt, the stretch, the verifier. Never the password.
+    // Only public parameters went to the server: the wrapped key, its salt and stretch, the verifier and the proof. Never the password.
     const [created] = server.created;
-    expect(Object.keys(created).sort()).toEqual(['iterations', 'partner', 'salt', 'verifier']);
-    expect(created.iterations).toBe(PBKDF2_ITERATIONS);
+    expect(Object.keys(created).sort()).toEqual(['auth', 'kdf', 'partner', 'verifier', 'version', 'wrapped_key']);
+    expect((created.kdf as { iterations: number }).iterations).toBe(PBKDF2_ITERATIONS);
     expect(JSON.stringify(created)).not.toContain(PASSWORD);
 
     // The creator's key is held already: the chat opens unlocked, and a message goes out sealed.
@@ -158,7 +194,7 @@ test.describe('private chat on every form factor', () => {
   });
 
   test('open one: list, lock screen, wrong password, unlocked with a photo and Nudge, viewer, lock on background', async ({ page }, info) => {
-    const secrets = await newChatSecrets(PASSWORD);
+    const secrets = await v1Chat(PASSWORD);
     const sealedPhoto = await encryptBytes(secrets.key, new Uint8Array(PNG));
     const blobId = 'ab'.repeat(16);
     const message = async (id: number, actor: string, name: string, text: string, ago: number) => ({
@@ -226,6 +262,124 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-lock')).toBeVisible();
     await expect(page.getByText('Dinner at seven, just us?')).toHaveCount(0);
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('change the password: the dialog, a wrong current password, then the history still opens with the new one', async ({ page }, info) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByText('Sent before any change')).toBeVisible();
+
+    await page.getByTestId('private-security-open').click();
+    const menu = page.getByTestId('private-security');
+    await expect(menu).toBeVisible();
+    // A browser has no phone lock to offer.
+    await expect(menu.getByTestId('private-phone-lock-toggle')).toHaveCount(0);
+    await check(page, info, run, 'private security menu', page.getByRole('dialog').last());
+
+    await menu.getByTestId('private-change-password-open').click();
+    const dialog = page.getByTestId('private-change-password');
+    await expect(dialog).toBeVisible();
+    const NEXT = 'a brand new shared sentence';
+    await dialog.getByTestId('private-current-password').fill('not the password at all');
+    await dialog.getByTestId('private-next-password').fill(NEXT);
+    await dialog.getByTestId('private-next-confirm').fill(`${NEXT}?`);
+    await expect(dialog.getByText('The two passwords do not match.')).toBeVisible();
+    await expect(dialog.getByTestId('private-change-submit')).toBeDisabled();
+    await dialog.getByTestId('private-next-confirm').fill(NEXT);
+    await dialog.getByTestId('private-change-understood').check();
+    await check(page, info, run, 'private change password', page.getByRole('dialog').last());
+
+    // A wrong current password is caught on the device: nothing is sent.
+    await dialog.getByTestId('private-change-submit').click();
+    await expect(dialog.getByTestId('private-change-error')).toContainText('not the current password');
+    expect(server.changes).toEqual([]);
+    await check(page, info, run, 'private change password wrong', page.getByRole('dialog').last());
+
+    await dialog.getByTestId('private-current-password').fill(PASSWORD);
+    await dialog.getByTestId('private-change-submit').click();
+    await expect(dialog).toHaveCount(0);
+    expect(server.changes).toHaveLength(1);
+    const [change] = server.changes!;
+    expect(change.verifier).toEqual(server.chats[0].verifier);
+    expect(change.auth).toBeUndefined();
+    expect(JSON.stringify(change)).not.toContain(NEXT);
+    expect(JSON.stringify(change)).not.toContain(PASSWORD);
+    // The person who changed it stays unlocked.
+    await expect(feed.getByText('Sent before any change')).toBeVisible();
+
+    // Locked again: the old password no longer opens it, the new one opens the old messages.
+    await page.getByTestId('private-lock-now').click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-wrong')).toBeVisible();
+    await unlockWith(page, NEXT);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    done(run);
+  });
+
+  test('unlock with the phone lock: turn it on with the password, then open the chat with it', async ({ page }, info) => {
+    // A stand-in for the Android plugin (the dev server only): it keeps what the page gives it.
+    await page.addInitScript(() => {
+      const stored: Record<string, string> = {};
+      (window as unknown as { __jarvisDeviceUnlockMock: unknown }).__jarvisDeviceUnlockMock = {
+        available: async () => ({ available: true }),
+        isEnabled: async ({ token }: { token: string }) => ({ enabled: token in stored }),
+        enable: async ({ token, key }: { token: string; key: string }) => {
+          stored[token] = key;
+          return { enabled: true };
+        },
+        unlock: async ({ token }: { token: string }) => {
+          if (!(token in stored)) throw new Error('Not set up');
+          return { key: stored[token] };
+        },
+        disable: async ({ token }: { token: string }) => {
+          delete stored[token];
+          return { enabled: false };
+        },
+      };
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    await page.getByTestId('private-security-open').click();
+    const toggle = page.getByTestId('private-phone-lock-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await check(page, info, run, 'private security phone', page.getByRole('dialog').last());
+    await toggle.click();
+    const sheet = page.getByTestId('private-phone-lock');
+    await expect(sheet).toBeVisible();
+    await sheet.getByTestId('private-phone-password').fill('wrong wrong wrong');
+    await sheet.getByTestId('private-phone-submit').click();
+    await expect(sheet.getByTestId('private-phone-error')).toContainText('not the password');
+    await check(page, info, run, 'private phone lock setup', page.getByRole('dialog').last());
+    await sheet.getByTestId('private-phone-password').fill(PASSWORD);
+    await sheet.getByTestId('private-phone-submit').click();
+    await expect(page.getByTestId('private-phone-lock-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
+
+    // The first lock after turning it on asks the phone by itself (once per opening of the chat)...
+    await page.getByTestId('private-lock-now').click();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    // ...after that it waits to be asked.
+    await page.getByTestId('private-lock-now').click();
+    const unlock = page.getByTestId('private-phone-unlock');
+    await expect(unlock).toBeVisible();
+    await expect(page.getByTestId('private-use-password')).toBeVisible();
+    await check(page, info, run, 'private phone unlock', page.getByTestId('chat-thread'), await overPanel(page, /^private phone unlock$/));
+    await unlock.click();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    // "Use password instead" always works.
+    await page.getByTestId('private-lock-now').click();
+    await page.getByTestId('private-use-password').click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
     done(run);
   });
 });

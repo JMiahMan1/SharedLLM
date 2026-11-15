@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, CheckCheck, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Check, CheckCheck, Fingerprint, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
+import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
+import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
+import PrivateChatSecurity from './PrivateChatSecurity';
 import EnvelopeBody from './EnvelopeBody';
 import {
   dayLabel,
@@ -72,6 +76,8 @@ export default function PrivateChatThread({
   const [opened, setOpened] = useState<Record<string, Opened>>({});
   const [secure, setSecure] = useState<SecureState | 'pending'>('pending');
   const token = conversation.token;
+  // The phone's lock is offered by itself once per opening of the chat, never again after a lock.
+  const autoPrompted = useRef(false);
 
   useEffect(() => {
     if (!adoptKey) return;
@@ -139,10 +145,11 @@ export default function PrivateChatThread({
   }, [messages, unlocked, opened, vault]);
 
   if (!unlocked) {
-    return <LockScreen info={info} infoError={infoError} vault={vault} partner={info?.partner_name} />;
+    return <LockScreen token={token} info={info} infoError={infoError} vault={vault} partner={info?.partner_name} autoPromptedRef={autoPrompted} />;
   }
   return (
     <UnlockedChat
+      partnerName={info?.partner_name || 'your partner'}
       token={token}
       conversation={conversation}
       messages={messages}
@@ -155,10 +162,62 @@ export default function PrivateChatThread({
   );
 }
 
-function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInfo; infoError?: string; vault: PrivateVault; partner?: string }) {
+function LockScreen({
+  token,
+  info,
+  infoError,
+  vault,
+  partner,
+  autoPromptedRef,
+}: {
+  token: string;
+  info?: PrivateChatInfo;
+  infoError?: string;
+  vault: PrivateVault;
+  partner?: string;
+  autoPromptedRef: { current: boolean };
+}) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [wrong, setWrong] = useState('');
+  // 'checking' until the phone says whether its lock is set up for this chat; 'phone' offers it first.
+  const [method, setMethod] = useState<'checking' | 'phone' | 'password'>(() => (deviceUnlockPlugin() ? 'checking' : 'password'));
+
+  const phoneUnlock = useCallback(async () => {
+    const plugin = deviceUnlockPlugin();
+    if (!plugin || !info) return;
+    setBusy(true);
+    setWrong('');
+    try {
+      vault.adopt(await keyFromDevice(plugin, token, info.verifier));
+    } catch (error) {
+      // Cancelled, a changed phone lock, anything: the password always works.
+      setWrong(deviceUnlockError(error, 'The phone lock did not open the chat.'));
+      setMethod('password');
+    } finally {
+      setBusy(false);
+    }
+  }, [info, token, vault]);
+
+  useEffect(() => {
+    if (method !== 'checking') return;
+    let live = true;
+    void deviceUnlockEnabled(token).then((enabled) => {
+      if (live) setMethod(enabled ? 'phone' : 'password');
+    });
+    return () => {
+      live = false;
+    };
+  }, [method, token]);
+
+  useEffect(() => {
+    if (method !== 'phone' || !info || autoPromptedRef.current) return;
+    const timer = window.setTimeout(() => {
+      autoPromptedRef.current = true;
+      void phoneUnlock();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [method, info, autoPromptedRef, phoneUnlock]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -166,7 +225,9 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
     setBusy(true);
     setWrong('');
     try {
-      const ok = await vault.unlock(password, { salt: info.kdf.salt, iterations: info.kdf.iterations }, info.verifier);
+      // The current key record, never a cached one: after a password change only the new password opens it.
+      const fresh = await api.getPrivateChat(token);
+      const ok = await vault.unlock(password, fresh);
       if (!ok) setWrong('That is not the password for this chat.');
     } catch (error) {
       setWrong(errorText(error, 'Could not unlock the chat.'));
@@ -194,6 +255,32 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
           <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-400">
             <Loader2 size={14} className="animate-spin" /> Loading…
           </p>
+        ) : method === 'checking' ? (
+          <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-400">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </p>
+        ) : method === 'phone' ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void phoneUnlock()}
+              disabled={busy}
+              data-testid="private-phone-unlock"
+              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-rose-600 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Fingerprint size={15} />}
+              {busy ? 'Waiting for the phone…' : 'Use phone lock'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMethod('password')}
+              disabled={busy}
+              data-testid="private-use-password"
+              className="mt-2 min-h-11 w-full rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
+            >
+              Use password instead
+            </button>
+          </>
         ) : (
           <>
             <label className="mt-4 block text-left">
@@ -235,6 +322,7 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
 }
 
 interface UnlockedChatProps {
+  partnerName: string;
   token: string;
   conversation: TalkConversation;
   messages: TalkMessage[];
@@ -245,7 +333,9 @@ interface UnlockedChatProps {
   onChanged: () => void;
 }
 
-function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
+  const queryClient = useQueryClient();
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -354,6 +444,16 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
             <BellRing size={14} aria-hidden /> Nudge
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setSecurityOpen(true)}
+          aria-label="Password and unlock"
+          title="Password and unlock"
+          data-testid="private-security-open"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+        >
+          <KeyRound size={14} aria-hidden /> <span className="hidden sm:inline">Password</span>
+        </button>
         <button
           type="button"
           onClick={() => vault.lock()}
@@ -503,6 +603,14 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
         </button>
       </form>
 
+      {securityOpen && (
+        <PrivateChatSecurity
+          token={token}
+          partnerName={partnerName}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] })}
+          onClose={() => setSecurityOpen(false)}
+        />
+      )}
       {viewing && (
         <PictureViewer
           url={viewing.url}

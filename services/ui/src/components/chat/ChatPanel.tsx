@@ -15,6 +15,7 @@ import ConversationInfo from './ConversationInfo';
 import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
 import PrivateChatThread from './PrivateChatThread';
+import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { errorText } from './privateChatModel';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
@@ -995,6 +996,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           isDefault={defaultToken === activeConversation.token}
           onToggleDefault={() => setDefault.mutate(defaultToken === activeConversation.token ? null : activeConversation.token)}
           onGone={() => {
+            // A deleted private chat takes this phone's unlock key with it.
+            if (activeConversation.private) void deviceUnlockPlugin()?.disable({ token: activeConversation.token }).catch(() => {});
             setInfoOpen(false);
             setSelectedToken('');
             setMobileView('list');
