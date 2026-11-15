@@ -79,6 +79,11 @@ final class SelfUpdate {
 
     /** Hand {@code apk} (already verified) to Android's installer. True when the session was committed. */
     static boolean install(Context context, File apk) {
+        return install(context, apk, "unknown");
+    }
+
+    /** {@code path} names who asked (the background updater, the update button) for the report. */
+    static boolean install(Context context, File apk, String path) {
         if (apk == null || !apk.exists()) return false;
         PackageInstaller.Session session = null;
         try {
@@ -115,9 +120,12 @@ final class SelfUpdate {
             session.commit(pi.getIntentSender());
             session.close();
             Log.i(TAG, "update session " + sessionId + " committed");
+            UpdateReport.send(context, "committed", UpdateReport.of("path", path));
             return true;
         } catch (Exception e) {
             Log.w(TAG, "session install failed: " + e.getMessage());
+            UpdateReport.send(context, "session_failed", UpdateReport.of(
+                    "path", path, "error", e.getClass().getSimpleName() + ": " + e.getMessage()));
             if (session != null) {
                 try {
                     session.abandon();
@@ -135,6 +143,9 @@ final class SelfUpdate {
         @Override
         public void onReceive(Context context, Intent intent) {
             int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+            UpdateReport.send(context, "status", UpdateReport.of(
+                    "status", status,
+                    "message", intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)));
             if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm == null) return;

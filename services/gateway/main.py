@@ -16995,6 +16995,41 @@ def _write_temp_apk(content: bytes):
     return tmp
 
 
+#: Where phones' app update reports are kept (newest last), and how many.
+INSTALL_REPORTS_KEY = "app_updates:install_reports"
+INSTALL_REPORTS_KEPT = 300
+_INSTALL_REPORT_FIELDS = ("event", "path", "status", "message", "error", "build", "sdk", "app_visible",
+                          "installer", "initiator", "update_owner", "may_install")
+
+
+@app.post("/api/app-updates/install-report")
+async def app_update_install_report(request: Request):
+    """A phone says what happened to an app update (UpdateReport.java): how it
+    was installed, Android's answer, who Android records as Jarvis's installer.
+    Kept in Redis for diagnosing updates that ask for a tap or the phone's lock.
+    Only known fields are kept, each cut short, so a phone cannot fill Redis."""
+    user = await _require_authenticated(request)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="A JSON body is required.") from exc
+    if not isinstance(body, dict) or not body.get("event"):
+        raise HTTPException(status_code=422, detail="event is required.")
+    report = {k: (str(body[k])[:300] if isinstance(body[k], str) else body[k])
+              for k in _INSTALL_REPORT_FIELDS if k in body and isinstance(body[k], (str, int, float, bool))}
+    report.update(user=user, at=datetime.now(UTC).isoformat())
+    from services.gateway.cache import get_redis
+
+    def _store() -> None:
+        r = get_redis()
+        r.rpush(INSTALL_REPORTS_KEY, json.dumps(report))
+        r.ltrim(INSTALL_REPORTS_KEY, -INSTALL_REPORTS_KEPT, -1)
+
+    await asyncio.to_thread(_store)
+    log.info("[app-updates] install report from %s: %s", user, report)
+    return {"status": "ok"}
+
+
 @app.post("/api/app-updates/publish")
 async def publish_app_update(request: Request):
     """Publish a new bundle.zip and/or the release APK and update metadata.

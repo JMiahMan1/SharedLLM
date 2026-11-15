@@ -119,7 +119,7 @@ final class NativeUpdater {
             Log.i(TAG, "APK " + code + " waits: Jarvis is in use");
             return;
         }
-        if (SelfUpdate.install(context, apk)) {
+        if (SelfUpdate.install(context, apk, "background")) {
             Log.i(TAG, "APK " + code + " handed to the installer");
         }
     }
