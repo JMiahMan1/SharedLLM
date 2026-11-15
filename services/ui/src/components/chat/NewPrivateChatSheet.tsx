@@ -8,7 +8,9 @@ import { errorText, MIN_PASSWORD_LENGTH, passwordProblem, type PrivateChatInfo, 
 /**
  * Start the parents' private chat: pick the other parent, choose a password
  * together (in person), confirm it, and accept that it cannot be recovered.
- * The key is made here; only its salt, round count and verifier go to the server.
+ * The chat's key is made here at random and wrapped under the password; only
+ * the wrapped key, its salt and round count, the verifier and a password proof
+ * (kept by the server as a hash) go to the server.
  */
 export default function NewPrivateChatSheet({
   partners,
@@ -38,9 +40,11 @@ export default function NewPrivateChatSheet({
       const secrets = await newChatSecrets(password);
       const chat = await api.createPrivateChat({
         partner,
-        salt: secrets.salt,
-        iterations: secrets.iterations,
+        version: 2,
+        kdf: secrets.kdf,
+        wrapped_key: secrets.wrapped_key,
         verifier: secrets.verifier,
+        auth: secrets.auth,
       });
       setPassword('');
       setConfirm('');

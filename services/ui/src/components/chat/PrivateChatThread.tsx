@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, CheckCheck, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
+import { chatLeft, chatShown, lockNow, vaultFor } from '../../lib/privateChatSession';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
+import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
+import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
+import PrivateChatSecurity from './PrivateChatSecurity';
+import PrivateCamera from './PrivateCamera';
+import PrivateGallery from './PrivateGallery';
+import { noSave, usePrivatePicture } from './usePrivatePicture';
 import EnvelopeBody from './EnvelopeBody';
 import {
   dayLabel,
@@ -41,12 +49,6 @@ interface PrivateChatThreadProps {
 
 type Opened = PrivatePayload | 'unreadable';
 
-/** Stop the browser offering to save, share, drag or open a picture elsewhere. */
-const noSave = {
-  draggable: false,
-  onContextMenu: (event: { preventDefault: () => void }) => event.preventDefault(),
-  onDragStart: (event: { preventDefault: () => void }) => event.preventDefault(),
-};
 
 /**
  * The parents' private chat: locked until the password is entered, and locked
@@ -65,13 +67,16 @@ export default function PrivateChatThread({
   onUnlockedChange,
   onChanged,
 }: PrivateChatThreadProps) {
-  // One vault per mounted chat (the panel remounts this per conversation).
-  const [vault] = useState(() => new PrivateVault());
+  // One vault per chat in this app's memory: it outlives this screen by this
+  // device's lock setting (privateChatSession), never the app.
+  const [vault] = useState(() => vaultFor(conversation.token));
   const subscribe = useCallback((fn: () => void) => vault.subscribe(fn), [vault]);
   const unlocked = useSyncExternalStore(subscribe, () => vault.unlocked);
   const [opened, setOpened] = useState<Record<string, Opened>>({});
   const [secure, setSecure] = useState<SecureState | 'pending'>('pending');
   const token = conversation.token;
+  // The phone's lock is offered by itself once per opening of the chat, never again after a lock.
+  const autoPrompted = useRef(false);
 
   useEffect(() => {
     if (!adoptKey) return;
@@ -79,26 +84,30 @@ export default function PrivateChatThread({
     onKeyAdopted?.();
   }, [adoptKey, vault, onKeyAdopted]);
 
-  // Lock on leaving: this screen going away, the tab or app going to the background.
+  // Leaving (this screen going away, the tab or app going to the background)
+  // locks now or starts the lock timer; coming back cancels a pending lock.
   useEffect(() => {
+    chatShown(token);
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') vault.lock();
+      if (document.visibilityState === 'hidden') chatLeft(token);
+      else chatShown(token);
     };
     document.addEventListener('visibilitychange', onVisibility);
-    let pause: { remove: () => Promise<void> } | undefined;
+    const handles: Array<{ remove: () => Promise<void> }> = [];
     if (Capacitor.isNativePlatform()) {
-      void CapacitorApp.addListener('pause', () => vault.lock())
-        .then((handle) => {
-          pause = handle;
-        })
+      void CapacitorApp.addListener('pause', () => chatLeft(token))
+        .then((handle) => handles.push(handle))
+        .catch(() => {});
+      void CapacitorApp.addListener('resume', () => chatShown(token))
+        .then((handle) => handles.push(handle))
         .catch(() => {});
     }
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      void pause?.remove();
-      vault.lock();
+      for (const handle of handles) void handle.remove();
+      chatLeft(token);
     };
-  }, [vault]);
+  }, [token]);
 
   // Gone from the screen is locked: the panel must not mark it read behind the lock.
   useEffect(() => () => onUnlockedChange(false), [onUnlockedChange]);
@@ -139,10 +148,11 @@ export default function PrivateChatThread({
   }, [messages, unlocked, opened, vault]);
 
   if (!unlocked) {
-    return <LockScreen info={info} infoError={infoError} vault={vault} partner={info?.partner_name} />;
+    return <LockScreen token={token} info={info} infoError={infoError} vault={vault} partner={info?.partner_name} autoPromptedRef={autoPrompted} />;
   }
   return (
     <UnlockedChat
+      partnerName={info?.partner_name || 'your partner'}
       token={token}
       conversation={conversation}
       messages={messages}
@@ -155,10 +165,62 @@ export default function PrivateChatThread({
   );
 }
 
-function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInfo; infoError?: string; vault: PrivateVault; partner?: string }) {
+function LockScreen({
+  token,
+  info,
+  infoError,
+  vault,
+  partner,
+  autoPromptedRef,
+}: {
+  token: string;
+  info?: PrivateChatInfo;
+  infoError?: string;
+  vault: PrivateVault;
+  partner?: string;
+  autoPromptedRef: { current: boolean };
+}) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [wrong, setWrong] = useState('');
+  // 'checking' until the phone says whether its lock is set up for this chat; 'phone' offers it first.
+  const [method, setMethod] = useState<'checking' | 'phone' | 'password'>(() => (deviceUnlockPlugin() ? 'checking' : 'password'));
+
+  const phoneUnlock = useCallback(async () => {
+    const plugin = deviceUnlockPlugin();
+    if (!plugin || !info) return;
+    setBusy(true);
+    setWrong('');
+    try {
+      vault.adopt(await keyFromDevice(plugin, token, info.verifier));
+    } catch (error) {
+      // Cancelled, a changed phone lock, anything: the password always works.
+      setWrong(deviceUnlockError(error, 'The phone lock did not open the chat.'));
+      setMethod('password');
+    } finally {
+      setBusy(false);
+    }
+  }, [info, token, vault]);
+
+  useEffect(() => {
+    if (method !== 'checking') return;
+    let live = true;
+    void deviceUnlockEnabled(token).then((enabled) => {
+      if (live) setMethod(enabled ? 'phone' : 'password');
+    });
+    return () => {
+      live = false;
+    };
+  }, [method, token]);
+
+  useEffect(() => {
+    if (method !== 'phone' || !info || autoPromptedRef.current) return;
+    const timer = window.setTimeout(() => {
+      autoPromptedRef.current = true;
+      void phoneUnlock();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [method, info, autoPromptedRef, phoneUnlock]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -166,7 +228,9 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
     setBusy(true);
     setWrong('');
     try {
-      const ok = await vault.unlock(password, { salt: info.kdf.salt, iterations: info.kdf.iterations }, info.verifier);
+      // The current key record, never a cached one: after a password change only the new password opens it.
+      const fresh = await api.getPrivateChat(token);
+      const ok = await vault.unlock(password, fresh);
       if (!ok) setWrong('That is not the password for this chat.');
     } catch (error) {
       setWrong(errorText(error, 'Could not unlock the chat.'));
@@ -194,6 +258,32 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
           <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-400">
             <Loader2 size={14} className="animate-spin" /> Loading…
           </p>
+        ) : method === 'checking' ? (
+          <p className="mt-4 flex items-center justify-center gap-2 text-sm text-slate-400">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </p>
+        ) : method === 'phone' ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void phoneUnlock()}
+              disabled={busy}
+              data-testid="private-phone-unlock"
+              className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-rose-600 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Fingerprint size={15} />}
+              {busy ? 'Waiting for the phone…' : 'Use phone lock'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMethod('password')}
+              disabled={busy}
+              data-testid="private-use-password"
+              className="mt-2 min-h-11 w-full rounded-xl text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
+            >
+              Use password instead
+            </button>
+          </>
         ) : (
           <>
             <label className="mt-4 block text-left">
@@ -235,6 +325,7 @@ function LockScreen({ info, infoError, vault, partner }: { info?: PrivateChatInf
 }
 
 interface UnlockedChatProps {
+  partnerName: string;
   token: string;
   conversation: TalkConversation;
   messages: TalkMessage[];
@@ -245,7 +336,12 @@ interface UnlockedChatProps {
   onChanged: () => void;
 }
 
-function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
+  const queryClient = useQueryClient();
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  // The gallery, opened on one picture (a comment's) or on the grid.
+  const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -288,6 +384,31 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
     }
   };
 
+  /**
+   * Send picture bytes: encrypted here before anything leaves the device,
+   * uploaded as an opaque blob (never a Talk file share), and the plaintext
+   * copy overwritten with zeros once encrypted.
+   */
+  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string, takenAt?: number) => {
+    let blob = '';
+    try {
+      let sealed: Uint8Array<ArrayBuffer>;
+      try {
+        sealed = await vault.encrypt(plain);
+      } finally {
+        plain.fill(0);
+      }
+      blob = (await api.uploadPrivateBlob(token, sealed)).id;
+      // When it was sent (and taken) travels inside the encryption, for the gallery.
+      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}) });
+      onChanged();
+    } catch (error) {
+      if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
+      throw error;
+    }
+  };
+
+  /** A photo from the picker, a paste or a drop. Anything that is not a photo is refused. */
   const sendPicture = async (file: File) => {
     if (!IMAGE_TYPES.has(file.type)) {
       toast.error('Only photos can be sent in a private chat');
@@ -298,32 +419,36 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
       return;
     }
     setSending(true);
-    let blob = '';
     try {
-      const sealed = await vault.encrypt(new Uint8Array(await file.arrayBuffer()));
-      blob = (await api.uploadPrivateBlob(token, sealed)).id;
-      await post({ t: 'image', blob, mime: file.type, name: file.name });
-      onChanged();
+      await sendImageBytes(new Uint8Array(await file.arrayBuffer()), file.type, file.name);
     } catch (error) {
-      if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
       toast.error(errorText(error, 'Could not send the picture'));
     } finally {
       setSending(false);
     }
   };
 
-  const remove = async (message: TalkMessage) => {
-    if (typeof message.id !== 'number') return;
+  const sendFiles = async (files: File[]) => {
+    for (const file of files) await sendPicture(file);
+  };
+
+  /** Delete a message for both of you, and the picture's encrypted blob when it is one. */
+  const removeById = async (messageId: number, blob?: string) => {
     setSelected(null);
     try {
-      const res = await api.deleteTalkMessage({ token, message_id: message.id });
+      const res = await api.deleteTalkMessage({ token, message_id: messageId });
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
-      const payload = opened[String(message.id)];
-      if (payload && payload !== 'unreadable' && payload.t === 'image') await api.deletePrivateBlob(token, payload.blob);
+      if (blob) await api.deletePrivateBlob(token, blob);
       onChanged();
     } catch (error) {
       toast.error(errorText(error, 'Could not delete the message'));
     }
+  };
+
+  const remove = async (message: TalkMessage) => {
+    if (typeof message.id !== 'number') return;
+    const payload = opened[String(message.id)];
+    await removeById(message.id, payload && payload !== 'unreadable' && payload.t === 'image' ? payload.blob : undefined);
   };
 
   const nudge = async () => {
@@ -339,7 +464,20 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="private-chat">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="private-chat"
+      // A dropped photo is encrypted like any other; nothing dropped here is ever opened by the browser.
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void sendFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
       <div className="flex shrink-0 items-center gap-2 border-b border-white/5 bg-rose-500/[0.06] px-3 py-1.5">
         <Lock size={13} className="shrink-0 text-rose-200" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs text-rose-100">Only the two of you can read this</span>
@@ -356,7 +494,27 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
         )}
         <button
           type="button"
-          onClick={() => vault.lock()}
+          onClick={() => setGallery({})}
+          aria-label="Gallery"
+          title="Gallery"
+          data-testid="private-gallery-open"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+        >
+          <Images size={14} aria-hidden /> <span className="hidden sm:inline">Gallery</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSecurityOpen(true)}
+          aria-label="Lock and password"
+          title="Lock and password"
+          data-testid="private-security-open"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+        >
+          <KeyRound size={14} aria-hidden /> <span className="hidden sm:inline">Security</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => lockNow(token)}
           data-testid="private-lock-now"
           className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
         >
@@ -396,8 +554,9 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
           const sealed = isSealedMessage(message.message);
           const isSelected = selected === key;
           const picture = payload !== undefined && payload !== 'unreadable' && payload.t === 'image';
-          // A text bubble of yours is tapped for Delete; a picture opens the viewer, which has Delete.
-          const selectable = own && !picture && typeof message.id === 'number';
+          const comment = payload !== undefined && payload !== 'unreadable' && payload.t === 'comment';
+          // A text bubble of yours is tapped for Delete; a picture opens the viewer and a comment the gallery, which have Delete.
+          const selectable = own && !picture && !comment && typeof message.id === 'number';
           return (
             <div key={key}>
               {separator}
@@ -428,6 +587,18 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
                     payload.text
+                  ) : payload.t === 'comment' ? (
+                    <button
+                      type="button"
+                      onClick={() => setGallery({ blob: payload.blob })}
+                      className="block text-left"
+                      data-testid="private-comment-bubble"
+                    >
+                      <span className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold opacity-80">
+                        <MessageSquare size={11} aria-hidden /> On a photo
+                      </span>
+                      {payload.text}
+                    </button>
                   ) : (
                     <PrivatePicture
                       token={token}
@@ -477,6 +648,16 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
         >
           <ImageIcon size={18} />
         </button>
+        <button
+          type="button"
+          onClick={() => setCameraOpen(true)}
+          disabled={sending}
+          aria-label="Take an encrypted photo"
+          data-testid="private-camera-open"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"
+        >
+          <Camera size={18} />
+        </button>
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -485,6 +666,13 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
               event.preventDefault();
               void sendText(event);
             }
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (!files.length) return;
+            // A pasted picture goes the same encrypted way as a picked one.
+            event.preventDefault();
+            void sendFiles(files);
           }}
           rows={1}
           placeholder="Private message"
@@ -503,6 +691,39 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
         </button>
       </form>
 
+      {gallery && (
+        <PrivateGallery
+          token={token}
+          vault={vault}
+          messages={messages}
+          myActorIds={myActorIds}
+          initialBlob={gallery.blob}
+          onClose={() => setGallery(null)}
+          onChanged={onChanged}
+          onDelete={removeById}
+        />
+      )}
+      {cameraOpen && (
+        <PrivateCamera
+          onClose={() => setCameraOpen(false)}
+          onCapture={async (jpeg, takenAt) => {
+            setSending(true);
+            try {
+              await sendImageBytes(jpeg, 'image/jpeg', undefined, takenAt);
+            } finally {
+              setSending(false);
+            }
+          }}
+        />
+      )}
+      {securityOpen && (
+        <PrivateChatSecurity
+          token={token}
+          partnerName={partnerName}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] })}
+          onClose={() => setSecurityOpen(false)}
+        />
+      )}
       {viewing && (
         <PictureViewer
           url={viewing.url}
@@ -547,23 +768,7 @@ function PrivatePicture({
   vault: PrivateVault;
   onOpen: (url: string) => void;
 }) {
-  const [url, setUrl] = useState('');
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void api
-      .getPrivateBlob(token, payload.blob)
-      .then((bytes) => vault.pictureUrl(bytes, payload.mime))
-      .then((made) => {
-        if (live) setUrl(made);
-      })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [token, payload.blob, payload.mime, vault]);
+  const { url, failed } = usePrivatePicture(token, payload.blob, payload.mime, vault);
 
   if (failed) return <span className="italic opacity-80">This picture could not be opened.</span>;
   if (!url) {

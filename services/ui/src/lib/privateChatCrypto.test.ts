@@ -1,30 +1,65 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  changePasswordRequest,
   checkVerifier,
   decryptBytes,
   deriveKey,
   encryptBytes,
   fromBase64,
+  importDataKey,
   isSealedMessage,
+  makeVerifier,
   newChatSecrets,
   openMessage,
   PBKDF2_ITERATIONS,
   PrivateVault,
+  randomBytes,
+  rawDataKey,
   readSealed,
   sealMessage,
   SEALED_LINE,
+  toBase64,
+  unlockKey,
+  WrongPasswordError,
+  type ChatKeyInfo,
+  type PasswordChangeBody,
 } from './privateChatCrypto';
+
+/** A chat as the first version made it (the one already in use): its key IS the password's. */
+async function v1Chat(password: string): Promise<{ info: ChatKeyInfo; key: CryptoKey }> {
+  const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
+  const key = await deriveKey(password, kdf);
+  return { info: { version: 1, kdf, verifier: await makeVerifier(key) }, key };
+}
+
+/** The record the server keeps after a change. */
+function afterChange(body: PasswordChangeBody): ChatKeyInfo {
+  return { version: 2, kdf: body.kdf, wrapped_key: body.wrapped_key, verifier: body.verifier };
+}
+
+const v2Info = (made: Awaited<ReturnType<typeof newChatSecrets>>): ChatKeyInfo => ({
+  version: 2,
+  kdf: made.kdf,
+  wrapped_key: made.wrapped_key,
+  verifier: made.verifier,
+});
 
 // The real stretch (600,000 rounds) runs once per describe block; it is the
 // point of the design, so the tests use it rather than a weaker count.
 describe('private chat crypto', () => {
-  it('derives the same key from the same password on the other parent\'s device', async () => {
+  it('opens a new (v2) chat with the same password on the other parent\'s device', async () => {
     const created = await newChatSecrets('correct horse battery');
-    expect(created.iterations).toBe(PBKDF2_ITERATIONS);
-    expect(fromBase64(created.salt)).toHaveLength(16);
+    expect(created.version).toBe(2);
+    expect(created.kdf.iterations).toBe(PBKDF2_ITERATIONS);
+    expect(fromBase64(created.kdf.salt)).toHaveLength(16);
     expect(fromBase64(created.verifier.iv)).toHaveLength(12);
+    expect(fromBase64(created.wrapped_key.ct)).toHaveLength(48);
+    expect(fromBase64(created.auth)).toHaveLength(32);
+    expect(created.key.extractable).toBe(false);
 
-    const other = await deriveKey('correct horse battery', { salt: created.salt, iterations: created.iterations });
+    const other = (await unlockKey('correct horse battery', v2Info(created)))!;
+    expect(other).not.toBeNull();
+    expect(other.extractable).toBe(false);
     expect(await checkVerifier(other, created.verifier)).toBe(true);
 
     const wire = await sealMessage(created.key, { t: 'text', text: 'Date night Friday?' });
@@ -35,9 +70,12 @@ describe('private chat crypto', () => {
 
   it('rejects a wrong password through the verifier and cannot open messages with it', async () => {
     const created = await newChatSecrets('the real one');
-    const wrong = await deriveKey('not the real one', { salt: created.salt, iterations: created.iterations });
-    expect(await checkVerifier(wrong, created.verifier)).toBe(false);
-    const wire = await sealMessage(created.key, { t: 'text', text: 'secret' });
+    expect(await unlockKey('not the real one', v2Info(created))).toBeNull();
+    const { info, key } = await v1Chat('the real one');
+    const wrong = await deriveKey('not the real one', info.kdf);
+    expect(await checkVerifier(wrong, info.verifier)).toBe(false);
+    expect(await unlockKey('not the real one', info)).toBeNull();
+    const wire = await sealMessage(key, { t: 'text', text: 'secret' });
     expect(await openMessage(wrong, wire)).toBeNull();
   }, 30_000);
 
@@ -72,14 +110,14 @@ describe('private chat crypto', () => {
 describe('PrivateVault', () => {
   it('unlocks only with the right password and forgets everything on lock', async () => {
     const created = await newChatSecrets('pw-1');
-    const params = { salt: created.salt, iterations: created.iterations };
+    const params = v2Info(created);
     const vault = new PrivateVault();
     const changes = vi.fn();
     vault.subscribe(changes);
 
-    expect(await vault.unlock('nope', params, created.verifier)).toBe(false);
+    expect(await vault.unlock('nope', params)).toBe(false);
     expect(vault.unlocked).toBe(false);
-    expect(await vault.unlock('pw-1', params, created.verifier)).toBe(true);
+    expect(await vault.unlock('pw-1', params)).toBe(true);
     expect(vault.unlocked).toBe(true);
 
     const wire = await vault.seal({ t: 'text', text: 'hi' });
@@ -98,4 +136,124 @@ describe('PrivateVault', () => {
     await expect(vault.seal({ t: 'text', text: 'x' })).rejects.toThrow(/locked/);
     expect(changes).toHaveBeenCalledTimes(2);
   }, 60_000);
+});
+
+/** Every buffer a WebCrypto call hands back, so a test can see what was left in memory. */
+function capture(method: 'deriveBits' | 'decrypt'): ArrayBuffer[] {
+  const subtle = globalThis.crypto.subtle;
+  const original = subtle[method].bind(subtle) as (...args: unknown[]) => Promise<ArrayBuffer>;
+  const seen: ArrayBuffer[] = [];
+  vi.spyOn(subtle, method).mockImplementation((async (...args: unknown[]) => {
+    const out = await original(...args);
+    seen.push(out);
+    return out;
+  }) as never);
+  return seen;
+}
+
+const allZero = (buffer: ArrayBuffer) => new Uint8Array(buffer).every((b) => b === 0);
+
+describe('changing the password', () => {
+  it('keeps a v1 chat\'s messages and photos readable with the new password', async () => {
+    const { info, key } = await v1Chat('the first password');
+    const wire = await sealMessage(key, { t: 'text', text: 'Before the change' });
+    const photo = new Uint8Array(2048).map((_, i) => (i * 7) % 256);
+    const sealedPhoto = await encryptBytes(key, photo);
+
+    const body = await changePasswordRequest(info, 'the first password', 'the second password');
+    expect(body.version).toBe(2);
+    // The same key: the verifier is the one already stored, and v1 has no proof to send.
+    expect(body.verifier).toEqual(info.verifier);
+    expect(body.auth).toBeUndefined();
+    expect(fromBase64(body.new_auth)).toHaveLength(32);
+    expect(body.kdf.salt).not.toBe(info.kdf.salt);
+    expect(JSON.stringify(body)).not.toContain('the second password');
+
+    const after = afterChange(body);
+    const opened = (await unlockKey('the second password', after))!;
+    expect(opened).not.toBeNull();
+    expect(opened.extractable).toBe(false);
+    expect(await openMessage(opened, wire)).toEqual({ t: 'text', text: 'Before the change' });
+    expect(await decryptBytes(opened, sealedPhoto)).toEqual(photo);
+    // And what is sent now opens with the old key bytes too: it is one key.
+    expect(await openMessage(key, await sealMessage(opened, { t: 'text', text: 'after' }))).toEqual({ t: 'text', text: 'after' });
+
+    const vault = new PrivateVault();
+    expect(await vault.unlock('the first password', after)).toBe(false);
+    expect(await vault.unlock('the second password', after)).toBe(true);
+  }, 60_000);
+
+  it('chains v2 changes: each needs the last proof, and the history still opens', async () => {
+    const made = await newChatSecrets('one one one one');
+    const wire = await sealMessage(made.key, { t: 'text', text: 'From the start' });
+
+    const first = await changePasswordRequest(v2Info(made), 'one one one one', 'two two two two');
+    expect(first.auth).toBe(made.auth);
+    const second = await changePasswordRequest(afterChange(first), 'two two two two', 'three three three');
+    expect(second.auth).toBe(first.new_auth);
+    expect(second.verifier).toEqual(made.verifier);
+
+    const now = afterChange(second);
+    const key = (await unlockKey('three three three', now))!;
+    expect(await openMessage(key, wire)).toEqual({ t: 'text', text: 'From the start' });
+    expect(await unlockKey('one one one one', now)).toBeNull();
+    expect(await unlockKey('two two two two', now)).toBeNull();
+  }, 90_000);
+
+  it('refuses a wrong current password on the device, before anything is sent', async () => {
+    const { info } = await v1Chat('the right one');
+    await expect(changePasswordRequest(info, 'the wrong one', 'a new password')).rejects.toBeInstanceOf(WrongPasswordError);
+    const made = await newChatSecrets('the right one');
+    await expect(changePasswordRequest(v2Info(made), 'the wrong one', 'a new password')).rejects.toThrow(/not the current password/);
+  }, 60_000);
+
+  it('overwrites the raw data key (and every stretch) with zeros when done, v1 and v2', async () => {
+    const { info } = await v1Chat('pw v1 pw v1');
+    const bits = capture('deriveBits');
+    const body = await changePasswordRequest(info, 'pw v1 pw v1', 'pw two pw two');
+    // The v1 data key itself (256 bits) and the new 512-bit stretch.
+    expect(bits.map((b) => b.byteLength).sort()).toEqual([32, 64]);
+    expect(bits.every(allZero)).toBe(true);
+    vi.restoreAllMocks();
+
+    const decrypted = capture('decrypt');
+    const bits2 = capture('deriveBits');
+    await changePasswordRequest(afterChange(body), 'pw two pw two', 'pw three pw three');
+    const keys = decrypted.filter((b) => b.byteLength === 32);
+    expect(keys).toHaveLength(1);
+    expect(keys.every(allZero)).toBe(true);
+    expect(bits2.length).toBe(2);
+    expect(bits2.every(allZero)).toBe(true);
+    vi.restoreAllMocks();
+  }, 90_000);
+
+  it('hands out raw key bytes only for the right password, and imports them never extractable', async () => {
+    const { info, key } = await v1Chat('raw raw raw raw');
+    expect(await rawDataKey('nope nope nope', info)).toBeNull();
+    const raw = (await rawDataKey('raw raw raw raw', info))!;
+    const copy = raw.dk.slice();
+    const imported = await importDataKey(raw.dk);
+    expect(imported.extractable).toBe(false);
+    expect(raw.dk.every((b) => b === 0)).toBe(true);
+    const wire = await sealMessage(key, { t: 'text', text: 'same key' });
+    expect(await openMessage(imported, wire)).toEqual({ t: 'text', text: 'same key' });
+    copy.fill(0);
+  }, 60_000);
+});
+
+describe('picture and comment payloads', () => {
+  it('carry their timestamps inside the encryption, and comments name the picture', async () => {
+    const { key } = await v1Chat('payload payload');
+    const image = await sealMessage(key, { t: 'image', blob: 'b1', mime: 'image/jpeg', sent_at: 1_800_000_000, taken_at: 1_799_999_000 });
+    expect(image).not.toContain('1800000000');
+    expect(await openMessage(key, image)).toEqual({ t: 'image', blob: 'b1', mime: 'image/jpeg', sent_at: 1_800_000_000, taken_at: 1_799_999_000 });
+    const comment = await sealMessage(key, { t: 'comment', blob: 'b1', text: 'Lovely', sent_at: 1_800_000_100 });
+    expect(comment).not.toContain('Lovely');
+    expect(comment).not.toContain('b1');
+    expect(await openMessage(key, comment)).toEqual({ t: 'comment', blob: 'b1', text: 'Lovely', sent_at: 1_800_000_100 });
+    // Nonsense stamps are dropped; an empty comment is not a comment.
+    const odd = await sealMessage(key, { t: 'image', blob: 'b2', mime: 'image/png', sent_at: -5, taken_at: Number.NaN });
+    expect(await openMessage(key, odd)).toEqual({ t: 'image', blob: 'b2', mime: 'image/png' });
+    expect(await openMessage(key, await sealMessage(key, { t: 'comment', blob: 'b1', text: '  ' }))).toBeNull();
+  }, 30_000);
 });

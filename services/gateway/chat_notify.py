@@ -164,6 +164,7 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
     seen = await r.hgetall(key) or {}
     primed = bool(await r.get(PRIMED_KEY.format(user=username)))
     me = creds["nextcloud_user"]
+    from services.gateway.private_chat import members as private_members
     from services.gateway.private_chat import private_tokens
 
     private = private_tokens()
@@ -175,7 +176,14 @@ async def _check_user(r, client, username: str, *, identity, execution, telemetr
         before = seen.get(token)
         if before is not None and int(before) >= int(msg_id):
             continue
-        notice = None if (before is None and not primed) else notice_for(conv, me, username, private=token in private)
+        is_private = token in private
+        if before is None and not primed:
+            notice = None
+        elif is_private and username not in private_members(token):
+            # A private chat's notice goes to its two members and nobody else.
+            notice = None
+        else:
+            notice = notice_for(conv, me, username, private=is_private)
         if notice is not None:
             if not await notify.send(notice, client=client, telemetry=telemetry,
                                      secret=headers["X-Internal-Secret"]):

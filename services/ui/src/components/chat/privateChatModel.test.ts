@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { previewLine, type TalkMessage } from './chatModel';
-import { canNudge, errorText, passwordProblem } from './privateChatModel';
+import { canNudge, errorText, mayUsePrivateChat, passwordProblem } from './privateChatModel';
 
 const me = new Set(['alex']);
 const msg = (id: number, actor: string, extra: Partial<TalkMessage> = {}): TalkMessage => ({ id, actor_id: actor, message: 'x', ...extra });
@@ -39,5 +39,19 @@ describe('errorText', () => {
 describe('previewLine', () => {
   it('never previews a private chat, whatever the server sent', () => {
     expect(previewLine({ token: 't', display_name: 'Private chat', private: true, last_message: 'leaked text' }, me)).toBe('Encrypted message');
+  });
+});
+
+describe('who may see the private chat', () => {
+  it('is only an adult father or mother', () => {
+    expect(mayUsePrivateChat({ family_role: 'father', is_minor: false })).toBe(true);
+    expect(mayUsePrivateChat({ family_role: 'mother' })).toBe(true);
+    for (const family_role of ['child', 'teen', 'adult_child', 'other', null, undefined]) {
+      expect(mayUsePrivateChat({ family_role, is_minor: false })).toBe(false);
+    }
+    expect(mayUsePrivateChat({ family_role: 'mother', is_minor: true })).toBe(false);
+    expect(mayUsePrivateChat({ family_role: 'father', is_system_default: true })).toBe(false);
+    expect(mayUsePrivateChat(undefined)).toBe(false);
+    expect(mayUsePrivateChat(null)).toBe(false);
   });
 });

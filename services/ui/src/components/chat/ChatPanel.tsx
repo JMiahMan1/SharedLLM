@@ -15,7 +15,10 @@ import ConversationInfo from './ConversationInfo';
 import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
 import PrivateChatThread from './PrivateChatThread';
-import { errorText } from './privateChatModel';
+import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
+import { privatePreviewPlugin } from '../../plugins/privatePreview';
+import { forgetLockAfter, lockNow } from '../../lib/privateChatSession';
+import { errorText, mayUsePrivateChat } from './privateChatModel';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
@@ -168,6 +171,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     },
     staleTime: 60_000,
     retry: false,
+    // Only an adult father or mother ever asks; nobody else hears of the feature.
+    enabled: mayUsePrivateChat(me),
   });
   const privateInfo = privateStatus.data?.chats.find((c) => c.token === activeToken);
   const privateInfoError = !isPrivate
@@ -180,6 +185,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           : privateStatus.data.reason || 'Private chats are only for the parents.'
         : undefined;
   const canStartPrivate = Boolean(
+    mayUsePrivateChat(me) &&
     privateStatus.data?.eligible && privateStatus.data.partners.length > 0 && privateStatus.data.chats.length === 0,
   );
 
@@ -661,16 +667,23 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         }`}
         data-testid="chat-thread"
         onDragOver={(event) => {
-          // A private chat's photos go through its own encrypted picker, never a Talk file share.
-          if (!activeToken || isPrivate || !event.dataTransfer.types.includes('Files')) return;
+          if (!activeToken || !event.dataTransfer.types.includes('Files')) return;
+          // Taken in every chat, so a drop never opens the file in the browser. A private
+          // chat's photos are encrypted by its own thread, never sent as a Talk file share.
           event.preventDefault();
-          setDragging(true);
+          if (!isPrivate) setDragging(true);
         }}
         onDragLeave={(event) => {
           if (event.currentTarget === event.target) setDragging(false);
         }}
         onDrop={(event) => {
-          if (isPrivate || !event.dataTransfer.files.length) return;
+          if (isPrivate) {
+            // The private thread encrypts what is dropped on it; anywhere else in a
+            // private chat a drop must not open the file in the browser.
+            if (event.dataTransfer.files.length) event.preventDefault();
+            return;
+          }
+          if (!event.dataTransfer.files.length) return;
           event.preventDefault();
           setDragging(false);
           const files = Array.from(event.dataTransfer.files).filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
@@ -995,6 +1008,13 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           isDefault={defaultToken === activeConversation.token}
           onToggleDefault={() => setDefault.mutate(defaultToken === activeConversation.token ? null : activeConversation.token)}
           onGone={() => {
+            // A deleted private chat takes this phone's unlock key with it.
+            if (activeConversation.private) {
+              lockNow(activeConversation.token);
+              forgetLockAfter(activeConversation.token);
+              void deviceUnlockPlugin()?.disable({ token: activeConversation.token }).catch(() => {});
+              void privatePreviewPlugin()?.disable({ token: activeConversation.token }).catch(() => {});
+            }
             setInfoOpen(false);
             setSelectedToken('');
             setMobileView('list');

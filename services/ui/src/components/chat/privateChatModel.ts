@@ -9,7 +9,10 @@ export interface PrivateChatInfo {
   partner_name: string;
   created_by: string;
   created_at: number;
+  /** 1: the key is the password's (the first chats); 2: the key is wrapped and the password can change. */
+  version?: 1 | 2;
   kdf: { name: 'PBKDF2-SHA256'; salt: string; iterations: number };
+  wrapped_key?: { iv: string; ct: string };
   verifier: { iv: string; ct: string };
 }
 
@@ -21,6 +24,16 @@ export interface PrivateChatStatus {
   /** The other parents a chat could be started with. */
   partners: Array<{ username: string; display_name: string }>;
   min_iterations: number;
+}
+
+/**
+ * Whether the signed-in person may use (or even hear of) the private chat: an
+ * adult father or mother. Everyone else, and anyone not known yet, gets no
+ * private-chat request and no private-chat UI; the server enforces the same
+ * rule (and answers anyone else with an empty status).
+ */
+export function mayUsePrivateChat(me?: { family_role?: string | null; is_minor?: boolean | null; is_system_default?: boolean | null } | null): boolean {
+  return Boolean(me && (me.family_role === 'father' || me.family_role === 'mother') && me.is_minor !== true && !me.is_system_default);
 }
 
 /** The shortest password the create form accepts. */

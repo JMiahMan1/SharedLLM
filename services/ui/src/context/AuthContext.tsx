@@ -8,6 +8,7 @@ import { storageGet, storageSet, storageRemove, storageInit, mirrorNativeCredent
 import { registerThisDevice } from '../lib/deviceRegistration';
 import { sharePushKey } from '../lib/push';
 import { mirrorIdentity } from '../lib/locationTracking';
+import { lockAll } from '../lib/privateChatSession';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -93,6 +94,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [queryClient]);
 
   const logout = useCallback(async () => {
+    // Every unlocked private chat locks with the person leaving.
+    lockAll();
     setToken(null);
     setUser(null);
     setInitError(null);

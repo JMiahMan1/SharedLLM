@@ -9,6 +9,7 @@ import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
+import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import { Capacitor } from '@capacitor/core';
@@ -3544,13 +3545,20 @@ export const api = {
     return resp.data;
   },
 
-  async createPrivateChat(body: {
-    partner: string;
-    salt: string;
-    iterations: number;
-    verifier: { iv: string; ct: string };
-  }): Promise<PrivateChatInfo> {
+  async createPrivateChat(body: WrappedRecord & { partner: string; auth: string }): Promise<PrivateChatInfo> {
     const resp = await apiClient.post('/api/private-chat/chats', body);
+    return resp.data;
+  },
+
+  /** One chat's current key record, fresh (unlocking never uses a cached one). */
+  async getPrivateChat(token: string): Promise<PrivateChatInfo> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}`);
+    return resp.data;
+  },
+
+  /** Re-wrap the chat's key under a new password (the body is made on this device). */
+  async changePrivateChatPassword(token: string, body: PasswordChangeBody): Promise<PrivateChatInfo & { notified: string[] }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/password`, body);
     return resp.data;
   },
 

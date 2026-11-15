@@ -4,15 +4,16 @@ import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
-import { encryptBytes, newChatSecrets, sealMessage, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import { deriveKey, encryptBytes, makeVerifier, randomBytes, sealMessage, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
 /**
  * The parents' private chat on every form factor: starting one (the create
  * sheet), the lock screen, a wrong password, the unlocked chat with an
- * encrypted photo and the Nudge, the photo viewer, and locking again when the
- * app goes to the background. Every screen gets the shared audit (nothing past
+ * encrypted photo and the Nudge, the photo viewer, locking again when the
+ * app goes to the background, changing the password, and the phone-lock
+ * unlock (with a stand-in for the Android plugin). Every screen gets the shared audit (nothing past
  * its card or dialog, no clipped text, nothing off the screen, 44px targets on
  * phones). Hermetic: the server is mocked, the ciphertext is real.
  */
@@ -26,6 +27,8 @@ interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
 
 interface Server {
   chats: Array<Record<string, unknown>>;
+  changes?: Array<Record<string, unknown>>;
+  uploads?: Buffer[];
   messages: Array<Record<string, unknown>>;
   blobs: Record<string, Buffer>;
   posted: string[];
@@ -46,9 +49,26 @@ async function serve(page: Page, server: Server): Promise<void> {
       const body = req.postDataJSON() as Record<string, unknown>;
       server.created.push(body);
       const chat = { token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'parent',
-        created_at: SEC, kdf: { name: 'PBKDF2-SHA256', salt: body.salt, iterations: body.iterations }, verifier: body.verifier };
+        created_at: SEC, version: 2, kdf: { name: 'PBKDF2-SHA256', ...(body.kdf as object) }, wrapped_key: body.wrapped_key, verifier: body.verifier };
       server.chats.push(chat);
       return route.fulfill({ json: chat });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') {
+      return route.fulfill({ json: server.chats[0] });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/password` && req.method() === 'POST') {
+      const body = req.postDataJSON() as Record<string, unknown>;
+      (server.changes ??= []).push(body);
+      const kdf = body.kdf as Record<string, unknown>;
+      server.chats[0] = { ...server.chats[0], version: 2, kdf: { name: 'PBKDF2-SHA256', ...kdf }, wrapped_key: body.wrapped_key };
+      return route.fulfill({ json: { ...server.chats[0], notified: ['robin'] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/blobs` && req.method() === 'POST') {
+      const body = req.postDataBuffer() ?? Buffer.alloc(0);
+      (server.uploads ??= []).push(body);
+      const id = (server.uploads.length).toString(16).padStart(32, '0');
+      server.blobs[id] = body;
+      return route.fulfill({ json: { id, size: body.length } });
     }
     const blob = /^\/api\/private-chat\/chats\/[^/]+\/blobs\/([0-9a-f]+)$/.exec(p);
     if (blob) {
@@ -70,11 +90,40 @@ async function serve(page: Page, server: Server): Promise<void> {
       return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: server.messages } } });
     }
     if (p === '/api/communication/talk/messages' && req.method() === 'POST') {
-      server.posted.push(String((req.postDataJSON() as { message?: string }).message));
+      const posted = String((req.postDataJSON() as { message?: string }).message);
+      server.posted.push(posted);
+      // Like Talk: what was sent is in the room on the next read.
+      const nextId = Math.max(0, ...server.messages.map((m) => Number(m.id) || 0)) + 1;
+      server.messages.push({ id: nextId, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent',
+        timestamp: Math.floor(Date.now() / 1000), message_type: 'comment', message: posted });
       return route.fulfill({ json: { status: 'SUCCESS', message: 'Chat message sent.' } });
     }
     return route.fallback();
   });
+}
+
+/** A chat as the first version made it (the one already in use): its key is the password's. */
+async function v1Chat(password: string): Promise<{ key: CryptoKey; salt: string; iterations: number; verifier: { iv: string; ct: string } }> {
+  const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
+  const key = await deriveKey(password, kdf);
+  return { key, ...kdf, verifier: await makeVerifier(key) };
+}
+
+async function v1Server(): Promise<{ server: Server; key: CryptoKey }> {
+  const secrets = await v1Chat(PASSWORD);
+  const server: Server = {
+    chats: [{ token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin', created_at: SEC - 86400,
+      version: 1, kdf: { name: 'PBKDF2-SHA256', salt: secrets.salt, iterations: secrets.iterations }, verifier: secrets.verifier }],
+    messages: [{ id: 1, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 600,
+      message_type: 'comment', message: await sealMessage(secrets.key, { t: 'text', text: 'Sent before any change' }) }],
+    blobs: {}, posted: [], created: [], nudges: 0, changes: [],
+  };
+  return { server, key: secrets.key };
+}
+
+async function unlockWith(page: Page, password: string): Promise<void> {
+  await page.getByTestId('private-password').fill(password);
+  await page.getByTestId('private-unlock').click();
 }
 
 async function open(page: Page, server: Server): Promise<Run> {
@@ -137,10 +186,10 @@ test.describe('private chat on every form factor', () => {
     await sheet.getByTestId('private-create').click();
     await expect(sheet).toHaveCount(0);
 
-    // Only public parameters went to the server: a 16-byte salt, the stretch, the verifier. Never the password.
+    // Only public parameters went to the server: the wrapped key, its salt and stretch, the verifier and the proof. Never the password.
     const [created] = server.created;
-    expect(Object.keys(created).sort()).toEqual(['iterations', 'partner', 'salt', 'verifier']);
-    expect(created.iterations).toBe(PBKDF2_ITERATIONS);
+    expect(Object.keys(created).sort()).toEqual(['auth', 'kdf', 'partner', 'verifier', 'version', 'wrapped_key']);
+    expect((created.kdf as { iterations: number }).iterations).toBe(PBKDF2_ITERATIONS);
     expect(JSON.stringify(created)).not.toContain(PASSWORD);
 
     // The creator's key is held already: the chat opens unlocked, and a message goes out sealed.
@@ -158,7 +207,7 @@ test.describe('private chat on every form factor', () => {
   });
 
   test('open one: list, lock screen, wrong password, unlocked with a photo and Nudge, viewer, lock on background', async ({ page }, info) => {
-    const secrets = await newChatSecrets(PASSWORD);
+    const secrets = await v1Chat(PASSWORD);
     const sealedPhoto = await encryptBytes(secrets.key, new Uint8Array(PNG));
     const blobId = 'ab'.repeat(16);
     const message = async (id: number, actor: string, name: string, text: string, ago: number) => ({
@@ -225,6 +274,404 @@ test.describe('private chat on every form factor', () => {
     });
     await expect(page.getByTestId('private-lock')).toBeVisible();
     await expect(page.getByText('Dinner at seven, just us?')).toHaveCount(0);
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('change the password: the dialog, a wrong current password, then the history still opens with the new one', async ({ page }, info) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    const feed = page.getByTestId('private-feed');
+    await expect(feed.getByText('Sent before any change')).toBeVisible();
+
+    await page.getByTestId('private-security-open').click();
+    const menu = page.getByTestId('private-security');
+    await expect(menu).toBeVisible();
+    // A browser has no phone lock to offer.
+    await expect(menu.getByTestId('private-phone-lock-toggle')).toHaveCount(0);
+    await check(page, info, run, 'private security menu', page.getByRole('dialog').last());
+
+    await menu.getByTestId('private-change-password-open').click();
+    const dialog = page.getByTestId('private-change-password');
+    await expect(dialog).toBeVisible();
+    const NEXT = 'a brand new shared sentence';
+    await dialog.getByTestId('private-current-password').fill('not the password at all');
+    await dialog.getByTestId('private-next-password').fill(NEXT);
+    await dialog.getByTestId('private-next-confirm').fill(`${NEXT}?`);
+    await expect(dialog.getByText('The two passwords do not match.')).toBeVisible();
+    await expect(dialog.getByTestId('private-change-submit')).toBeDisabled();
+    await dialog.getByTestId('private-next-confirm').fill(NEXT);
+    await dialog.getByTestId('private-change-understood').check();
+    await check(page, info, run, 'private change password', page.getByRole('dialog').last());
+
+    // A wrong current password is caught on the device: nothing is sent.
+    await dialog.getByTestId('private-change-submit').click();
+    await expect(dialog.getByTestId('private-change-error')).toContainText('not the current password');
+    expect(server.changes).toEqual([]);
+    await check(page, info, run, 'private change password wrong', page.getByRole('dialog').last());
+
+    await dialog.getByTestId('private-current-password').fill(PASSWORD);
+    await dialog.getByTestId('private-change-submit').click();
+    await expect(dialog).toHaveCount(0);
+    expect(server.changes).toHaveLength(1);
+    const [change] = server.changes!;
+    expect(change.verifier).toEqual(server.chats[0].verifier);
+    expect(change.auth).toBeUndefined();
+    expect(JSON.stringify(change)).not.toContain(NEXT);
+    expect(JSON.stringify(change)).not.toContain(PASSWORD);
+    // The person who changed it stays unlocked.
+    await expect(feed.getByText('Sent before any change')).toBeVisible();
+
+    // Locked again: the old password no longer opens it, the new one opens the old messages.
+    await page.getByTestId('private-lock-now').click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-wrong')).toBeVisible();
+    await unlockWith(page, NEXT);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    done(run);
+  });
+
+  test('unlock with the phone lock: turn it on with the password, then open the chat with it', async ({ page }, info) => {
+    // A stand-in for the Android plugin (the dev server only): it keeps what the page gives it.
+    await page.addInitScript(() => {
+      const stored: Record<string, string> = {};
+      (window as unknown as { __jarvisDeviceUnlockMock: unknown }).__jarvisDeviceUnlockMock = {
+        available: async () => ({ available: true }),
+        isEnabled: async ({ token }: { token: string }) => ({ enabled: token in stored }),
+        enable: async ({ token, key }: { token: string; key: string }) => {
+          stored[token] = key;
+          return { enabled: true };
+        },
+        unlock: async ({ token }: { token: string }) => {
+          if (!(token in stored)) throw new Error('Not set up');
+          return { key: stored[token] };
+        },
+        disable: async ({ token }: { token: string }) => {
+          delete stored[token];
+          return { enabled: false };
+        },
+      };
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    await page.getByTestId('private-security-open').click();
+    const toggle = page.getByTestId('private-phone-lock-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await check(page, info, run, 'private security phone', page.getByRole('dialog').last());
+    await toggle.click();
+    const sheet = page.getByTestId('private-phone-lock');
+    await expect(sheet).toBeVisible();
+    await sheet.getByTestId('private-phone-password').fill('wrong wrong wrong');
+    await sheet.getByTestId('private-phone-submit').click();
+    await expect(sheet.getByTestId('private-phone-error')).toContainText('not the password');
+    await check(page, info, run, 'private phone lock setup', page.getByRole('dialog').last());
+    await sheet.getByTestId('private-phone-password').fill(PASSWORD);
+    await sheet.getByTestId('private-phone-submit').click();
+    await expect(page.getByTestId('private-phone-lock-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
+
+    // The first lock after turning it on asks the phone by itself (once per opening of the chat)...
+    await page.getByTestId('private-lock-now').click();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    // ...after that it waits to be asked.
+    await page.getByTestId('private-lock-now').click();
+    const unlock = page.getByTestId('private-phone-unlock');
+    await expect(unlock).toBeVisible();
+    await expect(page.getByTestId('private-use-password')).toBeVisible();
+    await check(page, info, run, 'private phone unlock', page.getByTestId('chat-thread'), await overPanel(page, /^private phone unlock$/));
+    await unlock.click();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+
+    // "Use password instead" always works.
+    await page.getByTestId('private-lock-now').click();
+    await page.getByTestId('private-use-password').click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    done(run);
+  });
+
+  test('a child account: no private chat anywhere, and never a private-chat request', async ({ page }, info) => {
+    const asked: string[] = [];
+    page.on('request', (req) => {
+      if (/\/api\/private-chat\//.test(new URL(req.url()).pathname)) asked.push(req.url());
+    });
+    await quietHotReload(page);
+    const mocks = await mockHome(page, 'member');
+    await mockHealth(page);
+    await mockBible(page);
+    await mockFamilyPages(page);
+    const run: Run = { mocks, errors: [], found: [] };
+    page.on('pageerror', (e) => run.errors.push(e.message));
+    await page.goto('/family');
+    await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="private-lock"]')).toHaveCount(0);
+    await check(page, info, run, 'child chat list', page.locator('main'));
+
+    await page.getByTestId('chat-new').click();
+    const sheet = page.getByRole('dialog').last();
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId('new-private-chat-open')).toHaveCount(0);
+    await expect(sheet.getByText(/private/i)).toHaveCount(0);
+    await check(page, info, run, 'child new chat', sheet);
+    expect(asked).toEqual([]);
+    done(run);
+  });
+
+  test('lock timing: kept open for a minute after leaving, locked at once by default', async ({ page }, info) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    const privateRow = page.getByRole('button', { name: /Private chat/ }).first();
+    const leaveAndComeBack = async () => {
+      const back = page.getByRole('button', { name: 'Back to chats' });
+      if (await back.isVisible()) await back.click();
+      await page.getByText('Camping trip planning').first().click();
+      if (await back.isVisible()) await back.click();
+      await privateRow.click();
+    };
+
+    await privateRow.click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    await page.getByTestId('private-security-open').click();
+    const menu = page.getByTestId('private-security');
+    await expect(menu.getByTestId('private-lock-after-leave')).toHaveAttribute('aria-checked', 'true');
+    await menu.getByTestId('private-lock-after-1m').click();
+    await expect(menu.getByTestId('private-lock-after-1m')).toHaveAttribute('aria-checked', 'true');
+    await check(page, info, run, 'private lock setting', page.getByRole('dialog').last());
+    await menu.getByRole('button', { name: 'Close' }).last().click();
+
+    // Leaving and coming back within the minute: still open, no password asked.
+    await leaveAndComeBack();
+    await expect(page.getByTestId('private-feed').getByText('Sent before any change')).toBeVisible();
+    await expect(page.getByTestId('private-lock')).toHaveCount(0);
+
+    // Back to the default: leaving locks at once.
+    await page.getByTestId('private-security-open').click();
+    await page.getByTestId('private-lock-after-leave').click();
+    await page.getByTestId('private-security').getByRole('button', { name: 'Close' }).last().click();
+    await leaveAndComeBack();
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    done(run);
+  });
+
+  test('message text in notifications: off by default, turned on with the password (phone stand-in)', async ({ page }, info) => {
+    await page.addInitScript(() => {
+      const kept: Record<string, string> = {};
+      (window as unknown as { __jarvisPrivatePreviewMock: unknown }).__jarvisPrivatePreviewMock = {
+        available: async () => ({ available: true }),
+        isEnabled: async ({ token }: { token: string }) => ({ enabled: token in kept }),
+        enable: async ({ token, key }: { token: string; key: string }) => {
+          kept[token] = key;
+          return { enabled: true };
+        },
+        disable: async ({ token }: { token: string }) => {
+          delete kept[token];
+          return { enabled: false };
+        },
+      };
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    await page.getByTestId('private-security-open').click();
+    const toggle = page.getByTestId('private-preview-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    const sheet = page.getByTestId('private-preview-setup');
+    await expect(sheet.getByText('Less private')).toBeVisible();
+    await sheet.getByTestId('private-preview-password').fill('wrong wrong wrong');
+    await sheet.getByTestId('private-preview-submit').click();
+    await expect(sheet.getByTestId('private-preview-error')).toContainText('not the password');
+    await check(page, info, run, 'private preview setup', page.getByRole('dialog').last());
+    await sheet.getByTestId('private-preview-password').fill(PASSWORD);
+    await sheet.getByTestId('private-preview-submit').click();
+    await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('private-preview-toggle').click();
+    await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'false');
+    done(run);
+  });
+
+  test('a pasted or dropped photo is encrypted before it leaves the device, and a non-photo is refused', async ({ page }) => {
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    const png = [...PNG];
+
+    await page.getByTestId('private-input').evaluate((el, bytes) => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array(bytes)], 'pasted.png', { type: 'image/png' }));
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, png);
+    await expect.poll(() => server.posted.length).toBe(1);
+
+    await page.getByTestId('private-feed').evaluate((el, bytes) => {
+      const data = new DataTransfer();
+      data.items.add(new File([new Uint8Array(bytes)], 'dropped.png', { type: 'image/png' }));
+      el.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    }, png);
+    await expect.poll(() => server.posted.length).toBe(2);
+
+    // Uploads are ciphertext (no PNG signature, IV + tag longer), messages are sealed envelopes naming no file.
+    expect(server.uploads).toHaveLength(2);
+    for (const upload of server.uploads!) {
+      expect(upload.length).toBe(PNG.length + 12 + 16);
+      expect(upload.includes(PNG.subarray(0, 8))).toBe(false);
+    }
+    for (const posted of server.posted) {
+      expect(posted).toContain('```jarvis-envelope');
+      expect(posted).not.toContain('pasted.png');
+      expect(posted).not.toContain('dropped.png');
+    }
+
+    // A file that is not a photo is refused, and nothing is uploaded.
+    await page.getByTestId('private-feed').evaluate((el) => {
+      const data = new DataTransfer();
+      data.items.add(new File(['secret notes'], 'notes.txt', { type: 'text/plain' }));
+      el.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    });
+    await expect(page.getByText('Only photos can be sent in a private chat')).toBeVisible();
+    expect(server.uploads).toHaveLength(2);
+    expect(page.url()).toContain('/family');
+    done(run);
+  });
+
+  test('the in-app camera: front and back, take, send encrypted, nothing left behind', async ({ page }, info) => {
+    // A stand-in camera: a canvas stream, recording what was asked for and whether it was stopped.
+    await page.addInitScript(() => {
+      const log = { facing: [] as string[], stopped: 0 };
+      (window as unknown as { __cameraLog: typeof log }).__cameraLog = log;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async (constraints: MediaStreamConstraints) => {
+            const video = constraints.video as { facingMode?: { ideal?: string } };
+            log.facing.push(String(video?.facingMode?.ideal));
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d')!;
+            const draw = () => {
+              ctx.fillStyle = log.facing.length % 2 ? '#c2410c' : '#0369a1';
+              ctx.fillRect(0, 0, 640, 480);
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(200, 140, 240, 200);
+            };
+            draw();
+            const timer = setInterval(draw, 100);
+            const stream = canvas.captureStream(10);
+            for (const track of stream.getTracks()) {
+              const stop = track.stop.bind(track);
+              track.stop = () => {
+                log.stopped += 1;
+                clearInterval(timer);
+                stop();
+              };
+            }
+            return stream;
+          },
+        },
+      });
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    // Never the system camera: no capture input anywhere on the page.
+    expect(await page.locator('input[capture]').count()).toBe(0);
+
+    await page.getByTestId('private-camera-open').click();
+    const camera = page.getByTestId('private-camera');
+    await expect(camera.getByTestId('private-camera-shutter')).toBeEnabled();
+    await check(page, info, run, 'private camera', camera);
+    await camera.getByTestId('private-camera-flip').click();
+    await expect(camera.getByTestId('private-camera-shutter')).toBeEnabled();
+    // The back camera first, then the front (the dev build's strict mode may ask twice for each).
+    const asked = await page.evaluate(() => (window as unknown as { __cameraLog: { facing: string[] } }).__cameraLog.facing);
+    expect(asked.filter((f, i) => f !== asked[i - 1])).toEqual(['environment', 'user']);
+
+    await camera.getByTestId('private-camera-shutter').click();
+    await expect(camera.getByTestId('private-camera-still')).toBeVisible();
+    await check(page, info, run, 'private camera taken', camera);
+    await camera.getByTestId('private-camera-send').click();
+    await expect(camera).toHaveCount(0);
+    await expect.poll(() => server.posted.length).toBe(1);
+    expect(server.posted[0]).toContain('```jarvis-envelope');
+    const [upload] = server.uploads!;
+    // Ciphertext: not a JPEG (FF D8) on the wire.
+    expect(upload[0] === 0xff && upload[1] === 0xd8).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { __cameraLog: { stopped: number } }).__cameraLog.stopped)).toBeGreaterThanOrEqual(2);
+    done(run);
+  });
+
+  test('the encrypted gallery: every photo by day with its time, opened full screen, commented on by both', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const photoA = 'cd'.repeat(16);
+    const photoB = 'ef'.repeat(16);
+    server.blobs[photoA] = Buffer.from(await encryptBytes(key, new Uint8Array(PNG)));
+    server.blobs[photoB] = Buffer.from(await encryptBytes(key, new Uint8Array(PNG)));
+    server.messages.push(
+      // An older photo with no time inside: the gallery uses when Talk got it.
+      { id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 3 * 86400,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: photoA, mime: 'image/png' }) },
+      { id: 3, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent', timestamp: SEC - 120,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: photoB, mime: 'image/png', sent_at: SEC - 120, taken_at: SEC - 600 }) },
+      { id: 4, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 60,
+        message_type: 'comment', message: await sealMessage(key, { t: 'comment', blob: photoB, text: 'What a view' }) },
+    );
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    // In the thread a comment shows as a reply to a photo.
+    const bubble = page.getByTestId('private-comment-bubble');
+    await expect(bubble).toContainText('On a photo');
+    await expect(bubble).toContainText('What a view');
+
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(2);
+    await expect(gallery.getByTestId('private-gallery-count')).toHaveText('2 photos');
+    await expect(gallery.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await expect(gallery.locator('img[src^="blob:"]')).toHaveCount(2);
+    await check(page, info, run, 'private gallery', gallery);
+
+    await gallery.getByTestId('private-gallery-tile').first().click();
+    const viewer = page.getByTestId('private-gallery-viewer');
+    await expect(viewer.getByTestId('private-gallery-stamp')).toContainText('Sent');
+    await expect(viewer.getByTestId('private-gallery-comment')).toContainText('What a view');
+    expect(await viewer.locator('img').first().getAttribute('draggable')).toBe('false');
+    await viewer.getByTestId('private-gallery-comment-input').fill('Best weekend');
+    await viewer.getByTestId('private-gallery-comment-send').click();
+    await expect.poll(() => server.posted.length).toBe(1);
+    // The comment is a sealed message: neither its text nor which photo it is about is readable on the server.
+    expect(server.posted[0]).toContain('```jarvis-envelope');
+    expect(server.posted[0]).not.toContain('Best weekend');
+    expect(server.posted[0]).not.toContain(photoB);
+    await expect(viewer.getByTestId('private-gallery-comment')).toHaveCount(2);
+    await check(page, info, run, 'private gallery viewer', viewer);
+    await viewer.getByRole('button', { name: 'Back to the gallery' }).click();
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+    await expect(gallery).toHaveCount(0);
+
+    // Tapping a comment in the thread opens its photo.
+    await page.getByTestId('private-comment-bubble').first().click();
+    await expect(page.getByTestId('private-gallery-viewer')).toBeVisible();
+    await page.getByRole('button', { name: 'Back to the gallery' }).click();
+    await page.getByRole('button', { name: 'Close gallery' }).click();
+
+    // Locking wipes it: no decrypted picture is left on the page.
+    await page.getByTestId('private-lock-now').click();
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
     done(run);
   });

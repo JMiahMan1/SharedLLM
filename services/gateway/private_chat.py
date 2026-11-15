@@ -4,13 +4,38 @@ Like the "Between" couples app, but inside the family chat. Only the parents
 (family role ``father`` or ``mother``, never a minor) can start one or be in
 one, and only they can read it:
 
-* **The key never leaves a parent's device.** The password is stretched with
-  PBKDF2-SHA256 (``MIN_ITERATIONS`` or more, a random 16-byte salt per chat)
-  into an AES-GCM-256 key in the browser (services/ui/src/lib/privateChatCrypto.ts).
-  This service keeps only the salt, the iteration count and a *verifier* (the
-  AES-GCM encryption of a fixed constant), so a wrong password is caught on the
-  device without the server learning anything about it. A forgotten password
-  means the history is gone: there is nothing here to recover it with.
+* **The key never leaves a parent's device.** Every chat has a 32-byte data
+  key (DK) that encrypts its messages and pictures in the browser
+  (services/ui/src/lib/privateChatCrypto.ts). This service keeps a *verifier*
+  (the AES-GCM encryption of a fixed constant under DK, which never changes),
+  so a wrong password is caught on the device without the server learning
+  anything about it. A forgotten password means the history is gone: there is
+  nothing here to recover it with.
+* **Two record versions.** A *v1* chat (the first ones made) has no wrapped
+  key: DK is PBKDF2-SHA256(password, ``salt``, ``iterations``) itself, so its
+  password could never change. A *v2* chat keeps ``kdf`` {salt, iterations},
+  ``wrapped_key`` {iv, ct} and ``auth_hash``: the device derives 512 bits with
+  PBKDF2 from the password and ``kdf``; the first 256 are a key-encryption key
+  (KEK) that only wraps DK (``wrapped_key`` = AES-GCM(KEK, DK)), the second 256
+  are ``auth``, and the server stores only sha256(auth). New chats are v2.
+* **Changing the password** (``POST /chats/<token>/password``, either parent)
+  re-wraps the same DK under a new KEK, so nothing already sent is re-encrypted
+  and the verifier stays the same (a change that alters it is refused). A v2
+  chat must prove the current password with its old ``auth``; a v1 chat has no
+  proof to give, so a member's change is accepted as long as the verifier is
+  unchanged, and the chat becomes v2. Changes are limited to
+  ``PASSWORD_CHANGE_LIMIT`` attempts per chat per ``PASSWORD_CHANGE_WINDOW_S``,
+  and the other parent gets a notice with no content in it.
+* **Rolling back a bad change (admin, by hand).** Each change pushes the
+  record's previous key fields onto ``history`` (newest last, the last
+  ``PASSWORD_HISTORY_KEEP`` kept), with ``replaced_at`` and ``replaced_by``.
+  To undo the latest change, stop nothing: copy the last ``history`` entry's
+  fields (``version`` and, for v1, ``salt``/``iterations``; for v2, ``kdf``,
+  ``wrapped_key`` and ``auth_hash``; plus ``verifier``) back over the top-level
+  ones in ``chats/<token>.json`` (dropping the v2 fields when restoring v1),
+  remove that entry, and save the file. The old password works again at once.
+  Because DK never changes, the history holds nothing that could decrypt a
+  message without a password.
 * **Messages ride on Talk as ciphertext.** Each is a ``sealed`` envelope
   (services/common/sealed.py) with a fresh IV. The Talk routes refuse anything
   else in a private room (``guard_talk``): plain text, Talk file shares, polls,
@@ -18,8 +43,9 @@ one, and only they can read it:
 * **Pictures never touch Nextcloud.** They are encrypted on the device and kept
   here as opaque blobs (``PRIVATE_CHAT_DIR``), served only to the chat's
   members, so Nextcloud never makes a preview and nothing scans them.
-* **Notices carry no content**: "New private message from Sam" (chat_notify)
-  and "Sam nudged you in your private chat" (``nudge``).
+* **Notices carry no content**: "New private message from Sam" (chat_notify),
+  "Sam nudged you in your private chat" (``nudge``) and "Sam changed the
+  private chat password" (``change_password``).
 
 The registry is one JSON file per chat (``chats/<token>.json``); pictures are
 ``blobs/<token>/<id>``. Both are ciphertext or public parameters only.
@@ -29,6 +55,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -64,6 +92,17 @@ IV_BYTES = 12
 TAG_BYTES = 16
 #: One encrypted picture: the 25 MB attachment limit plus its IV and tag.
 MAX_BLOB_BYTES = 25 * 1024 * 1024 + IV_BYTES + TAG_BYTES
+#: The data key and the password-derived ``auth``, in bytes.
+KEY_BYTES = 32
+#: A wrapped data key: AES-GCM of the 32-byte key, so the key plus its tag.
+WRAPPED_KEY_BYTES = KEY_BYTES + 16
+#: Password changes (attempts, including refused ones) per chat in a window.
+PASSWORD_CHANGE_LIMIT = 5
+PASSWORD_CHANGE_WINDOW_S = 3600
+#: Previous key records kept on a chat, so an admin can undo a bad change by hand.
+PASSWORD_HISTORY_KEEP = 5
+#: The record fields a password change replaces (and ``history`` keeps).
+_KEY_FIELDS = ("version", "salt", "iterations", "kdf", "wrapped_key", "auth_hash", "verifier")
 #: One nudge per chat per sender in this many seconds.
 NUDGE_INTERVAL_S = 300
 #: The Talk room's name, which is all Nextcloud ever shows about the chat.
@@ -80,7 +119,11 @@ _ALLOWED_ACTIONS = frozenset({
     "participants", "mentions", "call_join", "call_leave", "send", "edit_message",
 })
 
+#: The only error text anyone outside the feature can reach: it names nothing.
+NOT_AVAILABLE = "Not available."
+
 _create_lock = asyncio.Lock()
+_password_lock = asyncio.Lock()
 
 
 # --- Store --------------------------------------------------------------------
@@ -94,7 +137,7 @@ class Store:
 
     def _chat_path(self, token: str) -> Path:
         if not _TOKEN.match(token or ""):
-            raise HTTPException(status_code=404, detail="No such private chat.")
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
         return self.root / "chats" / f"{token}.json"
 
     def _blob_dir(self, token: str) -> Path:
@@ -160,6 +203,12 @@ def private_tokens() -> set[str]:
     return get_store().tokens()
 
 
+def members(token: str | None) -> list[str]:
+    """The chat's two members (empty for anything that is not a private chat)."""
+    chat = get_store().get(str(token or ""))
+    return [str(m) for m in chat.get("members", [])] if chat else []
+
+
 def is_private(token: str | None) -> bool:
     return bool(token) and get_store().get(str(token)) is not None
 
@@ -216,14 +265,15 @@ async def _caller(request: Request) -> tuple[str, dict[str, dict[str, Any]]]:
 async def _member_chat(request: Request, token: str) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
     """The caller, the chat and the directory, for a member who is (still) a parent.
 
-    A chat the caller is not in answers 404, as if it did not exist.
+    A chat the caller is not in answers 404, as if it did not exist, and
+    nothing the caller can reach names the feature.
     """
     user, people = await _caller(request)
     chat = get_store().get(token)
     if not chat or user not in chat.get("members", []):
-        raise HTTPException(status_code=404, detail="No such private chat.")
+        raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
     if not is_parent(people.get(user)):
-        raise HTTPException(status_code=403, detail="Private chats are only for the parents.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     return user, chat, people
 
 
@@ -239,25 +289,63 @@ def _b64(value: Any, field: str) -> bytes:
         raise HTTPException(status_code=422, detail=f"{field} is not valid base64.") from exc
 
 
-def _crypto_params(body: dict[str, Any]) -> dict[str, Any]:
-    salt = _b64(body.get("salt"), "salt")
+def _iterations(value: Any, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not MIN_ITERATIONS <= value <= MAX_ITERATIONS:
+        raise HTTPException(status_code=422, detail=f"{field} must be a whole number from {MIN_ITERATIONS} to {MAX_ITERATIONS}.")
+    return value
+
+
+def _sealed(value: Any, field: str, *, ct_len: tuple[int, int]) -> dict[str, str]:
+    """An AES-GCM ``{iv, ct}`` pair, checked for shape only."""
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail=f"{field} is required: {{iv, ct}}.")
+    iv = _b64(value.get("iv"), f"{field}.iv")
+    ct = _b64(value.get("ct"), f"{field}.ct")
+    low, high = ct_len
+    if len(iv) != IV_BYTES or not low <= len(ct) <= high:
+        raise HTTPException(status_code=422, detail=f"{field} is not an AES-GCM encryption of the right size.")
+    return {"iv": value["iv"], "ct": value["ct"]}
+
+
+def _verifier(value: Any) -> dict[str, str]:
+    return _sealed(value, "verifier", ct_len=(TAG_BYTES + 1, 256))
+
+
+def _auth(value: Any, field: str) -> bytes:
+    raw = _b64(value, field)
+    if len(raw) != KEY_BYTES:
+        raise HTTPException(status_code=422, detail=f"{field} must be {KEY_BYTES} bytes.")
+    return raw
+
+
+def _auth_hash(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _wrapping(body: dict[str, Any]) -> dict[str, Any]:
+    """A v2 key record from a request body: the KEK's ``kdf``, the ``wrapped_key`` and the verifier."""
+    kdf = body.get("kdf")
+    if not isinstance(kdf, dict):
+        raise HTTPException(status_code=422, detail="kdf is required: {salt, iterations}. Update Jarvis and try again.")
+    salt = _b64(kdf.get("salt"), "kdf.salt")
     if len(salt) != SALT_BYTES:
-        raise HTTPException(status_code=422, detail=f"salt must be {SALT_BYTES} bytes.")
-    iterations = body.get("iterations")
-    if not isinstance(iterations, int) or isinstance(iterations, bool) or not MIN_ITERATIONS <= iterations <= MAX_ITERATIONS:
-        raise HTTPException(status_code=422, detail=f"iterations must be a whole number from {MIN_ITERATIONS} to {MAX_ITERATIONS}.")
-    verifier = body.get("verifier")
-    if not isinstance(verifier, dict):
-        raise HTTPException(status_code=422, detail="verifier is required: {iv, ct}.")
-    iv = _b64(verifier.get("iv"), "verifier.iv")
-    ct = _b64(verifier.get("ct"), "verifier.ct")
-    if len(iv) != IV_BYTES or not TAG_BYTES < len(ct) <= 256:
-        raise HTTPException(status_code=422, detail="verifier is not an AES-GCM encryption of the check value.")
+        raise HTTPException(status_code=422, detail=f"kdf.salt must be {SALT_BYTES} bytes.")
+    iterations = _iterations(kdf.get("iterations"), "kdf.iterations")
+    wrapped = _sealed(body.get("wrapped_key"), "wrapped_key", ct_len=(WRAPPED_KEY_BYTES, WRAPPED_KEY_BYTES))
     return {
-        "salt": body["salt"],
-        "iterations": iterations,
-        "verifier": {"iv": verifier["iv"], "ct": verifier["ct"]},
+        "version": 2,
+        "kdf": {"salt": kdf["salt"], "iterations": iterations},
+        "wrapped_key": wrapped,
+        "verifier": _verifier(body.get("verifier")),
     }
+
+
+def _key_fields(chat: dict[str, Any]) -> dict[str, Any]:
+    return {k: chat[k] for k in _KEY_FIELDS if k in chat}
+
+
+def _version(chat: dict[str, Any]) -> int:
+    return 2 if chat.get("version") == 2 else 1
 
 
 def _public(chat: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -269,6 +357,21 @@ def _public(chat: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) ->
         "partner_name": _display(people.get(partner) or {"username": partner}),
         "created_by": chat["created_by"],
         "created_at": chat["created_at"],
+        **_public_key(chat),
+    }
+
+
+def _public_key(chat: dict[str, Any]) -> dict[str, Any]:
+    """What a device needs to unlock: never ``auth_hash`` or ``history``."""
+    if _version(chat) == 2:
+        return {
+            "version": 2,
+            "kdf": {"name": "PBKDF2-SHA256", **chat["kdf"]},
+            "wrapped_key": chat["wrapped_key"],
+            "verifier": chat["verifier"],
+        }
+    return {
+        "version": 1,
         "kdf": {"name": "PBKDF2-SHA256", "salt": chat["salt"], "iterations": chat["iterations"]},
         "verifier": chat["verifier"],
     }
@@ -300,9 +403,10 @@ def guard_talk(token: str | None, action: str, message: str | None = None) -> No
     if not token or not is_private(token):
         return
     if action not in _ALLOWED_ACTIONS:
-        raise HTTPException(status_code=403, detail="That is not available in a private chat.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     if action in ("send", "edit_message") and not is_sealed(message):
-        raise HTTPException(status_code=403, detail="A private chat only takes encrypted messages. Unlock it in Jarvis to write.")
+        # Generic on purpose: someone outside the chat who knows its token learns nothing.
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
 
 
 def scrub_conversations(content: dict[str, Any]) -> dict[str, Any]:
@@ -331,33 +435,32 @@ def scrub_conversations(content: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/status")
 async def status(request: Request):
-    """Whether the caller may use private chats, their chats, and who they could start one with."""
+    """The caller's private chats and who they could start one with.
+
+    Anyone who may not use the feature (not a father or mother, a minor, no
+    chat account) gets exactly ``{"eligible": false, "chats": [], "partners": []}``:
+    no reason and nothing else that says the feature exists.
+    """
     user, people = await _caller(request)
     me = people.get(user)
-    eligible = is_parent(me)
-    chats = [_public(c, user, people) for c in get_store().all() if user in c.get("members", [])] if eligible else []
-    partners = (
-        [
-            {"username": name, "display_name": _display(p)}
-            for name, p in sorted(people.items())
-            if name != user and is_parent(p)
-        ]
-        if eligible
-        else []
-    )
-    reason = None
-    if not eligible:
-        reason = "Private chats are only for the parents (family role father or mother) with a chat account."
-    return {"eligible": eligible, "reason": reason, "chats": chats, "partners": partners,
-            "min_iterations": MIN_ITERATIONS}
+    if not is_parent(me):
+        return {"eligible": False, "chats": [], "partners": []}
+    chats = [_public(c, user, people) for c in get_store().all() if user in c.get("members", [])]
+    partners = [
+        {"username": name, "display_name": _display(p)}
+        for name, p in sorted(people.items())
+        if name != user and is_parent(p)
+    ]
+    return {"eligible": True, "chats": chats, "partners": partners, "min_iterations": MIN_ITERATIONS}
 
 
 @router.post("/chats")
 async def create_chat(request: Request):
     """Start a private chat with the other parent.
 
-    The body carries the public key-derivation parameters and the verifier the
-    creator's device made from the password; the password itself never comes here.
+    The body is a v2 key record the creator's device made: the KEK's ``kdf``,
+    the ``wrapped_key``, the ``verifier`` and ``auth`` (stored only as its
+    sha256). The password and the data key never come here.
     """
     try:
         body = await request.json()
@@ -368,14 +471,15 @@ async def create_chat(request: Request):
     user, people = await _caller(request)
     me = people.get(user)
     if not is_parent(me):
-        raise HTTPException(status_code=403, detail="Private chats are only for the parents.")
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
     partner = str(body.get("partner") or "")
     if not _USER.match(partner) or partner == user:
         raise HTTPException(status_code=422, detail="Choose the other parent.")
     other = people.get(partner)
     if not is_parent(other):
-        raise HTTPException(status_code=403, detail="A private chat can only be with the other parent.")
-    params = _crypto_params(body)
+        raise HTTPException(status_code=403, detail=NOT_AVAILABLE)
+    params = _wrapping(body)
+    params["auth_hash"] = _auth_hash(_auth(body.get("auth"), "auth"))
     members = sorted([user, partner])
 
     async with _create_lock:
@@ -532,3 +636,96 @@ async def nudge(token: str, request: Request):
         raise HTTPException(status_code=502, detail="The nudge could not be delivered; try again.")
     log.info("[private-chat] %s nudged %s", user, ", ".join(others))
     return {"nudged": others, "next_in": NUDGE_INTERVAL_S}
+
+
+def _recent_attempts(chat: dict[str, Any], now: float) -> list[float]:
+    stamps = chat.get("password_change_attempts")
+    if not isinstance(stamps, list):
+        return []
+    return [float(t) for t in stamps if isinstance(t, (int, float)) and now - float(t) < PASSWORD_CHANGE_WINDOW_S]
+
+
+@router.post("/chats/{token}/password")
+async def change_password(token: str, request: Request):
+    """Re-wrap the chat's data key under a new password (either parent).
+
+    The body is a v2 key record made on the device (``kdf``, ``wrapped_key``,
+    ``verifier``), the new ``new_auth`` and, for a v2 chat, the current
+    ``auth``. The verifier must be the one already stored: the data key, and so
+    every message and picture already sent, stays the same.
+    """
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="A JSON body is required.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="A JSON body is required.")
+    user, _chat, people = await _member_chat(request, token)
+    record = _wrapping(body)
+    new_auth = _auth(body.get("new_auth"), "new_auth")
+    old_auth = body.get("auth")
+
+    async with _password_lock:
+        store = get_store()
+        chat = store.get(token)
+        if not chat or user not in chat.get("members", []):
+            raise HTTPException(status_code=404, detail=NOT_AVAILABLE)
+        now = time.time()
+        attempts = _recent_attempts(chat, now)
+        if len(attempts) >= PASSWORD_CHANGE_LIMIT:
+            wait = max(1, int(PASSWORD_CHANGE_WINDOW_S - (now - min(attempts))))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Too many password changes; try again in {max(1, round(wait / 60))} min.",
+                         "retry_after": wait},
+                headers={"Retry-After": str(wait)},
+            )
+        chat["password_change_attempts"] = [*attempts, now]
+
+        refusal: HTTPException | None = None
+        if _version(chat) == 2:
+            stored = str(chat.get("auth_hash") or "")
+            given = _auth(old_auth, "auth") if old_auth is not None else None
+            if not stored or given is None or not hmac.compare_digest(_auth_hash(given), stored):
+                refusal = HTTPException(status_code=403, detail="That is not the current password for this chat.")
+        if refusal is None and record["verifier"] != chat.get("verifier"):
+            refusal = HTTPException(
+                status_code=409,
+                detail="That change would lock away the chat's history (its key changed). Nothing was changed.")
+        if refusal is not None:
+            store.save(chat)
+            log.warning("[private-chat] %s: password change by %s refused (%s)", token, user, refusal.status_code)
+            raise refusal
+
+        previous = {**_key_fields(chat), "version": _version(chat),
+                    "replaced_at": int(now), "replaced_by": user}
+        history = chat.get("history") if isinstance(chat.get("history"), list) else []
+        for field in _KEY_FIELDS:
+            chat.pop(field, None)
+        chat.update(record)
+        chat["auth_hash"] = _auth_hash(new_auth)
+        chat["history"] = [*history, previous][-PASSWORD_HISTORY_KEEP:]
+        chat["password_changed_at"] = int(now)
+        chat["password_changed_by"] = user
+        try:
+            store.save(chat)
+        except OSError as exc:
+            log.error("[private-chat] could not save the new password record for %s: %s", token, exc)
+            raise HTTPException(status_code=500, detail="Could not save the new password (PRIVATE_CHAT_DIR not writable).") from exc
+    log.info("[private-chat] %s changed the password of %s (was v%s)", user, token, previous["version"])
+
+    me = people.get(user) or {"username": user}
+    others = [m for m in chat["members"] if m != user]
+    url = f"/family?chat={token}"
+    sent = await notify.send_many(
+        others,
+        lambda person: notify.notice(
+            person, "chat", "Private chat", f"{_display(me)} changed the private chat password",
+            url=url, priority=4, tag=f"private-password:{token}",
+            actions=[notify.view_action(url)],
+            data={"token": token, "private": True, "password_changed": True},
+        ),
+    )
+    if not sent:
+        log.warning("[private-chat] %s: the password-change notice to %s was not delivered", token, ", ".join(others))
+    return {**_public(chat, user, people), "notified": others if sent else []}
