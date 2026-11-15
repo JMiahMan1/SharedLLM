@@ -445,6 +445,39 @@ describe('HealthNutrition', () => {
   });
 });
 
+describe('a meal of several things', () => {
+  const food = (id: number, name: string, calories: number, servings = 1) => ({
+    id, user_id: 'alex', day: '2026-10-22', meal: 'breakfast' as const, name, brand: '', calories,
+    protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: null, sugar_g: null, sodium_mg: null, servings,
+    serving_grams: null, barcode: null, recipe_path: null, source: 'manual', external_id: null,
+    created_at: '2026-10-22T08:00:00Z', density: null,
+  });
+
+  it('sums each meal and keeps adding to the same meal until Done', async () => {
+    getNutritionDay.mockResolvedValue(emptyNutrition({
+      logged: true, entries_count: 3,
+      meals: { breakfast: { entries: [food(1, 'Eggs', 140), food(2, 'Bacon', 90, 2), food(3, 'Biscuit', 190)], calories: 510 } } as never,
+    }));
+    addFood.mockResolvedValue({} as never);
+    renderWithClient(<HealthNutrition onNavigate={() => {}} />);
+
+    expect(await screen.findByTestId('meal-total-breakfast')).toHaveTextContent('3 items · 510 kcal');
+    fireEvent.click(within(screen.getByTestId('meal-breakfast')).getByText('Add'));
+    const panel = screen.getByTestId('add-food-panel');
+    expect(within(panel).getByTestId('add-food-so-far')).toHaveTextContent('In Breakfast so far · 510 kcal');
+    fireEvent.click(screen.getByText('By hand'));
+    fireEvent.change(screen.getByPlaceholderText('Food name'), { target: { value: 'Orange juice' } });
+    fireEvent.change(screen.getByLabelText('Calories'), { target: { value: '110' } });
+    fireEvent.click(screen.getByText('Add food'));
+    await waitFor(() => expect(addFood).toHaveBeenCalledWith(expect.objectContaining({ meal: 'breakfast', name: 'Orange juice' })));
+    // Still on breakfast, ready for the next thing.
+    await waitFor(() => expect(screen.getByPlaceholderText('Food name')).toHaveValue(''));
+    expect(screen.getByTestId('add-food-panel')).toHaveTextContent('Add to Breakfast');
+    fireEvent.click(within(screen.getByTestId('add-food-panel')).getByText('Done'));
+    expect(screen.queryByTestId('add-food-panel')).toBeNull();
+  });
+});
+
 describe('HealthToday family sharing', () => {
   it('shows a shared cycle phase with practical partner suggestions', async () => {
     getHealthSummary.mockResolvedValue(summary());

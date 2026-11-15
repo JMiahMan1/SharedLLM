@@ -105,9 +105,8 @@ export default function HealthNutrition({ onNavigate }: Props) {
     void queryClient.invalidateQueries({ queryKey: ['health-food'] });
   };
 
-  const resetAdd = () => {
-    setAddingMeal(null);
-    setMode('search');
+  /** Clear the form for the next item, staying on the same meal and way of adding. */
+  const clearForm = () => {
     setQuery('');
     setResults(null);
     setOfflineSources([]);
@@ -117,6 +116,12 @@ export default function HealthNutrition({ onNavigate }: Props) {
     setBarcode('');
     setManual(EMPTY_MANUAL);
     setPhotoRead(null);
+  };
+
+  const resetAdd = () => {
+    clearForm();
+    setAddingMeal(null);
+    setMode('search');
   };
 
   const search = useMutation({
@@ -193,8 +198,10 @@ export default function HealthNutrition({ onNavigate }: Props) {
       });
     },
     onSuccess: () => {
-      toast.success('Logged');
-      resetAdd();
+      // A meal is usually several things (eggs, bacon, biscuits): stay on it
+      // for the next one; Done closes the panel.
+      toast.success(`Added to ${addingMeal ? MEAL_LABELS[addingMeal] : 'the meal'}`);
+      clearForm();
       invalidate();
     },
     onError: (error: Error) => toast.error(error.message || 'Could not log that food'),
@@ -368,9 +375,24 @@ export default function HealthNutrition({ onNavigate }: Props) {
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-white">Add to {MEAL_LABELS[addingMeal]}</h3>
             <button type="button" onClick={resetAdd} className="-my-2 min-h-11 px-2 text-[11px] text-slate-400 hover:text-white sm:my-0 sm:min-h-0 sm:px-0">
-              Cancel
+              {(nutrition?.meals[addingMeal]?.entries.length ?? 0) > 0 ? 'Done' : 'Cancel'}
             </button>
           </div>
+          {(nutrition?.meals[addingMeal]?.entries.length ?? 0) > 0 && (
+            <div className="mt-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2" data-testid="add-food-so-far">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                In {MEAL_LABELS[addingMeal]} so far{kid ? '' : ` · ${Math.round(nutrition?.meals[addingMeal]?.calories ?? 0)} kcal`}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[11px] text-slate-300">
+                {nutrition?.meals[addingMeal]?.entries.map((entry: FoodEntry) => (
+                  <li key={entry.id} className="flex justify-between gap-2">
+                    <span className="min-w-0 truncate">{entry.name}</span>
+                    {!kid && <span className="shrink-0 text-slate-500">{Math.round(entry.calories * entry.servings)} kcal</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="mt-3 flex flex-wrap gap-1" role="tablist" aria-label="How to add food">
             {([
@@ -571,7 +593,7 @@ export default function HealthNutrition({ onNavigate }: Props) {
               meal={addingMeal}
               kid={kid}
               onLogged={() => {
-                resetAdd();
+                clearForm();
                 invalidate();
               }}
             />
@@ -720,8 +742,14 @@ export default function HealthNutrition({ onNavigate }: Props) {
             data-testid={`meal-${meal}`}
           >
             <div className="flex items-center justify-between gap-3">
-              <h3 id={`meal-${meal}`} className="text-sm font-semibold text-white">
-                {MEAL_LABELS[meal]}
+              <h3 id={`meal-${meal}`} className="min-w-0 text-sm font-semibold text-white">
+                <span>{MEAL_LABELS[meal]}</span>
+                {entries.length > 0 && (
+                  <span className="ml-1.5 text-[11px] font-medium text-slate-400" data-testid={`meal-total-${meal}`}>
+                    · {entries.length} {entries.length === 1 ? 'item' : 'items'}
+                    {kid ? '' : ` · ${Math.round(nutrition?.meals[meal]?.calories ?? 0).toLocaleString()} kcal`}
+                  </span>
+                )}
               </h3>
               <button
                 type="button"
