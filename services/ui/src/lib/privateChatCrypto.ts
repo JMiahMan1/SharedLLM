@@ -85,7 +85,10 @@ export class WrongPasswordError extends Error {
 /** What a message says once opened. */
 export type PrivatePayload =
   | { t: 'text'; text: string }
-  | { t: 'image'; blob: string; mime: string; name?: string; caption?: string };
+  /** `sent_at` / `taken_at` are seconds since the epoch, inside the encryption (older pictures have neither). */
+  | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number }
+  /** A comment on a picture in the chat's gallery, naming the picture's blob. */
+  | { t: 'comment'; blob: string; text: string; sent_at?: number };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -335,14 +338,23 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
     const plain = await decrypt(key, fromBase64(sealed.iv), fromBase64(sealed.ct));
     const payload = JSON.parse(decoder.decode(plain)) as PrivatePayload;
     if (payload?.t === 'text' && typeof payload.text === 'string') return { t: 'text', text: payload.text };
+    const stamp = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined);
     if (payload?.t === 'image' && typeof payload.blob === 'string' && typeof payload.mime === 'string') {
+      const sentAt = stamp(payload.sent_at);
+      const takenAt = stamp(payload.taken_at);
       return {
         t: 'image',
         blob: payload.blob,
         mime: payload.mime,
         ...(typeof payload.name === 'string' ? { name: payload.name } : {}),
         ...(typeof payload.caption === 'string' ? { caption: payload.caption } : {}),
+        ...(sentAt ? { sent_at: sentAt } : {}),
+        ...(takenAt ? { taken_at: takenAt } : {}),
       };
+    }
+    if (payload?.t === 'comment' && typeof payload.blob === 'string' && typeof payload.text === 'string' && payload.text.trim()) {
+      const sentAt = stamp(payload.sent_at);
+      return { t: 'comment', blob: payload.blob, text: payload.text, ...(sentAt ? { sent_at: sentAt } : {}) };
     }
     return null;
   } catch {

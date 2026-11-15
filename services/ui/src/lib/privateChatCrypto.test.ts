@@ -240,3 +240,20 @@ describe('changing the password', () => {
     copy.fill(0);
   }, 60_000);
 });
+
+describe('picture and comment payloads', () => {
+  it('carry their timestamps inside the encryption, and comments name the picture', async () => {
+    const { key } = await v1Chat('payload payload');
+    const image = await sealMessage(key, { t: 'image', blob: 'b1', mime: 'image/jpeg', sent_at: 1_800_000_000, taken_at: 1_799_999_000 });
+    expect(image).not.toContain('1800000000');
+    expect(await openMessage(key, image)).toEqual({ t: 'image', blob: 'b1', mime: 'image/jpeg', sent_at: 1_800_000_000, taken_at: 1_799_999_000 });
+    const comment = await sealMessage(key, { t: 'comment', blob: 'b1', text: 'Lovely', sent_at: 1_800_000_100 });
+    expect(comment).not.toContain('Lovely');
+    expect(comment).not.toContain('b1');
+    expect(await openMessage(key, comment)).toEqual({ t: 'comment', blob: 'b1', text: 'Lovely', sent_at: 1_800_000_100 });
+    // Nonsense stamps are dropped; an empty comment is not a comment.
+    const odd = await sealMessage(key, { t: 'image', blob: 'b2', mime: 'image/png', sent_at: -5, taken_at: Number.NaN });
+    expect(await openMessage(key, odd)).toEqual({ t: 'image', blob: 'b2', mime: 'image/png' });
+    expect(await openMessage(key, await sealMessage(key, { t: 'comment', blob: 'b1', text: '  ' }))).toBeNull();
+  }, 30_000);
+});

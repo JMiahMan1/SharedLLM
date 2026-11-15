@@ -90,7 +90,12 @@ async function serve(page: Page, server: Server): Promise<void> {
       return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: server.messages } } });
     }
     if (p === '/api/communication/talk/messages' && req.method() === 'POST') {
-      server.posted.push(String((req.postDataJSON() as { message?: string }).message));
+      const posted = String((req.postDataJSON() as { message?: string }).message);
+      server.posted.push(posted);
+      // Like Talk: what was sent is in the room on the next read.
+      const nextId = Math.max(0, ...server.messages.map((m) => Number(m.id) || 0)) + 1;
+      server.messages.push({ id: nextId, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent',
+        timestamp: Math.floor(Date.now() / 1000), message_type: 'comment', message: posted });
       return route.fulfill({ json: { status: 'SUCCESS', message: 'Chat message sent.' } });
     }
     return route.fallback();
@@ -607,6 +612,67 @@ test.describe('private chat on every form factor', () => {
     // Ciphertext: not a JPEG (FF D8) on the wire.
     expect(upload[0] === 0xff && upload[1] === 0xd8).toBe(false);
     expect(await page.evaluate(() => (window as unknown as { __cameraLog: { stopped: number } }).__cameraLog.stopped)).toBeGreaterThanOrEqual(2);
+    done(run);
+  });
+
+  test('the encrypted gallery: every photo by day with its time, opened full screen, commented on by both', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const photoA = 'cd'.repeat(16);
+    const photoB = 'ef'.repeat(16);
+    server.blobs[photoA] = Buffer.from(await encryptBytes(key, new Uint8Array(PNG)));
+    server.blobs[photoB] = Buffer.from(await encryptBytes(key, new Uint8Array(PNG)));
+    server.messages.push(
+      // An older photo with no time inside: the gallery uses when Talk got it.
+      { id: 2, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 3 * 86400,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: photoA, mime: 'image/png' }) },
+      { id: 3, token: TOKEN, actor_type: 'users', actor_id: 'parent', actor_display_name: 'Parent', timestamp: SEC - 120,
+        message_type: 'comment', message: await sealMessage(key, { t: 'image', blob: photoB, mime: 'image/png', sent_at: SEC - 120, taken_at: SEC - 600 }) },
+      { id: 4, token: TOKEN, actor_type: 'users', actor_id: 'robin', actor_display_name: 'Robin', timestamp: SEC - 60,
+        message_type: 'comment', message: await sealMessage(key, { t: 'comment', blob: photoB, text: 'What a view' }) },
+    );
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    // In the thread a comment shows as a reply to a photo.
+    const bubble = page.getByTestId('private-comment-bubble');
+    await expect(bubble).toContainText('On a photo');
+    await expect(bubble).toContainText('What a view');
+
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(2);
+    await expect(gallery.getByTestId('private-gallery-count')).toHaveText('2 photos');
+    await expect(gallery.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await expect(gallery.locator('img[src^="blob:"]')).toHaveCount(2);
+    await check(page, info, run, 'private gallery', gallery);
+
+    await gallery.getByTestId('private-gallery-tile').first().click();
+    const viewer = page.getByTestId('private-gallery-viewer');
+    await expect(viewer.getByTestId('private-gallery-stamp')).toContainText('Sent');
+    await expect(viewer.getByTestId('private-gallery-comment')).toContainText('What a view');
+    expect(await viewer.locator('img').first().getAttribute('draggable')).toBe('false');
+    await viewer.getByTestId('private-gallery-comment-input').fill('Best weekend');
+    await viewer.getByTestId('private-gallery-comment-send').click();
+    await expect.poll(() => server.posted.length).toBe(1);
+    // The comment is a sealed message: neither its text nor which photo it is about is readable on the server.
+    expect(server.posted[0]).toContain('```jarvis-envelope');
+    expect(server.posted[0]).not.toContain('Best weekend');
+    expect(server.posted[0]).not.toContain(photoB);
+    await expect(viewer.getByTestId('private-gallery-comment')).toHaveCount(2);
+    await check(page, info, run, 'private gallery viewer', viewer);
+    await viewer.getByRole('button', { name: 'Back to the gallery' }).click();
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+    await expect(gallery).toHaveCount(0);
+
+    // Tapping a comment in the thread opens its photo.
+    await page.getByTestId('private-comment-bubble').first().click();
+    await expect(page.getByTestId('private-gallery-viewer')).toBeVisible();
+    await page.getByRole('button', { name: 'Back to the gallery' }).click();
+    await page.getByRole('button', { name: 'Close gallery' }).click();
+
+    // Locking wipes it: no decrypted picture is left on the page.
+    await page.getByTestId('private-lock-now').click();
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
     done(run);
   });
 });

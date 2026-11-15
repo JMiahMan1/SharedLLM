@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Camera, Check, CheckCheck, Fingerprint, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -12,6 +12,8 @@ import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../.
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
+import PrivateGallery from './PrivateGallery';
+import { noSave, usePrivatePicture } from './usePrivatePicture';
 import EnvelopeBody from './EnvelopeBody';
 import {
   dayLabel,
@@ -47,12 +49,6 @@ interface PrivateChatThreadProps {
 
 type Opened = PrivatePayload | 'unreadable';
 
-/** Stop the browser offering to save, share, drag or open a picture elsewhere. */
-const noSave = {
-  draggable: false,
-  onContextMenu: (event: { preventDefault: () => void }) => event.preventDefault(),
-  onDragStart: (event: { preventDefault: () => void }) => event.preventDefault(),
-};
 
 /**
  * The parents' private chat: locked until the password is entered, and locked
@@ -344,6 +340,8 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  // The gallery, opened on one picture (a comment's) or on the grid.
+  const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -391,7 +389,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
    * uploaded as an opaque blob (never a Talk file share), and the plaintext
    * copy overwritten with zeros once encrypted.
    */
-  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string) => {
+  const sendImageBytes = async (plain: Uint8Array<ArrayBuffer>, mime: string, name?: string, takenAt?: number) => {
     let blob = '';
     try {
       let sealed: Uint8Array<ArrayBuffer>;
@@ -401,7 +399,8 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         plain.fill(0);
       }
       blob = (await api.uploadPrivateBlob(token, sealed)).id;
-      await post({ t: 'image', blob, mime, ...(name ? { name } : {}) });
+      // When it was sent (and taken) travels inside the encryption, for the gallery.
+      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}) });
       onChanged();
     } catch (error) {
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
@@ -433,18 +432,23 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     for (const file of files) await sendPicture(file);
   };
 
-  const remove = async (message: TalkMessage) => {
-    if (typeof message.id !== 'number') return;
+  /** Delete a message for both of you, and the picture's encrypted blob when it is one. */
+  const removeById = async (messageId: number, blob?: string) => {
     setSelected(null);
     try {
-      const res = await api.deleteTalkMessage({ token, message_id: message.id });
+      const res = await api.deleteTalkMessage({ token, message_id: messageId });
       if (res.status && res.status !== 'SUCCESS') throw new Error(res.message || 'Could not delete the message');
-      const payload = opened[String(message.id)];
-      if (payload && payload !== 'unreadable' && payload.t === 'image') await api.deletePrivateBlob(token, payload.blob);
+      if (blob) await api.deletePrivateBlob(token, blob);
       onChanged();
     } catch (error) {
       toast.error(errorText(error, 'Could not delete the message'));
     }
+  };
+
+  const remove = async (message: TalkMessage) => {
+    if (typeof message.id !== 'number') return;
+    const payload = opened[String(message.id)];
+    await removeById(message.id, payload && payload !== 'unreadable' && payload.t === 'image' ? payload.blob : undefined);
   };
 
   const nudge = async () => {
@@ -488,6 +492,16 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
             <BellRing size={14} aria-hidden /> Nudge
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setGallery({})}
+          aria-label="Gallery"
+          title="Gallery"
+          data-testid="private-gallery-open"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-slate-200 hover:bg-white/10"
+        >
+          <Images size={14} aria-hidden /> <span className="hidden sm:inline">Gallery</span>
+        </button>
         <button
           type="button"
           onClick={() => setSecurityOpen(true)}
@@ -540,8 +554,9 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           const sealed = isSealedMessage(message.message);
           const isSelected = selected === key;
           const picture = payload !== undefined && payload !== 'unreadable' && payload.t === 'image';
-          // A text bubble of yours is tapped for Delete; a picture opens the viewer, which has Delete.
-          const selectable = own && !picture && typeof message.id === 'number';
+          const comment = payload !== undefined && payload !== 'unreadable' && payload.t === 'comment';
+          // A text bubble of yours is tapped for Delete; a picture opens the viewer and a comment the gallery, which have Delete.
+          const selectable = own && !picture && !comment && typeof message.id === 'number';
           return (
             <div key={key}>
               {separator}
@@ -572,6 +587,18 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                     <span className="italic opacity-80">This message could not be decrypted.</span>
                   ) : payload.t === 'text' ? (
                     payload.text
+                  ) : payload.t === 'comment' ? (
+                    <button
+                      type="button"
+                      onClick={() => setGallery({ blob: payload.blob })}
+                      className="block text-left"
+                      data-testid="private-comment-bubble"
+                    >
+                      <span className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold opacity-80">
+                        <MessageSquare size={11} aria-hidden /> On a photo
+                      </span>
+                      {payload.text}
+                    </button>
                   ) : (
                     <PrivatePicture
                       token={token}
@@ -664,13 +691,25 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         </button>
       </form>
 
+      {gallery && (
+        <PrivateGallery
+          token={token}
+          vault={vault}
+          messages={messages}
+          myActorIds={myActorIds}
+          initialBlob={gallery.blob}
+          onClose={() => setGallery(null)}
+          onChanged={onChanged}
+          onDelete={removeById}
+        />
+      )}
       {cameraOpen && (
         <PrivateCamera
           onClose={() => setCameraOpen(false)}
-          onCapture={async (jpeg) => {
+          onCapture={async (jpeg, takenAt) => {
             setSending(true);
             try {
-              await sendImageBytes(jpeg, 'image/jpeg');
+              await sendImageBytes(jpeg, 'image/jpeg', undefined, takenAt);
             } finally {
               setSending(false);
             }
@@ -729,25 +768,7 @@ function PrivatePicture({
   vault: PrivateVault;
   onOpen: (url: string) => void;
 }) {
-  const [url, setUrl] = useState('');
-  const [failed, setFailed] = useState(false);
-  // Pictures are released when the chat goes off the screen; decrypt again when it is back.
-  const epoch = useSyncExternalStore(useCallback((fn: () => void) => vault.subscribe(fn), [vault]), () => vault.epoch);
-  useEffect(() => {
-    let live = true;
-    void api
-      .getPrivateBlob(token, payload.blob)
-      .then((bytes) => vault.pictureUrl(bytes, payload.mime))
-      .then((made) => {
-        if (live) setUrl(made);
-      })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [token, payload.blob, payload.mime, vault, epoch]);
+  const { url, failed } = usePrivatePicture(token, payload.blob, payload.mime, vault);
 
   if (failed) return <span className="italic opacity-80">This picture could not be opened.</span>;
   if (!url) {
