@@ -336,3 +336,38 @@ class TestBundleOlderThanApk:
         os.utime(apk, (later, later))  # a deploy syncs the same build again
         main.clear_apk_version_cache() if hasattr(main, "clear_apk_version_cache") else None
         assert self._offer(client)["bundle_available"] is True
+
+
+class TestSameCommitBundle:
+    """CI publishes the APK when its build finishes, often minutes after the
+    deploy published the same commit's bundle; that bundle is not stale."""
+
+    def _publish(self, client, code, sha):
+        r = client.post(
+            "/api/app-updates/publish",
+            headers=auth(),
+            data={"git_sha": sha},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(code), "application/vnd.android.package-archive")},
+        )
+        assert r.status_code == 200, r.text
+
+    def _setup(self, client, bundle_sha, apk_sha):
+        import os
+
+        from services.gateway import main
+
+        bundle = main.APP_UPDATES_DIR / "bundle.zip"
+        _write_bundle(bundle, "0" * 7)
+        self._publish(client, 700, "1" * 40)
+        client.get("/api/app-updates/version")  # first look at an APK recorded on publish
+        _write_bundle(bundle, bundle_sha)
+        self._publish(client, 701, apk_sha)  # the APK lands after the bundle
+        apk = main.APP_UPDATES_DIR / "jarvis-os.apk"
+        os.utime(bundle, (apk.stat().st_mtime - 240, apk.stat().st_mtime - 240))
+        return client.get("/api/app-updates/version").json()
+
+    def test_a_bundle_from_the_apks_own_commit_is_offered_even_if_published_first(self, client):
+        assert self._setup(client, "0e01c7e9", "0e01c7e9401d9e8079b21e088c7c03003dce74f8")["bundle_available"] is True
+
+    def test_an_older_commits_bundle_is_held_back(self, client):
+        assert self._setup(client, "b23af88d", "0e01c7e9401d9e8079b21e088c7c03003dce74f8")["bundle_available"] is False

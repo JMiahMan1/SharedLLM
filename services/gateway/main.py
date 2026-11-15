@@ -16675,6 +16675,27 @@ def _read_bundle_version(bundle_path: Path) -> dict:
     return {}
 
 
+_APK_RECORD = "apk_published.json"
+
+
+def _record_apk(apk: Path, digest: str, at: float, git_sha: str | None) -> None:
+    sidecar = apk.parent / _APK_RECORD
+    try:
+        tmp = sidecar.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"sha256": digest, "at": at, "git_sha": git_sha or None}))
+        tmp.replace(sidecar)
+    except OSError as e:
+        log.warning(f"[AppUpdates] Could not record when the APK changed: {e}")
+
+
+def _apk_record(apk: Path) -> dict:
+    try:
+        known = json.loads((apk.parent / _APK_RECORD).read_text())
+    except (OSError, ValueError):
+        return {}
+    return known if isinstance(known, dict) else {}
+
+
 def _apk_changed_at(apk: Path, digest: str) -> float:
     """When the APK on offer took its current contents (seconds since the epoch).
 
@@ -16685,27 +16706,31 @@ def _apk_changed_at(apk: Path, digest: str) -> float:
     copied in. With no record at all (the first look after this shipped) the
     answer is 0, "long ago", so nothing is withheld on a guess.
     """
-    sidecar = apk.parent / "apk_published.json"
-    try:
-        known = json.loads(sidecar.read_text())
-    except (OSError, ValueError):
-        known = None
-    if isinstance(known, dict) and known.get("sha256") == digest:
+    known = _apk_record(apk)
+    if known.get("sha256") == digest:
         return float(known.get("at") or 0)
-    at = 0.0 if known is None else apk.stat().st_mtime
-    try:
-        tmp = sidecar.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"sha256": digest, "at": at}))
-        tmp.replace(sidecar)
-    except OSError as e:
-        log.warning(f"[AppUpdates] Could not record when the APK changed: {e}")
+    at = 0.0 if not known else apk.stat().st_mtime
+    _record_apk(apk, digest, at, None)
     return at
 
 
-def _bundle_predates_apk(bundle: Path, apk: Path, digest: str) -> bool:
-    """Whether the web bundle on offer was published before the APK's contents changed."""
+def _bundle_predates_apk(bundle: Path, apk: Path, digest: str, bundle_sha: str) -> bool:
+    """Whether the web bundle on offer is an older build than the APK on offer.
+
+    CI publishes each APK straight to this server when its build finishes,
+    which can be minutes before or after the deploy publishes that commit's
+    bundle, so publish order alone cannot tell. A bundle from the APK's own
+    commit is never older; otherwise one published before the APK's contents
+    changed is.
+    """
     try:
-        return bundle.stat().st_mtime < _apk_changed_at(apk, digest)
+        changed_at = _apk_changed_at(apk, digest)
+        apk_sha = str(_apk_record(apk).get("git_sha") or "")
+        if apk_sha and bundle_sha and bundle_sha != "unknown" and (
+            apk_sha.startswith(bundle_sha) or bundle_sha.startswith(apk_sha)
+        ):
+            return False
+        return bundle.stat().st_mtime < changed_at
     except OSError:
         return False
 
@@ -16831,7 +16856,7 @@ async def get_app_update_version(request: Request):
             apk_available = False
             apk_size = 0
 
-    if bundle_available and apk_available and apk_sha256 and local_bundle.exists() and _bundle_predates_apk(local_bundle, apk_file, apk_sha256):
+    if bundle_available and apk_available and apk_sha256 and local_bundle.exists() and _bundle_predates_apk(local_bundle, apk_file, apk_sha256, effective_sha):
         # A deploy publishes the new APK minutes before the new web bundle. A
         # phone that installed that APK and was then offered the old bundle ran
         # the old pages over the new native code (a fix that needed both did
@@ -16978,6 +17003,8 @@ async def publish_app_update(request: Request):
                 detail="Uploaded APK has an unreadable AndroidManifest versionCode; refusing to publish it.",
             )
         out_a.write_bytes(content)
+        # Which commit this APK is, so its own bundle is never held back (see _bundle_predates_apk).
+        _record_apk(out_a, hashlib.sha256(content).hexdigest(), time.time(), None if git_sha == "unknown" else git_sha)
         log.info(
             f"[AppUpdates] Published new {APK_FILENAME} ({len(content)} bytes, "
             f"versionCode {probe['version_code']})"
