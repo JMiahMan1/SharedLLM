@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import ChatNotify from '../../plugins/chatNotify';
 import { useKeyboardSafeHeight } from '../../lib/useKeyboardSafeHeight';
 import { blobToBase64 } from '../../lib/base64';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Phone, Plus, Puzzle, Sparkles, Square, Video, X } from 'lucide-react';
+import { BookOpen, Brush, ChevronLeft, Gamepad2, ImageIcon, Info, Lock, Phone, Plus, Puzzle, Sparkles, Square, Video, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -13,6 +13,9 @@ import { useConversationSendAs } from './sendAsPref';
 import ConversationList from './ConversationList';
 import ConversationInfo from './ConversationInfo';
 import NewChatSheet from './NewChatSheet';
+import NewPrivateChatSheet from './NewPrivateChatSheet';
+import PrivateChatThread from './PrivateChatThread';
+import { errorText } from './privateChatModel';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
@@ -82,6 +85,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [historyLimit, setHistoryLimit] = useState<Record<string, number>>({});
+  const [newPrivateOpen, setNewPrivateOpen] = useState(false);
+  // The key of a private chat just created, handed to its thread once so the creator is not asked again at once.
+  const [createdKey, setCreatedKey] = useState<{ token: string; key: CryptoKey } | null>(null);
+  const [privateUnlocked, setPrivateUnlocked] = useState(false);
+  const forgetCreatedKey = useCallback(() => setCreatedKey(null), []);
   const { startCall } = useCall();
 
   const threadRef = useRef<HTMLElement | null>(null);
@@ -128,6 +136,35 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const showThread = mobileView === 'thread' || (mobileView === 'auto' && Boolean(defaultToken));
   const activeConversation = conversations.find((c) => c.token === activeToken);
   const isGroup = activeConversation?.type !== 1;
+  const isPrivate = Boolean(activeConversation?.private);
+
+  // The parents' private chats: who may start one, and each chat's key parameters.
+  const privateStatus = useQuery({
+    queryKey: ['private-chat-status'],
+    queryFn: async () => {
+      const status = await api.getPrivateChatStatus();
+      // An answer without the lists is a server fault: shown as one, never a broken chat page.
+      if (!status || !Array.isArray(status.chats) || !Array.isArray(status.partners)) {
+        throw new Error('The private chat service gave an answer this app cannot read.');
+      }
+      return status;
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+  const privateInfo = privateStatus.data?.chats.find((c) => c.token === activeToken);
+  const privateInfoError = !isPrivate
+    ? undefined
+    : privateStatus.isError
+      ? errorText(privateStatus.error, 'Could not load this chat.')
+      : privateStatus.data && !privateInfo
+        ? privateStatus.data.eligible
+          ? 'This private chat is not set up on the server.'
+          : privateStatus.data.reason || 'Private chats are only for the parents.'
+        : undefined;
+  const canStartPrivate = Boolean(
+    privateStatus.data?.eligible && privateStatus.data.partners.length > 0 && privateStatus.data.chats.length === 0,
+  );
 
   const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
   const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
@@ -236,11 +273,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   const unread = activeConversation?.unread_messages ?? 0;
   const readKey = `${activeToken}:${activeConversation?.last_message_timestamp ?? activeConversation?.last_activity ?? ''}`;
   const { mutate: markReadNow } = markRead;
+  const readable = !isPrivate || privateUnlocked;
   useEffect(() => {
-    if (!activeToken || unread <= 0 || markedRef.current === readKey) return;
+    if (!activeToken || unread <= 0 || !readable || markedRef.current === readKey) return;
     markedRef.current = readKey;
     markReadNow(activeToken);
-  }, [activeToken, unread, readKey, markReadNow]);
+  }, [activeToken, unread, readable, readKey, markReadNow]);
 
   const setDefault = useMutation({
     mutationFn: (token: string | null) =>
@@ -606,7 +644,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         }`}
         data-testid="chat-thread"
         onDragOver={(event) => {
-          if (!activeToken || !event.dataTransfer.types.includes('Files')) return;
+          // A private chat's photos go through its own encrypted picker, never a Talk file share.
+          if (!activeToken || isPrivate || !event.dataTransfer.types.includes('Files')) return;
           event.preventDefault();
           setDragging(true);
         }}
@@ -614,7 +653,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           if (event.currentTarget === event.target) setDragging(false);
         }}
         onDrop={(event) => {
-          if (!event.dataTransfer.files.length) return;
+          if (isPrivate || !event.dataTransfer.files.length) return;
           event.preventDefault();
           setDragging(false);
           const files = Array.from(event.dataTransfer.files).filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
@@ -650,8 +689,12 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
             {activeConversation && <ConversationAvatar conversation={activeConversation} people={people} size={42} />}
             <div className="min-w-0 flex-1">
               <p className="truncate text-[16px] font-bold text-white">{name}</p>
-              <p className={`truncate text-[12px] ${jarvisThinking ? 'text-fuchsia-300' : 'text-slate-400'}`}>
-                {jarvisThinking
+              <p className={`truncate text-[12px] ${jarvisThinking ? 'text-fuchsia-300' : isPrivate ? 'text-rose-200' : 'text-slate-400'}`}>
+                {isPrivate ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Lock size={11} aria-hidden /> End to end encrypted
+                  </span>
+                ) : jarvisThinking
                   ? 'Jarvis is thinking…'
                   : activeConversation?.description || (isGroup ? 'Family group · @Jarvis to ask' : 'Direct message')}
               </p>
@@ -693,6 +736,25 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           )}
         </header>
 
+        {isPrivate ? (
+          // Mounted only while it is on screen: leaving it (the list on a phone,
+          // another chat) unmounts it, which drops the key.
+          onScreenToken ? (
+            <PrivateChatThread
+              key={activeToken}
+              conversation={activeConversation as TalkConversation}
+              info={privateInfo}
+              infoError={privateInfoError}
+              messages={fetched}
+              myActorIds={myActorIds}
+              adoptKey={createdKey?.token === activeToken ? createdKey.key : undefined}
+              onKeyAdopted={forgetCreatedKey}
+              onUnlockedChange={setPrivateUnlocked}
+              onChanged={() => refreshThread(activeToken)}
+            />
+          ) : null
+        ) : (
+        <>
         <VerseBanner />
 
         <PollStrip polls={polls} onVote={(pollId, optionId) => void vote(pollId, optionId)} />
@@ -904,6 +966,8 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           sendAs={sendAs}
           onSendAsChange={setSendAs}
         />
+        </>
+        )}
       </section>
 
       {infoOpen && activeConversation && (
@@ -930,6 +994,28 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           }}
           onGroup={(name, people) => createGroup.mutate({ name, people: people.map((p) => p.id) })}
           onClose={() => setNewChatOpen(false)}
+          onPrivate={
+            canStartPrivate
+              ? () => {
+                  setNewChatOpen(false);
+                  setNewPrivateOpen(true);
+                }
+              : undefined
+          }
+        />
+      )}
+      {newPrivateOpen && privateStatus.data && (
+        <NewPrivateChatSheet
+          partners={privateStatus.data.partners}
+          onClose={() => setNewPrivateOpen(false)}
+          onCreated={(chat, key) => {
+            setNewPrivateOpen(false);
+            setCreatedKey({ token: chat.token, key });
+            toast.success('Private chat started');
+            void queryClient.invalidateQueries({ queryKey: ['private-chat-status'] });
+            void queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+            select(chat.token);
+          }}
         />
       )}
     </div>

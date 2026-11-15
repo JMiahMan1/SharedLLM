@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, MessageCircle, Users, X } from 'lucide-react';
+import { ChevronRight, Loader2, Lock, MessageCircle, Users, X } from 'lucide-react';
 import PeoplePicker from './PeoplePicker';
 import Sheet from './Sheet';
 import type { TalkPerson } from './chatModel';
@@ -14,12 +14,15 @@ export default function NewChatSheet({
   onDirect,
   onGroup,
   onClose,
+  onPrivate,
 }: {
   me: string[];
   busy: boolean;
   onDirect: (person: TalkPerson) => void;
   onGroup: (name: string, people: TalkPerson[]) => void;
   onClose: () => void;
+  /** Offered to a parent who has no private chat yet: start the encrypted one. */
+  onPrivate?: () => void;
 }) {
   const [people, setPeople] = useState<TalkPerson[]>([]);
   const [name, setName] = useState('');
@@ -30,6 +33,23 @@ export default function NewChatSheet({
 
   return (
     <Sheet title="New chat" onClose={onClose} testId="new-chat-sheet">
+      {onPrivate && (
+        <button
+          type="button"
+          onClick={onPrivate}
+          data-testid="new-private-chat-open"
+          className="mb-3 flex w-full min-h-14 items-center gap-3 rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 text-left"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-200">
+            <Lock size={16} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-white">Private chat</span>
+            <span className="block text-xs text-slate-300">Just the two parents, end to end encrypted</span>
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-slate-400" aria-hidden />
+        </button>
+      )}
       {people.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {people.map((p) => (

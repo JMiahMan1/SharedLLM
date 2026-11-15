@@ -68,6 +68,7 @@ from services.gateway import automation_routes
 from services.gateway import helper_routes
 from services.gateway import dashboard_routes
 from services.gateway import todo_routes
+from services.gateway import private_chat
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -950,7 +951,8 @@ app.include_router(hub_registry_routes.router)  # Areas, floors, labels, zones, 
 app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sensors
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
-app.include_router(todo_routes.router)  # Lists: the hub's to-do lists for every member
+app.include_router(todo_routes.router)
+app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
 app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub
 
@@ -8578,7 +8580,15 @@ async def proxy_send_announcement(request: Request):
 @app.get("/api/communication/talk/conversations")
 async def proxy_list_talk_conversations(request: Request):
     payload = {"action": "list"}
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    resp = await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    if resp.status_code != 200:
+        return resp
+    try:
+        content = json.loads(resp.body)
+    except (TypeError, ValueError):
+        return resp
+    # Private chats: marked, and their (ciphertext) last message never leaves.
+    return JSONResponse(status_code=200, content=private_chat.scrub_conversations(content))
 
 
 @app.post("/api/communication/talk/conversations/open")
@@ -8603,6 +8613,10 @@ async def proxy_create_talk_group(request: Request):
 @app.delete("/api/communication/talk/conversations")
 async def proxy_delete_talk_conversation(request: Request, token: str):
     """Delete a conversation (owners and moderators) or leave it (everyone else)."""
+    if private_chat.is_private(token):
+        # Members only, and a deleted private chat takes its pictures with it.
+        await private_chat._member_chat(request, token)
+        return await private_chat.delete_room(request, token)
     return await _proxy_execution_with_identity(request, "/execute/talk", {"action": "delete_conversation", "token": token})
 
 
@@ -8614,12 +8628,14 @@ async def proxy_talk_participants(request: Request, token: str):
 @app.post("/api/communication/talk/participants")
 async def proxy_add_talk_participant(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "add_participant")
     payload = {"action": "add_participant", "token": body.get("token"), "target_user": body.get("user")}
     return await _proxy_execution_with_identity(request, "/execute/talk", payload)
 
 
 @app.delete("/api/communication/talk/participants")
 async def proxy_remove_talk_participant(request: Request, token: str, attendee_id: int):
+    private_chat.guard_talk(token, "remove_participant")
     payload = {"action": "remove_participant", "token": token, "attendee_id": attendee_id}
     return await _proxy_execution_with_identity(request, "/execute/talk", payload)
 
@@ -8665,6 +8681,7 @@ async def proxy_wait_talk_messages(request: Request, token: str = "", last_id: i
 @app.post("/api/communication/talk/messages")
 async def proxy_send_talk_message(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "send", body.get("message"))
     payload = {
         "action": "send",
         "token": body.get("token"),
@@ -8677,6 +8694,7 @@ async def proxy_send_talk_message(request: Request):
 @app.post("/api/communication/talk/voice")
 async def proxy_send_talk_voice(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "send_voice")
     payload = {
         "action": "send_voice",
         "token": body.get("token"),
@@ -8691,6 +8709,9 @@ async def proxy_send_talk_voice(request: Request):
 async def proxy_send_talk_file(request: Request):
     """Share a photo or file into a conversation."""
     body = await request.json()
+    # A private chat's pictures are encrypted on the device and kept by the
+    # gateway (private_chat.py), never shared through Nextcloud.
+    private_chat.guard_talk(body.get("token"), "send_file")
     payload = {
         "action": "send_file",
         "token": body.get("token"),
@@ -8738,6 +8759,7 @@ async def proxy_get_talk_file(request: Request):
 @app.post("/api/communication/talk/messages/edit")
 async def proxy_edit_talk_message(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "edit_message", body.get("message"))
     payload = {"action": "edit_message", "token": body.get("token"), "message_id": body.get("message_id"), "message": body.get("message")}
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
@@ -8768,6 +8790,7 @@ async def proxy_get_talk_reactions(request: Request):
 @app.post("/api/communication/talk/react")
 async def proxy_react_talk_message(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "react")
     payload = {
         "action": "react",
         "token": body.get("token"),
@@ -8982,6 +9005,7 @@ async def proxy_talk_call(request: Request):
 async def proxy_talk_game(request: Request):
     """Drive a family game in a room: start | answer | flip | stop."""
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "game")
     payload = {
         "action": "game",
         "token": body.get("token"),
@@ -9001,6 +9025,7 @@ async def proxy_talk_game(request: Request):
 async def proxy_post_talk_card(request: Request):
     """Post a typed card (achievement, game move, creation) into a room."""
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "post_card")
     payload = {
         "action": "post_card",
         "token": body.get("token"),
@@ -9031,6 +9056,7 @@ async def proxy_get_talk_polls(request: Request):
 @app.post("/api/communication/talk/polls/create")
 async def proxy_create_talk_poll(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "create_poll")
     payload = {
         "action": "create_poll",
         "token": body.get("token"),
@@ -9043,6 +9069,7 @@ async def proxy_create_talk_poll(request: Request):
 @app.post("/api/communication/talk/polls/vote")
 async def proxy_vote_talk_poll(request: Request):
     body = await request.json()
+    private_chat.guard_talk(body.get("token"), "vote_poll")
     payload = {
         "action": "vote_poll",
         "token": body.get("token"),

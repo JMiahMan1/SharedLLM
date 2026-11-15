@@ -660,8 +660,15 @@ class RavenWorker:
             if not isinstance(list_json, dict):
                 list_json = {}
             rooms = (list_json.get("detail") or {}).get("conversations", [])
+            from services.common.sealed import is_sealed
+            from services.gateway.private_chat import private_tokens
+
+            # The parents' private chat is end to end encrypted: Jarvis never reads it.
+            private = private_tokens()
             for room in rooms:
                 token = room["token"]
+                if token in private:
+                    continue
 
                 msg_resp = await client.post(
                     url,
@@ -696,7 +703,7 @@ class RavenWorker:
                     content = msg.get("message", "")
                     actor_id = msg.get("actor_id", "")
 
-                    if actor_id == creds.get("nextcloud_user"):
+                    if actor_id == creds.get("nextcloud_user") or is_sealed(content):
                         continue
 
                     if "@jarvis" in content.lower():
@@ -715,7 +722,7 @@ class RavenWorker:
                             if older_id >= int(msg_id):
                                 break
                             older_text = str(older.get("message") or "").strip()
-                            if not older_text or older.get("deleted") or older.get("system_message"):
+                            if not older_text or older.get("deleted") or older.get("system_message") or is_sealed(older_text):
                                 continue
                             if "```jarvis-envelope" in older_text:
                                 answer = older_text.split("```jarvis-envelope")[0].strip()

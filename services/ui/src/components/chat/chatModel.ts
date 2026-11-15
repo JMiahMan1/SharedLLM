@@ -62,6 +62,8 @@ export interface TalkConversation {
   last_read?: number;
   /** You own or moderate it: you may delete it and manage its members. */
   can_moderate?: boolean;
+  /** The parents' end-to-end encrypted chat: no preview, opened with a password. */
+  private?: boolean;
 }
 
 export interface TalkParticipant {
@@ -217,6 +219,8 @@ export function isEmojiOnly(text: string | undefined): boolean {
 
 /** "You: …" or "Sam: …" in a group; just the text in a one-to-one. */
 export function previewLine(conversation: TalkConversation, myActorIds: ReadonlySet<string>): string {
+  // Never a preview of a private chat, whatever the server sent.
+  if (conversation.private) return 'Encrypted message';
   const raw = conversation.last_message || '';
   const fromJarvis = decodeEnvelope(raw).envelope?.kind === 'assistant';
   const text = plainText(raw)

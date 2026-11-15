@@ -8,6 +8,7 @@ import type {
 import { storageGetSync, storageSet } from '../lib/storage';
 import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type OfflinePassage } from '../lib/bibleOffline';
 import type { FamilyMember } from '../components/chat/familyDirectory';
+import type { PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import { Capacitor } from '@capacitor/core';
@@ -3533,6 +3534,54 @@ export const api = {
     as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/file', payload, { timeout: 180_000 });
+    return resp.data;
+  },
+
+  // --- Private chat (the parents' end-to-end encrypted conversation) ---
+
+  async getPrivateChatStatus(): Promise<PrivateChatStatus> {
+    const resp = await apiClient.get('/api/private-chat/status');
+    return resp.data;
+  },
+
+  async createPrivateChat(body: {
+    partner: string;
+    salt: string;
+    iterations: number;
+    verifier: { iv: string; ct: string };
+  }): Promise<PrivateChatInfo> {
+    const resp = await apiClient.post('/api/private-chat/chats', body);
+    return resp.data;
+  },
+
+  async deletePrivateChat(token: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}`);
+    return resp.data;
+  },
+
+  /** Keep one encrypted picture (IV then ciphertext); returns its id. */
+  async uploadPrivateBlob(token: string, bytes: Uint8Array<ArrayBuffer>): Promise<{ id: string }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs`, bytes, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: 180_000,
+    });
+    return resp.data;
+  },
+
+  async getPrivateBlob(token: string, id: string): Promise<Uint8Array<ArrayBuffer>> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs/${encodeURIComponent(id)}`, {
+      responseType: 'arraybuffer',
+      timeout: 180_000,
+    });
+    return new Uint8Array(resp.data as ArrayBuffer);
+  },
+
+  async deletePrivateBlob(token: string, id: string): Promise<void> {
+    await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs/${encodeURIComponent(id)}`);
+  },
+
+  async nudgePrivateChat(token: string): Promise<{ nudged: string[]; next_in: number }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/nudge`);
     return resp.data;
   },
 

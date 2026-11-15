@@ -35,6 +35,8 @@ export default function ConversationInfo({
   const token = conversation.token;
   const group = conversation.type !== 1;
   const canModerate = Boolean(conversation.can_moderate);
+  // A private chat is the two parents and nobody else: the server refuses new members.
+  const manage = group && canModerate && !conversation.private;
   const [adding, setAdding] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -96,7 +98,7 @@ export default function ConversationInfo({
 
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{members.length || ''} Members</h3>
-        {group && canModerate && (
+        {manage && (
           <button type="button" onClick={() => setAdding(!adding)} className="min-h-11 rounded-xl px-2 text-xs text-purple-200 flex items-center gap-1" data-testid="chat-add-member">
             <UserPlus size={14} /> {adding ? 'Done' : 'Add people'}
           </button>
@@ -130,7 +132,7 @@ export default function ConversationInfo({
                   </span>
                   {m.is_moderator && <span className="block text-[11px] text-slate-500">Admin</span>}
                 </span>
-                {group && canModerate && !isMe(m) && m.actor_type === 'users' && (
+                {manage && !isMe(m) && m.actor_type === 'users' && (
                   <button
                     type="button"
                     onClick={() => remove.mutate(m)}
@@ -152,7 +154,9 @@ export default function ConversationInfo({
           <p className="text-sm text-rose-100">
             {leaveOnly
               ? 'Leave this conversation? It stays for everyone else.'
-              : 'Delete this conversation for everyone? Its messages are gone for good.'}
+              : conversation.private
+                ? 'Delete this private chat for both of you? Its messages and pictures are gone for good.'
+                : 'Delete this conversation for everyone? Its messages are gone for good.'}
           </p>
           <div className="flex gap-2">
             <button type="button" onClick={() => setConfirming(false)} className="min-h-11 flex-1 rounded-xl border border-white/10 text-sm text-slate-200">

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { PenSquare, Pin, Search } from 'lucide-react';
+import { Lock, PenSquare, Pin, Search } from 'lucide-react';
 import { listTimeLabel, previewLine, type TalkConversation } from './chatModel';
 import ConversationAvatar from './ConversationAvatar';
 import type { FamilyLookup } from './familyDirectory';
@@ -43,7 +43,7 @@ export default function ConversationList({
     );
     if (!q) return sorted;
     return sorted.filter(
-      (c) => c.display_name.toLowerCase().includes(q) || (c.last_message || '').toLowerCase().includes(q),
+      (c) => c.display_name.toLowerCase().includes(q) || (!c.private && (c.last_message || '').toLowerCase().includes(q)),
     );
   }, [conversations, query]);
 
@@ -96,6 +96,9 @@ export default function ConversationList({
                     <span className={`truncate text-[15px] ${showBadge ? 'font-bold text-white' : 'font-semibold text-slate-100'}`}>
                       {name}
                     </span>
+                    {conversation.private && (
+                      <Lock size={12} className="shrink-0 text-rose-300" aria-label="Private, end to end encrypted" data-testid={`private-lock-${conversation.token}`} />
+                    )}
                     {conversation.token === defaultToken && (
                       <Pin size={12} className="shrink-0 text-purple-300" aria-label="Opens on launch" />
                     )}

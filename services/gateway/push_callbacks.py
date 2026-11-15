@@ -41,6 +41,11 @@ async def chat_reply(request: Request, params: dict, reply: str | None):
     text = (reply or "").strip()
     if not token or not text:
         raise HTTPException(status_code=422, detail="params.token and reply text are required")
+    from services.gateway import private_chat
+
+    # A private chat only takes messages encrypted on the device: an inline
+    # reply would post readable text into it (chat_notify offers no Reply there).
+    private_chat.guard_talk(token, "send", text)
     return await _proxy_execution_with_identity(
         request, "/execute/talk", {"action": "send", "token": token, "message": text}
     )
