@@ -7,7 +7,8 @@ import { saveBlob } from '../../lib/saveFile';
 import { errorText } from '../../lib/errorText';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
-import type { ConcernLevel, GuardianConcern } from '../../types/api';
+import type { ConcernLevel, GuardianConcern, NotifyLevel } from '../../types/api';
+import { statusQuery } from '../../lib/memberPage';
 import { useMemberDeviceNoun } from '../../hooks/useDeviceNoun';
 
 const LEVEL: Record<ConcernLevel, { word: string; icon: typeof AlertTriangle; style: string }> = {
@@ -15,6 +16,14 @@ const LEVEL: Record<ConcernLevel, { word: string; icon: typeof AlertTriangle; st
   high: { word: 'High', icon: AlertTriangle, style: 'border-amber-400/40 bg-amber-400/10 text-amber-200' },
   medium: { word: 'Worth a look', icon: Info, style: 'border-white/10 bg-white/5 text-slate-300' },
 };
+
+/** The choices a parent has, most to least, in their own words. */
+const NOTIFY_CHOICES: { level: NotifyLevel; word: string }[] = [
+  { level: 'all', word: 'Everything' },
+  { level: 'high', word: 'High & severe' },
+  { level: 'severe', word: 'Severe only' },
+  { level: 'off', word: 'Off' },
+];
 
 const WHERE: Record<string, string> = {
   sms: 'a text message',
@@ -80,6 +89,27 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [imageBusy, setImageBusy] = useState<string | null>(null);
   const canExport = Boolean(user?.is_admin || user?.family_role === 'father' || user?.family_role === 'mother');
+  /** Notices go to the child's parents, so only a parent chooses when they hear. */
+  const isParent = user?.family_role === 'father' || user?.family_role === 'mother';
+  const status = useQuery({ ...statusQuery(username), enabled: isParent });
+  const rules = status.data?.rules;
+  const myLevel: NotifyLevel =
+    (user?.username && rules?.notify_levels?.[user.username]) || rules?.monitoring || 'high';
+  const [levelError, setLevelError] = useState<string | null>(null);
+  const [levelSaving, setLevelSaving] = useState(false);
+
+  async function chooseLevel(level: NotifyLevel) {
+    setLevelSaving(true);
+    setLevelError(null);
+    try {
+      await api.setNotifyLevel(username, level);
+      await queryClient.invalidateQueries({ queryKey: ['screen-time', username] });
+    } catch (err) {
+      setLevelError(errorText(err, 'Your choice could not be saved.'));
+    } finally {
+      setLevelSaving(false);
+    }
+  }
   const concerns = useQuery({ queryKey: ['guardian-concerns', username], queryFn: () => api.getGuardianConcerns(username, 50), retry: false });
   const guidance = useQuery({ queryKey: ['guardian-guidance', username], queryFn: () => api.getGuardianGuidance(username), retry: false });
   const starters = new Map((guidance.data?.prompts || []).map((p) => [p.signal, p.starter]));
@@ -155,7 +185,6 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
       testId="member-concerns"
       isLoading={concerns.isLoading}
       error={concerns.isError ? 'Concerns could not be loaded.' : null}
-      empty={list.length === 0 ? `Nothing of concern found on ${name}'s ${device}.` : null}
       aside={
         <div className="flex items-center gap-2">
           {total > limit && <span>{limit} of {total}</span>}
@@ -184,6 +213,36 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
           {exportError}
         </p>
       )}
+      {isParent && rules && (
+        <div className="mb-3 space-y-1.5" data-testid="concern-notify-level">
+          <p id={`notify-level-${username}`} className="text-[11px] font-semibold text-slate-200">
+            Notify me about
+          </p>
+          <div role="radiogroup" aria-labelledby={`notify-level-${username}`} className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            {NOTIFY_CHOICES.map(({ level, word }) => (
+              <button
+                key={level}
+                type="button"
+                role="radio"
+                aria-checked={myLevel === level}
+                onClick={() => void chooseLevel(level)}
+                disabled={levelSaving}
+                className={`min-h-11 rounded-lg border px-2 text-[11px] font-semibold transition disabled:cursor-wait ${
+                  myLevel === level
+                    ? 'border-sky-300/60 bg-sky-400/15 text-white'
+                    : 'border-white/10 bg-white/5 text-slate-300 hover:border-sky-300/40'
+                }`}
+              >
+                {word}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] leading-relaxed text-slate-400">
+            Just for you, for {name}. Anything below waits for the weekly recap. Self-harm and exploitation always notify.
+          </p>
+          {levelError && <p className="text-[11px] text-amber-300" role="alert">{levelError}</p>}
+        </div>
+      )}
       {canExport && total > 0 && (
         <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5" data-testid="concerns-clear-all">
           {confirmClear === 'all' ? (
@@ -209,6 +268,12 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
       {reviewError && (
         <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-300" data-testid="concerns-review-error">
           {reviewError}
+        </p>
+      )}
+      {list.length === 0 && (
+        // Inside the card, so a parent can choose a level before anything is found.
+        <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400" data-testid="member-concerns-empty">
+          Nothing of concern found on {name}'s {device}.
         </p>
       )}
       <ul className="space-y-2.5">

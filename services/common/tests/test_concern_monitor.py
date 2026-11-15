@@ -44,9 +44,22 @@ def test_who_gets_paged():
     severe = {"category": "violence", "level": "severe"}
     high = {"category": "bullying", "level": "high"}
     self_harm = {"category": "self_harm", "level": "severe"}
-    assert pages_parent(severe, None) and not pages_parent(high, None)
-    assert pages_parent(high, "all")
+    medium = {"category": "profanity", "level": "medium"}
+    # The default is high and severe.
+    assert pages_parent(severe, None) and pages_parent(high, None) and not pages_parent(medium, None)
+    assert pages_parent(medium, "all") and pages_parent(high, "all")
+    assert pages_parent(high, "high") and not pages_parent(medium, "high")
+    assert pages_parent(severe, "severe") and not pages_parent(high, "severe")
     assert not pages_parent(severe, "off") and pages_parent(self_harm, "off")
+
+
+def test_each_parent_chooses_their_own_level():
+    from services.common.concern_monitor import parent_level
+
+    child = {"monitoring": "severe", "notify_levels": {"mom": "all", "dad": "bogus"}}
+    assert parent_level(child, "mom") == "all"
+    assert parent_level(child, "dad") == "severe"  # an unknown value falls back to the child's default
+    assert parent_level({}, "dad") == "high"
 
 
 def test_a_hit_carries_wider_context_and_its_source_item():

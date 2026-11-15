@@ -266,7 +266,7 @@ def test_the_guardian_list_names_each_child_their_parents_and_sensitivity(family
     children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
     assert set(children) == {"kid", "sib"}  # the adult child is not monitored
     assert set(children["kid"]["parents"]) == {"dad", "mom"}
-    assert children["kid"]["monitoring"] == "all" and children["sib"]["monitoring"] == "severe"
+    assert children["kid"]["monitoring"] == "all" and children["sib"]["monitoring"] == "high"
     assert children["kid"]["photo_scan"] is True
     assert children["kid"]["geofence_alerts"] == {"zone.school": {"arrive": True, "depart": True}}
 
@@ -325,3 +325,21 @@ def test_geofence_alerts_take_a_wander_saved_place(family):
     children = {c["username"]: c for c in family("dad").get("/api/internal/guardian/children").json()["children"]}
     assert children["kid"]["geofence_alerts"][place] == {"arrive": False, "depart": True}
     assert family("mom").put("/api/screen-time/kid/rules", json={"geofence_alerts": {"place.short": {}}}).status_code == 422
+
+
+def test_each_parent_sets_their_own_notification_level(family):
+    assert family("mom").put("/api/screen-time/kid/notify-level", json={"level": "all"}).json()["effective"] == "all"
+    dad = family("dad").put("/api/screen-time/kid/notify-level", json={"level": "severe"}).json()
+    assert dad["level"] == "severe"
+    # A rules edit by either parent keeps both choices.
+    family("dad").put("/api/screen-time/kid/rules", json={"daily_limit_min": 60})
+    levels = family("dad").get("/api/screen-time/kid/rules").json()["rules"]["notify_levels"]
+    assert levels == {"mom": "all", "dad": "severe"}
+    # Back to the child's default.
+    assert family("mom").put("/api/screen-time/kid/notify-level", json={"level": None}).json()["effective"] == "high"
+
+
+def test_only_parents_choose_a_notification_level_and_only_known_levels(family):
+    assert family("kid").put("/api/screen-time/kid/notify-level", json={"level": "off"}).status_code == 403
+    assert family("sib").put("/api/screen-time/kid/notify-level", json={"level": "off"}).status_code == 403
+    assert family("mom").put("/api/screen-time/kid/notify-level", json={"level": "loud"}).status_code == 422

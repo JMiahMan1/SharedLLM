@@ -29,6 +29,7 @@ from pydantic import Field as PydField
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.common import concern_monitor as concern_levels
 from services.common import device_noun, ha_redirect
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
@@ -5003,8 +5004,10 @@ def _clean_screen_rules(body: dict) -> dict:
         out["permission_gating"] = list(dict.fromkeys(groups))
     # Content monitoring (step 6): what pages a parent at once.
     if body.get("monitoring") is not None:
-        if body["monitoring"] not in ("all", "severe", "off"):
-            raise HTTPException(status_code=422, detail="monitoring must be all, severe or off")
+        if body["monitoring"] not in concern_levels.NOTIFY_LEVELS:
+            raise HTTPException(
+                status_code=422, detail=f"monitoring must be one of {', '.join(concern_levels.NOTIFY_LEVELS)}"
+            )
         out["monitoring"] = body["monitoring"]
     # Photo & video safety scanning for children (step 7)
     if body.get("photo_scan") is not None:
@@ -5198,12 +5201,42 @@ def put_screen_rules(username: str, body: dict, session: Session = Depends(get_s
         raise HTTPException(status_code=403, detail="Only a parent can set a minor's screen time")
     rules = _clean_screen_rules(body or {})
     current = _screen_rules(session, subject.username)
-    for key in ("paused", "paused_until", "paused_at", "app_allow_until"):  # a pause or temporary app unblock survives a rules edit
+    # A pause, a temporary app unblock and each parent's own notification
+    # level survive a rules edit (the last is set per parent, below).
+    for key in ("paused", "paused_until", "paused_at", "app_allow_until", "notify_levels"):
         if key in current and key not in rules:
             rules[key] = current[key]
     _save_screen_rules(session, subject.username, rules, caller.username)
     session.commit()
     return {"username": subject.username, "rules": rules}
+
+
+@app.put("/api/screen-time/{username}/notify-level")
+def put_notify_level(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """How serious a concern on this child's device must be before the
+    calling parent is notified: ``{"level": "all"|"high"|"severe"|"off"}``,
+    or ``{"level": null}`` to follow the child's default. Each parent sets
+    their own; self-harm and exploitation always notify."""
+    subject = _screen_subject(session, username)
+    if caller.username not in _parents_of(session, subject):
+        raise HTTPException(status_code=403, detail="Only this child's parents are notified about them")
+    level = (body or {}).get("level")
+    if level is not None and level not in concern_levels.NOTIFY_LEVELS:
+        raise HTTPException(status_code=422, detail=f"level must be one of {', '.join(concern_levels.NOTIFY_LEVELS)}")
+    rules = _screen_rules(session, subject.username)
+    levels = dict(rules.get("notify_levels") or {})
+    if level is None:
+        levels.pop(caller.username, None)
+    else:
+        levels[caller.username] = level
+    rules["notify_levels"] = levels
+    _save_screen_rules(session, subject.username, rules, caller.username)
+    session.commit()
+    return {
+        "username": subject.username,
+        "level": levels.get(caller.username),
+        "effective": levels.get(caller.username) or rules.get("monitoring") or concern_levels.DEFAULT_NOTIFY_LEVEL,
+    }
 
 
 @app.post("/api/screen-time/{username}/pause")
@@ -6069,7 +6102,8 @@ def internal_guardian_children(session: Session = Depends(get_session), _: None 
             "username": child.username,
             "display_name": child.display_name or child.username,
             "parents": parents,
-            "monitoring": rules.get("monitoring") or "severe",
+            "monitoring": rules.get("monitoring") or concern_levels.DEFAULT_NOTIFY_LEVEL,
+            "notify_levels": rules.get("notify_levels") or {},
             "photo_scan": rules.get("photo_scan", True),
             "geofence_alerts": rules.get("geofence_alerts") or {},
             "device_kinds": _device_kinds(session, child.username),

@@ -25,6 +25,14 @@ from collections.abc import Iterable
 from typing import Any
 
 LEVELS = ("medium", "high", "severe")
+
+#: How serious a concern must be before a parent is notified at once (each
+#: parent chooses, per child); anything below waits for the weekly recap.
+#: "all" is every level, "high" is high and severe. Self-harm and
+#: exploitation notify whatever is chosen (ALWAYS_ON).
+NOTIFY_LEVELS = ("all", "high", "severe", "off")
+DEFAULT_NOTIFY_LEVEL = "high"
+_NOTIFY_FLOOR = {"all": "medium", "high": "high", "severe": "severe"}
 # Always page a parent, whatever the sensitivity.
 ALWAYS_ON = ("self_harm", "exploitation")
 
@@ -162,13 +170,19 @@ def pages_parent(concern: dict[str, Any], sensitivity: str | None) -> bool:
         return False
     if concern.get("category") in ALWAYS_ON:
         return True
-    mode = sensitivity or "severe"
+    mode = sensitivity if sensitivity in NOTIFY_LEVELS else DEFAULT_NOTIFY_LEVEL
     if mode == "off":
         return False
-    if concern.get("feature") == "media" and (concern.get("review") or {}).get("verdict") == "confirmed":
-        # A picture the vision model confirmed is on the child's device now;
-        # a weekly recap is too late for it, whatever level it was given.
-        return True
-    if mode == "all":
-        return concern.get("level") in ("high", "severe")
-    return concern.get("level") == "severe"
+    level = concern.get("level")
+    if level not in LEVELS:
+        return False
+    return LEVELS.index(level) >= LEVELS.index(_NOTIFY_FLOOR[mode])
+
+
+def parent_level(child: dict[str, Any], parent: str) -> str:
+    """The level this parent chose for this child, else the child's default."""
+    mine = (child.get("notify_levels") or {}).get(parent)
+    if mine in NOTIFY_LEVELS:
+        return mine
+    default = child.get("monitoring")
+    return default if default in NOTIFY_LEVELS else DEFAULT_NOTIFY_LEVEL

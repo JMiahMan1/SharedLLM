@@ -7866,6 +7866,15 @@ async def screen_time_set_rules(request: Request, username: str):
     return JSONResponse(status_code=status, content=body)
 
 
+@app.put("/api/screen-time/{username}/notify-level")
+async def screen_time_notify_level(request: Request, username: str):
+    """The calling parent's own level for being notified about this child."""
+    status, body = await _identity_as_caller(
+        request, "PUT", f"/api/screen-time/{quote(username, safe='')}/notify-level", json=await request.json()
+    )
+    return JSONResponse(status_code=status, content=body)
+
+
 @app.post("/api/screen-time/{username}/pause")
 async def screen_time_pause(request: Request, username: str):
     payload = await request.json()

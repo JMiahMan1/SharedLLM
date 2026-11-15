@@ -265,6 +265,26 @@ test.describe('guardian page', () => {
     expect(unmocked).toEqual([]);
   });
 
+  test('"Notify me about" fits every screen and every choice is a 44px target', async ({ page }, info) => {
+    const { unmocked } = await mockApi(page, 'dad');
+    await page.goto('/guardian?member=sam');
+    const group = page.getByTestId('concern-notify-level');
+    await expect(group).toBeVisible();
+    await group.scrollIntoViewIfNeeded();
+    const choices = group.getByRole('radio');
+    await expect(choices).toHaveCount(4);
+    await expect(group.getByRole('radio', { name: 'High & severe' })).toHaveAttribute('aria-checked', 'true');
+    for (const choice of await choices.all()) {
+      const box = await choice.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+    }
+    await group.screenshot({ path: info.outputPath(`notify-level-${info.project.name}.png`) });
+    const o = await overflow(page);
+    expect(o.doc).toBeLessThanOrEqual(o.client + 1);
+    expect(unmocked).toEqual([]);
+  });
+
   test('a mother gets no device policies or devices', async ({ page }) => {
     const { unmocked } = await mockApi(page, 'mom');
     await page.goto('/guardian?area=safety');

@@ -1,6 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
+import type { NotifyLevel } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
@@ -1329,6 +1330,12 @@ export const api = {
       `/api/guardian/concerns/${encodeURIComponent(username)}/${encodeURIComponent(concernId)}/review`,
       { verdict, note },
     );
+    return resp.data;
+  },
+
+  /** The signed-in parent's own level for being notified about this child (null: the child's default). */
+  async setNotifyLevel(username: string, level: NotifyLevel | null): Promise<{ level: NotifyLevel | null; effective: NotifyLevel }> {
+    const resp = await apiClient.put(`/api/screen-time/${encodeURIComponent(username)}/notify-level`, { level });
     return resp.data;
   },
 

@@ -561,12 +561,15 @@ def create_app():
                 concern["image_kept_days"] = store.CONCERN_IMAGE_TTL_SECONDS // 86400
             await store.add_concerns(rc, user, [concern])
             day = guardian.household_now().date().isoformat()
-            if guardian.concern_monitor.pages_parent(concern, child.get("monitoring")):
-                for parent in child.get("parents") or []:
-                    try:
-                        await deliver_notice(guardian._concern_notice(parent, child, concern, day))
-                    except Exception as exc:
-                        log.warning("concern notice to %s failed: %s", parent, exc)
+            monitor = guardian.concern_monitor
+            for parent in child.get("parents") or []:
+                # Each parent chose how serious a concern must be to hear now.
+                if not monitor.pages_parent(concern, monitor.parent_level(child, parent)):
+                    continue
+                try:
+                    await deliver_notice(guardian._concern_notice(parent, child, concern, day))
+                except Exception as exc:
+                    log.warning("concern notice to %s failed: %s", parent, exc)
             return {
                 "status": "SUCCESS",
                 "concern": True,

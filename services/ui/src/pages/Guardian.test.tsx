@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -34,6 +34,7 @@ vi.mock('../services/api', async (importOriginal) => {
       downloadGuardianConcernImage: vi.fn(),
       clearGuardianConcern: vi.fn(),
       clearGuardianConcerns: vi.fn(),
+      setNotifyLevel: vi.fn(),
       getGuardianJournal: vi.fn(),
       addGuardianJournal: vi.fn(),
       getGuardRequests: vi.fn(),
@@ -178,7 +179,7 @@ describe('The family guardian page (a parent)', () => {
     auth.user = { username: 'mom', is_minor: false };
     vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [concern] });
     wrap(<Guardian />);
-    expect(await screen.findByTestId('member-concerns')).toHaveTextContent('Bullying');
+    await waitFor(() => expect(screen.getByTestId('member-concerns')).toHaveTextContent('Bullying'));
     expect(screen.queryByTestId('concern-review')).not.toBeInTheDocument();
   });
 
@@ -233,6 +234,32 @@ describe('The family guardian page (a parent)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^clear all$/i }));
     fireEvent.click(screen.getByRole('button', { name: /yes, clear all/i }));
     await waitFor(() => expect(api.clearGuardianConcerns).toHaveBeenCalledTimes(1));
+  });
+
+  it('lets each parent choose how serious a concern must be to notify them, for this child', async () => {
+    auth.user = { username: 'dad', is_minor: false, family_role: 'father' };
+    const base = status(false);
+    vi.mocked(api.getScreenTimeStatus).mockResolvedValue({
+      ...base, rules: { ...base.rules, monitoring: 'high', notify_levels: { mom: 'all' } },
+    });
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [] });
+    vi.mocked(api.setNotifyLevel).mockResolvedValue({ level: 'severe', effective: 'severe' });
+    wrap(<Guardian />);
+
+    const group = await screen.findByTestId('concern-notify-level');
+    // Dad has not chosen: he follows the child's default, not mom's choice.
+    expect(await within(group).findByRole('radio', { name: 'High & severe' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('member-concerns-empty')).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole('radio', { name: 'Severe only' }));
+    await waitFor(() => expect(api.setNotifyLevel).toHaveBeenCalledWith('emma', 'severe'));
+  });
+
+  it('shows no notification choice to an admin who is not a parent', async () => {
+    auth.user = { username: 'dad', is_minor: false, is_admin: true };
+    vi.mocked(api.getGuardianConcerns).mockResolvedValue({ concerns: [] });
+    wrap(<Guardian />);
+    expect(await screen.findByTestId('member-concerns')).toBeInTheDocument();
+    expect(screen.queryByTestId('concern-notify-level')).not.toBeInTheDocument();
   });
 
   it('explains itself to someone who is not a parent', async () => {

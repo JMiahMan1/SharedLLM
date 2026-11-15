@@ -384,8 +384,10 @@ export interface ScreenRules {
   install_approval?: boolean;
   /** Kinds of permission an app may get only once a parent approves it. */
   permission_gating?: PermissionGroup[];
-  /** Content monitoring: what pages a parent at once. */
-  monitoring?: 'all' | 'severe' | 'off';
+  /** Content monitoring: how serious a concern must be to notify a parent at once (the child's default). */
+  monitoring?: NotifyLevel;
+  /** Each parent's own choice of the same, by username. */
+  notify_levels?: Record<string, NotifyLevel>;
   /** Photo and video safety scanning (Bark / Qustodio style). */
   photo_scan?: boolean;
   /** Place arrival / departure geofence alerts per zone. */
@@ -657,6 +659,9 @@ export interface MdmAuditEvent {
   target: string | null;
   detail: Record<string, unknown>;
 }
+
+/** How serious a concern must be before a parent hears at once ("all": every level). */
+export type NotifyLevel = 'all' | 'high' | 'severe' | 'off';
 
 /** One thing content monitoring found on a child's phone. */
 export interface GuardianConcern {

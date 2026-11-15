@@ -391,9 +391,13 @@ def test_a_review_stays_on_its_concern_while_the_list_moves():
     asyncio.run(go())
 
 
-def test_a_confirmed_image_pages_the_parents_even_when_rated_high(wired, monkeypatch):
-    """A flagged picture is on the child's device now: it does not wait for the recap."""
+def test_each_parent_hears_at_the_level_they_chose(wired, monkeypatch):
+    """A high image reaches the parent who chose high, not the one who chose severe only."""
     client, _fake, sent = wired
+    kids = {"kid": {**KIDS["kid"], "monitoring": "severe", "notify_levels": {"mom": "high"}}}
+
+    async def _children(_session):
+        return kids
 
     async def _vision_settings(_session):
         return {"vision_ocr_proxy_url": "http://vision.example:11434", "vision_ocr_model": "vl"}
@@ -401,12 +405,15 @@ def test_a_confirmed_image_pages_the_parents_even_when_rated_high(wired, monkeyp
     async def _vision_chat(_session, url, payload, timeout):
         return '{"concern": true, "category": "sexual", "level": "high", "description": "Suggestive photo", "reason": "nudity"}'
 
+    monkeypatch.setattr(guardian, "children", _children)
     monkeypatch.setattr(guardian, "_model_settings", _vision_settings)
     monkeypatch.setattr("services.telemetry.llm.chat_content", _vision_chat)
     resp = client.post("/api/telemetry/media/scan", headers=HEADERS,
                        json={"user": "kid", "file_name": "p.jpg", "media_type": "image", "image_b64": "ZXNwaG9tZQ=="})
     assert resp.json()["level"] == "high"
-    assert [n["user"] for n in sent] == ["dad", "mom"]
+    assert [n["user"] for n in sent] == ["mom"]
+    # The concern is kept either way: dad sees it in the list and the recap.
+    assert client.get("/api/telemetry/concerns/kid", headers=HEADERS).json()["concerns"]
 
 
 def test_clearing_removes_the_concern_its_review_and_its_image_and_nothing_else():

@@ -289,9 +289,10 @@ async def on_activity(rc, session, event: dict[str, Any], deliver: Deliver) -> l
             concern["at"] = _iso_at(concern.get("at"))
         await store.add_concerns(rc, child["username"], found)
         for concern in found:
-            if not concern_monitor.pages_parent(concern, child.get("monitoring")):
-                continue
             for parent in child.get("parents") or []:
+                # Each parent chose how serious a concern must be to hear now.
+                if not concern_monitor.pages_parent(concern, concern_monitor.parent_level(child, parent)):
+                    continue
                 try:
                     await deliver(_concern_notice(parent, child, concern, day))
                 except Exception as exc:  # one parent's failure never blocks the other
