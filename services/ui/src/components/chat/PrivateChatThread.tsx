@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Check, CheckCheck, Fingerprint, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Check, CheckCheck, Fingerprint, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -11,6 +11,7 @@ import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins
 import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
 import PrivateChatSecurity from './PrivateChatSecurity';
+import PrivateCamera from './PrivateCamera';
 import EnvelopeBody from './EnvelopeBody';
 import {
   dayLabel,
@@ -342,6 +343,7 @@ interface UnlockedChatProps {
 function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -619,6 +621,16 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         >
           <ImageIcon size={18} />
         </button>
+        <button
+          type="button"
+          onClick={() => setCameraOpen(true)}
+          disabled={sending}
+          aria-label="Take an encrypted photo"
+          data-testid="private-camera-open"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"
+        >
+          <Camera size={18} />
+        </button>
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -652,6 +664,19 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         </button>
       </form>
 
+      {cameraOpen && (
+        <PrivateCamera
+          onClose={() => setCameraOpen(false)}
+          onCapture={async (jpeg) => {
+            setSending(true);
+            try {
+              await sendImageBytes(jpeg, 'image/jpeg');
+            } finally {
+              setSending(false);
+            }
+          }}
+        />
+      )}
       {securityOpen && (
         <PrivateChatSecurity
           token={token}

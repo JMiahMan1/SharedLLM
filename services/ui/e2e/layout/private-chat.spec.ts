@@ -540,4 +540,73 @@ test.describe('private chat on every form factor', () => {
     expect(page.url()).toContain('/family');
     done(run);
   });
+
+  test('the in-app camera: front and back, take, send encrypted, nothing left behind', async ({ page }, info) => {
+    // A stand-in camera: a canvas stream, recording what was asked for and whether it was stopped.
+    await page.addInitScript(() => {
+      const log = { facing: [] as string[], stopped: 0 };
+      (window as unknown as { __cameraLog: typeof log }).__cameraLog = log;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: async (constraints: MediaStreamConstraints) => {
+            const video = constraints.video as { facingMode?: { ideal?: string } };
+            log.facing.push(String(video?.facingMode?.ideal));
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d')!;
+            const draw = () => {
+              ctx.fillStyle = log.facing.length % 2 ? '#c2410c' : '#0369a1';
+              ctx.fillRect(0, 0, 640, 480);
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(200, 140, 240, 200);
+            };
+            draw();
+            const timer = setInterval(draw, 100);
+            const stream = canvas.captureStream(10);
+            for (const track of stream.getTracks()) {
+              const stop = track.stop.bind(track);
+              track.stop = () => {
+                log.stopped += 1;
+                clearInterval(timer);
+                stop();
+              };
+            }
+            return stream;
+          },
+        },
+      });
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    // Never the system camera: no capture input anywhere on the page.
+    expect(await page.locator('input[capture]').count()).toBe(0);
+
+    await page.getByTestId('private-camera-open').click();
+    const camera = page.getByTestId('private-camera');
+    await expect(camera.getByTestId('private-camera-shutter')).toBeEnabled();
+    await check(page, info, run, 'private camera', camera);
+    await camera.getByTestId('private-camera-flip').click();
+    await expect(camera.getByTestId('private-camera-shutter')).toBeEnabled();
+    // The back camera first, then the front (the dev build's strict mode may ask twice for each).
+    const asked = await page.evaluate(() => (window as unknown as { __cameraLog: { facing: string[] } }).__cameraLog.facing);
+    expect(asked.filter((f, i) => f !== asked[i - 1])).toEqual(['environment', 'user']);
+
+    await camera.getByTestId('private-camera-shutter').click();
+    await expect(camera.getByTestId('private-camera-still')).toBeVisible();
+    await check(page, info, run, 'private camera taken', camera);
+    await camera.getByTestId('private-camera-send').click();
+    await expect(camera).toHaveCount(0);
+    await expect.poll(() => server.posted.length).toBe(1);
+    expect(server.posted[0]).toContain('```jarvis-envelope');
+    const [upload] = server.uploads!;
+    // Ciphertext: not a JPEG (FF D8) on the wire.
+    expect(upload[0] === 0xff && upload[1] === 0xd8).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { __cameraLog: { stopped: number } }).__cameraLog.stopped)).toBeGreaterThanOrEqual(2);
+    done(run);
+  });
 });
