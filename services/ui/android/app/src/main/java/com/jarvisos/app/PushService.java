@@ -113,12 +113,19 @@ public class PushService extends Service {
         }
     }
 
+    /** Checks for a new APK while the service runs, so a deploy reaches the phone unattended. */
+    private java.util.concurrent.ScheduledExecutorService updates;
+
     @Override
     public void onCreate() {
         super.onCreate();
         PushNotifier.ensureChannels(this);
         TokenBridgePlugin.prefs(this).edit().remove(RETIRED_CURSOR).apply();
         watchNetwork();
+        updates = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        updates.scheduleWithFixedDelay(
+            () -> NativeUpdater.maybeCheck(this, NativeUpdater.CHECK_EVERY_MS - 60_000L),
+            1, NativeUpdater.CHECK_EVERY_MS / 60_000L, java.util.concurrent.TimeUnit.MINUTES);
     }
 
     @Override
@@ -434,6 +441,7 @@ public class PushService extends Service {
     @Override
     public void onDestroy() {
         shutDown();
+        if (updates != null) updates.shutdownNow();
         if (networkCallback != null) {
             ConnectivityManager cm = getSystemService(ConnectivityManager.class);
             try {

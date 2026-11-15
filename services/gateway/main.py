@@ -16666,6 +16666,14 @@ def _read_bundle_version(bundle_path: Path) -> dict:
     return {}
 
 
+def _bundle_predates_apk(bundle: Path, apk: Path) -> bool:
+    """Whether the web bundle on offer was published before the APK on offer."""
+    try:
+        return bundle.stat().st_mtime < apk.stat().st_mtime
+    except OSError:
+        return False
+
+
 @app.get("/api/app-updates/version")
 async def get_app_update_version(request: Request):
     """Return version and bundle info for OTA live updates and native APK updates."""
@@ -16786,6 +16794,15 @@ async def get_app_update_version(request: Request):
             )
             apk_available = False
             apk_size = 0
+
+    if bundle_available and apk_available and local_bundle.exists() and _bundle_predates_apk(local_bundle, apk_file):
+        # A deploy publishes the new APK minutes before the new web bundle. A
+        # phone that installed that APK and was then offered the old bundle ran
+        # the old pages over the new native code (a fix that needed both did
+        # nothing). The APK carries its own, newer pages: offer no bundle until
+        # one is published after it.
+        log.info("[AppUpdates] bundle.zip predates the published APK; not offering it until the next bundle.")
+        bundle_available = False
 
     return {
         "version": bundle_meta.get("version") or version_data.get("version", "1.2.0"),

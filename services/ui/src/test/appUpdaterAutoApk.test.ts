@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   downloadApk: vi.fn(),
   installDownloadedApk: vi.fn(),
   selfUpdateSupported: vi.fn(),
+  backgroundUpdates: vi.fn(),
 }));
 
 vi.mock('axios', () => ({ default: { get: mocks.get } }));
@@ -25,6 +26,7 @@ vi.mock('@capacitor/core', () => ({
     downloadApk: mocks.downloadApk,
     installDownloadedApk: mocks.installDownloadedApk,
     selfUpdateSupported: mocks.selfUpdateSupported,
+    backgroundUpdates: mocks.backgroundUpdates,
     addListener: () => Promise.resolve({ remove: () => Promise.resolve() }),
   }),
 }));
@@ -55,6 +57,7 @@ describe('automatic APK update', () => {
     mocks.downloadApk.mockResolvedValue({ path: 'x', sha256: 'a'.repeat(64), bytes: 1 });
     mocks.installDownloadedApk.mockResolvedValue({ message: 'ok' });
     mocks.selfUpdateSupported.mockResolvedValue({ supported: true });
+    mocks.backgroundUpdates.mockRejectedValue(new Error('not implemented'));
   });
 
   it('downloads a newer published APK and installs it once the app is in the background', async () => {
@@ -68,6 +71,13 @@ describe('automatic APK update', () => {
 
     await installStagedApk(); // the app went to the background
     expect(mocks.installDownloadedApk).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the APK to the native updater on a build that has one', async () => {
+    mocks.backgroundUpdates.mockResolvedValue({ native: true });
+    mocks.get.mockResolvedValue(published(700));
+    await autoUpdateApk();
+    expect(mocks.downloadApk).not.toHaveBeenCalled();
   });
 
   it('does nothing when the installed build is current', async () => {

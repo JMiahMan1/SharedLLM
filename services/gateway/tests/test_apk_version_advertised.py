@@ -285,3 +285,42 @@ class TestBundleShaDrift:
             data = client.get("/api/app-updates/version").json()
         assert data["git_sha"] == "61caa665"
         assert "disagrees" in caplog.text
+
+
+def _write_bundle(path, sha="abc1234"):
+    import json
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("version.json", json.dumps({"version": "1.6.0", "git_sha": sha}))
+    path.write_bytes(buf.getvalue())
+
+
+class TestBundleOlderThanApk:
+    """A deploy publishes the APK minutes before the web bundle. A phone that
+    installed the new APK in between was handed the old bundle, which ran the
+    old pages over the new native code."""
+
+    def _paths(self, client):
+        from services.gateway import main
+
+        TestVersionEndpoint()._publish_apk(client, 700)
+        return main.APP_UPDATES_DIR / "bundle.zip", main.APP_UPDATES_DIR / "jarvis-os.apk"
+
+    def test_a_bundle_published_before_the_apk_is_not_offered(self, client):
+        import os
+
+        bundle, apk = self._paths(client)
+        _write_bundle(bundle)
+        os.utime(bundle, (apk.stat().st_mtime - 300, apk.stat().st_mtime - 300))
+        data = client.get("/api/app-updates/version").json()
+        assert data["bundle_available"] is False
+        assert data["apk_available"] is True
+
+    def test_a_bundle_published_after_the_apk_is_offered(self, client):
+        import os
+
+        bundle, apk = self._paths(client)
+        _write_bundle(bundle)
+        os.utime(bundle, (apk.stat().st_mtime + 300, apk.stat().st_mtime + 300))
+        assert client.get("/api/app-updates/version").json()["bundle_available"] is True

@@ -352,6 +352,13 @@ export async function initAppUpdater(): Promise<void> {
     try {
       void App.addListener('pause', () => {
         void installStagedApk();
+        void applyStagedBundle();
+      }).catch(() => {});
+      // A phone keeps Jarvis alive in the background for days, so launch alone
+      // is not enough: look for a new web bundle every time it comes back.
+      void App.addListener('resume', () => {
+        void checkForAppUpdates({ silent: true });
+        void autoUpdateApk();
       }).catch(() => {});
     } catch {
       // No app lifecycle events: the next launch's check installs it instead.
@@ -436,12 +443,8 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
         // Background check: stage only. `next()` activates on the next cold
         // start instead of yanking the app out from under the user.
         await CapacitorUpdater.next({ id: bundle.id });
-        console.log('[AppUpdater] Update staged; will activate on next app launch.');
-        toast('Jarvis OS update ready. It will apply next time you open the app.', {
-          icon: '🚀',
-          duration: 6000,
-          id: 'app-update-ready',
-        });
+        stagedBundleId = bundle.id;
+        console.log('[AppUpdater] Update staged; applies when the app goes to the background.');
         return { ...baseResult, hasUpdate: true };
       }
 
@@ -487,6 +490,7 @@ interface ApkInstallPlugin {
   /** Present only on builds that verify the download; see hasVerifiedFlow(). */
   downloadApk?(opts: { url: string; sha256: string }): Promise<{ path: string; sha256: string; bytes: number }>;
   installDownloadedApk?(): Promise<{ message: string }>;
+  backgroundUpdates?(): Promise<{ native: boolean }>;
   selfUpdateSupported?(): Promise<{ supported: boolean }>;
   isApkDownloaded?(): Promise<{ downloaded: boolean }>;
   clearDownloadedApk?(): Promise<void>;
@@ -739,6 +743,25 @@ const AUTO_APK_TRIED_KEY = 'jarvis_auto_apk_tried';
 const AUTO_APK_RETRY_MS = 6 * 60 * 60 * 1000;
 
 let stagedApkVersion: number | null = null;
+/** A web bundle downloaded in the background, applied once the app is out of sight. */
+let stagedBundleId: string | null = null;
+
+/**
+ * Switch to a staged web bundle while nobody is looking. Waiting for the next
+ * cold start left phones that keep Jarvis in the background on old code for
+ * days. Not during a live call: the reload would end it.
+ */
+async function applyStagedBundle(): Promise<void> {
+  if (!stagedBundleId || updateBusy()) return;
+  const id = stagedBundleId;
+  stagedBundleId = null;
+  try {
+    await CapacitorUpdater.set({ id });
+  } catch (err) {
+    stagedBundleId = id;
+    console.warn('[AppUpdater] Applying the staged bundle failed:', err);
+  }
+}
 let autoApkRunning = false;
 let updateBusy: () => boolean = () => false;
 
@@ -762,6 +785,7 @@ export async function autoUpdateApk(now: number = Date.now()): Promise<void> {
   if (autoApkRunning || Capacitor.getPlatform() !== 'android') return;
   autoApkRunning = true;
   try {
+    if (await nativeUpdatesInstalled()) return; // NativeUpdater.java checks and installs by itself
     if (!(await hasVerifiedInstallFlow()) || !(await selfUpdateSupported())) return;
     const status = await checkApkUpdate();
     const code = status.apkVersionCode;
@@ -790,6 +814,16 @@ export async function autoUpdateApk(now: number = Date.now()): Promise<void> {
  * installer screen, which Jarvis Guard covers as tampering on a child's
  * phone: those builds are left to update from Settings.
  */
+async function nativeUpdatesInstalled(): Promise<boolean> {
+  const plugin = getApkInstallPlugin();
+  if (!plugin || typeof plugin.backgroundUpdates !== 'function') return false;
+  try {
+    return (await plugin.backgroundUpdates()).native === true;
+  } catch {
+    return false;
+  }
+}
+
 async function selfUpdateSupported(): Promise<boolean> {
   const plugin = getApkInstallPlugin();
   if (!plugin || typeof plugin.selfUpdateSupported !== 'function') return false;

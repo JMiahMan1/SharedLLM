@@ -91,6 +91,8 @@ registerPlugin(CommsPlugin.class);
         // New photos and videos on a protected child's phone (a no-op until
         // the media permission is on and a parent keeps scanning enabled).
         PhotoScanWorker.schedule(this);
+        // New APKs install themselves while the app is closed (NativeUpdater).
+        AppUpdateWorker.schedule(this);
     }
 
     @Override
@@ -210,6 +212,8 @@ registerPlugin(CommsPlugin.class);
         // The web app may have missed a change while in the background.
         GuardPlugin.notifyLockedMode(this);
         offerTimeTile();
+        // Coming back to Jarvis is a good moment to look for a new version.
+        NativeUpdater.checkSoon(this, 60_000L);
     }
 
     @Override
@@ -260,6 +264,8 @@ registerPlugin(CommsPlugin.class);
     public void onPause() {
         PushNotifier.appVisible = false;
         super.onPause();
+        // An update downloaded while Jarvis was on screen installs now.
+        NativeUpdater.onAppHidden(this);
     }
 
     private void configureWebView() {

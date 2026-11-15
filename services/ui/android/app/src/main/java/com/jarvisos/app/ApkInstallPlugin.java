@@ -266,6 +266,14 @@ public class ApkInstallPlugin extends Plugin {
      * lets that through), so the web app may install them unattended. Older
      * builds lack the method, and the web app leaves updates to Settings.
      */
+    /** This build checks for and installs new APKs natively (NativeUpdater), so the web app need not. */
+    @PluginMethod
+    public void backgroundUpdates(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("native", true);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void selfUpdateSupported(PluginCall call) {
         JSObject ret = new JSObject();
