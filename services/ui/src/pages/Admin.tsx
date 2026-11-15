@@ -813,7 +813,7 @@ const Admin = () => {
                           </span>
                         )}
                       </div>
-                      <p className="mt-1 text-xs text-slate-400">@{user.username}</p>
+                      <p className="mt-1 break-all text-xs text-slate-400">@{user.username}</p>
                       <p className="mt-2 text-[11px] text-slate-500 truncate">
                         HA: {user.ha_url || 'Not configured'} | Nextcloud: {user.nextcloud_url || 'Not configured'}
                       </p>
@@ -1055,7 +1055,7 @@ const Admin = () => {
                 <div key={device.id} className="glass-card flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-sm text-white truncate">{device.device_id}</p>
-                    <p className="mt-1 text-xs text-slate-400">@{device.username}</p>
+                    <p className="mt-1 break-all text-xs text-slate-400">@{device.username}</p>
                   </div>
                   <button
                     onClick={async () => {
@@ -1786,9 +1786,9 @@ const Admin = () => {
                     onClick={() => setInspectingCollection(name)}
                     className="w-full text-left glass-card p-4 transition hover:bg-white/5 active:scale-[0.98]"
                   >
-                    <div className="flex items-center justify-between mb-3">
-                       <p className="font-bold text-white uppercase tracking-tighter">{name.replace('_', ' ')}</p>
-                       <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">View Data &rarr;</span>
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                       <p className="min-w-0 break-all font-bold text-white uppercase tracking-tighter">{name.replace('_', ' ')}</p>
+                       <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-indigo-300">View Data &rarr;</span>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                        <div className="bg-white/5 rounded-xl p-3 border border-white/5">
@@ -1950,7 +1950,7 @@ const Admin = () => {
                            </div>
                            <div className="min-w-0">
                              <div className="flex flex-wrap items-center gap-2">
-                               <p className="font-semibold text-white capitalize">{serviceKey.replace(/_/g, ' ')}</p>
+                               <p className="min-w-0 break-all font-semibold text-white capitalize">{serviceKey.replace(/_/g, ' ')}</p>
                                {hasUpdate && !isPulling && (
                                  <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
                                    <ArrowUpCircle size={10} /> Update Available
@@ -2321,7 +2321,7 @@ const Admin = () => {
               value={inspectLimit}
               onChange={(e) => setInspectLimit(Number(e.target.value))}
               aria-label="Rows to display"
-              className="glass-input text-xs"
+              className="glass-input shrink-0 text-xs"
             >
               <option value={20}>20 rows</option>
               <option value={50}>50 rows</option>
@@ -2341,7 +2341,7 @@ const Admin = () => {
                     <span className="text-indigo-300">ID: {item.id}</span>
                     <span className="text-slate-500 uppercase tracking-widest">{String(item.metadata?.type || 'Record')}</span>
                   </div>
-                  <p className="mb-3 text-slate-200 whitespace-pre-wrap leading-relaxed">
+                  <p className="mb-3 text-slate-200 whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">
                     {item.document}
                   </p>
                   <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500">

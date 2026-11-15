@@ -370,13 +370,13 @@ export const WeatherRemindersPanel: FC<{ users: UserProfile[] }> = ({ users }) =
           />
           hours
         </label>
-        <label className="flex items-center gap-2 text-xs text-slate-400">
+        <label className="flex min-w-0 max-w-full items-center gap-2 text-xs text-slate-400">
           Where
           <select
             value={draft.place}
             onChange={(e) => setDraft((d) => ({ ...d, place: e.target.value }))}
             aria-label="Weather reminder place"
-            className="glass-input bg-black/30"
+            className="glass-input min-w-0 max-w-full bg-black/30"
           >
             {placeOptions.map((o) => (
               <option key={o.key} value={o.key}>{o.label}</option>
@@ -440,13 +440,13 @@ export const WeatherRemindersPanel: FC<{ users: UserProfile[] }> = ({ users }) =
             return (
               <li key={user.username}>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-white/5 bg-black/20 p-2">
-                  <span className="text-xs text-slate-300">@{user.username}</span>
+                  <span className="min-w-0 break-all text-xs text-slate-300">@{user.username}</span>
                   <input
                     type="checkbox"
                     checked={draft.people.includes(name)}
                     onChange={() => togglePerson(name)}
                     aria-label={`Remind @${user.username}`}
-                    className="h-4 w-4 accent-sky-500"
+                    className="h-4 w-4 shrink-0 accent-sky-500"
                   />
                 </label>
               </li>

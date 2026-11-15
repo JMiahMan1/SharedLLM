@@ -17,6 +17,16 @@
     max-width: 100%;
     min-width: 0;
   }
+
+  /* A finger needs 44px. Text fields and dropdowns were 40 to 42px tall, a
+     near miss on almost every form in the app; on a touch screen they are at
+     least 44px (a page that sets its own min height still wins). */
+  @media (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    select {
+      min-height: 2.75rem;
+    }
+  }
 }
 
 body {
@@ -199,9 +209,16 @@ body {
     justify-content: center;
     gap: 0.5rem;
     cursor: pointer;
-    /* Minimum touch target */
+    /* Minimum touch target (a finger's 44px on a touch screen, below) */
     min-height: 2.5rem;
     min-width: 2.5rem;
+  }
+
+  @media (pointer: coarse) {
+    .glass-button {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
 
   .glass-button:hover {
@@ -575,4 +592,16 @@ input[type="range"] {
 }
 .jarvis-map-dark.leaflet-container {
   background: #1a1d24;
+}
+
+/* Leaflet's zoom buttons are 30px squares, too small for a finger: 44px on a
+   phone, on every map (the attribution link stays as Leaflet draws it: it is a
+   credit, not a control the family uses). */
+@media (max-width: 639px) {
+  /* One class more than Leaflet's own rule: leaflet.css loads after this file. */
+  .leaflet-container.leaflet-touch .leaflet-bar a {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+  }
 }

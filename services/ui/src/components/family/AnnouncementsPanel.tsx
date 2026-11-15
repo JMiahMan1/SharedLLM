@@ -252,7 +252,7 @@ const AnnouncementsPanel = () => {
               <button
                 type="button"
                 onClick={() => timerActionMutation.mutate({ action: 'stop' })}
-                className="flex items-center gap-1.5 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/20"
+                className="max-sm:min-h-11 flex items-center gap-1.5 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/20"
                 title="Stop any ringing ESPHome speaker, flashing screen, or phone alarm"
               >
                 <Square size={12} />
@@ -262,7 +262,7 @@ const AnnouncementsPanel = () => {
                 type="button"
                 onClick={() => setShowAdvanced((prev) => !prev)}
                 aria-label="Configure alarm, sound, emoji and devices"
-                className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                className={`max-sm:min-h-11 flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
                   showAdvanced
                     ? 'border-purple-400/50 bg-purple-500/20 text-purple-200'
                     : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20'
@@ -285,7 +285,7 @@ const AnnouncementsPanel = () => {
                   if (preset.emoji) setSelectedEmoji(preset.emoji);
                   if (preset.title && !timerTitle.trim()) setTimerTitle(preset.title);
                 }}
-                className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 transition hover:border-purple-400/40 hover:bg-purple-500/15 hover:text-white"
+                className="max-sm:min-h-11 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 transition hover:border-purple-400/40 hover:bg-purple-500/15 hover:text-white"
               >
                 {preset.label}
               </button>
@@ -337,7 +337,7 @@ const AnnouncementsPanel = () => {
                       key={t}
                       type="button"
                       onClick={() => setTimerType(t)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
+                      className={`max-sm:min-h-11 rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
                         timerType === t
                           ? 'bg-purple-500/30 text-purple-200 border border-purple-400/40'
                           : 'bg-white/5 text-slate-400 hover:text-white'
@@ -352,7 +352,7 @@ const AnnouncementsPanel = () => {
                   <button
                     type="button"
                     onClick={() => setTimerScope((prev) => (prev === 'household' ? 'user' : 'household'))}
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`max-sm:min-h-11 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                       timerScope === 'household'
                         ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
                         : 'bg-white/5 text-slate-400 hover:text-white'
@@ -385,7 +385,7 @@ const AnnouncementsPanel = () => {
                     <button
                       type="button"
                       onClick={() => setSelectedEmoji('')}
-                      className="text-xs text-slate-400 hover:text-white"
+                      className="max-sm:min-h-11 text-xs text-slate-400 hover:text-white"
                     >
                       Clear {selectedEmoji}
                     </button>
@@ -402,7 +402,7 @@ const AnnouncementsPanel = () => {
                         if (next) playTimerSound('emoji_sound', next);
                       }}
                       title={item.label}
-                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition ${
+                      className={`max-sm:min-h-11 flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition ${
                         selectedEmoji === item.emoji
                           ? 'bg-purple-500/30 text-white ring-1 ring-purple-400'
                           : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -423,7 +423,7 @@ const AnnouncementsPanel = () => {
                     <button
                       type="button"
                       onClick={() => setTtsEnabled((prev) => !prev)}
-                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      className={`max-sm:min-h-11 flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                         ttsEnabled
                           ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/30'
                           : 'bg-white/5 text-slate-400'
@@ -435,7 +435,7 @@ const AnnouncementsPanel = () => {
                     <button
                       type="button"
                       onClick={() => playTimerSound(selectedSound || undefined, selectedEmoji || undefined)}
-                      className="rounded-lg bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-200 hover:bg-purple-500/30"
+                      className="max-sm:min-h-11 rounded-lg bg-purple-500/20 px-2.5 py-1 text-xs font-medium text-purple-200 hover:bg-purple-500/30"
                     >
                       Preview Sound
                     </button>
@@ -452,7 +452,7 @@ const AnnouncementsPanel = () => {
                         if (next) playTimerSound(next, selectedEmoji || undefined);
                       }}
                       title={snd.description}
-                      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                      className={`max-sm:min-h-11 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
                         selectedSound === snd.id
                           ? 'bg-purple-500/30 text-purple-200 border border-purple-400/40'
                           : 'bg-white/5 text-slate-400 hover:text-white'
@@ -482,7 +482,7 @@ const AnnouncementsPanel = () => {
                         type="button"
                         onClick={() => toggleTargetDevice(dev.id)}
                         title={dev.os_version ? `${dev.name} (${dev.os_version})` : dev.name}
-                        className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                        className={`max-sm:min-h-11 flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition ${
                           selected
                             ? 'bg-purple-500/30 text-purple-100 border border-purple-400/50'
                             : 'bg-white/5 text-slate-300 border border-white/5 hover:border-white/20'
@@ -529,7 +529,7 @@ const AnnouncementsPanel = () => {
                   <button
                     type="button"
                     onClick={() => setFlashScreen((prev) => !prev)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                    className={`max-sm:min-h-11 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                       flashScreen
                         ? 'bg-amber-400/30 text-amber-100 border border-amber-300/50'
                         : 'bg-white/5 text-slate-300'
@@ -544,7 +544,7 @@ const AnnouncementsPanel = () => {
                   onChange={(e) => setEsphomeScript(e.target.value)}
                   placeholder="Optional ESPHome script/service (e.g. flash_screen, alarm_flash, set_glance)"
                   aria-label="ESPHome script"
-                  className="glass-input min-h-9 w-full text-xs"
+                  className="glass-input min-h-11 w-full text-xs sm:min-h-9"
                 />
               </div>
             </div>
@@ -597,7 +597,7 @@ const AnnouncementsPanel = () => {
                           timer,
                         })
                       }
-                      className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-purple-300"
+                      className="flex h-11 sm:h-9 w-11 sm:w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-purple-300"
                       aria-label={`${paused ? 'Resume' : 'Pause'} ${timer.title}`}
                       title={paused ? 'Resume' : 'Pause'}
                     >
@@ -607,7 +607,7 @@ const AnnouncementsPanel = () => {
                       <button
                         type="button"
                         onClick={() => timerActionMutation.mutate({ action: 'reset', timer })}
-                        className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-cyan-300"
+                        className="flex h-11 sm:h-9 w-11 sm:w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-cyan-300"
                         aria-label={`Reset ${timer.title}`}
                         title="Reset"
                       >

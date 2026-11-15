@@ -37,8 +37,9 @@ const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ markdown, onTestExample
                     </span>
                     <button
                       onClick={() => handleCopy(codeContent)}
-                      className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-white/70 hover:text-white"
+                      className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-white/70 hover:text-white inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                       title="Copy code"
+                      aria-label="Copy code"
                     >
                       {copiedCode === codeContent ? (
                         <Check className="w-4 h-4 text-emerald-400" />

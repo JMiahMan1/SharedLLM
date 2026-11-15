@@ -640,7 +640,7 @@ const KnowledgeHub = () => {
                 <th className="px-4 sm:px-6 py-4">Name</th>
                 <th className="hidden lg:table-cell w-24 px-6 py-4">Size</th>
                 <th className="hidden lg:table-cell w-32 px-6 py-4">Status</th>
-                <th className="w-28 sm:w-40 px-4 sm:px-6 py-4 text-right">Actions</th>
+                <th className="w-28 sm:w-48 px-4 sm:px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">

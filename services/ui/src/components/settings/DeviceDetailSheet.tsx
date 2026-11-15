@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Activity, BatteryMedium, Footprints, X } from 'lucide-react';
@@ -282,6 +283,14 @@ export function DeviceDetailSheet({ device, onClose }: DeviceDetailSheetProps) {
   // the caller would attribute their own walk to someone else's watch.
   const stepOwner = device.owner_username || '';
   const caps = capabilityRows(device.capabilities ?? {});
+  // Escape closes the sheet, like every other dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
     <div

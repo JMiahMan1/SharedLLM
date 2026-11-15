@@ -104,7 +104,7 @@ export default function SharePanel({ path, asUser }: { path: string; asUser?: 'a
                 type="button"
                 disabled={busy}
                 aria-label={`Stop sharing with ${s.name}`}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-rose-300"
+                className="flex h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-rose-300"
                 onClick={() =>
                   void act(
                     () => api.noteShare({ action: 'remove', share_id: s.id, storage: STORAGE, as_user: asUser }),
@@ -136,7 +136,7 @@ export default function SharePanel({ path, asUser }: { path: string; asUser?: 'a
             aria-label="Share with"
             value={person}
             onChange={(e) => setPerson(e.target.value)}
-            className="glass-input min-h-9 px-2 py-1 text-base sm:text-xs"
+            className="glass-input min-h-9 pointer-coarse:min-h-11 px-2 py-1 text-base sm:text-xs"
           >
             <option value="">Choose someone…</option>
             {candidates.map((p) => (
@@ -151,7 +151,7 @@ export default function SharePanel({ path, asUser }: { path: string; asUser?: 'a
           <button
             type="button"
             disabled={busy || !person}
-            className="glass-button min-h-9 px-3 py-1 text-xs disabled:opacity-60"
+            className="glass-button min-h-9 pointer-coarse:min-h-11 px-3 py-1 text-xs disabled:opacity-60"
             onClick={share}
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Share2 size={13} />} Share

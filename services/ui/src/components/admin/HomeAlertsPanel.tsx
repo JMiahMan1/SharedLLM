@@ -176,13 +176,13 @@ export const HomeAlertsPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
             return (
               <li key={user.username}>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-white/5 bg-black/20 p-2">
-                  <span className="text-xs text-slate-300">@{user.username}</span>
+                  <span className="min-w-0 break-all text-xs text-slate-300">@{user.username}</span>
                   <input
                     type="checkbox"
                     checked={people.includes(name)}
                     onChange={() => togglePerson(name)}
                     aria-label={`Notify @${user.username}`}
-                    className="h-4 w-4 accent-sky-500"
+                    className="h-4 w-4 shrink-0 accent-sky-500"
                   />
                 </label>
               </li>

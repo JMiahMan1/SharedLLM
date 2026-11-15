@@ -542,7 +542,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
           ) : (
             <button
               disabled
-              className="text-xs px-3 py-1 rounded-lg font-semibold bg-slate-900/40 border border-slate-800 text-slate-500 cursor-not-allowed"
+              className="text-xs px-3 py-1 rounded-lg font-semibold pointer-coarse:min-h-11 bg-slate-900/40 border border-slate-800 text-slate-500 cursor-not-allowed"
             >
               No Toggle
             </button>
@@ -791,14 +791,14 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => toggleFavorite(selectedDevice.entity_id)}
-                  className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-amber-400 transition-colors"
+                  className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded-lg text-slate-400 hover:text-amber-400 transition-colors"
                 >
                   <Star size={16} className={pinnedDevices.includes(selectedDevice.entity_id) ? 'fill-amber-400 text-amber-400' : ''} />
                 </button>
                 {selectedToggleAction ? (
                   <button
                     onClick={() => toggleDevice(selectedDevice.entity_id, selectedDevice.state)}
-                    className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${
+                    className={`text-xs font-bold px-3 py-1.5 max-sm:min-h-11 rounded-lg border transition-all ${
                       isActive(selectedDevice.state)
                         ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
                         : 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
@@ -809,7 +809,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 ) : (
                   <button
                     disabled
-                    className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-slate-900/40 border-slate-800 text-slate-500 cursor-not-allowed"
+                    className="text-xs font-bold px-3 py-1.5 max-sm:min-h-11 rounded-lg border bg-slate-900/40 border-slate-800 text-slate-500 cursor-not-allowed"
                   >
                     No Toggle
                   </button>
@@ -846,19 +846,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                     <div className="flex gap-2">
                       <button
                         onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 2700 })}
-                        className="text-[10px] font-semibold px-2 py-1 rounded bg-orange-400/10 border border-orange-400/20 text-orange-400"
+                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-orange-400/10 border border-orange-400/20 text-orange-400"
                       >
                         Warm (2700K)
                       </button>
                       <button
                         onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 4000 })}
-                        className="text-[10px] font-semibold px-2 py-1 rounded bg-yellow-400/10 border border-yellow-400/20 text-yellow-400"
+                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-yellow-400/10 border border-yellow-400/20 text-yellow-400"
                       >
                         Natural (4000K)
                       </button>
                       <button
                         onClick={() => callHAService('light', 'turn_on', selectedDevice.entity_id, { color_temp_kelvin: 6500 })}
-                        className="text-[10px] font-semibold px-2 py-1 rounded bg-blue-400/10 border border-blue-400/20 text-blue-400"
+                        className="text-[10px] font-semibold px-2 py-1 max-sm:min-h-11 rounded bg-blue-400/10 border border-blue-400/20 text-blue-400"
                       >
                         Cool (6500K)
                       </button>
@@ -892,7 +892,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                                 target_temp_high: highSetpoint,
                               });
                             }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                            className="flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
                           >
                             -
                           </button>
@@ -908,7 +908,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                                 target_temp_high: highSetpoint,
                               });
                             }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                            className="flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
                           >
                             +
                           </button>
@@ -932,7 +932,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                                 target_temp_high: next,
                               });
                             }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                            className="flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
                           >
                             -
                           </button>
@@ -948,7 +948,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                                 target_temp_high: next,
                               });
                             }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
+                            className="flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-full border border-slate-700 bg-slate-800 font-bold text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
                           >
                             +
                           </button>
@@ -1004,7 +1004,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                             callHAService('climate', 'set_hvac_mode', selectedDevice.entity_id, { hvac_mode: mode });
                           }}
                           aria-pressed={climateMode === mode}
-                          className={`text-xs font-semibold px-3 py-1.5 rounded-lg border uppercase ${
+                          className={`text-xs font-semibold px-3 py-1.5 max-sm:min-h-11 rounded-lg border uppercase ${
                             climateMode === mode
                               ? 'bg-indigo-600/20 border-indigo-500 text-white'
                               : 'bg-slate-950/20 border-slate-800 text-slate-500 hover:text-slate-300'
@@ -1027,19 +1027,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   <div className="flex items-center justify-center gap-4 bg-slate-950/30 border border-white/5 py-3 rounded-xl">
                     <button
                       onClick={() => callHAService('media_player', 'media_previous_track', selectedDevice.entity_id)}
-                      className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
+                      className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
                     >
                       <SkipBack size={16} />
                     </button>
                     <button
                       onClick={() => callHAService('media_player', isActive(selectedDevice.state) ? 'media_pause' : 'media_play', selectedDevice.entity_id)}
-                      className="p-3 bg-purple-600 hover:bg-purple-500 text-white rounded-full transition-colors flex items-center justify-center shadow-lg"
+                      className="p-3 max-sm:min-h-11 max-sm:min-w-11 bg-purple-600 hover:bg-purple-500 text-white rounded-full transition-colors flex items-center justify-center shadow-lg"
                     >
                       {isActive(selectedDevice.state) ? <Pause size={18} /> : <Play size={18} />}
                     </button>
                     <button
                       onClick={() => callHAService('media_player', 'media_next_track', selectedDevice.entity_id)}
-                      className="p-2 hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
+                      className="p-2 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center hover:bg-white/5 rounded text-slate-400 hover:text-white transition-colors"
                     >
                       <SkipForward size={16} />
                     </button>
@@ -1073,19 +1073,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => callHAService('cover', 'open_cover', selectedDevice.entity_id)}
-                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-xs font-bold transition-colors"
+                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 max-sm:min-h-11 rounded-xl text-xs font-bold transition-colors"
                     >
                       <ArrowUp size={14} /> Open
                     </button>
                     <button
                       onClick={() => callHAService('cover', 'stop_cover', selectedDevice.entity_id)}
-                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-xs font-bold transition-colors"
+                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 max-sm:min-h-11 rounded-xl text-xs font-bold transition-colors"
                     >
                       Stop
                     </button>
                     <button
                       onClick={() => callHAService('cover', 'close_cover', selectedDevice.entity_id)}
-                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-xl text-xs font-bold transition-colors"
+                      className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-white py-2 max-sm:min-h-11 rounded-xl text-xs font-bold transition-colors"
                     >
                       <ArrowDown size={14} /> Close
                     </button>

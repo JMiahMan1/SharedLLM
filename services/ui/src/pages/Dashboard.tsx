@@ -431,7 +431,7 @@ const Dashboard = () => {
               type="submit"
               aria-label="Submit search"
               disabled={isSearching}
-              className="absolute right-2 top-1/2 -translate-y-1/2 glass-button px-3 py-1.5 text-xs font-bold min-h-0 min-w-0 h-8"
+              className="absolute right-2 max-sm:right-0 top-1/2 -translate-y-1/2 glass-button px-3 py-1.5 text-xs font-bold min-h-0 min-w-0 h-8 max-sm:h-11"
             >
               {isSearching ? <Loader2 size={13} className="animate-spin" /> : <ArrowUpRight size={14} />}
             </button>
@@ -468,7 +468,7 @@ const Dashboard = () => {
               <button
                 onClick={handleClearSearch}
                 aria-label="Close search results"
-                className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+                className="p-1.5 max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
               >
                 <X size={14} />
               </button>

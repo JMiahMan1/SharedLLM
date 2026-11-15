@@ -1492,7 +1492,7 @@ export default function Notes() {
             type="button"
             aria-pressed={!tagFilter}
             onClick={() => setTagFilter('')}
-            className={`min-h-9 rounded-full px-3 py-1 text-[11px] transition-colors ${
+            className={`min-h-9 pointer-coarse:min-h-11 rounded-full px-3 py-1 text-[11px] transition-colors ${
               tagFilter ? 'text-slate-400 hover:bg-white/5' : 'bg-white/10 text-slate-100'
             }`}
           >
@@ -1504,7 +1504,7 @@ export default function Notes() {
               type="button"
               aria-pressed={tagFilter === tag}
               onClick={() => setTagFilter(tagFilter === tag ? '' : tag)}
-              className={`min-h-9 rounded-full px-3 py-1 text-[11px] transition-colors ${
+              className={`min-h-9 pointer-coarse:min-h-11 rounded-full px-3 py-1 text-[11px] transition-colors ${
                 tagFilter === tag ? 'bg-purple-500/20 text-purple-100' : 'text-slate-400 hover:bg-white/5'
               }`}
             >
@@ -1661,16 +1661,17 @@ export default function Notes() {
                 {tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {tags.slice(0, 3).map((tag) => (
+                      // The pill stays small; on a touch screen the button around it is a full thumb tall.
                       <button
                         key={tag}
                         type="button"
-                        className="rounded-full bg-white/5 px-1.5 py-0.5 text-[10px] text-purple-200 hover:bg-white/10"
+                        className="group/tag inline-flex items-center pointer-coarse:min-h-11"
                         onClick={(e) => {
                           e.stopPropagation();
                           setTagFilter(tag);
                         }}
                       >
-                        #{tag}
+                        <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[10px] text-purple-200 group-hover/tag:bg-white/10">#{tag}</span>
                       </button>
                     ))}
                     {tags.length > 3 && <span className="text-[10px] text-slate-500">+{tags.length - 3}</span>}

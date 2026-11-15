@@ -138,7 +138,7 @@ export default function BibleBooksPanel() {
               setPath('');
               setSelected(null);
             }}
-            className={`min-h-9 rounded-lg border px-2.5 text-[11px] ${
+            className={`min-h-11 sm:min-h-9 rounded-lg border px-2.5 text-[11px] ${
               source === item
                 ? 'border-sky-400/50 bg-sky-500/15 text-sky-100'
                 : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200'
@@ -159,7 +159,7 @@ export default function BibleBooksPanel() {
           <button
             type="button"
             onClick={() => setPath(listing.data?.parent ?? '')}
-            className="min-h-9 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white"
+            className="min-h-11 sm:min-h-9 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white"
           >
             <ChevronLeft size={13} /> Up one level
           </button>
@@ -190,7 +190,7 @@ export default function BibleBooksPanel() {
                       setError('');
                     }
                   }}
-                  className="min-w-0 flex-1 text-left"
+                  className="min-w-0 min-h-11 sm:min-h-0 flex-1 text-left"
                 >
                   <span className="block truncate text-xs text-slate-200">{entry.name}</span>
                   <span className="block truncate text-[10px] text-slate-500">{entry.note}</span>
@@ -206,7 +206,7 @@ export default function BibleBooksPanel() {
                       setNotice('');
                       setError('');
                     }}
-                    className="min-h-9 rounded-lg bg-sky-500/20 px-2 text-[11px] text-sky-200"
+                    className="min-h-11 sm:min-h-9 rounded-lg bg-sky-500/20 px-2 text-[11px] text-sky-200"
                   >
                     Choose
                   </button>
@@ -226,14 +226,14 @@ export default function BibleBooksPanel() {
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Title"
               aria-label="Book title"
-              className="min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
+              className="min-h-11 sm:min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
             />
             <input
               value={author}
               onChange={(event) => setAuthor(event.target.value)}
               placeholder="Author (optional)"
               aria-label="Book author"
-              className="min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
+              className="min-h-11 sm:min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -241,7 +241,7 @@ export default function BibleBooksPanel() {
               value={kind}
               onChange={(event) => setKind(event.target.value as BibleBookKind)}
               aria-label="Book kind"
-              className="min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
+              className="min-h-11 sm:min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
             >
               <option value="devotional">Daily Devotions</option>
               <option value="study">Bible study</option>
@@ -250,7 +250,7 @@ export default function BibleBooksPanel() {
               type="button"
               onClick={() => runImport.mutate()}
               disabled={runImport.isPending}
-              className="min-h-10 rounded-lg bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="min-h-11 sm:min-h-10 rounded-lg bg-sky-500/20 px-3 text-xs font-medium text-sky-200 disabled:opacity-50 inline-flex items-center gap-1.5"
             >
               {runImport.isPending ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />}
               Import this book
@@ -258,7 +258,7 @@ export default function BibleBooksPanel() {
             <button
               type="button"
               onClick={() => setSelected(null)}
-              className="min-h-10 rounded-lg px-3 text-xs text-slate-400"
+              className="min-h-11 sm:min-h-10 rounded-lg px-3 text-xs text-slate-400"
             >
               Cancel
             </button>
@@ -278,7 +278,7 @@ export default function BibleBooksPanel() {
             value={kind}
             onChange={(event) => setKind(event.target.value as BibleBookKind)}
             aria-label="Manual book kind"
-            className="min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
+            className="min-h-11 sm:min-h-10 rounded-lg bg-slate-800/80 border border-white/10 px-3 text-xs text-slate-100"
           >
             <option value="devotional">Daily Devotions</option>
             <option value="study">Bible study</option>
@@ -298,7 +298,7 @@ export default function BibleBooksPanel() {
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={runUpload.isPending}
-            className="min-h-10 rounded-lg bg-white/5 px-3 text-xs text-slate-200 disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="min-h-11 sm:min-h-10 rounded-lg bg-white/5 px-3 text-xs text-slate-200 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {runUpload.isPending ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
             Choose PDF/EPUB
@@ -335,7 +335,7 @@ export default function BibleBooksPanel() {
                   onClick={() => remove.mutate(book.id)}
                   disabled={remove.isPending}
                   aria-label={`Delete ${book.title}`}
-                  className="min-h-9 min-w-9 rounded-lg text-rose-300/80 hover:bg-rose-500/10"
+                  className="min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 rounded-lg text-rose-300/80 hover:bg-rose-500/10"
                 >
                   <Trash2 size={14} className="mx-auto" />
                 </button>

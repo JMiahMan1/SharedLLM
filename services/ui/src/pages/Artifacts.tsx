@@ -178,7 +178,7 @@ const Artifacts = () => {
             invalidate();
             void artifacts.refetch();
           }}
-          className="glass-card px-3 py-2 text-xs text-slate-300 hover:text-white flex items-center gap-2"
+          className="glass-card px-3 py-2 pointer-coarse:min-h-11 text-xs text-slate-300 hover:text-white flex items-center gap-2"
         >
           <RefreshCcw size={14} className={artifacts.isFetching ? 'animate-spin' : ''} /> Refresh
         </button>
@@ -289,7 +289,8 @@ const Artifacts = () => {
                     {artifact.generator ? ` · ${artifact.generator}` : ''}
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
+                {/* On a phone the actions take their own row, so the name keeps the card's width. */}
+                <div className="flex items-center gap-1 max-sm:w-full max-sm:justify-end">
                   {!deleted && (
                     <>
                       <button
@@ -297,7 +298,7 @@ const Artifacts = () => {
                         disabled={openPreview.isPending && openPreview.variables?.id === artifact.id}
                         aria-label={`Preview ${title(artifact)}`}
                         title="Preview"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
+                        className="p-2 rounded-lg inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
                       >
                         <Eye size={17} />
                       </button>
@@ -306,7 +307,7 @@ const Artifacts = () => {
                         disabled={download.isPending && download.variables?.id === artifact.id}
                         aria-label={`Download ${title(artifact)}`}
                         title="Download"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
+                        className="p-2 rounded-lg inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-40"
                       >
                         <Download size={17} />
                       </button>
@@ -314,7 +315,7 @@ const Artifacts = () => {
                         onClick={() => { setRenaming(artifact); setRenameValue(title(artifact)); }}
                         aria-label={`Rename ${title(artifact)}`}
                         title="Rename"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                        className="p-2 rounded-lg inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-white hover:bg-white/5"
                       >
                         <Pencil size={16} />
                       </button>
@@ -323,7 +324,7 @@ const Artifacts = () => {
                         disabled={remove.isPending && remove.variables?.id === artifact.id}
                         aria-label={`Delete ${title(artifact)}`}
                         title="Delete (recoverable for a day)"
-                        className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
+                        className="p-2 rounded-lg inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
                       >
                         <Trash2 size={17} />
                       </button>
@@ -334,7 +335,7 @@ const Artifacts = () => {
                       <button
                         onClick={() => restore.mutate(artifact)}
                         disabled={restore.isPending && restore.variables?.id === artifact.id}
-                        className="px-2.5 py-1.5 rounded-lg text-xs text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 flex items-center gap-1.5"
+                        className="px-2.5 py-1.5 pointer-coarse:min-h-11 rounded-lg text-xs text-emerald-200 bg-emerald-500/10 hover:bg-emerald-500/20 flex items-center gap-1.5"
                       >
                         <RotateCcw size={14} /> Restore
                       </button>
@@ -342,7 +343,7 @@ const Artifacts = () => {
                         onClick={() => { setHardDelete(artifact); setConfirmPhrase(''); }}
                         aria-label={`Delete ${title(artifact)} permanently`}
                         title="Delete permanently"
-                        className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-500/10"
+                        className="p-2 rounded-lg inline-flex items-center justify-center pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10"
                       >
                         <Trash2 size={17} />
                       </button>
@@ -360,7 +361,7 @@ const Artifacts = () => {
           <button
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - limit))}
-            className="glass-card px-3 py-2 text-xs disabled:opacity-40"
+            className="glass-card px-3 py-2 pointer-coarse:min-h-11 text-xs disabled:opacity-40"
           >
             Previous
           </button>
@@ -370,7 +371,7 @@ const Artifacts = () => {
           <button
             disabled={offset + limit >= total}
             onClick={() => setOffset(offset + limit)}
-            className="glass-card px-3 py-2 text-xs disabled:opacity-40"
+            className="glass-card px-3 py-2 pointer-coarse:min-h-11 text-xs disabled:opacity-40"
           >
             Next
           </button>
@@ -423,8 +424,8 @@ const Artifacts = () => {
             autoFocus
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setRenaming(null)} className="px-3 py-2 text-sm text-slate-300">Cancel</button>
-            <button type="submit" disabled={!renameValue.trim() || rename.isPending} className="px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold disabled:opacity-40">
+            <button type="button" onClick={() => setRenaming(null)} className="px-3 py-2 pointer-coarse:min-h-11 text-sm text-slate-300">Cancel</button>
+            <button type="submit" disabled={!renameValue.trim() || rename.isPending} className="px-4 py-2 pointer-coarse:min-h-11 rounded-xl bg-purple-600 text-white text-sm font-semibold disabled:opacity-40">
               Save name
             </button>
           </div>
@@ -444,7 +445,7 @@ const Artifacts = () => {
             placeholder={hardDelete ? `delete ${hardDelete.name}` : ''}
           />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => { setHardDelete(null); setConfirmPhrase(''); }} className="px-3 py-2 text-sm text-slate-300">Cancel</button>
+            <button type="button" onClick={() => { setHardDelete(null); setConfirmPhrase(''); }} className="px-3 py-2 pointer-coarse:min-h-11 text-sm text-slate-300">Cancel</button>
             <button
               type="button"
               disabled={!hardDelete || confirmPhrase !== `delete ${hardDelete.name}` || hardRemove.isPending}

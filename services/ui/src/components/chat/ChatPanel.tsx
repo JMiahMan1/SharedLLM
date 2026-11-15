@@ -633,7 +633,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         <header className="flex shrink-0 items-center gap-2 border-b border-white/5 bg-slate-900/95 px-2 py-2.5 sm:px-3">
           <button
             type="button"
-            className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-slate-200 hover:bg-white/10 lg:hidden"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-slate-200 hover:bg-white/10 lg:hidden"
             aria-label="Back to chats"
             onClick={() => setMobileView('list')}
           >
@@ -645,7 +645,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
             disabled={!activeConversation}
             aria-label={`About ${name}`}
             data-testid="chat-info-open"
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left"
+            className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl text-left"
           >
             {activeConversation && <ConversationAvatar conversation={activeConversation} people={people} size={42} />}
             <div className="min-w-0 flex-1">

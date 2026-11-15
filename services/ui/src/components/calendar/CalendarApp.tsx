@@ -171,7 +171,7 @@ const MobileDayList = ({
           <div key={key} className="rounded-2xl p-3" style={isToday ? todayCell('1rem') : { background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' }}>
             <button
               onClick={() => onSelectDay(key)}
-              className="mb-2 flex w-full items-baseline gap-2 text-left"
+              className="mb-1 flex min-h-11 w-full items-center gap-2 text-left"
             >
               <span className="os-display text-lg font-bold" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink)' }}>{day.getDate()}</span>
               <span className="text-xs font-extrabold uppercase" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink-faint)' }}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
@@ -635,7 +635,7 @@ const CalendarApp = () => {
       key={key}
       onClick={() => setView(key)}
       aria-pressed={view === key}
-      className={`min-h-10 min-w-0 flex-1 rounded-full px-1.5 text-xs font-bold transition sm:flex-none sm:px-4 ${view === key ? '' : 'hover:opacity-80'}`}
+      className={`min-h-11 min-w-0 flex-1 rounded-full px-1.5 text-xs font-bold transition sm:min-h-10 sm:flex-none sm:px-4 ${view === key ? '' : 'hover:opacity-80'}`}
       style={view === key ? { background: 'var(--os-ember)', color: 'var(--os-on-ember)' } : { color: 'var(--os-ink-soft)' }}
     >
       {label}
@@ -834,7 +834,8 @@ ${isDark ? PLANNER_DARK : PLANNER_LIGHT}
                       return (
                         <span key={idx} role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); setEditing(ev); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setEditing(ev); } }} title={calendarLabel(ev.calendar, people)} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: c, color: textOn(c) } : { background: 'transparent', color: 'var(--os-ink)' }}>
                           {!ad && <span className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: c }} aria-hidden="true" />}
-                          <span className="truncate">{ev.summary}</span>
+                          {/* A block, so the ellipsis is cut at the cell's edge (an inline span ran past it). */}
+                          <span className="block truncate">{ev.summary}</span>
                         </span>
                       );
                     })}

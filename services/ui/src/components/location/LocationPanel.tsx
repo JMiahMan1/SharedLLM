@@ -528,8 +528,9 @@ const LocationPanel = () => {
               refreshData();
             }}
             disabled={loadingTelemetry}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
             title="Refresh location telemetry"
+            aria-label="Refresh location telemetry"
           >
             <RefreshCw size={14} className={loadingTelemetry ? 'animate-spin text-cyan-400' : ''} />
           </button>
@@ -543,7 +544,7 @@ const LocationPanel = () => {
             <button
               type="button"
               onClick={() => void refreshData()}
-              className="mt-1 block font-semibold text-amber-300 underline hover:text-amber-200"
+              className="mt-1 block min-h-11 sm:min-h-0 font-semibold text-amber-300 underline hover:text-amber-200"
             >
               Try again
             </button>
@@ -619,11 +620,11 @@ const LocationPanel = () => {
               {telemetry.frequented_locations.map((loc, idx) => (
                 <span
                   key={idx}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 text-[11px] text-slate-300 border border-white/5"
+                  className="inline-flex max-w-full items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 text-[11px] text-slate-300 border border-white/5"
                 >
-                  <MapPin size={11} className="text-purple-400" />
-                  <span className="font-medium">{loc.name}</span>
-                  <span className="text-slate-500">({loc.dwell_formatted})</span>
+                  <MapPin size={11} className="shrink-0 text-purple-400" />
+                  <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{loc.name}</span>
+                  <span className="shrink-0 text-slate-500">({loc.dwell_formatted})</span>
                 </span>
               ))}
             </div>
@@ -647,7 +648,7 @@ const LocationPanel = () => {
               trigger('light');
               setShowFleetManager(!showFleetManager);
             }}
-            className="flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 font-medium"
+            className="flex items-center gap-1 min-h-11 sm:min-h-0 text-xs text-purple-400 hover:text-purple-300 font-medium"
           >
             <span>{showFleetManager ? 'Close Vehicles' : 'Manage Vehicles'}</span>
             {showFleetManager ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -728,7 +729,7 @@ const LocationPanel = () => {
                   trigger('light');
                   setShowAddForm(!showAddForm);
                 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 min-h-11 sm:min-h-0 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-colors"
               >
                 <Plus size={13} />
                 <span>Add Vehicle</span>
@@ -758,13 +759,13 @@ const LocationPanel = () => {
                       value={lookupVin}
                       onChange={(e) => setLookupVin(e.target.value)}
                       maxLength={17}
-                      className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs uppercase focus:outline-none focus:border-purple-500 font-mono tracking-wider"
+                      className="flex-1 min-w-0 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs uppercase focus:outline-none focus:border-purple-500 font-mono tracking-wider"
                     />
                     <button
                       type="button"
                       onClick={handleVinLookup}
                       disabled={isLoadingVin || lookupVin.trim().length !== 17}
-                      className="px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium whitespace-nowrap disabled:opacity-40 transition-colors"
+                      className="px-2.5 py-1.5 min-h-11 sm:min-h-0 shrink-0 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium whitespace-nowrap disabled:opacity-40 transition-colors"
                     >
                       {isLoadingVin ? '...' : 'Decode VIN'}
                     </button>
@@ -899,7 +900,7 @@ const LocationPanel = () => {
                       placeholder="e.g. 3.49"
                       value={newVehicleCost}
                       onChange={(e) => setNewVehicleCost(e.target.value)}
-                      className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
+                      className="flex-1 min-w-0 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
                       required
                     />
                     <div className="flex gap-1">
@@ -909,13 +910,13 @@ const LocationPanel = () => {
                         placeholder="ZIP code"
                         value={fuelPriceZip}
                         onChange={(e) => setFuelPriceZip(e.target.value)}
-                        className="w-20 bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500"
+                        className="w-20 min-w-0 bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500"
                       />
                       <button
                         type="button"
                         onClick={handleFetchFuelPrice}
                         disabled={isLoadingFuelPrice}
-                        className="px-2 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium whitespace-nowrap disabled:opacity-50"
+                        className="px-2 py-1.5 min-h-11 sm:min-h-0 shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium whitespace-nowrap disabled:opacity-50"
                       >
                         {isLoadingFuelPrice ? '...' : '⛽ Fetch'}
                       </button>
@@ -935,14 +936,14 @@ const LocationPanel = () => {
                   <button
                     type="button"
                     onClick={() => setShowAddForm(false)}
-                    className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+                    className="px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg text-xs text-slate-400 hover:text-white"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingVehicle}
-                    className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold disabled:opacity-50"
+                    className="px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold disabled:opacity-50"
                   >
                     {isSavingVehicle ? 'Saving...' : 'Save Vehicle'}
                   </button>
@@ -957,7 +958,7 @@ const LocationPanel = () => {
                 <button
                   type="button"
                   onClick={() => void refreshData()}
-                  className="mt-1 block font-semibold text-amber-300 underline hover:text-amber-200"
+                  className="mt-1 block min-h-11 sm:min-h-0 font-semibold text-amber-300 underline hover:text-amber-200"
                 >
                   Try again
                 </button>
@@ -998,7 +999,7 @@ const LocationPanel = () => {
                       ) : (
                         <button
                           onClick={() => handleSelectVehicle(v.id)}
-                          className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-white/10"
+                          className="text-xs text-slate-400 hover:text-white px-2 py-1 min-h-11 sm:min-h-0 rounded hover:bg-white/10"
                         >
                           Select
                         </button>
@@ -1006,8 +1007,9 @@ const LocationPanel = () => {
                       <button
                         onClick={() => void handleDeleteVehicle(v.id, v.name)}
                         disabled={deletingVehicleId === v.id}
-                        className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                        className="p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
                         title="Delete vehicle"
+                        aria-label={`Delete ${v.name}`}
                       >
                         <Trash2 size={14} />
                       </button>

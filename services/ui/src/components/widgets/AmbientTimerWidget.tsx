@@ -585,7 +585,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
           onClick={() => setShowOptions((prev) => !prev)}
           aria-label="Timer & alarm options"
           title="Alarms, Sounds, Emojis & Devices"
-          className={`p-1.5 rounded-lg transition-colors ${
+          className={`p-1.5 rounded-lg transition-colors max-sm:min-h-11 max-sm:min-w-11 max-sm:flex max-sm:items-center max-sm:justify-center ${
             showOptions
               ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-400/40'
               : 'text-slate-400 hover:text-purple-300 hover:bg-white/5'
@@ -705,7 +705,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                     key={m}
                     type="button"
                     onClick={() => setEntryType(m)}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-colors ${
+                    className={`px-2 py-1 max-sm:min-h-11 rounded-lg text-[11px] font-semibold capitalize transition-colors ${
                       entryType === m
                         ? 'bg-purple-500/30 text-purple-200 border border-purple-400/40'
                         : 'bg-white/5 text-slate-400 hover:text-white'
@@ -718,7 +718,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
               <button
                 type="button"
                 onClick={() => setScope((prev) => (prev === 'household' ? 'user' : 'household'))}
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1 max-sm:min-h-11 rounded-lg text-[11px] font-semibold transition-colors ${
                   scope === 'household'
                     ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
                     : 'bg-white/5 text-slate-400 hover:text-white'
@@ -742,7 +742,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                       if (preset.emoji) setSelectedEmoji(preset.emoji);
                       if (preset.title && !newTitle) setNewTitle(preset.title);
                     }}
-                    className="px-2 py-0.5 rounded-md bg-white/5 hover:bg-purple-500/20 text-[11px] text-slate-300 border border-white/5"
+                    className="px-2 py-0.5 max-sm:min-h-11 max-sm:px-3 rounded-md bg-white/5 hover:bg-purple-500/20 text-[11px] text-slate-300 border border-white/5"
                   >
                     {preset.label}
                   </button>
@@ -780,7 +780,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                   <button
                     type="button"
                     onClick={() => setSelectedEmoji('')}
-                    className="text-[10px] text-slate-400 hover:text-white"
+                    className="text-[10px] text-slate-400 hover:text-white max-sm:min-h-11 max-sm:px-2"
                   >
                     Clear {selectedEmoji}
                   </button>
@@ -799,7 +799,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                       }
                     }}
                     title={item.label}
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-transform ${
+                    className={`w-7 h-7 max-sm:w-11 max-sm:h-11 rounded-lg flex items-center justify-center text-sm transition-transform ${
                       selectedEmoji === item.emoji
                         ? 'bg-purple-500/30 ring-1 ring-purple-400 scale-110'
                         : 'bg-white/5 hover:bg-white/10'
@@ -825,7 +825,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                         safePlayTimerSound(next, selectedEmoji || undefined);
                       }
                     }}
-                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
+                    className={`px-2 py-1 max-sm:min-h-11 rounded-md text-[10px] font-medium transition-colors ${
                       selectedSound === snd.id
                         ? 'bg-purple-500/30 text-purple-200 border border-purple-400/40'
                         : 'bg-white/5 text-slate-400 hover:text-slate-200'
@@ -839,7 +839,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                 <button
                   type="button"
                   onClick={() => setTtsEnabled((prev) => !prev)}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-colors ${
+                  className={`flex items-center gap-1 px-2 py-1 max-sm:min-h-11 rounded-lg text-[11px] transition-colors ${
                     ttsEnabled
                       ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/30'
                       : 'bg-white/5 text-slate-400'
@@ -854,7 +854,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                     safePlayTimerSound(selectedSound || undefined, selectedEmoji || undefined);
                     playChime();
                   }}
-                  className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-purple-300"
+                  className="px-2 py-1 max-sm:min-h-11 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-purple-300"
                 >
                   Preview Sound
                 </button>
@@ -876,7 +876,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                       type="button"
                       onClick={() => toggleTargetDevice(dev.id)}
                       title={dev.os_version ? `${dev.name} (${dev.os_version})` : dev.name}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-colors ${
+                      className={`flex items-center gap-1 px-2 py-1 max-sm:min-h-11 rounded-lg text-[11px] transition-colors ${
                         active
                           ? 'bg-purple-500/30 text-purple-200 border border-purple-400/50'
                           : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
@@ -915,7 +915,7 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
                   <button
                     type="button"
                     onClick={() => setFlashScreen((prev) => !prev)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                    className={`px-2 py-0.5 max-sm:min-h-11 rounded text-[10px] font-semibold ${
                       flashScreen
                         ? 'bg-amber-400/30 text-amber-100 border border-amber-300/40'
                         : 'bg-white/5 text-slate-300'

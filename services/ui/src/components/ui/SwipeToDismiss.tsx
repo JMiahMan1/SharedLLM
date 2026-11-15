@@ -109,7 +109,8 @@ export default function SwipeToDismiss({ onDismiss, label, className = '', child
           aria-label={`Clear ${label}`}
           onClick={() => clear(1)}
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute top-0.5 right-0.5 flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+          // 36px to look at, 44px to hit: the ::before reaches 4px past each side.
+          className="absolute top-0.5 right-0.5 flex h-9 w-9 before:absolute before:-inset-1 before:content-[''] items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
         >
           <X size={14} />
         </button>

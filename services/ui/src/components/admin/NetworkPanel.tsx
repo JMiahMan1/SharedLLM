@@ -174,7 +174,7 @@ export const NetworkPanel: FC = () => {
                   type="button"
                   aria-pressed={logLevel === l.id}
                   onClick={() => setLogLevel(l.id)}
-                  className={`min-h-9 rounded-lg px-2.5 text-xs font-semibold ${logLevel === l.id ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
+                  className={`min-h-11 sm:min-h-9 rounded-lg px-2.5 text-xs font-semibold ${logLevel === l.id ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
                 >
                   {l.label}
                 </button>
@@ -316,7 +316,7 @@ const UsageSection: FC<{ hours: number; onHours: (h: number) => void; usage: Net
               type="button"
               aria-pressed={hours === p.h}
               onClick={() => onHours(p.h)}
-              className={`min-h-9 rounded-lg px-2.5 text-xs font-semibold ${hours === p.h ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
+              className={`min-h-11 sm:min-h-9 rounded-lg px-2.5 text-xs font-semibold ${hours === p.h ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-white'}`}
             >
               {p.label}
             </button>

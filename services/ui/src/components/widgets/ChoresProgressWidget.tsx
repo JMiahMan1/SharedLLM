@@ -411,13 +411,13 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         {/* Dark paper is a faint tint (3% white), so the full view needs the app's dark base under it or the dashboard shows through. */}
         <style>{`.osk-overlay{${isDark ? PLANNER_DARK : PLANNER_LIGHT}--wc-ink:var(--os-ink);--wc-ink-faint:var(--os-ink-faint);--wc-ink-strong:var(--os-ink);--wc-border:var(--os-line);--wc-hover:var(--os-paper-deep);background:${isDark ? 'linear-gradient(var(--os-paper),var(--os-paper)),rgba(2,6,23,0.98)' : 'var(--os-paper)'}!important;backdrop-filter:blur(24px);}`}</style>
         <div className="osk-chores flex h-full flex-col">
-          <div className="mb-4 flex shrink-0 items-end gap-4">
-            <div className="flex-1">
+          <div className="mb-4 flex shrink-0 flex-wrap items-end gap-x-4 gap-y-2">
+            <div className="flex-1 min-w-0">
               <div className="text-3xl font-bold" style={{ color: 'var(--os-ink)' }}>
                 Today&apos;s Chores
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="text-sm font-bold" style={{ color: 'var(--os-ink-faint)' }}>
                 {completedCount}/{totalCount} done
               </div>
@@ -591,7 +591,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       icon="🧹"
       expandedClassName="osk-overlay"
       actions={
-        <span className="text-xs" style={{ color: 'var(--wc-ink-faint, var(--site-text-muted))' }}>
+        <span className="text-xs whitespace-nowrap" style={{ color: 'var(--wc-ink-faint, var(--site-text-muted))' }}>
           {/* The ring already shows the percentage; repeating it here left
               the title three letters wide on a phone. */}
           {completedCount}/{totalCount} done

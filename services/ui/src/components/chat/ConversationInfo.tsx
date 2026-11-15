@@ -97,7 +97,7 @@ export default function ConversationInfo({
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{members.length || ''} Members</h3>
         {group && canModerate && (
-          <button type="button" onClick={() => setAdding(!adding)} className="min-h-10 rounded-xl px-2 text-xs text-purple-200 flex items-center gap-1" data-testid="chat-add-member">
+          <button type="button" onClick={() => setAdding(!adding)} className="min-h-11 rounded-xl px-2 text-xs text-purple-200 flex items-center gap-1" data-testid="chat-add-member">
             <UserPlus size={14} /> {adding ? 'Done' : 'Add people'}
           </button>
         )}
@@ -136,7 +136,7 @@ export default function ConversationInfo({
                     onClick={() => remove.mutate(m)}
                     disabled={remove.isPending}
                     aria-label={`Remove ${m.display_name}`}
-                    className="min-h-10 min-w-10 flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-300"
+                    className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-300"
                   >
                     <UserMinus size={15} />
                   </button>

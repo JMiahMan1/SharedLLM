@@ -441,7 +441,8 @@ function Run({
                       type="button"
                       onClick={() => canAct && onReact(message, emoji)}
                       aria-label={`${emoji} ${count}`}
-                      className={`rounded-full border px-1.5 py-0.5 text-[12px] shadow ${
+                      // A small chip under the bubble; on a phone its tap area reaches 44px above and below it.
+                      className={`relative max-sm:before:absolute max-sm:before:inset-x-0 max-sm:before:-inset-y-2.5 max-sm:before:content-[''] rounded-full border px-1.5 py-0.5 text-[12px] shadow ${
                         message.reactions_self?.includes(emoji) ? 'border-purple-400/60 bg-purple-500/30' : 'border-white/10 bg-slate-800'
                       }`}
                     >
@@ -462,7 +463,7 @@ function Run({
                       key={emoji}
                       type="button"
                       aria-label={`React ${emoji}`}
-                      className="min-h-10 min-w-10 rounded-full text-xl transition hover:scale-125 hover:bg-white/10"
+                      className="min-h-11 min-w-11 rounded-full text-xl transition hover:scale-125 hover:bg-white/10 sm:min-h-10 sm:min-w-10"
                       onClick={() => onReact(message, emoji)}
                     >
                       {emoji}

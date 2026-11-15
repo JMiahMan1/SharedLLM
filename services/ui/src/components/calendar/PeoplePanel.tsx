@@ -100,7 +100,7 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
                   type="color"
                   value={p.color}
                   onChange={(e) => setColor(p.id, e.target.value)}
-                  className="h-7 w-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+                  className="h-11 w-11 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0 sm:h-7 sm:w-7"
                   aria-label={`${p.name} color`}
                 />
                 <input
@@ -112,7 +112,7 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
                   aria-label="Person name"
                   placeholder="Person name"
                 />
-                <button onClick={() => deletePerson(p.id)} className="p-1" style={{ color: 'var(--os-ember-deep)' }} aria-label={`Delete ${p.name}`}>
+                <button onClick={() => deletePerson(p.id)} className="flex h-11 w-11 shrink-0 items-center justify-center sm:h-auto sm:w-auto sm:p-1" style={{ color: 'var(--os-ember-deep)' }} aria-label={`Delete ${p.name}`}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6" /></svg>
                 </button>
               </div>
@@ -120,7 +120,7 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
                 {p.accounts.map((a) => (
                   <span key={a} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
                     {calendarLabel(a)}
-                    <button onClick={() => removeAccount(p.id, a)} className="opacity-60 hover:opacity-100" aria-label={`Remove ${a}`}>×</button>
+                    <button onClick={() => removeAccount(p.id, a)} className="flex h-11 min-w-6 items-center justify-center opacity-60 hover:opacity-100 sm:h-auto sm:min-w-0" aria-label={`Remove ${a}`}>×</button>
                   </span>
                 ))}
                 {p.accounts.length === 0 && <span className="text-[10px] opacity-60" style={{ color: 'var(--os-ink-soft)' }}>no calendars</span>}
@@ -152,11 +152,11 @@ const PeoplePanel = ({ people, discovered, onSave, onClose }: Props) => {
 
       <div className="flex justify-end gap-2 border-t pt-3" style={{ borderColor: 'var(--os-line)' }}>
         {onClose && (
-          <button onClick={onClose} className="rounded-xl px-4 py-2 text-xs font-bold" style={{ color: 'var(--os-ink-soft)' }}>Cancel</button>
+          <button onClick={onClose} className="min-h-11 rounded-xl px-4 py-2 text-xs font-bold sm:min-h-0" style={{ color: 'var(--os-ink-soft)' }}>Cancel</button>
         )}
         <button
           onClick={() => onSave(draft)}
-          className="rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]"
+          className="min-h-11 rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#fffdf8] sm:min-h-0"
           style={{ background: 'var(--os-ember)' }}
         >
           Save People

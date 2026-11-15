@@ -80,7 +80,7 @@ function TouCard({ summary, isAdmin, openSettings }: { summary: EnergySummary; i
     return (
       <p className="text-sm text-slate-500">
         No time-of-use split yet: set your rate periods in the energy settings
-        {isAdmin ? <> (<button type="button" className="underline" onClick={openSettings}>open settings</button>)</> : ' (an admin can)'}.
+        {isAdmin ? <> (<button type="button" className="inline-flex min-h-11 items-center underline sm:min-h-0" onClick={openSettings}>open settings</button>)</> : ' (an admin can)'}.
       </p>
     );
   }
@@ -223,7 +223,7 @@ export default function Energy() {
             </div>
           </div>
           <p className="text-xs text-slate-500">
-            Looking for one circuit over time? <Link className="underline" to="/history">History</Link> plots any sensor.
+            Looking for one circuit over time? <Link className="inline-flex min-h-11 items-center underline sm:min-h-0" to="/history">History</Link> plots any sensor.
           </p>
         </>
       )}

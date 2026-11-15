@@ -536,7 +536,18 @@ export async function mockHome(page: Page, role: Role): Promise<HomeMocks> {
         { file: 'r2_r90.mp4', start: iso(-240), end: iso(-239), duration: 12, triggers: ['motion'], rotation: 90 },
       ] });
     }
-    if (p === '/api/admin/cameras/live-video') return json({ configured: false, cameras: [], default_quality: 'sub' });
+    if (p === '/api/admin/cameras/live-video') {
+      return json({ configured: true, entry_id: 'go2rtc-1', enabled: true, state: 'loaded', reason: null,
+        url: 'http://192.0.2.30:1984', username: '', has_password: false,
+        options: { webrtc_host: '', webrtc_port: 8555, default_quality: 'sub' }, server: { version: '1.9.4', error: null },
+        cameras: [
+          { entity_id: 'camera.yard', name: 'Yard', platform: 'reolink', settings: {}, qualities: ['sub', 'main'],
+            registered: ['sub', 'main'], default_quality: 'sub' },
+          { entity_id: 'camera.porch', name: 'Porch camera over the side gate with a long name', platform: 'reolink',
+            settings: { on_demand: true }, qualities: ['sub'], registered: [], battery: true, on_demand: true,
+            note: 'It runs on a battery, so it streams only while someone watches.' },
+        ] });
+    }
     if (p === '/api/admin/cameras/recording') return json(MOTION_RECORDING);
     // Admin > Network (a made-up router and devices).
     if (p === '/api/network/status') {

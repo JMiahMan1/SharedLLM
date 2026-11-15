@@ -128,10 +128,10 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
                 )}
               </span>
               {role.description && <span className="mt-1 block break-words text-xs text-slate-400">{role.description}</span>}
-              <span className="mt-2 block text-[11px] text-slate-500">
+              <span className="mt-2 block text-[11px] text-slate-500 [overflow-wrap:anywhere]">
                 {role.permissions.length ? role.permissions.map(describe).join(' · ') : 'Nothing beyond assigned devices'}
               </span>
-              <span className="mt-1 block text-[11px] text-slate-500">
+              <span className="mt-1 block text-[11px] text-slate-500 [overflow-wrap:anywhere]">
                 {role.members.length ? role.members.map((m) => `@${m}`).join(', ') : 'Nobody has this role'}
               </span>
             </button>
@@ -178,9 +178,9 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
                   type="checkbox"
                   checked={draft.permissions.includes(p.key)}
                   onChange={() => toggle('permissions', p.key)}
-                  className="h-4 w-4"
+                  className="h-4 w-4 shrink-0"
                 />
-                {p.description}
+                <span className="min-w-0 py-2 [overflow-wrap:anywhere]">{p.description}</span>
               </label>
             ))}
           </fieldset>
@@ -200,9 +200,9 @@ export const RolesPanel: FC<{ users: UserProfile[] }> = ({ users }) => {
                     type="checkbox"
                     checked={draft.members.includes(u.username)}
                     onChange={() => toggle('members', u.username)}
-                    className="h-4 w-4"
+                    className="h-4 w-4 shrink-0"
                   />
-                  {u.full_name || u.display_name || u.username}
+                  <span className="min-w-0 py-2 [overflow-wrap:anywhere]">{u.full_name || u.display_name || u.username}</span>
                 </label>
               ))}
             </fieldset>

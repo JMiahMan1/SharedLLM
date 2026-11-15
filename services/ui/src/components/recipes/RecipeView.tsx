@@ -243,7 +243,7 @@ export default function RecipeView({
               {sourceUrl ? (
                 <>
                   {' · '}
-                  <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-purple-300 hover:underline">
+                  <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 align-middle text-purple-300 hover:underline pointer-coarse:min-h-11">
                     {sourceSite || 'source'} <ExternalLink size={10} />
                   </a>
                 </>

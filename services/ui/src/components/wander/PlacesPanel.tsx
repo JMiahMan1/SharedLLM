@@ -80,7 +80,7 @@ function IconPicker({ name, value, disabled, onChange }: { name: string; value: 
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="glass-input min-h-9 min-w-0 max-w-full px-2 text-xs"
+        className="glass-input min-h-11 min-w-0 max-w-full px-2 text-xs sm:min-h-9"
       >
         <option value="">Automatic</option>
         {PLACE_KINDS.map((k) => (
@@ -299,7 +299,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
             type="button"
             data-testid="add-place"
             onClick={() => setDraft({ ...EMPTY_DRAFT })}
-            className="glass-button flex min-h-9 items-center gap-1.5 px-3 text-xs text-slate-300"
+            className="max-sm:min-h-11 glass-button flex min-h-9 items-center gap-1.5 px-3 text-xs text-slate-300"
           >
             <Plus size={14} /> Add place
           </button>
@@ -338,7 +338,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                             icon: place.icon ?? '',
                           })
                         }
-                        className="glass-button flex h-9 w-9 items-center justify-center p-0 text-slate-300"
+                        className="glass-button flex h-11 w-11 items-center justify-center p-0 text-slate-300 sm:h-9 sm:w-9"
                       >
                         <Pencil size={14} />
                       </button>
@@ -350,7 +350,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                             removePlace.mutate(place);
                           }
                         }}
-                        className="glass-button flex h-9 w-9 items-center justify-center p-0 text-rose-300"
+                        className="glass-button flex h-11 sm:h-9 w-11 sm:w-9 items-center justify-center p-0 text-rose-300"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -375,7 +375,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
           <div className="space-y-2 rounded-xl border border-white/10 p-3" data-testid="place-form">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-300">{draft.id ? 'Edit place' : 'New place'}</span>
-              <button type="button" aria-label="Close" onClick={() => setDraft(null)} className="text-slate-400 hover:text-slate-200">
+              <button type="button" aria-label="Close" onClick={() => setDraft(null)} className="flex items-center justify-center text-slate-400 hover:text-slate-200 max-sm:-my-3 max-sm:min-h-11 max-sm:min-w-11">
                 <X size={14} />
               </button>
             </div>
@@ -401,7 +401,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                 placeholder="Longitude"
                 className="glass-input w-full min-w-0 flex-1 px-2 py-1 text-sm sm:w-32"
               />
-              <button type="button" onClick={useMyLocation} className="glass-button flex min-h-9 items-center gap-1.5 px-2 text-xs text-slate-300">
+              <button type="button" onClick={useMyLocation} className="max-sm:min-h-11 glass-button flex min-h-9 items-center gap-1.5 px-2 text-xs text-slate-300">
                 <Crosshair size={13} /> Use mine
               </button>
             </div>
@@ -420,7 +420,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                     type="button"
                     aria-pressed={draft.scope === scope}
                     onClick={() => setDraft({ ...draft, scope })}
-                    className={`min-h-9 rounded-full border px-3 text-xs ${
+                    className={`max-sm:min-h-11 min-h-9 rounded-full border px-3 text-xs ${
                       draft.scope === scope
                         ? 'border-purple-400/60 bg-purple-500/20 text-purple-100'
                         : 'border-white/10 text-slate-400 hover:text-slate-200'
@@ -446,11 +446,11 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                 type="button"
                 onClick={submitDraft}
                 disabled={savePlace.isPending}
-                className="glass-button min-h-9 px-3 text-xs text-emerald-200 disabled:opacity-60"
+                className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-emerald-200 disabled:opacity-60"
               >
                 {draft.id ? 'Save place' : 'Add place'}
               </button>
-              <button type="button" onClick={() => setDraft(null)} className="glass-button min-h-9 px-3 text-xs text-slate-400">
+              <button type="button" onClick={() => setDraft(null)} className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-slate-400">
                 Cancel
               </button>
             </div>
@@ -489,7 +489,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                         important: true,
                       })
                     }
-                    className="glass-button min-h-9 px-3 text-xs text-emerald-200"
+                    className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-emerald-200"
                   >
                     Add as a place
                   </button>
@@ -497,7 +497,7 @@ export default function PlacesPanel({ places, members, canEdit, onSaved, current
                     type="button"
                     aria-label={`Not a place: ${spot.place}`}
                     onClick={() => dismiss.mutate(spot)}
-                    className="glass-button min-h-9 px-3 text-xs text-slate-400"
+                    className="max-sm:min-h-11 glass-button min-h-9 px-3 text-xs text-slate-400"
                   >
                     Not a place
                   </button>

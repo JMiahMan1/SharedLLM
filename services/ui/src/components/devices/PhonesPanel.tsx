@@ -173,7 +173,7 @@ function PhoneRow({ phone, onChanged }: { phone: Phone; onChanged: () => void })
 
       {phone.sensors.length > shown.length && (
         <div>
-          <button type="button" className="inline-flex items-center gap-1 text-xs text-slate-400" onClick={() => setOpen((v) => !v)}>
+          <button type="button" className="inline-flex min-h-11 items-center gap-1 text-xs text-slate-400 sm:min-h-0" onClick={() => setOpen((v) => !v)}>
             {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} All sensors ({phone.sensors.length})
           </button>
           {open && <ul className="mt-2 space-y-1">{phone.sensors.map((s) => <SensorLine key={s.entity_id} s={s} />)}</ul>}

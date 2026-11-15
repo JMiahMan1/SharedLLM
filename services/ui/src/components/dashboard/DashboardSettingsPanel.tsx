@@ -405,13 +405,13 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
                   </p>
                   <button
                     onClick={() => setConfirmingReset(false)}
-                    className="px-3 py-2 text-sm text-slate-300 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                    className="px-3 py-2 max-sm:min-h-11 text-sm text-slate-300 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleReset}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-300 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 max-sm:min-h-11 text-sm font-medium text-red-300 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
                   >
                     <RotateCcw size={14} />
                     Yes, reset all
@@ -421,7 +421,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
                 <button
                   onClick={() => setConfirmingReset(true)}
                   aria-describedby="reset-all-hint"
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-300 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 max-sm:min-h-11 text-sm font-medium text-amber-300 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
                 >
                   <RotateCcw size={14} />
                   Reset All
