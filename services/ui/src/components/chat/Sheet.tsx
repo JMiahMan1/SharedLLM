@@ -1,33 +1,19 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { X } from 'lucide-react';
-import { focusableIn, trapTab } from '../../lib/focusTrap';
+import { useDialogFocus } from '../../lib/focusTrap';
 
 /** A bottom sheet on a phone, a centred panel on a wide screen. */
 export default function Sheet({ title, onClose, children, testId }: { title: string; onClose: () => void; children: ReactNode; testId?: string }) {
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
   // A dialog that does not take focus lets Tab walk into the page behind it and
   // leaves the reader with no idea where they are. Take focus on open, keep it
   // inside, and hand it back to whatever opened the sheet on close.
-  useEffect(() => {
-    const restoreTo = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    const first = focusableIn(panel)[0] ?? panel;
-    first?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-        return;
-      }
-      trapTab(e, panel);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      restoreTo?.focus?.();
-    };
-  }, [onClose]);
+  //
+  // Once, on open: the chat passes an inline `onClose`, and the chat re-renders
+  // on every poll. Re-running the focus effect for each new `onClose` pulled
+  // focus out of the field being typed in (closing a phone's keyboard) every
+  // few seconds, in the new group's name, the people search and the private
+  // chat's password.
+  const panelRef = useDialogFocus<HTMLDivElement>(true, onClose);
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={title}>

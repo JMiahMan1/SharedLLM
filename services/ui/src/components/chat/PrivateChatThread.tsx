@@ -19,6 +19,7 @@ import {
   type TalkMessage,
 } from './chatModel';
 import { canNudge, errorText, type PrivateChatInfo } from './privateChatModel';
+import { isImeKey } from '../../lib/keyboard';
 
 interface PrivateChatThreadProps {
   conversation: TalkConversation;
@@ -480,7 +481,7 @@ function UnlockedChat({ token, conversation, messages, opened, myActorIds, vault
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !Capacitor.isNativePlatform()) {
+            if (event.key === 'Enter' && !event.shiftKey && !isImeKey(event) && !Capacitor.isNativePlatform()) {
               event.preventDefault();
               void sendText(event);
             }
