@@ -21,7 +21,9 @@ import java.io.OutputStream;
  * The APK goes through a {@link PackageInstaller} session instead of the
  * "open this .apk" hand-off. On Android 12+ a session that updates the app
  * doing the installing needs no tap once Jarvis is its own installer of
- * record ({@code USER_ACTION_NOT_REQUIRED}); the first time, or on older
+ * record ({@code USER_ACTION_NOT_REQUIRED}, which also needs the
+ * UPDATE_PACKAGES_WITHOUT_USER_ACTION permission in the manifest: without it
+ * Android silently ignores the request and asks every time); the first time, or on older
  * Android, Android still asks, and {@link Receiver} shows that screen (or a
  * notification to tap when the app is in the background).
  *
@@ -89,6 +91,12 @@ final class SelfUpdate {
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 params.setPackageSource(PackageInstaller.PACKAGE_SOURCE_OTHER);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+: Jarvis keeps the update ownership of itself, so
+                // no other installer (a browser, Files) takes it over and makes
+                // the next update ask again.
+                params.setRequestUpdateOwnership(true);
             }
             int sessionId = installer.createSession(params);
             session = installer.openSession(sessionId);

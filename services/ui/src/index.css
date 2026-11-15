@@ -605,3 +605,18 @@ input[type="range"] {
     line-height: 44px;
   }
 }
+
+/*
+ * iPhone and iPad zoom the page into any field whose text is under 16px and
+ * leave it zoomed. Only iOS has -webkit-touch-callout, so only there are
+ * fields raised to 16px; every other screen keeps the design's sizes. Unlayered
+ * on purpose: it outranks the layered utility classes (text-xs, text-sm).
+ */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: max(16px, 1em);
+  }
+}

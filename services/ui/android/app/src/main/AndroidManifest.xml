@@ -42,6 +42,11 @@
         android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: lets Jarvis update itself with no tap and no lock-screen
+         check (SelfUpdate asks for USER_ACTION_NOT_REQUIRED). Without this
+         permission Android ignores that request and shows its install screen
+         for every update. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <!-- Install approvals: the screen guard lists the apps on a child's phone to
          hold a newly installed one until a parent says yes. Sideloaded, never
          on Play. -->
