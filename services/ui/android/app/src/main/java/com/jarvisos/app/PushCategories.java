@@ -16,6 +16,10 @@ final class PushCategories {
     static final String CHAT = "chat";
     static final String GENERAL = "general";
     static final String URGENT = "urgent";
+    /** A parent nudged the other in their private chat: its own sound and heartbeat vibration. */
+    static final String NUDGE = "nudge";
+    /** Two quick pulses, a pause, two more: a heartbeat, unlike any other notice. */
+    static final long[] NUDGE_VIBRATION = {0, 120, 90, 120, 450, 120, 90, 120};
 
     static final String CHANNEL_PREFIX = "jarvis_";
 
@@ -54,6 +58,8 @@ final class PushCategories {
     static final List<Category> ALL = Collections.unmodifiableList(Arrays.asList(
         new Category(CHAT, "Family chat",
             "New messages and Jarvis answers in your conversations.", POP_UP, GROUP_FAMILY, R.drawable.mi_chat),
+        new Category(NUDGE, "Nudges",
+            "When the other parent nudges you in your private chat.", POP_UP, GROUP_FAMILY, R.drawable.mi_favorite),
         new Category("call", "Family calls",
             "When somebody starts a family call.", POP_UP, GROUP_FAMILY, R.drawable.mi_call),
         new Category("family_presence", "Arrivals and departures",

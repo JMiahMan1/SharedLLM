@@ -625,8 +625,11 @@ async def nudge(token: str, request: Request):
     sent = await notify.send_many(
         others,
         lambda person: notify.notice(
-            person, "chat", "Private chat", f"{_display(me)} nudged you in your private chat",
-            url=url, priority=4, tag=f"private-nudge:{token}",
+            # Its own category: the phones give a nudge its own sound and a
+            # heartbeat vibration (Android channel "Nudges"), and an open
+            # Jarvis shows it full screen, so it does not pass as one more message.
+            person, "nudge", "Private chat", f"{_display(me)} nudged you in your private chat",
+            url=url, priority=4, tag=f"private-nudge:{token}", kind="nudge",
             actions=[notify.view_action(url)],
             data={"token": token, "private": True, "nudge": True},
         ),

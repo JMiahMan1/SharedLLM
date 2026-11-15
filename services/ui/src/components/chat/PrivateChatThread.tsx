@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { BellRing, Camera, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
+import { useHaptics } from '../../hooks/useHaptics';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -345,6 +346,8 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
+  const [nudgeSent, setNudgeSent] = useState(false);
+  const { trigger } = useHaptics();
   const [selected, setSelected] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{ url: string; name: string; message?: TalkMessage } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -455,6 +458,10 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     setNudging(true);
     try {
       await api.nudgePrivateChat(token);
+      // The sender feels it go too: a short heartbeat and the heart beating on the button.
+      trigger('success');
+      setNudgeSent(true);
+      window.setTimeout(() => setNudgeSent(false), 1600);
       toast.success('Nudged');
     } catch (error) {
       toast.error(errorText(error, 'Could not nudge'));
@@ -489,7 +496,12 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
             data-testid="private-nudge"
             className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/10 disabled:opacity-50"
           >
-            <BellRing size={14} aria-hidden /> Nudge
+            {nudgeSent ? (
+              <Heart size={14} className="fill-rose-400 text-rose-300 motion-safe:animate-[nudge-beat_1.1s_ease-in-out_infinite]" aria-hidden />
+            ) : (
+              <BellRing size={14} aria-hidden />
+            )}{' '}
+            {nudgeSent ? 'Nudged' : 'Nudge'}
           </button>
         )}
         <button

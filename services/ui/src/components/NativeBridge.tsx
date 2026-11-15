@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { App } from '@capacitor/app';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../context/AuthContext';
 import ChatNotify from '../plugins/chatNotify';
+import NudgeOverlay, { type Nudge } from './chat/NudgeOverlay';
 
 /**
  * Android glue that needs the router: once signed in, notifications are
@@ -79,5 +80,28 @@ export default function NativeBridge() {
     };
   }, [native, navigate]);
 
-  return null;
+  // A nudge while Jarvis is open: shown full screen, not as one more message.
+  const [nudge, setNudge] = useState<Nudge | null>(null);
+  useEffect(() => {
+    if (!native) return;
+    const handle = ChatNotify.addListener('nudge', ({ body, path }) => {
+      setNudge({ body: body || 'You were nudged in your private chat', path: path && path.startsWith('/') ? path : '/family' });
+    });
+    return () => {
+      void handle.then((h) => h.remove()).catch(() => {});
+    };
+  }, [native]);
+  const closeNudge = useCallback(() => setNudge(null), []);
+
+  if (!nudge) return null;
+  return (
+    <NudgeOverlay
+      nudge={nudge}
+      onClose={closeNudge}
+      onOpen={() => {
+        setNudge(null);
+        navigate(nudge.path);
+      }}
+    />
+  );
 }

@@ -378,6 +378,8 @@ def test_a_nudge_says_who_and_nothing_else(env):
     assert {n["user"] for n in env["notices"]} <= {"alex", "sam"}
     assert notice["title"] == "Private chat"
     assert notice["body"] == "Alex nudged you in your private chat"
+    # Its own category and kind: the phone's "Nudges" channel (sound, heartbeat vibration).
+    assert notice["category"] == "nudge" and notice["kind"] == "nudge"
     assert notice["data"]["url"] == "/family?chat=room123abc"
     assert not any(a.get("type") == "reply" for a in notice.get("actions", []))
 

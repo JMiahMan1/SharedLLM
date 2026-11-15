@@ -98,6 +98,12 @@ public final class PushNotifier {
                 .setShowWhen(true)
                 .setContentIntent(openIntent(context, n.path.isEmpty() ? "/" : n.path, id));
         if (PushCategories.silent(n.priority)) b.setSilent(true);
+        if (PushCategories.NUDGE.equals(n.category)) {
+            // Before Android 8 the sound and vibration go on the notification itself.
+            b.setSound(nudgeSound(context)).setVibrate(PushCategories.NUDGE_VIBRATION);
+            // Jarvis on screen: the page shows its own nudge as well.
+            PushPlugin.nudged(n.title, n.body, n.path);
+        }
         addActions(context, b, n.actions, n, id, null);
         nm.notify(id, b.build());
     }
@@ -306,11 +312,25 @@ public final class PushNotifier {
             // description; what the person changed in Android stays.
             NotificationChannel ch = new NotificationChannel(c.channelId(), c.name, importance(c.importance));
             ch.setDescription(c.description);
+            if (PushCategories.NUDGE.equals(c.id)) {
+                // A new channel id, so its sound and vibration apply (Android fixes
+                // them when a channel is first made).
+                ch.setSound(nudgeSound(context), new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+                ch.enableVibration(true);
+                ch.setVibrationPattern(PushCategories.NUDGE_VIBRATION);
+            }
             if (c.group != null) ch.setGroup(c.group);
             channels.add(ch);
         }
         nm.createNotificationChannels(channels);
         channelsReady = true;
+    }
+
+    static android.net.Uri nudgeSound(Context context) {
+        return android.net.Uri.parse("android.resource://" + context.getPackageName() + "/" + R.raw.jarvis_nudge);
     }
 
     private static int importance(int level) {

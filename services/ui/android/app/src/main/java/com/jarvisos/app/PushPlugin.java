@@ -155,6 +155,26 @@ public class PushPlugin extends Plugin {
         });
     }
 
+    /** The loaded plugin, so a nudge that arrives while Jarvis is open reaches the page. */
+    private static volatile PushPlugin current;
+
+    @Override
+    public void load() {
+        super.load();
+        current = this;
+    }
+
+    /** A nudge arrived: the open page shows it (nothing is kept if no page listens). */
+    static void nudged(String title, String body, String path) {
+        PushPlugin plugin = current;
+        if (plugin == null || !PushNotifier.appVisible) return;
+        JSObject data = new JSObject();
+        data.put("title", title);
+        data.put("body", body);
+        data.put("path", path);
+        plugin.notifyListeners("nudge", data);
+    }
+
     /** A notification was tapped: tell JS where to go (kept until it listens). */
     void open(String path) {
         JSObject data = new JSObject();
