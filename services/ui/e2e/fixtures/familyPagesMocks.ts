@@ -460,6 +460,9 @@ function answer(p: string, url: URL, method: string): unknown {
       return { status: 'SUCCESS', detail: { messages: MESSAGES.map((m) => ({ ...m, token })) } };
     }
     case '/api/communication/talk/polls': return { status: 'SUCCESS', detail: { polls: [] } };
+    // The parents' private chat: a parent with none yet, who could start one with Robin.
+    case '/api/private-chat/status':
+      return { eligible: true, reason: null, chats: [], partners: [{ username: 'robin', display_name: 'Robin' }], min_iterations: 600000 };
     case '/api/communication/talk/participants': return { status: 'SUCCESS', detail: { participants: PARTICIPANTS } };
     case '/api/communication/talk/people':
       return { status: 'SUCCESS', detail: { people: DIRECTORY.map((d) => ({ id: d.username, label: d.display_name })) } };
