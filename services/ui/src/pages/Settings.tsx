@@ -821,8 +821,9 @@ const AppUpdatesSection = () => {
           <div className="min-w-0">
             <p className="text-sm font-medium text-amber-200">Google Play Protect stopped an update</p>
             <p className="text-xs text-amber-100/80">
-              Play Protect asks to scan every new Jarvis version. In its settings, turn off
-              &ldquo;Improve harmful app detection&rdquo;; the update then installs by itself.
+              Play Protect asks to scan every new Jarvis version. On this phone open Settings,
+              Google, Security, Google Play Protect, tap the gear and turn off &ldquo;Improve
+              harmful app detection&rdquo;. Scanning stays on; the update then installs by itself.
             </p>
           </div>
           <button

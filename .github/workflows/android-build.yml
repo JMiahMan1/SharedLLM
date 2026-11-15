@@ -4,11 +4,23 @@ on:
   push:
     branches: [ main, microservices ]
     paths:
-      - 'services/ui/**'
+      # Only what the APK itself is made of. A web-only change reaches phones as
+      # the OTA web bundle; building an APK for it made every phone install a
+      # new APK (and Play Protect ask about it) for nothing.
+      - 'services/ui/android/**'
+      - 'services/ui/package.json'
+      - 'services/ui/package-lock.json'
+      - 'services/ui/capacitor.config.*'
   pull_request:
     branches: [ main, microservices ]
     paths:
-      - 'services/ui/**'
+      # Only what the APK itself is made of. A web-only change reaches phones as
+      # the OTA web bundle; building an APK for it made every phone install a
+      # new APK (and Play Protect ask about it) for nothing.
+      - 'services/ui/android/**'
+      - 'services/ui/package.json'
+      - 'services/ui/package-lock.json'
+      - 'services/ui/capacitor.config.*'
   workflow_dispatch:
 
 jobs:
