@@ -25,6 +25,7 @@ import { api } from '../../services/api';
 import type { TimerTargetDevice } from '../../types/api';
 import { formatClock } from '../../lib/utils';
 import toast from 'react-hot-toast';
+import NumberField from '../ui/NumberField';
 
 const FALLBACK_EMOJIS = [
   { emoji: '🥚', label: 'Egg Timer' },
@@ -938,10 +939,10 @@ const AmbientTimerWidget = ({ settingsButton }: IWidgetProps) => {
         )}
 
         <div className="flex gap-2">
-          <input
-            type="number"
+          <NumberField
+            inputMode="numeric"
             value={newDuration}
-            onChange={(e) => setNewDuration(Math.max(1, Number(e.target.value)))}
+            onValue={(n) => setNewDuration(Math.max(1, Math.round(n ?? 1)))}
             className="glass-input w-20 px-3 py-2 text-sm shrink-0"
             aria-label="Timer duration in seconds"
             placeholder="Sec"

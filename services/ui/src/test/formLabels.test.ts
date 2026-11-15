@@ -70,7 +70,8 @@ describe('form label and control accessibility', () => {
         const openTag = findJsxTags(block, ['label'])[0]?.tag ?? '';
         if (openTag.includes('htmlFor=')) continue;
         const body = block.slice(openTag.length, -'</label>'.length);
-        const controls = findJsxTags(body, ['input', 'select', 'textarea']);
+        // NumberField renders exactly one <input> with the props it is given.
+        const controls = findJsxTags(body, ['input', 'select', 'textarea', 'NumberField']);
         if (controls.length === 1) continue;
         // Generic wrappers whose one control arrives as children (the Health
         // profile's rows, and the Automations/Schedules `Field`).
@@ -97,8 +98,10 @@ describe('form label and control accessibility', () => {
       while ((m = containerBlock.exec(text)) !== null) {
         ranges.push([m.index, m.index + m[0].length]);
       }
-      for (const { start, end, tag } of findJsxTags(text, ['input', 'select', 'textarea'])) {
+      for (const { start, end, tag } of findJsxTags(text, ['input', 'select', 'textarea', 'NumberField'])) {
         if (tag.includes('type="hidden"') || /\bhidden\b/.test(tag)) continue;
+        // A wrapper's own input takes its name from the caller's props, which are checked where it is used.
+        if (path.basename(file) === 'NumberField.tsx' && tag.includes('{...rest}')) continue;
         if (tag.includes('className="hidden"') || tag.includes('sr-only')) continue;
         if (ranges.some(([s, e]) => s <= start && end <= e)) continue;
         if (/\b(aria-label|aria-labelledby|title)=/.test(tag)) continue;

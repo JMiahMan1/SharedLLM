@@ -45,3 +45,18 @@ test('P5-T2 ⌘K from Listen Now opens search', async ({ page }) => {
   await expect(page.getByRole('searchbox', { name: 'Search music and books' })).toBeFocused();
   api.assertNoUnmocked();
 });
+
+test('typing fast, and editing mid-word, keeps every letter and the caret', async ({ page }) => {
+  await setupPlayerMocks(page);
+  await page.goto('/media/search');
+  const box = page.getByRole('searchbox', { name: 'Search music and books' });
+  await expect(box).toBeFocused();
+  await page.keyboard.type('midnight city lights', { delay: 0 });
+  await expect(box).toHaveValue('midnight city lights');
+  // Fix a word in the middle: the caret must stay where the edit is.
+  await box.evaluate((el: HTMLInputElement) => el.setSelectionRange(8, 8));
+  await page.keyboard.type('XY', { delay: 0 });
+  await expect(box).toHaveValue('midnightXY city lights');
+  expect(await box.evaluate((el: HTMLInputElement) => el.selectionStart)).toBe(10);
+  await expect(page).toHaveURL(/q=midnightXY\+city\+lights/);
+});

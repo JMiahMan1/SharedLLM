@@ -19,6 +19,7 @@ import {
 } from '../../lib/phones';
 import type { Phone, PhoneSensor, PhoneSettings } from '../../lib/phones';
 import { confirmDialog } from '../ui/confirmDialog';
+import NumberField from '../ui/NumberField';
 
 const QUERY_KEY = ['homehub-phones'];
 const button = 'inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-50';
@@ -227,8 +228,8 @@ function SettingsForm({ settings, onSaved }: { settings: PhoneSettings; onSaved:
       </label>
       <label className="block text-xs text-slate-400">
         Minutes a companion app report counts as fresh
-        <input className={input} type="number" min={1} value={draft.companion_fresh_minutes}
-          onChange={(e) => set('companion_fresh_minutes', Number(e.target.value) || 1)} aria-label="Fresh minutes" />
+        <NumberField className={input} inputMode="numeric" value={draft.companion_fresh_minutes}
+          onValue={(n) => set('companion_fresh_minutes', Math.max(1, Math.round(n ?? 1)))} aria-label="Fresh minutes" />
       </label>
       <label className="flex min-h-11 items-center gap-2 text-xs text-slate-300">
         <input type="checkbox" checked={draft.jarvis_fallback} onChange={(e) => set('jarvis_fallback', e.target.checked)} />

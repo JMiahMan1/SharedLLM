@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { History, Search, X } from 'lucide-react';
 import { MIN_SEARCH_LENGTH, useMediaSearch } from '../api/queries';
@@ -45,7 +45,13 @@ function countFor(data: MediaSearchResponse, filter: 'all' | Bucket): number {
  */
 export default function SearchPage() {
   const [params, setParams] = useSearchParams();
-  const q = params.get('q') ?? '';
+  const urlQ = params.get('q') ?? '';
+  // The box keeps its own text and writes it to the URL. Bound straight to the
+  // URL, every key press came back through the router, which applies a URL
+  // change as a transition: the box was drawn with the previous text first, so
+  // the keyboard's word in progress broke (letters dropped or doubled on
+  // Android, the cursor jumped to the end).
+  const [q, setQ] = useState(urlQ);
   const filterParam = params.get('type') as Bucket | null;
   const filter: 'all' | Bucket = FILTERS.some((f) => f.id === filterParam) ? (filterParam as Bucket) : 'all';
   const search = useMediaSearch(q);
@@ -62,7 +68,14 @@ export default function SearchPage() {
     el?.setSelectionRange(el.value.length, el.value.length);
   }, []);
 
+  // Back and forward (or a link) change the URL: show that search, unless the
+  // box is being typed in, where the URL only ever trails the box.
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setQ(urlQ);
+  }, [urlQ]);
+
   const update = (next: { q?: string; type?: 'all' | Bucket }) => {
+    if (next.q !== undefined) setQ(next.q);
     const query = next.q ?? q;
     const type = next.type ?? filter;
     const p: Record<string, string> = {};
