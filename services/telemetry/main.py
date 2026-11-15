@@ -26,7 +26,7 @@ from fastapi import HTTPException
 
 from services.common import jarvis_use
 from services.common.secrets import secret_matches
-from services.telemetry import guardian, notices, push, spotify_sync, store
+from services.telemetry import app_catalog, guardian, notices, push, spotify_sync, store
 from services.telemetry.alpaca import is_busy
 from services.telemetry.config import (
     BUSY_DEFER_SECONDS,
@@ -306,6 +306,7 @@ async def lifespan(app):
         asyncio.create_task(worker_loop()),
         asyncio.create_task(guardian.recap_loop(_redis, _client, deliver_notice)),
         asyncio.create_task(spotify_sync.sync_loop(_redis, _client, deliver_notice)),
+        asyncio.create_task(app_catalog.catalog_loop(_redis, _client, deliver_notice)),
     ]
     log.info("Telemetry scheduler + worker started")
     try:
@@ -702,6 +703,67 @@ def create_app():
         keys = [d.strip() for d in devices.split(",") if d.strip()][:20]
         rc = _redis()
         return {"status": "SUCCESS", "nights": await store.get_nights(rc, keys, night)}
+
+    @application.post("/api/telemetry/apps/inventory")
+    async def record_app_inventory(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """One child's device's installed apps (the gateway checked the device
+        and that it is a minor's). The device's previous list is replaced;
+        packages not yet looked up are queued, and apps already known are
+        assessed now so a parent hears about a flagged one without waiting."""
+        user = str(body.get("user") or "").strip().lower()
+        device = str(body.get("device") or "").strip()
+        if not user or not device or not isinstance(body.get("apps"), list):
+            raise HTTPException(status_code=422, detail="user, device and apps required")
+        rc = _redis()
+        kept = await app_catalog.save_inventory(rc, user, device, body)
+        child = (await guardian.children(_client())).get(user)
+        if child:
+            try:
+                kept["notified"] = await app_catalog.notify_child(rc, child, deliver_notice)
+            except Exception as exc:  # a notice that fails never loses the inventory
+                log.warning("app notices for %s failed: %s", user, exc)
+        return {"status": "SUCCESS", **kept}
+
+    @application.post("/api/telemetry/apps/catalog")
+    async def app_catalog_entries(body: dict = Body(...), _: bool = Depends(require_internal)):
+        """What is known about some packages (listing summary and review), with
+        the unknown or old ones queued ahead of the rest. ``waiting`` names a
+        request whose notice is sent again once its verdict is in."""
+        packages = body.get("packages")
+        if not isinstance(packages, list) or not all(isinstance(p, str) for p in packages):
+            raise HTTPException(status_code=422, detail="packages must be a list of package names")
+        packages = [p for p in packages if app_catalog.app_vetting.is_package(p)][:100]
+        rc = _redis()
+        queued = await app_catalog.queue_lookups(rc, packages, first=True)
+        waiting = body.get("waiting")
+        known = await app_catalog.catalog(rc, packages)
+        if isinstance(waiting, dict) and len(packages) == 1 and waiting.get("child") \
+                and not app_catalog.settled(known.get(packages[0]) or {}):
+            await app_catalog.wait_for(rc, packages[0], {
+                "child": str(waiting["child"]).lower(),
+                "request_id": waiting.get("request_id"),
+                "label": str(waiting.get("label") or "")[:120],
+            })
+        return {"status": "SUCCESS", "catalog": known, "queued": queued}
+
+    @application.get("/api/telemetry/apps/{user}")
+    async def app_inventory(user: str, _: bool = Depends(require_internal)):
+        """A child's apps across their devices, each with what is known about
+        it; the gateway adds the policy and decides who may see it."""
+        rc = _redis()
+        apps, devices = await app_catalog.merged_apps(rc, user.strip().lower())
+        backoff = await app_catalog.backoff_state(rc)
+        return {
+            "status": "SUCCESS",
+            "devices": devices,
+            "apps": apps,
+            "catalog": await app_catalog.catalog(rc, [a["package"] for a in apps]),
+            "lookups": {
+                "enabled": app_catalog.APP_CATALOG_ENABLED,
+                "paused_until": (backoff or {}).get("until_iso"),
+                "paused_reason": (backoff or {}).get("reason"),
+            },
+        }
 
     @application.post("/api/telemetry/notify")
     async def notify(body: dict = Body(...), _: bool = Depends(require_internal)):

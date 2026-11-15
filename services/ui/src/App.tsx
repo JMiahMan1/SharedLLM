@@ -15,6 +15,7 @@ import MobileShell from './components/layout/MobileShell';
 import DeployBanner from './components/layout/DeployBanner';
 import ActivityBeacon from './components/layout/ActivityBeacon';
 import PhoneUsageSync from './components/layout/PhoneUsageSync';
+import AppInventorySync from './components/layout/AppInventorySync';
 import GuardWatch from './components/layout/GuardWatch';
 import MediaSessionSync from './components/layout/MediaSessionSync';
 import CommsSync from './components/layout/CommsSync';
@@ -160,6 +161,7 @@ function App() {
           <NativeBridge />
           <ActivityBeacon />
           <PhoneUsageSync />
+          <AppInventorySync />
           <GuardWatch />
 <MediaSessionSync />
 <CommsSync />

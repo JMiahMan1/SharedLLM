@@ -377,6 +377,7 @@
 [data-theme-scheme="light"] .text-emerald-100 { color: oklch(50.8% 0.118 165.612) !important; }
 [data-theme-scheme="light"] .text-emerald-200 { color: oklch(50.8% 0.118 165.612) !important; }
 [data-theme-scheme="light"] .text-emerald-200\/80 { color: color-mix(in srgb, oklch(50.8% 0.118 165.612) 80%, transparent) !important; }
+[data-theme-scheme="light"] .text-emerald-200\/90 { color: color-mix(in srgb, oklch(50.8% 0.118 165.612) 90%, transparent) !important; }
 [data-theme-scheme="light"] .text-emerald-300 { color: oklch(50.8% 0.118 165.612) !important; }
 [data-theme-scheme="light"] .text-emerald-300\/80 { color: color-mix(in srgb, oklch(50.8% 0.118 165.612) 80%, transparent) !important; }
 [data-theme-scheme="light"] .text-emerald-300\/90 { color: color-mix(in srgb, oklch(50.8% 0.118 165.612) 90%, transparent) !important; }

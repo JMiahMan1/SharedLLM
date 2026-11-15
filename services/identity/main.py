@@ -14,7 +14,7 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as dt
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -30,7 +30,7 @@ from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from services.common import concern_monitor as concern_levels
-from services.common import device_noun, ha_redirect
+from services.common import app_vetting, device_noun, ha_redirect
 from services.common.http import get_client, get_client_insecure
 from services.common.screen_time import (
     LOCKED_SECTIONS,
@@ -204,6 +204,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
         _add_column("user", "family_role", "ALTER TABLE user ADD COLUMN family_role VARCHAR NOT NULL DEFAULT 'other'")
         _add_column("user", "mother_username", "ALTER TABLE user ADD COLUMN mother_username VARCHAR")
+        _add_column("user", "birth_date", "ALTER TABLE user ADD COLUMN birth_date VARCHAR")
         _add_column("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR")
         _add_column("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR")
         _add_column("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR")
@@ -5203,7 +5204,7 @@ def put_screen_rules(username: str, body: dict, session: Session = Depends(get_s
     current = _screen_rules(session, subject.username)
     # A pause, a temporary app unblock and each parent's own notification
     # level survive a rules edit (the last is set per parent, below).
-    for key in ("paused", "paused_until", "paused_at", "app_allow_until", "notify_levels"):
+    for key in ("paused", "paused_until", "paused_at", "app_allow_until", "notify_levels", "app_policy"):
         if key in current and key not in rules:
             rules[key] = current[key]
     _save_screen_rules(session, subject.username, rules, caller.username)
@@ -5237,6 +5238,188 @@ def put_notify_level(username: str, body: dict, session: Session = Depends(get_s
         "level": levels.get(caller.username),
         "effective": levels.get(caller.username) or rules.get("monitoring") or concern_levels.DEFAULT_NOTIFY_LEVEL,
     }
+
+
+# --- app vetting: the age rule and the parents' choices per app -------------
+# (services/common/app_vetting.py; telemetry looks the apps up, the gateway
+# puts the Apps card together). A child's parents and admins only, the same
+# rule as their screen time: the child never reads or changes it.
+
+
+def _app_subject(session: Session, username: str, caller: User) -> User:
+    subject = _screen_subject(session, username)
+    if not _may_manage_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only this child's parents can see or change their apps")
+    return subject
+
+
+def _can_uninstall(session: Session, username: str) -> bool:
+    """Whether any of the child's devices last reported Jarvis as its device
+    owner: only then does a removal queued in ``uninstall_apps`` happen."""
+    devices = session.exec(select(Device).where(Device.owner_username == username, Device.revoked == False)).all()  # noqa: E712
+    for device in devices:
+        try:
+            caps = json.loads(device.capabilities or "{}")
+        except (TypeError, ValueError):
+            continue
+        guard = caps.get("guard") if isinstance(caps, dict) else None
+        if isinstance(guard, dict) and guard.get("deviceOwner") is True:
+            return True
+    return False
+
+
+def _app_policy_read(session: Session, subject: User, caller: User) -> dict:
+    rules = _screen_rules(session, subject.username)
+    policy = app_vetting.effective_policy(rules.get("app_policy"), subject.birth_date, date.today())
+    levels = rules.get("notify_levels") or {}
+    return {
+        "username": subject.username,
+        "display_name": subject.display_name or subject.username,
+        **policy,
+        "ratings": list(app_vetting.RATINGS),
+        "blocked_apps": rules.get("blocked_apps") or [],
+        "uninstall_apps": rules.get("uninstall_apps") or [],
+        "can_uninstall": _can_uninstall(session, subject.username),
+        # The caller's own notify level decides what is put first for them.
+        "notify_level": levels.get(caller.username) or rules.get("monitoring") or concern_levels.DEFAULT_NOTIFY_LEVEL,
+    }
+
+
+def _save_app_policy(session: Session, subject: User, policy: dict, by: str) -> None:
+    rules = _screen_rules(session, subject.username)
+    rules["app_policy"] = {k: v for k, v in policy.items() if k in ("max_rating", "apps", "unused_days", "dismissed", "kept")}
+    _save_screen_rules(session, subject.username, rules, by)
+
+
+@app.get("/api/apps/{username}/policy")
+def get_app_policy(username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """The child's age, the rating limit (from the age, or a parent's choice),
+    the per-app choices and dismissals, and what removal can do."""
+    return _app_policy_read(session, _app_subject(session, username, caller), caller)
+
+
+@app.put("/api/apps/{username}/policy")
+def put_app_policy(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """``{"birth_date": "YYYY-MM-DD"|null, "max_rating": rating|null,
+    "unused_days": n}``; any key left out is unchanged, null clears it."""
+    subject = _app_subject(session, username, caller)
+    body = body or {}
+    policy = app_vetting.clean_policy(_screen_rules(session, subject.username).get("app_policy"))
+    if "birth_date" in body:
+        if body["birth_date"] is None:
+            subject.birth_date = None
+        else:
+            try:
+                subject.birth_date = app_vetting.parse_birth_date(body["birth_date"], date.today()).isoformat()
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        session.add(subject)
+    if "max_rating" in body:
+        if body["max_rating"] is None:
+            policy.pop("max_rating", None)
+        elif body["max_rating"] in app_vetting.RATINGS:
+            policy["max_rating"] = body["max_rating"]
+        else:
+            raise HTTPException(status_code=422, detail=f"max_rating must be one of {', '.join(app_vetting.RATINGS)}")
+    if "unused_days" in body:
+        days = body["unused_days"]
+        low, high = app_vetting.UNUSED_DAYS_RANGE
+        if not isinstance(days, int) or isinstance(days, bool) or not low <= days <= high:
+            raise HTTPException(status_code=422, detail=f"unused_days must be whole days from {low} to {high}")
+        policy["unused_days"] = days
+    _save_app_policy(session, subject, policy, caller.username)
+    session.commit()
+    session.refresh(subject)
+    return _app_policy_read(session, subject, caller)
+
+
+@app.put("/api/apps/{username}/policy/apps/{package}")
+def put_app_override(username: str, package: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """A parent's choice for one app: ``{"mode": "allow"}`` (never flag it),
+    ``{"mode": "flag"}`` (always flag it) or ``{"mode": null}`` (the rules decide)."""
+    subject = _app_subject(session, username, caller)
+    if not app_vetting.is_package(package):
+        raise HTTPException(status_code=422, detail="package must be an app package")
+    mode = (body or {}).get("mode")
+    if mode is not None and mode not in app_vetting.APP_OVERRIDES:
+        raise HTTPException(status_code=422, detail="mode must be allow, flag or null")
+    policy = app_vetting.clean_policy(_screen_rules(session, subject.username).get("app_policy"))
+    if mode is None:
+        policy["apps"].pop(package, None)
+    else:
+        policy["apps"][package] = mode
+    _save_app_policy(session, subject, policy, caller.username)
+    session.commit()
+    return _app_policy_read(session, subject, caller)
+
+
+@app.post("/api/apps/{username}/policy/dismiss")
+def dismiss_app(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """"Reviewed, keep": ``{"package", "kind": "flag", "fingerprint"}`` keeps a
+    flagged app off the top until its verdict changes; ``{"package", "kind":
+    "unused"}`` drops a removal suggestion until the app is used again.
+    ``"undo": true`` takes either back."""
+    subject = _app_subject(session, username, caller)
+    body = body or {}
+    package, kind = body.get("package"), body.get("kind")
+    if not app_vetting.is_package(package):
+        raise HTTPException(status_code=422, detail="package must be an app package")
+    if kind not in ("flag", "unused"):
+        raise HTTPException(status_code=422, detail="kind must be flag or unused")
+    policy = app_vetting.clean_policy(_screen_rules(session, subject.username).get("app_policy"))
+    bucket = policy["dismissed" if kind == "flag" else "kept"]
+    if body.get("undo"):
+        bucket.pop(package, None)
+    elif kind == "flag":
+        fingerprint = body.get("fingerprint")
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{16}", fingerprint):
+            raise HTTPException(status_code=422, detail="fingerprint must be the verdict being dismissed")
+        bucket[package] = fingerprint
+    else:
+        bucket[package] = datetime.now(UTC).isoformat()
+    _save_app_policy(session, subject, policy, caller.username)
+    session.commit()
+    return _app_policy_read(session, subject, caller)
+
+
+#: What a parent can do about one app from the Apps card, and the rule list
+#: each one edits (the phone's guard enforces both lists already).
+APP_ACTIONS = {
+    "block": ("blocked_apps", True),
+    "unblock": ("blocked_apps", False),
+    "remove": ("uninstall_apps", True),
+    "cancel_remove": ("uninstall_apps", False),
+}
+
+
+@app.post("/api/apps/{username}/policy/action")
+def app_action(username: str, body: dict, session: Session = Depends(get_session), caller: User = Depends(require_api_key)):
+    """``{"package", "action": "block"|"unblock"|"remove"|"cancel_remove"}``.
+    Block keeps the app from opening on every device; remove uninstalls it,
+    which only a device with Jarvis as its device owner can do (refused, 409,
+    when none is)."""
+    subject = _app_subject(session, username, caller)
+    if not _may_edit_screen_time(caller, subject):
+        raise HTTPException(status_code=403, detail="Only this child's parents can change their apps")
+    body = body or {}
+    package, action = body.get("package"), body.get("action")
+    if not app_vetting.is_package(package):
+        raise HTTPException(status_code=422, detail="package must be an app package")
+    if action not in APP_ACTIONS:
+        raise HTTPException(status_code=422, detail=f"action must be one of {', '.join(APP_ACTIONS)}")
+    if action == "remove" and not _can_uninstall(session, subject.username):
+        raise HTTPException(
+            status_code=409,
+            detail="None of this child's devices has Jarvis as its device owner, so an app cannot be removed "
+            "remotely. Block it instead, or remove it on the device.",
+        )
+    key, add = APP_ACTIONS[action]
+    rules = _screen_rules(session, subject.username)
+    listed = [p for p in rules.get(key) or [] if p != package]
+    rules[key] = [*listed, package] if add else listed
+    _save_screen_rules(session, subject.username, rules, caller.username)
+    session.commit()
+    return _app_policy_read(session, subject, caller)
 
 
 @app.post("/api/screen-time/{username}/pause")
@@ -6118,6 +6301,9 @@ def internal_guardian_children(session: Session = Depends(get_session), _: None 
             "photo_scan": rules.get("photo_scan", True),
             "geofence_alerts": rules.get("geofence_alerts") or {},
             "device_kinds": _device_kinds(session, child.username),
+            # App vetting: the age rule's inputs (telemetry works the limit out).
+            "birth_date": child.birth_date,
+            "app_policy": app_vetting.clean_policy(rules.get("app_policy")),
         })
     return {"children": out}
 

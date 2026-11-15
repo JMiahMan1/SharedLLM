@@ -4,6 +4,7 @@ import MemberCard from '../MemberCard';
 import AppControls from '../../health/AppControls';
 import WebFilterControls from '../../health/WebFilterControls';
 import RequestsCard from '../../guardian/RequestsCard';
+import AppsCard from '../../guardian/AppsCard';
 import { activityQuery, statusQuery } from '../../../lib/memberPage';
 import { relativeTime } from '../../../lib/wanderTrips';
 
@@ -48,6 +49,8 @@ export default function AppsWebSection({ username, name }: { username: string; n
   return (
     <>
       <RequestsCard username={username} name={name} kinds={['app', 'app_unblock', 'permission', 'site']} />
+      {/* Every app's rating and review: the child's parents only (the server refuses anyone else). */}
+      {status?.can_manage && <AppsCard username={username} name={name} />}
       {isLoading || isError || !rules ? (
         <MemberCard
           title="Apps and websites"

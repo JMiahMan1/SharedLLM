@@ -702,7 +702,134 @@ export interface GuardRequest {
   decided_by: string | null;
   created_at: string;
   decided_at: string | null;
+  /** App vetting's verdict on an app request (a parent's view only; never on a child's own). */
+  vetting?: RequestVetting;
 }
+
+/** Where an app's public Play lookup stands. */
+export type AppLookup = 'checking' | 'pending' | 'found' | 'not_on_play' | 'error' | 'off' | 'unavailable';
+export type AppReviewState = 'checking' | 'ready' | 'failed' | 'no_model' | 'not_needed';
+/** The content ratings Google Play uses in the US (IARC), least to most restricted. */
+export type AppRating = 'Everyone' | 'Everyone 10+' | 'Teen' | 'Mature 17+' | 'Adults only 18+';
+
+export interface AppConcern {
+  category: string;
+  label: string;
+  severity: ConcernLevel;
+  why?: string;
+  evidence?: string[];
+}
+
+/** Why an app is flagged: over the age limit, a parent's flag, a review concern, or (not on Play) its permissions. */
+export interface AppFlag {
+  reason: 'over_age' | 'parent_flag' | 'concern' | 'permissions' | 'sideloaded';
+  category: string;
+  level: ConcernLevel;
+  text: string;
+}
+
+export interface RequestVetting {
+  lookup: AppLookup;
+  lookup_reason?: string | null;
+  review_state?: AppReviewState;
+  review_reason?: string | null;
+  title?: string | null;
+  developer?: string | null;
+  rating?: string | null;
+  limit?: string | null;
+  over_age?: boolean | null;
+  ads?: boolean | null;
+  in_app_purchases?: boolean | null;
+  interactive?: string[];
+  summary?: string | null;
+  level?: ConcernLevel | null;
+  stars?: number | null;
+  installs?: string | null;
+  concerns?: Array<Pick<AppConcern, 'label' | 'severity' | 'why'>>;
+  /** The verdict in one or two sentences. */
+  line: string;
+}
+
+/** One installed app with its verdict, for the Apps card. */
+export interface AppVerdict {
+  package: string;
+  label: string;
+  lookup: AppLookup;
+  lookup_reason?: string | null;
+  review_state: AppReviewState;
+  review_reason?: string | null;
+  title?: string | null;
+  developer?: string | null;
+  rating: string | null;
+  rating_descriptors: string[];
+  interactive: string[];
+  limit: string | null;
+  over_age: boolean | null;
+  ads: boolean | null;
+  in_app_purchases: boolean | null;
+  data_safety: { shares_data?: boolean | null; shared_types?: string | null; collects_data?: boolean | null; collected_types?: string | null };
+  stars: number | null;
+  installs: string | null;
+  summary: string | null;
+  concerns: AppConcern[];
+  flags: AppFlag[];
+  level: ConcernLevel | null;
+  override: 'allow' | 'flag' | null;
+  fingerprint: string;
+  dismissed: boolean;
+  store: string | null;
+  installer: string | null;
+  first_install: number | null;
+  last_update: number | null;
+  last_used: number | null;
+  permissions: string[];
+  size_bytes: number | null;
+  devices: string[];
+  /** The flags this parent should see first (their notify level applied). */
+  attention: AppFlag[];
+}
+
+export interface UnusedApp {
+  package: string;
+  label: string;
+  last_used: number | null;
+  first_install: number | null;
+  size_bytes: number | null;
+  days_unused: number;
+  never_used: boolean;
+  devices: string[];
+}
+
+export interface AppPolicy {
+  username: string;
+  display_name: string;
+  birth_date: string | null;
+  age: number | null;
+  default_max_rating: AppRating | null;
+  max_rating: AppRating | null;
+  effective_max_rating: AppRating | null;
+  ratings: AppRating[];
+  apps: Record<string, 'allow' | 'flag'>;
+  unused_days: number;
+  dismissed: Record<string, string>;
+  kept: Record<string, string>;
+  blocked_apps: string[];
+  uninstall_apps: string[];
+  can_uninstall: boolean;
+  notify_level: NotifyLevel;
+}
+
+export interface GuardianApps {
+  username: string;
+  policy: AppPolicy;
+  devices: Array<{ device: string; reported_at: string | null; apps: number; usage_access: boolean }>;
+  apps: AppVerdict[];
+  attention: number;
+  unused: UnusedApp[];
+  lookups: { enabled?: boolean; paused_until?: string | null; paused_reason?: string | null };
+}
+
+export type AppAction = 'block' | 'unblock' | 'remove' | 'cancel_remove';
 
 /** The kinds of suggestion Jarvis makes; a parent can switch each off for a child. */
 export type RecommendationLane = 'music' | 'video' | 'podcast' | 'book' | 'game' | 'activity';

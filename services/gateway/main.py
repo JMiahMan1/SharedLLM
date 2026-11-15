@@ -63,7 +63,7 @@ from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
 from services.gateway import calls, camera_live_routes, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
 from services.gateway import hub_registry_routes
-from services.gateway import phone_routes, room_presence
+from services.gateway import app_vetting_routes, phone_routes, room_presence
 from services.gateway import automation_routes
 from services.gateway import helper_routes
 from services.gateway import dashboard_routes
@@ -935,6 +935,7 @@ app.add_middleware(
 
 app.include_router(info_router)
 app.include_router(family_safety.router)
+app.include_router(app_vetting_routes.router)
 app.include_router(push_routes.router)
 app.include_router(network_routes.router)
 app.include_router(weather_routes.router)
@@ -7284,7 +7285,7 @@ async def _identity_as_caller(request: Request, method: str, path: str, **kwargs
 
 
 async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
-                              actions: list[dict] | None = None) -> None:
+                              actions: list[dict] | None = None, tag: str | None = None) -> None:
     """Tell people about a screen-time or family-safety event.
 
     ``actions`` adds buttons (a parent's Approve / Disapprove); a tap on the
@@ -7293,7 +7294,8 @@ async def _screen_time_notice(users: list[str], title: str, body: str, url: str,
     """
     for user in users or []:
         try:
-            payload = _notify.notice(user, "family_safety", title, body, url=url, actions=actions, tag=f"screen-time:{user}")
+            payload = _notify.notice(user, "family_safety", title, body, url=url, actions=actions,
+                                     tag=tag or f"screen-time:{user}", replace=bool(tag))
             await _notify.send(payload)
         except Exception as exc:  # a missed notice never fails the request
             log.warning("[screen-time] notice to %s failed: %s", user, exc)
@@ -7735,10 +7737,20 @@ async def ask_a_parent(request: Request, payload: dict) -> tuple[int, dict]:
         title, line = _GUARD_ASK_TITLES[str(asked.get("kind"))]
         note = f" \u2014 \u201c{asked['note']}\u201d" if asked.get("note") else ""
         request_id = asked.get("id")
+        text = line.format(name=child, what=_guard_request_words(asked), note=note)
+        tag = None
+        if asked.get("kind") in app_vetting_routes.REQUEST_KINDS:
+            # The app's rating and the local review, or "checking" until they
+            # are in (telemetry then sends this notice again with them).
+            target = str(asked.get("target") or "")
+            text = f"{text} " + await app_vetting_routes.request_verdict(
+                child, target, str(asked.get("label") or ""), request_id)
+            tag = f"guard-app:{child}:{target}"
         await _screen_time_notice(
-            body["notify"], title, line.format(name=child, what=_guard_request_words(asked), note=note),
+            body["notify"], title, text,
             f"/family/member/{child}",
             actions=_decide_actions("guard_decide", request_id, "approve") if request_id is not None else None,
+            tag=tag,
         )
     return status, {k: v for k, v in (body or {}).items() if k != "notify"}
 
@@ -7752,6 +7764,11 @@ async def guard_ask_a_parent(request: Request):
 @app.get("/api/guard/requests")
 async def guard_requests(request: Request, status: str = "pending"):
     code, body = await _identity_as_caller(request, "GET", "/api/guard/requests", params={"status": status})
+    if code == 200 and isinstance(body, dict) and isinstance(body.get("requests"), list):
+        # A parent sees each app request's rating and review on its card.
+        ident = await _acting_identity(request)
+        caller = str((ident or {}).get("user") or "").strip().lower()
+        body["requests"] = await app_vetting_routes.vet_requests(caller, body["requests"])
     return JSONResponse(status_code=code, content=body)
 
 

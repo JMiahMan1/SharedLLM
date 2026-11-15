@@ -6,7 +6,8 @@ import { requestLine } from '../../lib/guardRequests';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from '../member/MemberCard';
 import { guardRequestsQuery, timeRequestsQuery } from '../../lib/memberPage';
-import type { GuardRequest, ScreenTimeRequest } from '../../types/api';
+import { LEVEL_STYLES, LEVEL_WORDS, factChips, ratingLine } from '../../lib/appVetting';
+import type { GuardRequest, RequestVetting, ScreenTimeRequest } from '../../types/api';
 
 type Kind = GuardRequest['kind'] | 'time';
 type Row =
@@ -22,6 +23,43 @@ function historyLine(row: Row): string {
   }
   const r = row.request as GuardRequest;
   return `${requestLine(r).replace(' - waiting for your OK', '')}: ${r.status === 'approved' ? 'yes' : 'no'}${r.decided_by ? ` (${r.decided_by})` : ''}`;
+}
+
+/** App vetting's verdict on an app request: the rating against the limit, the
+ *  review's concerns and the listing's facts, or that it is still being checked. */
+function RequestVerdict({ id, vetting }: { id: number; vetting: RequestVetting }) {
+  const found = vetting.lookup === 'found';
+  const rating = ratingLine(vetting);
+  const facts = factChips({ rating: null, ads: vetting.ads ?? null, in_app_purchases: vetting.in_app_purchases ?? null,
+    interactive: vetting.interactive || [], store: null });
+  const checking = vetting.lookup === 'checking' || vetting.lookup === 'pending' || (found && vetting.review_state === 'checking');
+  return (
+    <div className="min-w-0 space-y-1.5 rounded-lg border border-white/10 bg-slate-950/30 p-2.5 text-xs" data-testid={`request-verdict-${id}`}>
+      {rating && (
+        <p className={`break-words font-semibold ${vetting.over_age ? 'text-amber-200' : 'text-slate-200'}`}>{rating}</p>
+      )}
+      {checking ? (
+        <p className="text-slate-400" role="status">Checking its Play listing and reviews…</p>
+      ) : !found ? (
+        <p className="break-words text-slate-300">{vetting.line}</p>
+      ) : null}
+      {(vetting.concerns || []).length > 0 && (
+        <ul className="space-y-1">
+          {(vetting.concerns || []).map((c) => (
+            <li key={c.label} className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${LEVEL_STYLES[c.severity]}`}>{LEVEL_WORDS[c.severity]}</span>
+              <span className="min-w-0 break-words text-slate-200">{c.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {found && !checking && (vetting.concerns || []).length === 0 && vetting.review_state === 'ready' && (
+        <p className="text-emerald-200/90">The review found nothing to worry about.</p>
+      )}
+      {facts.length > 0 && <p className="break-words text-slate-400">{facts.join(' · ')}</p>}
+      {vetting.summary && <p className="break-words leading-relaxed text-slate-300">{vetting.summary}</p>}
+    </div>
+  );
 }
 
 /**
@@ -91,6 +129,9 @@ export default function RequestsCard({ username, name, kinds = ALL_KINDS, histor
                   {relativeTime(row.at)}
                 </span>
               </div>
+              {row.kind !== 'time' && (row.request as GuardRequest).vetting && (
+                <RequestVerdict id={row.id} vetting={(row.request as GuardRequest).vetting as RequestVetting} />
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 {row.kind === 'time' ? (
                   <>
