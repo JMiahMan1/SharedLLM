@@ -233,6 +233,13 @@ def test_a_background_location_upload_counts_as_the_device_checking_in(family):
     with Session(identity_main.engine) as session:
         seen = session.exec(select(Device).where(Device.device_key == "leo-phone-0000001")).one().last_seen_at
     assert seen > "2026-01-02"
-    # A model that is none of theirs changes nothing.
-    body["device_name"] = "Other X1"
+    # An old build sends no name: with one phone it can only be that one.
+    with Session(identity_main.engine) as session:
+        dev = session.exec(select(Device).where(Device.device_key == "leo-phone-0000001")).one()
+        dev.last_seen_at = "2026-01-01T00:00:00"
+        session.add(dev)
+        session.commit()
+    body.pop("device_name")
     client.post("/api/users/leo/location", headers=HEADERS, json=body)
+    with Session(identity_main.engine) as session:
+        assert session.exec(select(Device).where(Device.device_key == "leo-phone-0000001")).one().last_seen_at > "2026-01-02"

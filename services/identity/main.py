@@ -7638,16 +7638,18 @@ def _note_background_checkin(session: Session, person: str, device_name: str | N
     Jarvis's background service. A child's phone sending its location every
     few minutes showed "last seen 3 days ago". The upload names its model
     (``device_name``, "Samsung SM-G990U"); the owner's phone or tablet whose
-    model it names is the one that checked in. No match, or two, changes
-    nothing rather than guessing.
+    model it names is the one that checked in; an old build that sends no name
+    counts only when the person has a single phone or tablet. No match, or two,
+    changes nothing rather than guessing.
     """
     name = (device_name or "").lower()
-    if not name:
-        return
-    matches = [
+    mobiles = [
         d for d in session.exec(select(Device).where(Device.owner_username == person)).all()
-        if not d.revoked and d.kind in ("phone", "tablet") and d.model and d.model.lower() in name
+        if not d.revoked and d.kind in ("phone", "tablet")
     ]
+    # Builds before uploads named their device send no name: with one phone
+    # or tablet it can only be that one.
+    matches = [d for d in mobiles if d.model and d.model.lower() in name] if name else mobiles
     if len(matches) != 1:
         return
     matches[0].last_seen_at = datetime.now().isoformat()  # the same clock as registration
