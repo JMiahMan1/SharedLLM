@@ -81,6 +81,19 @@ export async function audit(scope: Locator, phone: boolean, min = 44): Promise<F
       const s = getComputedStyle(el);
       return paints(s) && parseFloat(s.borderTopLeftRadius) >= 6;
     };
+    // A box meant to scroll sideways (a strip of chips or tabs) may hold more than it shows. A box
+    // that scrolls only up and down computes overflow-x as auto too (CSS turns a visible x into
+    // auto beside a scrolling y), so the computed style cannot tell them apart: the class can.
+    const sideways = (box: HTMLElement) => {
+      const o = getComputedStyle(box).overflowX;
+      if (o !== 'auto' && o !== 'scroll') return false;
+      const cls = typeof box.className === 'string' ? box.className : '';
+      if (/(^|\s)([a-z0-9-]+:)*overflow-x-(auto|scroll)\b/.test(cls)) return true;
+      if (/(^|\s)([a-z0-9-]+:)*overflow-(auto|scroll)\b/.test(cls)) return true;
+      if (/(^|\s)([a-z0-9-]+:)*overflow-y-(auto|scroll)\b/.test(cls)) return false;
+      // Set some other way (a style attribute, a component class): trust it.
+      return true;
+    };
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
       if (!visible(el)) continue;
       const s = getComputedStyle(el);
@@ -91,13 +104,11 @@ export async function audit(scope: Locator, phone: boolean, min = 44): Promise<F
       let box: HTMLElement | null = el.parentElement;
       let scrolls = false;
       while (box && box !== root.parentElement && !isBox(box)) {
-        const o = getComputedStyle(box).overflowX;
-        if (o === 'auto' || o === 'scroll') scrolls = true;
+        if (sideways(box)) scrolls = true;
         box = box.parentElement;
       }
       if (!box || scrolls) continue;
-      const bs = getComputedStyle(box).overflowX;
-      if (bs === 'auto' || bs === 'scroll') continue;
+      if (sideways(box)) continue;
       const b = el.getBoundingClientRect();
       const c = box.getBoundingClientRect();
       if (b.right > c.right + 1 || b.left < c.left - 1) {
