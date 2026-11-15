@@ -7630,6 +7630,30 @@ def _resolve_location_user_key(session: Session, user_id: str) -> str:
     return raw.lower()
 
 
+def _note_background_checkin(session: Session, person: str, device_name: str | None) -> None:
+    """A location upload is the device checking in, so its "last seen" moves.
+
+    "Last seen" used to move only when the Jarvis app itself was opened
+    (device registration), while location, battery and activity come from
+    Jarvis's background service. A child's phone sending its location every
+    few minutes showed "last seen 3 days ago". The upload names its model
+    (``device_name``, "Samsung SM-G990U"); the owner's phone or tablet whose
+    model it names is the one that checked in. No match, or two, changes
+    nothing rather than guessing.
+    """
+    name = (device_name or "").lower()
+    if not name:
+        return
+    matches = [
+        d for d in session.exec(select(Device).where(Device.owner_username == person)).all()
+        if not d.revoked and d.kind in ("phone", "tablet") and d.model and d.model.lower() in name
+    ]
+    if len(matches) != 1:
+        return
+    matches[0].last_seen_at = datetime.now().isoformat()  # the same clock as registration
+    session.add(matches[0])
+
+
 @app.post("/api/users/{user_id}/location")
 async def update_user_location(
     user_id: str,
@@ -7681,6 +7705,7 @@ async def update_user_location(
         counts = location_devices.accept(
             devices, device, location.device_name, location.latitude, location.longitude,
             location.accuracy, location.timestamp or time.time(), time.time())
+        _note_background_checkin(session, person, location.device_name)
         if dev_row:
             dev_row.value = json.dumps(devices)
         else:

@@ -216,3 +216,23 @@ def test_a_late_fix_from_the_phones_backlog_does_not_move_the_current_position(f
     assert (held["latitude"], held["battery"]) == (40.1, 80)
     assert forwarded == [2_000_000.0, 1_000_000.0]  # both still reach the history
     assert sent == []  # the old 9% reading is not a low-battery alert
+
+
+def test_a_background_location_upload_counts_as_the_device_checking_in(family):
+    """Last seen used to move only when the app was opened, so a phone sending
+    its location every few minutes looked days silent."""
+    report, _ = family
+    client = TestClient(identity_main.app)
+    with Session(identity_main.engine) as session:
+        dev = session.exec(select(Device).where(Device.device_key == "leo-phone-0000001")).one()
+        dev.model, dev.last_seen_at = "SM-A000", "2026-01-01T00:00:00"
+        session.add(dev)
+        session.commit()
+    body = {"latitude": 39.7, "longitude": -105.0, "battery": 50, "device_name": "Samsung SM-A000"}
+    assert client.post("/api/users/leo/location", headers=HEADERS, json=body).status_code == 200
+    with Session(identity_main.engine) as session:
+        seen = session.exec(select(Device).where(Device.device_key == "leo-phone-0000001")).one().last_seen_at
+    assert seen > "2026-01-02"
+    # A model that is none of theirs changes nothing.
+    body["device_name"] = "Other X1"
+    client.post("/api/users/leo/location", headers=HEADERS, json=body)
