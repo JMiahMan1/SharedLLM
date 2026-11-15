@@ -52,6 +52,47 @@ public class PushPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Whether Jarvis's notices can show here: Android lets the app post at all
+     * (Android 13's permission, or not switched off in settings) and the
+     * family chat channel is not turned off. Without this a declined prompt
+     * meant every notice was dropped and nobody could tell.
+     */
+    @PluginMethod
+    public void notificationState(PluginCall call) {
+        call.resolve(notificationState(getContext()));
+    }
+
+    static JSObject notificationState(android.content.Context context) {
+        JSObject ret = new JSObject();
+        boolean app = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled();
+        boolean chat = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PushNotifier.ensureChannels(context);
+            android.app.NotificationManager nm = context.getSystemService(android.app.NotificationManager.class);
+            android.app.NotificationChannel channel = nm == null ? null
+                    : nm.getNotificationChannel(PushCategories.channelId(PushCategories.CHAT, 3));
+            chat = channel == null || channel.getImportance() != android.app.NotificationManager.IMPORTANCE_NONE;
+        }
+        ret.put("app", app);
+        ret.put("chat", chat);
+        return ret;
+    }
+
+    /** Android's notification settings for Jarvis, to switch them back on. */
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getContext().getPackageName())
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not open notification settings: " + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void stop(PluginCall call) {
         PushService.stop(getContext());

@@ -550,6 +550,8 @@ export interface MemberGuardState {
   usageAccess?: boolean;
   /** Notification access (media sessions, chat and social notifications). */
   notificationAccess?: boolean;
+  /** Jarvis may post its own notices here (family chat, alerts); off means they never show. */
+  jarvisNotifications?: boolean;
   callLogAccess?: boolean;
   smsAccess?: boolean;
   activityAccess?: boolean;

@@ -11,6 +11,10 @@ export interface ChatNotifyPluginInterface {
   /** Asks for notification permission (Android 13+) and starts listening. */
   start(): Promise<{ notifications: boolean }>;
   stop(): Promise<void>;
+  /** Whether Jarvis's notices can show: allowed by Android (`app`) and the chat channel on (`chat`). Newer APKs only. */
+  notificationState?(): Promise<{ app: boolean; chat: boolean }>;
+  /** Android's notification settings for Jarvis. Newer APKs only. */
+  openNotificationSettings?(): Promise<void>;
   /** The conversation on screen, which then does not notify; null when none. */
   setActiveConversation(options: { token: string | null }): Promise<void>;
   /** The names people know apps by, keyed by package name. */

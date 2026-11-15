@@ -98,6 +98,9 @@ public class GuardPlugin extends Plugin {
             // Not readable here: reported as none rather than guessed.
         }
         out.put("bypassApps", bypass);
+        // Whether Jarvis's own notices (family chat, alerts) can show on this device.
+        JSObject notices = PushPlugin.notificationState(getContext());
+        out.put("jarvisNotifications", notices.optBoolean("app", true) && notices.optBoolean("chat", true));
         call.resolve(out);
     }
 

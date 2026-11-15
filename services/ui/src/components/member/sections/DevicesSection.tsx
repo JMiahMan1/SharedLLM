@@ -30,6 +30,7 @@ const GUARD_ROWS: Array<{ key: keyof MemberGuardState; label: string }> = [
   { key: 'webFilterAllowed', label: 'Web filter VPN allowed' },
   { key: 'webFilterActive', label: 'Web filter running' },
   { key: 'usageAccess', label: 'Usage access' },
+  { key: 'jarvisNotifications', label: 'Jarvis notifications (family chat, alerts)' },
   { key: 'notificationAccess', label: 'Notification access (media, chat apps)' },
   { key: 'callLogAccess', label: 'Call log' },
   { key: 'smsAccess', label: 'Text messages' },
