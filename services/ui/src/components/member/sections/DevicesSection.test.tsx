@@ -76,3 +76,23 @@ describe('a device that is not updating', () => {
     expect(screen.queryByTestId('member-device-behind')).toBeNull();
   });
 });
+
+describe('last location', () => {
+  it('shows when the device last sent its location, separately from the app being opened', async () => {
+    vi.mocked(api.getMemberDevices).mockResolvedValue({
+      username: 'kid',
+      devices: [{ device_key: 'kid-phone-0000000001', kind: 'phone', capabilities: {}, last_location_at: new Date(Date.now() - 5 * 60_000).toISOString() }],
+      tamper: [],
+      offline_code: {},
+    } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <DevicesSection username="kid" name="Kid" />
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByTestId('member-device-kid-phone-0000000001');
+    expect(within(card).getByText('Last location')).toBeInTheDocument();
+    expect(within(card).queryByText('none yet')).toBeNull();
+  });
+});

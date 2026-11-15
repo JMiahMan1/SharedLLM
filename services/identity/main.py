@@ -6009,11 +6009,12 @@ def family_member_devices(username: str, session: Session = Depends(get_session)
         raise HTTPException(status_code=403, detail="Only the father or an admin can see device details")
     devices = session.exec(select(Device).where(Device.owner_username == child.username, Device.revoked == False)).all()  # noqa: E712
     batteries = _latest_batteries(session, [d.device_key for d in devices])
+    located = _last_location_times(session, child.username, list(devices))
     out = []
     for d in sorted(devices, key=lambda d: d.last_seen_at or "", reverse=True):
         read = _device_to_read(d)
         read.battery = batteries.get(d.device_key)
-        out.append({**read.model_dump(), "os_build": d.os_build})
+        out.append({**read.model_dump(), "os_build": d.os_build, "last_location_at": located.get(d.device_key)})
     tamper = session.exec(
         select(DeviceEvent)
         .where(DeviceEvent.username == child.username, DeviceEvent.event == "guard_tamper")
@@ -7630,6 +7631,35 @@ def _resolve_location_user_key(session: Session, user_id: str) -> str:
     return raw.lower()
 
 
+def _uploading_device(mobiles: list[Device], device_name: str | None) -> Device | None:
+    """Which of a person's phones and tablets sent a location upload, by the
+    model its ``device_name`` names ("Samsung SM-G990U"). Builds before uploads
+    named their device send no name: with one phone or tablet it can only be
+    that one. None when no device, or more than one, fits."""
+    name = (device_name or "").lower()
+    matches = [d for d in mobiles if d.model and d.model.lower() in name] if name else mobiles
+    return matches[0] if len(matches) == 1 else None
+
+
+def _last_location_times(session: Session, person: str, devices: list[Device]) -> dict[str, str]:
+    """Each device's latest location upload (ISO, UTC), from the per-device
+    fixes identity keeps for choosing the lead device."""
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == f"user_location_devices:{person}")).first()
+    try:
+        fixes = json.loads(row.value) if row else {}
+    except (TypeError, ValueError):
+        fixes = {}
+    mobiles = [d for d in devices if not d.revoked and d.kind in ("phone", "tablet")]
+    latest: dict[str, float] = {}
+    for fix in (fixes.values() if isinstance(fixes, dict) else []):
+        if not isinstance(fix, dict) or not fix.get("t"):
+            continue
+        device = _uploading_device(mobiles, fix.get("name"))
+        if device is not None:
+            latest[device.device_key] = max(latest.get(device.device_key, 0.0), float(fix["t"]))
+    return {key: datetime.fromtimestamp(t, UTC).isoformat() for key, t in latest.items()}
+
+
 def _note_background_checkin(session: Session, person: str, device_name: str | None) -> None:
     """A location upload is the device checking in, so its "last seen" moves.
 
@@ -7642,18 +7672,15 @@ def _note_background_checkin(session: Session, person: str, device_name: str | N
     counts only when the person has a single phone or tablet. No match, or two,
     changes nothing rather than guessing.
     """
-    name = (device_name or "").lower()
     mobiles = [
         d for d in session.exec(select(Device).where(Device.owner_username == person)).all()
         if not d.revoked and d.kind in ("phone", "tablet")
     ]
-    # Builds before uploads named their device send no name: with one phone
-    # or tablet it can only be that one.
-    matches = [d for d in mobiles if d.model and d.model.lower() in name] if name else mobiles
-    if len(matches) != 1:
+    device = _uploading_device(mobiles, device_name)
+    if device is None:
         return
-    matches[0].last_seen_at = datetime.now().isoformat()  # the same clock as registration
-    session.add(matches[0])
+    device.last_seen_at = datetime.now().isoformat()  # the same clock as registration
+    session.add(device)
 
 
 @app.post("/api/users/{user_id}/location")

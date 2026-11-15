@@ -574,6 +574,8 @@ export interface MemberDevice {
   os_build: string | null;
   app_version: string | null;
   app_build: string | null;
+  /** The device's latest location upload (ISO); background uploads, not app opens. */
+  last_location_at?: string | null;
   esphome_version?: string | null;
   hardware?: string | null;
   platform?: 'android' | 'esphome' | string;

@@ -223,3 +223,20 @@ def test_the_guardian_list_and_notices_say_tablet_for_a_tablet(family):
     assert paused["device"] == "phone or tablet"
     refused = act("kid").post("/api/screen-time/sib/pause", json={})
     assert refused.status_code == 403 and refused.json()["detail"] == "Only a parent can pause a minor's phone or tablet"
+
+
+def test_each_device_shows_its_last_location_upload(family):
+    """Background location uploads, not app opens, say a phone is alive."""
+    import json
+
+    from services.identity.models import GlobalSetting
+
+    act, engine = family
+    with Session(engine) as session:
+        session.add(GlobalSetting(key="user_location_devices:kid", value=json.dumps({
+            "a1": {"name": "Google Pixel 7", "t": 1_800_000_000.0},
+            "a2": {"name": "Web browser", "t": 1_800_000_900.0},
+        })))
+        session.commit()
+    phone = act("dad").get("/api/family/devices/kid").json()["devices"][0]
+    assert phone["last_location_at"] == "2027-01-15T08:00:00+00:00"

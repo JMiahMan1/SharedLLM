@@ -78,6 +78,7 @@ function DeviceCard({ device, latest }: { device: MemberDevice; latest?: number 
         ['Android', [device.os_version, device.os_build].filter(Boolean).join(' · ') || 'unknown'],
         ['Jarvis app', device.app_version ? `${device.app_version}${device.app_build ? ` (build ${device.app_build})` : ''}` : 'unknown'],
         ['Last seen', device.last_seen_at ? relativeTime(device.last_seen_at) : 'never'],
+        ['Last location', device.last_location_at ? relativeTime(device.last_location_at) : 'none yet'],
         ['Address', device.last_ip_address || 'unknown'],
         ['First seen', device.first_seen_at ? new Date(device.first_seen_at).toLocaleDateString() : 'unknown'],
       ];
