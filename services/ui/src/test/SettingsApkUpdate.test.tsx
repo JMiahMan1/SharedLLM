@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   openApkInstallSettings: vi.fn(),
   getRunningVersion: vi.fn(),
   updateNeedsOk: vi.fn(),
+  playProtectBlockedUpdate: vi.fn(),
+  openPlayProtectSettings: vi.fn(),
   native: true,
 }));
 
@@ -35,6 +37,8 @@ vi.mock('../lib/appUpdater', () => ({
   openApkInstallSettings: mocks.openApkInstallSettings,
   getRunningVersion: mocks.getRunningVersion,
   updateNeedsOk: mocks.updateNeedsOk,
+  playProtectBlockedUpdate: mocks.playProtectBlockedUpdate,
+  openPlayProtectSettings: mocks.openPlayProtectSettings,
 }));
 
 const SHA = 'a'.repeat(64);
@@ -93,6 +97,7 @@ describe('Settings APK update notice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.playProtectBlockedUpdate.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(status());
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
@@ -211,6 +216,7 @@ describe('Settings APK install permission', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.playProtectBlockedUpdate.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(pending);
     mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
@@ -283,6 +289,7 @@ describe('Settings APK verified download flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.playProtectBlockedUpdate.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(verified);
     mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
@@ -438,6 +445,7 @@ describe('background updates row', () => {
     vi.clearAllMocks();
     mocks.native = true;
     mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.playProtectBlockedUpdate.mockResolvedValue(false);
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(status());
     mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
@@ -465,5 +473,33 @@ describe('background updates row', () => {
     mocks.checkApkUpdate.mockResolvedValue(status({ updateAvailable: true, apkUrl: '/api/app-updates/jarvis-os.apk', apkVersionCode: 99 }));
     renderWithProviders(<Settings />);
     expect(await screen.findByTestId('apk-needs-ok', undefined, { timeout: CONTROL_TIMEOUT_MS })).toBeInTheDocument();
+  });
+});
+
+describe('Play Protect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.native = true;
+    mocks.updateNeedsOk.mockResolvedValue(false);
+    mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
+    mocks.checkApkUpdate.mockResolvedValue(status());
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
+    mocks.hasVerifiedInstallFlow.mockResolvedValue(false);
+    mocks.openPlayProtectSettings.mockResolvedValue(true);
+  });
+
+  it('says when Play Protect stopped an update and opens its settings', async () => {
+    mocks.playProtectBlockedUpdate.mockResolvedValue(true);
+    renderWithProviders(<Settings />);
+    await userEvent.click(await screen.findByTestId('play-protect-open', undefined, { timeout: CONTROL_TIMEOUT_MS }));
+    expect(mocks.openPlayProtectSettings).toHaveBeenCalled();
+    expect(screen.queryByTestId('play-protect-row')).toBeNull();
+  });
+
+  it('shows nothing about Play Protect when no update was stopped', async () => {
+    mocks.playProtectBlockedUpdate.mockResolvedValue(false);
+    renderWithProviders(<Settings />);
+    await screen.findByTestId('background-updates-on', undefined, { timeout: CONTROL_TIMEOUT_MS });
+    expect(screen.queryByTestId('play-protect-row')).toBeNull();
   });
 });

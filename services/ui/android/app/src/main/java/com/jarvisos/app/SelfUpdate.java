@@ -51,6 +51,27 @@ final class SelfUpdate {
     /** A background update Android would only install with the person's OK: left for Settings. */
     static final String KEY_NEEDS_OK = "self_update_needs_ok";
 
+    /**
+     * An update Google Play Protect refused (its "scan this app?" step, then
+     * INSTALL_FAILED_VERIFICATION_FAILURE). Not retried: each retry would ask
+     * again. Settings says so and opens Play Protect's settings.
+     */
+    static final String KEY_PLAY_PROTECT = "self_update_play_protect";
+
+    static long playProtectBlocked(Context context) {
+        return GuardApi.prefs(context).getLong(KEY_PLAY_PROTECT, 0L);
+    }
+
+    /**
+     * The person went to change Play Protect: forget the refusals. Not
+     * installed now (that could ask while they are still on that page); the
+     * next background check, or Jarvis leaving the screen, installs it.
+     */
+    static void retry(Context context) {
+        GuardApi.prefs(context).edit().remove(KEY_PLAY_PROTECT).remove(KEY_NEEDS_OK).apply();
+        NativeUpdater.forgetFailures(context);
+    }
+
     /** The update waiting for the person's OK in Settings, or 0. */
     static long needsOk(Context context) {
         return GuardApi.prefs(context).getLong(KEY_NEEDS_OK, 0L);
@@ -175,9 +196,14 @@ final class SelfUpdate {
             }
             close(context);
             if (status == PackageInstaller.STATUS_SUCCESS) {
-                GuardApi.prefs(context).edit().remove(KEY_NEEDS_OK).apply();
+                GuardApi.prefs(context).edit().remove(KEY_NEEDS_OK).remove(KEY_PLAY_PROTECT).apply();
                 Log.i(TAG, "updated");
             } else {
+                String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+                if (message != null && message.contains("VERIFICATION_FAILURE")) {
+                    GuardApi.prefs(context).edit()
+                            .putLong(KEY_PLAY_PROTECT, NativeUpdater.stagedCode(context)).apply();
+                }
                 Log.w(TAG, "update not installed (" + status + "): "
                         + intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
             }

@@ -282,6 +282,30 @@ public class ApkInstallPlugin extends Plugin {
         long code = SelfUpdate.needsOk(getContext());
         ret.put("needsOk", code > 0);
         ret.put("versionCode", code);
+        ret.put("playProtect", SelfUpdate.playProtectBlocked(getContext()) > 0);
+        call.resolve(ret);
+    }
+
+    /** Google Play Protect's own settings ("Improve harmful app detection"), then try the update again. */
+    @PluginMethod
+    public void openPlayProtectSettings(PluginCall call) {
+        String[] actions = {
+            "com.google.android.gms.settings.VERIFY_APPS_SETTINGS",
+            android.provider.Settings.ACTION_SECURITY_SETTINGS,
+        };
+        boolean opened = false;
+        for (String action : actions) {
+            try {
+                getActivity().startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                opened = true;
+                break;
+            } catch (Exception ignored) {
+                // not on this phone: try the next
+            }
+        }
+        SelfUpdate.retry(getContext());
+        JSObject ret = new JSObject();
+        ret.put("opened", opened);
         call.resolve(ret);
     }
 

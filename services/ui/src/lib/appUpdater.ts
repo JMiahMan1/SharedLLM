@@ -493,7 +493,8 @@ interface ApkInstallPlugin {
   backgroundUpdates?(): Promise<{ native: boolean }>;
   selfUpdateSupported?(): Promise<{ supported: boolean }>;
   /** A background update Android would only install with the person's OK (builds after 682). */
-  updateNeedsOk?(): Promise<{ needsOk: boolean; versionCode: number }>;
+  updateNeedsOk?(): Promise<{ needsOk: boolean; versionCode: number; playProtect?: boolean }>;
+  openPlayProtectSettings?(): Promise<{ opened: boolean }>;
   isApkDownloaded?(): Promise<{ downloaded: boolean }>;
   clearDownloadedApk?(): Promise<void>;
   addListener?(event: 'downloadProgress', cb: (p: ApkDownloadProgress) => void): Promise<{ remove(): Promise<void> }>;
@@ -584,6 +585,24 @@ export async function updateNeedsOk(): Promise<boolean> {
     console.warn('[AppUpdater] update-needs-OK probe failed:', err);
     return false;
   }
+}
+
+/** Whether Google Play Protect refused the last update (its scan prompt). False when unknown. */
+export async function playProtectBlockedUpdate(): Promise<boolean> {
+  const ApkInstall = getApkInstallPlugin();
+  if (!ApkInstall || typeof ApkInstall.updateNeedsOk !== 'function') return false;
+  try {
+    return (await ApkInstall.updateNeedsOk()).playProtect === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Open Play Protect's settings; the refused update is tried again afterwards in the background. */
+export async function openPlayProtectSettings(): Promise<boolean> {
+  const ApkInstall = getApkInstallPlugin();
+  if (!ApkInstall || typeof ApkInstall.openPlayProtectSettings !== 'function') return false;
+  return (await ApkInstall.openPlayProtectSettings()).opened;
 }
 
 export async function getApkInstallPermission(): Promise<ApkInstallPermission> {

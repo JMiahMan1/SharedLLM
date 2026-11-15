@@ -115,6 +115,9 @@ final class NativeUpdater {
             clearStaged(context);
             return;
         }
+        if (SelfUpdate.playProtectBlocked(context) == code) {
+            return; // Play Protect refused this one: retrying would only ask again (Settings explains)
+        }
         if (SelfUpdate.needsOk(context) == code) {
             return; // Android wants the person's OK for this one: Settings offers it, nothing pops up
         }
@@ -125,6 +128,11 @@ final class NativeUpdater {
         if (SelfUpdate.install(context, apk, "background")) {
             Log.i(TAG, "APK " + code + " handed to the installer");
         }
+    }
+
+    /** Forget a failed version, so the next check tries it at once. */
+    static void forgetFailures(Context context) {
+        GuardApi.prefs(context).edit().remove(KEY_TRIED).apply();
     }
 
     /** The version code of the verified download waiting to be installed, or 0. */

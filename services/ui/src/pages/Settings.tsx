@@ -30,6 +30,8 @@ import { disablePush, enablePush, permissionState, pushSupported } from '../lib/
 import {
   checkForAppUpdates,
   updateNeedsOk,
+  playProtectBlockedUpdate,
+  openPlayProtectSettings,
   checkApkUpdate,
   downloadAndInstallApk,
   downloadApkWithProgress,
@@ -622,10 +624,14 @@ const AppUpdatesSection = () => {
 
   // A background update Android held for an OK: said here, never popped up.
   const [needsOk, setNeedsOk] = useState(false);
+  const [playProtect, setPlayProtect] = useState(false);
   useEffect(() => {
     let active = true;
     void updateNeedsOk().then((v) => {
       if (active) setNeedsOk(v);
+    });
+    void playProtectBlockedUpdate().then((v) => {
+      if (active) setPlayProtect(v);
     });
     return () => { active = false; };
   }, []);
@@ -805,6 +811,32 @@ const AppUpdatesSection = () => {
               <span>Allow updates</span>
             </button>
           )}
+        </div>
+      )}
+      {native && playProtect && (
+        <div
+          data-testid="play-protect-row"
+          className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-amber-200">Google Play Protect stopped an update</p>
+            <p className="text-xs text-amber-100/80">
+              Play Protect asks to scan every new Jarvis version. In its settings, turn off
+              &ldquo;Improve harmful app detection&rdquo;; the update then installs by itself.
+            </p>
+          </div>
+          <button
+            data-testid="play-protect-open"
+            onClick={() => {
+              trigger('medium');
+              setPlayProtect(false);
+              void openPlayProtectSettings();
+            }}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+          >
+            <SettingsIcon size={13} />
+            <span>Open Play Protect</span>
+          </button>
         </div>
       )}
       {apkPending && apk && (
