@@ -68,7 +68,8 @@ export default function SecretInput({ value, onChange, saved, onReveal, label, p
         disabled={disabled || (!saved && value === '')}
         aria-label={visible ? `Hide ${label}` : `Show ${label}`}
         aria-pressed={visible}
-        className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30"
+        // 32px to look at, 44px to hit: the ::before reaches 6px past each side.
+        className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center before:absolute before:-inset-1.5 before:content-[''] justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-slate-100 disabled:opacity-30"
       >
         {loading ? <Loader2 size={15} className="animate-spin" /> : visible ? <EyeOff size={15} /> : <Eye size={15} />}
       </button>
