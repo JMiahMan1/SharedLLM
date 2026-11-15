@@ -24,6 +24,10 @@ class User(SQLModel, table=True):  # type: ignore
     # This is a relationship, not a credential; the person can still choose
     # whether to share anything with her.
     mother_username: str | None = Field(default=None)
+    # A child's birth date (YYYY-MM-DD), set by their parents or an admin
+    # only: it sets the default app content rating (services/common/app_vetting.py).
+    # Not the health profile's birth year, which the member edits themselves.
+    birth_date: str | None = Field(default=None)
     password_hash: str | None = Field(default=None)
     api_key: str | None = Field(default=None, index=True)
     api_key_enc: str | None = Field(default=None)

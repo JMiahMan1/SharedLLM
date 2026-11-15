@@ -38,3 +38,34 @@ LLM_QUEUE_TIMEOUT_SECONDS = 180
 LLM_TIMEOUT_SECONDS = 300
 
 NOTIFICATION_HISTORY = 50
+
+# App vetting (services/telemetry/app_catalog.py). Read once at startup.
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be true or false, not {raw!r}")
+
+
+#: Whether the server looks apps up on their public Google Play listing (read
+#: only, no account; only the package name is sent). Off: listings show
+#: "lookups are switched off" and apps are judged on their permissions alone.
+APP_CATALOG_ENABLED = _env_bool("APP_CATALOG_ENABLED", True)
+#: A listing (and its review) is looked up again after this many days.
+APP_CATALOG_TTL_DAYS = int(os.getenv("APP_CATALOG_TTL_DAYS", "7"))
+#: At least this long between two requests to Google Play.
+APP_CATALOG_MIN_INTERVAL_S = float(os.getenv("APP_CATALOG_MIN_INTERVAL_S", "15"))
+#: After Google refuses or fails, wait this long, doubling up to the maximum.
+APP_CATALOG_BACKOFF_BASE_S = int(os.getenv("APP_CATALOG_BACKOFF_BASE_S", "600"))
+APP_CATALOG_BACKOFF_MAX_S = int(os.getenv("APP_CATALOG_BACKOFF_MAX_S", str(12 * 3600)))
+APP_CATALOG_FETCH_TIMEOUT_S = float(os.getenv("APP_CATALOG_FETCH_TIMEOUT_S", "20"))
+#: How long the local model may take to read one listing.
+APP_REVIEW_TIMEOUT_S = float(os.getenv("APP_REVIEW_TIMEOUT_S", "120"))
+#: A device that stops reporting its apps is forgotten after this many days.
+APP_INVENTORY_TTL_DAYS = int(os.getenv("APP_INVENTORY_TTL_DAYS", "60"))
+#: Jarvis's own Android package: never listed among a child's apps.
+JARVIS_ANDROID_PACKAGE = os.getenv("JARVIS_ANDROID_PACKAGE", "com.jarvisos.app")

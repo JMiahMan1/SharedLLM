@@ -30,6 +30,7 @@
 - `docs/ACHIEVEMENTS.md`: goals, achievements, opt-in sharing, stars
 - `docs/HEALTH_STEPS.md`: pedometer capture, device ledger, widgets
 - `docs/HEALTH_HUB.md`: Health hub service and UI: profiles, open metric ingestion, sleep, readiness, nutrition, sharing
+- `docs/APP_VETTING.md`: App vetting on children's devices: installed apps, public Play listing lookups, the local review, age policy, notices
 - `docs/NOTES.md`: Keep-style notes over Nextcloud markdown (and the Recipes cookbook)
 - `docs/CALENDAR.md`: merged Nextcloud/Skylight/iCal agenda, windows, repeats, edit by UID
 - `docs/ARCADE_INTEGRATION.md`: Alpaca arcade games in the Family hub
