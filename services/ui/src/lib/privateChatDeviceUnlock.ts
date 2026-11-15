@@ -18,14 +18,7 @@ export async function enableDeviceUnlock(
   password: string,
   info: ChatKeyInfo,
 ): Promise<void> {
-  const raw = await rawDataKey(password, info);
-  if (!raw) throw new WrongPasswordError('That is not the password for this chat.');
-  try {
-    const { enabled } = await plugin.enable({ token, key: toBase64(raw.dk) });
-    if (!enabled) throw new Error('The phone lock was not turned on.');
-  } finally {
-    raw.dk.fill(0);
-  }
+  await giveKeyTo(plugin, token, password, info);
 }
 
 /**
@@ -42,4 +35,24 @@ export async function keyFromDevice(plugin: DeviceUnlockPluginInterface, token: 
     throw new Error('The key on this phone does not open this chat. Use the password, then set the phone lock up again.');
   }
   return chatKey;
+}
+
+/** Anything that keeps the chat key on this phone given the bytes (phone lock, notification previews). */
+interface KeyKeeper {
+  enable(options: { token: string; key: string }): Promise<{ enabled: boolean }>;
+}
+
+/**
+ * Hand the chat's data key to a native keeper after checking the password,
+ * zeroing the bytes afterwards (the phone lock, notification previews).
+ */
+export async function giveKeyTo(keeper: KeyKeeper, token: string, password: string, info: ChatKeyInfo): Promise<void> {
+  const raw = await rawDataKey(password, info);
+  if (!raw) throw new WrongPasswordError('That is not the password for this chat.');
+  try {
+    const { enabled } = await keeper.enable({ token, key: toBase64(raw.dk) });
+    if (!enabled) throw new Error('It was not turned on.');
+  } finally {
+    raw.dk.fill(0);
+  }
 }

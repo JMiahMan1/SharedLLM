@@ -70,6 +70,17 @@ public final class PushNotifier {
         NotificationManager nm = context.getSystemService(NotificationManager.class);
         if (nm == null) return;
         String token = n.chatToken();
+        if (token != null && n.privateChat && !n.preview && n.messageId > 0
+                && PrivatePreviewPlugin.enabled(context, token)) {
+            // Message text in notifications is on for this chat on this phone: open the
+            // message here, off the caller's thread. Any failure keeps the content-free notice.
+            final Context app = context.getApplicationContext();
+            new Thread(() -> {
+                String text = PrivatePreviewPlugin.preview(app, token, n.messageId);
+                showChat(app, nm, text == null ? n : n.withPreview(text), token);
+            }, "private-preview").start();
+            return;
+        }
         if (token != null) {
             showChat(context, nm, n, token);
             return;
@@ -143,6 +154,17 @@ public final class PushNotifier {
                 .setGroup(GROUP_CHAT)
                 .setNumber(recent.size())
                 .setContentIntent(openIntent(context, n.path.isEmpty() ? "/family?chat=" + token : n.path, id));
+        if (n.privateChat) {
+            // Nothing from a private chat on the lock screen: there it reads "New private message".
+            b.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(new NotificationCompat.Builder(
+                        context, PushCategories.channelId(PushCategories.CHAT, n.priority))
+                        .setSmallIcon(PushCategories.icon(PushCategories.CHAT, n.priority))
+                        .setContentTitle("Private chat")
+                        .setContentText("New private message")
+                        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                        .build());
+        }
         if (quiet) b.setSilent(true);
         addActions(context, b, n.actions, n, id, token);
         return b;

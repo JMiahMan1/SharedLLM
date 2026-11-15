@@ -51,6 +51,7 @@ const thread = (info: PrivateChatInfo) => (
 
 afterEach(() => {
   delete window.__jarvisDeviceUnlockMock;
+  delete window.__jarvisPrivatePreviewMock;
   getPrivateChat.mockReset();
 });
 
@@ -60,6 +61,32 @@ describe('private chat: password and phone lock', () => {
     expect(screen.getByTestId('private-change-password-open')).toBeTruthy();
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId('private-phone-lock-toggle')).toBeNull();
+    expect(screen.queryByTestId('private-preview-toggle')).toBeNull();
+  });
+
+  it('on a phone with the preview plugin: message text in notifications is offered, off, and says it is less private', async () => {
+    window.__jarvisPrivatePreviewMock = {
+      available: vi.fn(async () => ({ available: true })),
+      isEnabled: vi.fn(async () => ({ enabled: false })),
+      enable: vi.fn(async () => ({ enabled: true })),
+      disable: vi.fn(async () => ({ enabled: false })),
+    };
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    const toggle = await screen.findByTestId('private-preview-toggle');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText(/less private/)).toBeTruthy();
+  });
+
+  it('a preview plugin that is missing from the APK is not offered', async () => {
+    window.__jarvisPrivatePreviewMock = {
+      available: vi.fn(async () => { throw new Error('not implemented'); }),
+      isEnabled: vi.fn(),
+      enable: vi.fn(),
+      disable: vi.fn(),
+    };
+    render(wrap(<PrivateChatSecurity token="roomP" partnerName="Robin" onChanged={() => undefined} onClose={() => undefined} />));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('private-preview-toggle')).toBeNull();
   });
 
   it('on a phone with the plugin: the toggle is offered, off by default', async () => {

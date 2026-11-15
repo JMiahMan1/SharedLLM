@@ -1,15 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ChevronRight, Fingerprint, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
+import { BellRing, ChevronRight, Fingerprint, KeyRound, Loader2, Timer, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { changePasswordRequest } from '../../lib/privateChatCrypto';
 import { getLockAfter, LOCK_OPTIONS, setLockAfter, type LockAfter } from '../../lib/privateChatSession';
-import { enableDeviceUnlock } from '../../lib/privateChatDeviceUnlock';
+import { enableDeviceUnlock, giveKeyTo } from '../../lib/privateChatDeviceUnlock';
+import { privatePreviewPlugin, privatePreviewState } from '../../plugins/privatePreview';
 import { deviceUnlockAvailable, deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import Sheet from './Sheet';
 import { errorText, MIN_PASSWORD_LENGTH, passwordProblem } from './privateChatModel';
 
-type Mode = 'menu' | 'password' | 'phone';
+type Mode = 'menu' | 'password' | 'phone' | 'preview';
 
 const inputClass = 'glass-input min-h-11 w-full text-base sm:text-sm';
 
@@ -60,6 +61,7 @@ export default function PrivateChatSecurity({
   const [mode, setMode] = useState<Mode>('menu');
   const [lockAfter, setLockAfterState] = useState<LockAfter>(() => getLockAfter(token));
   const [phone, setPhone] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
+  const [preview, setPreview] = useState<{ available: boolean; enabled: boolean }>({ available: false, enabled: false });
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -72,7 +74,11 @@ export default function PrivateChatSecurity({
     void (async () => {
       const available = await deviceUnlockAvailable();
       const enabled = available ? await deviceUnlockEnabled(token) : false;
-      if (live) setPhone({ available, enabled });
+      const previews = await privatePreviewState(token);
+      if (live) {
+        setPhone({ available, enabled });
+        setPreview(previews);
+      }
     })();
     return () => {
       live = false;
@@ -128,6 +134,42 @@ export default function PrivateChatSecurity({
       setError(deviceUnlockError(e, 'Could not turn on the phone lock'));
     } finally {
       setCurrent('');
+      setBusy(false);
+    }
+  };
+
+  const turnOnPreview = async (event: FormEvent) => {
+    event.preventDefault();
+    const plugin = privatePreviewPlugin();
+    if (!plugin || !current || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const info = await api.getPrivateChat(token);
+      await giveKeyTo(plugin, token, current, info);
+      setPreview({ available: true, enabled: true });
+      toast.success('Message text will show in notifications on this phone');
+      reset('menu');
+    } catch (e) {
+      setError(deviceUnlockError(e, 'Could not turn on message previews'));
+    } finally {
+      setCurrent('');
+      setBusy(false);
+    }
+  };
+
+  const turnOffPreview = async () => {
+    const plugin = privatePreviewPlugin();
+    if (!plugin || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await plugin.disable({ token });
+      setPreview((p) => ({ ...p, enabled: false }));
+      toast.success('Notifications will not show message text');
+    } catch (e) {
+      setError(deviceUnlockError(e, 'Could not turn off message previews'));
+    } finally {
       setBusy(false);
     }
   };
@@ -211,6 +253,45 @@ export default function PrivateChatSecurity({
             </button>
           </div>
           <p className="text-center text-xs text-slate-500">At least {MIN_PASSWORD_LENGTH} characters.</p>
+        </form>
+      </Sheet>
+    );
+  }
+
+  if (mode === 'preview') {
+    return (
+      <Sheet title="Message text in notifications" onClose={onClose} testId="private-preview-setup">
+        <form onSubmit={(event) => void turnOnPreview(event)} className="space-y-3">
+          <div className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-sm text-amber-100" role="note">
+            <p className="flex items-center gap-2 font-semibold">
+              <TriangleAlert size={15} aria-hidden /> Less private
+            </p>
+            <p className="mt-1 leading-relaxed">
+              This phone keeps a copy of the chat key it can open without your fingerprint or screen lock, so it can show messages
+              as they arrive. Anyone holding this phone while it is unlocked can read them in notifications. The lock screen only ever
+              says "New private message".
+            </p>
+          </div>
+          <PasswordField label="Chat password" value={current} onChange={setCurrent} testId="private-preview-password" autoComplete="current-password" autoFocus />
+          {error && (
+            <p className="text-sm text-rose-200" role="alert" data-testid="private-preview-error">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <button type="button" onClick={() => reset('menu')} className="min-h-12 flex-1 rounded-xl border border-white/10 text-sm font-semibold text-slate-200">
+              Back
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !current}
+              data-testid="private-preview-submit"
+              className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-rose-600 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <BellRing size={15} />}
+              Show message text
+            </button>
+          </div>
         </form>
       </Sheet>
     );
@@ -314,6 +395,34 @@ export default function PrivateChatSecurity({
             >
               <span className={`relative h-6 w-11 rounded-full transition-colors ${phone.enabled ? 'bg-rose-600' : 'bg-white/15'}`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${phone.enabled ? 'left-[22px]' : 'left-0.5'}`} />
+              </span>
+            </button>
+          </div>
+        )}
+        {preview.available && (
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+            <BellRing size={16} className="shrink-0 text-rose-200" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-white" id="private-preview-label">
+                Show message text in notifications
+              </p>
+              <p className="text-xs leading-relaxed text-slate-400">
+                Off: notifications only say who wrote. On: this phone reads new messages in the background, which is less private.
+                Never shown on the lock screen.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={preview.enabled}
+              aria-labelledby="private-preview-label"
+              disabled={busy}
+              onClick={() => (preview.enabled ? void turnOffPreview() : reset('preview'))}
+              data-testid="private-preview-toggle"
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center disabled:opacity-50"
+            >
+              <span className={`relative h-6 w-11 rounded-full transition-colors ${preview.enabled ? 'bg-rose-600' : 'bg-white/15'}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${preview.enabled ? 'left-[22px]' : 'left-0.5'}`} />
               </span>
             </button>
           </div>

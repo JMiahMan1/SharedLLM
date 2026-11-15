@@ -16,6 +16,7 @@ import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
 import PrivateChatThread from './PrivateChatThread';
 import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
+import { privatePreviewPlugin } from '../../plugins/privatePreview';
 import { forgetLockAfter, lockNow } from '../../lib/privateChatSession';
 import { errorText, mayUsePrivateChat } from './privateChatModel';
 import ConversationAvatar from './ConversationAvatar';
@@ -1005,6 +1006,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               lockNow(activeConversation.token);
               forgetLockAfter(activeConversation.token);
               void deviceUnlockPlugin()?.disable({ token: activeConversation.token }).catch(() => {});
+              void privatePreviewPlugin()?.disable({ token: activeConversation.token }).catch(() => {});
             }
             setInfoOpen(false);
             setSelectedToken('');

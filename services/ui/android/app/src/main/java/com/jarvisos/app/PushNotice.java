@@ -71,10 +71,17 @@ final class PushNotice {
     final String sound;
     final String emoji;
     final List<Action> actions;
+    /** A notice about the parents' private chat ({@code data.private}): it never carries content. */
+    final boolean privateChat;
+    /** The Talk message a chat notice is about ({@code data.message_id}), 0 when unknown. */
+    final long messageId;
+    /** True once the phone opened the message itself for a preview ({@link #withPreview}). */
+    final boolean preview;
 
     private PushNotice(String id, String category, String kind, String title, String body,
                        int priority, String tag, String path, String dataToken,
-                       boolean ringPhone, String sound, String emoji, List<Action> actions) {
+                       boolean ringPhone, String sound, String emoji, List<Action> actions,
+                       boolean privateChat, long messageId, boolean preview) {
         this.id = id;
         this.category = category;
         this.kind = kind;
@@ -88,6 +95,15 @@ final class PushNotice {
         this.sound = sound;
         this.emoji = emoji;
         this.actions = actions;
+        this.privateChat = privateChat;
+        this.messageId = messageId;
+        this.preview = preview;
+    }
+
+    /** The same notice with the text this phone decrypted for a private-chat preview. */
+    PushNotice withPreview(String text) {
+        return new PushNotice(id, category, kind, title, text, priority, tag, path, dataToken,
+                ringPhone, sound, emoji, actions, privateChat, messageId, true);
     }
 
     /** The notice in a stream message, or null when the text is not a notice. */
@@ -110,6 +126,8 @@ final class PushNotice {
         boolean ringPhone = data != null && data.optBoolean("ring_phone", false);
         String sound = data != null ? str(data, "sound") : "";
         String emoji = data != null ? str(data, "emoji") : "";
+        boolean privateChat = data != null && data.optBoolean("private", false);
+        long messageId = data != null ? data.optLong("message_id", 0) : 0;
         String category = str(o, "category");
         return new PushNotice(
                 str(o, "id"),
@@ -124,14 +142,17 @@ final class PushNotice {
                 ringPhone,
                 sound,
                 emoji,
-                actions(o.optJSONArray("actions")));
+                actions(o.optJSONArray("actions")),
+                privateChat,
+                Math.max(0, messageId),
+                false);
     }
 
     /** A message that is not a notice (sent to the topic by hand): shown as it is. */
     static PushNotice plain(String id, String title, String body) {
         return new PushNotice(id == null ? "" : id, PushCategories.GENERAL, "",
                 title == null || title.isEmpty() ? "Jarvis" : title, body == null ? "" : body,
-                3, "", "", "", false, "", "", Collections.<Action>emptyList());
+                3, "", "", "", false, "", "", Collections.<Action>emptyList(), false, 0, false);
     }
 
     private static List<Action> actions(JSONArray list) {

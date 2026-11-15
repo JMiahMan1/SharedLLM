@@ -446,4 +446,43 @@ test.describe('private chat on every form factor', () => {
     await expect(page.getByTestId('private-lock')).toBeVisible();
     done(run);
   });
+
+  test('message text in notifications: off by default, turned on with the password (phone stand-in)', async ({ page }, info) => {
+    await page.addInitScript(() => {
+      const kept: Record<string, string> = {};
+      (window as unknown as { __jarvisPrivatePreviewMock: unknown }).__jarvisPrivatePreviewMock = {
+        available: async () => ({ available: true }),
+        isEnabled: async ({ token }: { token: string }) => ({ enabled: token in kept }),
+        enable: async ({ token, key }: { token: string; key: string }) => {
+          kept[token] = key;
+          return { enabled: true };
+        },
+        disable: async ({ token }: { token: string }) => {
+          delete kept[token];
+          return { enabled: false };
+        },
+      };
+    });
+    const { server } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByTestId('private-feed')).toBeVisible();
+    await page.getByTestId('private-security-open').click();
+    const toggle = page.getByTestId('private-preview-toggle');
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    const sheet = page.getByTestId('private-preview-setup');
+    await expect(sheet.getByText('Less private')).toBeVisible();
+    await sheet.getByTestId('private-preview-password').fill('wrong wrong wrong');
+    await sheet.getByTestId('private-preview-submit').click();
+    await expect(sheet.getByTestId('private-preview-error')).toContainText('not the password');
+    await check(page, info, run, 'private preview setup', page.getByRole('dialog').last());
+    await sheet.getByTestId('private-preview-password').fill(PASSWORD);
+    await sheet.getByTestId('private-preview-submit').click();
+    await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('private-preview-toggle').click();
+    await expect(page.getByTestId('private-preview-toggle')).toHaveAttribute('aria-checked', 'false');
+    done(run);
+  });
 });
