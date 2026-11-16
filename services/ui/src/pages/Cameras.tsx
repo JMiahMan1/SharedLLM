@@ -22,8 +22,13 @@ import { updateEntity } from '../lib/hardware';
 import {
   addDays, cameraMediaUrl, cameraRotation, dayRange, formatClock, formatDuration, fromDateInput, isCameraOnline,
   nextRotation, playbackRotation, rotatedMediaStyle, sameDay, tileRefreshMs, toDateInput, triggerLabel, triggerStyle,
-  type CameraInfo, type CameraRecording, type CameraRotation,
+  type CameraInfo, type CameraRotation,
 } from '../lib/cameras';
+import {
+  DAY_MS, KIND_COLORS, buildSegments, dayBounds, filterSegments, followingSegment, initialPlayhead, kindsPresent,
+  nextSegment, previousSegment, resolvePlayTarget, segmentAt, type Segment, type TimelineKind,
+} from '../lib/cameraTimeline';
+import RecordingsTimeline, { TimelineControls, TimelineFilters } from '../components/cameras/RecordingsTimeline';
 
 const LIST_POLL_MS = 30_000;
 /** A battery camera's live view pauses after this long, since every frame keeps it awake. */
@@ -220,25 +225,62 @@ function LiveView({ camera, token }: { camera: CameraInfo; token: ReturnType<typ
   );
 }
 
+/** Where to put a playing recording: `at` seconds in; a new `n` asks again for the same second. */
+export interface RecordingSeek {
+  at: number;
+  n: number;
+}
+
 /**
  * A recording. Unturned, it is the browser's own player. Turned, the video is
  * rotated without its controls (a sideways scrub bar is no use), and play,
- * pause and seeking sit under it the right way up.
+ * pause and seeking sit under it the right way up. `seek` starts it part way
+ * in (a tap on the timeline lands inside a clip); `onTime` and `onEnded` let
+ * the timeline follow it and carry on into the next clip.
  */
-function RecordingPlayer({ src, rotation, label, onError }: {
+function RecordingPlayer({ src, rotation, label, onError, seek, onTime, onEnded }: {
   src: string;
   rotation: CameraRotation;
   label: string;
   onError: () => void;
+  seek?: RecordingSeek | null;
+  onTime?: (seconds: number) => void;
+  onEnded?: () => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  // A seek asked for before the file's length is known waits for it.
+  const pendingSeek = useRef<number | null>(null);
+  useEffect(() => {
+    if (!seek) return;
+    const v = ref.current;
+    if (v && v.readyState >= 1) {
+      v.currentTime = seek.at;
+      if (v.paused) void v.play()?.catch?.(() => {});
+    } else {
+      pendingSeek.current = seek.at;
+    }
+  }, [seek]);
+  const onMetadata = (v: HTMLVideoElement) => {
+    setDuration(Number.isFinite(v.duration) ? v.duration : 0);
+    if (pendingSeek.current !== null) {
+      v.currentTime = pendingSeek.current;
+      pendingSeek.current = null;
+    }
+  };
+  const onTimeUpdate = (v: HTMLVideoElement) => {
+    setTime(v.currentTime);
+    onTime?.(v.currentTime);
+  };
   if (rotation === 0) {
     return (
-      <video src={src} controls autoPlay playsInline preload="metadata"
-        className="w-full aspect-video rounded-xl bg-black" onError={onError} aria-label={label} />
+      <video ref={ref} src={src} controls autoPlay playsInline preload="metadata"
+        className="w-full aspect-video rounded-xl bg-black" onError={onError} aria-label={label}
+        onLoadedMetadata={(e) => onMetadata(e.currentTarget)}
+        onTimeUpdate={(e) => onTimeUpdate(e.currentTarget)}
+        onEnded={onEnded} />
     );
   }
   const toggle = () => {
@@ -260,9 +302,10 @@ function RecordingPlayer({ src, rotation, label, onError }: {
           onClick={toggle}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-          onLoadedMetadata={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+          onTimeUpdate={(e) => onTimeUpdate(e.currentTarget)}
+          onLoadedMetadata={(e) => onMetadata(e.currentTarget)}
           onDurationChange={(e) => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+          onEnded={onEnded}
           onError={onError}
           aria-label={label}
         />
@@ -293,13 +336,30 @@ function RecordingPlayer({ src, rotation, label, onError }: {
   );
 }
 
+/**
+ * A day's recordings, laid out like a recorder's playback screen: the player on
+ * top, and under it the day as a horizontal track of coloured clips beneath a
+ * fixed centre playhead. Tap a clip (or a moment in one) to play from there;
+ * when a clip ends the next one plays and the playhead follows the video. Type
+ * chips filter the track, and the full list is one tap away but folded, so a
+ * busy day never pushes the player off the screen.
+ */
 function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnType<typeof useMediaToken> }) {
   const [day, setDay] = useState(() => new Date());
-  const [playing, setPlaying] = useState<CameraRecording | null>(null);
+  const [playingFile, setPlayingFile] = useState<string | null>(null);
+  const [seek, setSeek] = useState<RecordingSeek | null>(null);
   const [playError, setPlayError] = useState(false);
+  // Null until the day is moved through: the day then opens on its latest recording.
+  const [playhead, setPlayhead] = useState<number | null>(null);
+  const [spanMs, setSpanMs] = useState(DAY_MS);
+  const [filter, setFilter] = useState<TimelineKind | 'all'>('all');
+  const [listOpen, setListOpen] = useState(false);
+  const scrubbing = useRef(false);
+  useTick(60_000); // the "now" marker on today
   const today = new Date();
   const isToday = sameDay(day, today);
   const range = useMemo(() => dayRange(day), [day]);
+  const bounds = useMemo(() => dayBounds(day), [day]);
 
   const recordings = useQuery({
     queryKey: ['camera-recordings', camera.entity_id, toDateInput(day)],
@@ -307,17 +367,57 @@ function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnTy
     // Today's list grows while you watch; past days do not change.
     refetchInterval: () => (isToday && !document.hidden ? 60_000 : false),
   });
-  const items = recordings.data?.recordings ?? [];
+  const items = useMemo(() => recordings.data?.recordings ?? [], [recordings.data]);
+  const segments = useMemo(() => buildSegments(items), [items]);
+  const kinds = useMemo(() => kindsPresent(segments), [segments]);
+  // A filter for a type the day no longer has (another day) shows everything.
+  const activeFilter = filter !== 'all' && kinds.some((k) => k.kind === filter) ? filter : 'all';
+  const shown = useMemo(() => filterSegments(segments, activeFilter), [segments, activeFilter]);
+  const nowMs = isToday ? today.getTime() : null;
+  const head = playhead ?? initialPlayhead(segments, bounds.start, bounds.end, today.getTime());
+  const playing = segments.find((s) => s.rec.file === playingFile) ?? null;
 
-  const choose = (rec: CameraRecording) => { setPlayError(false); setPlaying(rec); };
-  const playUrl = playing ? cameraMediaUrl(token, camera.entity_id, 'play', { file: playing.file }) : null;
+  const changeDay = (next: Date) => {
+    setDay(next);
+    setPlayhead(null);
+    setPlayingFile(null);
+    setSeek(null);
+    setPlayError(false);
+  };
+
+  const play = (seg: Segment, offsetS: number) => {
+    setPlayError(false);
+    setPlayingFile(seg.rec.file);
+    setSeek((s) => ({ at: offsetS, n: (s?.n ?? 0) + 1 }));
+    setPlayhead(seg.startMs + offsetS * 1000);
+  };
+  const commit = (t: number, toleranceMs: number) => {
+    scrubbing.current = false;
+    const target = resolvePlayTarget(shown, t, toleranceMs);
+    if (target) play(target.seg, target.offsetS);
+    else setPlayhead(t);
+  };
+  const scrub = (t: number) => { scrubbing.current = true; setPlayhead(t); };
+  const onTime = (seconds: number) => {
+    if (!playing || scrubbing.current) return;
+    setPlayhead(playing.startMs + seconds * 1000);
+  };
+  const onEnded = () => {
+    if (!playing) return;
+    const next = followingSegment(shown, playing);
+    if (next) play(next, 0);
+  };
+  const previous = previousSegment(shown, head);
+  const next = nextSegment(shown, head);
+  const playUrl = playing ? cameraMediaUrl(token, camera.entity_id, 'play', { file: playing.rec.file }) : null;
+  const here = segmentAt(shown, head);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => setDay((d) => addDays(d, -1))}
+          onClick={() => changeDay(addDays(day, -1))}
           className={`${TOUCH} flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10`}
           aria-label="Previous day"
         >
@@ -327,13 +427,13 @@ function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnTy
           type="date"
           value={toDateInput(day)}
           max={toDateInput(today)}
-          onChange={(e) => { const next = fromDateInput(e.target.value); if (next && next <= today) setDay(next); }}
+          onChange={(e) => { const d = fromDateInput(e.target.value); if (d && d <= today) changeDay(d); }}
           className="min-h-11 flex-1 min-w-0 rounded-xl bg-white/5 border border-white/10 px-3 text-sm text-white [color-scheme:dark]"
           aria-label="Day"
         />
         <button
           type="button"
-          onClick={() => setDay((d) => addDays(d, 1))}
+          onClick={() => changeDay(addDays(day, 1))}
           disabled={isToday}
           className={`${TOUCH} flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 disabled:opacity-40`}
           aria-label="Next day"
@@ -342,72 +442,120 @@ function RecordingsView({ camera, token }: { camera: CameraInfo; token: ReturnTy
         </button>
       </div>
 
-      {playing && (
-        <div className="space-y-1">
-          {playUrl && !playError ? (
-            <RecordingPlayer
-              key={playing.file}
-              src={playUrl}
-              rotation={playbackRotation(camera, playing)}
-              label={`Recording at ${formatClock(playing.start)}`}
-              onError={() => setPlayError(true)}
-            />
-          ) : (
-            <div className="w-full aspect-video rounded-xl bg-black flex flex-col items-center justify-center gap-2 text-center p-4">
-              <span className="text-sm text-slate-300">{playError ? 'This recording would not play.' : 'Getting ready…'}</span>
-              {playError && (
-                <button type="button" onClick={() => setPlayError(false)} className={`${TOUCH} px-4 text-sm text-cyan-300 underline`}>
-                  Try again
+      {playing && playUrl && !playError ? (
+        <RecordingPlayer
+          key={playing.rec.file}
+          src={playUrl}
+          rotation={playbackRotation(camera, playing.rec)}
+          label={`Recording at ${formatClock(playing.rec.start)}`}
+          onError={() => setPlayError(true)}
+          seek={seek}
+          onTime={onTime}
+          onEnded={onEnded}
+        />
+      ) : (
+        <div className="w-full aspect-video rounded-xl bg-black flex flex-col items-center justify-center gap-2 text-center p-4"
+          data-testid="recording-placeholder">
+          {playError ? (
+            <>
+              <span className="text-sm text-slate-300">This recording would not play.</span>
+              <button type="button" onClick={() => setPlayError(false)} className={`${TOUCH} px-4 text-sm text-cyan-300 underline`}>
+                Try again
+              </button>
+            </>
+          ) : playing ? (
+            <span className="text-sm text-slate-300">Getting ready…</span>
+          ) : segments.length > 0 ? (
+            <>
+              <Film size={22} className="text-slate-500" aria-hidden />
+              <span className="text-sm text-slate-300">
+                {here ? 'Tap the timeline or Play to watch.' : 'No recording at this time. Tap a coloured clip to watch it.'}
+              </span>
+              {(here ?? next ?? previous) && (
+                <button
+                  type="button"
+                  onClick={() => { const seg = here ?? next ?? previous; if (seg) play(seg, here ? Math.max(0, (head - seg.startMs) / 1000) : 0); }}
+                  className={`${TOUCH} flex items-center gap-2 rounded-xl bg-cyan-500/20 border border-cyan-500/40 px-4 text-sm text-cyan-100`}
+                >
+                  <Play size={16} aria-hidden />Play
                 </button>
               )}
-            </div>
-          )}
-          <p className="text-xs text-slate-400">
-            {formatClock(playing.start)} · {formatDuration(playing.duration)}
-          </p>
+            </>
+          ) : null}
         </div>
       )}
 
       {recordings.isLoading ? (
-        <div className="flex justify-center py-8" role="status" aria-label="Loading recordings">
+        <div className="flex justify-center py-6" role="status" aria-label="Loading recordings">
           <Loader2 className="animate-spin text-slate-500" />
         </div>
       ) : recordings.isError ? (
-        <div className="text-center py-6">
+        <div className="text-center py-4">
           <p className="text-sm text-red-300">{errorText(recordings.error, 'Couldn’t read the recordings')}</p>
           <button type="button" onClick={() => void recordings.refetch()} className={`${TOUCH} px-4 text-sm text-cyan-300 underline`}>
             Try again
           </button>
         </div>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-slate-500 py-6 text-center">No recordings {isToday ? 'yet today' : 'on this day'}.</p>
+      ) : segments.length === 0 ? (
+        <p className="text-sm text-slate-500 py-4 text-center">No recordings {isToday ? 'yet today' : 'on this day'}.</p>
       ) : (
-        <ul className="space-y-1.5" aria-label="Recordings">
-          {items.map((rec) => {
-            const selected = playing?.file === rec.file;
-            return (
-              <li key={rec.file}>
-                <button
-                  type="button"
-                  onClick={() => choose(rec)}
-                  aria-pressed={selected}
-                  className={`w-full min-h-12 flex items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${
-                    selected ? 'bg-cyan-500/15 border-cyan-500/40' : 'bg-white/5 border-white/10 hover:bg-white/10'
-                  }`}
-                >
-                  <Play size={16} className="text-cyan-300 shrink-0" aria-hidden />
-                  <span className="text-sm text-white tabular-nums shrink-0">{formatClock(rec.start)}</span>
-                  <span className="text-xs text-slate-400 tabular-nums shrink-0">{formatDuration(rec.duration)}</span>
-                  <span className="flex flex-wrap gap-1 min-w-0 justify-end ml-auto">
-                    {rec.triggers.map((t) => (
-                      <span key={t} className={`rounded-full border px-2 py-0.5 text-[11px] ${triggerStyle(t)}`}>{triggerLabel(t)}</span>
-                    ))}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <RecordingsTimeline
+            segments={shown}
+            dayStart={bounds.start}
+            dayEnd={bounds.end}
+            now={nowMs}
+            playhead={head}
+            spanMs={spanMs}
+            playingFile={playingFile}
+            onSpan={setSpanMs}
+            onScrub={scrub}
+            onCommit={commit}
+          />
+          <TimelineControls
+            spanMs={spanMs}
+            onSpan={setSpanMs}
+            hasPrevious={Boolean(previous)}
+            hasNext={Boolean(next)}
+            onPrevious={() => { if (previous) play(previous, 0); }}
+            onNext={() => { if (next) play(next, 0); }}
+          />
+          <TimelineFilters kinds={kinds} filter={activeFilter} onFilter={setFilter} total={segments.length} />
+          <details className="rounded-xl border border-white/10 bg-white/[0.03] group" onToggle={(e) => setListOpen(e.currentTarget.open)}>
+            <summary className="min-h-11 flex cursor-pointer list-none items-center gap-2 px-3 text-sm text-slate-300">
+              <ChevronDown size={16} className="transition-transform group-open:rotate-180" aria-hidden />
+              List ({shown.length})
+            </summary>
+            {listOpen && (
+              <ul className="max-h-72 overflow-y-auto space-y-1 px-2 pb-2" aria-label="Recordings">
+                {[...shown].reverse().map((seg) => {
+                  const selected = playingFile === seg.rec.file;
+                  return (
+                    <li key={seg.rec.file}>
+                      <button
+                        type="button"
+                        onClick={() => play(seg, 0)}
+                        aria-pressed={selected}
+                        className={`w-full min-h-11 flex items-center gap-2 rounded-lg border px-2.5 text-left transition-colors ${
+                          selected ? 'bg-cyan-500/15 border-cyan-500/40' : 'bg-white/5 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${KIND_COLORS[seg.kind]}`} aria-hidden />
+                        <span className="text-sm text-white tabular-nums shrink-0">{formatClock(seg.rec.start)}</span>
+                        <span className="text-xs text-slate-400 tabular-nums shrink-0">{formatDuration(seg.rec.duration)}</span>
+                        <span className="flex flex-wrap gap-1 min-w-0 justify-end ml-auto">
+                          {seg.rec.triggers.map((t) => (
+                            <span key={t} className={`rounded-full border px-2 py-0.5 text-[11px] ${triggerStyle(t)}`}>{triggerLabel(t)}</span>
+                          ))}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </details>
+        </>
       )}
     </div>
   );
