@@ -31,6 +31,10 @@ from services.execution.wyoming_stt import read_event
 PREFIX = "piper:"
 #: ``host:port`` of the Wyoming Piper server. Read once, at start.
 SERVER = os.getenv("PIPER_TTS", "").strip()
+#: The Piper server's voice folder, mounted read-only. The server describes every voice in its
+#: catalog as installed and downloads one on first use, so only voices with a model here are
+#: offered: picking a voice must never fetch one from the internet. Read once, at start.
+VOICES_DIR = os.getenv("PIPER_VOICES_DIR", "").strip()
 #: A reply is a few sentences; a long passage still finishes well inside this.
 SYNTH_TIMEOUT_S = 60.0
 DESCRIBE_TIMEOUT_S = 5.0
@@ -74,8 +78,15 @@ async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         raise PiperError(f"the Piper server at {SERVER} did not answer: {exc}") from exc
 
 
+def _present(name: str) -> bool:
+    """Whether the voice's model is in the voice folder (always, when no folder is configured)."""
+    if not VOICES_DIR:
+        return True
+    return os.path.isfile(os.path.join(VOICES_DIR, f"{name}.onnx"))
+
+
 async def list_voices() -> list[str]:
-    """The installed Piper voices, each as ``piper:<name>``."""
+    """The Piper voices on this host, each as ``piper:<name>``."""
     reader, writer = await _connect()
     try:
         writer.write(_event("describe"))
@@ -95,7 +106,7 @@ async def list_voices() -> list[str]:
     names: list[str] = []
     for program in data.get("tts") or []:
         for voice in program.get("voices") or []:
-            if voice.get("installed", True) and voice.get("name"):
+            if voice.get("installed", True) and voice.get("name") and _present(str(voice["name"])):
                 names.append(PREFIX + str(voice["name"]))
     return sorted(set(names))
 
@@ -105,6 +116,8 @@ async def synthesize(text: str, voice: str) -> bytes:
     name = voice_name(voice)
     if not name:
         raise PiperError("a Piper voice needs a name after 'piper:'")
+    if not _present(name):
+        raise PiperError(f"the Piper voice {name!r} is not installed (put {name}.onnx and its .onnx.json in data/piper)")
     reader, writer = await _connect()
     try:
         writer.write(_event("synthesize", {"text": text, "voice": {"name": name}}))

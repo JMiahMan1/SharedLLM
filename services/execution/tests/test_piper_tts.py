@@ -47,6 +47,21 @@ def test_a_piper_voice_is_named_with_its_prefix():
     assert piper_tts.voice_name("piper:en_US-test-medium") == "en_US-test-medium"
 
 
+async def test_only_voices_with_a_model_here_are_offered_or_spoken(piper_at, monkeypatch, tmp_path):
+    (tmp_path / "en_US-test-medium.onnx").write_bytes(b"model")
+    monkeypatch.setattr(piper_tts, "VOICES_DIR", str(tmp_path))
+    info = {"tts": [{"name": "piper", "voices": [
+        {"name": "en_US-test-medium", "installed": True},
+        {"name": "en_US-elsewhere-high", "installed": True},
+    ]}]}
+    server, port = await _serve(lambda kind, data: [_event("info", info)])
+    piper_at(port)
+    async with server:
+        assert await piper_tts.list_voices() == ["piper:en_US-test-medium"]
+    with pytest.raises(piper_tts.PiperError, match="not installed"):
+        await piper_tts.synthesize("Hi", "piper:en_US-elsewhere-high")
+
+
 async def test_installed_voices_are_listed_with_the_prefix(piper_at):
     info = {"tts": [{"name": "piper", "voices": [
         {"name": "en_US-test-medium", "installed": True},

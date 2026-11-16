@@ -177,6 +177,7 @@ services:
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=host
       - PIPER_TTS=${PIPER_TTS:-127.0.0.1:10200}
+      - PIPER_VOICES_DIR=/piper-voices
       - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
       # Telemetry keeps a fixed bridge address (it publishes no host port);
       # reachable from this host-networked container for the activity feed
@@ -215,6 +216,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_SSH_DIR:?HOST_SSH_DIR must name the host .ssh directory (see .env.example)}:/home/sharedllm/.ssh:ro
       - kokoro_models:/app/models
+      # The Piper voices on this host, so only voices that are here are offered
+      # (the Piper server would download any other one on first use).
+      - ./data/piper:/piper-voices:ro
       - ${WORKSPACE_HOST_PATH:?WORKSPACE_HOST_PATH must name the host directory to mount at /workspaces (see .env.example)}:/workspaces
       - execution_data:/data
       # The offline recipe index is a host file (gitignored, rebuilt by
