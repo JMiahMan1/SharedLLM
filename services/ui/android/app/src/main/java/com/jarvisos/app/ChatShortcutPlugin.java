@@ -95,6 +95,36 @@ public class ChatShortcutPlugin extends Plugin {
         }
     }
 
+    /**
+     * A chat was opened: keep it for the launcher's widget list ("Jarvis chat",
+     * ChatShortcutPickerActivity) and the long-press list on the Jarvis icon,
+     * without asking to pin anything.
+     */
+    @PluginMethod
+    public void offer(PluginCall call) {
+        String id = call.getString("id", "");
+        String label = call.getString("label", "");
+        String path = call.getString("path", "");
+        if (!validId(id) || !validPath(path) || label == null || label.trim().isEmpty()) {
+            call.reject("A chat shortcut needs a chat id, a name and a chat page");
+            return;
+        }
+        Context ctx = getContext();
+        try {
+            int colour = parseColour(call.getString("color", ""));
+            String monogram = call.getString("monogram", "");
+            Bitmap picture = decode(call.getString("icon", ""));
+            ChatShortcutStore.put(ctx, id, label.trim(), path, colour, monogram, picture);
+            ShortcutInfoCompat info = build(ctx, id, label.trim(), path, colour, monogram, picture);
+            keepRoomFor(ctx, id);
+            ShortcutManagerCompat.pushDynamicShortcut(ctx, info);
+            if (isPinned(ctx, id)) ShortcutManagerCompat.updateShortcuts(ctx, Collections.singletonList(info));
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not offer the shortcut: " + e.getMessage());
+        }
+    }
+
     /** The conversation is gone: the pinned shortcut greys out with the message, and leaves the long-press list. */
     @PluginMethod
     public void disable(PluginCall call) {
@@ -105,6 +135,7 @@ public class ChatShortcutPlugin extends Plugin {
         }
         String message = call.getString("message", "This chat is no longer available");
         List<String> ids = Collections.singletonList(id);
+        ChatShortcutStore.remove(getContext(), id);
         try {
             ShortcutManagerCompat.disableShortcuts(getContext(), ids, message);
             ShortcutManagerCompat.removeLongLivedShortcuts(getContext(), ids);
@@ -122,7 +153,7 @@ public class ChatShortcutPlugin extends Plugin {
         return path != null && path.startsWith(PATH_PREFIX) && path.length() > PATH_PREFIX.length();
     }
 
-    private static ShortcutInfoCompat build(Context ctx, String id, String label, String path, int colour,
+    static ShortcutInfoCompat build(Context ctx, String id, String label, String path, int colour,
                                             String monogram, Bitmap picture) {
         IconCompat icon = IconCompat.createWithAdaptiveBitmap(iconBitmap(picture, colour, monogram, label));
         Intent intent = new Intent(ctx, MainActivity.class)
@@ -143,6 +174,19 @@ public class ChatShortcutPlugin extends Plugin {
                 .setLongLived(true)
                 .setRank(0)
                 .build();
+    }
+
+    /** The same icon drawn round at `size` px, for the picker's list. */
+    static Bitmap roundIcon(Bitmap picture, int colour, String monogram, String label, int size) {
+        Bitmap full = iconBitmap(picture, colour, monogram, label);
+        int inset = (ICON_PX - VISIBLE_PX) / 2;
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint);
+        paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(full, new Rect(inset, inset, ICON_PX - inset, ICON_PX - inset), new Rect(0, 0, size, size), paint);
+        return out;
     }
 
     /** Whether the launcher already has this shortcut on the home screen. */

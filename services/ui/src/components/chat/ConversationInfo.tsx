@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Loader2, LogOut, Pin, PinOff, Smartphone, Trash2, UserMinus, UserPlus } from 'lucide-react';
+import { Heart, Loader2, LogOut, Pin, PinOff, Smartphone, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { api } from '../../services/api';
 import PeoplePicker from './PeoplePicker';
 import Sheet from './Sheet';
@@ -32,7 +32,7 @@ export default function ConversationInfo({
   onGone: () => void;
   onClose: () => void;
   /** Only where a home-screen shortcut can be made (the Android app, a launcher that pins). */
-  homeShortcut?: { onAdd: () => void; busy: boolean };
+  homeShortcut?: { onAdd: () => void; busy: boolean; onAddBeloved?: () => void };
 }) {
   const queryClient = useQueryClient();
   const people = useFamilyDirectory();
@@ -116,6 +116,21 @@ export default function ConversationInfo({
                 ? 'One tap opens this chat on its lock screen. No message is ever shown on the shortcut.'
                 : 'One tap from your home screen straight into this conversation.'}
             </span>
+          </span>
+        </button>
+      )}
+      {homeShortcut?.onAddBeloved && (
+        <button
+          type="button"
+          onClick={homeShortcut.onAddBeloved}
+          disabled={homeShortcut.busy}
+          data-testid="chat-beloved-shortcut"
+          className="mb-4 flex w-full min-h-12 items-center gap-3 rounded-xl border border-rose-300/15 px-3 text-left disabled:opacity-60"
+        >
+          <Heart size={16} className="text-rose-300" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-white">Add Beloved to home screen</span>
+            <span className="block text-xs text-slate-400">Your spouse&apos;s picture, named Beloved. One tap opens Beloved after the lock screen.</span>
           </span>
         </button>
       )}

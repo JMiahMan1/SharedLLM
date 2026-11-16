@@ -48,6 +48,8 @@ interface PrivateChatThreadProps {
   adoptKey?: CryptoKey;
   /** The adopted key is held now: the panel forgets it, so coming back asks for the password. */
   onKeyAdopted?: () => void;
+  /** Puts Beloved on the home screen (the Android app, a launcher that pins); absent elsewhere. */
+  onAddBelovedToHome?: () => void;
   onUnlockedChange: (unlocked: boolean) => void;
   /** Refetch the thread after a send or a delete. */
   onChanged: () => void;
@@ -72,6 +74,7 @@ export default function PrivateChatThread({
   onKeyAdopted,
   onUnlockedChange,
   onChanged,
+  onAddBelovedToHome,
 }: PrivateChatThreadProps) {
   // One vault per chat in this app's memory: it outlives this screen by this
   // device's lock setting (privateChatSession), never the app.
@@ -171,6 +174,7 @@ export default function PrivateChatThread({
       secure={secure}
       belovedAllowed={belovedAllowed}
       onChanged={onChanged}
+      onAddBelovedToHome={onAddBelovedToHome}
     />
   );
 }
@@ -346,9 +350,10 @@ interface UnlockedChatProps {
   /** Whether the signed-in parent may open Beloved here (one father and one mother). */
   belovedAllowed: boolean;
   onChanged: () => void;
+  onAddBelovedToHome?: () => void;
 }
 
-function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged, onAddBelovedToHome }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -768,7 +773,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           onDelete={removeById}
         />
       )}
-      {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} />}
+      {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} onAddToHome={onAddBelovedToHome} />}
       {cameraOpen && (
         <PrivateCamera
           onClose={() => setCameraOpen(false)}

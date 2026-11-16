@@ -81,3 +81,21 @@ export function chatShortcutRequest(target: ChatShortcutTarget, icon?: string | 
   if (icon) request.icon = icon;
   return request;
 }
+
+/** Beloved's own shortcut: a second one for the private chat, opening straight into Beloved once unlocked. */
+export function belovedShortcutId(token: string): string {
+  return `${chatShortcutId(token)}:beloved`;
+}
+
+/**
+ * The private chat's Beloved shortcut: the spouse's picture, named "Beloved"
+ * (nothing more on the home screen), and the page a heart's notice opens.
+ */
+export function belovedShortcutRequest(target: ChatShortcutTarget, icon?: string | null): ChatShortcutRequest {
+  return {
+    ...chatShortcutRequest(target, icon),
+    id: belovedShortcutId(target.token),
+    label: 'Beloved',
+    path: `${chatShortcutPath(target.token)}&beloved=1`,
+  };
+}

@@ -12,6 +12,7 @@ import type { ExecutionResponse } from '../../types/api';
 import { useConversationSendAs } from './sendAsPref';
 import ConversationList from './ConversationList';
 import ConversationInfo from './ConversationInfo';
+import { canSeeBeloved } from '../../lib/beloved/access';
 import NewChatSheet from './NewChatSheet';
 import NewPrivateChatSheet from './NewPrivateChatSheet';
 import PrivateChatThread from './PrivateChatThread';
@@ -20,7 +21,7 @@ import { privatePreviewPlugin } from '../../plugins/privatePreview';
 import { forgetLockAfter, lockNow } from '../../lib/privateChatSession';
 import { errorText, mayUsePrivateChat } from './privateChatModel';
 import { chatShortcutPlugin, chatShortcutSupported } from '../../plugins/chatShortcut';
-import { CHAT_SHORTCUT_GONE, chatShortcutId, chatShortcutRequest, chatShortcutTarget, type ChatShortcutTarget } from './chatShortcut';
+import { CHAT_SHORTCUT_GONE, belovedShortcutId, belovedShortcutRequest, chatShortcutId, chatShortcutRequest, chatShortcutTarget, type ChatShortcutTarget } from './chatShortcut';
 import { avatarIconPng } from '../../lib/avatarIcon';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
@@ -207,7 +208,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     ? chatShortcutTarget({ conversation: activeConversation, people, privateInfo, mayUsePrivate: mayUsePrivateChat(me) })
     : null;
   const addToHome = useMutation({
-    mutationFn: async (target: ChatShortcutTarget) => {
+    mutationFn: async ({ target, beloved = false }: { target: ChatShortcutTarget; beloved?: boolean }) => {
       const plugin = chatShortcutPlugin();
       if (!plugin) throw new Error('Home screen shortcuts need the Jarvis app');
       // The same cached picture the chat draws (fetched now if it never was).
@@ -218,7 +219,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           staleTime: Infinity,
         }),
       );
-      return plugin.pin(chatShortcutRequest(target, icon));
+      return plugin.pin(beloved ? belovedShortcutRequest(target, icon) : chatShortcutRequest(target, icon));
     },
     onSuccess: (result) => {
       if (result.updated) toast.success('Home screen shortcut updated');
@@ -227,6 +228,35 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     },
     onError: (error: Error) => toast.error(error.message || 'Could not add it to the home screen'),
   });
+
+  // Every chat opened is kept on the phone for the launcher's widget list ("Jarvis chat")
+  // and the long-press list on the Jarvis icon; the private chat also offers Beloved.
+  const offerTarget = chatShortcutPlugin()
+    ? chatShortcutTarget({ conversation: activeConversation, people, privateInfo, mayUsePrivate: mayUsePrivateChat(me) })
+    : null;
+  const offerBeloved = Boolean(activeConversation?.private && canSeeBeloved(me, privateInfo));
+  const offered = useRef(new Set<string>());
+  useEffect(() => {
+    const plugin = chatShortcutPlugin();
+    if (!plugin?.offer || !offerTarget) return;
+    const key = `${offerTarget.token}:${offerTarget.label}:${offerTarget.avatar ?? ''}:${offerBeloved}`;
+    if (offered.current.has(key)) return;
+    offered.current.add(key);
+    const target = offerTarget;
+    void (async () => {
+      const icon = await avatarIconPng(target.avatar, () =>
+        queryClient.fetchQuery({
+          queryKey: ['avatar-image', target.username, target.avatar],
+          queryFn: () => api.getAvatarImage(target.username ?? '', target.avatar),
+          staleTime: Infinity,
+        }),
+      ).catch(() => null);
+      await plugin.offer?.(chatShortcutRequest(target, icon));
+      if (offerBeloved) await plugin.offer?.(belovedShortcutRequest(target, icon));
+    })().catch(() => {
+      // An older APK, or no room: nothing to offer.
+    });
+  }, [offerTarget, offerBeloved, queryClient]);
 
   const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
   const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
@@ -402,7 +432,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     toast.error(CHAT_SHORTCUT_GONE);
     setSelectedToken((current) => (current === linked.token ? '' : current));
     setMobileView('list');
-    void chatShortcutPlugin()?.disable({ id: chatShortcutId(linked.token), message: CHAT_SHORTCUT_GONE }).catch(() => {});
+    for (const id of [chatShortcutId(linked.token), belovedShortcutId(linked.token)]) {
+      void chatShortcutPlugin()?.disable({ id, message: CHAT_SHORTCUT_GONE }).catch(() => {});
+    }
   }, [linked, conversations, conversationsLoaded, conversationsStale, loadingConversations, conversationsAt]);
 
   // Tell the phone which conversation is on screen, so it does not notify
@@ -837,6 +869,11 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
               onKeyAdopted={forgetCreatedKey}
               onUnlockedChange={setPrivateUnlocked}
               onChanged={() => refreshThread(activeToken)}
+              onAddBelovedToHome={
+                shortcutTarget && shortcutTarget.token === activeToken
+                  ? () => addToHome.mutate({ target: shortcutTarget, beloved: true })
+                  : undefined
+              }
             />
           ) : null
         ) : (
@@ -1065,12 +1102,20 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           onToggleDefault={() => setDefault.mutate(defaultToken === activeConversation.token ? null : activeConversation.token)}
           homeShortcut={
             shortcutTarget && shortcutTarget.token === activeConversation.token
-              ? { onAdd: () => addToHome.mutate(shortcutTarget), busy: addToHome.isPending }
+              ? {
+                  onAdd: () => addToHome.mutate({ target: shortcutTarget }),
+                  busy: addToHome.isPending,
+                  onAddBeloved: activeConversation.private && canSeeBeloved(me, privateInfo)
+                    ? () => addToHome.mutate({ target: shortcutTarget, beloved: true })
+                    : undefined,
+                }
               : undefined
           }
           onGone={() => {
             // Its home-screen shortcut stays, greyed out, and says why.
-            void chatShortcutPlugin()?.disable({ id: chatShortcutId(activeConversation.token), message: CHAT_SHORTCUT_GONE }).catch(() => {});
+            for (const id of [chatShortcutId(activeConversation.token), belovedShortcutId(activeConversation.token)]) {
+              void chatShortcutPlugin()?.disable({ id, message: CHAT_SHORTCUT_GONE }).catch(() => {});
+            }
             // A deleted private chat takes this phone's unlock key with it.
             if (activeConversation.private) {
               lockNow(activeConversation.token);

@@ -32,6 +32,11 @@ export interface ChatShortcutPluginInterface {
   supported(): Promise<{ supported: boolean }>;
   /** `updated`: it was on the home screen already; `requested`: Android is adding it (it may show its own dialog). */
   pin(options: ChatShortcutRequest): Promise<{ requested: boolean; updated: boolean }>;
+  /**
+   * A chat was opened: keep it for the launcher's widget list ("Jarvis chat")
+   * and the long-press list, without pinning. Not on APKs before build 689.
+   */
+  offer?(options: ChatShortcutRequest): Promise<void>;
   /** The conversation is gone: the shortcut stays on the home screen greyed out with `message`. */
   disable(options: { id: string; message: string }): Promise<void>;
 }

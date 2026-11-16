@@ -344,6 +344,19 @@
                 android:resource="@xml/action_button_widget_info" />
         </receiver>
 
+        <!-- "Jarvis chat" in the launcher's widget list: put a chat (Beloved too) on the home screen. -->
+        <activity
+            android:name=".ChatShortcutPickerActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Jarvis chat"
+            android:theme="@style/AppTheme.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".widgets.ConfigureActionButtonActivity"
             android:exported="true"

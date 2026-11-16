@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { BookHeart, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, NotebookPen, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { BookHeart, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, NotebookPen, Settings2, Smartphone, Sparkles, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../../services/api';
 import { IMAGE_TYPES, type PrivateVault } from '../../../lib/privateChatCrypto';
@@ -36,7 +36,18 @@ const TABS: ReadonlyArray<{ id: Tab; label: string; icon: typeof Heart }> = [
  * only to the two spouses. Everything personal on it is sealed on this phone
  * with the chat's key before it is sent; see docs/BELOVED.md.
  */
-export default function BelovedPage({ token, vault, onClose }: { token: string; vault: PrivateVault; onClose: () => void }) {
+export default function BelovedPage({
+  token,
+  vault,
+  onClose,
+  onAddToHome,
+}: {
+  token: string;
+  vault: PrivateVault;
+  onClose: () => void;
+  /** Only in the Android app: a home-screen icon with your spouse's picture that opens straight here. */
+  onAddToHome?: () => void;
+}) {
   const data = useBeloved(token, vault);
   const [tab, setTab] = useState<Tab>('home');
   const [editing, setEditing] = useState(false);
@@ -87,6 +98,18 @@ export default function BelovedPage({ token, vault, onClose }: { token: string; 
         <h2 className="flex min-w-0 flex-1 items-center gap-1.5 truncate font-serif text-lg font-semibold text-rose-100">
           <Lily size={18} className="shrink-0 text-rose-200" /> Beloved
         </h2>
+        {onAddToHome && (
+          <button
+            type="button"
+            onClick={onAddToHome}
+            aria-label="Add Beloved to home screen"
+            title="Add Beloved to home screen"
+            data-testid="beloved-home-shortcut"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-rose-100 hover:bg-white/10"
+          >
+            <Smartphone size={18} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setEditing(true)}

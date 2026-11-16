@@ -30,6 +30,7 @@ declare global {
   interface Window {
     __pinned?: Array<Record<string, unknown>>;
     __disabled?: Array<Record<string, unknown>>;
+    __offered?: Array<Record<string, unknown>>;
   }
 }
 
@@ -37,6 +38,7 @@ async function nativeStandIn(page: Page): Promise<void> {
   await page.addInitScript(() => {
     window.__pinned = [];
     window.__disabled = [];
+    window.__offered = [];
     (window as unknown as { __jarvisChatShortcutMock: unknown }).__jarvisChatShortcutMock = {
       supported: async () => ({ supported: true }),
       pin: async (request: Record<string, unknown>) => {
@@ -46,11 +48,14 @@ async function nativeStandIn(page: Page): Promise<void> {
       disable: async (options: Record<string, unknown>) => {
         window.__disabled!.push(options);
       },
+      offer: async (request: Record<string, unknown>) => {
+        window.__offered!.push(request);
+      },
     };
   });
 }
 
-async function open(page: Page, withPrivate = false): Promise<Run> {
+async function open(page: Page, withPrivate = false, beloved = false): Promise<Run> {
   await quietHotReload(page);
   const mocks = await mockHome(page, 'admin');
   await mockHealth(page);
@@ -71,7 +76,7 @@ async function open(page: Page, withPrivate = false): Promise<Run> {
       return route.fulfill({ json: { eligible: true, reason: null, min_iterations: 600000, partners: [{ username: 'robin', display_name: 'Robin' }],
         chats: withPrivate ? [{ token: PRIVATE, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin',
           created_at: SEC - 86400, version: 2, kdf: { name: 'PBKDF2-SHA256', salt: 'c2FsdHNhbHRzYWx0c2FsdA==', iterations: 600000 },
-          wrapped_key: { iv: 'aXZpdml2aXZpdml2', ct: 'Y3Q=' }, verifier: { iv: 'aXZpdml2aXZpdml2', ct: 'Y3Q=' } }] : [] } });
+          wrapped_key: { iv: 'aXZpdml2aXZpdml2', ct: 'Y3Q=' }, verifier: { iv: 'aXZpdml2aXZpdml2', ct: 'Y3Q=' }, beloved }] : [] } });
     }
     const own = withPrivate
       ? [{ token: PRIVATE, display_name: 'Private chat', type: 2, private: true, last_message: 'Encrypted message', last_activity: SEC - 30,
@@ -155,7 +160,34 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     expect(Buffer.from(pinned.icon, 'base64').subarray(1, 4).toString()).toBe('PNG');
     expect(JSON.stringify(pinned)).not.toContain('Encrypted message');
 
+    // Opening it also kept it for the launcher's widget list; no Beloved for a chat that is not the couple's.
+    const offered = (await page.evaluate(() => window.__offered ?? [])) as Array<Record<string, string>>;
+    expect(offered.map((o) => o.id)).toEqual([`chat:${PRIVATE}`]);
+    await expect(sheet.getByTestId('chat-beloved-shortcut')).toHaveCount(0);
+
     // Opening that page is the lock screen.
+    await page.goto(pinned.path);
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    await expect(page.getByTestId('private-feed')).toHaveCount(0);
+    done(run);
+  });
+
+  test("in the app: Beloved gets its own icon with the spouse's picture, opening Beloved after the lock screen", async ({ page }, info) => {
+    await nativeStandIn(page);
+    const run = await open(page, true, true);
+    const sheet = await details(page, /Private chat/);
+    const add = sheet.getByTestId('chat-beloved-shortcut');
+    await expect(add).toContainText('Add Beloved to home screen');
+    await check(page, info, run, 'private chat details with Beloved in the app');
+    await add.click();
+    await expect.poll(() => page.evaluate(() => window.__pinned?.length ?? 0)).toBe(1);
+    const pinned = (await page.evaluate(() => window.__pinned![0])) as Record<string, string>;
+    expect(pinned).toMatchObject({ id: `chat:${PRIVATE}:beloved`, label: 'Beloved', path: `/family?chat=${PRIVATE}&beloved=1` });
+    expect(Buffer.from(pinned.icon, 'base64').subarray(1, 4).toString()).toBe('PNG');
+    // Both are kept for the launcher's widget list ("Jarvis chat").
+    await expect.poll(async () => ((await page.evaluate(() => window.__offered ?? [])) as Array<Record<string, string>>).map((o) => o.id))
+      .toEqual([`chat:${PRIVATE}`, `chat:${PRIVATE}:beloved`]);
+
     await page.goto(pinned.path);
     await expect(page.getByTestId('private-lock')).toBeVisible();
     await expect(page.getByTestId('private-feed')).toHaveCount(0);
@@ -168,7 +200,10 @@ test.describe('chat home-screen shortcuts on every form factor', () => {
     await page.goto('/family?chat=room-gone');
     await expect(page.getByText('This chat is no longer available')).toBeVisible();
     await expect(page.getByRole('list', { name: 'Conversations' })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.__disabled)).toEqual([{ id: 'chat:room-gone', message: 'This chat is no longer available' }]);
+    await expect.poll(() => page.evaluate(() => window.__disabled)).toEqual([
+      { id: 'chat:room-gone', message: 'This chat is no longer available' },
+      { id: 'chat:room-gone:beloved', message: 'This chat is no longer available' },
+    ]);
     done(run);
   });
 });

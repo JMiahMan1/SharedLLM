@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CHAT_SHORTCUT_GONE, chatShortcutId, chatShortcutPath, chatShortcutRequest, chatShortcutTarget } from './chatShortcut';
+import { CHAT_SHORTCUT_GONE, belovedShortcutId, belovedShortcutRequest, chatShortcutId, chatShortcutPath, chatShortcutRequest, chatShortcutTarget } from './chatShortcut';
 import { buildFamilyLookup } from './familyDirectory';
 import { chatShortcutPlugin, chatShortcutSupported, type ChatShortcutPluginInterface } from '../../plugins/chatShortcut';
 
@@ -43,6 +43,16 @@ describe('chat shortcut payload', () => {
     const request = chatShortcutRequest(target!);
     expect(request.path).toBe('/family?chat=roomprivate1');
     expect(Object.keys(request).sort()).toEqual(['color', 'id', 'label', 'monogram', 'path']);
+  });
+
+  it("Beloved's shortcut is the private chat's picture, named Beloved, opening Beloved", () => {
+    const conversation = { token: 'roomprivate1', display_name: 'Private chat', type: 2, private: true };
+    const privateInfo = { token: 'roomprivate1', partner: 'robin', partner_name: 'Robin Sample' };
+    const target = chatShortcutTarget({ conversation, people, privateInfo, mayUsePrivate: true })!;
+    const request = belovedShortcutRequest(target, 'cG5n');
+    expect(request).toMatchObject({ id: 'chat:roomprivate1:beloved', label: 'Beloved', path: '/family?chat=roomprivate1&beloved=1', icon: 'cG5n' });
+    expect(request.color).toBe(chatShortcutRequest(target).color);
+    expect(belovedShortcutId('roomprivate1')).toBe('chat:roomprivate1:beloved');
   });
 
   it('a private chat is not offered to someone without the private chat, or before its record loads', () => {
