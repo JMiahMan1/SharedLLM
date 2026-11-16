@@ -198,6 +198,23 @@ def _entry(runtime: Any, entry_id: str) -> ConfigEntry:
 
 # -- reconfigure --------------------------------------------------------------------------
 
+async def _check_changes(domain: str, changes: dict[str, Any], data: dict[str, Any]) -> None:
+    """A new account key is checked as the setup flow checked it (manual_flows.RECONFIGURE_CHECKS)."""
+    from services.homehub.flows import NeedsInput
+    from services.homehub.manual_flows import RECONFIGURE_CHECKS
+
+    found = RECONFIGURE_CHECKS.get(domain)
+    if found is None:
+        return
+    keys, check = found
+    if not any(str(changes.get(k) or "").strip() for k in keys):
+        return  # nothing it checks was changed (an empty secret keeps the stored one)
+    try:
+        await check(data)
+    except NeedsInput as exc:
+        raise EntryError(exc.error or exc.message) from exc
+
+
 async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """``{"title"?, "data"?: {...}}``: change the entry's title and the keys it already has, then reload it."""
     entry = _entry(runtime, entry_id)
@@ -239,6 +256,7 @@ async def reconfigure_entry(runtime: Any, entry_id: str, body: dict[str, Any]) -
     if "host" in changes and str(changes.get("host") or "").strip():
         # An address override from the import would win over the new address.
         options.pop("host", None)
+    await _check_changes(entry.domain, changes, data)
     old = (dict(entry.data), dict(entry.options), entry.title)
     entry.data, entry.options = data, options
     if title:
@@ -515,6 +533,22 @@ def delete_area(runtime: Any, area_id: str) -> dict[str, Any]:
     _delete_row(runtime.store, "areas", "area_id", area_id)
     hub.bus.fire("area_registry_updated", {"action": "remove", "area_id": area_id})
     return {"status": "removed", "area_id": area_id, "devices": devices, "entities": ents}
+
+
+# -- accounts other services read ------------------------------------------------------------
+
+def integration_data(runtime: Any, domain: str) -> dict[str, Any]:
+    """The enabled entry of a one-per-hub account, with its data (secrets too: internal callers only).
+
+    ``configured`` is false when there is none, or it is disabled: telemetry then treats the
+    check it drives as not set up.
+    """
+    entry = next((e for e in runtime.hub.config_entries.values()
+                  if e.domain == domain and e.source != "ignore" and not e.disabled_by), None)
+    if entry is None:
+        return {"domain": domain, "configured": False, "data": {}}
+    return {"domain": domain, "configured": True, "entry_id": entry.entry_id, "title": entry.title,
+            "state": entry.state, "data": dict(entry.data or {})}
 
 
 # -- the ESPHome Device Builder -----------------------------------------------------------

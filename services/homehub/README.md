@@ -66,6 +66,7 @@ Jarvis services --HA API--> homehub :8123 --> drivers --> devices (LAN, cloud)
 | open_meteo, nws, sun | `weather.py`, `sun.py` | `weather.get_forecasts` |
 | mobile_app | `mobile_app.py` | The companion app's own webhooks first (sensors, location, pushes; `MOBILE_APP.md`), Jarvis's reports from geo when it is quiet; persons, zones, `notify.mobile_app_*` |
 | local_todo, shopping_list | `todo.py` | |
+| malwarebazaar, common_sense_media | `accounts.py` | App vetting's outside sources (docs/APP_VETTING.md); no entities. Telemetry reads them with the internal secret at `GET /hub/integrations/{domain}`. Added under Devices > Add & fix > Add by address > Cloud accounts |
 
 ## Cameras
 

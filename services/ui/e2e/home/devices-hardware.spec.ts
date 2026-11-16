@@ -134,4 +134,33 @@ test.describe('Devices: the hardware list', () => {
     await snap(page, info, 'devices-add-helper');
     clean(run);
   });
+
+  test('the app check accounts are cloud accounts; MalwareBazaar asks for its key as a password', async ({ page }, info) => {
+    const run = await open(page);
+    await page.getByRole('tab', { name: 'Add & fix' }).click();
+    await page.getByRole('button', { name: /Add by address/ }).click();
+    const picker = page.getByTestId('add-by-address');
+    const cloud = picker.locator('div', { has: page.getByText('Cloud accounts', { exact: true }) }).last();
+    const mb = cloud.getByRole('button', { name: 'abuse.ch MalwareBazaar (app malware check)' });
+    await expect(mb).toBeVisible();
+    await expect(cloud.getByRole('button', { name: 'Common Sense Media (app age ratings)' })).toBeVisible();
+    await expectTapTargets(picker);
+    await expectNoHorizontalOverflow(page);
+    await mb.click();
+    const dialog = page.getByRole('dialog');
+    const key = dialog.getByLabel('Auth-Key');
+    await expect(key).toBeVisible();
+    await expect(key).toHaveAttribute('type', 'password');
+    await expect(dialog).toContainText('auth.abuse.ch');
+    await expect(dialog).toContainText('An online account');
+    await expect(dialog.getByLabel('Room (optional)')).toHaveCount(0); // an account has no room
+    await settled(page, dialog);
+    await expectFits(page, dialog);
+    await expectTapTargets(dialog.getByTestId('adopt-dialog'));
+    // The dialog's close button is 44px under a finger (pointer-coarse) and 36px under a mouse.
+    if (info.project.use.hasTouch) await expectTapTargets(dialog);
+    await expectNoHorizontalOverflow(page);
+    await snap(page, info, 'devices-add-malwarebazaar');
+    clean(run);
+  });
 });

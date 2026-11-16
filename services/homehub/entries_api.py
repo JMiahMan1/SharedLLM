@@ -10,10 +10,14 @@
 | ``GET /hub/flows`` | Every integration that can be added by hand (by address, login or choice), with its fields and ``kind`` |
 | ``POST /hub/flows/{domain}`` | ``{"host"? or "url"?, "name"?, "area_id"?, "input"?}``; same answers as adopting a finding |
 | ``GET /hub/esphome-builder`` | ``{"configured", "url", "state"}`` (never the login) |
+| ``GET /hub/integrations/{domain}`` | ``{"configured", "data", ...}`` of a one-per-hub account; the internal secret only |
 | ``GET /hub/areas``, ``POST /hub/areas`` | The areas; ``{"name", "aliases"?, "icon"?, "floor_id"?}`` makes one (a hub with no import starts with none) |
 | ``PATCH /hub/areas/{id}``, ``DELETE /hub/areas/{id}`` | Rename or change one; remove one (its devices and entities are left with no area) |
 
-Admins only, like the rest of ``/hub/*``. See ``entries.py`` and ``pairing.py``.
+Admins only, like the rest of ``/hub/*``, except ``/hub/integrations/{domain}``: it answers with the
+entry's data, secrets included (the abuse.ch key telemetry looks apps up with), so only a service
+holding the stack's ``INTERNAL_SECRET`` may call it; an admin's own token is refused. See
+``entries.py`` and ``pairing.py``.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from services.common.secrets import secret_matches
 from services.homehub import entries, flows
 from services.homehub import manual_flows as by_hand
 from services.homehub.auth import Auth, bearer
@@ -138,6 +143,13 @@ def build_router(runtime: Any, auth: Auth) -> APIRouter:
             return entries.delete_area(runtime, area_id)
         except HubError as exc:
             return failure(exc)
+
+    @router.get("/hub/integrations/{domain}")
+    async def integration(domain: str, request: Request) -> dict[str, Any]:
+        tok = bearer(request.headers.get("authorization")) or request.headers.get("x-internal-secret")
+        if not tok or not secret_matches(tok, auth.internal_secret):
+            raise HTTPException(401, detail="Only the stack's services may read an integration's settings")
+        return entries.integration_data(runtime, domain)
 
     @router.get("/hub/esphome-builder")
     async def esphome_builder(request: Request) -> dict[str, Any]:

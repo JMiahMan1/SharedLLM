@@ -67,7 +67,7 @@ export default function Lists() {
       {error && <ErrorRetry title={failureText(error, 'Could not load the lists')} onRetry={() => void refetch()} />}
       {lists && lists.length === 0 && (
         <EmptyState icon={<ListChecks size={28} />} title="No lists yet"
-          detail="An admin can add a to-do list or the shopping list under Devices, Add an integration." />
+          detail="An admin can add a to-do list or the shopping list under Devices, Add & fix, Add by address." />
       )}
       {current && <ListCard key={current.entity_id} list={current} act={act} />}
 

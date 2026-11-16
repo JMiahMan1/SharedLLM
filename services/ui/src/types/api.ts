@@ -793,7 +793,7 @@ export interface CommonSenseConsensus {
 /** The Common Sense Media lookup for an app; review fields are present when status is "found". */
 export interface AppCommonSense {
   /** found; not_found (no review under the app's name); error (a page could not be read: reason);
-   *  checking; off (switched off with app_vetting_common_sense_enabled). */
+   *  checking; off (the hub's Common Sense Media integration is not set up). */
   status: 'found' | 'not_found' | 'error' | 'checking' | 'off';
   reason: string | null;
   url?: string;

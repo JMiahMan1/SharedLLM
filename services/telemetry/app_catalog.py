@@ -21,11 +21,15 @@ listings, the local model's review of each, and the parents' notices.
   is redone with them (the entry's hash moves).
 * Common Sense Media's review of each found app (``common_sense``) is looked
   for by the app's Play title, on its own interval, backoff and TTL, while
-  the ``app_vetting_common_sense_enabled`` global setting is on.
+  the hub's Common Sense Media integration is set up.
 * The SHA-256 of each app file a device reports is looked up on abuse.ch
-  MalwareBazaar (``malwarebazaar``) with the ``malwarebazaar_auth_key``
-  global setting, on its own interval and backoff; without a key every app
-  says the check is not set up.
+  MalwareBazaar (``malwarebazaar``) with the Auth-Key of the hub's abuse.ch
+  MalwareBazaar integration, on its own interval and backoff; without one
+  every app says the check is not set up.
+* Both integrations are read from the hub (``GET /hub/integrations/{domain}``
+  with the internal secret) for each round of lookups, cached a minute, so a
+  change on the Devices page applies within a minute. While the hub cannot be
+  asked both count as not set up, which is logged once until it answers.
 * After each lookup the child's apps are assessed (``app_vetting.assess``) and
   each parent hears about newly flagged ones at their own notify level, once
   per app and verdict. A request waiting on the lookup gets its notice again,
@@ -46,7 +50,7 @@ from typing import Any
 import aiohttp
 
 from services.common import app_review, app_vetting, common_sense, malwarebazaar, play_listing
-from services.telemetry import guardian, llm, notices
+from services.telemetry import guardian, llm
 from services.telemetry.config import (
     APP_CATALOG_BACKOFF_BASE_S,
     APP_CATALOG_BACKOFF_MAX_S,
@@ -60,6 +64,8 @@ from services.telemetry.config import (
     COMMON_SENSE_BACKOFF_MAX_S,
     COMMON_SENSE_MIN_INTERVAL_S,
     COMMON_SENSE_TTL_DAYS,
+    HOMEHUB_URL,
+    INTERNAL_SECRET,
     JARVIS_ANDROID_PACKAGE,
     MALWAREBAZAAR_BACKOFF_BASE_S,
     MALWAREBAZAAR_BACKOFF_MAX_S,
@@ -93,10 +99,14 @@ MB_BACKOFF_KEY = "tel:apps:mb-backoff"
 MB_LAST_FETCH_KEY = "tel:apps:mb-last-fetch"
 MB_STATE_KEY = "tel:apps:mb-state"
 
-#: The global settings these checks read (identity; cached for a minute).
-SETTING_MB_KEY = "malwarebazaar_auth_key"
-SETTING_CSM = "app_vetting_common_sense_enabled"
+#: The hub integrations these checks read (homehub; cached for a minute).
+MB_DOMAIN = "malwarebazaar"
+CSM_DOMAIN = "common_sense_media"
 SETTINGS_CACHE_S = 60.0
+HUB_TIMEOUT_S = 5.0
+#: Where an admin turns Common Sense lookups on (the Devices page).
+CSM_NOT_SET_UP = ("Common Sense Media lookups are off: add the Common Sense Media integration "
+                  "(Devices > Add & fix > Add by address > Cloud accounts)")
 MB_FETCH_TIMEOUT_S = 20.0
 
 MAX_APPS_PER_DEVICE = 500
@@ -109,7 +119,9 @@ REVIEW_RETRY_MAX_S = 86400
 REVIEW_MAX_TOKENS = 900
 
 _fetch_session: aiohttp.ClientSession | None = None
-_settings_cache: tuple[float, dict[str, str]] | None = None
+_settings_cache: tuple[float, dict[str, Any]] | None = None
+#: The hub could not be asked last time (so the next failure is not logged again).
+_hub_down = False
 
 
 def _now() -> float:
@@ -238,20 +250,50 @@ async def _interval_ok(rc, key: str, interval: float) -> bool:
     return not (last and _now() - float(last) < interval)
 
 
-async def check_settings(session) -> dict[str, str]:
-    """The MalwareBazaar key and the Common Sense switch from identity's
-    global settings (cached a minute). Raises when identity cannot be read."""
-    global _settings_cache
+async def hub_integration(session, domain: str) -> dict[str, Any]:
+    """``GET /hub/integrations/{domain}`` with the internal secret: ``{configured, data}``. Raises when
+    the hub does not answer 200."""
+    async with session.get(
+        f"{HOMEHUB_URL}/hub/integrations/{domain}", headers={"Authorization": f"Bearer {INTERNAL_SECRET}"},
+        timeout=aiohttp.ClientTimeout(total=HUB_TIMEOUT_S),
+    ) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"homehub answered HTTP {resp.status}")
+        body = await resp.json(content_type=None)
+    return body if isinstance(body, dict) else {}
+
+
+async def check_settings(session) -> dict[str, Any]:
+    """``{"malwarebazaar_key": str, "common_sense": bool}`` from the hub's integrations (cached a minute).
+
+    The key is the abuse.ch MalwareBazaar integration's Auth-Key, empty without one; Common Sense
+    is on while its integration is set up. A hub that cannot be asked counts as neither set up for
+    this pass, logged once until it answers again; never raises."""
+    global _settings_cache, _hub_down
     if _settings_cache and _settings_cache[0] > time.monotonic():
         return _settings_cache[1]
-    found = await notices.identity_settings(session, (SETTING_MB_KEY, SETTING_CSM))
+    try:
+        mb = await hub_integration(session, MB_DOMAIN)
+        csm = await hub_integration(session, CSM_DOMAIN)
+    except Exception as exc:
+        if not _hub_down:
+            log.warning("homehub could not be asked for the app check integrations (%s); "
+                        "treating them as not set up until it answers", type(exc).__name__)
+        _hub_down = True
+        found: dict[str, Any] = {"malwarebazaar_key": "", "common_sense": False, "hub_down": True}
+    else:
+        if _hub_down:
+            log.info("homehub answers again; the app check integrations are read from it")
+        _hub_down = False
+        key = str((mb.get("data") or {}).get("auth_key") or "").strip() if mb.get("configured") else ""
+        found = {"malwarebazaar_key": key, "common_sense": bool(csm.get("configured"))}
     _settings_cache = (time.monotonic() + SETTINGS_CACHE_S, found)
     return found
 
 
-def common_sense_enabled(settings: dict[str, str]) -> bool:
-    """The switch, default on: only an explicit false-like value turns it off."""
-    return (settings.get(SETTING_CSM) or "true").strip().lower() not in ("false", "0", "no", "off")
+def common_sense_enabled(settings: dict[str, Any]) -> bool:
+    """On while the hub's Common Sense Media integration is set up."""
+    return bool(settings.get("common_sense"))
 
 
 def _session() -> aiohttp.ClientSession:
@@ -501,7 +543,7 @@ async def common_sense_entry(rc, package: str) -> dict[str, Any] | None:
     pending the previous answer is shown; switched off says so."""
     state = await _get_json(rc, CSM_STATE_KEY) or {}
     if state.get("enabled") is False:
-        return {"status": "off", "reason": f"Common Sense Media lookups are switched off ({SETTING_CSM})"}
+        return {"status": "off", "reason": CSM_NOT_SET_UP}
     entry = await _get_json(rc, f"{CSM_PREFIX}{package}")
     if entry is None:
         return None
@@ -933,7 +975,7 @@ async def _play_step(rc, session, deliver: Deliver) -> bool:
     return False
 
 
-async def _common_sense_step(rc, session, deliver: Deliver, settings: dict[str, str] | None) -> bool:
+async def _common_sense_step(rc, session, deliver: Deliver, settings: dict[str, Any] | None) -> bool:
     """One Common Sense Media request when switched on and allowed."""
     if settings is None:
         return False
@@ -954,12 +996,12 @@ async def _common_sense_step(rc, session, deliver: Deliver, settings: dict[str, 
     return True
 
 
-async def _malware_step(rc, session, deliver: Deliver, settings: dict[str, str] | None) -> bool:
+async def _malware_step(rc, session, deliver: Deliver, settings: dict[str, Any] | None) -> bool:
     """One MalwareBazaar request when a key is set and allowed. Without a key
     the state says "not set up" and nothing is asked."""
     if settings is None:
         return False
-    key = (settings.get(SETTING_MB_KEY) or "").strip()
+    key = str(settings.get("malwarebazaar_key") or "").strip()
     state = await _get_json(rc, MB_STATE_KEY) or {}
     if not key:
         if state.get("state") != "not_set_up":
@@ -1009,7 +1051,7 @@ async def step(rc, session, deliver: Deliver) -> str:
         return "reviewed"
     fetched = await _play_step(rc, session, deliver)
     try:
-        settings: dict[str, str] | None = await check_settings(session)
+        settings: dict[str, Any] | None = await check_settings(session)
     except Exception as exc:
         log.warning("app check settings could not be read: %s", type(exc).__name__)
         settings = None
