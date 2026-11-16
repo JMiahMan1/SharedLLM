@@ -69,3 +69,18 @@ APP_REVIEW_TIMEOUT_S = float(os.getenv("APP_REVIEW_TIMEOUT_S", "120"))
 APP_INVENTORY_TTL_DAYS = int(os.getenv("APP_INVENTORY_TTL_DAYS", "60"))
 #: Jarvis's own Android package: never listed among a child's apps.
 JARVIS_ANDROID_PACKAGE = os.getenv("JARVIS_ANDROID_PACKAGE", "com.jarvisos.app")
+#: Common Sense Media review pages (switched on and off with the
+#: app_vetting_common_sense_enabled global setting): at least this long between
+#: two requests, a found or missing review is looked for again after the TTL,
+#: and a refusal or failure backs off, doubling up to the maximum.
+COMMON_SENSE_MIN_INTERVAL_S = float(os.getenv("COMMON_SENSE_MIN_INTERVAL_S", "20"))
+COMMON_SENSE_TTL_DAYS = int(os.getenv("COMMON_SENSE_TTL_DAYS", "30"))
+COMMON_SENSE_BACKOFF_BASE_S = int(os.getenv("COMMON_SENSE_BACKOFF_BASE_S", "900"))
+COMMON_SENSE_BACKOFF_MAX_S = int(os.getenv("COMMON_SENSE_BACKOFF_MAX_S", str(24 * 3600)))
+#: abuse.ch MalwareBazaar lookups of app file hashes (the Auth-Key is the
+#: malwarebazaar_auth_key global setting): spacing, how long a "not a known
+#: sample" answer is trusted, and the backoff after a failure.
+MALWAREBAZAAR_MIN_INTERVAL_S = float(os.getenv("MALWAREBAZAAR_MIN_INTERVAL_S", "5"))
+MALWAREBAZAAR_TTL_DAYS = int(os.getenv("MALWAREBAZAAR_TTL_DAYS", "7"))
+MALWAREBAZAAR_BACKOFF_BASE_S = int(os.getenv("MALWAREBAZAAR_BACKOFF_BASE_S", "600"))
+MALWAREBAZAAR_BACKOFF_MAX_S = int(os.getenv("MALWAREBAZAAR_BACKOFF_MAX_S", str(24 * 3600)))

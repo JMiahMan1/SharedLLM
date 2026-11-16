@@ -42,6 +42,17 @@ export interface InstalledApp {
   /** Last use (needs usage access), else null. */
   last_used: number | null;
   size_bytes: number | null;
+  /** Risky access it declares or asks for (APKs with the security scan): accessibility, device_admin,
+   *  notification_listener, vpn, sms_read, sms_send, call_log, background_location, overlay, install_apps. */
+  capabilities?: string[];
+  /** Special access switched on for it now: accessibility, device_admin, notification_listener. */
+  special_access?: string[];
+  /** SHA-1 fingerprints of its signing certificates (uppercase hex), for the stalkerware list. */
+  cert_sha1?: string[];
+  /** SHA-256 of its base APK (lowercase hex), or null when not hashed (see apk_hash_state). */
+  apk_sha256?: string | null;
+  /** "ok", or why there is no hash: "too_large", "unreadable", "deferred" (a later report hashes it). */
+  apk_hash_state?: 'ok' | 'too_large' | 'unreadable' | 'deferred' | null;
 }
 
 export interface PhoneUsagePluginInterface {

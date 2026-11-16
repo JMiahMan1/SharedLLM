@@ -103,13 +103,17 @@ export interface InstalledAppRow {
   permissions: string[];
   last_used: number | null;
   size_bytes: number | null;
+  special_access?: string[];
+  apk_sha256?: string | null;
 }
 
-/** What changes the app list: a new or removed app, an update, new permissions.
+/** What changes the app list: a new or removed app, an update, new permissions,
+ *  special access switched on or off, a newly fingerprinted app file.
  *  Last use and size move all the time and are sent with the daily refresh. */
 export function inventoryFingerprint(apps: InstalledAppRow[]): string {
   return apps
-    .map((a) => `${a.package}|${a.last_update ?? ''}|${a.installer ?? ''}|${(a.permissions || []).join(',')}`)
+    .map((a) => `${a.package}|${a.last_update ?? ''}|${a.installer ?? ''}|${(a.permissions || []).join(',')}`
+      + `|${(a.special_access || []).join(',')}|${a.apk_sha256 ?? ''}`)
     .sort()
     .join('\n');
 }
@@ -125,4 +129,47 @@ export function shouldSendInventory(
 ): boolean {
   if (!last || last.user !== user) return true;
   return last.fingerprint !== fingerprint || now - last.at >= INVENTORY_REFRESH_MS;
+}
+
+/** One line for the MalwareBazaar check of an app, or null when there is nothing to say. */
+export function malwareWords(check: AppVerdict['malware_check']): string | null {
+  if (!check) return null;
+  switch (check.state) {
+    case 'malware':
+      return `Known malware on abuse.ch MalwareBazaar${check.signature ? ` (${check.signature})` : ''}`;
+    case 'not_known':
+      return 'Not a known malware file (abuse.ch MalwareBazaar)';
+    case 'checking':
+      return 'Malware check queued';
+    case 'not_set_up':
+      // Said once for the whole card, not under every app.
+      return null;
+    case 'skipped':
+      return check.reason || 'The device could not fingerprint this app, so it was not checked for malware';
+    case 'no_hash':
+      return 'Not checked for malware yet: the device needs the latest Jarvis update';
+    case 'error':
+      return `Malware check failed${check.reason ? `: ${check.reason}` : ''}`;
+    default:
+      return null;
+  }
+}
+
+/** "Read 47 reviews: 20 most relevant, 15 newest, 12 one and two star", or null before any were read. */
+export function reviewsReadWords(read: AppVerdict['reviews_read']): string | null {
+  if (!read || !('state' in read)) return null;
+  const total = read.relevant + read.newest + read.lowest;
+  if (!total) return read.state === 'reading' ? 'Reading reviews' : null;
+  const parts = [
+    read.relevant ? `${read.relevant} most relevant` : '',
+    read.newest ? `${read.newest} newest` : '',
+    read.lowest ? `${read.lowest} one and two star` : '',
+  ].filter(Boolean);
+  const more = read.state === 'reading' ? '; reading more' : '';
+  return `Read ${total} review${total === 1 ? '' : 's'}: ${parts.join(', ')}${more}`;
+}
+
+/** "Common Sense age 13+" as a chip when Common Sense Media reviewed the app. */
+export function commonSenseChip(cs: AppVerdict['common_sense']): string | null {
+  return cs?.status === 'found' && cs.age != null ? `Common Sense ${cs.age_label || `age ${cs.age}+`}` : null;
 }

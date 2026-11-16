@@ -1,4 +1,5 @@
 """Reading public Play listings, on saved (trimmed) pages of well-known apps."""
+import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -81,3 +82,70 @@ def test_a_card_summary_leaves_out_the_description_and_reviews():
     listing = play_listing.parse(_page("com.kiloo.subwaysurf"), "com.kiloo.subwaysurf")
     summary = play_listing.summary(listing)
     assert "reviews" not in summary and "description" not in summary and summary["title"] == "Subway Surfers"
+
+
+# --- more reviews: the newest and the lowest rated ---------------------------
+
+
+def _row(stars, text, seconds=1_794_000_000, name="Made-up Reviewer"):
+    """One review row in Play's shape (made-up values; the name and picture are where Play puts them)."""
+    return ["id-" + text[:8], [name, [None, 2, None, [None, None, "https://example.invalid/pic.png"]]], stars, None,
+            text, [seconds, 0], 3, None, None, None, "1.2.3", None, None, None, None, None, None]
+
+
+def _rpc(rows):
+    """A batchexecute answer as Play sends it: an anti-JSON prefix, then the envelope."""
+    import json as _json
+
+    inner = _json.dumps([rows, [None, "next-page-token"]])
+    return ")]}'\n\n" + _json.dumps([["wrb.fr", "UsvDTd", inner, None, None, None, "generic"], ["di", 120]]) + "\n25\n"
+
+
+def test_the_reviews_request_carries_the_package_sort_and_stars_only():
+    url, form, headers = play_listing.reviews_request("com.example.game", "one_star")
+    assert url.startswith(play_listing.REVIEWS_URL)
+    assert parse_qs(urlparse(url).query) == {"rpcids": ["UsvDTd"], "hl": ["en_US"], "gl": ["US"]}
+    outer = json.loads(form["f.req"])
+    assert outer[0][0][0] == "UsvDTd"
+    inner = json.loads(outer[0][0][1])
+    assert inner == [None, None, [2, 2, [40, None, None], None, [None, 1]], ["com.example.game", 7]]
+    assert set(headers) == {"User-Agent", "Accept-Language", "Content-Type"}
+    newest = json.loads(json.loads(play_listing.reviews_request("com.example.game", "newest")[1]["f.req"])[0][0][1])
+    assert newest[2][4] == [None, None]
+
+
+def test_an_answer_of_reviews_keeps_words_stars_and_date_never_the_reviewer():
+    reviews = play_listing.parse_reviews(_rpc([_row(1, "Strangers message kids here."), _row(1, "Too many ads.")]),
+                                         "one_star")
+    assert [r["text"] for r in reviews] == ["Strangers message kids here.", "Too many ads."]
+    assert reviews[0] == {"stars": 1, "text": "Strangers message kids here.", "at": "2026-11-06", "thumbs_up": 3,
+                          "version": "1.2.3"}
+    assert "Made-up Reviewer" not in repr(reviews) and "pic.png" not in repr(reviews)
+
+
+def test_an_app_with_no_such_reviews_is_an_empty_list():
+    import json as _json
+
+    empty = ")]}'\n\n" + _json.dumps([["wrb.fr", "UsvDTd", _json.dumps([None, None]), None, None, None, "generic"]])
+    assert play_listing.parse_reviews(empty, "two_star") == []
+
+
+@pytest.mark.parametrize("body", [
+    "", "<html>consent page</html>", ")]}'\n\n[[\"wrb.fr\",\"UsvDTd\",null,null,null,[3],\"generic\"]]",
+    ")]}'\n\n[[\"wrb.fr\",\"Other\",\"[]\",null]]",
+])
+def test_an_unreadable_reviews_answer_is_an_error(body):
+    with pytest.raises(play_listing.ListingError):
+        play_listing.parse_reviews(body, "newest")
+
+
+def test_a_star_filtered_answer_with_other_stars_is_refused():
+    with pytest.raises(play_listing.ListingError, match="1-star"):
+        play_listing.parse_reviews(_rpc([_row(1, "Bad."), _row(5, "Great.")]), "one_star")
+
+
+def test_the_extra_reviews_hash_moves_with_their_words():
+    a = {"newest": {"reviews": [{"text": "one"}]}, "one_star": {"reviews": []}, "two_star": {"reviews": []}}
+    b = {"newest": {"reviews": [{"text": "two"}]}, "one_star": {"reviews": []}, "two_star": {"reviews": []}}
+    assert play_listing.more_reviews_hash(a) != play_listing.more_reviews_hash(b)
+    assert play_listing.more_reviews_hash(a) == play_listing.more_reviews_hash(dict(a))

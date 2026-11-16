@@ -722,10 +722,107 @@ export interface AppConcern {
 
 /** Why an app is flagged: over the age limit, a parent's flag, a review concern, or (not on Play) its permissions. */
 export interface AppFlag {
-  reason: 'over_age' | 'parent_flag' | 'concern' | 'permissions' | 'sideloaded';
+  reason: 'over_age' | 'parent_flag' | 'concern' | 'permissions' | 'sideloaded'
+    | 'stalkerware' | 'malware' | 'sideloaded_risky';
+  /** "security" for stalkerware, malware and sideloaded_risky. */
   category: string;
   level: ConcernLevel;
   text: string;
+  /** over_age only: which rating decided it (the stricter of Play and Common Sense Media). */
+  source?: AppAgeSource | null;
+}
+
+/** Which rating decided the age check: Play's IARC rating or Common Sense Media's age. */
+export type AppAgeSource = 'play' | 'common_sense';
+
+/** One finding of the local security scan (docs/APP_VETTING.md). */
+export interface AppSecurityFinding {
+  check: 'sideloaded' | 'risky_access' | 'stalkerware' | 'malware';
+  /** sideloaded: unknown_installer | other_store | other_installer; risky_access: the capability
+   *  (accessibility, device_admin, notification_listener, vpn, sms_read, sms_send, call_log,
+   *  background_location, overlay, install_apps) or camera_microphone_location; stalkerware: package |
+   *  certificate (what matched); malware: malwarebazaar. */
+  key: string;
+  severity: ConcernLevel;
+  /** One plain sentence for a parent. */
+  text: string;
+  /** risky_access: switched on now (special access), not only declared. */
+  active?: boolean;
+  /** stalkerware: the name on the indicator list. */
+  name?: string;
+  /** sideloaded: the installer package when known. */
+  installer?: string;
+  /** malware: MalwareBazaar's signature (malware family), when it names one. */
+  signature?: string | null;
+}
+
+/** The MalwareBazaar check of an app's file hash. */
+export interface AppMalwareCheck {
+  /** malware: a known sample; not_known: looked up, not a known sample; checking: queued;
+   *  not_set_up: no abuse.ch Auth-Key (reason says where to add it); error: the lookup failed or the key was
+   *  refused (reason); skipped: the device could not hash it (too large, unreadable); no_hash: the device's
+   *  Jarvis app is older than the check. */
+  state: 'malware' | 'not_known' | 'checking' | 'not_set_up' | 'error' | 'skipped' | 'no_hash';
+  reason: string | null;
+  checked_at?: string | null;
+  sha256?: string;
+  signature?: string | null;
+  file_type?: string | null;
+  first_seen?: string | null;
+  tags?: string[];
+  /** The sample's public MalwareBazaar page. */
+  link?: string;
+}
+
+/** Common Sense Media's consensus of parent or kid reviews. */
+export interface CommonSenseConsensus {
+  age: number;
+  reviews: number;
+  summary: string | null;
+}
+
+/** The Common Sense Media lookup for an app; review fields are present when status is "found". */
+export interface AppCommonSense {
+  /** found; not_found (no review under the app's name); error (a page could not be read: reason);
+   *  checking; off (switched off with app_vetting_common_sense_enabled). */
+  status: 'found' | 'not_found' | 'error' | 'checking' | 'off';
+  reason: string | null;
+  url?: string;
+  name?: string | null;
+  kind?: 'app' | 'game';
+  /** "age 13+" as a number (13). */
+  age?: number;
+  age_label?: string;
+  /** Common Sense's own quality stars (1 to 5). */
+  quality_stars?: number | null;
+  parents_need_to_know?: string;
+  parents_say?: CommonSenseConsensus | null;
+  kids_say?: CommonSenseConsensus | null;
+  published?: string | null;
+}
+
+/** A review a concern quoted, word for word (never the reviewer). */
+export interface AppReviewExcerpt {
+  /** The concern category it supports (see AppConcern). */
+  category: string;
+  stars: number;
+  /** YYYY-MM-DD */
+  at: string | null;
+  text: string;
+  /** relevant: Play's first page; newest; lowest: the one- and two-star reviews. */
+  source: 'relevant' | 'newest' | 'lowest';
+}
+
+/** How many reviews of each kind the local review read. */
+export interface AppReviewsRead {
+  relevant: number;
+  newest: number;
+  lowest: number;
+  /** reading: the newest and lowest-rated pages are still being fetched; not_read: a listing kept from
+   *  before these were read (the next refresh reads them). */
+  state: 'reading' | 'done' | 'not_read';
+  /** Pages Play answered but could not be read, by batch (newest, one_star, two_star). */
+  errors: Record<string, string>;
 }
 
 export interface RequestVetting {
@@ -743,6 +840,9 @@ export interface RequestVetting {
   interactive?: string[];
   summary?: string | null;
   level?: ConcernLevel | null;
+  age_source?: AppAgeSource | null;
+  common_sense?: AppCommonSense | null;
+  review_excerpts?: AppReviewExcerpt[];
   stars?: number | null;
   installs?: string | null;
   concerns?: Array<Pick<AppConcern, 'label' | 'severity' | 'why'>>;
@@ -787,6 +887,30 @@ export interface AppVerdict {
   devices: string[];
   /** The flags this parent should see first (their notify level applied). */
   attention: AppFlag[];
+  /** Which rating decided over_age: the stricter of Play's and Common Sense Media's, or null. */
+  age_source: AppAgeSource | null;
+  /** The Common Sense Media lookup, or null before it was ever queued. */
+  common_sense: AppCommonSense | null;
+  /** Common Sense's age against the child (null when either is unknown). */
+  common_sense_over_age: boolean | null;
+  /** The oldest Common Sense age allowed: the child's age, or what the parent's rating limit covers. */
+  common_sense_limit: number | null;
+  /** Play's rating against the rating limit, on its own. */
+  play_over_age: boolean | null;
+  /** The reviews the local review's concerns quoted, word for word. */
+  review_excerpts: AppReviewExcerpt[];
+  /** How many reviews the local review read ({} before the listing was found). */
+  reviews_read: AppReviewsRead | Record<string, never>;
+  /** The local security scan, most serious first (empty for a clean app). */
+  security: AppSecurityFinding[];
+  /** The most serious security finding's severity, or null. */
+  security_level: ConcernLevel | null;
+  /** The MalwareBazaar check, or null when the app was not reported by a device. */
+  malware_check: AppMalwareCheck | null;
+  /** Special access switched on now (accessibility, device_admin, notification_listener). */
+  special_access: string[];
+  /** Risky access the app declares or asks for (see AppSecurityFinding.key). */
+  capabilities: string[];
 }
 
 export interface UnusedApp {
@@ -826,7 +950,17 @@ export interface GuardianApps {
   apps: AppVerdict[];
   attention: number;
   unused: UnusedApp[];
-  lookups: { enabled?: boolean; paused_until?: string | null; paused_reason?: string | null };
+  lookups: {
+    enabled?: boolean;
+    paused_until?: string | null;
+    paused_reason?: string | null;
+    common_sense?: { enabled: boolean; paused_until: string | null; paused_reason: string | null };
+    /** state: ready, not_set_up (reason says to add an abuse.ch Auth-Key), key_rejected, or checking. */
+    malware?: { state: 'ready' | 'not_set_up' | 'key_rejected' | 'checking'; reason: string | null;
+      paused_until: string | null; paused_reason: string | null };
+  };
+  /** Where the bundled stalkerware list came from (CC BY 4.0; shown as attribution). */
+  stalkerware_list: { source: string; commit: string; commit_date: string; license: string; attribution: string };
 }
 
 export type AppAction = 'block' | 'unblock' | 'remove' | 'cancel_remove';

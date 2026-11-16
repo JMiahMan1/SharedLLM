@@ -71,7 +71,25 @@ test.describe('app vetting', () => {
       await expect(detail.getByRole('button', { name, exact: true })).toBeVisible();
     }
     await expect(detail).toContainText('Block keeps it from opening');
+    // Common Sense Media's age and review, and the Play reviews the concern rests on.
+    const cs = detail.getByTestId('app-common-sense-com.example.blockworld');
+    await expect(cs).toContainText('age 13+ (limit 10)');
+    await expect(cs).toContainText('Parents say age 12+ (41 reviews)');
+    await expect(cs.getByRole('link', { name: /Read the full review/ })).toHaveAttribute('href', /commonsensemedia\.org/);
+    const reviews = detail.getByTestId('app-reviews-com.example.blockworld');
+    await expect(reviews).toContainText('Chat is full of adults');
+    await expect(reviews).toContainText('Read 47 reviews: 20 most relevant, 15 newest, 12 one and two star');
     await check(page, info, run, 'apps card app open', card);
+
+    // A risky app from outside Play: the security findings, and the card says the malware check needs a key.
+    await expect(card.getByTestId('apps-malware-setup')).toContainText('Admin > Users & Devices > App checks');
+    await card.getByRole('button', { name: /Screen Helper Pro/ }).click();
+    const sec = card.getByTestId('app-security-com.example.screenhelper');
+    await expect(sec).toContainText('accessibility service), and it is switched on');
+    await expect(sec).toContainText('It can read text messages');
+    await expect(card.getByTestId('apps-attribution')).toContainText('Echap');
+    await check(page, info, run, 'apps card security', card);
+    await card.getByRole('button', { name: /Block World Builders/ }).click();
 
     // The age rules.
     await card.getByTestId('apps-rules-toggle').click();

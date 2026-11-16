@@ -762,6 +762,7 @@ def create_app():
                 "enabled": app_catalog.APP_CATALOG_ENABLED,
                 "paused_until": (backoff or {}).get("until_iso"),
                 "paused_reason": (backoff or {}).get("reason"),
+                **await app_catalog.checks_state(rc),
             },
         }
 

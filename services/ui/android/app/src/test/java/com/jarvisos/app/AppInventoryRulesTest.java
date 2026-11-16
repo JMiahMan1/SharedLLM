@@ -55,4 +55,73 @@ public class AppInventoryRulesTest {
         assertNull(AppInventoryRules.lastUsed(now + 3_600_000L, 1_700_000_000_000L, now));
         assertEquals(Long.valueOf(1_750_000_000_000L), AppInventoryRules.lastUsed(1_750_000_000_000L, 1_700_000_000_000L, now));
     }
+
+    @Test
+    public void riskyCapabilitiesComeFromPermissionsAndDeclaredComponents() {
+        Set<String> caps = AppInventoryRules.capabilities(Arrays.asList(
+                "android.permission.READ_SMS", "android.permission.SEND_SMS", "android.permission.INTERNET",
+                "android.permission.ACCESS_BACKGROUND_LOCATION", "android.permission.SYSTEM_ALERT_WINDOW",
+                "android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.READ_CALL_LOG", null),
+                Arrays.asList(AppInventoryRules.DECLARES_ACCESSIBILITY, AppInventoryRules.DECLARES_VPN, "nonsense"));
+        assertEquals(new TreeSet<>(Arrays.asList("accessibility", "background_location", "call_log", "install_apps",
+                "overlay", "sms_read", "sms_send", "vpn")), caps);
+        assertTrue(AppInventoryRules.capabilities(null, null).isEmpty());
+    }
+
+    @Test
+    public void everyCapabilityIsOneTheServerKnows() {
+        Set<String> server = new TreeSet<>(Arrays.asList(
+                "accessibility", "device_admin", "notification_listener", "vpn", "sms_read", "sms_send", "call_log",
+                "background_location", "overlay", "install_apps"));
+        Set<String> seen = AppInventoryRules.capabilities(Arrays.asList(
+                "android.permission.READ_SMS", "android.permission.SEND_SMS", "android.permission.READ_CALL_LOG",
+                "android.permission.ACCESS_BACKGROUND_LOCATION", "android.permission.SYSTEM_ALERT_WINDOW",
+                "android.permission.REQUEST_INSTALL_PACKAGES"),
+                Arrays.asList(AppInventoryRules.DECLARES_ACCESSIBILITY, AppInventoryRules.DECLARES_DEVICE_ADMIN,
+                        AppInventoryRules.DECLARES_NOTIFICATION_LISTENER, AppInventoryRules.DECLARES_VPN));
+        assertEquals(server, seen);
+    }
+
+    @Test
+    public void aComponentCountsOnlyWhenTheSystemsBindPermissionGuardsIt() {
+        assertTrue(AppInventoryRules.declares(AppInventoryRules.DECLARES_ACCESSIBILITY,
+                "android.permission.BIND_ACCESSIBILITY_SERVICE"));
+        assertFalse(AppInventoryRules.declares(AppInventoryRules.DECLARES_ACCESSIBILITY, null));
+        assertFalse(AppInventoryRules.declares(AppInventoryRules.DECLARES_VPN,
+                "android.permission.BIND_ACCESSIBILITY_SERVICE"));
+        assertFalse(AppInventoryRules.declares("unknown", "android.permission.BIND_VPN_SERVICE"));
+    }
+
+    @Test
+    public void aSettingsComponentListNamesItsPackages() {
+        assertEquals(new TreeSet<>(Arrays.asList("com.example.reader", "org.sample.helper")),
+                new TreeSet<>(AppInventoryRules.packagesIn(
+                        "com.example.reader/.ReaderService:org.sample.helper/org.sample.helper.Svc::/bad:nopkg")));
+        assertTrue(AppInventoryRules.packagesIn(null).isEmpty());
+        assertTrue(AppInventoryRules.packagesIn("  ").isEmpty());
+    }
+
+    @Test
+    public void digestsAreUppercaseHex() {
+        assertEquals("00FF10AB", AppInventoryRules.hex(new byte[] {0, (byte) 0xff, 0x10, (byte) 0xab}));
+    }
+
+    @Test
+    public void bigFilesAreSkippedAndTheBudgetDefersTheRest() {
+        assertEquals(AppInventoryRules.HASH_NOW, AppInventoryRules.hashPlan(50L << 20, AppInventoryRules.HASH_BUDGET_BYTES));
+        assertEquals(AppInventoryRules.HASH_TOO_LARGE,
+                AppInventoryRules.hashPlan(AppInventoryRules.APK_MAX_BYTES + 1, AppInventoryRules.HASH_BUDGET_BYTES));
+        assertEquals(AppInventoryRules.HASH_DEFERRED, AppInventoryRules.hashPlan(50L << 20, 10L << 20));
+    }
+
+    @Test
+    public void aCachedHashHoldsForOneVersionOnly() {
+        String sha = "ab".repeat(32);
+        String entry = AppInventoryRules.cacheEntry(1_700_000_000_000L, sha);
+        assertEquals(sha, AppInventoryRules.cachedHash(entry, 1_700_000_000_000L));
+        assertNull(AppInventoryRules.cachedHash(entry, 1_700_000_000_001L));
+        assertNull(AppInventoryRules.cachedHash("1700000000000|NOTAHASH", 1_700_000_000_000L));
+        assertNull(AppInventoryRules.cachedHash(null, 1L));
+        assertNull(AppInventoryRules.cachedHash("garbage", 1L));
+    }
 }

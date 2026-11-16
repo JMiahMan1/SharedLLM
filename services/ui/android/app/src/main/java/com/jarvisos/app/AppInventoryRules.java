@@ -3,6 +3,8 @@ package com.jarvisos.app;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -18,6 +20,12 @@ import java.util.TreeSet;
  * server's groups (location, camera, microphone, contacts, sms, phone,
  * photos, calendar, nearby): the same names the guard's permission requests
  * use, so a parent reads one vocabulary everywhere.
+ *
+ * The security scan's inputs are decided here too: the risky capabilities an
+ * app declares or asks for (services/common/app_security.py CAPABILITIES),
+ * which components a "pkg/cls:pkg/cls" settings list switches on, the hex of
+ * a certificate fingerprint, and whether an app file is hashed now, later or
+ * never (APK_MAX_BYTES, HASH_BUDGET_BYTES).
  */
 public final class AppInventoryRules {
 
@@ -42,6 +50,46 @@ public final class AppInventoryRules {
         group("nearby", "BLUETOOTH_SCAN", "BLUETOOTH_CONNECT", "BLUETOOTH_ADVERTISE", "NEARBY_WIFI_DEVICES",
                 "UWB_RANGING");
     }
+
+    /** Fine-grained permissions behind the risky capabilities the server knows. */
+    private static final Map<String, String> CAPABILITY_PERMISSIONS = new HashMap<>();
+
+    static {
+        CAPABILITY_PERMISSIONS.put("android.permission.READ_SMS", "sms_read");
+        CAPABILITY_PERMISSIONS.put("android.permission.RECEIVE_SMS", "sms_read");
+        CAPABILITY_PERMISSIONS.put("android.permission.SEND_SMS", "sms_send");
+        CAPABILITY_PERMISSIONS.put("android.permission.READ_CALL_LOG", "call_log");
+        CAPABILITY_PERMISSIONS.put("android.permission.ACCESS_BACKGROUND_LOCATION", "background_location");
+        CAPABILITY_PERMISSIONS.put("android.permission.SYSTEM_ALERT_WINDOW", "overlay");
+        CAPABILITY_PERMISSIONS.put("android.permission.REQUEST_INSTALL_PACKAGES", "install_apps");
+    }
+
+    /** Components an app declares, by the capability they give it (bound only by the system). */
+    public static final String DECLARES_ACCESSIBILITY = "accessibility";
+    public static final String DECLARES_DEVICE_ADMIN = "device_admin";
+    public static final String DECLARES_NOTIFICATION_LISTENER = "notification_listener";
+    public static final String DECLARES_VPN = "vpn";
+
+    /** The permission a declared component must be guarded by to count (the system's bind permission). */
+    private static final Map<String, String> BIND_PERMISSIONS = new HashMap<>();
+
+    static {
+        BIND_PERMISSIONS.put(DECLARES_ACCESSIBILITY, "android.permission.BIND_ACCESSIBILITY_SERVICE");
+        BIND_PERMISSIONS.put(DECLARES_DEVICE_ADMIN, "android.permission.BIND_DEVICE_ADMIN");
+        BIND_PERMISSIONS.put(DECLARES_NOTIFICATION_LISTENER, "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE");
+        BIND_PERMISSIONS.put(DECLARES_VPN, "android.permission.BIND_VPN_SERVICE");
+    }
+
+    /** App files larger than this are not hashed (reported as "too_large"). */
+    public static final long APK_MAX_BYTES = 300L * 1024 * 1024;
+    /** Bytes hashed per report at most; the rest wait for a later report ("deferred"). */
+    public static final long HASH_BUDGET_BYTES = 1024L * 1024 * 1024;
+    /** The device's answer for an app file: hash it now, too large, or wait for a later report. */
+    public static final String HASH_NOW = "hash";
+    public static final String HASH_TOO_LARGE = "too_large";
+    public static final String HASH_DEFERRED = "deferred";
+    /** At most this many signing certificates are reported per app. */
+    public static final int MAX_CERTS = 4;
 
     private AppInventoryRules() {}
 
@@ -68,6 +116,82 @@ public final class AppInventoryRules {
             if (group != null) out.add(group);
         }
         return out;
+    }
+
+    /**
+     * The risky capabilities an app declares or asks for, sorted: from its
+     * requested permissions and the system components it declares (each
+     * {@code DECLARES_*} name in {@code declared}).
+     */
+    public static Set<String> capabilities(Collection<String> requested, Collection<String> declared) {
+        Set<String> out = new TreeSet<>();
+        if (requested != null) {
+            for (String permission : requested) {
+                String capability = permission == null ? null : CAPABILITY_PERMISSIONS.get(permission);
+                if (capability != null) out.add(capability);
+            }
+        }
+        if (declared != null) {
+            for (String name : declared) {
+                if (name != null && BIND_PERMISSIONS.containsKey(name)) out.add(name);
+            }
+        }
+        return out;
+    }
+
+    /** Whether a declared component counts: it is guarded by the system's bind permission for that kind. */
+    public static boolean declares(String kind, String componentPermission) {
+        String expected = BIND_PERMISSIONS.get(kind);
+        return expected != null && expected.equals(componentPermission);
+    }
+
+    /**
+     * The packages a settings list of components names ("pkg/cls:pkg/.cls",
+     * as Android keeps enabled accessibility services and notification
+     * listeners). Blank or malformed parts are skipped.
+     */
+    public static Set<String> packagesIn(String componentList) {
+        if (componentList == null || componentList.trim().isEmpty()) return Collections.emptySet();
+        Set<String> out = new HashSet<>();
+        for (String part : componentList.split(":")) {
+            int slash = part.indexOf('/');
+            String pkg = (slash > 0 ? part.substring(0, slash) : "").trim();
+            if (!pkg.isEmpty()) out.add(pkg);
+        }
+        return out;
+    }
+
+    /** Uppercase hex of a digest (how the stalkerware list writes certificate fingerprints). */
+    public static String hex(byte[] digest) {
+        StringBuilder out = new StringBuilder(digest.length * 2);
+        for (byte b : digest) out.append(String.format(Locale.ROOT, "%02X", b));
+        return out.toString();
+    }
+
+    /** What to do with an app file of {@code size} bytes when {@code budgetLeft} bytes may still be hashed. */
+    public static String hashPlan(long size, long budgetLeft) {
+        if (size > APK_MAX_BYTES) return HASH_TOO_LARGE;
+        if (size > budgetLeft) return HASH_DEFERRED;
+        return HASH_NOW;
+    }
+
+    /**
+     * A cached hash is good for exactly one version of an app: the cache keeps
+     * "lastUpdateTime|sha256" per package and this reads it back, or null when
+     * the app was updated since (or the entry is malformed).
+     */
+    public static String cachedHash(String cached, long lastUpdate) {
+        if (cached == null) return null;
+        int bar = cached.indexOf('|');
+        if (bar <= 0) return null;
+        String sha = cached.substring(bar + 1);
+        if (!cached.substring(0, bar).equals(Long.toString(lastUpdate)) || !sha.matches("[0-9a-f]{64}")) return null;
+        return sha;
+    }
+
+    /** The cache entry for one version of an app file. */
+    public static String cacheEntry(long lastUpdate, String sha256) {
+        return lastUpdate + "|" + sha256;
     }
 
     /**

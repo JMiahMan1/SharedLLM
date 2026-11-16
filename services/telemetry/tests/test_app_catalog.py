@@ -24,6 +24,16 @@ REVIEW = {"summary": "A building game with open chat.", "concerns": [
 LABELS = {"com.roblox.client": "Roblox", "com.kiloo.subwaysurf": "Subway Surfers"}
 
 
+def _rpc(rows):
+    """A made-up Play reviews answer (batchexecute) holding ``rows``."""
+    inner = json.dumps([rows, None])
+    return ")]}'\n\n" + json.dumps([["wrb.fr", "UsvDTd", inner, None, None, None, "generic"]])
+
+
+def _row(stars, text):
+    return ["id", ["Made-up Reviewer", None], stars, None, text, [1_799_000_000, 0], 0, None, None, None, "1.0"]
+
+
 def _page(package):
     return (FIXTURES / f"{package}.html").read_text(encoding="utf-8")
 
@@ -37,6 +47,14 @@ def wired(monkeypatch):
     model: dict = {"settings": {"llm_local_url": "http://llm.local", "guardian_monitor_model": "local-model"},
                    "answer": json.dumps(REVIEW), "calls": 0}
     clock = {"now": 1_800_000_000.0}
+    reviews: dict[tuple[str, str], tuple[int, str]] = {}
+    review_calls: list[tuple[str, str]] = []
+    csm: dict[str, tuple[int, str, str | None]] = {}
+    csm_calls: list[str] = []
+    mb: dict[str, tuple[int, object]] = {}
+    mb_calls: list[tuple[str, str]] = []
+    # Common Sense off and no MalwareBazaar key unless a test turns them on.
+    checks = {"settings": {"app_vetting_common_sense_enabled": "false", "malwarebazaar_auth_key": ""}}
 
     async def _children(_session):
         return KIDS
@@ -54,6 +72,28 @@ def wired(monkeypatch):
     async def _settings(_session):
         return model["settings"]
 
+    async def _reviews(package, batch):
+        review_calls.append((package, batch))
+        return reviews.get((package, batch), (200, _rpc([])))
+
+    async def _csm(url):
+        csm_calls.append(url)
+        return csm.get(url, (404, "", None))
+
+    async def _mb(sha, key):
+        mb_calls.append((sha, key))
+        if sha not in mb:
+            return 200, {"query_status": "hash_not_found"}
+        answer = mb[sha]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    async def _check_settings(_session):
+        if isinstance(checks["settings"], Exception):
+            raise checks["settings"]
+        return checks["settings"]
+
     async def _chat(session, url, payload, timeout_s, headers=None, what="the model"):
         model["calls"] += 1
         if isinstance(model["answer"], Exception):
@@ -66,11 +106,17 @@ def wired(monkeypatch):
     monkeypatch.setattr(guardian, "_model_settings", _settings)
     monkeypatch.setattr(guardian, "household_now", lambda: __import__("datetime").datetime(2026, 11, 15, 12, 0))
     monkeypatch.setattr(app_catalog, "fetch_page", _fetch)
+    monkeypatch.setattr(app_catalog, "fetch_reviews", _reviews)
+    monkeypatch.setattr(app_catalog, "fetch_common_sense", _csm)
+    monkeypatch.setattr(app_catalog, "query_malwarebazaar", _mb)
+    monkeypatch.setattr(app_catalog, "check_settings", _check_settings)
     monkeypatch.setattr(app_catalog, "_now", lambda: clock["now"])
     monkeypatch.setattr(llm, "chat_content", _chat)
     with TestClient(app) as client:
         yield {"client": client, "redis": fake, "sent": sent, "fetched": fetched, "pages": pages,
-               "model": model, "clock": clock, "deliver": _deliver}
+               "model": model, "clock": clock, "deliver": _deliver, "reviews": reviews,
+               "review_calls": review_calls, "csm": csm, "csm_calls": csm_calls, "mb": mb, "mb_calls": mb_calls,
+               "checks": checks}
 
 
 def _inventory(*packages, device="phone-key-0000000001", usage_access=True):
@@ -280,3 +326,281 @@ def test_the_screen_time_reports_count_as_use(wired, monkeypatch):
     client.post("/api/telemetry/apps/inventory", headers=HEADERS, json=_inventory("com.roblox.client"))
     data = client.get("/api/telemetry/apps/kid", headers=HEADERS).json()
     assert data["apps"][0]["last_used"] == 1_799_500_000_000
+
+
+# --- more reviews: the newest and the lowest rated ---------------------------
+
+CSM_FIXTURE = Path(__file__).resolve().parents[2] / "common" / "tests" / "fixtures" / "common_sense" / "rail-dash-runner.html"
+
+
+async def _step(w, seconds=None):
+    outcome = await app_catalog.step(w["redis"], None, w["deliver"])
+    w["clock"]["now"] += app_catalog.APP_CATALOG_MIN_INTERVAL_S if seconds is None else seconds
+    return outcome
+
+
+async def test_the_newest_and_lowest_reviews_are_read_then_the_review_is_redone(wired):
+    pkg = "com.roblox.client"
+    wired["pages"][pkg] = (200, _page(pkg))
+    wired["reviews"][(pkg, "one_star")] = (200, _rpc([_row(1, "A stranger asked my son where he lives.")]))
+    wired["reviews"][(pkg, "newest")] = (200, _rpc([_row(5, "Fun with my cousins.")]))
+    await app_catalog.queue_lookups(wired["redis"], [pkg])
+    assert await _step(wired, 1) == "fetched"  # the listing, reviewed at once with Play's first page
+    assert wired["model"]["calls"] == 1 and wired["review_calls"] == []
+    # The extra pages wait for the same interval as any Play request.
+    assert await _step(wired, app_catalog.APP_CATALOG_MIN_INTERVAL_S - 1) == "idle"
+    for _ in range(3):
+        assert await _step(wired) == "fetched"
+    assert wired["review_calls"] == [(pkg, "newest"), (pkg, "one_star"), (pkg, "two_star")]
+    entry = json.loads(await wired["redis"].get(f"{app_catalog.LISTING_PREFIX}{pkg}"))
+    assert entry["hash"] != entry["page_hash"] and entry["more_reviews"]["pending"] == []
+    # Redone once with every page in: the model read the one-star review.
+    assert wired["model"]["calls"] == 2
+    card = await app_catalog.catalog_entry(wired["redis"], pkg)
+    assert card["review"]["listing_hash"] == entry["hash"]
+    assert card["listing"]["listing"]["reviews_read"] == {"relevant": 20, "newest": 1, "lowest": 1, "state": "done",
+                                                          "errors": {}}
+    assert "more_reviews" not in card["listing"]
+    assert "Made-up Reviewer" not in json.dumps(entry)
+
+
+async def test_the_lowest_reviews_reach_the_model(wired, monkeypatch):
+    pkg = "com.kiloo.subwaysurf"
+    wired["pages"][pkg] = (200, _page(pkg))
+    wired["reviews"][(pkg, "two_star")] = (200, _rpc([_row(2, "Someone in the chat asked for photos.")]))
+    seen = []
+
+    async def _chat(session, url, payload, timeout_s, headers=None, what="the model"):
+        seen.append(payload["messages"][1]["content"])
+        return json.dumps(REVIEW)
+
+    monkeypatch.setattr(llm, "chat_content", _chat)
+    await app_catalog.queue_lookups(wired["redis"], [pkg])
+    for _ in range(5):
+        await _step(wired)
+    assert "Someone in the chat asked for photos." in seen[-1] and "Lowest-rated reviews" in seen[-1]
+
+
+async def test_a_refused_reviews_request_backs_off_and_keeps_its_page_pending(wired):
+    pkg = "com.roblox.client"
+    wired["pages"][pkg] = (200, _page(pkg))
+    wired["reviews"][(pkg, "newest")] = (429, "")
+    await app_catalog.queue_lookups(wired["redis"], [pkg])
+    await _step(wired)
+    await _step(wired)
+    state = await app_catalog.backoff_state(wired["redis"])
+    assert state and "reviews" in state["reason"]
+    entry = json.loads(await wired["redis"].get(f"{app_catalog.LISTING_PREFIX}{pkg}"))
+    assert entry["more_reviews"]["pending"][0] == "newest"
+
+
+async def test_an_unreadable_reviews_page_is_kept_with_its_reason(wired):
+    pkg = "com.roblox.client"
+    wired["pages"][pkg] = (200, _page(pkg))
+    wired["reviews"][(pkg, "two_star")] = (200, "<html>not reviews</html>")
+    await app_catalog.queue_lookups(wired["redis"], [pkg])
+    for _ in range(4):
+        await _step(wired)
+    read = (await app_catalog.catalog_entry(wired["redis"], pkg))["listing"]["listing"]["reviews_read"]
+    assert read["state"] == "done" and "two_star" in read["errors"]
+
+
+# --- Common Sense Media -------------------------------------------------------
+
+
+def _csm_page(name="Roblox", age=13):
+    return (CSM_FIXTURE.read_text(encoding="utf-8").replace("Rail Dash Runner", name)
+            .replace('"typicalAgeRange": "9+"', f'"typicalAgeRange": "{age}+"').replace("age 9+", f"age {age}+"))
+
+
+async def _found_listing(w, pkg="com.roblox.client"):
+    w["pages"][pkg] = (200, _page(pkg))
+    await app_catalog.queue_lookups(w["redis"], [pkg])
+    await _step(w)
+
+
+async def test_common_sense_is_found_by_the_apps_name_and_judges_the_age(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    url = "https://www.commonsensemedia.org/app-reviews/roblox"
+    wired["csm"][url] = (200, _csm_page("Roblox", 13), None)
+    await _found_listing(wired)
+    entry = await app_catalog.catalog_entry(wired["redis"], "com.roblox.client")
+    assert wired["csm_calls"] == [url]
+    assert entry["common_sense"]["status"] == "found" and entry["common_sense"]["review"]["age"] == 13
+    verdict = app_catalog.app_vetting.assess({"package": "com.roblox.client"}, entry, app_catalog._policy(KIDS["kid"]))
+    # Common Sense 13+ ties Play's Teen (13): Play's rating speaks, and it is over the age-10 limit.
+    assert verdict["age_source"] == "play" and verdict["common_sense"]["age"] == 13
+
+
+async def test_common_sense_follows_a_renamed_slug_and_tries_the_game_section(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (301, "", "/game-reviews/roblox-online")
+    wired["csm"]["https://www.commonsensemedia.org/game-reviews/roblox-online"] = (200, _csm_page("Roblox", 13), None)
+    await _found_listing(wired)
+    for _ in range(3):
+        await _step(wired, app_catalog.COMMON_SENSE_MIN_INTERVAL_S)
+    assert wired["csm_calls"][:2] == ["https://www.commonsensemedia.org/app-reviews/roblox",
+                                      "https://www.commonsensemedia.org/game-reviews/roblox-online"]
+    entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
+    assert entry["status"] == "found" and entry["review"]["kind"] == "game"
+
+
+async def test_no_review_under_the_name_is_not_found_after_a_bounded_search(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    await _found_listing(wired)
+    for _ in range(8):
+        await _step(wired, app_catalog.COMMON_SENSE_MIN_INTERVAL_S)
+    assert len(wired["csm_calls"]) <= app_catalog.common_sense.MAX_CANDIDATES
+    entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
+    assert entry["status"] == "not_found" and "no review" in entry["reason"]
+
+
+async def test_a_page_for_another_app_is_skipped(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (200, _csm_page("Robot Lox Builder"), None)
+    await _found_listing(wired)
+    for _ in range(4):
+        await _step(wired, app_catalog.COMMON_SENSE_MIN_INTERVAL_S)
+    assert (await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client"))["status"] == "not_found"
+
+
+async def test_an_unreadable_common_sense_page_is_an_error_with_its_reason(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (200, "<html>redesigned</html>", None)
+    await _found_listing(wired)
+    entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
+    assert entry["status"] == "error" and "could not be read" in entry["reason"]
+
+
+async def test_common_sense_failing_backs_off_on_its_own(wired):
+    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (503, "", None)
+    await _found_listing(wired)
+    state = await app_catalog.backoff_state(wired["redis"], app_catalog.CSM_BACKOFF_KEY)
+    assert state and "503" in state["reason"]
+    assert await app_catalog.backoff_state(wired["redis"]) is None  # Play goes on
+    calls = len(wired["csm_calls"])
+    await _step(wired, app_catalog.COMMON_SENSE_MIN_INTERVAL_S)
+    assert len(wired["csm_calls"]) == calls
+    assert (await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client"))["status"] == "checking"
+
+
+async def test_common_sense_switched_off_asks_nothing_and_says_so(wired):
+    await _found_listing(wired)
+    await _step(wired)
+    assert wired["csm_calls"] == []
+    entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
+    assert entry["status"] == "off" and "app_vetting_common_sense_enabled" in entry["reason"]
+
+
+# --- MalwareBazaar ------------------------------------------------------------
+
+SHA = "ab" * 32
+
+
+def _hashed_inventory(*packages, sha=SHA):
+    body = _inventory(*packages)
+    for row in body["apps"]:
+        row.update(apk_sha256=sha, apk_hash_state="ok")
+    return body
+
+
+async def test_without_a_key_the_check_says_it_is_not_set_up_and_asks_nothing(wired):
+    client = wired["client"]
+    client.post("/api/telemetry/apps/inventory", headers=HEADERS, json=_hashed_inventory("com.example.tool"))
+    await _step(wired)
+    data = client.get("/api/telemetry/apps/kid", headers=HEADERS).json()
+    check = data["apps"][0]["malware_check"]
+    assert check["state"] == "not_set_up" and "abuse.ch Auth-Key" in check["reason"]
+    assert data["lookups"]["malware"]["state"] == "not_set_up"
+    assert wired["mb_calls"] == []
+
+
+async def test_a_known_sample_is_severe_and_every_parent_hears(wired, caplog):
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    wired["mb"][SHA] = (200, {"query_status": "ok", "data": [{"sha256_hash": SHA, "signature": "ExampleFamily"}]})
+    wired["pages"]["com.example.tool"] = (404, "")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    for _ in range(3):
+        await _step(wired)
+    assert wired["mb_calls"] == [(SHA, "made-up-secret-key")]
+    malware = [n for n in wired["sent"] if "malware" in n["body"]]
+    assert sorted(n["user"] for n in malware) == ["dad", "mom"]  # severe reaches the severe-only parent too
+    assert malware[0]["priority"] == 4
+    data = wired["client"].get("/api/telemetry/apps/kid", headers=HEADERS).json()
+    assert data["apps"][0]["malware_check"]["state"] == "malware"
+    assert "made-up-secret-key" not in json.dumps(data) and "made-up-secret-key" not in caplog.text
+
+
+async def test_an_unknown_hash_is_not_known_and_is_checked_again_after_the_ttl(wired):
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
+    assert apps[0]["malware_check"]["state"] == "not_known"
+    assert await app_catalog.queue_hashes(wired["redis"], [SHA]) == []
+    wired["clock"]["now"] += app_catalog.MALWAREBAZAAR_TTL_DAYS * 86400
+    assert await app_catalog.queue_hashes(wired["redis"], [SHA]) == [SHA]
+
+
+async def test_a_refused_key_is_an_error_that_a_new_key_clears(wired, caplog):
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-wrong-key"}
+    wired["mb"][SHA] = (401, None)
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
+    assert apps[0]["malware_check"]["state"] == "error" and "Auth-Key" in apps[0]["malware_check"]["reason"]
+    assert await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
+    assert "made-up-wrong-key" not in caplog.text
+    # A new key lifts the pause and the hash is asked again.
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-right-key"}
+    del wired["mb"][SHA]
+    await _step(wired)
+    assert wired["mb_calls"][-1] == (SHA, "made-up-right-key")
+    apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
+    assert apps[0]["malware_check"]["state"] == "not_known"
+
+
+async def test_a_failed_lookup_backs_off_without_naming_the_key(wired, caplog):
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    wired["mb"][SHA] = OSError("connection reset")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    result = json.loads(await wired["redis"].get(f"{app_catalog.MB_PREFIX}{SHA}"))
+    assert result["status"] == "error" and result["reason"] == "OSError"
+    assert await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
+    assert await wired["redis"].zrangebyscore(app_catalog.MB_DUE, 0, wired["clock"]["now"]) == [SHA]
+    assert "made-up-secret-key" not in caplog.text
+
+
+async def test_an_app_the_device_could_not_hash_says_why(wired):
+    body = _inventory("com.example.big", "com.example.old")
+    body["apps"][0].update(apk_sha256=None, apk_hash_state="too_large")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", body)
+    apps = {a["package"]: a for a in (await app_catalog.merged_apps(wired["redis"], "kid"))[0]}
+    assert apps["com.example.big"]["malware_check"] == {
+        "state": "skipped", "reason": "The app file is too large to fingerprint on the device"}
+    assert apps["com.example.old"]["malware_check"]["state"] == "no_hash"
+
+
+async def test_settings_that_cannot_be_read_ask_nothing(wired):
+    wired["checks"]["settings"] = RuntimeError("identity down")
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
+    await _step(wired)
+    assert wired["mb_calls"] == [] and wired["csm_calls"] == []
+
+
+# --- Jarvis is never checked --------------------------------------------------
+
+
+async def test_jarvis_is_never_looked_up_anywhere(wired):
+    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key",
+                                   "app_vetting_common_sense_enabled": "true"}
+    await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001",
+                                     _hashed_inventory(app_catalog.JARVIS_ANDROID_PACKAGE, sha="cd" * 32))
+    assert await app_catalog.queue_lookups(wired["redis"], [app_catalog.JARVIS_ANDROID_PACKAGE]) == []
+    assert await app_catalog.queue_common_sense(wired["redis"], app_catalog.JARVIS_ANDROID_PACKAGE, "Jarvis") is False
+    for _ in range(3):
+        await _step(wired)
+    assert wired["fetched"] == [] and wired["mb_calls"] == [] and wired["csm_calls"] == []
+    assert (await app_catalog.merged_apps(wired["redis"], "kid"))[0] == []
