@@ -26,7 +26,7 @@ import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from services.common import app_vetting
+from services.common import app_security, app_vetting
 from services.common.http import get_client
 from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET, TELEMETRY_SVC
 
@@ -85,7 +85,8 @@ def _relay(status: int, body: Any) -> JSONResponse:
 async def report_inventory(request: Request):
     """A minor's device reports its installed apps: ``{"device_key", "apps":
     [{package, label, installer, first_install, last_update, last_used,
-    launchable, permissions, size_bytes}], "usage_access"}``."""
+    launchable, permissions, size_bytes, capabilities, special_access,
+    cert_sha1, apk_sha256, apk_hash_state}], "usage_access"}``."""
     user = await _caller(request)
     body = await request.json()
     if not isinstance(body, dict):
@@ -123,6 +124,8 @@ def _row(app: dict[str, Any], verdict: dict[str, Any], notify_level: str) -> dic
         "permissions": app.get("permissions") or [],
         "size_bytes": app.get("size_bytes"),
         "devices": app.get("devices") or [],
+        "special_access": app.get("special_access") or [],
+        "capabilities": app.get("capabilities") or [],
         "attention": attention,
     }
 
@@ -131,9 +134,9 @@ def build_card(policy: dict[str, Any], data: dict[str, Any], now_ms: int) -> dic
     """The Apps card from identity's policy and telemetry's apps (pure)."""
     level = policy.get("notify_level") or "high"
     catalog = data.get("catalog") or {}
-    apps = data.get("apps") or []
+    apps = [a for a in data.get("apps") or [] if a.get("package") != JARVIS_PACKAGE]
     by_package = {a["package"]: a for a in apps}
-    verdicts = [app_vetting.assess(a, catalog.get(a["package"]), policy) for a in apps]
+    verdicts = [app_vetting.assess(a, catalog.get(a["package"]), policy, JARVIS_PACKAGE) for a in apps]
     ordered = app_vetting.sort_for_parent(verdicts, level)
     rows = [_row(by_package[v["package"]], v, level) for v in ordered]
     return {
@@ -144,6 +147,7 @@ def build_card(policy: dict[str, Any], data: dict[str, Any], now_ms: int) -> dic
         "attention": sum(1 for r in rows if r["attention"]),
         "unused": app_vetting.unused_apps(apps, policy, now_ms, JARVIS_PACKAGE),
         "lookups": data.get("lookups") or {},
+        "stalkerware_list": app_security.stalkerware_source(),
     }
 
 
@@ -190,7 +194,8 @@ async def action(request: Request, username: str):
 def _request_summary(verdict: dict[str, Any]) -> dict[str, Any]:
     """What a request card shows (and nothing about the child's other apps)."""
     keys = ("lookup", "lookup_reason", "review_state", "review_reason", "title", "developer", "rating", "limit",
-            "over_age", "ads", "in_app_purchases", "interactive", "summary", "level", "stars", "installs")
+            "over_age", "ads", "in_app_purchases", "interactive", "summary", "level", "stars", "installs",
+            "age_source", "common_sense", "review_excerpts")
     return {
         **{k: verdict.get(k) for k in keys},
         "concerns": [{"label": c["label"], "severity": c["severity"], "why": c.get("why")} for c in verdict["concerns"]],
@@ -236,7 +241,7 @@ async def vet_requests(caller: str, requests: list[dict[str, Any]]) -> list[dict
         if child is None:
             continue
         verdict = app_vetting.assess({"package": row["target"], "label": row.get("label") or ""},
-                                     catalog.get(row["target"]), _child_policy(child))
+                                     catalog.get(row["target"]), _child_policy(child), JARVIS_PACKAGE)
         row["vetting"] = _request_summary(verdict)
     return requests
 
@@ -253,7 +258,8 @@ async def request_verdict(child: str, package: str, label: str, request_id: Any)
         if status != 200 or child not in children:
             raise RuntimeError(f"telemetry answered HTTP {status}" if status != 200 else "not a monitored child")
         verdict = app_vetting.assess({"package": package, "label": label},
-                                     ((body or {}).get("catalog") or {}).get(package), _child_policy(children[child]))
+                                     ((body or {}).get("catalog") or {}).get(package), _child_policy(children[child]),
+                                     JARVIS_PACKAGE)
         return app_vetting.verdict_line(verdict)
     except Exception as exc:
         log.warning("[app-vetting] verdict for %s's %s unavailable: %s", child, package, exc)

@@ -187,3 +187,94 @@ def test_an_app_request_notice_carries_the_verdict(wired, monkeypatch):
     assert sent[0]["tag"] == "guard-app:kid:com.roblox.client" and sent[0]["replace"] is True
     waiting = next(j for m, p, j in wired["telemetry"] if p == "/api/telemetry/apps/catalog")
     assert waiting["waiting"] == {"child": "kid", "request_id": 9, "label": "Roblox"}
+
+
+# --- the new checks on the card ----------------------------------------------
+
+#: Every field the Apps card's API now carries per app (services/ui/src/types/api.ts AppVerdict).
+NEW_APP_FIELDS = {
+    "age_source", "common_sense", "common_sense_over_age", "common_sense_limit", "play_over_age",
+    "review_excerpts", "reviews_read", "security", "security_level", "malware_check", "special_access",
+    "capabilities",
+}
+
+
+def _card_data():
+    sideload = {"package": "com.example.helper", "label": "Helper", "installer": None, "launchable": True,
+                "devices": [DEVICE], "permissions": ["location"], "capabilities": ["accessibility", "sms_read"],
+                "special_access": ["accessibility"], "cert_sha1": [], "apk_sha256": "ab" * 32, "apk_hashes": ["ab" * 32],
+                "apk_hash_state": "ok", "malware_check": {"state": "not_set_up", "reason": "Not set up: add an abuse.ch "
+                                                                                          "Auth-Key"}}
+    game = {"package": "com.example.game", "label": "Game", "installer": "com.android.vending", "launchable": True,
+            "devices": [DEVICE], "permissions": [], "capabilities": [], "special_access": [], "cert_sha1": [],
+            "malware_check": {"state": "not_known", "reason": "Not a known malware sample on MalwareBazaar"}}
+    jarvis = {**game, "package": routes.JARVIS_PACKAGE, "label": "Jarvis", "installer": None,
+              "special_access": ["device_admin"], "malware_check": {"state": "malware"}}
+    return {
+        "devices": [{"device": DEVICE}],
+        "apps": [sideload, game, jarvis],
+        "catalog": {
+            "com.example.helper": {"listing": {"status": "not_on_play"}, "review": None, "common_sense": None},
+            "com.example.game": {
+                "listing": {"status": "found", "hash": "g", "listing": {
+                    "title": "Game", "content_rating": "Everyone 10+",
+                    "reviews_read": {"relevant": 40, "newest": 40, "lowest": 25, "state": "done", "errors": {}}}},
+                "review": {"status": "ready", "listing_hash": "g", "summary": "Chat with strangers.", "concerns": [
+                    {"category": "contact_strangers", "severity": "high", "why": "Strangers ask for addresses.",
+                     "evidence": ["asked for my address"]}],
+                    "excerpts": [{"category": "contact_strangers", "stars": 1, "at": "2026-11-12",
+                                  "text": "Someone asked for my address in chat.", "source": "lowest"}]},
+                "common_sense": {"status": "found", "checked_at": "2026-11-16T00:00:00+00:00", "reason": None,
+                                 "review": {"url": "https://www.commonsensemedia.org/app-reviews/game", "name": "Game",
+                                            "kind": "app", "age": 13, "age_label": "age 13+",
+                                            "parents_need_to_know": "Parents need to know that it has open chat.",
+                                            "parents_say": {"age": 12, "reviews": 9, "summary": None},
+                                            "kids_say": None, "quality_stars": 3, "published": "2020-01-01"}},
+            },
+        },
+        "lookups": {"enabled": True, "malware": {"state": "not_set_up", "reason": "Not set up"}},
+    }
+
+
+def test_the_card_carries_the_security_scan_common_sense_and_review_excerpts():
+    card = routes.build_card(POLICY, _card_data(), 1_800_000_000_000)
+    rows = {a["package"]: a for a in card["apps"]}
+    assert routes.JARVIS_PACKAGE not in rows  # Jarvis is never on the card
+    for row in rows.values():
+        assert set(row) >= NEW_APP_FIELDS
+    helper = rows["com.example.helper"]
+    assert helper["security_level"] == "severe" and helper["level"] == "severe"
+    assert {f["check"] for f in helper["security"]} == {"sideloaded", "risky_access"}
+    assert helper["special_access"] == ["accessibility"] and helper["capabilities"] == ["accessibility", "sms_read"]
+    assert helper["malware_check"]["state"] == "not_set_up"
+    assert helper["attention"][0]["reason"] == "sideloaded_risky"
+    game = rows["com.example.game"]
+    assert game["age_source"] == "common_sense" and game["over_age"] is True and game["play_over_age"] is False
+    assert game["common_sense"]["age"] == 13 and game["common_sense"]["parents_need_to_know"].startswith("Parents")
+    assert game["review_excerpts"][0]["text"] == "Someone asked for my address in chat."
+    assert game["reviews_read"]["lowest"] == 25
+    assert card["lookups"]["malware"]["state"] == "not_set_up"
+    assert card["stalkerware_list"]["license"].startswith("CC BY 4.0")
+    # Flagged apps first, most serious first.
+    assert [a["package"] for a in card["apps"]] == ["com.example.helper", "com.example.game"]
+
+
+def test_the_card_route_returns_the_new_fields(wired):
+    wired["who"]["user"] = "dad"
+    wired["answers"][("identity", "GET", "/api/apps/kid/policy")] = (200, POLICY)
+    wired["answers"][("telemetry", "GET", "/api/telemetry/apps/kid")] = (200, _card_data())
+    body = wired["client"].get("/api/guardian/apps/kid").json()
+    assert {"stalkerware_list", "lookups"} <= set(body)
+    assert all(set(a) >= NEW_APP_FIELDS for a in body["apps"])
+
+
+def test_a_request_card_shows_common_sense_and_excerpts(wired, monkeypatch):
+    data = _card_data()
+    verdict = routes.app_vetting.assess({"package": "com.example.game", "label": "Game"},
+                                        data["catalog"]["com.example.game"],
+                                        routes.app_vetting.effective_policy({}, "2016-01-01", __import__("datetime").date(2026, 11, 16)),
+                                        routes.JARVIS_PACKAGE)
+    summary = routes._request_summary(verdict)
+    assert summary["age_source"] == "common_sense" and summary["common_sense"]["age"] == 13
+    assert summary["review_excerpts"][0]["source"] == "lowest"
+    assert "Common Sense Media says age 13+" in summary["line"]
