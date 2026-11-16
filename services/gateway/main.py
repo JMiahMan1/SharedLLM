@@ -11276,6 +11276,16 @@ async def update_raven_config(request: Request):
                     json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
+        if body.get("system_default_tts_voice"):
+            # Execution resolved the voice at start; tell it now so the choice takes effect at once.
+            async with client.post(
+                f"{EXECUTION_SVC}/execute/tts/default",
+                json={"voice": str(body["system_default_tts_voice"])},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            ) as resp:
+                taken = resp.status == 200
+            if not taken:
+                raise HTTPException(status_code=502, detail="The voice was saved but the speech engine did not take it; it applies at its next restart")
     return {"status": "SUCCESS"}
 @app.get("/api/admin/raven/tts/voices")
 async def get_raven_tts_voices(request: Request):

@@ -368,6 +368,8 @@ async def resolve_runtime_config():
         "coding_model": "CODING_MODEL",
         "librarian_model": "LIBRARIAN_MODEL",
         "default_tts_voice": "DEFAULT_TTS_VOICE",
+        # The key the Settings voice picker saves (Admin > Raven > Spoken replies).
+        "system_default_tts_voice": "DEFAULT_TTS_VOICE",
         "workspace_root": "WORKSPACE_ROOT",
         "workspace_runtime_root": "WORKSPACE_RUNTIME_ROOT",
         "models_dir": "MODELS_DIR",

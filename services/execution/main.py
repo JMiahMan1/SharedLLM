@@ -2117,6 +2117,21 @@ def _tts_default_voice() -> str:
     return config.DEFAULT_TTS_VOICE or "af_heart"
 
 
+@app.post("/execute/tts/default")
+async def set_tts_default_voice(body: dict):
+    """Jarvis's voice changed in Settings (saved in identity): use it from now on, without a restart.
+
+    Internal only, like every route here (``require_internal``).
+    """
+    from services import config
+    voice = str(body.get("voice") or "").strip()
+    if not voice:
+        raise HTTPException(status_code=400, detail="voice is required")
+    config.DEFAULT_TTS_VOICE = voice
+    log.info("[tts] Jarvis's voice is now %s", voice)
+    return {"status": "SUCCESS", "default": voice}
+
+
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""

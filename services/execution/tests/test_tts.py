@@ -546,3 +546,27 @@ def test_synthesis_goes_through_the_shared_engine(mocker):
     assert out == b"wav"
     engine.generate.assert_awaited_once_with("The Lord is my shepherd.", "af_bella", storybook=False)
     assert tts.get_tts_engine() is engine
+
+
+def test_a_voice_chosen_in_settings_applies_at_once(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from services import config
+
+    app, secret = _import_audiobook_app()
+    monkeypatch.setattr(config, "DEFAULT_TTS_VOICE", "af_heart")
+    client = TestClient(app)
+    resp = client.post("/execute/tts/default", headers={"X-Internal-Secret": secret},
+                       json={"voice": "bm_fable,bm_lewis,bm_george"})
+    assert resp.status_code == 200 and config.DEFAULT_TTS_VOICE == "bm_fable,bm_lewis,bm_george"
+    assert client.post("/execute/tts/default", headers={"X-Internal-Secret": secret},
+                       json={"voice": " "}).status_code == 400
+    assert client.post("/execute/tts/default", json={"voice": "bm_george"}).status_code == 403
+
+
+def test_the_settings_key_the_voice_picker_saves_is_the_one_read_at_start():
+    import inspect
+
+    from services import config
+
+    assert '"system_default_tts_voice": "DEFAULT_TTS_VOICE"' in inspect.getsource(config)
