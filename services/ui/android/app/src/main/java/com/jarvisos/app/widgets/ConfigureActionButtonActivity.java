@@ -67,6 +67,7 @@ public class ConfigureActionButtonActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_configure_action_button);
+        com.jarvisos.app.SystemBarPadding.apply(this, 0xFF0F172A);
 
         appWidgetId = getIntent().getIntExtra(
             AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);

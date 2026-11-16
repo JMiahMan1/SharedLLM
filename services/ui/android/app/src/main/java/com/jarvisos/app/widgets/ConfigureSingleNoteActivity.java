@@ -79,6 +79,7 @@ public class ConfigureSingleNoteActivity extends Activity {
         root.addView(cancel);
 
         setContentView(root);
+        com.jarvisos.app.SystemBarPadding.apply(this, 0xFF0F172A);
         loadNotes();
     }
 
