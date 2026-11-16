@@ -29,6 +29,14 @@ function seen(iso: string | null): string {
   return `seen ${Math.round(minutes / 60)} h ago`;
 }
 
+/** What the add dialog says per kind; an account in the cloud has no room to go in. */
+const MANUAL_INTRO: Record<string, string> = {
+  local: 'For a device that is on the network but was not found automatically.',
+  service: 'For a server or service the hub talks to.',
+  cloud: 'An online account the hub keeps the login for.',
+  helper: 'Made by the hub itself; nothing to connect to.',
+};
+
 /**
  * Devices > New devices (admins): what the device hub has found on the LAN that
  * is not set up yet, with Add and Ignore, a "Scan now", "Add Matter device"
@@ -277,9 +285,9 @@ export default function NewDevicesPanel() {
       {manual && (
         <AdoptDeviceDialog
           title={`Add ${manual.label}`}
-          intro="For a device that is on the network but was not found automatically."
+          intro={MANUAL_INTRO[manual.kind || 'local'] ?? MANUAL_INTRO.local}
           needs={manual.fields}
-          areas={areas}
+          areas={manual.kind === 'cloud' ? [] : areas}
           onSubmit={({ name, areaId, input }) => addByAddress(manual.domain, { name, area_id: areaId, input, host: input.host, url: input.url })}
           onDone={added}
           onClose={() => setManual(null)}

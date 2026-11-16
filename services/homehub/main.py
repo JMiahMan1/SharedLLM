@@ -15,6 +15,7 @@ from typing import Any
 import uvicorn
 
 from services.homehub import (
+    app_checks_migration,
     automation_api,
     builtin,
     camera_recording,
@@ -93,6 +94,8 @@ class Service:
         await self._start_people()
         await self._start_bluetooth()  # before the drivers: ESPHome proxies and BLE sensors attach to it
         await self.runtime.start_all()
+        # Once: the app vetting accounts move from identity's settings to integrations.
+        self._bg.append(asyncio.create_task(app_checks_migration.run(self.runtime)))
         # Automations wait (in the background, so the API is up at once) for
         # every integration's first setup attempt, as HA starts them only once
         # it has started.

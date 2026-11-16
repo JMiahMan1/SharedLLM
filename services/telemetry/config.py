@@ -16,6 +16,9 @@ AUTOMATION_SVC_URL = (
     os.getenv("AUTOMATION_SVC_URL") or _net_url("AUTOMATION", "http://automation:11437")
 ).rstrip("/")
 
+#: The device hub: the app checks' accounts are its integrations (GET /hub/integrations/{domain}).
+HOMEHUB_URL = os.getenv("HOMEHUB_URL", "http://host.docker.internal:8123").rstrip("/")
+
 GEO_SVC = (GEO_SVC_URL or "").rstrip("/")
 IDENTITY_SVC = (IDENTITY_SVC_URL or "").rstrip("/")
 
@@ -69,16 +72,16 @@ APP_REVIEW_TIMEOUT_S = float(os.getenv("APP_REVIEW_TIMEOUT_S", "120"))
 APP_INVENTORY_TTL_DAYS = int(os.getenv("APP_INVENTORY_TTL_DAYS", "60"))
 #: Jarvis's own Android package: never listed among a child's apps.
 JARVIS_ANDROID_PACKAGE = os.getenv("JARVIS_ANDROID_PACKAGE", "com.jarvisos.app")
-#: Common Sense Media review pages (switched on and off with the
-#: app_vetting_common_sense_enabled global setting): at least this long between
+#: Common Sense Media review pages (on while the hub's Common Sense Media
+#: integration is set up): at least this long between
 #: two requests, a found or missing review is looked for again after the TTL,
 #: and a refusal or failure backs off, doubling up to the maximum.
 COMMON_SENSE_MIN_INTERVAL_S = float(os.getenv("COMMON_SENSE_MIN_INTERVAL_S", "20"))
 COMMON_SENSE_TTL_DAYS = int(os.getenv("COMMON_SENSE_TTL_DAYS", "30"))
 COMMON_SENSE_BACKOFF_BASE_S = int(os.getenv("COMMON_SENSE_BACKOFF_BASE_S", "900"))
 COMMON_SENSE_BACKOFF_MAX_S = int(os.getenv("COMMON_SENSE_BACKOFF_MAX_S", str(24 * 3600)))
-#: abuse.ch MalwareBazaar lookups of app file hashes (the Auth-Key is the
-#: malwarebazaar_auth_key global setting): spacing, how long a "not a known
+#: abuse.ch MalwareBazaar lookups of app file hashes (the Auth-Key is the hub's
+#: abuse.ch MalwareBazaar integration): spacing, how long a "not a known
 #: sample" answer is trusted, and the backoff after a failure.
 MALWAREBAZAAR_MIN_INTERVAL_S = float(os.getenv("MALWAREBAZAAR_MIN_INTERVAL_S", "5"))
 MALWAREBAZAAR_TTL_DAYS = int(os.getenv("MALWAREBAZAAR_TTL_DAYS", "7"))

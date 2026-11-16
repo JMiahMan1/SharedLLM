@@ -493,6 +493,24 @@ async def _ensure_default_settings(session: Session) -> None:
         inserted = True
     if inserted:
         session.commit()
+    _drop_retired_settings(session)
+
+
+#: Settings that moved elsewhere. The app vetting checks are homehub integrations now
+#: (services/homehub/app_checks_migration.py): the hub copies these once and empties them,
+#: and an emptied row is deleted here on the next start. A row that still holds a value has
+#: not been moved yet and is kept for the hub to read.
+_RETIRED_SETTINGS = ("malwarebazaar_auth_key", "app_vetting_common_sense_enabled")
+
+
+def _drop_retired_settings(session: Session) -> None:
+    rows = session.exec(select(GlobalSetting).where(GlobalSetting.key.in_(_RETIRED_SETTINGS))).all()
+    gone = [r for r in rows if not (r.value or "").strip()]
+    for row in gone:
+        session.delete(row)
+    if gone:
+        session.commit()
+        log.info("[identity] removed moved settings: %s", ", ".join(sorted(r.key for r in gone)))
 
 # A short or obvious DEFAULT_ADMIN_PASSWORD is the one credential a stranger can
 # guess at the login page, and an account with no password can never sign in.
@@ -3678,6 +3696,8 @@ def get_settings(
 
 #: Global settings that are secrets: shown to the UI as "***" only, and a
 #: write of "***" back (an editor saving the masked value) keeps the secret.
+#: malwarebazaar_auth_key moved to the hub's integrations, but its row stays
+#: until the hub has copied it (_RETIRED_SETTINGS), so it stays masked.
 _MASKED_SETTINGS = {"spotify_client_secret", "malwarebazaar_auth_key"}
 
 

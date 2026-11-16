@@ -82,7 +82,7 @@ test.describe('app vetting', () => {
     await check(page, info, run, 'apps card app open', card);
 
     // A risky app from outside Play: the security findings, and the card says the malware check needs a key.
-    await expect(card.getByTestId('apps-malware-setup')).toContainText('Admin > Users & Devices > App checks');
+    await expect(card.getByTestId('apps-malware-setup')).toContainText('Devices > Add & fix > Add by address > Cloud accounts');
     await card.getByRole('button', { name: /Screen Helper Pro/ }).click();
     const sec = card.getByTestId('app-security-com.example.screenhelper');
     await expect(sec).toContainText('accessibility service), and it is switched on');

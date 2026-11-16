@@ -73,7 +73,7 @@ describe('AppsCard', () => {
 
   it('shows the security scan, Common Sense Media and the reviews behind a concern', async () => {
     renderWithProviders(<AppsCard username="kid" name="Sam" />);
-    expect(await screen.findByTestId('apps-malware-setup')).toHaveTextContent('Admin > Users & Devices > App checks');
+    expect(await screen.findByTestId('apps-malware-setup')).toHaveTextContent('Devices > Add & fix > Add by address > Cloud accounts');
     fireEvent.click(await screen.findByRole('button', { name: /^Helper/ }));
     const sec = screen.getByTestId('app-security-com.example.helper');
     expect(sec).toHaveTextContent('and it is switched on');

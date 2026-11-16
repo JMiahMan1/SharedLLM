@@ -54,7 +54,7 @@ def wired(monkeypatch):
     mb: dict[str, tuple[int, object]] = {}
     mb_calls: list[tuple[str, str]] = []
     # Common Sense off and no MalwareBazaar key unless a test turns them on.
-    checks = {"settings": {"app_vetting_common_sense_enabled": "false", "malwarebazaar_auth_key": ""}}
+    checks = {"settings": {"common_sense": False, "malwarebazaar_key": ""}}
 
     async def _children(_session):
         return KIDS
@@ -420,7 +420,7 @@ async def _found_listing(w, pkg="com.roblox.client"):
 
 
 async def test_common_sense_is_found_by_the_apps_name_and_judges_the_age(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     url = "https://www.commonsensemedia.org/app-reviews/roblox"
     wired["csm"][url] = (200, _csm_page("Roblox", 13), None)
     await _found_listing(wired)
@@ -433,7 +433,7 @@ async def test_common_sense_is_found_by_the_apps_name_and_judges_the_age(wired):
 
 
 async def test_common_sense_follows_a_renamed_slug_and_tries_the_game_section(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (301, "", "/game-reviews/roblox-online")
     wired["csm"]["https://www.commonsensemedia.org/game-reviews/roblox-online"] = (200, _csm_page("Roblox", 13), None)
     await _found_listing(wired)
@@ -446,7 +446,7 @@ async def test_common_sense_follows_a_renamed_slug_and_tries_the_game_section(wi
 
 
 async def test_no_review_under_the_name_is_not_found_after_a_bounded_search(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     await _found_listing(wired)
     for _ in range(8):
         await _step(wired, app_catalog.COMMON_SENSE_MIN_INTERVAL_S)
@@ -456,7 +456,7 @@ async def test_no_review_under_the_name_is_not_found_after_a_bounded_search(wire
 
 
 async def test_a_page_for_another_app_is_skipped(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (200, _csm_page("Robot Lox Builder"), None)
     await _found_listing(wired)
     for _ in range(4):
@@ -465,7 +465,7 @@ async def test_a_page_for_another_app_is_skipped(wired):
 
 
 async def test_an_unreadable_common_sense_page_is_an_error_with_its_reason(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (200, "<html>redesigned</html>", None)
     await _found_listing(wired)
     entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
@@ -473,7 +473,7 @@ async def test_an_unreadable_common_sense_page_is_an_error_with_its_reason(wired
 
 
 async def test_common_sense_failing_backs_off_on_its_own(wired):
-    wired["checks"]["settings"] = {"app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"common_sense": True}
     wired["csm"]["https://www.commonsensemedia.org/app-reviews/roblox"] = (503, "", None)
     await _found_listing(wired)
     state = await app_catalog.backoff_state(wired["redis"], app_catalog.CSM_BACKOFF_KEY)
@@ -490,7 +490,7 @@ async def test_common_sense_switched_off_asks_nothing_and_says_so(wired):
     await _step(wired)
     assert wired["csm_calls"] == []
     entry = await app_catalog.common_sense_entry(wired["redis"], "com.roblox.client")
-    assert entry["status"] == "off" and "app_vetting_common_sense_enabled" in entry["reason"]
+    assert entry["status"] == "off" and "Add by address > Cloud accounts" in entry["reason"]
 
 
 # --- MalwareBazaar ------------------------------------------------------------
@@ -511,13 +511,13 @@ async def test_without_a_key_the_check_says_it_is_not_set_up_and_asks_nothing(wi
     await _step(wired)
     data = client.get("/api/telemetry/apps/kid", headers=HEADERS).json()
     check = data["apps"][0]["malware_check"]
-    assert check["state"] == "not_set_up" and "abuse.ch Auth-Key" in check["reason"]
+    assert check["state"] == "not_set_up" and "abuse.ch MalwareBazaar integration" in check["reason"]
     assert data["lookups"]["malware"]["state"] == "not_set_up"
     assert wired["mb_calls"] == []
 
 
 async def test_a_known_sample_is_severe_and_every_parent_hears(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
     wired["mb"][SHA] = (200, {"query_status": "ok", "data": [{"sha256_hash": SHA, "signature": "ExampleFamily"}]})
     wired["pages"]["com.example.tool"] = (404, "")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
@@ -533,7 +533,7 @@ async def test_a_known_sample_is_severe_and_every_parent_hears(wired, caplog):
 
 
 async def test_an_unknown_hash_is_not_known_and_is_checked_again_after_the_ttl(wired):
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
     apps, _ = await app_catalog.merged_apps(wired["redis"], "kid")
@@ -544,7 +544,7 @@ async def test_an_unknown_hash_is_not_known_and_is_checked_again_after_the_ttl(w
 
 
 async def test_a_refused_key_is_an_error_that_a_new_key_clears(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-wrong-key"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-wrong-key"}
     wired["mb"][SHA] = (401, None)
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
@@ -553,7 +553,7 @@ async def test_a_refused_key_is_an_error_that_a_new_key_clears(wired, caplog):
     assert await app_catalog.backoff_state(wired["redis"], app_catalog.MB_BACKOFF_KEY)
     assert "made-up-wrong-key" not in caplog.text
     # A new key lifts the pause and the hash is asked again.
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-right-key"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-right-key"}
     del wired["mb"][SHA]
     await _step(wired)
     assert wired["mb_calls"][-1] == (SHA, "made-up-right-key")
@@ -562,7 +562,7 @@ async def test_a_refused_key_is_an_error_that_a_new_key_clears(wired, caplog):
 
 
 async def test_a_failed_lookup_backs_off_without_naming_the_key(wired, caplog):
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key"}
     wired["mb"][SHA] = OSError("connection reset")
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001", _hashed_inventory("com.example.tool"))
     await _step(wired)
@@ -594,8 +594,8 @@ async def test_settings_that_cannot_be_read_ask_nothing(wired):
 
 
 async def test_jarvis_is_never_looked_up_anywhere(wired):
-    wired["checks"]["settings"] = {"malwarebazaar_auth_key": "made-up-secret-key",
-                                   "app_vetting_common_sense_enabled": "true"}
+    wired["checks"]["settings"] = {"malwarebazaar_key": "made-up-secret-key",
+                                   "common_sense": True}
     await app_catalog.save_inventory(wired["redis"], "kid", "phone-key-0000000001",
                                      _hashed_inventory(app_catalog.JARVIS_ANDROID_PACKAGE, sha="cd" * 32))
     assert await app_catalog.queue_lookups(wired["redis"], [app_catalog.JARVIS_ANDROID_PACKAGE]) == []

@@ -67,8 +67,9 @@ Reviewers' names and pictures are never kept.
 
 ## Common Sense Media
 
-When `app_vetting_common_sense_enabled` is on (the default), each found app is
-looked for on Common Sense Media by its Play title: at most four pages
+While the hub's **Common Sense Media (app age ratings)** integration is set
+up (Devices > Add & fix > Add by address > Cloud accounts; it has no fields),
+each found app is looked for on Common Sense Media by its Play title: at most four pages
 (`/app-reviews/<slug>` and `/game-reviews/<slug>`, for the whole title and the
 title before a subtitle), plus one redirect to another review page. Only the
 app's name is in those URLs; a generic browser user agent, no cookies, no
@@ -141,12 +142,16 @@ fingerprint of a public file, goes out. At most one lookup per
 `MALWAREBAZAAR_BACKOFF_MAX_S` (24 h); "not a known sample" is trusted for
 `MALWAREBAZAAR_TTL_DAYS` (7), a hit is kept.
 
-The key is the `malwarebazaar_auth_key` global setting (free at
-auth.abuse.ch; Admin > Users & Devices > App checks). It is a secret:
-identity shows it to the UI only as `***`, saving `***` back keeps it, it is
+The key is the Auth-Key of the hub's **abuse.ch MalwareBazaar (app malware
+check)** integration (free at auth.abuse.ch; added under Devices > Add & fix >
+Add by address > Cloud accounts). Adding it makes one real lookup first, of the
+empty file's SHA-256 (`malwarebazaar.KEY_CHECK_SHA256`, so nothing about the
+family goes out), and a key abuse.ch refuses is not saved. It is replaced the
+same way, checked again, under Devices > Setup > Integrations > Reconfigure. It
+is a secret: the hub never sends it back to the UI (only that it is set), it is
 never logged and never in any card. With no key nothing is asked and every
-app's `malware_check` says `not_set_up` ("add an abuse.ch Auth-Key"); a
-refused key says so (`error`) until the key changes. A hit is the highest
+app's `malware_check` says `not_set_up` (naming where to add it); a refused
+key says so (`error`) until the key changes. A hit is the highest
 severity and notifies every parent at severe.
 
 `malware_check.state`: `malware`, `not_known`, `checking`, `not_set_up`,
@@ -157,13 +162,26 @@ is older than the check).
 
 | Setting | Default | Where | What |
 |---|---|---|---|
-| `app_vetting_common_sense_enabled` | `true` | identity global setting (Admin > Users & Devices > App checks) | Common Sense Media lookups on or off |
-| `malwarebazaar_auth_key` | empty | identity global setting (same place), secret | abuse.ch Auth-Key for the malware check |
+| Common Sense Media (app age ratings) | set up on existing households (see below) | homehub integration, Devices > Add & fix > Add by address > Cloud accounts | Common Sense Media lookups on while it exists |
+| abuse.ch MalwareBazaar (app malware check) | not set up | homehub integration (same place), its Auth-Key a secret | abuse.ch Auth-Key for the malware check |
 | `COMMON_SENSE_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 20, 30, 900, 86400 | telemetry environment, read at start | Common Sense pacing |
 | `MALWAREBAZAAR_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 5, 7, 600, 86400 | telemetry environment, read at start | MalwareBazaar pacing |
 
-Telemetry reads the two global settings from identity (cached a minute) in
-its background loop only.
+Telemetry reads the two integrations from the hub in its background loop only,
+for each round of lookups (`GET /hub/integrations/{domain}` with the internal
+secret, cached a minute, so a change applies within a minute). That route
+answers only the stack's `INTERNAL_SECRET`: an admin's own token is refused,
+so the key never reaches a browser. While the hub cannot be asked both checks
+count as not set up for that pass (logged once until it answers again).
+
+They were identity global settings (`app_vetting_common_sense_enabled`,
+`malwarebazaar_auth_key`) edited in an Admin box. On its first start after the
+change the hub moves them once (`services/homehub/app_checks_migration.py`,
+marker `app_checks_moved` in its store): it creates the Common Sense Media
+entry unless the old switch was "false", creates the MalwareBazaar entry with
+the stored key when there was one, and empties both settings, which identity
+deletes on its next start. Until identity answers the hub keeps trying, and an
+entry an admin removes afterwards stays removed.
 
 ## The local review
 

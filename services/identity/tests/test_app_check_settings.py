@@ -1,5 +1,6 @@
-"""The app checks' global settings: seeded with a description naming where
-they are edited, and the MalwareBazaar key treated as a secret."""
+"""The app checks' old global settings: no longer seeded (they are homehub
+integrations now), the MalwareBazaar key still masked while its row waits to
+be moved, and an emptied row deleted at startup."""
 import os
 
 import pytest
@@ -25,13 +26,22 @@ def session():
         yield s
 
 
-def test_both_settings_are_seeded_with_where_to_edit_them():
-    seeded = {s["key"]: s for s in DEFAULT_GLOBAL_SETTINGS}
-    assert seeded[KEY]["value"] == ""
-    assert seeded["app_vetting_common_sense_enabled"]["value"] == "true"
-    for key in (KEY, "app_vetting_common_sense_enabled"):
-        assert "Admin > Users & Devices > App checks" in seeded[key]["description"]
-        assert "\u2014" not in seeded[key]["description"] and "\u2013" not in seeded[key]["description"]
+def test_neither_setting_is_seeded_any_more():
+    seeded = {s["key"] for s in DEFAULT_GLOBAL_SETTINGS}
+    assert KEY not in seeded and "app_vetting_common_sense_enabled" not in seeded
+
+
+def test_emptied_rows_are_deleted_and_unmoved_ones_kept(session):
+    main._drop_retired_settings(session)
+    kept = {s.key for s in session.exec(select(GlobalSetting)).all()}
+    assert {KEY, "app_vetting_common_sense_enabled"} <= kept  # not moved yet: the hub still has to read them
+    for row in session.exec(select(GlobalSetting)).all():
+        row.value = ""
+        session.add(row)
+    session.commit()
+    main._drop_retired_settings(session)
+    left = {s.key for s in session.exec(select(GlobalSetting)).all()}
+    assert KEY not in left and "app_vetting_common_sense_enabled" not in left
 
 
 def test_the_key_is_masked_for_the_ui_and_whole_for_services(session):
