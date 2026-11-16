@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Loader2, LogOut, Pin, PinOff, Trash2, UserMinus, UserPlus } from 'lucide-react';
+import { Loader2, LogOut, Pin, PinOff, Smartphone, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { api } from '../../services/api';
 import PeoplePicker from './PeoplePicker';
 import Sheet from './Sheet';
@@ -14,6 +14,7 @@ import { errorText } from '../../lib/errorText';
  * Everything about one conversation: who is in it, adding and removing
  * people, opening it on launch, and deleting (or leaving) it. Talk decides
  * who may do what; the sheet only offers what the conversation says you can.
+ * In the Android app it can also put the conversation on the home screen.
  */
 export default function ConversationInfo({
   conversation,
@@ -22,6 +23,7 @@ export default function ConversationInfo({
   onToggleDefault,
   onGone,
   onClose,
+  homeShortcut,
 }: {
   conversation: TalkConversation;
   myActorIds: ReadonlySet<string>;
@@ -29,6 +31,8 @@ export default function ConversationInfo({
   onToggleDefault: () => void;
   onGone: () => void;
   onClose: () => void;
+  /** Only where a home-screen shortcut can be made (the Android app, a launcher that pins). */
+  homeShortcut?: { onAdd: () => void; busy: boolean };
 }) {
   const queryClient = useQueryClient();
   const people = useFamilyDirectory();
@@ -95,6 +99,26 @@ export default function ConversationInfo({
           <span className={`block h-5 w-5 rounded-full bg-white transition ${isDefault ? 'translate-x-4' : ''}`} />
         </span>
       </button>
+
+      {homeShortcut && (
+        <button
+          type="button"
+          onClick={homeShortcut.onAdd}
+          disabled={homeShortcut.busy}
+          data-testid="chat-home-shortcut"
+          className="mb-4 flex w-full min-h-12 items-center gap-3 rounded-xl border border-white/10 px-3 text-left disabled:opacity-60"
+        >
+          {homeShortcut.busy ? <Loader2 size={16} className="animate-spin text-purple-300" /> : <Smartphone size={16} className="text-purple-300" />}
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-white">Add to home screen</span>
+            <span className="block text-xs text-slate-400">
+              {conversation.private
+                ? 'One tap opens this chat on its lock screen. No message is ever shown on the shortcut.'
+                : 'One tap from your home screen straight into this conversation.'}
+            </span>
+          </span>
+        </button>
+      )}
 
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{members.length || ''} Members</h3>

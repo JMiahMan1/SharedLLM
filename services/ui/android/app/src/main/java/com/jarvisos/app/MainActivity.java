@@ -56,6 +56,7 @@ registerPlugin(CommsPlugin.class);
         registerPlugin(SecureWindowPlugin.class);
         registerPlugin(DeviceUnlockPlugin.class);
         registerPlugin(PrivatePreviewPlugin.class);
+        registerPlugin(ChatShortcutPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -169,7 +170,7 @@ registerPlugin(CommsPlugin.class);
         }
     }
 
-    /** A notification tap carries the page to open (a chat, the player). */
+    /** A notification tap or a chat's home-screen shortcut carries the page to open (a chat, the player). */
     private void maybeOpenPath(Intent intent) {
         if (intent == null) return;
         String path = intent.getStringExtra(PushNotifier.EXTRA_OPEN_PATH);
