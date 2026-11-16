@@ -40,7 +40,17 @@ describe('NativeBridge notification check', () => {
   it('says so on the device when Android is not letting Jarvis notify', async () => {
     m.notificationState.mockResolvedValue({ app: false, chat: true });
     mount();
-    await waitFor(() => expect(m.toast).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ id: 'jarvis-notifications-off', duration: Infinity })));
+    // Long enough to read, then out of the way of the page's own buttons (it used to stay forever).
+    await waitFor(() => expect(m.toast).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ id: 'jarvis-notifications-off', duration: 15_000 })));
+  });
+
+  it('stays quiet for a week after Not now', async () => {
+    window.localStorage.setItem('jarvis-notifications-off-snoozed-until', String(Date.now() + 60_000));
+    m.notificationState.mockResolvedValue({ app: false, chat: true });
+    mount();
+    await waitFor(() => expect(m.notificationState).toHaveBeenCalled());
+    expect(m.toast).not.toHaveBeenCalled();
+    window.localStorage.removeItem('jarvis-notifications-off-snoozed-until');
   });
 
   it('flags family chat switched off on its own', async () => {

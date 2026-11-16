@@ -13,6 +13,27 @@ import NudgeOverlay, { type Nudge } from './chat/NudgeOverlay';
  * notification opens the page it is about.
  */
 const NOTICE_ID = 'jarvis-notifications-off';
+/** "Not now" quiets the notice on this device for a week (it covered the top of every screen). */
+const SNOOZE_KEY = 'jarvis-notifications-off-snoozed-until';
+const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Shown long enough to read, then out of the way of the page's own buttons. */
+const NOTICE_MS = 15_000;
+
+function snoozed(): boolean {
+  try {
+    return Number(window.localStorage.getItem(SNOOZE_KEY) || 0) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function snooze(): void {
+  try {
+    window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+  } catch {
+    // Without storage it simply shows again next time.
+  }
+}
 
 /**
  * Say so on this device when Android is not letting Jarvis show notices (a
@@ -31,6 +52,7 @@ async function warnIfNotificationsOff(): Promise<void> {
     toast.dismiss(NOTICE_ID);
     return;
   }
+  if (snoozed()) return;
   toast(
     (t) => (
       <span className="flex flex-wrap items-center gap-2" data-testid="notifications-off">
@@ -47,9 +69,20 @@ async function warnIfNotificationsOff(): Promise<void> {
         >
           Turn on
         </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-lg px-3 text-sm font-semibold text-slate-300 hover:bg-white/10"
+          data-testid="notifications-off-later"
+          onClick={() => {
+            snooze();
+            toast.dismiss(t.id);
+          }}
+        >
+          Not now
+        </button>
       </span>
     ),
-    { id: NOTICE_ID, duration: Infinity },
+    { id: NOTICE_ID, duration: NOTICE_MS },
   );
 }
 
