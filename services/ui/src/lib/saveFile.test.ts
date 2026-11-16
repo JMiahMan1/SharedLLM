@@ -42,3 +42,15 @@ describe('saveBlob', () => {
     expect(native.save).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('imageKindOf', () => {
+  it('names real pictures and refuses anything else', async () => {
+    const { imageKindOf } = await import('./saveFile');
+    expect(imageKindOf(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpeg');
+    expect(imageKindOf(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]))).toBe('png');
+    expect(imageKindOf(new TextEncoder().encode('RIFF....WEBP'))).toBe('webp');
+    expect(imageKindOf(new TextEncoder().encode('/9j/4AAQ'))).toBeNull(); // a JPEG as base64 text
+    expect(imageKindOf(Uint8Array.from([0xef, 0xbf, 0xbd, 0xef]))).toBeNull(); // bytes mangled as text
+    expect(imageKindOf(new Uint8Array())).toBeNull();
+  });
+});

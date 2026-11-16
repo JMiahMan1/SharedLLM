@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertOctagon, AlertTriangle, Check, Download, Info, ShieldAlert, Trash2, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { saveBlob } from '../../lib/saveFile';
+import { imageKindOf, saveBlob } from '../../lib/saveFile';
 import { errorText } from '../../lib/errorText';
 import { relativeTime } from '../../lib/wanderTrips';
 import MemberCard from './MemberCard';
@@ -86,6 +86,7 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
   const [confirmClear, setConfirmClear] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewNote, setReviewNote] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [imageBusy, setImageBusy] = useState<string | null>(null);
   const canExport = Boolean(user?.is_admin || user?.family_role === 'father' || user?.family_role === 'mother');
@@ -167,9 +168,19 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
     if (!concern.id) return;
     setImageBusy(concern.id);
     setReviewError(null);
+    setReviewNote(null);
     try {
       const { blob, filename } = await api.downloadGuardianConcernImage(username, concern.id);
-      await saveBlob(blob, filename);
+      // Check the picture before saving it, so a damaged download says so (with its size and
+      // first bytes, never the picture) instead of saving a blank file.
+      const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+      if (!imageKindOf(head)) {
+        const hex = Array.from(head.slice(0, 4), (b) => b.toString(16).padStart(2, '0')).join(' ');
+        setReviewError(`The image arrived damaged (${blob.size} bytes, starting ${hex || 'empty'}). Nothing was saved.`);
+        return;
+      }
+      const saved = await saveBlob(blob, filename);
+      if (saved) setReviewNote(`Saved ${filename} (${Math.round(blob.size / 1024)} KB).`);
     } catch (err) {
       setReviewError(await downloadError(err, 'The image could not be downloaded.'));
     } finally {
@@ -264,6 +275,11 @@ export default function ConcernsCard({ username, name, limit = 5 }: { username: 
             </button>
           )}
         </div>
+      )}
+      {reviewNote && !reviewError && (
+        <p className="mb-2 rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-2.5 py-2 text-[11px] text-emerald-300" data-testid="concerns-review-note" role="status">
+          {reviewNote}
+        </p>
       )}
       {reviewError && (
         <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-300" data-testid="concerns-review-error">

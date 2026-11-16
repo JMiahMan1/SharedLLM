@@ -34,6 +34,17 @@ function anchorDownload(url: string, filename: string) {
   a.remove();
 }
 
+/** The picture format the first bytes name (JPEG, PNG, WebP, GIF, HEIC), or null. */
+export function imageKindOf(head: Uint8Array): string | null {
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'jpeg';
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'png';
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return 'gif';
+  const ascii = (from: number, to: number) => String.fromCharCode(...head.slice(from, to));
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp';
+  if (ascii(4, 8) === 'ftyp') return 'heic';
+  return null;
+}
+
 /** An app build from before the plugin answers "not implemented". */
 function notImplemented(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code;
