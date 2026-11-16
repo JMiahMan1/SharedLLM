@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chatLeft, chatShown, forgetLockAfter, getLockAfter, lockAll, lockNow, lockPending, setLockAfter, vaultFor } from './privateChatSession';
+import { chatLeft, chatShown, forgetLockAfter, getLockAfter, lockAll, lockNow, lockPending, pickerDone, pickerOpening, PICKER_GRACE_MS, setLockAfter, vaultFor } from './privateChatSession';
 
 async function unlockedVault(token: string) {
   const vault = vaultFor(token);
@@ -101,5 +101,37 @@ describe('private chat lock timing', () => {
   it('keeps one vault per chat for the life of the app', () => {
     expect(vaultFor('room6')).toBe(vaultFor('room6'));
     expect(vaultFor('room6')).not.toBe(vaultFor('room7'));
+  });
+
+  it('the phone picker opening over the chat does not lock it until the grace ends, and a return cancels it', async () => {
+    const vault = await unlockedVault('room9');
+    vi.useFakeTimers();
+    pickerOpening('room9');
+    chatLeft('room9');
+    // Pictures go at once as always; the key waits for the pictures to be chosen.
+    expect(vault.liveUrls).toBe(0);
+    expect(vault.unlocked).toBe(true);
+    vi.advanceTimersByTime(PICKER_GRACE_MS - 1000);
+    chatShown('room9');
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(vault.unlocked).toBe(true);
+    // The hold is used once: the next leave locks at once again.
+    chatLeft('room9');
+    expect(vault.unlocked).toBe(false);
+  });
+
+  it('a picker left open past the grace locks the chat, and a closed picker gives no grace', async () => {
+    const vault = await unlockedVault('room10');
+    vi.useFakeTimers();
+    pickerOpening('room10');
+    chatLeft('room10');
+    vi.advanceTimersByTime(PICKER_GRACE_MS);
+    expect(vault.unlocked).toBe(false);
+
+    const again = await unlockedVault('room11');
+    pickerOpening('room11');
+    pickerDone('room11');
+    chatLeft('room11');
+    expect(again.unlocked).toBe(false);
   });
 });

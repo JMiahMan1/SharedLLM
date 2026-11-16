@@ -689,3 +689,49 @@ def test_a_private_message_notice_reaches_only_a_member(env, monkeypatch, user, 
     for n in sent:
         assert n["data"]["message_id"] == 9
         assert "BBBB" not in json.dumps(n)
+
+
+# --- Pictures added to the gallery (no chat message) ---------------------------
+
+
+def test_gallery_entries_are_sealed_kept_for_both_parents_and_make_no_talk_message(env):
+    _create(env)
+    c = env["client"]
+    before = len(env["calls"])
+    up = c.post("/api/private-chat/chats/room123abc/gallery", json={"sealed": SEALED}, headers=_as("alex"))
+    assert up.status_code == 200, up.text
+    entry_id = up.json()["id"]
+    # Not a Talk message: nothing posted to the room, and no notice to anyone.
+    assert len(env["calls"]) == before
+    assert env["notices"] == []
+    mine = c.get("/api/private-chat/chats/room123abc/gallery", headers=_as("alex")).json()["entries"]
+    theirs = c.get("/api/private-chat/chats/room123abc/gallery", headers=_as("sam")).json()["entries"]
+    assert [(e["id"], e["own"], e["by_name"], e["sealed"]) for e in mine] == [(entry_id, True, "Alex", SEALED)]
+    assert [(e["id"], e["own"]) for e in theirs] == [(entry_id, False)]
+    # Only the parent who added it may remove it.
+    assert c.delete(f"/api/private-chat/chats/room123abc/gallery/{entry_id}", headers=_as("sam")).status_code == 403
+    assert c.delete(f"/api/private-chat/chats/room123abc/gallery/{entry_id}", headers=_as("alex")).status_code == 200
+    assert c.get("/api/private-chat/chats/room123abc/gallery", headers=_as("alex")).json()["entries"] == []
+
+
+def test_gallery_refuses_outsiders_plain_text_and_oversized_entries(env, monkeypatch):
+    _create(env)
+    c = env["client"]
+    for outsider in ("kid", "teen", "gran", "uncle"):
+        assert c.get("/api/private-chat/chats/room123abc/gallery", headers=_as(outsider)).status_code == 404
+        assert c.post("/api/private-chat/chats/room123abc/gallery", json={"sealed": SEALED}, headers=_as(outsider)).status_code == 404
+    assert c.post("/api/private-chat/chats/room123abc/gallery", json={"sealed": "a holiday photo"}, headers=_as("alex")).status_code == 422
+    assert c.post("/api/private-chat/chats/room123abc/gallery", content=b"not json", headers=_as("alex")).status_code == 422
+    monkeypatch.setattr(private_chat, "MAX_GALLERY_ENTRY_BYTES", 50)
+    assert c.post("/api/private-chat/chats/room123abc/gallery", json={"sealed": SEALED}, headers=_as("alex")).status_code == 413
+    assert c.delete("/api/private-chat/chats/room123abc/gallery/../../x", headers=_as("alex")).status_code == 404
+    assert c.delete("/api/private-chat/chats/room123abc/gallery/" + "a" * 32, headers=_as("alex")).status_code == 404
+
+
+def test_deleting_the_chat_removes_its_gallery_entries(env):
+    _create(env)
+    c = env["client"]
+    assert c.post("/api/private-chat/chats/room123abc/gallery", json={"sealed": SEALED}, headers=_as("alex")).status_code == 200
+    assert (env["root"] / "gallery" / "room123abc").is_dir()
+    assert c.delete("/api/private-chat/chats/room123abc", headers=_as("alex")).status_code == 200
+    assert not (env["root"] / "gallery" / "room123abc").exists()

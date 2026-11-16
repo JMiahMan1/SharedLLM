@@ -4,7 +4,9 @@ import { mockHealth } from '../fixtures/healthMocks';
 import { mockBible } from '../fixtures/bibleMocks';
 import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
 import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
-import { deriveKey, encryptBytes, makeVerifier, randomBytes, sealMessage, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import JSZip from 'jszip';
+import { deriveKey, encryptBytes, makeVerifier, openMessage, randomBytes, sealMessage, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+import { fakeJpeg } from '../../src/test/fakes/fakeJpeg';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 
@@ -34,6 +36,8 @@ interface Server {
   posted: string[];
   created: Array<Record<string, unknown>>;
   nudges: number;
+  /** Pictures added straight to the gallery: sealed entries, never Talk messages. */
+  entries?: Array<{ id: string; at: number; own: boolean; by_name: string; sealed: string }>;
 }
 
 async function serve(page: Page, server: Server): Promise<void> {
@@ -73,6 +77,21 @@ async function serve(page: Page, server: Server): Promise<void> {
     const blob = /^\/api\/private-chat\/chats\/[^/]+\/blobs\/([0-9a-f]+)$/.exec(p);
     if (blob) {
       return route.fulfill({ body: server.blobs[blob[1]], contentType: 'application/octet-stream', headers: { 'cache-control': 'no-store' } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/gallery` && req.method() === 'GET') {
+      return route.fulfill({ json: { entries: server.entries ?? [] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}/gallery` && req.method() === 'POST') {
+      const sealed = String((req.postDataJSON() as { sealed?: string }).sealed);
+      const entries = (server.entries ??= []);
+      const id = (entries.length + 1).toString(16).padStart(32, 'e');
+      entries.push({ id, at: Math.floor(Date.now() / 1000), own: true, by_name: 'Parent', sealed });
+      return route.fulfill({ json: { id, at: Math.floor(Date.now() / 1000) } });
+    }
+    const entry = /^\/api\/private-chat\/chats\/[^/]+\/gallery\/([0-9a-f]+)$/.exec(p);
+    if (entry && req.method() === 'DELETE') {
+      server.entries = (server.entries ?? []).filter((e) => e.id !== entry[1]);
+      return route.fulfill({ json: { deleted: entry[1] } });
     }
     if (/\/nudge$/.test(p)) {
       server.nudges += 1;
@@ -671,6 +690,97 @@ test.describe('private chat on every form factor', () => {
     await page.getByRole('button', { name: 'Close gallery' }).click();
 
     // Locking wipes it: no decrypted picture is left on the page.
+    await page.getByTestId('private-lock-now').click();
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('add pictures to the gallery without sending them, and import a Between export: by the day taken, never in the chat', async ({ page }, info) => {
+    const { server, key } = await v1Server();
+    const run = await open(page, server);
+    await page.getByRole('button', { name: /Private chat/ }).first().click();
+    await unlockWith(page, PASSWORD);
+    await expect(page.getByText('Sent before any change')).toBeVisible();
+    await page.getByTestId('private-gallery-open').click();
+    const gallery = page.getByTestId('private-gallery');
+    await expect(gallery.getByText(/No photos yet/)).toBeVisible();
+    await gallery.getByTestId('private-gallery-add').click();
+    const sheet = page.getByTestId('private-gallery-import');
+    await expect(sheet.getByRole('heading', { name: 'Import from Between' })).toBeVisible();
+    await check(page, info, run, 'private gallery add pictures', sheet);
+
+    // Two pictures from the phone (made-up EXIF: an old date, a made-up camera and place) and the same one again.
+    const first = Buffer.from(fakeJpeg({ dateTimeOriginal: '2016:05:12 14:30:00', make: 'Acme', model: 'Pocket 7', gps: { lat: 10.5, lon: 20.25 } }, 1));
+    const second = Buffer.from(fakeJpeg(undefined, 2));
+    const chooser = page.waitForEvent('filechooser');
+    await sheet.getByTestId('private-import-phone').click();
+    await (await chooser).setFiles([
+      { name: 'IMG_0001.jpg', mimeType: 'image/jpeg', buffer: first },
+      { name: 'IMG_20180704_211509.jpg', mimeType: 'image/jpeg', buffer: second },
+      { name: 'IMG_0001 copy.jpg', mimeType: 'image/jpeg', buffer: first },
+    ]);
+    const result = sheet.getByTestId('private-import-result');
+    await expect(result).toContainText('2 added, 1 already in the gallery');
+    await expect(sheet.getByTestId('private-import-originals')).toContainText('still on your phone');
+    await check(page, info, run, 'private gallery add pictures done', sheet);
+
+    // Encrypted before it left: the blobs are not the pictures, and the entries say nothing readable.
+    expect(server.uploads?.length).toBe(2);
+    expect(server.uploads?.some((u) => u.includes(first.subarray(0, 64)))).toBe(false);
+    expect(server.entries?.length).toBe(2);
+    for (const e of server.entries ?? []) {
+      expect(e.sealed).toContain('```jarvis-envelope');
+      for (const secret of ['IMG_', 'Acme', '10.5', '2016']) expect(e.sealed).not.toContain(secret);
+    }
+    const opened = await openMessage(key, server.entries![0].sealed);
+    // The first of the two identical files (in name order) is the one kept.
+    expect(opened).toMatchObject({ t: 'added', name: 'IMG_0001 copy.jpg', camera: 'Acme Pocket 7', taken_from: 'exif', source: 'phone' });
+    // Never a chat message: nothing was posted to Talk.
+    expect(server.posted).toEqual([]);
+
+    // A Between backup zip: the picture already in is skipped, the new one lands on its folder's date, the video is left out.
+    const zip = new JSZip();
+    zip.file('Between/photos/IMG_0001.jpg', first);
+    zip.file('Between/photos/2012-12-25/photo_3.jpg', Buffer.from(fakeJpeg(undefined, 3)));
+    zip.file('Between/videos/clip.mp4', Buffer.from([0, 0, 0, 24]));
+    const between = page.waitForEvent('filechooser');
+    await sheet.getByTestId('private-import-between').click();
+    await (await between).setFiles({ name: 'between-backup.zip', mimeType: 'application/zip', buffer: Buffer.from(await zip.generateAsync({ type: 'uint8array' })) });
+    await expect(result).toContainText('1 added, 1 already in the gallery');
+    await expect(result).toContainText('1 video was left out');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect(sheet).toHaveCount(0);
+
+    // In the gallery by the day each was taken, years apart, for both parents.
+    await expect(gallery.getByTestId('private-gallery-count')).toHaveText('3 photos');
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(3);
+    await expect(gallery.getByRole('heading', { name: /2016/ })).toBeVisible();
+    await expect(gallery.getByRole('heading', { name: /2012/ })).toBeVisible();
+    await expect(gallery.locator('img[src^="blob:"]')).toHaveCount(3);
+    await check(page, info, run, 'private gallery with imported pictures', gallery);
+
+    await gallery.getByRole('button', { name: /taken .*2016/ }).click();
+    const viewer = page.getByTestId('private-gallery-viewer');
+    await expect(viewer.getByTestId('private-gallery-stamp')).toContainText('Taken');
+    await expect(viewer.getByTestId('private-gallery-details')).toContainText('IMG_0001 copy.jpg');
+    await expect(viewer.getByTestId('private-gallery-details')).toContainText('Acme Pocket 7');
+    await expect(viewer.getByTestId('private-gallery-place')).toContainText('10.5000, 20.2500');
+    // Comments work as on a sent picture: a sealed chat message naming the picture.
+    await viewer.getByTestId('private-gallery-comment-input').fill('Our first trip');
+    await viewer.getByTestId('private-gallery-comment-send').click();
+    await expect.poll(() => server.posted.length).toBe(1);
+    expect(server.posted[0]).not.toContain('Our first trip');
+    await expect(viewer.getByTestId('private-gallery-comment')).toContainText('Our first trip');
+    await check(page, info, run, 'private gallery imported picture', viewer);
+
+    // Removing it removes the entry and its encrypted picture.
+    await viewer.getByTestId('private-gallery-delete').click();
+    await expect(gallery.getByTestId('private-gallery-tile')).toHaveCount(2);
+    expect(server.entries?.length).toBe(2);
+    await gallery.getByRole('button', { name: 'Close gallery' }).click();
+
+    // The thread shows the comment, never the added pictures themselves.
+    await expect(page.getByTestId('private-picture')).toHaveCount(0);
     await page.getByTestId('private-lock-now').click();
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
     done(run);

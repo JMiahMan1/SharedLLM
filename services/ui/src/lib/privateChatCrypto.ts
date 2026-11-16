@@ -86,9 +86,41 @@ export class WrongPasswordError extends Error {
 export type PrivatePayload =
   | { t: 'text'; text: string }
   /** `sent_at` / `taken_at` are seconds since the epoch, inside the encryption (older pictures have neither). */
-  | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number }
+  | { t: 'image'; blob: string; mime: string; name?: string; caption?: string; sent_at?: number; taken_at?: number; sha256?: string }
+  /**
+   * A picture added straight to the gallery (never a chat message): kept as a
+   * sealed gallery entry, not in Talk. The original bytes are in the blob
+   * untouched; these are the facts read from them, for placing it in time.
+   */
+  | AddedPicture
   /** A comment on a picture in the chat's gallery, naming the picture's blob. */
   | { t: 'comment'; blob: string; text: string; sent_at?: number };
+
+export interface AddedPicture {
+  t: 'added';
+  blob: string;
+  mime: string;
+  /** The original file name, and the path inside a zip when it came from one. */
+  name?: string;
+  path?: string;
+  caption?: string;
+  /** When it was taken (seconds), and where that came from: EXIF, a date in its name, or the file's own time. */
+  taken_at?: number;
+  taken_from?: 'exif' | 'name' | 'file';
+  /** When it was added to the gallery (seconds). */
+  added_at?: number;
+  /** The file's own modification time (seconds), as it was on the phone or in the zip. */
+  file_time?: number;
+  /** SHA-256 of the original bytes (hex), so an import run again skips what is already in. */
+  sha256?: string;
+  size?: number;
+  source?: 'phone' | 'between' | 'zip';
+  camera?: string;
+  /** Where it was taken, from EXIF: only ever inside the encryption. */
+  gps?: { lat: number; lon: number; alt?: number };
+  width?: number;
+  height?: number;
+}
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -350,8 +382,10 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
         ...(typeof payload.caption === 'string' ? { caption: payload.caption } : {}),
         ...(sentAt ? { sent_at: sentAt } : {}),
         ...(takenAt ? { taken_at: takenAt } : {}),
+        ...(isSha256(payload.sha256) ? { sha256: payload.sha256 } : {}),
       };
     }
+    if (payload?.t === 'added' && typeof payload.blob === 'string' && typeof payload.mime === 'string') return readAdded(payload, stamp);
     if (payload?.t === 'comment' && typeof payload.blob === 'string' && typeof payload.text === 'string' && payload.text.trim()) {
       const sentAt = stamp(payload.sent_at);
       return { t: 'comment', blob: payload.blob, text: payload.text, ...(sentAt ? { sent_at: sentAt } : {}) };
@@ -360,6 +394,38 @@ export async function openMessage(key: CryptoKey, raw: string | null | undefined
   } catch {
     return null;
   }
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+/** An added picture's entry, keeping only fields of the right shape. */
+function readAdded(raw: AddedPicture, stamp: (value: unknown) => number | undefined): AddedPicture {
+  const text = (value: unknown, max = 500) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
+  const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined);
+  const out: AddedPicture = { t: 'added', blob: raw.blob, mime: raw.mime };
+  const fields: Partial<AddedPicture> = {
+    name: text(raw.name),
+    path: text(raw.path, 1000),
+    caption: text(raw.caption, 2000),
+    taken_at: stamp(raw.taken_at),
+    taken_from: raw.taken_from === 'exif' || raw.taken_from === 'name' || raw.taken_from === 'file' ? raw.taken_from : undefined,
+    added_at: stamp(raw.added_at),
+    file_time: stamp(raw.file_time),
+    sha256: isSha256(raw.sha256) ? raw.sha256 : undefined,
+    size: num(raw.size),
+    source: raw.source === 'phone' || raw.source === 'between' || raw.source === 'zip' ? raw.source : undefined,
+    camera: text(raw.camera, 200),
+    width: num(raw.width),
+    height: num(raw.height),
+  };
+  const gps = raw.gps;
+  if (gps && typeof gps.lat === 'number' && typeof gps.lon === 'number' && Number.isFinite(gps.lat) && Number.isFinite(gps.lon)) {
+    fields.gps = { lat: gps.lat, lon: gps.lon, ...(typeof gps.alt === 'number' && Number.isFinite(gps.alt) ? { alt: gps.alt } : {}) };
+  }
+  for (const [key, value] of Object.entries(fields)) if (value !== undefined) (out as unknown as Record<string, unknown>)[key] = value;
+  return out;
 }
 
 /** A picture's bytes encrypted for upload: IV first, then the ciphertext. */

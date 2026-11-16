@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TalkMessage } from './chatModel';
-import { buildGallery, groupByDay, type Opened } from './privateGalleryModel';
+import { buildGallery, groupByDay, type Opened, type OpenedEntry } from './privateGalleryModel';
 
 const me = new Set(['alex']);
 const day = (y: number, m: number, d: number, h = 12) => Math.floor(new Date(y, m - 1, d, h).getTime() / 1000);
@@ -57,5 +57,30 @@ describe('the private gallery', () => {
     expect(days.map((d) => [d.key, d.items.length])).toEqual([['2026-11-02', 1], ['2026-11-01', 1]]);
     expect(days[0].label).toBe('Today');
     expect(days[1].label).toBe('Yesterday');
+  });
+
+  it('includes pictures added to the gallery, placed on the day they were taken, with their details and comments', () => {
+    const added: OpenedEntry[] = [
+      { id: 'e1', at: day(2026, 11, 3, 12), own: true, byName: 'Alex',
+        payload: { t: 'added', blob: 'old', mime: 'image/jpeg', name: 'IMG_1.jpg', taken_at: day(2016, 5, 12, 14), taken_from: 'exif', added_at: day(2026, 11, 3, 12),
+          source: 'between', camera: 'Acme', gps: { lat: 1, lon: 2 }, sha256: 'a'.repeat(64) } },
+      // No taken time: it sits on the day it was added.
+      { id: 'e2', at: day(2026, 11, 3, 13), own: false, byName: 'Sam', payload: { t: 'added', blob: 'undated', mime: 'image/png' } },
+      { id: 'e3', at: day(2026, 11, 3, 14), own: false, byName: 'Sam', payload: 'unreadable' },
+      // A sent picture's blob is never listed twice.
+      { id: 'e4', at: day(2026, 11, 3, 15), own: true, byName: 'Alex', payload: { t: 'added', blob: 'b3', mime: 'image/jpeg' } },
+    ];
+    const withComment = [...messages, msg(9, 'sam', day(2026, 11, 4, 9))];
+    const items = buildGallery(withComment, { ...opened, '9': { t: 'comment', blob: 'old', text: 'Ten years ago!' } }, me, added);
+    expect(items.map((i) => i.blob)).toEqual(['undated', 'b3', 'b1', 'old']);
+    const old = items.find((i) => i.blob === 'old')!;
+    expect(old).toMatchObject({ entryId: 'e1', messageId: 0, own: true, actorName: 'Alex', takenAt: day(2016, 5, 12, 14), when: day(2016, 5, 12, 14), sha256: 'a'.repeat(64) });
+    expect(old.details).toEqual({ taken_from: 'exif', source: 'between', camera: 'Acme', gps: { lat: 1, lon: 2 } });
+    expect(old.comments.map((c) => [c.text, c.own])).toEqual([['Ten years ago!', false]]);
+    expect(items.find((i) => i.blob === 'undated')).toMatchObject({ when: day(2026, 11, 3, 13), own: false });
+    expect(items.find((i) => i.blob === 'b3')?.entryId).toBeUndefined();
+    const days = groupByDay(items, new Date(2026, 10, 3, 18));
+    expect(days.map((d) => d.key)).toEqual(['2026-11-03', '2026-11-02', '2026-11-01', '2016-05-12']);
+    expect(days[3].label).toMatch(/2016/);
   });
 });

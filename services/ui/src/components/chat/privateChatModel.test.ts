@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { previewLine, type TalkMessage } from './chatModel';
-import { canNudge, errorText, mayUsePrivateChat, passwordProblem } from './privateChatModel';
+import { canNudge, errorText, mayUsePrivateChat, passwordProblem, threadMessages } from './privateChatModel';
 
 const me = new Set(['alex']);
 const msg = (id: number, actor: string, extra: Partial<TalkMessage> = {}): TalkMessage => ({ id, actor_id: actor, message: 'x', ...extra });
@@ -53,5 +53,18 @@ describe('who may see the private chat', () => {
     expect(mayUsePrivateChat({ family_role: 'father', is_system_default: true })).toBe(false);
     expect(mayUsePrivateChat(undefined)).toBe(false);
     expect(mayUsePrivateChat(null)).toBe(false);
+  });
+});
+
+describe('threadMessages', () => {
+  it('shows what was said, never a picture added straight to the gallery, nor a deleted message', () => {
+    const messages = [msg(1, 'sam'), msg(2, 'alex'), msg(3, 'alex'), msg(4, 'sam', { deleted: true }), msg(5, 'sam')];
+    const shown = threadMessages(messages, {
+      '1': { t: 'text', text: 'Hi' },
+      '2': { t: 'added', blob: 'b2', mime: 'image/jpeg' },
+      '3': { t: 'image', blob: 'b3', mime: 'image/jpeg' },
+      '5': 'unreadable',
+    });
+    expect(shown.map((m) => m.id)).toEqual([1, 3, 5]);
   });
 });
