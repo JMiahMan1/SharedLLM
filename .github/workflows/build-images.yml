@@ -300,6 +300,11 @@ jobs:
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
             SERVICE_NAME=${{ steps.build-args.outputs.SERVICE_NAME }}
+          # A build-time secret (never in a layer): execution's camoufox step asks
+          # GitHub's API for its browser, and anonymous calls from shared runners
+          # are refused (403) once the runner's IP has used its quota.
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           platforms: linux/amd64
 
   build-ui:
