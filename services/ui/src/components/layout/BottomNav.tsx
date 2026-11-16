@@ -82,7 +82,7 @@ const BottomNav = () => {
           <div
             ref={moreSheetRef}
             tabIndex={-1}
-            className="relative w-full max-w-lg mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)] outline-none"
+            className="relative w-full max-w-lg mx-auto app-bar backdrop-blur-2xl border-t rounded-t-2xl p-3 pb-[max(0.75rem,var(--safe-bottom))] shadow-[0_-8px_30px_rgba(0,0,0,0.85)] outline-none"
           >
             <div className="flex items-center justify-between px-2 pb-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">More</span>
@@ -135,7 +135,7 @@ const BottomNav = () => {
       <nav
         ref={navRef}
         className="fixed bottom-0 left-0 right-0 z-50 app-bar backdrop-blur-2xl border-t shadow-[0_-8px_30px_rgba(0,0,0,0.85)]"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{ paddingBottom: 'var(--safe-bottom)' }}
       >
         <div className="flex items-center justify-around h-16 w-full max-w-lg mx-auto px-1">
           {pinnedItems.map((item) => (

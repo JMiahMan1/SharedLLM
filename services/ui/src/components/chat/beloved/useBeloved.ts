@@ -10,6 +10,7 @@ import {
   type BelovedRecord,
   type BelovedView,
   type CoupleMember,
+  type FamilyChild,
   type Opened,
   type SealedRecord,
 } from '../../../lib/beloved/records';
@@ -26,6 +27,8 @@ export interface BelovedData {
   me: string;
   couple: CoupleMember[];
   spouse?: CoupleMember;
+  /** The caller's children as Jarvis knows them, to fill in their birthdays. */
+  family: FamilyChild[];
   view: BelovedView;
   /** Seal a record on this device and keep it (a new one, or a replacement of `id`). */
   save: (kind: BelovedKind, record: BelovedRecord, options?: { id?: string; notify?: boolean }) => Promise<{ notified: boolean }>;
@@ -112,6 +115,7 @@ export function useBeloved(token: string, vault: PrivateVault): BelovedData {
     me: query.data?.me ?? '',
     couple,
     spouse: couple.find((p) => !p.me),
+    family: query.data?.children ?? [],
     view,
     save,
     remove,

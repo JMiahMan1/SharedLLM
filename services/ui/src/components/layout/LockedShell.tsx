@@ -57,7 +57,7 @@ export default function LockedShell({ children, sections }: { children: ReactNod
       <nav
         aria-label="Locked mode"
         className="fixed bottom-0 left-0 right-0 z-50 app-bar border-t"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{ paddingBottom: 'var(--safe-bottom)' }}
         data-testid="locked-nav"
       >
         <div className="mx-auto flex h-16 w-full max-w-lg items-center justify-around px-1">

@@ -94,3 +94,26 @@ def test_event_note_only_when_weather_is_worth_saying():
     assert wx.event_note(fc, local_ts(3, 15) + 600) == "Rain likely (80%), 65°F."
     assert wx.event_note(fc, local_ts(3, 12)) == ""
     assert wx.event_note(fc, local_ts(9, 12)) == ""  # beyond the forecast
+
+
+def test_each_night_carries_its_cloud_cover_for_stargazing():
+    data = raw()
+    # Overcast until 22:00 on the 3rd, clear from 23:00 on.
+    data["hourly"]["cloud_cover"] = [100 if h < 23 else 0 for h in range(48)]
+    data["daily"]["cloud_cover_mean"] = [90, 10]
+    fc = wx.parse_forecast(data, now=NOW)
+    third, fourth = fc["daily"]
+    # The night of the 3rd: 21, 22 overcast; 23, 00, 01 clear.
+    assert third["night_cloud"] == 40
+    assert third["cloud"] == 90
+    # The night of the 4th has 21:00-23:00 only (3 of 5 hours), all clear.
+    assert fourth["night_cloud"] == 0
+    assert fc["hourly"][0]["cloud"] == 100
+
+
+def test_a_night_mostly_past_the_forecast_has_no_cloud_figure():
+    data = raw(hours=46)  # ends at 21:00 on the 4th
+    data["hourly"]["cloud_cover"] = [50] * 46
+    fc = wx.parse_forecast(data, now=NOW)
+    assert fc["daily"][1]["night_cloud"] is None
+    assert fc["daily"][1]["cloud"] is None  # no daily mean was sent

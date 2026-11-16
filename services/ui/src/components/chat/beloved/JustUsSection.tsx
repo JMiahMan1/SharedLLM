@@ -19,7 +19,9 @@ import {
 import type { Opened, PlanRecord } from '../../../lib/beloved/records';
 import type { ReminderState } from '../../../plugins/belovedReminders';
 import { errorText } from '../privateChatModel';
+import { wantsNightSky } from '../../../lib/beloved/sky';
 import { Card, Field } from './BelovedUi';
+import { BelovedWeather } from './BelovedWeather';
 import type { BelovedData } from './useBeloved';
 
 const button = 'flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold disabled:opacity-50';
@@ -204,6 +206,7 @@ export function JustUsSection({
       {selectedDay && (
         <Card testId="justus-selected">
           <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200/80">{longDayLabel(selectedDay)}</span>
+          {dayNumber(selectedDay) >= dayNumber(today) && <BelovedWeather day={selectedDay} night />}
           <ul className="mt-1 space-y-1.5">
             {onSelected.map((t) => (
               <li key={t.id} className="flex min-w-0 items-start gap-2 text-sm text-slate-100" data-testid="justus-entry">
@@ -254,6 +257,7 @@ export function JustUsSection({
                 <span className="block text-xs text-slate-300">
                   {dayLabel(day)}{p.record.time ? ` at ${p.record.time}` : ''} · {p.own ? 'You planned it' : `${p.byName} planned it`}
                 </span>
+                <BelovedWeather day={day} night={wantsNightSky(p.record.time, p.record.idea)} />
                 {p.record.note && <span className="mt-1 block whitespace-pre-wrap break-words text-sm text-slate-100">{p.record.note}</span>}
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button type="button" disabled={busy || !due} onClick={() => void finish(p)} data-testid="justus-plan-done" className={quiet}>
@@ -280,6 +284,11 @@ export function JustUsSection({
                 className="glass-input min-h-11 w-full text-base sm:text-sm" />
             </Field>
           </div>
+          {parseDay(planDay) && (
+            <div data-testid="justus-plan-weather">
+              <BelovedWeather day={parseDay(planDay) as Ymd} night={wantsNightSky(planTime || undefined, planIdea)} />
+            </div>
+          )}
           <div>
             <span className="mb-1 block text-xs font-semibold text-slate-300">An idea (optional)</span>
             <div className="flex flex-wrap gap-1.5">

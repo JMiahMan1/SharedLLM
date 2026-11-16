@@ -159,7 +159,7 @@ export default function JarvisStudyThread({
         data-testid="bible-ask-scrim"
       />
       <div
-        className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
+        className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] overflow-y-auto"
         data-testid="bible-ask-panel"
       >
         <div className="flex items-start justify-between gap-3 mb-3">

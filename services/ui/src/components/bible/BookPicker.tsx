@@ -28,7 +28,7 @@ export default function BookPicker({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Choose a book and chapter">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full sm:max-w-2xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]" data-testid="bible-book-picker">
+      <div className="relative w-full sm:max-w-2xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))]" data-testid="bible-book-picker">
         <div className="mb-3 flex items-center gap-2">
           {book && (
             <button type="button" onClick={() => setBook(null)} aria-label="Back to books" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl text-slate-300">

@@ -591,7 +591,7 @@ export default function ReferenceBar({
             data-testid={current.testId}
             className={
               isPhone
-                ? 'fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-3xl border border-b-0 border-white/10 bg-slate-950/97 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-xl'
+                ? 'fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-3xl border border-b-0 border-white/10 bg-slate-950/97 p-4 pb-[max(1rem,var(--safe-bottom))] backdrop-blur-xl'
                 : `absolute top-full z-50 mt-2 max-h-[min(70vh,40rem)] overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-950/97 p-4 shadow-2xl backdrop-blur-xl ${
                     panel === 'passage' || panel === 'version' ? 'left-0' : 'right-0'
                   } w-[min(30rem,calc(100vw-2rem))]`

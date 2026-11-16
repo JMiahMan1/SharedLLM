@@ -141,7 +141,7 @@ export default function PrivateGallery({
 
   return (
     <div className="fixed inset-0 z-[85] flex flex-col bg-slate-950" role="dialog" aria-modal="true" aria-label="Gallery" data-testid="private-gallery">
-      <div className="flex shrink-0 items-center gap-2 border-b border-white/5 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/5 px-2 pb-2 pt-[max(0.5rem,var(--safe-top))]">
         <button type="button" onClick={onClose} aria-label="Close gallery" className="flex h-11 w-11 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10">
           <X size={20} />
         </button>
@@ -158,7 +158,7 @@ export default function PrivateGallery({
           <ImagePlus size={16} aria-hidden /> Add pictures
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[max(1rem,var(--safe-bottom))] pt-2 sm:px-4">
         {entries.isError && (
           <p className="mb-2 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100" role="alert">
             {errorText(entries.error, 'Could not load the pictures added to the gallery.')}
@@ -311,7 +311,7 @@ function Viewer({
 
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label="Photo" data-testid="private-gallery-viewer" {...noSave}>
-      <div className="flex shrink-0 items-center gap-2 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+      <div className="flex shrink-0 items-center gap-2 px-2 pb-2 pt-[max(0.5rem,var(--safe-top))]">
         <button type="button" onClick={onClose} aria-label="Back to the gallery" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white">
           <ChevronLeft size={20} />
         </button>
@@ -391,7 +391,7 @@ function Viewer({
           </div>
         ))}
       </div>
-      <form onSubmit={(event) => void comment(event)} className="flex shrink-0 items-center gap-2 bg-slate-950 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1">
+      <form onSubmit={(event) => void comment(event)} className="flex shrink-0 items-center gap-2 bg-slate-950 px-2 pb-[max(0.5rem,var(--safe-bottom))] pt-1">
         <input
           value={text}
           onChange={(event) => setText(event.target.value)}

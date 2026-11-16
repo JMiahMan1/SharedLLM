@@ -164,7 +164,7 @@ export default function ReferenceChip({ reference, version, onOpenRef, className
               data-testid="reference-popover"
               className={`glass-panel border border-white/10 shadow-2xl shadow-black/50 p-4 space-y-3 focus:outline-none ${
                 phone
-                  ? 'w-full rounded-t-2xl max-h-[75vh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]'
+                  ? 'w-full rounded-t-2xl max-h-[75vh] overflow-y-auto pb-[max(1rem,var(--safe-bottom))]'
                   : 'fixed rounded-2xl max-h-[60vh] overflow-y-auto'
               }`}
               style={phone || !placement ? undefined : { ...placement, width: POPOVER_WIDTH }}

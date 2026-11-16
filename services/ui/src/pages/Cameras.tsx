@@ -606,7 +606,7 @@ function CameraViewer({ camera, token, view, onView, onClose }: {
       aria-modal="true"
       aria-label={displayName(camera)}
     >
-      <div className="mx-auto w-full max-w-6xl px-3 sm:px-6 pb-10 pt-[max(0.75rem,env(safe-area-inset-top))] space-y-3">
+      <div className="mx-auto w-full max-w-6xl px-3 sm:px-6 pb-10 pt-[max(0.75rem,var(--safe-top))] space-y-3">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold text-white truncate">{displayName(camera)}</h2>

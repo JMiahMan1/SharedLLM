@@ -878,7 +878,7 @@ function PictureViewer({ url, name, onClose, onDelete }: { url: string; name: st
         type="button"
         onClick={onClose}
         aria-label="Close picture"
-        className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white"
+        className="absolute right-3 top-[max(0.75rem,var(--safe-top))] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white"
       >
         <X size={20} />
       </button>
@@ -886,7 +886,7 @@ function PictureViewer({ url, name, onClose, onDelete }: { url: string; name: st
         <button
           type="button"
           onClick={onDelete}
-          className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/20 px-4 text-xs font-semibold text-rose-100"
+          className="absolute bottom-[max(0.75rem,var(--safe-bottom))] left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full border border-rose-400/30 bg-rose-500/20 px-4 text-xs font-semibold text-rose-100"
         >
           <Trash2 size={13} aria-hidden /> Delete for both of you
         </button>

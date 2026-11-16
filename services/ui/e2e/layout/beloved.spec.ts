@@ -34,6 +34,8 @@ interface Server {
   /** Every body the page sent to a Beloved route. */
   sent: Array<{ method: string; path: string; body: string }>;
   belovedCalls: number;
+  /** The caller's children as identity knows them (the overview's `children`). */
+  children?: Array<{ username: string; display_name: string; birth_date: string | null }>;
 }
 
 async function serve(page: Page, server: Server): Promise<void> {
@@ -51,7 +53,7 @@ async function serve(page: Page, server: Server): Promise<void> {
       const [, kind, id] = beloved;
       if (req.method() !== 'GET') server.sent.push({ method: req.method(), path: p, body: req.postData() ?? '' });
       if (req.method() === 'GET') {
-        return route.fulfill({ json: { me: 'parent', records: server.records, couple: [
+        return route.fulfill({ json: { me: 'parent', records: server.records, children: server.children ?? [], couple: [
           { username: 'parent', display_name: 'Parent', avatar: null, family_role: 'father', me: true },
           { username: 'robin', display_name: 'Robin', avatar: null, family_role: 'mother', me: false },
         ] } });
@@ -445,6 +447,109 @@ test.describe('Beloved on every form factor', () => {
       done(run);
     });
   }
+
+  test("children's birthdays, the weather for a stargazing night, and nothing under the phone's nav bar", async ({ page }, info) => {
+    const { server, key } = await setup();
+    const local = (offset: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    // Turning 9 the day after tomorrow, inside the week the forecast covers.
+    const soon = local(2);
+    const nineYearsAgo = `${Number(soon.slice(0, 4)) - 9}${soon.slice(4)}`;
+    server.children = [
+      { username: 'kidsky', display_name: 'Sky', birth_date: nineYearsAgo },
+      { username: 'kidjamie', display_name: 'Jamie', birth_date: null },
+    ];
+    // The Android app's edge-to-edge insets, as Capacitor's SystemBars injects them (env() reads 0 there).
+    const NAV_BAR = 48;
+    const run = await open(page, server);
+    // Capacitor sets them on the page once it has loaded.
+    await page.evaluate((px) => document.documentElement.style.setProperty('--safe-area-inset-bottom', `${px}px`), NAV_BAR);
+    await page.getByTestId('private-beloved-open').click();
+    const beloved = page.getByTestId('beloved');
+    await expect(beloved.getByTestId('beloved-home')).toBeVisible();
+
+    // Our details: the family's children are offered, Sky with the birth date Jarvis has.
+    await beloved.getByTestId('beloved-settings-open').click();
+    const sheet = page.getByTestId('beloved-settings');
+    const kids = sheet.getByTestId('beloved-children');
+    await expect(kids.getByTestId('beloved-child-from-family')).toHaveText(['Sky', 'Jamie']);
+    await kids.getByTestId('beloved-child-from-family').filter({ hasText: 'Sky' }).click();
+    await expect(kids.getByTestId('beloved-child-birthday').first()).toHaveValue(nineYearsAgo);
+    await kids.getByTestId('beloved-child-from-family').filter({ hasText: 'Jamie' }).click();
+    await expect(kids.getByTestId('beloved-child-from-family')).toHaveCount(0);
+    await expect(kids.getByTestId('beloved-child-incomplete')).toHaveText('Add the birthday to keep this one.');
+    await kids.getByTestId('beloved-child-birthday').nth(1).fill('2019-02-28');
+    await expect(kids.getByTestId('beloved-child-incomplete')).toHaveCount(0);
+    await kids.getByTestId('beloved-child-add').click();
+    await kids.getByTestId('beloved-child-name').nth(2).fill('A made-up godchild');
+    await kids.getByTestId('beloved-child-birthday').nth(2).fill('2021-06-15');
+
+    // The Save button sits clear of the nav bar the phone draws over the page.
+    const save = sheet.getByTestId('beloved-settings-save');
+    await save.scrollIntoViewIfNeeded();
+    const box = await save.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.y + box.height <= viewport.height - NAV_BAR, 'Save is under the nav bar').toBeTruthy();
+    await check(page, info, run, 'beloved children birthdays', sheet);
+    await save.click();
+    await expect(sheet).toHaveCount(0);
+
+    // Sealed: the server got no names or dates, and the sealed profile holds all three.
+    const put = server.sent.filter((s) => s.path.includes('/profile')).at(-1);
+    expect(put).toBeTruthy();
+    for (const plain of ['Sky', 'Jamie', 'godchild', '2019-02-28']) expect(put?.body).not.toContain(plain);
+    const profile = server.records.find((r) => r.kind === 'profile') as SealedRow;
+    const opened = await openRecord(key, profile.sealed) as { children?: Array<{ name: string; birthday: string }> };
+    expect(opened.children?.map((c) => c.name)).toEqual(['Sky', 'Jamie', 'A made-up godchild']);
+
+    // Special days: Sky turns 9 in two days, with that day's weather beside it.
+    await beloved.getByTestId('beloved-tab-days').click();
+    const sky = beloved.getByTestId('beloved-day').filter({ hasText: "Sky's 9th birthday" });
+    await expect(sky).toContainText('In 2 days');
+    await expect(sky.getByTestId('beloved-weather')).toHaveAttribute('aria-label', /^Rain, high 72°F, low 49°F$/);
+    await expect(beloved.getByTestId('beloved-day').filter({ hasText: /^.*Jamie's \d+\w\w birthday/ })).toHaveCount(1);
+    await check(page, info, run, 'beloved days with children', beloved);
+
+    // Just us: picking stargazing two nights out shows that night is cloudy, and the moon.
+    await beloved.getByTestId('beloved-tab-justus').click();
+    const tab = beloved.getByTestId('beloved-justus');
+    await tab.getByTestId('justus-plan-day').fill(soon);
+    await tab.getByTestId('justus-idea').filter({ hasText: 'Stargazing' }).click();
+    const preview = tab.getByTestId('justus-plan-weather');
+    await expect(preview.getByTestId('beloved-weather-day')).toContainText('Rain');
+    const night = preview.getByTestId('beloved-weather-night');
+    await expect(night).toHaveAttribute('data-look', 'cloudy');
+    await expect(night).toContainText('Overnight 90% cloud');
+    await expect(night.getByTestId('beloved-weather-moon')).toContainText(/(moon|crescent|quarter|gibbous)\b.*% lit/i);
+    await tab.getByTestId('justus-plan-add').click();
+    const planned = tab.getByTestId('justus-plan').filter({ hasText: 'Stargazing' });
+    await expect(planned.getByTestId('beloved-weather-night')).toContainText('Overnight 90% cloud');
+    // Tomorrow is the clearest night left in the forecast but one: 40% is "some clouds".
+    await tab.getByTestId('justus-plan-day').fill(local(1));
+    await expect(tab.getByTestId('justus-plan-weather').getByTestId('beloved-weather-night')).toHaveAttribute('data-look', 'some-cloud');
+    // Past the week the forecast covers, only the moon.
+    await tab.getByTestId('justus-plan-day').fill(local(20));
+    const far = tab.getByTestId('justus-plan-weather');
+    await expect(far.getByTestId('beloved-weather-day')).toHaveCount(0);
+    await expect(far.getByTestId('beloved-weather-moon')).toBeVisible();
+    await expect(far.getByTestId('beloved-weather-night')).not.toContainText('cloud');
+    await check(page, info, run, 'beloved just us stargazing weather', tab);
+
+    // The end of the Beloved page scrolls clear of the nav bar too.
+    // Scrolled to the end, as a thumb would: the card may already be "in view" behind the bar.
+    const last = tab.getByTestId('justus-reminder');
+    await last.evaluate((el) => {
+      let box: HTMLElement | null = el.parentElement;
+      while (box && getComputedStyle(box).overflowY !== 'auto') box = box.parentElement;
+      box?.scrollTo({ top: box.scrollHeight, behavior: 'instant' });
+    });
+    const end = await last.boundingBox();
+    expect(end && viewport && end.y + end.height <= viewport.height - NAV_BAR, 'the last card is under the nav bar').toBeTruthy();
+    done(run);
+  });
 
   test('never shows Beloved to an administrator father who is not one of the couple, even with the chat unlocked', async ({ page }) => {
     const { server } = await setup();

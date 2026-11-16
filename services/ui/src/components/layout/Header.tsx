@@ -235,7 +235,7 @@ const Header = () => {
           </button>
 
           {showNotifications && (
-            <div className="fixed left-4 right-4 top-[calc(4rem+env(safe-area-inset-top,0px))] sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
+            <div className="fixed left-4 right-4 top-[calc(4rem+var(--safe-top))] sm:absolute sm:left-auto sm:top-auto sm:right-0 sm:mt-4 sm:w-80 glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
               <div className="mb-3 flex items-center justify-between gap-3 border-b border-white/5 pb-2">
                 <h4 className="text-sm font-bold text-white">Notifications</h4>
                 {visible.length > 0 && (

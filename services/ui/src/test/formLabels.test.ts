@@ -74,9 +74,9 @@ describe('form label and control accessibility', () => {
         const controls = findJsxTags(body, ['input', 'select', 'textarea', 'NumberField']);
         if (controls.length === 1) continue;
         // Generic wrappers whose one control arrives as children (the Health
-        // profile's rows, and the Automations/Schedules `Field`).
+        // profile's rows, the Automations/Schedules `Field` and Beloved's `Field`).
         if ((body.includes('{children}') || body.includes('{body}'))
-          && ['HealthProfilePanel.tsx', 'FormBits.tsx'].includes(path.basename(file))) continue;
+          && ['HealthProfilePanel.tsx', 'FormBits.tsx', 'BelovedUi.tsx'].includes(path.basename(file))) continue;
         const line = text.slice(0, m.index).split('\n').length;
         badLabels.push(`${rel}:${line} (controls=${controls.length})`);
       }

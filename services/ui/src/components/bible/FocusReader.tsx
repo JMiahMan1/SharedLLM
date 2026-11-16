@@ -79,7 +79,7 @@ export default function FocusReader({
           chrome ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] border-b border-[var(--page-rule)] bg-[var(--page-paper)]">
+        <div className="flex items-center justify-between gap-2 px-3 py-2 pt-[max(0.5rem,var(--safe-top))] border-b border-[var(--page-rule)] bg-[var(--page-paper)]">
           <button
             type="button"
             onClick={onPrev}

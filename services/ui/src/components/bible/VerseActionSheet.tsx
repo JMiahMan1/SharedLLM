@@ -273,7 +273,7 @@ export default function VerseActionSheet({
         data-testid="bible-sheet-scrim"
       />
       <div
-        className="relative w-full sm:mb-6 sm:max-w-xl bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[min(80dvh,40rem)] overflow-y-auto overscroll-contain"
+        className="relative w-full sm:mb-6 sm:max-w-xl bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[min(80dvh,40rem)] overflow-y-auto overscroll-contain"
         data-testid="bible-verse-sheet"
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20 sm:hidden" aria-hidden />

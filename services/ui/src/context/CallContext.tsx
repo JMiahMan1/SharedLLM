@@ -785,7 +785,7 @@ function CallOverlay({
       >
         <header
           className="flex items-center gap-3 border-b border-white/10 px-4 pb-3"
-          style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+          style={{ paddingTop: 'max(0.75rem, var(--safe-top))' }}
         >
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${finished ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
             <Phone size={18} />
@@ -887,7 +887,7 @@ function CallOverlay({
         {!finished && (
           <footer
             className="flex items-center justify-center gap-3 border-t border-white/10 px-4 pt-4"
-            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            style={{ paddingBottom: 'max(1rem, var(--safe-bottom))' }}
           >
             <button
               type="button"
@@ -939,7 +939,7 @@ function IncomingCall({ call, onAnswer, onDecline }: { call: ActiveCall; onAnswe
   return (
     <div
       className="fixed inset-0 z-[140] flex flex-col items-center justify-between bg-gradient-to-b from-emerald-950 via-slate-950 to-slate-950 px-6 text-center sm:inset-auto sm:bottom-5 sm:right-5 sm:w-[360px] sm:rounded-3xl sm:border sm:border-emerald-400/30 sm:py-6 sm:shadow-2xl"
-      style={{ paddingTop: 'max(3.5rem, env(safe-area-inset-top))', paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
+      style={{ paddingTop: 'max(3.5rem, var(--safe-top))', paddingBottom: 'max(2.5rem, var(--safe-bottom))' }}
       role="alertdialog"
       aria-modal="true"
       aria-label={`${caller} ${verb}`}

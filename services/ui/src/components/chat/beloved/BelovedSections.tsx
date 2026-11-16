@@ -10,6 +10,7 @@ import { stampLabel } from '../privateGalleryModel';
 import { errorText } from '../privateChatModel';
 import { Pomegranate, Vine } from './BelovedArt';
 import { Card, Field } from './BelovedUi';
+import { BelovedWeather } from './BelovedWeather';
 import { useVerse } from './useBeloved';
 import type { BelovedData } from './useBeloved';
 
@@ -76,6 +77,7 @@ export function DaysSection({ data, days, reminders }: { data: BelovedData; days
               <span className="block break-words font-semibold text-white">{day.name}</span>
               <span className="block text-xs text-slate-400">{countdownLabel(day.inDays)} · {dayLabel(day.date)}</span>
             </span>
+            <BelovedWeather day={day.date} compact />
             {day.recordId && (
               <button
                 type="button"

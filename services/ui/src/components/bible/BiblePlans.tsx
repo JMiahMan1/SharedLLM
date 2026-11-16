@@ -657,7 +657,7 @@ function ReadTogetherDialog({
   };
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 sm:items-center" role="dialog" aria-modal="true" data-testid="bible-group-dialog">
-      <div className="w-full max-w-md glass-panel rounded-t-2xl sm:rounded-2xl p-5 border border-violet-400/30">
+      <div className="w-full max-w-md glass-panel rounded-t-2xl sm:rounded-2xl p-5 pb-[max(1.25rem,var(--safe-bottom))] border border-violet-400/30">
         <div className="flex items-center gap-2">
           <Users size={16} className="text-violet-300" />
           <h3 className="min-w-0 flex-1 font-semibold text-white">Read together</h3>

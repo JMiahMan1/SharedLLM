@@ -56,9 +56,14 @@ def convert(measure: str, value: float, src: str, dst: str) -> float:
 _CURRENT = ("temperature_2m", "apparent_temperature", "relative_humidity_2m", "precipitation",
             "weather_code", "wind_speed_10m", "wind_gusts_10m", "is_day")
 _HOURLY = ("temperature_2m", "precipitation_probability", "precipitation", "snowfall",
-           "weather_code", "wind_speed_10m", "wind_gusts_10m")
+           "weather_code", "wind_speed_10m", "wind_gusts_10m", "cloud_cover")
 _DAILY = ("weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_sum",
-          "precipitation_probability_max", "snowfall_sum", "wind_gusts_10m_max", "sunrise", "sunset")
+          "precipitation_probability_max", "snowfall_sum", "wind_gusts_10m_max", "sunrise", "sunset",
+          "cloud_cover_mean")
+
+#: The night a day's ``night_cloud`` describes: 9 PM that evening to 2 AM the
+#: next morning, local time (the hours someone would be out under the stars).
+NIGHT_HOURS = (21, 22, 23, 0, 1)
 
 #: WMO weather interpretation codes (Open-Meteo's ``weather_code``) as a short
 #: label and an icon key the clients map to their own icon set.
@@ -126,6 +131,26 @@ def _epoch(local_iso: str, offset_s: int) -> float | None:
     return naive.replace(tzinfo=timezone(timedelta(seconds=offset_s))).timestamp()
 
 
+def _night_cloud(hourly: dict, day: str) -> float | None:
+    """Mean cloud cover (%) over ``NIGHT_HOURS`` of the night starting on
+    ``day``, from the whole hourly answer (not the 48 hours kept), or None
+    when fewer than half of those hours are in the forecast."""
+    try:
+        evening = datetime.strptime(day, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+    wanted = set()
+    for hour in NIGHT_HOURS:
+        when = evening + timedelta(days=1 if hour < 12 else 0, hours=hour)
+        wanted.add(when.strftime("%Y-%m-%dT%H:%M"))
+    cover = hourly.get("cloud_cover") or []
+    values = [v for i, t in enumerate(hourly.get("time") or [])
+              if t in wanted and i < len(cover) and (v := _num(cover[i])) is not None]
+    if len(values) * 2 < len(NIGHT_HOURS):
+        return None
+    return round(sum(values) / len(values))
+
+
 def parse_forecast(raw: dict, *, units: str = "imperial", now: float | None = None,
                    name: str | None = None) -> dict:
     """Open-Meteo's answer as the forecast shape every reader uses.
@@ -178,6 +203,7 @@ def parse_forecast(raw: dict, *, units: str = "imperial", now: float | None = No
             "icon": hi,
             "wind": _num(col("wind_speed_10m")),
             "gust": _num(col("wind_gusts_10m")),
+            "cloud": _num(col("cloud_cover")),
         })
 
     daily = []
@@ -203,6 +229,8 @@ def parse_forecast(raw: dict, *, units: str = "imperial", now: float | None = No
             "icon": di,
             "sunrise": dcol("sunrise"),
             "sunset": dcol("sunset"),
+            "cloud": _num(dcol("cloud_cover_mean")),
+            "night_cloud": _night_cloud(h, day),
         })
 
     u = UNITS[units_for(units)]

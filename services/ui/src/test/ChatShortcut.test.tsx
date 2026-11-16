@@ -95,7 +95,10 @@ describe('chat home-screen shortcuts', () => {
     const info = await openDetails(user);
     await user.click(within(info).getByTestId('chat-delete'));
     await user.click(within(info).getByTestId('chat-delete-confirm'));
-    await waitFor(() => expect(disabled).toEqual([{ id: 'chat:room-alpha', message: 'This chat is no longer available' }]));
+    await waitFor(() => expect(disabled).toEqual([
+      { id: 'chat:room-alpha', message: 'This chat is no longer available' },
+      { id: 'chat:room-alpha:beloved', message: 'This chat is no longer available' },
+    ]));
   });
 
   it('a shortcut to a conversation that is gone lands on the list with a notice', async () => {
@@ -103,7 +106,10 @@ describe('chat home-screen shortcuts', () => {
     conversations([{ token: 'room-alpha', display_name: 'Family', type: 2 }]);
     renderWithProviders(<Family />, { route: '/family?chat=room-gone' });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('This chat is no longer available'));
-    await waitFor(() => expect(disabled).toEqual([{ id: 'chat:room-gone', message: 'This chat is no longer available' }]));
+    await waitFor(() => expect(disabled).toEqual([
+      { id: 'chat:room-gone', message: 'This chat is no longer available' },
+      { id: 'chat:room-gone:beloved', message: 'This chat is no longer available' },
+    ]));
     // The list, not an empty thread for a conversation that is not there.
     expect(screen.queryByText('Select a conversation')).not.toBeInTheDocument();
   });

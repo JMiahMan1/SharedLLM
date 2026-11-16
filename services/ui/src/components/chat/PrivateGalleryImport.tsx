@@ -137,7 +137,7 @@ export default function PrivateGalleryImport({
             <X size={20} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,var(--safe-bottom))] pt-3">
           <p className="text-sm leading-relaxed text-slate-300">
             Pictures added here go into this gallery only: encrypted on this phone, seen by the two of you, and never posted in the chat. They keep their
             original file, with the date and details the camera saved.
