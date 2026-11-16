@@ -732,6 +732,22 @@ async def context_route():
     return {"text": wx.context_text(fc), "summary": wx.summary_line(fc), "stale": bool(fc.get("stale"))}
 
 
+@router.get("/answer")
+async def answer_route(q: str, user: str | None = None):
+    """A spoken answer to a plain weather question, from the cached forecast:
+    the person's own place when they set one, else the household's.
+    ``{"text": ""}`` means "not one to answer here" and the caller asks the model."""
+    if not wx.weather_question(q):
+        return {"text": ""}
+    fc = None
+    if user and user != "household":
+        cfg = await settings()
+        fc, _personal = await own_forecast(user, cfg)
+    if not fc:
+        fc = await home_forecast()
+    return {"text": wx.answer_weather(fc or {}, q)}
+
+
 @router.get("/energy")
 async def energy_route(days: int = 30):
     return await energy_report(days)

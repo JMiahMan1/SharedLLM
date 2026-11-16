@@ -1,6 +1,8 @@
 """Open-Meteo forecast parsing and the wording every reader shares (docs/WEATHER.md)."""
 from datetime import UTC, datetime
 
+import pytest
+
 from services.common import weather as wx
 
 OFFSET = -6 * 3600  # America/Chicago in November
@@ -117,3 +119,62 @@ def test_a_night_mostly_past_the_forecast_has_no_cloud_figure():
     fc = wx.parse_forecast(data, now=NOW)
     assert fc["daily"][1]["night_cloud"] is None
     assert fc["daily"][1]["cloud"] is None  # no daily mean was sent
+
+
+# --- spoken weather questions ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("query, when, rain", [
+    ("What's the weather going to be today?", "today", False),
+    ("what's the forecast", "today", False),
+    ("Will it rain tomorrow?", "tomorrow", True),
+    ("how cold will it be tonight", "tonight", False),
+    ("Do I need an umbrella on Friday?", "friday", True),
+    ("what's the weather like this weekend", "weekend", False),
+    ("Is it going to snow tomorrow night?", "tomorrow night", True),
+    ("what's the weather in the morning", "today", False),
+])
+def test_plain_weather_questions_are_recognised(query, when, rain):
+    assert wx.weather_question(query) == {"when": when, "rain": rain}
+
+
+@pytest.mark.parametrize("query", [
+    "What's the weather in Seattle?",
+    "weather in denver tomorrow",
+    "remind me to bring an umbrella if it rains",
+    "turn on the fan, it's hot",
+    "is the weather station battery low",
+    "what was the weather yesterday",
+    "turn off the piano lamp",
+    "",
+])
+def test_other_requests_go_to_the_model(query):
+    assert wx.weather_question(query) is None
+
+
+def test_today_answers_from_the_forecast_with_now_and_the_rain_hour():
+    fc = wx.parse_forecast(raw(), now=NOW)
+    text = wx.answer_weather(fc, "What's the weather going to be today?", now=NOW)
+    assert text.startswith("Right now it's partly cloudy and 60°F.")
+    assert "Today: rain, high 78°F, low 57°F, 80% chance of rain." in text
+    assert "Rain is likely from 3 PM." in text
+
+
+def test_tomorrow_and_a_rain_question_lead_with_the_verdict():
+    fc = wx.parse_forecast(raw(), now=NOW)
+    assert wx.answer_weather(fc, "will it rain tomorrow", now=NOW) == \
+        "Rain is unlikely. Tomorrow: clear, high 68°F, low 56°F, 5% chance of rain."
+
+
+def test_tonight_uses_the_evening_hours():
+    fc = wx.parse_forecast(raw(), now=NOW)
+    text = wx.answer_weather(fc, "how cold will it be tonight", now=NOW)
+    # 6 PM to 6 AM on the 3rd: temperatures 50 + hour of day, so the coldest is 50 at midnight.
+    assert text == "Tonight: mostly clear, down to 50°F, 5% chance of rain."
+
+
+def test_a_day_past_the_forecast_or_another_place_is_left_to_the_model():
+    fc = wx.parse_forecast(raw(), now=NOW)
+    assert wx.answer_weather(fc, "what's the weather on Saturday", now=NOW) == ""
+    assert wx.answer_weather(fc, "what's the weather in Seattle", now=NOW) == ""
+    assert wx.answer_weather({}, "what's the weather", now=NOW) == ""

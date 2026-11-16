@@ -16,6 +16,7 @@ the conversion, so a threshold in a reminder is always in the units shown.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
@@ -375,3 +376,157 @@ def event_note(forecast: dict, ts: float) -> str:
     if prob >= 50 or h.get("icon") == "storm":
         return f"{'Storms' if h.get('icon') == 'storm' else 'Rain'} likely ({round(prob)}%), {_r(h.get('temp'))}{unit}."
     return ""
+
+
+# --- Answering a spoken weather question ----------------------------------------------
+#
+# "What's the weather going to be today?" is answered from the cached forecast,
+# without the language model: given the question, the model searched the web,
+# read weather.com and was refused by AccuWeather while the forecast sat in its
+# own context. Only plain questions about the weather here are answered; one
+# about another place, or a request to do something ("remind me if it rains"),
+# goes to the model as before.
+
+_WEATHER_WORDS = re.compile(
+    r"\b(weather|forecast|temperature|temp outside|umbrella|jacket|coat|"
+    r"(will|is|does|did) it (be )?(going to )?(rain|snow|storm|drizzle|hail|freeze|be (hot|cold|warm|windy|sunny|cloudy|nice|chilly))|"
+    r"(going|gonna) to (rain|snow)|raining|snowing|chance of (rain|snow)|"
+    r"how (hot|cold|warm|windy|chilly) (is it|will it|was it|it is|it'?s)|"
+    r"(high|low) (today|tonight|tomorrow))\b",
+    re.IGNORECASE,
+)
+#: Asking for something to be done, not asked about: left to the model.
+_NOT_A_QUESTION = re.compile(
+    r"\b(remind|reminder|alert|notify|tell me when|let me know|turn|switch|set|schedule|add|create|"
+    r"automation|play|open|close|lock|unlock|start|stop|thermostat|station|sensor|battery|widget|history|yesterday|last (week|month|year))\b",
+    re.IGNORECASE,
+)
+#: "weather in Seattle", "forecast for denver": somewhere else, which the cached
+#: forecast is not. Only times and near words may follow ("in the morning", "in
+#: an hour", "for tomorrow", "at home"); transcripts are often lower case, so
+#: capitals cannot be the test.
+_ELSEWHERE = re.compile(
+    r"\b(in|for|at|near|around) (?!(the|a|an|this|next|today|tonight|tomorrow|here|home|our|my|about|"
+    r"morning|afternoon|evening|night|weekend|\d)\b)[a-z]",
+    re.IGNORECASE,
+)
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def weather_question(query: str) -> dict | None:
+    """``{"when": "today"|"tonight"|"tomorrow"|"weekend"|<weekday>, "rain": bool}`` for a
+    plain question about the weather here, else None."""
+    q = (query or "").strip()
+    if not q or len(q) > 160 or not _WEATHER_WORDS.search(q) or _NOT_A_QUESTION.search(q) or _ELSEWHERE.search(q):
+        return None
+    low = q.lower()
+    when = "today"
+    if "tomorrow night" in low:
+        when = "tomorrow night"
+    elif "tonight" in low or "this evening" in low:
+        when = "tonight"
+    elif "tomorrow" in low:
+        when = "tomorrow"
+    elif "weekend" in low:
+        when = "weekend"
+    else:
+        for day in _WEEKDAYS:
+            if re.search(rf"\b{day}\b", low):
+                when = day
+                break
+    rain = bool(re.search(r"\b(rain|raining|snow|snowing|storm|drizzle|umbrella|wet|precipitation)\b", low))
+    return {"when": when, "rain": rain}
+
+
+def _day_sentence(day: dict, unit: str, name: str) -> str:
+    prob = day.get("precip_prob")
+    rain = f", {_r(prob)}% chance of rain" if prob is not None else ""
+    return f"{name}: {(day.get('label') or 'Unknown').lower()}, high {_r(day.get('high'))}{unit}, low {_r(day.get('low'))}{unit}{rain}."
+
+
+def _night(forecast: dict, start_ts: float) -> dict | None:
+    """6 PM to 6 AM from ``start_ts`` (that evening's 6 PM): the low, the wettest hour and the sky."""
+    hours = [h for h in forecast.get("hourly") or [] if start_ts <= (h.get("ts") or 0) < start_ts + 12 * 3600]
+    if not hours:
+        return None
+    temps = [h["temp"] for h in hours if h.get("temp") is not None]
+    probs = [h["precip_prob"] for h in hours if h.get("precip_prob") is not None]
+    labels = [h.get("label") for h in hours if h.get("label")]
+    return {
+        "low": min(temps) if temps else None,
+        "precip_prob": max(probs) if probs else None,
+        "label": max(set(labels), key=labels.count) if labels else "Unknown",
+    }
+
+
+def answer_weather(forecast: dict, query: str, now: float | None = None) -> str:
+    """A spoken answer from the forecast, or "" when the question is not one it can
+    answer (see ``weather_question``) or the day is past the forecast."""
+    asked = weather_question(query)
+    if not asked or not forecast:
+        return ""
+    now = now if now is not None else datetime.now(UTC).timestamp()
+    offset = int(forecast.get("utc_offset_seconds") or 0)
+    tz = timezone(timedelta(seconds=offset))
+    today = datetime.fromtimestamp(now, tz).date()
+    unit = (forecast.get("units") or {}).get("temp", "°")
+    daily = {d.get("date"): d for d in forecast.get("daily") or [] if d.get("date")}
+
+    def day_at(n: int) -> dict | None:
+        return daily.get((today + timedelta(days=n)).isoformat())
+
+    def evening(n: int) -> float:
+        d = today + timedelta(days=n)
+        return datetime(d.year, d.month, d.day, 18, tzinfo=tz).timestamp()
+
+    when = asked["when"]
+    parts: list[str] = []
+    if when in ("tonight", "tomorrow night"):
+        night = _night(forecast, evening(0 if when == "tonight" else 1))
+        if not night:
+            return ""
+        name = "Tonight" if when == "tonight" else "Tomorrow night"
+        prob = night["precip_prob"]
+        rain = f", {_r(prob)}% chance of rain" if prob is not None else ""
+        parts.append(f"{name}: {night['label'].lower()}, down to {_r(night['low'])}{unit}{rain}.")
+        chance = prob
+    elif when == "weekend":
+        ahead = (5 - today.weekday()) % 7  # Saturday
+        days = [(ahead + i, day_at(ahead + i)) for i in (0, 1)] if today.weekday() < 5 else \
+            [(0, day_at(0)), (1, day_at(1))] if today.weekday() == 5 else [(0, day_at(0))]
+        found = [(n, d) for n, d in days if d]
+        if not found:
+            return ""
+        for n, d in found:
+            parts.append(_day_sentence(d, unit, (today + timedelta(days=n)).strftime("%A")))
+        chance = max((d.get("precip_prob") or 0) for _, d in found)
+    else:
+        if when == "today":
+            n = 0
+        elif when == "tomorrow":
+            n = 1
+        else:
+            n = (_WEEKDAYS.index(when) - today.weekday()) % 7
+        day = day_at(n)
+        if not day:
+            return ""
+        if n == 0:
+            cur = forecast.get("current") or {}
+            if cur.get("temp") is not None:
+                parts.append(f"Right now it's {(cur.get('label') or 'unknown').lower()} and {_r(cur.get('temp'))}{unit}.")
+            name = "Today"
+        elif n == 1:
+            name = "Tomorrow"
+        else:
+            name = (today + timedelta(days=n)).strftime("%A")
+        parts.append(_day_sentence(day, unit, name))
+        chance = day.get("precip_prob")
+        if n == 0:
+            wet = next((h for h in (forecast.get("hourly") or [])[:18]
+                        if (h.get("precip_prob") or 0) >= 50 and (h.get("ts") or 0) >= now - 3600), None)
+            if wet:
+                parts.append(f"Rain is likely from {_clock(wet['ts'], offset)}.")
+    if asked["rain"] and chance is not None:
+        verdict = "likely" if chance >= 50 else "possible" if chance >= 25 else "unlikely"
+        parts.insert(0, f"Rain is {verdict}.")
+    return " ".join(parts)

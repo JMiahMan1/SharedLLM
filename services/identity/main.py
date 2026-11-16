@@ -355,6 +355,11 @@ SHARED_CREDENTIAL_SERVICES = (
 )
 
 
+#: The identity a kiosk or voice satellite acts as when it names no person
+#: (resolve_credentials' household mode). It has no User row.
+HOUSEHOLD_IDENTITY = "household"
+
+
 def _is_system_default_user(user: User | None) -> bool:
     """True for the "User 1" account that owns the shared credentials."""
     if user is None:
@@ -959,7 +964,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     )
 
     return ResolvedCredentials(
-        user="household" if household else user.username,
+        user=HOUSEHOLD_IDENTITY if household else user.username,
         id=None if household else user.id,
         is_admin=False if household else user.is_admin,
         api_key=None if household else (decrypt(user.api_key_enc) if user.api_key_enc else req.api_key),
@@ -2663,6 +2668,20 @@ def internal_user_device_assignments(
     actually control. Admins and the system default user get all of them.
     """
     user = session.exec(select(User).where(User.username == username)).first()
+    if not user and username == HOUSEHOLD_IDENTITY:
+        # The household is who a kiosk or a voice satellite acts as when no
+        # speaker is recognised (resolve_credentials' household mode): no
+        # account of its own, the shared home credentials, never an admin. It
+        # may use every device that is not locked, as anyone at home could by
+        # hand; a locked one (a door lock, the garage) still needs a person it
+        # recognises. Before, the missing account answered "nothing", and
+        # "turn off the piano lamp" by voice got "Access denied".
+        return {
+            "device_ids": [],
+            "protected_entity_ids": [p.entity_id for p in _entity_protection_rows(session)],
+            "permitted_entity_ids": [],
+            "all_unprotected": True,
+        }
     if not user:
         return {
             "device_ids": [],
