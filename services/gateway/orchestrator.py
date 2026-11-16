@@ -36,6 +36,13 @@ log = logging.getLogger("gateway.orchestrator")
 #: single-turn request inside the context Ollama actually loaded.
 MAX_RAG_CONTEXT_CHARS = 12000
 
+#: A spoken question gets a short spoken answer, and every token read before it is
+#: time the person stands waiting: 25k characters of context once took 38 s to read.
+#: A voice turn searches this much and skips Raven's always-on curriculum.
+VOICE_RAG_CHARS = 5000
+#: Room for a full page of matching devices (8, searched first) plus a few other hits.
+VOICE_RAG_HITS = 12
+
 
 def _truncate_rag_context(rag_context: str) -> str:
     """Trim retrieved context to a size that fits the model window."""
@@ -137,7 +144,7 @@ _CODING_INTENT_TOKENS = ("file", "code", "git", "workspace", "fix", "repair")
 _CODING_COLLECTIONS = ("system_capabilities", "nextcloud_files", "system_learnings", "ha_entities")
 
 
-def _collections_for_query(query: str, *, include_library: bool = False) -> list[str]:
+def _collections_for_query(query: str, *, include_library: bool = False, devices_first: bool = False) -> list[str]:
     """Choose which RAG collections a query is allowed to spend budget on.
 
     A book library is not searched unless the query asks for one. It is by far
@@ -165,6 +172,10 @@ def _collections_for_query(query: str, *, include_library: bool = False) -> list
     collections = list(_CODING_COLLECTIONS) if any(token in q for token in _CODING_INTENT_TOKENS) else list(_BASE_COLLECTIONS)
     if include_library or _library_intent_asked(q):
         collections = ["calibre_files"] + [c for c in collections if c != "calibre_files"]
+    if devices_first and "ha_entities" in collections:
+        # A spoken request is most often about a device ("fix the thermostat" reads as coding),
+        # so the devices it names are searched before anything else can use up the budget.
+        collections = ["ha_entities"] + [c for c in collections if c != "ha_entities"]
     return collections
 
 
@@ -536,6 +547,11 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # 2. Context Injection (RAG + live HA state + workspace memory)
     workspace_id = job_payload.get("workspace_id")
     include_curriculum = job_payload.get("include_curriculum", True)
+    rag_budget: dict[str, int | bool] = {}
+    if job_payload.get("voice_context") and not is_autonomous:
+        # A voice satellite cannot use workspaces, the CLI toolchain or Raven's protocol lessons.
+        include_curriculum = False
+        rag_budget = {"search_chars": VOICE_RAG_CHARS, "max_hits": VOICE_RAG_HITS, "devices_first": True}
     if grounded:
         # The caller already supplied the complete, authoritative passages;
         # unrelated household/workspace hits are what made Bible study answers
@@ -543,7 +559,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         rag_context = ""
     else:
         rag_context = await _fetch_rag_context(
-            query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum
+            query, user_id, creds, workspace_id=workspace_id, include_curriculum=include_curriculum, **rag_budget
         )
 
     # A Raven mission may arrive with context already retrieved at dispatch
@@ -587,6 +603,9 @@ async def _fetch_rag_context(
     *,
     include_curriculum: bool = True,
     include_library: bool = False,
+    search_chars: int = 15000,
+    max_hits: int = 20,
+    devices_first: bool = False,
 ) -> str:
     """Assemble the retrieved context for one turn.
 
@@ -610,13 +629,13 @@ async def _fetch_rag_context(
     try:
         # Prioritize collections based on query intent
         q = query.lower()
-        collections = _collections_for_query(query, include_library=include_library)
+        collections = _collections_for_query(query, include_library=include_library, devices_first=devices_first)
 
         # Context constraints
-        MAX_TOTAL_HITS = 20
-        MAX_HITS_PER_COLL = 8
+        MAX_TOTAL_HITS = max_hits
+        MAX_HITS_PER_COLL = min(8, max_hits)
         MAX_CHARS_PER_HIT = 2000
-        TOTAL_CHARS_LIMIT = 15000 # Approx 4k tokens
+        TOTAL_CHARS_LIMIT = search_chars  # 15000 is about 4k tokens
 
         total_hits = 0
         total_chars = 0
@@ -1641,7 +1660,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     if grounded:
         single_turn_guide = _grounded_tool_guide(single_turn_guide)
         log.info("[_single_turn_inference] grounded turn: retrieval tools omitted from the tool guide")
-    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}"
+    # What never changes comes first and what changes every turn (the time, the retrieved
+    # context) last, so the model server can reuse the cached start of the prompt instead of
+    # reading the whole tool guide again on every turn.
+    system = f"{system_prompt.strip()}\n\nSystem Capability Context:\n{single_turn_guide}"
     if workspace_context.strip():
         system += (
             f"\n\nWorkspace:\n{workspace_context.strip()}\n"
@@ -1650,7 +1672,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             "here: say so plainly, name the file it would use, and suggest sending "
             "it to Raven as a mission."
         )
-    system += f"\n\nRetrieved Context:\n{rag_context}"
+    system += f"\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
