@@ -169,3 +169,59 @@ class TestUpdateDetectionImprovements:
         ) as f:
             env = f.read()
         assert "GITHUB_TOKEN" in env
+
+
+class TestPullSurvivesADeadConnection:
+    """dockerd closes an idle kept-alive connection; the next pull must not fail on it."""
+
+    def _main(self, monkeypatch, pulls):
+        import http.client
+
+        import services.control_plane.main as m
+
+        calls = {"n": 0, "closed": 0}
+
+        class Api:
+            def pull(self, tag, stream, decode):
+                calls["n"] += 1
+                outcome = pulls[calls["n"] - 1]
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return iter(outcome)
+
+            def close(self):
+                calls["closed"] += 1
+
+        class Client:
+            api = Api()
+
+        monkeypatch.setattr(m, "client", Client())
+        monkeypatch.setattr(m.time, "sleep", lambda s: None)
+        return m, calls, http.client
+
+    def test_a_dropped_connection_is_retried_on_a_new_one(self, monkeypatch):
+        import http.client
+
+        dead = http.client.RemoteDisconnected("Remote end closed connection without response")
+        m, calls, _ = self._main(monkeypatch, [dead, [{"status": "Downloaded newer image"}]])
+        seen = []
+        m._pull_streaming("ghcr.io/example/app:latest", seen.append)
+        assert calls == {"n": 2, "closed": 1}
+        assert seen == [{"status": "Downloaded newer image"}]
+
+    def test_a_connection_that_never_comes_back_still_fails(self, monkeypatch):
+        import requests
+
+        err = requests.exceptions.ConnectionError("gone")
+        m, calls, _ = self._main(monkeypatch, [err, err, err])
+        with pytest.raises(requests.exceptions.ConnectionError):
+            m._pull_streaming("ghcr.io/example/app:latest")
+        assert calls["n"] == m.PULL_ATTEMPTS
+
+    def test_an_answer_from_docker_is_not_retried(self, monkeypatch):
+        from docker.errors import APIError
+
+        m, calls, _ = self._main(monkeypatch, [APIError("manifest unknown")])
+        with pytest.raises(APIError):
+            m._pull_streaming("ghcr.io/example/app:nope")
+        assert calls["n"] == 1

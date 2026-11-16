@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 
 import requests
+import urllib3
 from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
@@ -210,6 +211,40 @@ _pull_status: dict[str, dict] = {}
 _pull_lock = threading.Lock()
 
 
+#: Attempts at a pull whose connection to Docker drops before it answers.
+PULL_ATTEMPTS = 3
+#: How a dead connection shows: requests' wrapper, or (mid-stream) urllib3's or
+#: http.client's own RemoteDisconnected, which is a built-in ConnectionError.
+_DROPPED_CONNECTION = (requests.exceptions.ConnectionError, urllib3.exceptions.ProtocolError, ConnectionError)
+
+
+def _pull_streaming(image_tag: str, on_line=None) -> None:
+    """Pull an image, starting again on a fresh connection if the old one was dead.
+
+    The Docker client keeps its connection to the socket between requests, and
+    dockerd closes one that sat idle. The next pull then fails at once with
+    "Remote end closed connection without response" although Docker and the
+    registry are fine, which is how an Update button in Admin failed on
+    2026-11-16 while the same pull from the host worked. A dropped connection is
+    retried on a new one; anything Docker or the registry actually answered (a
+    missing image, a refused login) is raised as it is.
+    """
+    for attempt in range(1, PULL_ATTEMPTS + 1):
+        try:
+            for line in client.api.pull(image_tag, stream=True, decode=True):
+                if on_line:
+                    on_line(line)
+            return
+        except _DROPPED_CONNECTION as e:
+            if attempt == PULL_ATTEMPTS:
+                raise
+            log.warning(f"[pull] connection to Docker dropped pulling {image_tag} ({e}); retrying on a new one")
+            # Closing the session drops its pooled connections; the next request opens a fresh one.
+            with suppress(Exception):
+                client.api.close()
+            time.sleep(attempt)
+
+
 def _pull_image_background(service_name: str, image_tag: str, current_image_id: str):
     """Pull an image in a background thread, recording status for polling."""
     with _pull_lock:
@@ -227,7 +262,7 @@ def _pull_image_background(service_name: str, image_tag: str, current_image_id: 
     try:
         log.info(f"[pull] Background pull started for {service_name}: {image_tag}")
         # Stream pull output to capture layer progress
-        for line in client.api.pull(image_tag, stream=True, decode=True):
+        def _record(line: dict) -> None:
             status = line.get("status", "")
             progress = line.get("progress", "")
             if progress:
@@ -240,6 +275,7 @@ def _pull_image_background(service_name: str, image_tag: str, current_image_id: 
                 _pull_status[service_name]["progress"] = display
                 _pull_status[service_name]["last_update"] = time.time()
 
+        _pull_streaming(image_tag, _record)
         new_image_id = client.images.get(image_tag).id
         updated = new_image_id != current_image_id
         with _pull_lock:
@@ -1003,7 +1039,7 @@ def pull_and_restart(service_name: str):
             )
 
         log.info(f"[pull-and-restart] Pulling latest image for {container.name}: {image_tag}")
-        client.images.pull(image_tag)
+        _pull_streaming(image_tag)
 
         new_image_id = client.images.get(image_tag).id
         if new_image_id == current_image_id:
