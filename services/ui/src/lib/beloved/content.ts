@@ -1,0 +1,392 @@
+/**
+ * Beloved's curated content: daily devotions for a married couple, questions
+ * to talk over together and date night ideas.
+ *
+ * Only Scripture *references* live here. The verse text is fetched from the
+ * family's Bible service in whichever translation it serves (no translation's
+ * text is copied into this repository). The reflections, prayers, questions and
+ * ideas are original to Jarvis: short, warm, Christian and wholesome, written
+ * for husbands and wives. The Song of Solomon is handled the way a pastor would
+ * in a sermon: as a celebration of faithful married love, never explicit.
+ *
+ * The day's content is the same on both phones: it is chosen from the local
+ * calendar day alone (see `dailyContent`).
+ */
+import { dayNumber, type Ymd } from './dates';
+
+export interface Devotion {
+  id: string;
+  /** The passage, as people say it ("Song of Solomon 2:10-13"). */
+  ref: string;
+  title: string;
+  /** A short original reflection. */
+  reflection: string;
+  /** A one-line prayer to pray together. */
+  prayer: string;
+}
+
+export interface DateIdea {
+  id: string;
+  title: string;
+  detail: string;
+  kind: 'home' | 'out' | 'outdoors' | 'serve' | 'faith';
+}
+
+export const DEVOTIONS: readonly Devotion[] = [
+  { id: 'd01', ref: 'Song of Solomon 6:3', title: 'I am my beloved\'s',
+    reflection: 'Belonging is the heart of marriage. Before it is a list of duties, it is a joyful claim: you are mine and I am yours. Let that settle over the day: you are not alone in anything.',
+    prayer: 'Lord, thank You that we belong to You first, and so we can belong to each other.' },
+  { id: 'd02', ref: 'Genesis 2:24', title: 'Two become one',
+    reflection: 'God\'s first word on marriage is about leaving, holding fast and becoming one. Oneness is not sameness. It is two lives woven together so tightly that each is stronger for the other.',
+    prayer: 'Father, keep weaving our lives together, and show us where we still hold back.' },
+  { id: 'd03', ref: 'Ephesians 5:25-28', title: 'Love that gives itself',
+    reflection: 'Paul sets the bar for a husband\'s love at the cross: love that gives itself up. That kind of love is daily and ordinary, shown in patience, attention and putting the other first.',
+    prayer: 'Jesus, teach us to love the way You love us, freely and to the end.' },
+  { id: 'd04', ref: '1 Corinthians 13:4-7', title: 'Love is patient',
+    reflection: 'Read this passage slowly and put your own name where it says love. It quickly shows where grace is needed. The good news is that the love described here is the love God already has for you.',
+    prayer: 'Lord, make us patient and kind with each other today, especially when we are tired.' },
+  { id: 'd05', ref: 'Ecclesiastes 4:9-12', title: 'A cord of three strands',
+    reflection: 'Two are better than one, and a cord of three strands is not quickly broken. A marriage with Christ at its center has a strength neither spouse could supply alone.',
+    prayer: 'Lord, be the third strand in our marriage, holding us when we are weak.' },
+  { id: 'd06', ref: 'Song of Solomon 2:10-13', title: 'Arise, my love',
+    reflection: 'The winter is past and the flowers appear. Seasons of marriage change, and God delights to bring new springs. Look for one small sign of new life between you this week.',
+    prayer: 'Father, bring a fresh season of joy and closeness to our home.' },
+  { id: 'd07', ref: 'Ruth 1:16-17', title: 'Where you go, I will go',
+    reflection: 'Ruth\'s vow was spoken to her mother in law, yet couples have borrowed it for centuries because it is covenant language: a promise that does not depend on circumstances.',
+    prayer: 'Lord, help us keep our promises to each other in every place and season.' },
+  { id: 'd08', ref: 'Colossians 3:12-14', title: 'Clothed in love',
+    reflection: 'Compassion, kindness, humility, gentleness and patience are clothes we choose to put on each morning. Above them all goes love, which ties everything together.',
+    prayer: 'Jesus, help us put on kindness today before we put on anything else.' },
+  { id: 'd09', ref: '1 Peter 3:7', title: 'Heirs together',
+    reflection: 'Husband and wife are co heirs of the grace of life. Neither is ahead of the other before God. Honoring each other is part of how our prayers stay unhindered.',
+    prayer: 'Father, help us honor each other as fellow heirs of Your grace.' },
+  { id: 'd10', ref: 'Proverbs 31:10-12', title: 'Worth far more than rubies',
+    reflection: 'A trustworthy spouse is a rare treasure. Trust grows in small faithful acts: doing what you said, telling the truth kindly, guarding the other\'s good name.',
+    prayer: 'Lord, make us people our spouse can fully trust.' },
+  { id: 'd11', ref: 'Song of Solomon 8:6-7', title: 'Love strong as death',
+    reflection: 'Many waters cannot quench love. Real love is not fragile; it survives storms because it is anchored in a covenant, not a feeling. Feelings follow faithfulness.',
+    prayer: 'Lord, set us like a seal on each other\'s hearts.' },
+  { id: 'd12', ref: 'Ephesians 4:2-3', title: 'Bearing with one another',
+    reflection: 'Every marriage involves bearing with each other. Humility and gentleness keep the bond of peace, and peace at home is worth more than winning an argument.',
+    prayer: 'Father, give us humble, gentle hearts that guard the peace between us.' },
+  { id: 'd13', ref: 'Proverbs 18:22', title: 'He who finds a wife',
+    reflection: 'Your spouse is a good thing and a gift of favor from the Lord. Gratitude changes how we see the one we live with. Name one way your spouse has blessed you this week.',
+    prayer: 'Thank You, Lord, for the gift of each other.' },
+  { id: 'd14', ref: 'Song of Solomon 2:15', title: 'The little foxes',
+    reflection: 'It is often the small things that spoil the vineyard: a sharp word, a forgotten promise, a habit of distraction. Catching them early protects what is blooming.',
+    prayer: 'Lord, show us the little foxes in our marriage and help us deal with them gently.' },
+  { id: 'd15', ref: 'Philippians 2:3-4', title: 'Interests of the other',
+    reflection: 'In humility, count the other more significant. In marriage that looks like asking about your spouse\'s day and really listening to the answer.',
+    prayer: 'Jesus, give us Your humble mind toward each other.' },
+  { id: 'd16', ref: 'Psalm 127:1', title: 'Unless the Lord builds the house',
+    reflection: 'Every home is built on something. Plans, money and effort matter, but only the Lord can build a house that lasts. Invite Him into the plans you are making.',
+    prayer: 'Lord, build our house, and keep us from building in vain.' },
+  { id: 'd17', ref: 'Song of Solomon 4:7', title: 'Altogether beautiful',
+    reflection: 'The beloved sees no flaw. Love chooses to see the other with delight. Tell your spouse something you find beautiful about them, inside or out.',
+    prayer: 'Father, help us see each other the way You see us: with delight.' },
+  { id: 'd18', ref: 'James 1:19-20', title: 'Quick to listen',
+    reflection: 'Quick to listen, slow to speak, slow to anger. Most hard conversations would go better if both people followed just the first part.',
+    prayer: 'Lord, make us quick to listen to each other today.' },
+  { id: 'd19', ref: 'Romans 12:10', title: 'Outdo one another',
+    reflection: 'Paul invites us to a friendly contest: outdo one another in showing honor. Who can be more generous, more encouraging, more thankful today?',
+    prayer: 'Lord, make us eager to honor each other.' },
+  { id: 'd20', ref: 'Hebrews 13:4', title: 'Marriage held in honor',
+    reflection: 'Marriage is to be honored by all, beginning with the two people in it. Guarding your marriage is an act of worship, a way of honoring the God who designed it.',
+    prayer: 'Father, help us honor our marriage in our thoughts, words and choices.' },
+  { id: 'd21', ref: 'Song of Solomon 1:15-16', title: 'How beautiful you are',
+    reflection: 'The lovers in the Song speak praise freely and often. Couples who keep saying kind things to each other keep feeling kindly toward each other.',
+    prayer: 'Lord, put words of praise for each other on our lips.' },
+  { id: 'd22', ref: 'Proverbs 15:1', title: 'A gentle answer',
+    reflection: 'A gentle answer turns away wrath. Tone often matters more than words. When tension rises, lower your voice and soften your face.',
+    prayer: 'Lord, give us gentle answers when we are frustrated.' },
+  { id: 'd23', ref: 'Ephesians 4:31-32', title: 'Forgiving one another',
+    reflection: 'Kindness and tenderhearted forgiveness are possible because we have been forgiven in Christ. Forgiveness is not pretending nothing happened; it is choosing not to hold it over each other.',
+    prayer: 'Father, help us forgive each other as You have forgiven us.' },
+  { id: 'd24', ref: 'Genesis 2:18', title: 'Not good to be alone',
+    reflection: 'God made a helper suitable, a partner who corresponds. You were given to each other on purpose, to share the work and the joy of life.',
+    prayer: 'Thank You, Lord, for giving us each other as partners.' },
+  { id: 'd25', ref: 'Song of Solomon 2:4', title: 'His banner over me is love',
+    reflection: 'A banner tells everyone who you belong to. Let your love be visible: in how you speak about your spouse, how you greet them, how you make room for them.',
+    prayer: 'Lord, let our love for each other be plain for our family to see.' },
+  { id: 'd26', ref: 'Micah 6:8', title: 'Walk humbly together',
+    reflection: 'Do justice, love kindness, walk humbly with your God. A couple who walks humbly with God tends to walk kindly with each other.',
+    prayer: 'Lord, teach us to walk humbly with You side by side.' },
+  { id: 'd27', ref: 'Matthew 19:4-6', title: 'What God has joined',
+    reflection: 'Jesus points back to the beginning: what God has joined together, let no one separate. Your marriage is God\'s work, and He is committed to it.',
+    prayer: 'Father, guard what You have joined, and keep us close.' },
+  { id: 'd28', ref: 'Proverbs 3:5-6', title: 'Trust in the Lord together',
+    reflection: 'Decisions as a couple can be heavy. Trusting the Lord together means praying before deciding and being willing to wait for His leading.',
+    prayer: 'Lord, make our paths straight as we trust You together.' },
+  { id: 'd29', ref: 'Song of Solomon 7:10', title: 'His desire is for me',
+    reflection: 'To be wanted and cherished by your spouse is a deep gift. Let your spouse know today, in a way they understand, that you still choose them.',
+    prayer: 'Lord, keep our hearts turned toward each other.' },
+  { id: 'd30', ref: 'Galatians 6:2', title: 'Bear one another\'s burdens',
+    reflection: 'What is weighing on your spouse right now? Carrying a burden together does not always mean fixing it. Sometimes it means simply staying close.',
+    prayer: 'Jesus, help us carry each other\'s burdens with love.' },
+  { id: 'd31', ref: 'Psalm 34:3', title: 'Magnify the Lord together',
+    reflection: 'Praise is better together. Couples who thank God together for ordinary mercies grow more grateful and more joyful.',
+    prayer: 'Lord, we praise You together for the good gifts of this week.' },
+  { id: 'd32', ref: '1 John 4:18-19', title: 'We love because He first loved us',
+    reflection: 'Perfect love casts out fear. In a safe marriage you can be honest without fear of rejection. That safety is a gift you give each other daily.',
+    prayer: 'Father, let Your love drive fear out of our home.' },
+  { id: 'd33', ref: 'Song of Solomon 4:9', title: 'You have captured my heart',
+    reflection: 'One glance, one look. Small moments of attention still capture the heart. Put the phones down tonight and really look at each other.',
+    prayer: 'Lord, renew our delight in each other.' },
+  { id: 'd34', ref: 'Proverbs 17:17', title: 'A friend loves at all times',
+    reflection: 'Your spouse should be your closest friend. Friendship grows in shared laughter, shared interests and showing up in hard times.',
+    prayer: 'Lord, deepen our friendship and our laughter.' },
+  { id: 'd35', ref: 'Joshua 24:15', title: 'As for me and my house',
+    reflection: 'Serving the Lord as a household is a choice made again and again. What is one way your home can serve the Lord this week?',
+    prayer: 'Lord, as for us and our house, we will serve You.' },
+  { id: 'd36', ref: 'Proverbs 12:4', title: 'A crown to her husband',
+    reflection: 'A good spouse is an honor to the other. Speak well of each other in public and in private, and your words will become a crown.',
+    prayer: 'Lord, let us be a blessing and an honor to each other.' },
+  { id: 'd37', ref: 'Song of Solomon 3:4', title: 'I held him and would not let go',
+    reflection: 'Love seeks and holds on. Sometimes marriage needs pursuit: making time, planning a date, chasing each other\'s hearts again.',
+    prayer: 'Lord, give us hearts that pursue each other.' },
+  { id: 'd38', ref: 'Romans 15:7', title: 'Welcome one another',
+    reflection: 'Welcome one another as Christ has welcomed you. Make coming home a welcome: a smile, a hug, a moment of attention before the to do list.',
+    prayer: 'Jesus, help us welcome each other the way You welcome us.' },
+  { id: 'd39', ref: 'Isaiah 41:10', title: 'Do not fear',
+    reflection: 'God is with you and will strengthen you. When fears come as a couple, take them to God together rather than carrying them alone.',
+    prayer: 'Father, we give You our worries; hold us up with Your hand.' },
+  { id: 'd40', ref: 'Philippians 4:6-7', title: 'Peace that guards',
+    reflection: 'Prayer with thanksgiving brings a peace that guards hearts. Praying together, even briefly, is one of the best gifts you can give your marriage.',
+    prayer: 'Lord, guard our hearts and minds with Your peace.' },
+  { id: 'd41', ref: 'Song of Solomon 5:16', title: 'This is my friend',
+    reflection: 'The bride says it plainly: this is my beloved and this is my friend. Romance and friendship belong together in a good marriage.',
+    prayer: 'Thank You, Lord, that we get to be both beloved and friends.' },
+  { id: 'd42', ref: 'Proverbs 27:17', title: 'Iron sharpens iron',
+    reflection: 'Spouses help each other grow. Encouragement and honest, kind feedback can make each of you more like Christ.',
+    prayer: 'Lord, help us sharpen each other in love.' },
+  { id: 'd43', ref: '1 Thessalonians 5:11', title: 'Build each other up',
+    reflection: 'Encourage one another and build each other up. A word of encouragement can carry your spouse through a hard day.',
+    prayer: 'Lord, give us encouraging words for each other today.' },
+  { id: 'd44', ref: 'Lamentations 3:22-23', title: 'New every morning',
+    reflection: 'God\'s mercies are new every morning. Marriages need that too: a fresh start each day without yesterday\'s grudges.',
+    prayer: 'Father, give us fresh mercy for each other this morning.' },
+  { id: 'd45', ref: 'Song of Solomon 2:16', title: 'My beloved is mine',
+    reflection: 'Mutual belonging means both give and both receive. A healthy marriage has room for both to be known and both to be served.',
+    prayer: 'Lord, let our love be generous in both directions.' },
+  { id: 'd46', ref: 'Psalm 128:1-4', title: 'The blessing of a godly home',
+    reflection: 'The psalm pictures a home blessed by walking in God\'s ways. Blessing grows from ordinary faithfulness at the table and in daily work.',
+    prayer: 'Lord, bless our table, our work and our home.' },
+  { id: 'd47', ref: 'Ephesians 5:21', title: 'Submitting to one another',
+    reflection: 'Out of reverence for Christ, a marriage is two people yielding to each other\'s good. It is a posture of serving, not of keeping score.',
+    prayer: 'Jesus, help us serve each other out of reverence for You.' },
+  { id: 'd48', ref: 'Proverbs 5:18-19', title: 'Rejoice in the wife of your youth',
+    reflection: 'Scripture calls husbands and wives to keep rejoicing in each other through the years. Joy in marriage is something to tend on purpose.',
+    prayer: 'Lord, keep our joy in each other fresh all our lives.' },
+  { id: 'd49', ref: 'Song of Solomon 8:7', title: 'Love cannot be bought',
+    reflection: 'If one offered all the wealth of his house for love, it would be scorned. Love is not earned or bought; it is given and received.',
+    prayer: 'Father, help us love each other freely, not as a trade.' },
+  { id: 'd50', ref: 'John 15:12-13', title: 'Lay down your life',
+    reflection: 'Greater love has no one than this. Most days, laying down your life looks like laying down your preferences for the good of your spouse.',
+    prayer: 'Jesus, help us lay down our own way for each other.' },
+  { id: 'd51', ref: 'Psalm 37:4-5', title: 'Commit your way',
+    reflection: 'Delight in the Lord and commit your way to Him. Dreams you share as a couple are safest in His hands.',
+    prayer: 'Lord, we commit our hopes and plans to You.' },
+  { id: 'd52', ref: 'Proverbs 24:3-4', title: 'By wisdom a house is built',
+    reflection: 'Wisdom builds, understanding establishes, knowledge fills the rooms. Keep learning about each other: what delights, what worries, what helps.',
+    prayer: 'Lord, give us wisdom to build our house well.' },
+  { id: 'd53', ref: 'Song of Solomon 1:2-4', title: 'Your love is better than wine',
+    reflection: 'The Song opens with joy and longing. God is not embarrassed by married love; He designed it as a good gift to be enjoyed faithfully.',
+    prayer: 'Thank You, Father, for the gift of married love.' },
+  { id: 'd54', ref: 'Colossians 3:18-19', title: 'Do not be harsh',
+    reflection: 'Paul warns against harshness. Words carry weight in a home. Choose words that heal and avoid words that wound, even in disagreement.',
+    prayer: 'Lord, guard our mouths from harsh words.' },
+  { id: 'd55', ref: '2 Corinthians 4:16-18', title: 'Renewed day by day',
+    reflection: 'Outwardly we age, but inwardly we are renewed. Growing old together is not a loss but a shared path toward glory.',
+    prayer: 'Lord, renew us inwardly as we grow older together.' },
+  { id: 'd56', ref: 'Psalm 46:1-3', title: 'Our refuge and strength',
+    reflection: 'Storms come to every marriage: illness, money, loss. God is a very present help. Run to Him together.',
+    prayer: 'Lord, be our refuge in every storm.' },
+  { id: 'd57', ref: 'Song of Solomon 2:14', title: 'Let me hear your voice',
+    reflection: 'Let me see your face, let me hear your voice. Your spouse longs to hear from you: your thoughts, your hopes, your day.',
+    prayer: 'Lord, help us share our hearts openly with each other.' },
+  { id: 'd58', ref: 'Proverbs 16:24', title: 'Gracious words are honey',
+    reflection: 'Gracious words are sweet to the soul and healing to the bones. Say one gracious thing to your spouse before the day ends.',
+    prayer: 'Lord, make our words sweet and healing.' },
+  { id: 'd59', ref: 'Romans 12:12', title: 'Patient in affliction',
+    reflection: 'Rejoice in hope, be patient in tribulation, be constant in prayer. Three habits that keep a marriage steady when life is hard.',
+    prayer: 'Lord, keep us hopeful, patient and praying.' },
+  { id: 'd60', ref: 'Numbers 6:24-26', title: 'The Lord bless you',
+    reflection: 'This ancient blessing is a beautiful prayer to speak over your spouse. Try praying it aloud for each other tonight.',
+    prayer: 'The Lord bless you and keep you, and give you peace.' },
+  { id: 'd61', ref: 'Song of Solomon 4:12', title: 'A garden locked',
+    reflection: 'The garden enclosed is a picture of faithfulness: love reserved for one. Guarding your marriage means guarding your heart, eyes and time.',
+    prayer: 'Lord, help us guard our hearts for each other alone.' },
+  { id: 'd62', ref: 'Zephaniah 3:17', title: 'He rejoices over you with singing',
+    reflection: 'God rejoices over His people with gladness. Let His delight in you shape how you delight in each other.',
+    prayer: 'Father, thank You for rejoicing over us; help us rejoice in each other.' },
+  { id: 'd63', ref: 'Proverbs 31:28-31', title: 'Her children rise up',
+    reflection: 'Words of praise in a home teach children what love sounds like. Praise your spouse where your family can hear it.',
+    prayer: 'Lord, let our home be full of praise for each other.' },
+  { id: 'd64', ref: 'Psalm 90:12, 17', title: 'Establish the work of our hands',
+    reflection: 'Teach us to number our days. Time together is a gift. Ask God to bless the work you do side by side.',
+    prayer: 'Lord, establish the work of our hands and teach us to treasure our days.' },
+];
+
+export const QUESTIONS: readonly string[] = [
+  'What is one moment from our wedding day you hope you never forget?',
+  'When did you first know you wanted to marry me?',
+  'What is something I do that makes you feel most loved?',
+  'What is one prayer you would like us to pray together this week?',
+  'Where is a place you would love for us to visit together someday?',
+  'What is a small habit we could start that would make our mornings better?',
+  'What is something you are worried about that I might not know?',
+  'Which season of our marriage so far has been your favorite, and why?',
+  'What is one thing you admire about how I handle hard days?',
+  'If we had a free Saturday with no plans, how would you want to spend it?',
+  'What is a Bible verse that has meant a lot to you lately?',
+  'How can I encourage you better when you feel overwhelmed?',
+  'What tradition from your childhood would you like our family to keep?',
+  'What is one new tradition you would like us to start?',
+  'What does a perfect evening at home look like to you?',
+  'What is something you have learned about God through our marriage?',
+  'When do you feel closest to me?',
+  'What is one dream you have for the next five years?',
+  'Is there something I said or did this week that you would like to talk about?',
+  'What is a way we could serve someone together this month?',
+  'What makes you laugh the most about our life together?',
+  'How would you describe our marriage to a newly married couple?',
+  'What is one thing you would like us to do more often?',
+  'What is one thing you would like us to do less often?',
+  'What is your favorite memory of the two of us from this past year?',
+  'How can I pray for you today?',
+  'What does rest look like for you, and how can I help you get it?',
+  'What is a song that reminds you of us?',
+  'What is one thing about me that surprised you after we married?',
+  'What would make our home feel more peaceful?',
+  'What is a fear you would like us to face together?',
+  'Who is a couple you look up to, and what do you admire about them?',
+  'What is something you would like to learn together?',
+  'How do you most like to receive an apology?',
+  'What is one way I could make your week easier?',
+  'What is a promise from God you are holding onto right now?',
+  'What is your favorite way for us to spend a Sunday afternoon?',
+  'When have you seen God answer a prayer for our family?',
+  'What is a gift I gave you that meant more than I knew?',
+  'What would you like our anniversary to feel like this year?',
+  'What do you love about the way we parent together, and what would you change?',
+  'What is something you are proud of us for?',
+  'What is one thing you need more of from me right now?',
+  'How do you feel most respected by me?',
+  'What is a hobby you would enjoy sharing with me?',
+  'What is one thing you want our children to remember about our marriage?',
+  'When is it hardest for you to be patient with me, and how can I help?',
+  'What blessing are you most thankful for today?',
+  'What is a place that feels like "us" to you?',
+  'What does faithfulness look like in the small things for you?',
+  'What is one goal we could set together for this month?',
+  'If you could relive one day of our marriage, which would it be?',
+  'How have you seen me grow since we married?',
+  'What is something new you would like to try together this year?',
+  'What helps you feel at peace after a disagreement?',
+  'What is your favorite thing about growing older together?',
+  'What is a question you have always wanted to ask me?',
+  'Which character in the Bible do you relate to most right now, and why?',
+  'What does a godly marriage look like to you in one sentence?',
+  'What is one way we could protect our time together better?',
+  'What would you like to thank me for that you have not said out loud?',
+  'What is a hope you have for us when the children are grown?',
+  'How can we make our home more welcoming to others?',
+  'What is one word you would use to describe us right now, and why?',
+  'What is something small that always makes your day better?',
+  'Where have you seen God\'s faithfulness in our marriage?',
+];
+
+export const DATE_IDEAS: readonly DateIdea[] = [
+  { id: 'i01', title: 'Candlelit dinner at home', detail: 'Cook a favorite meal together, set the table with candles and leave the phones in another room.', kind: 'home' },
+  { id: 'i02', title: 'Sunrise coffee', detail: 'Wake up early, take coffee somewhere with a view and watch the sun come up together.', kind: 'outdoors' },
+  { id: 'i03', title: 'Revisit your first date', detail: 'Go back to where you had your first date, or recreate it as closely as you can.', kind: 'out' },
+  { id: 'i04', title: 'Picnic in the park', detail: 'Pack a simple lunch, a blanket and a book of Psalms to read aloud.', kind: 'outdoors' },
+  { id: 'i05', title: 'Stargazing night', detail: 'Drive away from the city lights, lie on a blanket and read Psalm 8 under the stars.', kind: 'outdoors' },
+  { id: 'i06', title: 'Wedding album evening', detail: 'Look through your wedding photos and tell each other what you remember from each one.', kind: 'home' },
+  { id: 'i07', title: 'Serve together', detail: 'Volunteer at a food pantry, shelter or church event as a couple.', kind: 'serve' },
+  { id: 'i08', title: 'Cooking class', detail: 'Take a cooking class together, or pick a new recipe from a cuisine neither of you has tried.', kind: 'out' },
+  { id: 'i09', title: 'Board game night', detail: 'Pull out a two player game, make popcorn and play best of three.', kind: 'home' },
+  { id: 'i10', title: 'Love letters', detail: 'Each write a handwritten letter to the other, then read them aloud over dessert.', kind: 'home' },
+  { id: 'i11', title: 'Hike and pray', detail: 'Take a trail hike and stop at the top to pray for each other.', kind: 'outdoors' },
+  { id: 'i12', title: 'Dessert crawl', detail: 'Visit two or three bakeries or ice cream shops and share a treat at each.', kind: 'out' },
+  { id: 'i13', title: 'Worship night', detail: 'Make a playlist of your favorite worship songs, sing together and share what each song means to you.', kind: 'faith' },
+  { id: 'i14', title: 'Bike ride', detail: 'Rent or ride bikes along a scenic path and stop somewhere for lunch.', kind: 'outdoors' },
+  { id: 'i15', title: 'Bookstore date', detail: 'Pick out a book for each other in under ten minutes, then read the first chapter over coffee.', kind: 'out' },
+  { id: 'i16', title: 'Dream board', detail: 'Make a simple dream board for the next five years of your marriage and pray over it together.', kind: 'faith' },
+  { id: 'i17', title: 'Breakfast in bed', detail: 'Take turns surprising each other with breakfast in bed on a slow morning.', kind: 'home' },
+  { id: 'i18', title: 'Farmers market', detail: 'Stroll a farmers market, pick ingredients and cook lunch together with what you found.', kind: 'out' },
+  { id: 'i19', title: 'Slow dance in the kitchen', detail: 'Play the first dance song from your wedding and dance in the kitchen.', kind: 'home' },
+  { id: 'i20', title: 'Museum or gallery', detail: 'Visit a museum and each choose a favorite piece to explain to the other.', kind: 'out' },
+  { id: 'i21', title: 'Read the Song of Solomon together', detail: 'Read a chapter aloud together and talk about what it says about God\'s design for marriage.', kind: 'faith' },
+  { id: 'i22', title: 'Garden together', detail: 'Plant flowers, herbs or a small tree together as a picture of your growing love.', kind: 'home' },
+  { id: 'i23', title: 'Fancy dress at home', detail: 'Dress up as if for a fine restaurant, then order takeout and eat by candlelight.', kind: 'home' },
+  { id: 'i24', title: 'Beach or lake day', detail: 'Spend a day by the water: walk, talk, skip stones and watch the sunset.', kind: 'outdoors' },
+  { id: 'i25', title: 'Memory lane drive', detail: 'Drive past places that matter in your story: where you met, your first home, your church.', kind: 'out' },
+  { id: 'i26', title: 'Puzzle night', detail: 'Start a jigsaw puzzle together with hot cocoa and your favorite music.', kind: 'home' },
+  { id: 'i27', title: 'Bless a neighbor', detail: 'Bake something together and deliver it to a neighbor who could use encouragement.', kind: 'serve' },
+  { id: 'i28', title: 'Concert or recital', detail: 'Go to a local concert, choir or recital, then talk about your favorite piece over dessert.', kind: 'out' },
+  { id: 'i29', title: 'Pray through your vows', detail: 'Read your wedding vows aloud and pray through each promise together.', kind: 'faith' },
+  { id: 'i30', title: 'Sunset walk', detail: 'Take an evening walk around the neighborhood holding hands, no destination needed.', kind: 'outdoors' },
+  { id: 'i31', title: 'Learn to dance', detail: 'Take a ballroom or swing dance lesson together, or follow a video at home.', kind: 'out' },
+  { id: 'i32', title: 'Movie marathon', detail: 'Pick a classic film series, build a blanket fort and watch together.', kind: 'home' },
+  { id: 'i33', title: 'Thankfulness jar', detail: 'Write twenty things you are thankful for about each other on slips of paper and fill a jar.', kind: 'home' },
+  { id: 'i34', title: 'Scenic drive', detail: 'Take a scenic drive with a playlist from the year you met.', kind: 'out' },
+  { id: 'i35', title: 'Paint together', detail: 'Try a paint night: same picture, two easels, no judging.', kind: 'home' },
+  { id: 'i36', title: 'Visit an older couple', detail: 'Visit a couple married for many years and ask them what has kept them together.', kind: 'serve' },
+  { id: 'i37', title: 'Tea party for two', detail: 'Brew a few kinds of tea, set out small treats and have an unhurried conversation.', kind: 'home' },
+  { id: 'i38', title: 'Mini golf or bowling', detail: 'Play mini golf or bowl a few frames. Winner picks dessert.', kind: 'out' },
+  { id: 'i39', title: 'Plan a getaway', detail: 'Spend an evening planning a future weekend away, even if it is a year out.', kind: 'home' },
+  { id: 'i40', title: 'Attend a marriage night', detail: 'Go to a church marriage event or class together.', kind: 'faith' },
+  { id: 'i41', title: 'Orchard or berry picking', detail: 'Pick fruit together, then bake something with what you picked.', kind: 'outdoors' },
+  { id: 'i42', title: 'Photo walk', detail: 'Take a walk and photograph things that remind you of each other.', kind: 'outdoors' },
+  { id: 'i43', title: 'Recreate your wedding dinner', detail: 'Cook the meal you served at your wedding, or the closest you can manage.', kind: 'home' },
+  { id: 'i44', title: 'Couples Bible study', detail: 'Start a short Bible study for couples and do the first session together.', kind: 'faith' },
+  { id: 'i45', title: 'Coffee shop chat', detail: 'Go to a cozy coffee shop and take turns asking each other the questions in Beloved.', kind: 'out' },
+  { id: 'i46', title: 'Build something', detail: 'Build a small project together: a birdhouse, a shelf or a planter.', kind: 'home' },
+  { id: 'i47', title: 'Christmas lights drive', detail: 'In the holiday season, drive around to see the lights with hot chocolate.', kind: 'out' },
+  { id: 'i48', title: 'Prayer walk', detail: 'Walk your neighborhood and pray for each home you pass.', kind: 'faith' },
+  { id: 'i49', title: 'Kayak or canoe', detail: 'Rent a kayak or canoe for two and paddle somewhere calm.', kind: 'outdoors' },
+  { id: 'i50', title: 'Write your story', detail: 'Write down the story of how you met and fell in love, to give to your children one day.', kind: 'home' },
+  { id: 'i51', title: 'Thrift store challenge', detail: 'Give each other a small budget to find a gift at a thrift store.', kind: 'out' },
+  { id: 'i52', title: 'Sing your favorite hymns', detail: 'Find the hymns from your wedding or childhood and sing them together.', kind: 'faith' },
+  { id: 'i53', title: 'Fire pit evening', detail: 'Light a fire pit, make s\'mores and talk about your favorite memories.', kind: 'outdoors' },
+  { id: 'i54', title: 'Surprise errand date', detail: 'Turn a boring errand into a date: run it together and stop for a treat afterward.', kind: 'out' },
+];
+
+/** The day's verse, devotion and question: the same on both phones, from the calendar day alone. */
+export interface DailyContent {
+  /** `YYYY-MM-DD`, the day it is for (what a "done" or an answer is kept under). */
+  day: string;
+  devotion: Devotion;
+  question: string;
+}
+
+/**
+ * Deterministic daily rotation. The devotion walks through the list in order
+ * (so it does not repeat for DEVOTIONS.length days); the question walks its own
+ * list at a different pace, so a devotion is not always paired with the same question.
+ */
+export function dailyContent(today: Ymd): DailyContent {
+  const n = dayNumber(today);
+  const devotion = DEVOTIONS[mod(n, DEVOTIONS.length)];
+  const question = QUESTIONS[mod(n * 7 + 3, QUESTIONS.length)];
+  return {
+    day: `${String(today.y).padStart(4, '0')}-${String(today.m).padStart(2, '0')}-${String(today.d).padStart(2, '0')}`,
+    devotion,
+    question,
+  };
+}
+
+function mod(a: number, b: number): number {
+  return ((a % b) + b) % b;
+}
+
+/** The reference as the Bible service reads it (it names the book "Song of Songs"). */
+export function fetchRef(ref: string): string {
+  return ref.replace(/^Song of Solomon\b/, 'Song');
+}
+
+/** A date idea by id, or undefined for one no longer in the list. */
+export function dateIdea(id: string): DateIdea | undefined {
+  return DATE_IDEAS.find((idea) => idea.id === id);
+}

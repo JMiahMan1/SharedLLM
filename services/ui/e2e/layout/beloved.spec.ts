@@ -1,0 +1,296 @@
+import { test, expect as baseExpect, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
+import { mockHome, type HomeMocks } from '../fixtures/homeMocks';
+import { mockHealth } from '../fixtures/healthMocks';
+import { mockBible } from '../fixtures/bibleMocks';
+import { mockFamilyPages, CONVERSATIONS } from '../fixtures/familyPagesMocks';
+import { screenFindings, settle, shot, quietHotReload, type Allowed } from '../fixtures/pageAudit';
+import { deriveKey, makeVerifier, openRecord, randomBytes, sealRecord, toBase64, PBKDF2_ITERATIONS } from '../../src/lib/privateChatCrypto';
+
+const expect = baseExpect.configure({ timeout: 20_000 });
+
+/**
+ * Beloved, the couple's page inside the private chat, on every form factor:
+ * the home page with both pictures and the days-married counter, adding a
+ * special day, today's devotion, a love note, a prayer marked prayed for and
+ * answered, a date idea suggested, and Our details. The server is mocked and
+ * the ciphertext is real: the test checks the server only ever receives sealed
+ * records, nothing is readable after a lock, and nothing scrolls sideways. A
+ * second test checks the entry point is never there for an administrator who
+ * is not one of the couple, nor for a child or a teen.
+ */
+
+const PASSWORD = 'a long shared sentence';
+const TOKEN = 'roombeloved1';
+const SEC = Math.floor(Date.now() / 1000);
+const WEDDING = '2016-04-09';
+
+interface Run { mocks: HomeMocks; errors: string[]; found: string[] }
+
+interface SealedRow { id: string; kind: string; at: number; updated_at: number; by: string; own: boolean; by_name: string; sealed: string }
+
+interface Server {
+  chat: Record<string, unknown>;
+  records: SealedRow[];
+  /** Every body the page sent to a Beloved route. */
+  sent: Array<{ method: string; path: string; body: string }>;
+  belovedCalls: number;
+}
+
+async function serve(page: Page, server: Server): Promise<void> {
+  await page.route(/\/api\/(private-chat\/|communication\/talk\/(conversations|messages)(\?|$))/, async (route: Route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const p = url.pathname;
+    if (p === '/api/private-chat/status') {
+      return route.fulfill({ json: { eligible: true, chats: [server.chat], min_iterations: PBKDF2_ITERATIONS, partners: [] } });
+    }
+    if (p === `/api/private-chat/chats/${TOKEN}` && req.method() === 'GET') return route.fulfill({ json: server.chat });
+    const beloved = new RegExp(`^/api/private-chat/chats/${TOKEN}/beloved(?:/([a-z]+))?(?:/([0-9a-f]{32}))?$`).exec(p);
+    if (beloved) {
+      server.belovedCalls += 1;
+      const [, kind, id] = beloved;
+      if (req.method() !== 'GET') server.sent.push({ method: req.method(), path: p, body: req.postData() ?? '' });
+      if (req.method() === 'GET') {
+        return route.fulfill({ json: { me: 'parent', records: server.records, couple: [
+          { username: 'parent', display_name: 'Parent', avatar: null, family_role: 'father', me: true },
+          { username: 'robin', display_name: 'Robin', avatar: null, family_role: 'mother', me: false },
+        ] } });
+      }
+      if (req.method() === 'POST' && kind) {
+        const body = req.postDataJSON() as { sealed: string; notify?: boolean };
+        const row: SealedRow = { id: (server.records.length + 1).toString(16).padStart(32, 'b'), kind, at: Math.floor(Date.now() / 1000),
+          updated_at: Math.floor(Date.now() / 1000), by: 'parent', own: true, by_name: 'Parent', sealed: body.sealed };
+        server.records.push(row);
+        return route.fulfill({ json: { ...row, notified: Boolean(body.notify) } });
+      }
+      const row = server.records.find((r) => r.id === id);
+      if (!row) return route.fulfill({ status: 404, json: { detail: 'No such record.' } });
+      if (req.method() === 'PUT') {
+        row.sealed = (req.postDataJSON() as { sealed: string }).sealed;
+        row.updated_at += 1;
+        return route.fulfill({ json: row });
+      }
+      server.records = server.records.filter((r) => r.id !== id);
+      return route.fulfill({ json: { deleted: id } });
+    }
+    if (p === '/api/communication/talk/conversations') {
+      const own = [{ token: TOKEN, display_name: 'Private chat', type: 2, private: true, last_message: 'Encrypted message',
+        last_message_actor: 'Robin', last_message_actor_id: 'robin', last_message_timestamp: SEC - 30, last_activity: SEC - 30,
+        unread_messages: 0, last_common_read: 0, last_read: 0, can_moderate: true }];
+      return route.fulfill({ json: { status: 'SUCCESS', detail: { conversations: [...own, ...CONVERSATIONS] } } });
+    }
+    if (p === '/api/communication/talk/messages' && url.searchParams.get('token') === TOKEN) {
+      return route.fulfill({ json: { status: 'SUCCESS', detail: { messages: [] } } });
+    }
+    return route.fallback();
+  });
+  // A short passage, as the Bible service answers a single verse.
+  await page.route(/\/api\/bible\/passages/, (route) => route.fulfill({ json: {
+    version: 'tst', requested: 'x', reference: 'Made-up 1:1', spans: [], count: 1,
+    verses: [{ version: 'tst', osis: 'Gen', book_name: 'Genesis', chapter: 1, verse: 1, reference: 'Genesis 1:1',
+      text: 'A made-up verse for the test, about love that is patient and kind.' }],
+  } }));
+}
+
+async function setup(): Promise<{ server: Server; key: CryptoKey }> {
+  const kdf = { salt: toBase64(randomBytes(16)), iterations: PBKDF2_ITERATIONS };
+  const key = await deriveKey(PASSWORD, kdf);
+  const row = async (id: string, kind: string, record: object, by = 'robin'): Promise<SealedRow> => ({
+    id, kind, at: SEC - 3600, updated_at: SEC - 3600, by, own: by === 'parent', by_name: by === 'parent' ? 'Parent' : 'Robin',
+    sealed: await sealRecord(key, record),
+  });
+  const server: Server = {
+    chat: { token: TOKEN, members: ['parent', 'robin'], partner: 'robin', partner_name: 'Robin', created_by: 'robin', created_at: SEC - 86400,
+      version: 1, kdf: { name: 'PBKDF2-SHA256', ...kdf }, verifier: await makeVerifier(key), beloved: true },
+    records: [
+      await row('a'.repeat(32), 'profile', { b: 'profile', wedding: WEDDING, birthdays: { robin: '1990-07-04' } }),
+      await row('c'.repeat(32), 'note', { b: 'note', text: 'Thank you for the coffee this morning.' }),
+    ],
+    sent: [],
+    belovedCalls: 0,
+  };
+  return { server, key };
+}
+
+async function open(page: Page, server: Server, me?: Record<string, unknown>, unlock = true): Promise<Run> {
+  await quietHotReload(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const mocks = await mockHome(page, 'admin');
+  await mockHealth(page);
+  await mockBible(page);
+  await mockFamilyPages(page);
+  await serve(page, server);
+  if (me) await page.route('**/api/users/me', (route) => route.fulfill({ json: me }));
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && /React UI error|Uncaught|is not a function|Cannot read prop/.test(m.text())) errors.push(m.text().slice(0, 400));
+  });
+  await page.goto('/family');
+  await expect(page.getByText('Camping trip planning').first()).toBeVisible();
+  await page.getByRole('button', { name: /Private chat/ }).first().click();
+  if (!unlock) return { mocks, errors, found: [] };
+  await page.getByTestId('private-password').fill(PASSWORD);
+  await page.getByTestId('private-unlock').click();
+  await expect(page.getByTestId('private-chat')).toBeVisible();
+  return { mocks, errors, found: [] };
+}
+
+async function check(page: Page, info: TestInfo, run: Run, where: string, scope: Locator, allowed: Allowed[] = []): Promise<void> {
+  await settle(page);
+  run.found.push(...await screenFindings(page, scope, where, allowed));
+  await shot(page, info, where.replace(/\W+/g, '-'));
+}
+
+function done(run: Run) {
+  expect(run.found, run.found.join('\n')).toEqual([]);
+  expect(run.errors, `page errors: ${run.errors.join(' | ')}`).toEqual([]);
+  expect(run.mocks.unmocked, `unmocked: ${run.mocks.unmocked.join(', ')}`).toEqual([]);
+}
+
+test.describe('Beloved on every form factor', () => {
+  test.describe.configure({ timeout: 180_000 });
+
+  test('home, special days, today, notes and prayer, date ideas, details; sealed throughout and gone on lock', async ({ page }, info) => {
+    const { server, key } = await setup();
+    const run = await open(page, server);
+
+    await page.getByTestId('private-beloved-open').click();
+    const beloved = page.getByTestId('beloved');
+    await expect(beloved).toBeVisible();
+    const home = beloved.getByTestId('beloved-home');
+    await expect(home).toBeVisible();
+    // Both of them, side by side, and how long they have been married.
+    await expect(home.getByRole('img', { name: 'Parent' })).toBeVisible();
+    await expect(home.getByRole('img', { name: 'Robin' })).toBeVisible();
+    await expect(home.getByTestId('beloved-names')).toHaveText('Parent & Robin');
+    await expect(home.getByTestId('beloved-counter')).toContainText('days married');
+    await expect(home.getByTestId('beloved-counter')).toContainText('years');
+    await expect(home.getByTestId('beloved-verse')).toContainText('patient and kind');
+    await expect(home.getByTestId('beloved-latest-note')).toContainText('Thank you for the coffee');
+    await check(page, info, run, 'beloved home', beloved);
+
+    await home.getByTestId('beloved-heart').click();
+    await expect.poll(() => server.records.filter((r) => r.kind === 'heart').length).toBe(1);
+    expect(JSON.parse(server.sent.find((s) => s.path.endsWith('/heart'))!.body).notify).toBe(true);
+
+    // Special days: the anniversary, Robin's birthday, milestones, and one of their own.
+    await beloved.getByTestId('beloved-tab-days').click();
+    const days = beloved.getByTestId('beloved-days');
+    await expect(days.getByText(/wedding anniversary/)).toBeVisible();
+    await expect(days.getByText("Robin's birthday")).toBeVisible();
+    await expect(days.getByText(/days married/).first()).toBeVisible();
+    await days.getByTestId('beloved-day-name').fill('The day we got engaged');
+    await days.getByTestId('beloved-day-date').fill('2015-12-24');
+    await days.getByTestId('beloved-day-add').click();
+    await expect(days.getByText('The day we got engaged')).toBeVisible();
+    await check(page, info, run, 'beloved days', beloved);
+
+    // Today: the verse, a devotion and a question, marked done and answered.
+    await beloved.getByTestId('beloved-tab-today').click();
+    const today = beloved.getByTestId('beloved-today');
+    await expect(today.getByTestId('beloved-verse-text')).toContainText('patient and kind');
+    await expect(today.getByTestId('beloved-reflection')).not.toBeEmpty();
+    await expect(today.getByTestId('beloved-question')).not.toBeEmpty();
+    await today.getByTestId('beloved-answer').fill('Walking together after dinner.');
+    await today.getByTestId('beloved-devotion-done').click();
+    await expect(today.getByTestId('beloved-devotion-done')).toContainText('Done today');
+    await check(page, info, run, 'beloved today', beloved);
+
+    // Notes and prayer.
+    await beloved.getByTestId('beloved-tab-notes').click();
+    const notes = beloved.getByTestId('beloved-notes');
+    await notes.getByTestId('beloved-note-input').fill('Counting the hours until tonight.');
+    await notes.getByTestId('beloved-note-send').click();
+    await expect(notes.getByText('Counting the hours until tonight.')).toBeVisible();
+    await notes.getByTestId('beloved-prayer-input').fill('Wisdom for the new job.');
+    await notes.getByTestId('beloved-prayer-add').click();
+    const prayer = notes.getByTestId('beloved-prayer').filter({ hasText: 'Wisdom for the new job.' });
+    await expect(prayer).toBeVisible();
+    await prayer.getByTestId('beloved-prayed').click();
+    await expect(prayer).toContainText('prayed 1 time');
+    await check(page, info, run, 'beloved notes and prayer', beloved);
+    await prayer.getByTestId('beloved-answered-open').click();
+    await prayer.getByTestId('beloved-answer-how').fill('The offer came on Friday.');
+    await prayer.getByTestId('beloved-answered-save').click();
+    const answered = notes.getByTestId('beloved-answered');
+    await expect(answered).toContainText('The offer came on Friday.');
+    await check(page, info, run, 'beloved answered prayer', beloved);
+
+    // Date ideas: suggest one, then mark it done.
+    await beloved.getByTestId('beloved-tab-dates').click();
+    const dates = beloved.getByTestId('beloved-dates');
+    const idea = dates.getByTestId('beloved-idea').first();
+    const ideaTitle = (await idea.locator('span').nth(1).textContent()) ?? '';
+    await idea.getByTestId('beloved-idea-suggest').click();
+    const suggested = dates.getByTestId('beloved-suggested');
+    await expect(suggested).toContainText(ideaTitle);
+    expect(JSON.parse(server.sent.filter((s) => s.path.endsWith('/idea')).at(-1)!.body).notify).toBe(true);
+    await check(page, info, run, 'beloved date ideas', beloved);
+    await suggested.getByTestId('beloved-idea-done').click();
+    await expect(dates.getByTestId('beloved-idea-had')).toContainText(ideaTitle);
+
+    // Our details: the shared settings sheet.
+    await beloved.getByTestId('beloved-settings-open').click();
+    const sheet = page.getByTestId('beloved-settings');
+    await expect(sheet.getByTestId('beloved-wedding')).toHaveValue(WEDDING);
+    await sheet.getByTestId('beloved-first-date').fill('2014-02-14');
+    await check(page, info, run, 'beloved details', sheet);
+    await sheet.getByTestId('beloved-settings-save').click();
+    await expect(sheet).toHaveCount(0);
+
+    // The server only ever received sealed records: none of what was written is readable in what was sent.
+    const sentText = JSON.stringify(server.sent);
+    for (const secret of ['engaged', '2015-12-24', 'Counting the hours', 'Wisdom for the new job', 'The offer came', 'Walking together',
+      '2014-02-14', WEDDING, ideaTitle]) {
+      expect(sentText, secret).not.toContain(secret);
+    }
+    for (const s of server.sent.filter((x) => x.method !== 'DELETE')) expect(JSON.parse(s.body).sealed).toContain('```jarvis-envelope');
+    // And the records do open with the chat's key, to exactly what was written.
+    const profiles = server.records.filter((r) => r.kind === 'profile');
+    expect(await openRecord(key, profiles[0].sealed)).toMatchObject({ b: 'profile', wedding: WEDDING, firstDate: '2014-02-14' });
+
+    // Going to the background locks the chat: Beloved and everything decrypted are gone.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    await expect(page.getByTestId('beloved')).toHaveCount(0);
+    for (const text of ['Counting the hours', 'Thank you for the coffee', 'Wisdom for the new job', 'days married']) {
+      await expect(page.getByText(text)).toHaveCount(0);
+    }
+    expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  // The app never even asks a non-parent about private chats, so these never reach an unlocked chat.
+  const outsiders: Array<[string, Record<string, unknown>]> = [
+    ['an administrator who is not a parent', { id: 9, username: 'admin', display_name: 'Admin', full_name: 'Admin', role: 'admin',
+      is_admin: true, family_role: 'other', is_minor: false }],
+    ['a teen', { id: 10, username: 'teen', display_name: 'Teen', full_name: 'Teen', role: 'user', is_admin: false, family_role: 'teen', is_minor: true }],
+    ['a child', { id: 11, username: 'kid', display_name: 'Kid', full_name: 'Kid', role: 'user', is_admin: false, family_role: 'child', is_minor: true }],
+  ];
+  for (const [who, me] of outsiders) {
+    test(`never shows Beloved to ${who}`, async ({ page }) => {
+      const { server } = await setup();
+      const run = await open(page, server, me, false);
+      await expect(page.getByTestId('private-lock')).toBeVisible();
+      await expect(page.getByTestId('private-beloved-open')).toHaveCount(0);
+      await expect(page.getByText('Beloved', { exact: true })).toHaveCount(0);
+      // Not even asked for: nothing about it reaches the server either.
+      expect(server.belovedCalls).toBe(0);
+      done(run);
+    });
+  }
+
+  test('never shows Beloved to an administrator father who is not one of the couple, even with the chat unlocked', async ({ page }) => {
+    const { server } = await setup();
+    const run = await open(page, server, { id: 12, username: 'otherdad', display_name: 'Other Dad', full_name: 'Other Dad', role: 'admin',
+      is_admin: true, family_role: 'father', is_minor: false });
+    await expect(page.getByTestId('private-gallery-open')).toBeVisible();
+    await expect(page.getByTestId('private-beloved-open')).toHaveCount(0);
+    expect(server.belovedCalls).toBe(0);
+    done(run);
+  });
+});

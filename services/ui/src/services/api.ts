@@ -10,6 +10,7 @@ import { isUnreachable, recallPassage, rememberPassage, withOfflineCopy, type Of
 import type { FamilyMember } from '../components/chat/familyDirectory';
 import type { PrivateChatInfo, PrivateChatStatus } from '../components/chat/privateChatModel';
 import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto';
+import type { BelovedKind, BelovedOverview, SealedRecord } from '../lib/beloved/records';
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import { Capacitor } from '@capacitor/core';
@@ -3652,6 +3653,27 @@ export const api = {
   async nudgePrivateChat(token: string): Promise<{ nudged: string[]; next_in: number }> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/nudge`);
     return resp.data;
+  },
+
+  // --- Beloved (the couple's page in the private chat; sealed records only) ---
+
+  async getBeloved(token: string): Promise<BelovedOverview> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved`);
+    return resp.data;
+  },
+
+  async addBelovedRecord(token: string, kind: BelovedKind, sealed: string, notify = false): Promise<SealedRecord & { notified: boolean }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}`, { sealed, notify });
+    return resp.data;
+  },
+
+  async replaceBelovedRecord(token: string, kind: BelovedKind, id: string, sealed: string): Promise<SealedRecord> {
+    const resp = await apiClient.put(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`, { sealed });
+    return resp.data;
+  },
+
+  async deleteBelovedRecord(token: string, kind: BelovedKind, id: string): Promise<void> {
+    await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/beloved/${kind}/${encodeURIComponent(id)}`);
   },
 
   /** A chat attachment's bytes (or its thumbnail), fetched as the caller. */
