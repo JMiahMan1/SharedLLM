@@ -570,3 +570,12 @@ def test_the_settings_key_the_voice_picker_saves_is_the_one_read_at_start():
     from services import config
 
     assert '"system_default_tts_voice": "DEFAULT_TTS_VOICE"' in inspect.getsource(config)
+
+
+def test_a_request_that_names_no_voice_speaks_with_jarvis_s_voice():
+    """The voice satellites and announcements name no voice: the request must not
+    fill one in, or the Settings choice never reaches them (it used to default to af_heart)."""
+    from services.execution.schemas import TTSRequest, UserContext
+
+    req = TTSRequest(user_context=UserContext(user="household"), text="The lamp is off.")
+    assert req.voice is None
