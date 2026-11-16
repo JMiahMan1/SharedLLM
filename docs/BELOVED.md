@@ -16,6 +16,7 @@ chat is unlocked.
 | **Today** | A verse (fetched from the family's Bible service), a short devotion and prayer, and a question to talk about together. Each spouse can mark it done and write an answer the other can read. The same content shows on both phones for a given calendar day. |
 | **Notes** | Love notes (the other spouse is told one arrived) and prayer requests for each other, with "Prayed for this" counts and answered-prayer tracking (with how it was answered). |
 | **Dates** | 54 date night ideas (at home, out, outdoors, serving together, faith), a fresh handful each day; tap one to suggest it to your spouse, mark it done, or suggest your own. |
+| **Just us** | The couple's own private calendar (a moon on the tab). See below. |
 | **Our details** | Wedding date, first date, both birthdays, what the couple calls themselves, the cover photo, and this phone's reminder setting. |
 
 Content (`services/ui/src/lib/beloved/content.ts`): 64 devotions (so the
@@ -67,10 +68,10 @@ Beloved uses the private chat's end-to-end encryption unchanged
   note, a prayer, an answer, a date idea choice or the cover photo.
 - **Kinds**: `profile` (wedding and first date, birthdays, title, cover photo
   pointer), `day`, `note`, `heart`, `prayer`, `devotion` (one per spouse per
-  day), `idea`. The kind is visible to the server (it has to name a notice);
-  the contents are not. Notes, hearts and devotion answers can be changed or
-  removed only by their author; profile, days, prayers and ideas by either
-  spouse. At most 5,000 records per kind per couple.
+  day), `idea`, and Just us's `together` and `plan`. The kind is visible to
+  the server (it has to name a notice); the contents are not. Notes, hearts,
+  devotion answers and marked days can be changed or removed only by their
+  author; profile, days, prayers, ideas and plans by either spouse. At most 5,000 records per kind per couple.
 - **The cover photo** is encrypted on the device and kept as an opaque blob in
   the chat's blob store, exactly like a private chat picture.
 - **Opened only while the chat is unlocked**: Beloved lives inside the unlocked
@@ -112,6 +113,52 @@ phone schedules them itself:
   that phone, and the web app has none. A day added on one spouse's phone is
   scheduled on the other's the next time they open Beloved. A server-side
   fallback was not built: it would have to learn at least the dates.
+
+## Just us
+
+A private calendar for husband and wife, on its own tab, discreetly named.
+It exists only inside the unlocked private chat: nothing about it shows on
+Beloved's home page, on the chat bar's heart, in a notice or in a reminder.
+
+- **Mark a day**: one tap on "We were together" marks today, or tap a day on
+  the calendar to mark it, with an optional private note. Either spouse can
+  mark; both see it; each can remove only their own (`together` records are
+  author-only on the server).
+- **Last time**: how many days since the last marked day, and how many days
+  were marked this month and this year (a day both of them marked counts
+  once). A month calendar (arrows, or swipe on a phone) shows a small heart on
+  marked days and an outline on planned ones. No charts.
+- **Plan an evening**: a day, an optional time, an optional idea (a candlelit
+  dinner at home, a night away at a hotel, a no-phones evening and a few
+  more, nothing explicit) and an optional note. The other spouse is told
+  "Something from Sam is waiting" and nothing else. Either spouse can mark a
+  plan done once its day has come (which marks that day) or cancel it
+  (removes it).
+- **Remind me after**: per phone, off by default (3, 5, 7, 10 or 14 days).
+  This phone reminds its owner once, at 19:00, that many days after the last
+  marked day; marking a day moves it. A reminder already past is not
+  scheduled again, so it never nags. The choice is kept only on the phone
+  (`localStorage`), never sent anywhere.
+- **Reminders for plans**: both phones remind their owner on the morning of
+  a plan (08:00, or an hour before an earlier time), scheduled the same way as
+  special days (the next time Beloved is opened on that phone).
+
+Privacy, on top of everything above:
+
+- **Every reminder from this tab is generic, always**: title "Jarvis", text
+  "A little reminder for the two of you.", whatever "Show what the day is in
+  reminders" says. They share the "Special days" channel.
+- **Kinds named to say nothing**: the server sees only `together` and `plan`
+  with who and when; the day, time, idea and note are sealed. The plan notice
+  says only that something is waiting, and a marked day makes no notice at
+  all. The server's log line for an unreadable record names its id, never its
+  kind.
+- **Not counted by the bar's heart** (`unseenLove` counts hearts and notes
+  only) and **not previewed on the home page**.
+- Files: `lib/beloved/justus.ts` (with `justus.test.ts`),
+  `components/chat/beloved/JustUsSection.tsx`; the e2e test in
+  `e2e/layout/beloved.spec.ts` checks that nothing typed or picked, and no
+  revealing word, reaches the server or a reminder in clear.
 
 ## Android
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { BookHeart, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, NotebookPen, Settings2, Sparkles, Trash2, X } from 'lucide-react';
+import { BookHeart, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, Moon, NotebookPen, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../../services/api';
 import { IMAGE_TYPES, type PrivateVault } from '../../../lib/privateChatCrypto';
@@ -8,6 +8,7 @@ import { countdownLabel, dayLabel, dayNumber, durationLabel, elapsed, grouped, l
 import { dailyContent } from '../../../lib/beloved/content';
 import { specialDays } from '../../../lib/beloved/days';
 import { planReminders, reminderDetails, setReminderDetails } from '../../../lib/beloved/reminders';
+import { nudgeAfter, planPrivateReminders, setNudgeAfter } from '../../../lib/beloved/justus';
 import type { ProfileRecord } from '../../../lib/beloved/records';
 import { syncReminders, type ReminderState } from '../../../plugins/belovedReminders';
 import UserAvatar from '../../UserAvatar';
@@ -16,10 +17,11 @@ import { errorText } from '../privateChatModel';
 import { noSave, usePrivatePicture } from '../usePrivatePicture';
 import { Lily, Pomegranate, Vine } from './BelovedArt';
 import { DatesSection, DaysSection, NotesSection, TodaySection } from './BelovedSections';
+import { JustUsSection } from './JustUsSection';
 import { Card, Field } from './BelovedUi';
 import { useBeloved, useVerse, type BelovedData } from './useBeloved';
 
-type Tab = 'home' | 'days' | 'today' | 'notes' | 'dates';
+type Tab = 'home' | 'days' | 'today' | 'notes' | 'dates' | 'justus';
 
 const TABS: ReadonlyArray<{ id: Tab; label: string; icon: typeof Heart }> = [
   { id: 'home', label: 'Us', icon: Heart },
@@ -27,6 +29,7 @@ const TABS: ReadonlyArray<{ id: Tab; label: string; icon: typeof Heart }> = [
   { id: 'today', label: 'Today', icon: BookHeart },
   { id: 'notes', label: 'Notes', icon: NotebookPen },
   { id: 'dates', label: 'Dates', icon: HeartHandshake },
+  { id: 'justus', label: 'Just us', icon: Moon },
 ];
 
 /**
@@ -41,6 +44,7 @@ export default function BelovedPage({ token, vault, onClose }: { token: string; 
   const [tab, setTab] = useState<Tab>('home');
   const [editing, setEditing] = useState(false);
   const [reminders, setReminders] = useState<ReminderState | null>(null);
+  const [nudge, setNudge] = useState(nudgeAfter);
   const today = localToday();
   const todayKey = `${today.y}-${today.m}-${today.d}`;
   const days = useMemo(
@@ -53,13 +57,16 @@ export default function BelovedPage({ token, vault, onClose }: { token: string; 
   useEffect(() => {
     if (data.loading) return;
     let live = true;
-    void syncReminders(planReminders(days, Date.now(), reminderDetails())).then((state) => {
+    // One list for the phone (each sync replaces the last): "Just us" first, always generic, then the special days.
+    const now = Date.now();
+    const list = [...planPrivateReminders(data.view, now, localToday(), nudge), ...planReminders(days, now, reminderDetails())];
+    void syncReminders(list).then((state) => {
       if (live) setReminders(state);
     });
     return () => {
       live = false;
     };
-  }, [days, data.loading]);
+  }, [days, data.loading, data.view, nudge]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -99,7 +106,7 @@ export default function BelovedPage({ token, vault, onClose }: { token: string; 
           <Settings2 size={18} />
         </button>
       </div>
-      <nav className="grid shrink-0 grid-cols-5 gap-1 border-b border-rose-300/10 px-1.5 py-1" aria-label="Beloved sections">
+      <nav className="grid shrink-0 grid-cols-6 gap-1 border-b border-rose-300/10 px-1.5 py-1" aria-label="Beloved sections">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -139,8 +146,19 @@ export default function BelovedPage({ token, vault, onClose }: { token: string; 
             <TodaySection data={data} today={today} />
           ) : tab === 'notes' ? (
             <NotesSection data={data} />
-          ) : (
+          ) : tab === 'dates' ? (
             <DatesSection data={data} />
+          ) : (
+            <JustUsSection
+              data={data}
+              today={today}
+              nudge={nudge}
+              reminders={reminders}
+              onNudge={(after) => {
+                setNudgeAfter(after);
+                setNudge(after);
+              }}
+            />
           )}
         </div>
       </div>

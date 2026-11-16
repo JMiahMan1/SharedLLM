@@ -212,3 +212,85 @@ def test_hearts_are_kept_but_announced_at_most_once_a_minute(couple):
     assert second.status_code == 200 and second.json()["notified"] is False
     assert len(couple["notices"]) == 1
     assert len(couple["client"].get(BASE, headers=_as("sam")).json()["records"]) == 2
+
+
+# --- Just us: the couple's private calendar --------------------------------------
+
+#: Words that must never reach a lock screen, a log line or anything a notice carries.
+REVEALING = ("intima", "sex", "night", "together", "bed", "romanc", "romantic")
+
+
+def test_the_private_calendar_kinds_are_kept_sealed(couple):
+    for kind in ("together", "plan"):
+        resp = _add(couple, kind)
+        assert resp.status_code == 200, resp.text
+        saved = json.loads((couple["root"] / "beloved" / TOKEN / kind / f"{resp.json()['id']}.json").read_text())
+        assert set(saved) == {"id", "kind", "by", "at", "updated_at", "updated_by", "sealed"}
+    kinds = sorted(r["kind"] for r in couple["client"].get(BASE, headers=_as("sam")).json()["records"])
+    assert kinds == ["plan", "together"]
+
+
+@pytest.mark.parametrize("caller", NOT_THE_COUPLE)
+@pytest.mark.parametrize("kind", ["together", "plan"])
+def test_the_private_calendar_is_a_404_for_everyone_else(couple, caller, kind):
+    c = couple["client"]
+    record = _add(couple, kind).json()["id"]
+    answers = [
+        c.get(BASE, headers=_as(caller)),
+        c.post(f"{BASE}/{kind}", json={"sealed": _envelope(), "notify": True}, headers=_as(caller)),
+        c.put(f"{BASE}/{kind}/{record}", json={"sealed": _envelope()}, headers=_as(caller)),
+        c.delete(f"{BASE}/{kind}/{record}", headers=_as(caller)),
+    ]
+    for resp in answers:
+        assert resp.status_code == 404, (caller, resp.status_code, resp.text)
+        assert resp.json()["detail"] == "Not available."
+        assert kind not in resp.text
+    assert couple["notices"] == []
+    assert (couple["root"] / "beloved" / TOKEN / kind / f"{record}.json").is_file()
+
+
+def test_a_marked_day_is_only_its_authors_but_a_plan_is_either_spouses(couple):
+    c = couple["client"]
+    marked = _add(couple, "together").json()["id"]
+    assert c.put(f"{BASE}/together/{marked}", json={"sealed": _envelope()}, headers=_as("sam")).status_code == 403
+    assert c.delete(f"{BASE}/together/{marked}", headers=_as("sam")).status_code == 403
+    assert c.delete(f"{BASE}/together/{marked}", headers=_as("alex")).status_code == 200
+    plan = _add(couple, "plan").json()["id"]
+    done = c.put(f"{BASE}/plan/{plan}", json={"sealed": _envelope(ct=bytes(60))}, headers=_as("sam"))
+    assert done.status_code == 200 and done.json()["own"] is False
+    assert c.delete(f"{BASE}/plan/{plan}", headers=_as("sam")).status_code == 200
+
+
+def test_a_plan_tells_the_other_spouse_only_that_something_is_waiting(couple):
+    assert _add(couple, "plan", user="sam", notify=True).json()["notified"] is True
+    [notice] = couple["notices"]
+    assert notice["user"] == "alex"
+    assert notice["category"] == "nudge"
+    assert notice["title"] == "Beloved"
+    assert notice["body"] == "Something from Sam is waiting"
+    assert "token" not in notice["data"]
+    text = json.dumps(notice).lower()
+    for word in REVEALING:
+        assert word not in text, word
+
+
+def test_plans_are_announced_at_most_once_in_half_a_minute(couple):
+    assert _add(couple, "plan", notify=True).json()["notified"] is True
+    assert _add(couple, "plan", notify=True).json()["notified"] is False
+    assert len(couple["notices"]) == 1
+
+
+def test_a_marked_day_is_never_announced(couple):
+    assert _add(couple, "together", notify=True).json()["notified"] is False
+    assert couple["notices"] == []
+
+
+def test_an_unreadable_record_is_logged_without_its_kind(couple, caplog):
+    folder = couple["root"] / "beloved" / TOKEN / "together"
+    folder.mkdir(parents=True)
+    (folder / f"{'e' * 32}.json").write_text("{not json")
+    with caplog.at_level("WARNING", logger="gateway.beloved"):
+        assert couple["client"].get(BASE, headers=_as("alex")).status_code == 200
+    assert "unreadable record" in caplog.text
+    for word in REVEALING:
+        assert word not in caplog.text.lower(), word
