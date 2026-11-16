@@ -242,7 +242,22 @@ export function prayedCount(record: PrayerRecord): number {
   return Object.values(record.prayed ?? {}).reduce((sum, times) => sum + times.length, 0);
 }
 
-/** Hearts from the other spouse since a moment (seconds), for the small indicator. */
-export function heartsSince(view: BelovedView, since: number): number {
-  return view.hearts.filter((h) => !h.own && h.at > since).length + view.notes.filter((n) => !n.own && n.at > since).length;
+/** What the bar's heart counts: a heart or a love note. */
+const LOVE_KINDS: ReadonlySet<BelovedKind> = new Set(['heart', 'note']);
+
+type Stamped = Pick<SealedRecord, 'kind' | 'own' | 'at'>;
+
+/**
+ * Hearts and love notes from the other spouse newer than `seen` (the server's
+ * seconds), for the heart on the private chat bar. Only the kind, the sender
+ * and the time are read, which the server lists in the clear, so nothing is
+ * decrypted to count them.
+ */
+export function unseenLove(records: readonly Stamped[], seen: number): number {
+  return records.filter((r) => !r.own && LOVE_KINDS.has(r.kind) && r.at > seen).length;
+}
+
+/** The newest heart or note from the other spouse (server seconds), 0 when there is none. */
+export function latestLove(records: readonly Stamped[]): number {
+  return records.reduce((max, r) => (!r.own && LOVE_KINDS.has(r.kind) && r.at > max ? r.at : max), 0);
 }

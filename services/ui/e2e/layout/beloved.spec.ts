@@ -155,9 +155,17 @@ test.describe('Beloved on every form factor', () => {
     const { server, key } = await setup();
     const run = await open(page, server);
 
+    // The heart on the bar: Robin's note has not been seen yet.
+    const indicator = page.getByTestId('private-love-indicator');
+    await expect(indicator).toHaveText('1');
+    await expect(page.getByTestId('private-beloved-open')).toHaveAttribute('aria-label', 'Beloved, 1 new from Robin');
+    await check(page, info, run, 'private chat bar with a heart', page.getByTestId('private-chat'));
+
     await page.getByTestId('private-beloved-open').click();
     const beloved = page.getByTestId('beloved');
     await expect(beloved).toBeVisible();
+    // Seen once Beloved opens; your own heart below never lights it.
+    await expect(indicator).toHaveCount(0);
     const home = beloved.getByTestId('beloved-home');
     await expect(home).toBeVisible();
     // Both of them, side by side, and how long they have been married.
@@ -173,6 +181,16 @@ test.describe('Beloved on every form factor', () => {
     await home.getByTestId('beloved-heart').click();
     await expect.poll(() => server.records.filter((r) => r.kind === 'heart').length).toBe(1);
     expect(JSON.parse(server.sent.find((s) => s.path.endsWith('/heart'))!.body).notify).toBe(true);
+    await beloved.getByRole('button', { name: 'Close Beloved' }).click();
+    await expect(beloved).toHaveCount(0);
+    await expect(page.getByTestId('private-beloved-open')).toHaveAttribute('aria-label', 'Beloved');
+    await expect(indicator).toHaveCount(0);
+    // A new heart from Robin lights it again on the next check (every 30 seconds).
+    server.records.push({ ...server.records[1], id: 'd'.repeat(32), kind: 'heart', at: Math.floor(Date.now() / 1000) + 5 });
+    await expect(indicator).toHaveText('1', { timeout: 40_000 });
+    await page.getByTestId('private-beloved-open').click();
+    await expect(beloved).toBeVisible();
+    await expect(indicator).toHaveCount(0);
 
     // Special days: the anniversary, Robin's birthday, milestones, and one of their own.
     await beloved.getByTestId('beloved-tab-days').click();

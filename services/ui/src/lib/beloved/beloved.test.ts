@@ -15,7 +15,7 @@ import {
 } from './dates';
 import { DATE_IDEAS, DEVOTIONS, QUESTIONS, dailyContent, fetchRef } from './content';
 import { specialDays } from './days';
-import { buildView, markPrayed, prayedCount, readRecord, type Opened, type BelovedRecord, type BelovedKind } from './records';
+import { buildView, latestLove, markPrayed, prayedCount, readRecord, unseenLove, type Opened, type BelovedRecord, type BelovedKind } from './records';
 import { GENERIC_SOON, GENERIC_TITLE, GENERIC_TODAY, MAX_REMINDERS, planReminders, reminderId } from './reminders';
 import { canSeeBeloved } from './access';
 import { PrivateVault, readSealed, sealRecord, openRecord, randomBytes } from '../privateChatCrypto';
@@ -213,6 +213,28 @@ describe('records', () => {
     expect(await vault.openRecord(await vault.sealRecord({ b: 'heart' }))).toEqual({ b: 'heart' });
     vault.lock();
     await expect(vault.sealRecord({ b: 'heart' })).rejects.toThrow('locked');
+  });
+});
+
+describe('the heart on the chat bar', () => {
+  const rows = [
+    { kind: 'heart' as const, own: false, at: 100 },
+    { kind: 'note' as const, own: false, at: 200 },
+    { kind: 'heart' as const, own: true, at: 300 },
+    { kind: 'prayer' as const, own: false, at: 400 },
+    { kind: 'day' as const, own: false, at: 500 },
+  ];
+
+  it('counts only hearts and notes from the other spouse, after what was seen', () => {
+    expect(unseenLove(rows, 0)).toBe(2);
+    expect(unseenLove(rows, 100)).toBe(1);
+    expect(unseenLove(rows, 200)).toBe(0);
+    expect(unseenLove([], 0)).toBe(0);
+  });
+
+  it('remembers the newest one from the other spouse, never your own or other kinds', () => {
+    expect(latestLove(rows)).toBe(200);
+    expect(latestLove([{ kind: 'heart', own: true, at: 900 }])).toBe(0);
   });
 });
 

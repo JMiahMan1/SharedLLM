@@ -17,6 +17,7 @@ import PrivateCamera from './PrivateCamera';
 import PrivateGallery from './PrivateGallery';
 import BelovedPage from './beloved/BelovedPage';
 import { Lily } from './beloved/BelovedArt';
+import { useLoveIndicator } from './beloved/useLoveIndicator';
 import { canSeeBeloved } from '../../lib/beloved/access';
 import { noSave, usePrivatePicture } from './usePrivatePicture';
 import EnvelopeBody from './EnvelopeBody';
@@ -355,6 +356,13 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
   // A heart or love note notice opens the chat with ?beloved=1: straight to Beloved once unlocked.
   const [beloved, setBeloved] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('beloved') === '1');
+  // The heart on the bar: hearts and love notes from your spouse you have not seen in Beloved yet.
+  const love = useLoveIndicator(token, belovedAllowed);
+  const { markSeen } = love;
+  useEffect(() => {
+    // Whatever arrives while Beloved is open is seen there.
+    if (beloved && belovedAllowed) markSeen();
+  }, [beloved, belovedAllowed, markSeen]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -524,12 +532,24 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           <button
             type="button"
             onClick={() => setBeloved(true)}
-            aria-label="Beloved"
-            title="Beloved"
+            aria-label={love.unseen ? `Beloved, ${love.unseen} new from ${partnerName}` : 'Beloved'}
+            title={love.unseen ? `${love.unseen} new from ${partnerName}` : 'Beloved'}
             data-testid="private-beloved-open"
-            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/10"
+            className="relative flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/10"
           >
             <Lily size={15} /> <span className="hidden sm:inline">Beloved</span>
+            {love.unseen > 0 && (
+              <span
+                className="pointer-events-none absolute right-0.5 top-0.5 flex items-center"
+                data-testid="private-love-indicator"
+                aria-hidden
+              >
+                <Heart size={16} className="fill-rose-500 text-rose-400 drop-shadow motion-safe:animate-[nudge-beat_1.6s_ease-in-out_infinite]" />
+                <span className="absolute inset-0 flex items-center justify-center pb-px text-[9px] font-bold leading-none text-white">
+                  {love.unseen > 9 ? '9+' : love.unseen}
+                </span>
+              </span>
+            )}
           </button>
         )}
         <button
