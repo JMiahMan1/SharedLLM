@@ -137,6 +137,7 @@ class Backends:
         self.reply, self.ask_error, self.ask_delay, self.speak_error = reply, ask_error, ask_delay, speak_error
         self.asked: list[tuple[str, dict]] = []
         self.spoken: list[str] = []
+        self.voices: list[str | None] = []
 
     def install(self, monkeypatch):
         monkeypatch.setattr(voice_pipeline, "BACKENDS", voice_pipeline.Backends(
@@ -155,6 +156,7 @@ class Backends:
         if self.speak_error:
             raise self.speak_error
         self.spoken.append(text)
+        self.voices.append(voice)
         return URL
 
 
@@ -266,6 +268,22 @@ async def test_happy_path_sends_the_whole_event_sequence(env, monkeypatch):
     assert {"listen", "stt", "intent", "tts", "total"} <= set(status["last_run"]["timings_ms"])
     assert status["runs"] == 1 and status["last_error"] is None
     assert "weather" not in json.dumps(status) and "sunny" not in json.dumps(status)  # no transcripts kept
+    await drv.async_unload()
+
+
+async def test_the_reply_is_spoken_in_the_voice_the_gateway_chose(env, monkeypatch):
+    """The gateway names the person's own voice (the recognised speaker's, else the
+    satellite owner's); with none, the hub's setting, else Jarvis's (None)."""
+    reply = voice_pipeline.Reply("It is sunny.")
+    reply.voice = "piper:en_US-hfc_male-medium"
+    be = Backends(reply=reply).install(monkeypatch)
+    _hub, drv = make_driver()
+    await drv.async_setup()
+    await run_turn(drv, drv._client, [_silence(0.3), _tone(1.0), _silence(1.0)])
+    assert be.voices == ["piper:en_US-hfc_male-medium"]
+    be.reply = "It is sunny."  # no voice chosen: Jarvis's own
+    await run_turn(drv, drv._client, [_silence(0.3), _tone(1.0), _silence(1.0)])
+    assert be.voices[-1] is None
     await drv.async_unload()
 
 

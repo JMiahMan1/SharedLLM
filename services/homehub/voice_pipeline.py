@@ -373,6 +373,14 @@ class WyomingSTT:
                 await writer.wait_closed()
 
 
+class Reply(str):
+    """Jarvis's answer, with the voice to say it in when the gateway chose one:
+    the recognised speaker's own, else the satellite owner's (their settings).
+    None is Jarvis's voice. A plain ``str`` subclass, so a reply is still text."""
+
+    voice: str | None = None
+
+
 def chat_reply_text(body: Any) -> str | None:
     """The reply in a gateway ``/api/chat`` answer (Ollama, OpenAI or plain ``message``)."""
     if not isinstance(body, dict):
@@ -409,7 +417,10 @@ async def ask_jarvis(settings: VoiceSettings, text: str, context: dict[str, Any]
     reply = chat_reply_text(data)
     if not reply:
         raise PipelineError("intent-failed", "Jarvis answered with no text")
-    return reply
+    out = Reply(reply)
+    voice = data.get("voice") if isinstance(data, dict) else None
+    out.voice = voice.strip() if isinstance(voice, str) and voice.strip() else None
+    return out
 
 
 async def make_speech(text: str, voice: str | None) -> str:
@@ -953,7 +964,9 @@ class SatelliteVoice:
             self._event(run, VoiceAssistantEventType.VOICE_ASSISTANT_TTS_START, {"text": reply})
             run.mark("tts")
             try:
-                url = await BACKENDS.speak(reply, settings.tts_voice)
+                # The person's own voice when the gateway chose one, else the hub's
+                # setting, else (None) Jarvis's.
+                url = await BACKENDS.speak(reply, getattr(reply, "voice", None) or settings.tts_voice)
             except (HubError, OSError) as exc:
                 raise PipelineError("tts-failed", f"Jarvis's voice could not speak the reply: {exc}") from exc
             run.mark("spoken")

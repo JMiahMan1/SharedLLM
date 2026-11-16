@@ -2132,6 +2132,19 @@ async def set_tts_default_voice(body: dict):
     return {"status": "SUCCESS", "default": voice}
 
 
+@app.post("/execute/tts/server")
+async def set_speech_server(body: dict):
+    """alpaca's audio server changed in Settings (speech_server_url, saved in identity):
+    send speech there from now on, without a restart. Empty speaks here."""
+    from services import config
+    url = str(body.get("url") or "").strip().rstrip("/")
+    if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?", url):
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
+    config.SPEECH_SERVER_URL = url
+    log.info("[tts] speech is now spoken %s", f"by {url}" if url else "here")
+    return {"status": "SUCCESS", "url": url}
+
+
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""

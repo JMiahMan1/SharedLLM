@@ -69,7 +69,7 @@ class ResolvedCredentials(BaseModel):
     skylight_email: str | None = None
     skylight_pass: str | None = None
     skylight_enabled: bool = True
-    preferred_tts_voice: str | None = "af_heart"
+    preferred_tts_voice: str | None = None
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
     # Where each shared-able service's credentials came from:
     #   "own"     -> this user's own entry
@@ -134,7 +134,7 @@ class UserCreate(BaseModel):
     skylight_email: str | None = None
     skylight_pass: str | None = None
     skylight_enabled: bool = True
-    preferred_tts_voice: str | None = "af_heart"
+    preferred_tts_voice: str | None = None
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
 
 
@@ -287,7 +287,7 @@ class UserRead(BaseModel):
     #: and they have it on), "off" (they turned it off) or "not_set_up".
     skylight_status: str | None = None
     voice_fingerprint: str | None = None
-    preferred_tts_voice: str | None = "af_heart"
+    preferred_tts_voice: str | None = None
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
     api_key: str | None = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses.

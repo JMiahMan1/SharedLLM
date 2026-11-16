@@ -159,6 +159,9 @@ ASSISTANT_MODEL = os.getenv("ASSISTANT_MODEL")
 CODING_MODEL = os.getenv("CODING_MODEL")
 LIBRARIAN_MODEL = os.getenv("LIBRARIAN_MODEL")
 DEFAULT_TTS_VOICE = os.getenv("DEFAULT_TTS_VOICE")
+# alpaca's audio server, which speaks every voice Jarvis uses (Kokoro and Piper);
+# the speech_server_url setting (Admin > Raven > Spoken replies) overrides it.
+SPEECH_SERVER_URL = (os.getenv("SPEECH_SERVER_URL") or os.getenv("KOKORO_GPU_URL") or "").strip().rstrip("/")
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT")
 WORKSPACE_REGISTRY_PATH = os.getenv("WORKSPACE_REGISTRY_PATH")
 WORKSPACE_DATABASE_URL = os.getenv("WORKSPACE_DATABASE_URL")
@@ -368,6 +371,7 @@ async def resolve_runtime_config():
         "coding_model": "CODING_MODEL",
         "librarian_model": "LIBRARIAN_MODEL",
         "default_tts_voice": "DEFAULT_TTS_VOICE",
+        "speech_server_url": "SPEECH_SERVER_URL",
         # The key the Settings voice picker saves (Admin > Raven > Spoken replies).
         "system_default_tts_voice": "DEFAULT_TTS_VOICE",
         "workspace_root": "WORKSPACE_ROOT",
