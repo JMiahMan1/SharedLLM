@@ -3619,9 +3619,17 @@ def get_settings(
         for s in settings:
             if s.key == "llm_cloud_api_key" and s.value:
                 s.value = "sk-***"
-            if s.key == "spotify_client_secret" and s.value:
+            if s.key in _MASKED_SETTINGS and s.value:
                 s.value = "***"
     return settings
+
+#: Global settings that are secrets: shown to the UI as "***" only, and a
+#: write of "***" back (an editor saving the masked value) keeps the secret.
+_MASKED_SETTINGS = {"spotify_client_secret", "malwarebazaar_auth_key"}
+
+
+def _keeps_masked(key: str, value: str | None) -> bool:
+    return key in _MASKED_SETTINGS and (value or "").strip() == "***"
 
 # Keys that must never be written with a blank/empty value.
 # The UI dropdowns are always populated with real values, so a blank write
@@ -3646,6 +3654,8 @@ def update_settings_bulk(
                 status_code=400,
                 detail=f"Model setting '{key}' cannot be blank. Select a valid model from the dropdown."
             )
+        if _keeps_masked(key, value):
+            continue
         setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if not setting:
             setting = GlobalSetting(key=key, value=value)
@@ -3670,6 +3680,8 @@ def get_setting(
     # Mask sensitive keys for non-internal (UI) requests
     if not _matches_internal_secret(x_internal_secret) and key == "llm_cloud_api_key" and setting.value:
         setting.value = "sk-***"
+    if not _matches_internal_secret(x_internal_secret) and key in _MASKED_SETTINGS and setting.value:
+        setting.value = "***"
 
     return setting
 
@@ -3682,6 +3694,11 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
         )
 
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+    if _keeps_masked(key, body.value):
+        # The editor sent the mask back: the secret is kept as it is.
+        if setting is None:
+            raise HTTPException(status_code=400, detail=f"'{key}' is a secret; send its value, not the mask")
+        return GlobalSettingRead(key=key, value="***", description=setting.description)
     if not setting:
         setting = GlobalSetting(key=key, value=body.value)
     else:
@@ -3690,6 +3707,8 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
     session.add(setting)
     session.commit()
     session.refresh(setting)
+    if key in _MASKED_SETTINGS:
+        return GlobalSettingRead(key=key, value="***" if setting.value else "", description=setting.description)
     return setting
 
 class _SeedRequest(BaseModel):
