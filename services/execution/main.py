@@ -2111,12 +2111,19 @@ async def execute_index_capabilities():
 
 
 # Infrastructure Endpoints
+def _tts_default_voice() -> str:
+    """Jarvis's voice, as resolved at start (the identity setting, else .env, else Kokoro's af_heart)."""
+    from services import config
+    return config.DEFAULT_TTS_VOICE or "af_heart"
+
+
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""
-    from services.execution.tts import get_tts_engine
-    engine = get_tts_engine()
-    return {"status": "SUCCESS", "voices": engine.list_voices()}
+    from services.execution.tts import featured_voices, list_voices
+    voices = await list_voices()
+    return {"status": "SUCCESS", "voices": voices, "featured": featured_voices(voices),
+            "default": _tts_default_voice()}
 
 @app.post("/execute/tts/download")
 async def download_tts_voice(voice_type: str = "kokoro-v1.0"):

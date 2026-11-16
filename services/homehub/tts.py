@@ -83,9 +83,18 @@ def _required_env(name: str) -> str:
     return value
 
 
+#: A Piper voice on execution's Piper server (``piper:en_US-hfc_male-medium``).
+PIPER_PREFIX = "piper:"
+
+
 def is_kokoro_voice(voice: str | None) -> bool:
-    """No voice (the default) or a Kokoro voice id or blend; anything else names a cloned voice."""
-    return not voice or bool(_KOKORO_VOICE.match(voice.replace(" ", "")))
+    """A voice execution speaks: none (Jarvis's own), a Kokoro id or blend, or ``piper:<name>``.
+
+    Anything else names a cloned voice on alpaca.
+    """
+    if not voice or voice.strip().startswith(PIPER_PREFIX):
+        return True
+    return bool(_KOKORO_VOICE.match(voice.replace(" ", "")))
 
 
 def _alpaca_url() -> str:
@@ -153,6 +162,11 @@ async def synthesize(text: str, voice: str | None = None) -> bytes:
 
 
 async def kokoro_voices() -> list[str]:
+    return (await _engine_voices())[0]
+
+
+async def _engine_voices() -> tuple[list[str], str | None]:
+    """Execution's voices (Kokoro's and Piper's) and Jarvis's default voice."""
     url = _required_env("EXECUTION_SVC_URL").rstrip("/") + "/execute/tts/voices"
     headers = {"X-Internal-Secret": _required_env("INTERNAL_SECRET")}
     try:
@@ -164,7 +178,8 @@ async def kokoro_voices() -> list[str]:
     names = data.get("voices") if isinstance(data, dict) else None
     if not isinstance(names, list):
         raise HubError(f"Jarvis's speech engine did not list its voices: {data}")
-    return [str(v) for v in names]
+    default = data.get("default") if isinstance(data.get("default"), str) else None
+    return [str(v) for v in names], default
 
 
 async def voices() -> dict[str, Any]:
@@ -176,20 +191,27 @@ async def voices() -> dict[str, Any]:
     """
     out: list[dict[str, Any]] = []
     errors: dict[str, str] = {}
+    default: str | None = DEFAULT_VOICE
     try:
-        out.extend({"id": v, "name": v, "kind": "kokoro"} for v in await kokoro_voices())
+        names, default = await _engine_voices()
+        default = default or DEFAULT_VOICE
+        out.extend({"id": v, "name": v, "kind": "piper" if v.startswith(PIPER_PREFIX) else "kokoro"} for v in names)
     except HubError as exc:
         errors["kokoro"] = str(exc)
     try:
         out.extend({"id": p["id"], "name": p["name"], "kind": "clone"} for p in await clone_profiles())
     except HubError as exc:
         errors["clone"] = str(exc)
-    return {"voices": out, "default": DEFAULT_VOICE, "errors": errors}
+    return {"voices": out, "default": default, "errors": errors}
 
 
 async def synthesize_kokoro(text: str, voice: str | None = None) -> bytes:
     url = _required_env("EXECUTION_SVC_URL").rstrip("/") + "/execute/tts"
-    body = {"user_context": {"user": "household"}, "text": text, "voice": voice or DEFAULT_VOICE}
+    # No voice means Jarvis's own: execution's default voice setting decides, so the satellites,
+    # announcements and the app all speak with the one voice an admin chose.
+    body: dict[str, Any] = {"user_context": {"user": "household"}, "text": text}
+    if voice:
+        body["voice"] = voice.strip()
     headers = {"X-Internal-Secret": _required_env("INTERNAL_SECRET")}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=SYNTH_TIMEOUT_S)) as s, \

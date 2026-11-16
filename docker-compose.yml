@@ -176,6 +176,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - LLM_URL=${LLM_URL}
       - NETWORK_MODE=host
+      - PIPER_TTS=${PIPER_TTS:-127.0.0.1:10200}
       - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
       # Telemetry keeps a fixed bridge address (it publishes no host port);
       # reachable from this host-networked container for the activity feed
@@ -1025,6 +1026,23 @@ services:
       - --data-dir=/data
     volumes:
       - ./data/whisper:/data
+
+  piper:
+    # Piper voices for Jarvis ("piper:<voice>" wherever a voice is taken; see
+    # services/execution/piper_tts.py). Home Assistant's Piper add-on spoke with
+    # en_US-hfc_male-medium: the same engine, prebuilt upstream image. Execution
+    # reaches it at PIPER_TTS (127.0.0.1:10200 by default). Voices live in
+    # ./data/piper as <voice>.onnx plus <voice>.onnx.json.
+    image: rhasspy/wyoming-piper:2.5.3
+    container_name: sharedllm_piper
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --uri=tcp://127.0.0.1:10200
+      - --voice=${PIPER_VOICE:-en_US-hfc_male-medium}
+      - --data-dir=/data
+    volumes:
+      - ./data/piper:/data
 
   redis:
     image: redis:7-alpine

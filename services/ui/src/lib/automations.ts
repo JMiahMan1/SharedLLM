@@ -211,11 +211,11 @@ export async function exportYaml(kind: ItemKind, id?: string): Promise<{ yaml: s
   return (await apiClient.get(`${BASE}/export`, { params: id ? { kind, id } : { kind } })).data;
 }
 
-/** A voice `tts.speak` takes in `options.voice`: one of Jarvis's Kokoro voices, or a cloned voice on alpaca. */
+/** A voice `tts.speak` takes in `options.voice`: one of Jarvis's Kokoro or Piper voices, or a cloned voice on alpaca. */
 export interface TtsVoice {
   id: string;
   name: string;
-  kind: 'kokoro' | 'clone';
+  kind: 'kokoro' | 'piper' | 'clone';
 }
 
 export interface TtsVoices {

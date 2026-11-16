@@ -42,4 +42,24 @@ describe('RavenOpsPanel', () => {
     expect(screen.queryByText(/Sentinel Compliance/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Manual Correction/i)).not.toBeInTheDocument();
   });
+
+  it('offers the featured voices by name, ahead of the full list', async () => {
+    server.use(
+      http.get('/api/admin/raven/tts/voices', () => HttpResponse.json({
+        status: 'SUCCESS',
+        voices: ['af_heart', 'bm_george', 'piper:en_US-test-medium'],
+        featured: [
+          { id: 'bm_fable,bm_lewis,bm_george', name: 'Parable Party announcer' },
+          { id: 'piper:en_US-test-medium', name: 'en_US-test-medium (Piper)' },
+        ],
+      })),
+    );
+    renderWithProviders(<RavenOpsPanel />);
+    const announcer = await screen.findByRole('option', { name: 'Parable Party announcer' });
+    expect(announcer).toHaveValue('bm_fable,bm_lewis,bm_george');
+    expect(screen.getByRole('option', { name: 'en_US-test-medium (Piper)' })).toHaveValue('piper:en_US-test-medium');
+    // A featured voice is listed once, under Featured, not again under All voices.
+    expect(screen.queryByRole('option', { name: 'piper:en_US-test-medium' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'bm_george' })).toBeInTheDocument();
+  });
 });

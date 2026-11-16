@@ -3907,7 +3907,7 @@ export const api = {
     return data;
   },
 
-  getRavenVoices: async (): Promise<{ status: string, voices: string[] }> => {
+  getRavenVoices: async (): Promise<{ status: string, voices: string[], featured?: { id: string, name: string }[], default?: string }> => {
     const { data } = await apiClient.get('/api/admin/raven/tts/voices');
     return data;
   },

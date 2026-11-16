@@ -48,6 +48,7 @@ export default function RavenOpsPanel() {
 
   const { data: voicesRes } = useQuery({ queryKey: ['raven-voices'], queryFn: () => api.getRavenVoices() });
   const voices = voicesRes?.voices || [];
+  const featured = voicesRes?.featured || [];
 
   const refreshMissions = () => queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
 
@@ -225,10 +226,18 @@ export default function RavenOpsPanel() {
               disabled={!voices.length || updateConfigMutation.isPending}
               className="glass-input w-full min-h-11 bg-black/30 text-sm"
             >
-              {!voices.includes(current.system_default_tts_voice) && (
+              {!voices.includes(current.system_default_tts_voice)
+                && !featured.some((f) => f.id === current.system_default_tts_voice) && (
                 <option value={current.system_default_tts_voice}>{current.system_default_tts_voice}</option>
               )}
-              {voices.map((v) => <option key={v} value={v}>{v}</option>)}
+              {featured.length > 0 && (
+                <optgroup label="Featured">
+                  {featured.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </optgroup>
+              )}
+              <optgroup label="All voices">
+                {voices.filter((v) => !featured.some((f) => f.id === v)).map((v) => <option key={v} value={v}>{v}</option>)}
+              </optgroup>
             </select>
           </label>
           <button

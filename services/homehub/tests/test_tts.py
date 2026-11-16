@@ -1,6 +1,8 @@
 """tts.speak / tts.piper: Jarvis's voice, served from the hub, played on the speaker."""
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -263,3 +265,72 @@ def test_the_voices_route_needs_a_principal(tmp_path, monkeypatch):
     assert client.get("/api/homehub/automations/voices").status_code == 401
     r = client.get("/api/homehub/automations/voices", headers={"Authorization": "Bearer s"})
     assert r.status_code == 200 and r.json()["voices"][0]["id"] == "af_heart"
+
+
+def test_a_piper_voice_is_spoken_by_execution_not_taken_for_a_clone():
+    assert tts.is_kokoro_voice("piper:en_US-hfc_male-medium")
+    assert tts.is_kokoro_voice(" piper:en_GB-alan-low")
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.status = 200
+        self._payload = payload
+
+    async def json(self, content_type=None):
+        return self._payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    """Stands in for aiohttp.ClientSession: records each request, answers from ``replies`` by method."""
+
+    sent: ClassVar[list] = []
+    replies: ClassVar[dict] = {}
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, json=None, headers=None):
+        _FakeSession.sent.append(("POST", url, json))
+        return _FakeResponse(_FakeSession.replies["POST"])
+
+    def get(self, url, headers=None):
+        _FakeSession.sent.append(("GET", url, None))
+        return _FakeResponse(_FakeSession.replies["GET"])
+
+
+@pytest.fixture
+def fake_session(monkeypatch):
+    monkeypatch.setenv("EXECUTION_SVC_URL", "http://execution.example.test:8003")
+    monkeypatch.setenv("INTERNAL_SECRET", "s")
+    monkeypatch.setattr(tts.aiohttp, "ClientSession", _FakeSession)
+    _FakeSession.sent = []
+    _FakeSession.replies = {}
+    return _FakeSession
+
+
+async def test_the_editor_lists_piper_voices_and_jarvis_s_own_default(fake_session):
+    fake_session.replies["GET"] = {"voices": ["af_heart", "piper:en_US-test-medium"], "default": "bm_fable,bm_lewis"}
+    names, default = await tts._engine_voices()
+    assert default == "bm_fable,bm_lewis"
+    assert names == ["af_heart", "piper:en_US-test-medium"]
+
+
+async def test_no_voice_leaves_the_choice_to_jarvis_s_default(fake_session):
+    fake_session.replies["POST"] = {"detail": {"audio_base64": "UklGRg=="}}
+    await tts.synthesize("Hello", None)
+    await tts.synthesize("Hello", "piper:en_US-test-medium")
+    assert "voice" not in fake_session.sent[0][2]
+    assert fake_session.sent[1][2]["voice"] == "piper:en_US-test-medium"

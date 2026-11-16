@@ -519,7 +519,7 @@ function VoicePicker({ value, disabled, onChange }: { value: string; disabled: b
     return () => { live = false; };
   }, []);
   const list = voices?.voices ?? [];
-  const kokoro = list.filter((v) => v.kind === 'kokoro');
+  const kokoro = list.filter((v) => v.kind !== 'clone');
   const clones = list.filter((v) => v.kind === 'clone');
   const problems = [
     failed,

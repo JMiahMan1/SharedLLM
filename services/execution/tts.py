@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from services.config import DEFAULT_TTS_VOICE, MODELS_DIR
+from services import config as _config
+from services.config import MODELS_DIR
+from services.execution import piper_tts
 
 if TYPE_CHECKING:
     pass  # pyright: ignore[reportMissingImports,reportUnusedImport]
@@ -29,6 +31,11 @@ log = logging.getLogger("execution.tts")
 # is the phonemizer's own business.
 PAUSE_STRUCTURE = 0.55  # seconds of silence after titles/headers, list items, and references
 SAMPLE_RATE_HZ = 24000
+#: Voices worth naming in the voice pickers, by id. The Parable Party announcer is alpaca's
+#: game-show voice (``arcade/announcer.py``), a blend of three British Kokoro voices.
+FEATURED_VOICES = {"bm_fable,bm_lewis,bm_george": "Parable Party announcer"}
+#: The storybook needs Kokoro voices; it narrates with this one when the default voice is Piper's.
+KOKORO_FALLBACK_NARRATOR = "bm_george"
 KOKORO_CONFIG_FILENAME = "vocab-v1.0.json"  # pykokoro 0.10 refuses to load v1.0 without it
 
 # Internal marker used to flag narrator-structure boundaries (paragraph
@@ -219,7 +226,7 @@ class KokoroTTSEngine:
         self._ensure_loaded()
 
         if not voice:
-            voice = DEFAULT_TTS_VOICE or "af_heart"
+            voice = _config.DEFAULT_TTS_VOICE or "af_heart"
 
         if storybook:
             return await self._generate_storybook(text, voice)
@@ -553,6 +560,34 @@ async def text_to_speech(text: str, voice: str | None = None, storybook: bool = 
     makes the queue explicit rather than leaving it to chance.
     """
     engine = get_tts_engine()
+    chosen = voice or _config.DEFAULT_TTS_VOICE
+    if piper_tts.is_piper_voice(chosen):
+        if not storybook:
+            # Piper is its own server, so Kokoro's lock is not needed. Our pause marks and SSMD
+            # are not Piper's: a break becomes a comma, and numbers and scripture are worded
+            # the same way they are for Kokoro.
+            spoken = engine._normalize_text(_translate_ssmd(text).replace(_PAUSE_MARK, ", "))
+            return await piper_tts.synthesize(spoken, str(chosen))
+        # A storybook casts several Kokoro voices; with a Piper default it narrates in Kokoro's.
+        voice = KOKORO_FALLBACK_NARRATOR
     async with _SYNTH_LOCK:
         return await engine.generate(text, voice, storybook=storybook)
+
+
+def featured_voices(voices: list[str]) -> list[dict[str, str]]:
+    """The named presets, then every Piper voice (Piper is a different engine, so each is worth a name)."""
+    out = [{"id": v, "name": name} for v, name in FEATURED_VOICES.items()]
+    out += [{"id": v, "name": f"{piper_tts.voice_name(v)} (Piper)"} for v in voices if piper_tts.is_piper_voice(v)]
+    return out
+
+
+async def list_voices() -> list[str]:
+    """Every voice Jarvis can speak with: Kokoro's, then Piper's (``piper:<name>``) when it is set up."""
+    voices = list(get_tts_engine().list_voices())
+    if piper_tts.SERVER:
+        try:
+            voices.extend(await piper_tts.list_voices())
+        except piper_tts.PiperError as exc:
+            log.warning("[tts] Piper voices not listed: %s", exc)
+    return voices
 
