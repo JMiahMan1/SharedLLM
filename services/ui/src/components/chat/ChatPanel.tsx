@@ -19,6 +19,9 @@ import { deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { privatePreviewPlugin } from '../../plugins/privatePreview';
 import { forgetLockAfter, lockNow } from '../../lib/privateChatSession';
 import { errorText, mayUsePrivateChat } from './privateChatModel';
+import { chatShortcutPlugin, chatShortcutSupported } from '../../plugins/chatShortcut';
+import { CHAT_SHORTCUT_GONE, chatShortcutId, chatShortcutRequest, chatShortcutTarget, type ChatShortcutTarget } from './chatShortcut';
+import { avatarIconPng } from '../../lib/avatarIcon';
 import ConversationAvatar from './ConversationAvatar';
 import VerseBanner from './VerseBanner';
 import { verseShareText } from '../../lib/verseShare';
@@ -109,6 +112,9 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
 
   const {
     data: conversations = EMPTY_ARRAY,
+    dataUpdatedAt: conversationsAt,
+    isSuccess: conversationsLoaded,
+    isPlaceholderData: conversationsStale,
     isFetching: loadingConversations,
     isError: conversationsError,
     error: conversationsErrorObj,
@@ -188,6 +194,39 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
     mayUsePrivateChat(me) &&
     privateStatus.data?.eligible && privateStatus.data.partners.length > 0 && privateStatus.data.chats.length === 0,
   );
+
+  // "Add to home screen": the Android app only, and only where the launcher pins shortcuts.
+  const shortcutSupport = useQuery({
+    queryKey: ['chat-shortcut-supported'],
+    queryFn: () => chatShortcutSupported(),
+    enabled: Boolean(chatShortcutPlugin()),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const shortcutTarget = shortcutSupport.data
+    ? chatShortcutTarget({ conversation: activeConversation, people, privateInfo, mayUsePrivate: mayUsePrivateChat(me) })
+    : null;
+  const addToHome = useMutation({
+    mutationFn: async (target: ChatShortcutTarget) => {
+      const plugin = chatShortcutPlugin();
+      if (!plugin) throw new Error('Home screen shortcuts need the Jarvis app');
+      // The same cached picture the chat draws (fetched now if it never was).
+      const icon = await avatarIconPng(target.avatar, () =>
+        queryClient.fetchQuery({
+          queryKey: ['avatar-image', target.username, target.avatar],
+          queryFn: () => api.getAvatarImage(target.username ?? '', target.avatar),
+          staleTime: Infinity,
+        }),
+      );
+      return plugin.pin(chatShortcutRequest(target, icon));
+    },
+    onSuccess: (result) => {
+      if (result.updated) toast.success('Home screen shortcut updated');
+      else if (result.requested) toast.success('Added to home screen');
+      else toast.error('This home screen cannot add shortcuts');
+    },
+    onError: (error: Error) => toast.error(error.message || 'Could not add it to the home screen'),
+  });
 
   const [sendAs, setSendAs] = useConversationSendAs(isAdmin, activeToken);
   const asUser = sendAs === 'admin' ? ('admin' as const) : undefined;
@@ -338,16 +377,33 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
   // drop the parameter so going back to the list is not undone.
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedToken = searchParams.get('chat');
+  // The conversation a link asked for, until a list fetched after it says whether it still exists.
+  const [linked, setLinked] = useState<{ token: string; at: number } | null>(null);
   useEffect(() => {
     if (!linkedToken) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- following the link
     setSelectedToken(linkedToken);
+    setLinked({ token: linkedToken, at: Date.now() });
     setMobileView('thread');
     setSearchParams((params) => {
       params.delete('chat');
       return params;
     }, { replace: true });
   }, [linkedToken, setSearchParams]);
+
+  // A link (a home-screen shortcut, an old notification) to a conversation that is
+  // gone, or that this account cannot see any more: back to the list with a word,
+  // never an empty thread, and its shortcut is greyed out.
+  useEffect(() => {
+    if (!linked || !conversationsLoaded || conversationsStale || loadingConversations || conversationsAt < linked.at) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the link has been checked
+    setLinked(null);
+    if (conversations.some((c) => c.token === linked.token)) return;
+    toast.error(CHAT_SHORTCUT_GONE);
+    setSelectedToken((current) => (current === linked.token ? '' : current));
+    setMobileView('list');
+    void chatShortcutPlugin()?.disable({ id: chatShortcutId(linked.token), message: CHAT_SHORTCUT_GONE }).catch(() => {});
+  }, [linked, conversations, conversationsLoaded, conversationsStale, loadingConversations, conversationsAt]);
 
   // Tell the phone which conversation is on screen, so it does not notify
   // about messages being read as they arrive.
@@ -1007,7 +1063,14 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
           myActorIds={myActorIds}
           isDefault={defaultToken === activeConversation.token}
           onToggleDefault={() => setDefault.mutate(defaultToken === activeConversation.token ? null : activeConversation.token)}
+          homeShortcut={
+            shortcutTarget && shortcutTarget.token === activeConversation.token
+              ? { onAdd: () => addToHome.mutate(shortcutTarget), busy: addToHome.isPending }
+              : undefined
+          }
           onGone={() => {
+            // Its home-screen shortcut stays, greyed out, and says why.
+            void chatShortcutPlugin()?.disable({ id: chatShortcutId(activeConversation.token), message: CHAT_SHORTCUT_GONE }).catch(() => {});
             // A deleted private chat takes this phone's unlock key with it.
             if (activeConversation.private) {
               lockNow(activeConversation.token);
