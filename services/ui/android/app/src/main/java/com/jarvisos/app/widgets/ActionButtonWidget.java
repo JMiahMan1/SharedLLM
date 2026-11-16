@@ -70,22 +70,24 @@ public class ActionButtonWidget extends AppWidgetProvider {
     static RemoteViews build(Context context, int appWidgetId) {
         String[] shown = new String[2];
         RemoteViews base = buildBase(context, appWidgetId, shown);
+        ActionButtonConfig cfg = ActionButtonConfig.load(context, appWidgetId);
+        final boolean tile = cfg != null && cfg.iconBg != 0;
         // Before Android 12 there are no sizes: a typical 1x1 cell.
-        WidgetFit fit = WidgetFit.of(base).fallback(v -> apply(v, ActionButtonFit.of(72, 88, shown[0], shown[1])));
+        WidgetFit fit = WidgetFit.of(base).fallback(v -> apply(v, ActionButtonFit.of(72, 88, shown[0], shown[1]), tile));
         for (float[] size : SIZES) {
             ActionButtonFit f = ActionButtonFit.of(size[0], size[1], shown[0], shown[1]);
-            fit.at(size[0], size[1], base, v -> apply(v, f));
+            fit.at(size[0], size[1], base, v -> apply(v, f, tile));
         }
         return fit.build();
     }
 
-    /** Size the button and show the name and state as {@code f} says. */
-    private static void apply(RemoteViews v, ActionButtonFit f) {
+    /** Size the icon and show the name and state as {@code f} says. */
+    private static void apply(RemoteViews v, ActionButtonFit f, boolean tile) {
         v.setViewVisibility(R.id.action_label, f.label ? View.VISIBLE : View.GONE);
         if (!f.state) v.setViewVisibility(R.id.action_state, View.GONE);
         if (f.smallText) v.setTextViewTextSize(R.id.action_label, android.util.TypedValue.COMPLEX_UNIT_SP, 10);
         v.setInt(R.id.action_label, "setMaxLines", Math.max(2, f.lines));
-        int pad = px(f.glyphPad);
+        int pad = px(tile ? f.glyphPad : f.bareGlyphPad);
         v.setViewPadding(R.id.action_icon, pad, pad, pad, pad);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             WidgetFit.sizeDp(v, R.id.action_button, f.button, f.button);
@@ -111,26 +113,24 @@ public class ActionButtonWidget extends AppWidgetProvider {
         WidgetStyle st = WidgetStyle.of(context);
         ActionButtonConfig cfg = ActionButtonConfig.load(context, appWidgetId);
         int background = cfg == null ? 0 : cfg.iconBg;
-        paintCard(views, st, background);
-        // On the bare wallpaper the name is white (with the layout's shadow); on a card, the theme's ink.
-        st.text(views, R.id.action_label, background == 0 ? 0xFFFFFFFF : st.text);
+        paintTile(views, st, background);
+        // The name sits on the wallpaper like an app's: white with the layout's shadow.
+        st.text(views, R.id.action_label, 0xFFFFFFFF);
         if (cfg == null) {
             setLabel(views, "Set up", "Tap to choose a device");
-            setState(views, "Tap to choose", st.muted);
-            views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes("settings"));
-            paintButton(views, st, false);
+            setState(views, "Tap to choose", STATE_TEXT);
+            paintGlyph(context, views, st, "settings", background, false);
             views.setOnClickPendingIntent(R.id.action_root,
                 WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
             return views;
         }
-        views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(cfg.icon));
         final String label = cfg.displayLabel(null);
         setLabel(views, label, "");
-        setState(views, "", st.muted);
-        paintButton(views, st, false);
+        setState(views, "", STATE_TEXT);
+        paintGlyph(context, views, st, cfg.icon, background, false);
         try {
             if (WidgetApi.apiKey(context) == null) {
-                setState(views, "Sign in", st.muted);
+                setState(views, "Sign in", STATE_TEXT);
                 setLabel(views, label, "Sign in");
                 views.setOnClickPendingIntent(R.id.action_root, WidgetUpdater.openAppPendingIntent(context));
                 return views;
@@ -140,9 +140,9 @@ public class ActionButtonWidget extends AppWidgetProvider {
             String state = e != null ? EntityNames.text(e, "state") : "";
             boolean on = EntityStates.active(state);
             String shown = e == null ? "Not found" : EntityStates.pretty(cfg.domain(), state);
-            setState(views, shown, on ? st.accent : st.muted);
+            setState(views, shown, on ? st.accent : STATE_TEXT);
             setLabel(views, label, shown);
-            paintButton(views, st, on);
+            paintGlyph(context, views, st, cfg.icon, background, on);
             String resolvedState = e != null ? EntityNames.text(e, "state") : "off";
             String service = WidgetApi.resolveService(cfg.service, cfg.domain(), resolvedState.isEmpty() ? "off" : resolvedState);
             android.app.PendingIntent pi;
@@ -165,27 +165,77 @@ public class ActionButtonWidget extends AppWidgetProvider {
         return views;
     }
 
+    /** The state line on the wallpaper: white, a little softer than the name. */
+    private static final int STATE_TEXT = 0xE6FFFFFF;
+
     /**
-     * The card the person picked when configuring: "None" (0) is no card at
-     * all, the button and its name on the wallpaper like an app icon; a colour
-     * is a card of that colour.
+     * The tile behind the glyph: none for "None" (0), else a rounded square in
+     * the chosen colour, like a launcher icon. The widget itself draws nothing.
      */
-    private static void paintCard(RemoteViews views, WidgetStyle st, int iconBg) {
+    private static void paintTile(RemoteViews views, WidgetStyle st, int iconBg) {
+        views.setInt(R.id.action_root, "setBackgroundResource", 0);
         if (iconBg == 0) {
-            views.setInt(R.id.action_root, "setBackgroundResource", 0);
+            views.setInt(R.id.action_button, "setBackgroundResource", 0);
             return;
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            st.card(views, R.id.action_root); // no runtime tint before Android 12: the theme's card
-            return;
+        views.setInt(R.id.action_button, "setBackgroundResource", R.drawable.wg_icon_tile);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            views.setColorStateList(R.id.action_button, "setBackgroundTintList",
+                    android.content.res.ColorStateList.valueOf(iconBg));
+        } else {
+            st.fill(views, R.id.action_button, R.drawable.wg_tile, st.tile);
         }
-        views.setInt(R.id.action_root, "setBackgroundResource", R.drawable.wg_card_solid);
-        views.setColorStateList(R.id.action_root, "setBackgroundTintList", android.content.res.ColorStateList.valueOf(iconBg));
     }
 
-    /** The round button: accent-filled while on, a quiet tile while off. */
-    private static void paintButton(RemoteViews views, WidgetStyle st, boolean on) {
-        st.fill(views, R.id.action_icon, R.drawable.wg_circle, on ? st.accent : st.tile);
-        st.icon(views, R.id.action_icon, on ? st.onAccent : st.text);
+    /**
+     * The glyph: white while off and the theme's accent while on. On a tile it
+     * is the plain icon; on the bare wallpaper it is drawn with a soft shadow
+     * (as launchers draw icon labels), since a white glyph alone disappears on a
+     * light wallpaper and RemoteViews cannot give an ImageView a shadow.
+     */
+    private static void paintGlyph(Context context, RemoteViews views, WidgetStyle st, String icon, int iconBg, boolean on) {
+        int color = on ? st.accent : 0xFFFFFFFF;
+        if (iconBg != 0) {
+            views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(icon));
+            st.icon(views, R.id.action_icon, color);
+            return;
+        }
+        android.graphics.Bitmap glyph = shadowedGlyph(context, icon, color);
+        if (glyph == null) {
+            views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(icon));
+            st.icon(views, R.id.action_icon, color);
+            return;
+        }
+        views.setInt(R.id.action_icon, "setColorFilter", 0);
+        views.setImageViewBitmap(R.id.action_icon, glyph);
+    }
+
+    /** The bitmap side, in px; fitCenter scales it to the icon's size. */
+    private static final int GLYPH_PX = 192;
+
+    static android.graphics.Bitmap shadowedGlyph(Context context, String icon, int color) {
+        android.graphics.drawable.Drawable d = MaterialIcons.drawable(context, icon);
+        if (d == null) return null;
+        d = d.mutate();
+        d.setTint(color);
+        // A margin all round so the shadow is not cut off; the glyph stays centred.
+        int margin = Math.round(GLYPH_PX * 0.08f);
+        android.graphics.Bitmap glyph = android.graphics.Bitmap.createBitmap(GLYPH_PX, GLYPH_PX, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas c = new android.graphics.Canvas(glyph);
+        d.setBounds(margin, margin, GLYPH_PX - margin, GLYPH_PX - margin);
+        d.draw(c);
+        android.graphics.Paint blur = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        blur.setMaskFilter(new android.graphics.BlurMaskFilter(GLYPH_PX * 0.035f, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        int[] offset = new int[2];
+        android.graphics.Bitmap alpha = glyph.extractAlpha(blur, offset);
+        android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(GLYPH_PX, GLYPH_PX, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas oc = new android.graphics.Canvas(out);
+        android.graphics.Paint shadow = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        shadow.setColor(0x80000000);
+        oc.drawBitmap(alpha, offset[0], offset[1] + GLYPH_PX * 0.012f, shadow);
+        oc.drawBitmap(glyph, 0, 0, null);
+        alpha.recycle();
+        glyph.recycle();
+        return out;
     }
 }

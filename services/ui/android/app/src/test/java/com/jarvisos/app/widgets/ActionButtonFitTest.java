@@ -13,9 +13,11 @@ public class ActionButtonFitTest {
     public void theButtonFillsMostOfAOneCellWidget() {
         ActionButtonFit f = ActionButtonFit.of(72, 88, "Garage", "Closed");
         assertTrue(f.label);
-        // Most of the cell's width is the button, and the glyph most of the button.
+        // Most of the cell's width is the icon; on a tile the glyph is a launcher icon's
+        // share of it, and with no tile the glyph is the whole icon.
         assertTrue(f.button >= 0.7f * 72);
-        assertTrue(f.glyphPad * 2 <= f.button * 0.4f);
+        assertEquals(Math.round(f.button * 0.2f), f.glyphPad, 0.01f);
+        assertEquals(0f, f.bareGlyphPad, 0.01f);
     }
 
     @Test

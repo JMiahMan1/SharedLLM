@@ -31,16 +31,19 @@ final class ActionButtonFit {
     /** The on/off line shows only while the button still fills this share of the cell. */
     static final float STATE_SHARE = 0.8f;
     /**
-     * The glyph's share of the button. Material icons keep a margin inside
-     * their own 24dp box (the shape is about 20dp), so this leaves the drawn
-     * shape at about 60% of the circle.
+     * The glyph's share of the icon box. On a coloured tile it is a launcher
+     * icon's proportion (about 60% of the tile); with no tile the glyph is the
+     * whole icon, so it fills the box (its bitmap keeps its own margin for the
+     * shadow, and Material icons a little inside their 24dp square).
      */
-    static final float GLYPH = 0.72f;
+    static final float GLYPH = 0.6f;
+    static final float BARE_GLYPH = 1.0f;
     static final float MAX_BUTTON = 132f;
 
     final float button;
-    /** Inner padding around the glyph, dp. */
+    /** Inner padding around the glyph, dp: on a tile, and with no tile. */
     final float glyphPad;
+    final float bareGlyphPad;
     final boolean label;
     final boolean state;
     /** Name lines and whether it uses the smaller size. */
@@ -50,6 +53,7 @@ final class ActionButtonFit {
     private ActionButtonFit(float button, boolean label, boolean state, int lines, boolean smallText) {
         this.button = button;
         this.glyphPad = Math.round(button * (1 - GLYPH) / 2f);
+        this.bareGlyphPad = Math.round(button * (1 - BARE_GLYPH) / 2f);
         this.label = label;
         this.state = state;
         this.lines = lines;
