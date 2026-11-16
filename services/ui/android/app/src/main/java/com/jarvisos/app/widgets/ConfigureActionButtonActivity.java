@@ -374,7 +374,7 @@ public class ConfigureActionButtonActivity extends Activity {
         }
     }
 
-    /** Optional chip color behind the widget icon (0 = transparent / "None"). */
+    /** The card behind the button: 0 ("None") is no card at all, like an app icon on the wallpaper. */
     private void buildIconBgRow() {
         LinearLayout row = findViewById(R.id.icon_bg_row);
         if (row == null) return;
@@ -402,9 +402,9 @@ public class ConfigureActionButtonActivity extends Activity {
                 nbg.setStroke(MaterialIcons.dp(getResources(), 2),
                     selected ? 0xFF4ADE80 : 0xFF64748B);
                 none.setBackground(nbg);
-                none.setContentDescription("None: transparent tile, no background");
+                none.setContentDescription("None: no card, the button on the wallpaper");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    none.setTooltipText("None: transparent tile, no background");
+                    none.setTooltipText("None: no card, the button on the wallpaper");
                 }
                 none.setOnClickListener(v -> {
                     selectedIconBg = 0;
@@ -443,7 +443,7 @@ public class ConfigureActionButtonActivity extends Activity {
         TextView status = findViewById(R.id.icon_bg_selected);
         if (status == null) return;
         if (selectedIconBg == 0) {
-            status.setText("None: transparent tile (icon floats on the wallpaper)");
+            status.setText("None: no card, the button sits on the wallpaper like an app icon");
         } else {
             String name = "Color";
             for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
@@ -452,7 +452,7 @@ public class ConfigureActionButtonActivity extends Activity {
                     break;
                 }
             }
-            status.setText(name + " chip on the dark tile. Tap None for no background");
+            status.setText("A " + name.toLowerCase(java.util.Locale.ROOT) + " card behind the button. Tap None for no card");
         }
     }
 
