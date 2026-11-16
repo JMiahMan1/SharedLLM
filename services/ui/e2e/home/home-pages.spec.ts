@@ -134,6 +134,9 @@ test.describe('home pages', () => {
     await viewer.getByTestId('camera-rotate').click();
     await expect(viewer.getByTestId('camera-rotate')).toHaveAccessibleName(/now 90°/);
     await viewer.getByRole('tab', { name: 'Recordings' }).click();
+    // The timeline is the main view; the list is folded under it.
+    await expect(viewer.getByTestId('timeline-track')).toBeVisible();
+    await viewer.getByText(/^List \(\d+\)$/).click();
     await viewer.getByRole('list', { name: 'Recordings' }).getByRole('button').first().click();
     const video = viewer.locator('video');
     await expect(video).toHaveAttribute('style', /rotate\(90deg\)/);

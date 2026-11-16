@@ -98,6 +98,10 @@ describe('Cameras page', () => {
     renderWithProviders(<Cameras />, { route: '/cameras?camera=camera.backyard_camera_1_fluent' });
     const dialog = await screen.findByRole('dialog', { name: 'Backyard Camera 1' });
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Recordings' }));
+    // The day is a timeline first; the list is folded under it, newest first.
+    expect(await within(dialog).findByRole('slider', { name: 'Recordings timeline' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('list', { name: 'Recordings' })).toBeNull();
+    await userEvent.click(within(dialog).getByText('List (2)'));
     const list = await within(dialog).findByRole('list', { name: 'Recordings' });
     const rows = within(list).getAllByRole('button');
     expect(rows).toHaveLength(2);
@@ -120,7 +124,7 @@ describe('Cameras page', () => {
   it('moves to the previous day and will not go past today', async () => {
     renderWithProviders(<Cameras />, { route: '/cameras?camera=camera.backyard_camera_1_fluent&view=recordings' });
     const dialog = await screen.findByRole('dialog', { name: 'Backyard Camera 1' });
-    await within(dialog).findByRole('list', { name: 'Recordings' });
+    await within(dialog).findByRole('slider', { name: 'Recordings timeline' });
     expect(within(dialog).getByRole('button', { name: 'Next day' })).toBeDisabled();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Previous day' }));
     await waitFor(() => expect(recordingQueries).toHaveLength(2));
