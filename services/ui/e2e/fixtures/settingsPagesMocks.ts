@@ -48,6 +48,7 @@ const ENTITIES = [
 const SETTINGS = [
   { key: 'weather_location', value: JSON.stringify({ name: 'Home farm', latitude: 36.1, longitude: -86.8 }), description: 'Forecast place' },
   { key: 'weather_units', value: 'imperial', description: 'Forecast units' },
+  { key: 'household_device_access', value: 'unlocked', description: 'What a voice satellite may control when it does not recognise who is speaking' },
   { key: 'weather_reminders', value: JSON.stringify([{ id: 'r1', kind: 'freeze', threshold: 32, enabled: true, label: 'Drip the taps' }]) },
   { key: 'default_model', value: 'qwen3:8b', description: 'The model Jarvis uses when nothing else is chosen' },
   { key: 'a_setting_with_a_long_value', value: `${LONG_WORD}${LONG_WORD}`, description: `A description that goes on and on to see how a long line of text wraps on a small phone screen ${LONG_WORD}` },
@@ -311,6 +312,9 @@ const GET: Record<string, unknown> = {
     system_default_tts_voice: 'af_heart', system_default_tts_engine: 'kokoro', raven_max_total_seconds: 1800 },
   '/api/admin/raven/queue': RAVEN_QUEUE,
   '/api/admin/raven/tts/voices': { status: 'success', voices: ['af_heart', 'am_adam', 'bf_emma'] },
+  // Settings > Voice: what anyone may choose, and Jarvis's own.
+  '/api/tts/voices': { status: 'SUCCESS', voices: ['af_heart', 'am_adam', 'bf_emma', 'bm_george', 'piper:en_US-hfc_male-medium'],
+    featured: [{ id: 'bm_fable,bm_lewis,bm_george', name: 'Parable Party announcer' }], default: 'piper:en_US-hfc_male-medium' },
   // Admin: LLM & settings
   '/api/dns': DNS,
   '/api/config/models': { models: ['qwen3:8b', 'qwen2.5-coder:7b', `a-model-with-a-long-name-${LONG_WORD.toLowerCase()}:q4_k_m`] },

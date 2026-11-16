@@ -224,8 +224,17 @@ export interface VoiceCheck {
   is_me: boolean;
 }
 
+/** The voices a person may choose (GET /api/tts/voices), and Jarvis's own. */
+export interface TtsVoices {
+  voices: string[];
+  featured: { id: string; name: string }[];
+  default: string;
+}
+
 export interface UserProfile extends UserProfileRaw {
   full_name?: string;
+  /** The voice Jarvis speaks to this person with; null is Jarvis's own (Settings > Voice). */
+  preferred_tts_voice?: string | null;
   role: 'admin' | 'user';
   is_admin: boolean;
   voice_id?: string | null;
@@ -1444,6 +1453,8 @@ export interface RavenConfig {
   system_default_tts_voice: string;
   system_default_tts_engine: string;
   raven_max_total_seconds?: number;
+  /** alpaca's audio server that speaks every voice; empty speaks on this server. */
+  speech_server_url?: string;
 }
 
 export interface MediaGroup {

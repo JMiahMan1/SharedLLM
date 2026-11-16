@@ -28,6 +28,59 @@ const formatWhen = (iso?: string | null) => {
   return Number.isNaN(parsed) ? iso : new Date(parsed).toLocaleString();
 };
 
+/** What a voice satellite may control when it does not recognise who is speaking. */
+const HOUSEHOLD_CHOICES = [
+  { value: 'unlocked', label: "Every device that isn't locked" },
+  { value: 'none', label: 'Nothing' },
+] as const;
+
+const HouseholdAccess: FC = () => {
+  const queryClient = useQueryClient();
+  const { data: settings, isError } = useQuery({ queryKey: ['global-settings'], queryFn: () => api.getSettings() });
+  const current = settings?.find((s) => s.key === 'household_device_access')?.value ?? 'unlocked';
+  const save = useMutation({
+    mutationFn: (value: string) => api.updateSetting('household_device_access', value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['global-settings'] });
+      toast.success('Saved');
+    },
+    onError: () => toast.error('Not saved. Try again.'),
+  });
+  return (
+    <div className="mb-4 rounded-lg border border-white/5 bg-black/20 p-3" data-testid="household-access">
+      <p id="household-access-label" className="text-sm text-slate-200">
+        When a voice satellite doesn&apos;t recognise who is speaking, it may control
+      </p>
+      {isError ? (
+        <p className="mt-2 text-xs text-amber-300" role="alert">This setting could not be loaded.</p>
+      ) : (
+        <div role="radiogroup" aria-labelledby="household-access-label" className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {HOUSEHOLD_CHOICES.map((choice) => (
+            <button
+              key={choice.value}
+              type="button"
+              role="radio"
+              aria-checked={current === choice.value}
+              disabled={!settings || save.isPending}
+              onClick={() => current !== choice.value && save.mutate(choice.value)}
+              className={`min-h-11 rounded-xl px-3 text-sm font-medium transition-colors disabled:opacity-60 ${
+                current === choice.value
+                  ? 'bg-[var(--site-accent-soft)] text-[var(--site-accent-text)] border border-[var(--site-accent-border)]'
+                  : 'bg-white/5 text-slate-300 hover:bg-white/10'
+              }`}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+        Locked devices always need someone it recognises. A person it recognises can use what their account allows.
+      </p>
+    </div>
+  );
+};
+
 const bypassesLocks = (u: UserProfile) =>
   u.is_admin || u.username.toLowerCase() === 'default' || Boolean(u.permissions?.includes('devices.use_locked'));
 
@@ -116,6 +169,8 @@ export const EntityProtectionPanel: FC<{ users: UserProfile[] }> = ({ users }) =
         assignment naming a normal user grants them nothing. Protected entities also disappear from
         everyone else&apos;s device lists, so an unpermitted user never sees them at all.
       </p>
+
+      <HouseholdAccess />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
         <EntitySearchDropdown

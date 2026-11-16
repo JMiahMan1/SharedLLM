@@ -251,6 +251,31 @@ export default function RavenOpsPanel() {
         {!voices.length && (
           <p className="text-xs text-slate-500">No voices installed yet. Download the voice models (about 320 MB) to choose one.</p>
         )}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <label className="block min-w-0">
+            <span className="text-[10px] text-slate-500 uppercase font-black mb-1 block">Speech server</span>
+            <input
+              type="url"
+              inputMode="url"
+              value={current.speech_server_url ?? ''}
+              onChange={(e) => setDraftConfig({ ...draftConfig, speech_server_url: e.target.value })}
+              placeholder="http://192.168.2.43:8082"
+              data-testid="speech-server-url"
+              className="glass-input w-full min-h-11 bg-black/30 text-sm font-mono"
+            />
+          </label>
+          <button
+            onClick={() => updateConfigMutation.mutate({ speech_server_url: (current.speech_server_url ?? '').trim() })}
+            disabled={draftConfig.speech_server_url == null || updateConfigMutation.isPending}
+            data-testid="speech-server-save"
+            className={`${btn} text-blue-300`}
+          >
+            Save
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">
+          alpaca's audio server on the graphics card speaks every voice, Kokoro and Piper. Leave it empty to speak on this server.
+        </p>
       </div>
 
       <MissionSection icon={<Activity size={16} className="text-orange-400" />} title="Proposed fixes" loading={missionsLoading}

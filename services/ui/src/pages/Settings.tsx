@@ -13,6 +13,7 @@ import ActivitySharingPanel from '../components/settings/ActivitySharingPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
 import AppCleanupPanel from '../components/settings/AppCleanupPanel';
 import MapStylePanel from '../components/settings/MapStylePanel';
+import MyVoicePanel from '../components/settings/MyVoicePanel';
 import MobileMenuPanel from '../components/settings/MobileMenuPanel';
 import NotificationPreferencesPanel from '../components/settings/NotificationPreferencesPanel';
 import PhoneReportsPanel from '../components/settings/PhoneReportsPanel';
@@ -116,6 +117,11 @@ const Settings = () => {
         <SiteThemePanel />
         <MapStylePanel />
         <MobileMenuPanel />
+      </section>
+
+      <section className="space-y-4" aria-labelledby="settings-voice">
+        <h2 id="settings-voice" className="px-1 text-sm font-semibold text-slate-400 uppercase tracking-wider">Voice</h2>
+        <MyVoicePanel />
       </section>
 
       <section className="space-y-4" aria-labelledby="settings-weather">

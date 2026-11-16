@@ -11434,6 +11434,24 @@ async def get_tts_voices(request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.post("/api/tts/sample")
+async def post_tts_sample(request: Request):
+    """Hear a voice before choosing it (Settings > Voice). Signed-in people only."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("user"):
+        raise HTTPException(status_code=401, detail="Sign in first")
+    body = await request.json() if (request.headers.get("content-length") or "0") != "0" else {}
+    voice = str((body or {}).get("voice") or "").strip()[:120]
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/tts/sample",
+            json={"voice": voice},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=60.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.post("/execute/tts/download")
 async def proxy_tts_voice_download(request: Request):
     """Proxy the Kokoro TTS voice-model download to the execution service.

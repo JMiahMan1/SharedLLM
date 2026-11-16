@@ -2132,6 +2132,23 @@ async def set_tts_default_voice(body: dict):
     return {"status": "SUCCESS", "default": voice}
 
 
+#: What a voice says when someone tries it in Settings > Voice.
+VOICE_SAMPLE = "Hi, I'm Jarvis. This is how I'll sound when I talk to you."
+
+
+@app.post("/execute/tts/sample")
+async def tts_sample(body: dict):
+    """A short sample in ``voice`` (or Jarvis's own), for trying a voice before
+    choosing it. Unlike /execute/tts it keeps nothing: no artifact is saved."""
+    import base64
+
+    voice = str(body.get("voice") or "").strip() or None
+    audio = await text_to_speech(VOICE_SAMPLE, voice=voice)
+    if not audio:
+        raise HTTPException(status_code=502, detail="That voice did not speak")
+    return {"audio_base64": base64.b64encode(audio).decode(), "mime_type": "audio/wav"}
+
+
 @app.post("/execute/tts/server")
 async def set_speech_server(body: dict):
     """alpaca's audio server changed in Settings (speech_server_url, saved in identity):
