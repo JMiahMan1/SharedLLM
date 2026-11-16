@@ -103,13 +103,17 @@ export interface InstalledAppRow {
   permissions: string[];
   last_used: number | null;
   size_bytes: number | null;
+  special_access?: string[];
+  apk_sha256?: string | null;
 }
 
-/** What changes the app list: a new or removed app, an update, new permissions.
+/** What changes the app list: a new or removed app, an update, new permissions,
+ *  special access switched on or off, a newly fingerprinted app file.
  *  Last use and size move all the time and are sent with the daily refresh. */
 export function inventoryFingerprint(apps: InstalledAppRow[]): string {
   return apps
-    .map((a) => `${a.package}|${a.last_update ?? ''}|${a.installer ?? ''}|${(a.permissions || []).join(',')}`)
+    .map((a) => `${a.package}|${a.last_update ?? ''}|${a.installer ?? ''}|${(a.permissions || []).join(',')}`
+      + `|${(a.special_access || []).join(',')}|${a.apk_sha256 ?? ''}`)
     .sort()
     .join('\n');
 }

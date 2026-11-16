@@ -1,23 +1,39 @@
 package com.jarvisos.app;
 
+import android.app.admin.DevicePolicyManager;
 import android.app.usage.StorageStats;
 import android.app.usage.StorageStatsManager;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.InstallSourceInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.os.Process;
+import android.provider.Settings;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The apps a person installed on this device, for app vetting on a child's
@@ -28,11 +44,23 @@ import java.util.Map;
  * The web app sends this only from a child's or teen's device (the server
  * refuses anyone else's). Last use and size need usage access; without it
  * they are left out (null), never guessed.
+ *
+ * For the security scan each row also carries the risky capabilities the app
+ * declares or asks for, the special access switched on for it now
+ * (accessibility, device administration, reading notifications), the SHA-1
+ * of its signing certificates, and the SHA-256 of its base APK. The hash is
+ * computed once per app version (cached by lastUpdateTime in
+ * {@link #HASH_PREFS}); a file over {@link AppInventoryRules#APK_MAX_BYTES} is
+ * skipped as "too_large", and at most {@link AppInventoryRules#HASH_BUDGET_BYTES}
+ * are read per report ("deferred" until a later one).
  */
 final class AppInventory {
 
     /** How far back last use is read: Android keeps about two years of usage history. */
     static final long HISTORY_MS = 2L * 365 * 24 * 60 * 60 * 1000;
+
+    /** Where app file hashes are cached: package -> "lastUpdateTime|sha256". */
+    static final String HASH_PREFS = "app_vetting_apk_hashes";
 
     private AppInventory() {}
 
@@ -41,8 +69,17 @@ final class AppInventory {
         long now = System.currentTimeMillis();
         boolean usageAccess = PhoneUsagePlugin.hasUsageAccess(context);
         Map<String, UsageStats> usage = usageAccess ? usage(context, now) : Collections.emptyMap();
+        Map<String, Set<String>> declared = declaredComponents(pm);
+        Set<String> accessibilityOn = AppInventoryRules.packagesIn(secure(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES));
+        Set<String> listenersOn = AppInventoryRules.packagesIn(secure(context, "enabled_notification_listeners"));
+        Set<String> adminsOn = activeAdmins(context);
+        SharedPreferences hashes = context.getSharedPreferences(HASH_PREFS, Context.MODE_PRIVATE);
+        SharedPreferences.Editor hashEdits = hashes.edit();
+        Set<String> listedPackages = new HashSet<>();
+        long[] budget = {AppInventoryRules.HASH_BUDGET_BYTES};
         JSONArray out = new JSONArray();
-        List<PackageInfo> packages = pm.getInstalledPackages(PackageManager.GET_PERMISSIONS);
+        List<PackageInfo> packages = pm.getInstalledPackages(
+                PackageManager.GET_PERMISSIONS | PackageManager.GET_SIGNING_CERTIFICATES);
         for (PackageInfo info : packages) {
             ApplicationInfo app = info.applicationInfo;
             if (app == null || !AppInventoryRules.listed(info.packageName, app.flags, context.getPackageName())) continue;
@@ -65,12 +102,139 @@ final class AppInventory {
                 row.put("last_used", lastUsed == null ? JSONObject.NULL : lastUsed);
                 Long size = usageAccess ? size(context, app) : null;
                 row.put("size_bytes", size == null ? JSONObject.NULL : size);
+
+                Set<String> mine = declared.containsKey(info.packageName)
+                        ? declared.get(info.packageName) : Collections.emptySet();
+                JSONArray caps = new JSONArray();
+                for (String cap : AppInventoryRules.capabilities(requested, mine)) caps.put(cap);
+                row.put("capabilities", caps);
+                JSONArray special = new JSONArray();
+                if (accessibilityOn.contains(info.packageName)) special.put(AppInventoryRules.DECLARES_ACCESSIBILITY);
+                if (adminsOn.contains(info.packageName)) special.put(AppInventoryRules.DECLARES_DEVICE_ADMIN);
+                if (listenersOn.contains(info.packageName)) special.put(AppInventoryRules.DECLARES_NOTIFICATION_LISTENER);
+                row.put("special_access", special);
+                row.put("cert_sha1", certificates(info.signingInfo));
+                listedPackages.add(info.packageName);
+                apkHash(row, app, info, hashes, hashEdits, budget);
                 out.put(row);
             } catch (Exception ignored) {
                 // One app that cannot be read is left out; the rest still report.
             }
         }
+        for (String cachedPackage : hashes.getAll().keySet()) {
+            if (!listedPackages.contains(cachedPackage)) hashEdits.remove(cachedPackage);
+        }
+        hashEdits.apply();
         return out;
+    }
+
+    /** Each package's declared system components (accessibility, notification listener, VPN, device admin). */
+    private static Map<String, Set<String>> declaredComponents(PackageManager pm) {
+        Map<String, Set<String>> out = new HashMap<>();
+        String[][] services = {
+            {AppInventoryRules.DECLARES_ACCESSIBILITY, "android.accessibilityservice.AccessibilityService"},
+            {AppInventoryRules.DECLARES_NOTIFICATION_LISTENER, "android.service.notification.NotificationListenerService"},
+            {AppInventoryRules.DECLARES_VPN, "android.net.VpnService"},
+        };
+        for (String[] kind : services) {
+            try {
+                for (ResolveInfo info : pm.queryIntentServices(new Intent(kind[1]), 0)) {
+                    if (info.serviceInfo != null && AppInventoryRules.declares(kind[0], info.serviceInfo.permission)) {
+                        out.computeIfAbsent(info.serviceInfo.packageName, k -> new HashSet<>()).add(kind[0]);
+                    }
+                }
+            } catch (Exception ignored) {
+                // A query Android refuses leaves that kind out; the rest still report.
+            }
+        }
+        try {
+            Intent admin = new Intent("android.app.action.DEVICE_ADMIN_ENABLED");
+            for (ResolveInfo info : pm.queryBroadcastReceivers(admin, 0)) {
+                if (info.activityInfo != null
+                        && AppInventoryRules.declares(AppInventoryRules.DECLARES_DEVICE_ADMIN, info.activityInfo.permission)) {
+                    out.computeIfAbsent(info.activityInfo.packageName, k -> new HashSet<>())
+                            .add(AppInventoryRules.DECLARES_DEVICE_ADMIN);
+                }
+            }
+        } catch (Exception ignored) {
+            // As above.
+        }
+        return out;
+    }
+
+    private static String secure(Context context, String name) {
+        try {
+            return Settings.Secure.getString(context.getContentResolver(), name);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Set<String> activeAdmins(Context context) {
+        Set<String> out = new HashSet<>();
+        try {
+            DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+            List<ComponentName> admins = dpm == null ? null : dpm.getActiveAdmins();
+            if (admins != null) for (ComponentName admin : admins) out.add(admin.getPackageName());
+        } catch (Exception ignored) {
+            // Unknown: reported as not switched on, never guessed.
+        }
+        return out;
+    }
+
+    /** SHA-1 of each signing certificate (current signers, or the rotation history), uppercase hex. */
+    private static JSONArray certificates(SigningInfo signing) {
+        JSONArray out = new JSONArray();
+        if (signing == null) return out;
+        try {
+            Signature[] signatures = signing.hasMultipleSigners()
+                    ? signing.getApkContentsSigners() : signing.getSigningCertificateHistory();
+            if (signatures == null) return out;
+            for (Signature signature : signatures) {
+                if (out.length() >= AppInventoryRules.MAX_CERTS) break;
+                out.put(AppInventoryRules.hex(MessageDigest.getInstance("SHA-1").digest(signature.toByteArray())));
+            }
+        } catch (Exception ignored) {
+            // No fingerprints: the package name still matches.
+        }
+        return out;
+    }
+
+    /** The base APK's SHA-256, from the cache when this version was hashed before. */
+    private static void apkHash(JSONObject row, ApplicationInfo app, PackageInfo info, SharedPreferences cache,
+                                SharedPreferences.Editor edits, long[] budget) throws Exception {
+        String cached = AppInventoryRules.cachedHash(cache.getString(info.packageName, null), info.lastUpdateTime);
+        if (cached != null) {
+            row.put("apk_sha256", cached);
+            row.put("apk_hash_state", "ok");
+            return;
+        }
+        File apk = app.sourceDir == null ? null : new File(app.sourceDir);
+        if (apk == null || !apk.canRead()) {
+            row.put("apk_sha256", JSONObject.NULL);
+            row.put("apk_hash_state", "unreadable");
+            return;
+        }
+        String plan = AppInventoryRules.hashPlan(apk.length(), budget[0]);
+        if (!AppInventoryRules.HASH_NOW.equals(plan)) {
+            row.put("apk_sha256", JSONObject.NULL);
+            row.put("apk_hash_state", plan);
+            return;
+        }
+        budget[0] -= apk.length();
+        try (InputStream in = new FileInputStream(apk)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) > 0) digest.update(buffer, 0, read);
+            String sha = AppInventoryRules.hex(digest.digest()).toLowerCase(Locale.ROOT);
+            edits.putString(info.packageName, AppInventoryRules.cacheEntry(info.lastUpdateTime, sha));
+            row.put("apk_sha256", sha);
+            row.put("apk_hash_state", "ok");
+        } catch (Exception e) {
+            row.put("apk_sha256", JSONObject.NULL);
+            row.put("apk_hash_state", "unreadable");
+        }
     }
 
     private static Map<String, UsageStats> usage(Context context, long now) {

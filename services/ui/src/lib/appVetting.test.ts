@@ -66,6 +66,12 @@ describe('when the device sends its app list', () => {
     expect(inventoryFingerprint([app('a.b'), app('c.d')])).toBe(inventoryFingerprint([app('c.d'), app('a.b')]));
   });
 
+  it('sends at once when special access is switched on or an app file is newly fingerprinted', () => {
+    expect(inventoryFingerprint([app('a.b', { special_access: ['accessibility'] })]))
+      .not.toBe(inventoryFingerprint([app('a.b')]));
+    expect(inventoryFingerprint([app('a.b', { apk_sha256: 'ab'.repeat(32) })])).not.toBe(inventoryFingerprint([app('a.b')]));
+  });
+
   it('sends on a change, once a day, or for another person', () => {
     const last = { fingerprint: 'x', at: NOW, user: 'kid' };
     expect(shouldSendInventory(null, 'x', 'kid', NOW)).toBe(true);
