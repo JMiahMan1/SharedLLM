@@ -345,14 +345,14 @@ public class LocationTrackingService extends Service {
                 return START_NOT_STICKY;
             }
             if (ACTION_HEARTBEAT.equals(intent.getAction())) {
-                startForegroundCompat();
+                if (!startForegroundCompat()) return START_NOT_STICKY;
                 onHeartbeat();
                 return START_STICKY;
             }
             if (ACTION_ACTIVITY_ACCESS.equals(intent.getAction()) && updatesRequested) {
                 // Activity Recognition was just allowed in the app. A service
                 // that was not running starts in full below instead.
-                startForegroundCompat();
+                if (!startForegroundCompat()) return START_NOT_STICKY;
                 registerTransitions();
                 return START_STICKY;
             }
@@ -361,7 +361,7 @@ public class LocationTrackingService extends Service {
             }
         }
         setEnabled(this, true);
-        startForegroundCompat();
+        if (!startForegroundCompat()) return START_NOT_STICKY;
         acquireWakeLock();
         readSteps();
         requestUpdates();
@@ -381,14 +381,40 @@ public class LocationTrackingService extends Service {
                 .apply();
     }
 
-    private void startForegroundCompat() {
+    /**
+     * Become a location foreground service, or stop. Android 14+ refuses the
+     * location type without a location permission (or when the app is not
+     * allowed to start one now) by throwing, and that killed the app in a loop:
+     * declining location on first start, or revoking it later, left Jarvis
+     * "keeps stopping". Without it there is nothing to track, so the service
+     * stops quietly and is not restarted; the app asks again when opened.
+     */
+    private boolean startForegroundCompat() {
+        if (!hasLocation(this)) {
+            Log.w(TAG, "no location permission: not tracking");
+            stopSelf();
+            return false;
+        }
         Notification notification = BackgroundNotice.build(
                 this, PushNotifier.STATUS_ICON, "Location sharing is on", null);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+            return true;
+        } catch (SecurityException | IllegalStateException e) {
+            Log.w(TAG, "Android would not let location sharing run now: " + e.getMessage());
+            stopSelf();
+            return false;
         }
+    }
+
+    /** Any location permission at all ("while using the app" counts). */
+    static boolean hasLocation(Context context) {
+        return context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void acquireWakeLock() {
