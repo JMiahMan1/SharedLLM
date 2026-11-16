@@ -31,6 +31,16 @@ log = logging.getLogger("execution.tts")
 # is the phonemizer's own business.
 PAUSE_STRUCTURE = 0.55  # seconds of silence after titles/headers, list items, and references
 SAMPLE_RATE_HZ = 24000
+#: Kokoro on a graphics card: alpaca's audio server (``POST /api/tts``), the same Kokoro model
+#: and voices, about 0.5 s for a reply that takes this host's CPU 12 s. Read once, at start;
+#: unset, everything is spoken here. A reply the card cannot take (down, too long, an error) is
+#: spoken here instead, and the log says why.
+KOKORO_GPU_URL = os.getenv("KOKORO_GPU_URL", "").strip().rstrip("/")
+#: The audio server refuses more than 4000 characters; a longer passage (the reader) stays here.
+GPU_MAX_CHARS = 3800
+#: A cold card loads Kokoro in ~15 s; past this the reply is spoken here.
+GPU_TIMEOUT_S = 30.0
+
 #: Voices worth naming in the voice pickers, by id. The Parable Party announcer is alpaca's
 #: game-show voice (``arcade/announcer.py``), a blend of three British Kokoro voices.
 FEATURED_VOICES = {"bm_fable,bm_lewis,bm_george": "Parable Party announcer"}
@@ -570,8 +580,40 @@ async def text_to_speech(text: str, voice: str | None = None, storybook: bool = 
             return await piper_tts.synthesize(spoken, str(chosen))
         # A storybook casts several Kokoro voices; with a Piper default it narrates in Kokoro's.
         voice = KOKORO_FALLBACK_NARRATOR
+    if KOKORO_GPU_URL and not storybook:
+        spoken = await _kokoro_on_gpu(engine, text, chosen or "af_heart")
+        if spoken:
+            return spoken
     async with _SYNTH_LOCK:
         return await engine.generate(text, voice, storybook=storybook)
+
+
+async def _kokoro_on_gpu(engine, text: str, voice: str) -> bytes | None:
+    """``text`` spoken by Kokoro on alpaca's graphics card, or None (with a warning) when it cannot."""
+    import base64
+
+    import aiohttp
+
+    prepared = engine._normalize_text(engine._mark_structure_pauses(_translate_ssmd(text)))
+    if len(prepared) > GPU_MAX_CHARS:
+        return None
+    # Our structure beats are paragraph breaks there, paid out as the same silence.
+    body = {"text": prepared.replace(_PAUSE_MARK, "\n\n"), "voice": voice, "normalize": False,
+            "paragraph_pause_s": PAUSE_STRUCTURE}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=GPU_TIMEOUT_S)) as client, \
+                client.post(f"{KOKORO_GPU_URL}/api/tts", json=body) as resp:
+            data = await resp.json(content_type=None)
+            status = resp.status
+    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+        log.warning("[tts] the graphics card did not speak (%s); speaking here", exc or type(exc).__name__)
+        return None
+    audio = data.get("audio_b64") if isinstance(data, dict) else None
+    if status != 200 or not audio:
+        detail = data.get("error") if isinstance(data, dict) else data
+        log.warning("[tts] the graphics card refused (%s: %s); speaking here", status, detail)
+        return None
+    return base64.b64decode(audio)
 
 
 def featured_voices(voices: list[str]) -> list[dict[str, str]]:
