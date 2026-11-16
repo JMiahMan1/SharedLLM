@@ -147,7 +147,17 @@ function App() {
       <AuthProvider>
         <CallProvider>
         <LocationProvider>
-        <Toaster position="top-right" toastOptions={{
+        <Toaster
+          position="top-right"
+          // Clear of the status bar and the nav buttons: Android draws the app edge to
+          // edge, and a toast at the default 16px sat under the clock.
+          containerStyle={{
+            top: 'calc(var(--safe-top) + 12px)',
+            bottom: 'calc(var(--safe-bottom) + 12px)',
+            left: 'calc(var(--safe-left) + 12px)',
+            right: 'calc(var(--safe-right) + 12px)',
+          }}
+          toastOptions={{
           // The theme's menu surface and text, so a toast reads on light themes too.
           style: {
             background: 'var(--site-menu-a)',

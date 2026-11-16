@@ -11,4 +11,4 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/action_button_widget_desc"
-    android:previewLayout="@layout/widget_action_button" />
+    android:previewLayout="@layout/widget_action_button_preview" />

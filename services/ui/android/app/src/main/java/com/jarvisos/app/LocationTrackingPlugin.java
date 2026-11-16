@@ -43,6 +43,12 @@ public class LocationTrackingPlugin extends Plugin {
             call.reject("username is required to start location tracking");
             return;
         }
+        if (!LocationTrackingService.hasLocation(getContext())) {
+            // Starting the service without it is refused by Android 14+ with an
+            // exception that crashes the app, so it is never started then.
+            call.reject("Location permission is not granted");
+            return;
+        }
         LocationTrackingService.setEnabled(getContext(), true);
         // Older bundles do not pass it: no background step readings then.
         LocationTrackingService.setStepsEnabled(getContext(), Boolean.TRUE.equals(call.getBoolean("steps", false)));

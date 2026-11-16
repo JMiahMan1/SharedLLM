@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Action button: one device as a single big control, like an app icon. The
-  circle fills most of the cell (ActionButtonWidget sizes it per widget size)
-  and fills with the accent while the device is on. The name sits under it
-  on up to two lines, never cut. With the "None" background there is no card
-  at all; the shadow keeps the name readable on any wallpaper.
+  Action button: one device as one icon, laid out like an app on the home
+  screen: the icon fills most of the cell and the name sits under it, whole.
+  "None" draws no tile at all (the glyph carries its own soft shadow so it
+  reads on any wallpaper); a colour draws a rounded-square tile behind the
+  glyph only. Sizes come from ActionButtonFit, per widget size.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/action_root"
@@ -12,22 +12,20 @@
     android:layout_height="match_parent"
     android:gravity="center"
     android:orientation="vertical"
-    android:background="@drawable/wg_card"
-    android:clipToOutline="true"
     android:padding="3dp">
 
     <FrameLayout
         android:id="@+id/action_button"
-        android:layout_width="52dp"
-        android:layout_height="52dp">
+        android:layout_width="56dp"
+        android:layout_height="56dp">
 
         <ImageView
             android:id="@+id/action_icon"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@drawable/wg_circle"
+            android:layout_gravity="center"
             android:importantForAccessibility="no"
-            android:padding="10dp"
+            android:padding="0dp"
             android:scaleType="fitCenter"
             android:src="@drawable/mi_power" />
     </FrameLayout>
@@ -60,7 +58,7 @@
         android:singleLine="true"
         android:includeFontPadding="false"
         android:text=""
-        android:textColor="#94A3B8"
+        android:textColor="#E6FFFFFF"
         android:textSize="10sp"
         android:shadowColor="#99000000"
         android:shadowDy="1"

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the launcher's widget list shows for the Action Button: the icon as it
+     looks with a colour chosen (a plain white glyph would vanish on the list's
+     light background). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="3dp">
+
+    <FrameLayout
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/wg_icon_tile"
+        android:backgroundTint="#863BFF">
+
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:importantForAccessibility="no"
+            android:padding="11dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/mi_power"
+            android:tint="#FFFFFF" />
+    </FrameLayout>
+</LinearLayout>
