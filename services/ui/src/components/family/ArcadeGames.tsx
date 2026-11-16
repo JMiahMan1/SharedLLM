@@ -344,7 +344,7 @@ export default function ArcadeGames() {
               allow="autoplay; fullscreen; gamepad"
               allowFullScreen
             />
-            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-1 pt-2 pb-[env(safe-area-inset-bottom)]">
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 px-1 pt-2 pb-[var(--safe-bottom)]">
               <span className="text-[11px] text-slate-400">
                 Playing as <b className="font-mono text-slate-200">{me?.initials ?? 'YOU'}</b>
               </span>

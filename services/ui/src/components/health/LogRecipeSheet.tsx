@@ -102,7 +102,7 @@ export default function LogRecipeSheet({
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={heading}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative flex max-h-[85vh] w-full flex-col overflow-y-auto border border-b-0 border-white/10 bg-slate-950/97 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl sm:border-b"
+        className="relative flex max-h-[85vh] w-full flex-col overflow-y-auto border border-b-0 border-white/10 bg-slate-950/97 p-4 pb-[max(1rem,var(--safe-bottom))] sm:max-w-md sm:rounded-2xl sm:border-b"
         data-testid="log-recipe-sheet"
       >
         <div className="mb-3 flex items-center justify-between gap-3">

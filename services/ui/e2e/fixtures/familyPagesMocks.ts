@@ -264,7 +264,8 @@ function forecast() {
       wind: 4, gust: 16, is_day: true },
     hourly: [],
     daily: Array.from({ length: 7 }, (_, i) => ({ date: day(i), ts: 0, high: 78 - i * 3, low: 57 - i * 4, precip: 0, precip_prob: 5,
-      snow: 0, gust: 20, code: 0, label: labels[i], icon: icons[i], sunrise: null, sunset: null })),
+      snow: 0, gust: 20, code: 0, label: labels[i], icon: icons[i], sunrise: null, sunset: null,
+      night_cloud: [10, 40, 90, 70, 20, 15, 80][i] })),
     fetched_at: SEC, personal: false, heads_up: [],
   };
 }

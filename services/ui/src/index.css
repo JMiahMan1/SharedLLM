@@ -40,13 +40,13 @@ body {
    makes it, else of the system's own bar, plus a margin. Real utilities (not
    component classes) so they win over a p-4 beside them. */
 @utility pb-clear-bottom-bar {
-  padding-bottom: calc(max(var(--bottom-bar), env(safe-area-inset-bottom, 0px)) + 1rem);
+  padding-bottom: calc(max(var(--bottom-bar), var(--safe-bottom)) + 1rem);
 }
 
 /* The end of a full-screen layer drawn above the bottom bar: only the
    system's gesture or button bar is in the way. */
 @utility pb-clear-system-bar {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+  padding-bottom: calc(var(--safe-bottom) + 1rem);
 }
 
 /* CSS Variables */
@@ -54,6 +54,15 @@ body {
   /* How much of the bottom of the screen the app's bottom bar covers right
      now, measured by BottomNav (lib/bottomBar.ts); 0 where it is not shown. */
   --bottom-bar: 0px;
+  /* The system bars' insets. On Android the WebView draws edge to edge and
+     env(safe-area-inset-*) can read 0 there, so Capacitor's SystemBars
+     (insetsHandling 'css') injects --safe-area-inset-* instead; iOS and
+     browsers only have env(). The larger of the two is the truth, so every
+     page pads by these, never by env() alone. */
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--safe-area-inset-right, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--safe-area-inset-left, 0px));
   --color-bg-base: #030711;
   --site-bg-glow-a: rgba(88, 28, 220, 0.18);
   --site-bg-glow-b: rgba(15, 118, 200, 0.10);
@@ -285,11 +294,11 @@ body {
 
   /* Safe area padding for mobile notches */
   .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0.5rem);
+    padding-bottom: var(--safe-bottom);
   }
 
   .safe-area-top {
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: var(--safe-top);
   }
 
   /* Status badges */

@@ -115,7 +115,7 @@ export default function AvatarPicker({ user, onClose }: { user: UserProfile; onC
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Choose a profile picture">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full sm:max-w-2xl max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+      <div className="relative w-full sm:max-w-2xl max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-5 pb-[max(1.25rem,var(--safe-bottom))]">
         <div className="flex items-center gap-4">
           <UserAvatar username={user.username} avatar={current} name={user.full_name || user.username} size={72} />
           <div className="min-w-0 flex-1">

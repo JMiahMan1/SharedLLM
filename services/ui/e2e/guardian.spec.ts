@@ -167,6 +167,10 @@ async function mockApi(page: Page, viewer: Viewer) {
 
     // No deploy under way (the "Jarvis is updating" flag, served from a file: 404 when there is none).
     if (p === '/api/deploy-status') return route.fulfill({ status: 404, body: '' });
+    // The app version on offer (the page asks whether a child's tablet runs an older APK), as familyPagesMocks answers.
+    if (p === '/api/app-updates/version') {
+      return route.fulfill({ json: { version: '1.0.0', git_sha: 'e2e', apk_available: true, apk_version_code: 100 } });
+    }
     unmocked.push(`${route.request().method()} ${p}`);
     return route.fulfill({ json: [] });
   });

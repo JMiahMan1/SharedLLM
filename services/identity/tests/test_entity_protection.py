@@ -335,3 +335,22 @@ def test_a_normal_user_can_still_read_their_own_assignments(client: TestClient, 
     client.post("/api/users/devices", json={"username": "alice", "device_id": "light.kitchen"})
     _as(session, client, "alice")
     assert client.get("/api/users/devices").status_code == 200
+
+
+# the household (a voice satellite or kiosk with no recognised speaker)
+
+
+def test_the_household_may_use_every_unlocked_device_but_no_locked_one(client: TestClient):
+    assert _lock(client, "lock.front_door", permitted=["alice"]).status_code == 200
+    perms = _permissions(client, "household")
+    # Every device that is not locked: "turn off the lamp" by voice works.
+    assert perms["all_unprotected"] is True
+    # A locked one still needs a person: it is listed as locked and not permitted.
+    assert "lock.front_door" in perms["protected_entity_ids"]
+    assert perms["permitted_entity_ids"] == []
+    assert perms["device_ids"] == []
+
+
+def test_an_unknown_username_still_gets_nothing(client: TestClient):
+    perms = _permissions(client, "nobody-by-that-name")
+    assert perms == {"device_ids": [], "protected_entity_ids": [], "permitted_entity_ids": []}

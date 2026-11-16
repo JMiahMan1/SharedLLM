@@ -77,6 +77,18 @@ export default function RecordingsTimeline({
     }, SETTLE_MS);
   };
   useEffect(() => () => { if (settle.current) window.clearTimeout(settle.current); }, []);
+  /**
+   * Play from `t` now. A settle still pending from an arrow key or the wheel
+   * is dropped first: otherwise it fired after a tap, drag or Home/Page jump
+   * and took playback back to where the keys had left it.
+   */
+  const commitNow = (t: number, tolerance: number) => {
+    if (settle.current) {
+      window.clearTimeout(settle.current);
+      settle.current = null;
+    }
+    onCommit(t, tolerance);
+  };
 
   // Ctrl/cmd + wheel (and a trackpad pinch, which arrives as one) zooms; a sideways wheel pans.
   // Native, not React's, because React's wheel listener is passive and cannot stop the page zooming.
@@ -149,9 +161,9 @@ export default function RecordingsTimeline({
     const tolerance = TAP_TOLERANCE_PX * msPerPx;
     if (!d.moved && !cancelled) {
       const rect = e.currentTarget.getBoundingClientRect();
-      onCommit(clampTime(xToTime(e.clientX - rect.left, win, rect.width), dayStart, dayEnd), tolerance);
+      commitNow(clampTime(xToTime(e.clientX - rect.left, win, rect.width), dayStart, dayEnd), tolerance);
     } else {
-      onCommit(playhead, tolerance);
+      commitNow(playhead, tolerance);
     }
   };
 
@@ -159,7 +171,7 @@ export default function RecordingsTimeline({
     const tolerance = TAP_TOLERANCE_PX * msPerPx;
     const step = keyStep(spanMs);
     const move = (t: number) => { const c = clampTime(t, dayStart, dayEnd); onScrub(c); settleLater(c); };
-    const jump = (seg: Segment | null | undefined) => { if (seg) onCommit(seg.startMs, 0); };
+    const jump = (seg: Segment | null | undefined) => { if (seg) commitNow(seg.startMs, 0); };
     switch (e.key) {
       case 'ArrowLeft': case 'ArrowDown': move(playhead - step); break;
       case 'ArrowRight': case 'ArrowUp': move(playhead + step); break;
@@ -167,7 +179,7 @@ export default function RecordingsTimeline({
       case 'PageDown': jump(nextSegment(segments, playhead)); break;
       case 'Home': jump(segments[0]); break;
       case 'End': jump(segments[segments.length - 1]); break;
-      case 'Enter': case ' ': onCommit(playhead, tolerance); break;
+      case 'Enter': case ' ': commitNow(playhead, tolerance); break;
       case '+': case '=': onSpan(stepZoom(spanMs, 1)); break;
       case '-': case '_': onSpan(stepZoom(spanMs, -1)); break;
       default: return;

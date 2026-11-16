@@ -496,7 +496,7 @@ function AttemptReview({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Game answers">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full sm:max-w-xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-3">
+      <div className="relative w-full sm:max-w-xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] space-y-3">
         <div className="flex items-center gap-2">
           <h2 className="flex-1 text-base font-bold text-white capitalize">
             {data ? `${mine ? 'Your' : `${data.username}'s`} ${data.name} · ${data.correct}/${data.total}` : 'Answers'}

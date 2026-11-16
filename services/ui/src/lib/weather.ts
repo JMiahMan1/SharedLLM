@@ -26,6 +26,8 @@ export interface WeatherHour {
   icon: WeatherIcon;
   wind: number | null;
   gust: number | null;
+  /** Cloud cover, % (older servers leave it out). */
+  cloud?: number | null;
 }
 
 export interface WeatherDay {
@@ -42,6 +44,10 @@ export interface WeatherDay {
   icon: WeatherIcon;
   sunrise: string | null;
   sunset: string | null;
+  /** Mean cloud cover over the day, % (older servers leave it out). */
+  cloud?: number | null;
+  /** Mean cloud cover from 9 PM that evening to 2 AM, %; null past the hourly forecast. */
+  night_cloud?: number | null;
 }
 
 export interface WeatherHeadsUp {

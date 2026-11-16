@@ -45,8 +45,20 @@ def couple(env, monkeypatch):  # noqa: F811  (the imported fixture)
         return dict(ALL)
 
     monkeypatch.setattr(private_chat, "_people", people)
+    _children_answer(monkeypatch, 200, {"children": []})
     assert _create(env).status_code == 200
     return env
+
+
+def _children_answer(monkeypatch, status, body):
+    """What identity's internal children list says (never a real request)."""
+    from services.gateway import app_vetting_routes
+
+    async def identity_call(method, path, request=None, **kwargs):
+        assert (method, path) == ("GET", "/api/internal/guardian/children")
+        return status, body
+
+    monkeypatch.setattr(app_vetting_routes, "identity_call", identity_call)
 
 
 def _add(e, kind="note", user="alex", **body):
@@ -294,3 +306,26 @@ def test_an_unreadable_record_is_logged_without_its_kind(couple, caplog):
     assert "unreadable record" in caplog.text
     for word in REVEALING:
         assert word not in caplog.text.lower(), word
+
+
+# --- The children's birthdays -------------------------------------------------------
+
+
+def test_each_parent_is_offered_only_their_own_children_and_birth_dates(couple, monkeypatch):
+    _children_answer(monkeypatch, 200, {"children": [
+        {"username": "kid", "display_name": "Kid", "parents": ["alex", "sam"], "birth_date": "2016-04-02"},
+        {"username": "teen", "display_name": "Teen", "parents": ["alex", "sam"], "birth_date": None},
+        {"username": "cousin", "display_name": "Cousin", "parents": ["uncle"], "birth_date": "2015-01-01"},
+    ]})
+    data = couple["client"].get(BASE, headers=_as("sam")).json()
+    assert data["children"] == [
+        {"username": "kid", "display_name": "Kid", "birth_date": "2016-04-02"},
+        {"username": "teen", "display_name": "Teen", "birth_date": None},
+    ]
+
+
+def test_beloved_still_opens_when_identity_cannot_list_the_children(couple, monkeypatch):
+    _children_answer(monkeypatch, 503, None)
+    resp = couple["client"].get(BASE, headers=_as("alex"))
+    assert resp.status_code == 200
+    assert resp.json()["children"] == []

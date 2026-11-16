@@ -307,7 +307,7 @@ export default function Composer({
 
   return (
     <div
-      className="shrink-0 border-t border-white/5 bg-slate-950/80 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-3"
+      className="shrink-0 border-t border-white/5 bg-slate-950/80 px-2 pt-2 pb-[max(0.5rem,var(--safe-bottom))] backdrop-blur sm:px-3"
       onPaste={(event) => {
         const files = Array.from(event.clipboardData?.files || []);
         if (files.length) {

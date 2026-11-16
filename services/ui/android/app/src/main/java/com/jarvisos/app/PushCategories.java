@@ -68,7 +68,7 @@ final class PushCategories {
             "Low battery, school arrivals, long stops somewhere unknown and On my way.",
             POP_UP, GROUP_FAMILY, R.drawable.mi_shield),
         new Category("health", "Health and fitness",
-            "Step goals reached and your weekly summary.", QUIET, GROUP_FAMILY, R.drawable.mi_favorite),
+            "Step goals reached and your weekly summary.", QUIET, GROUP_FAMILY, R.drawable.mi_steps),
         new Category("leave_by", "Time to leave",
             "When to head out to reach your next event on time.", POP_UP, GROUP_REMINDERS, R.drawable.mi_car),
         new Category("calendar", "Calendar reminders",

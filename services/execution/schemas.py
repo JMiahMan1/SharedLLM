@@ -1079,7 +1079,10 @@ class TTSRequest(BaseRequest):
     """
     user_context: UserContext
     text: str = Field(..., description="The text (or SSMD-marked text) to convert to speech")
-    voice: str | None = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
+    # None is Jarvis's own voice (the Settings choice, text_to_speech). A default of
+    # "af_heart" here made every caller that names no voice (the voice satellites,
+    # announcements) speak in it whatever was chosen.
+    voice: str | None = Field(None, description="Voice ID (e.g. af_heart, am_adam, piper:<name>); none means Jarvis's voice")
     storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
     workspace_id: str | None = Field(None, description="Workspace where the generated audio file should be saved")
     relative_path: str | None = Field(None, description="Path (e.g. 'narration.wav') where the audio file is saved inside the workspace")

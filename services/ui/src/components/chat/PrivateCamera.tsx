@@ -5,7 +5,7 @@ type Facing = 'environment' | 'user';
 
 /**
  * The private chat's own camera. It never opens the phone's camera app and
- * never uses `<input capture>` (either can save a copy to the phone's
+ * never uses a file input with the capture attribute (either can save a copy to the phone's
  * gallery): the picture is taken from the camera stream in this page, drawn to
  * a canvas, turned into JPEG bytes in memory and handed to the chat, which
  * encrypts them before anything leaves the device. Nothing is written to disk.
@@ -124,7 +124,7 @@ export default function PrivateCamera({
 
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label="Camera" data-testid="private-camera">
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+      <div className="flex shrink-0 items-center gap-2 px-3 pt-[max(0.75rem,var(--safe-top))]">
         <button type="button" onClick={onClose} aria-label="Close camera" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white">
           <X size={20} />
         </button>
@@ -147,7 +147,7 @@ export default function PrivateCamera({
           </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center justify-around gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+      <div className="flex shrink-0 items-center justify-around gap-3 px-4 pb-[max(1rem,var(--safe-bottom))] pt-3">
         {captured ? (
           <>
             <button type="button" onClick={retake} disabled={sending} className="flex min-h-12 items-center gap-2 rounded-full bg-white/10 px-5 text-sm font-semibold text-white disabled:opacity-50" data-testid="private-camera-retake">

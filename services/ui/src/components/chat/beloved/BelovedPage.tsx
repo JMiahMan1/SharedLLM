@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { BookHeart, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, Moon, NotebookPen, Settings2, Smartphone, Sparkles, Trash2, X } from 'lucide-react';
+import { BookHeart, Cake, CalendarHeart, Heart, HeartHandshake, ImagePlus, Loader2, Moon, NotebookPen, Plus, Settings2, Smartphone, Sparkles, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../../services/api';
 import { IMAGE_TYPES, type PrivateVault } from '../../../lib/privateChatCrypto';
@@ -7,6 +7,8 @@ import { pickerDone, pickerOpening } from '../../../lib/privateChatSession';
 import { countdownLabel, dayLabel, dayNumber, durationLabel, elapsed, grouped, localToday, parseDay, upcomingMilestones } from '../../../lib/beloved/dates';
 import { dailyContent } from '../../../lib/beloved/content';
 import { specialDays } from '../../../lib/beloved/days';
+import { isIncomplete, keptChildren, rowFor, unlistedChildren, type ChildRow } from '../../../lib/beloved/children';
+import { MAX_CHILDREN } from '../../../lib/beloved/records';
 import { planReminders, reminderDetails, setReminderDetails } from '../../../lib/beloved/reminders';
 import { nudgeAfter, planPrivateReminders, setNudgeAfter } from '../../../lib/beloved/justus';
 import type { ProfileRecord } from '../../../lib/beloved/records';
@@ -98,7 +100,7 @@ export default function BelovedPage({
       data-testid="beloved"
       {...noSave}
     >
-      <div className="flex shrink-0 items-center gap-2 border-b border-rose-300/10 px-2 pb-1 pt-[max(0.5rem,env(safe-area-inset-top))]">
+      <div className="flex shrink-0 items-center gap-2 border-b border-rose-300/10 px-2 pb-1 pt-[max(0.5rem,var(--safe-top))]">
         <button type="button" onClick={onClose} aria-label="Close Beloved" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-200 hover:bg-white/10">
           <X size={20} />
         </button>
@@ -147,7 +149,7 @@ export default function BelovedPage({
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[max(1.25rem,var(--safe-bottom))] pt-3 sm:px-4">
         <div className="mx-auto w-full max-w-2xl">
           {notFound ? (
             <p className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-sm text-slate-300" role="alert">
@@ -370,6 +372,10 @@ function ProfileSheet({
   const [firstDate, setFirstDate] = useState(record?.firstDate ?? '');
   const [title, setTitle] = useState(record?.title ?? '');
   const [birthdays, setBirthdays] = useState<Record<string, string>>(record?.birthdays ?? {});
+  const [children, setChildren] = useState<ChildRow[]>(() => (record?.children ?? []).map((c) => ({ ...c })));
+  const unlisted = unlistedChildren(data.family, children);
+  const editChild = (index: number, change: Partial<ChildRow>) =>
+    setChildren((rows) => rows.map((row, i) => (i === index ? { ...row, ...change } : row)));
   const [cover, setCover] = useState(record?.cover);
   const [details, setDetails] = useState(reminderDetails());
   const [busy, setBusy] = useState(false);
@@ -412,6 +418,8 @@ function ProfileSheet({
       if (title.trim()) next.title = title.trim().slice(0, 120);
       const days = Object.fromEntries(Object.entries(birthdays).filter(([, v]) => parseDay(v)));
       if (Object.keys(days).length) next.birthdays = days;
+      const kids = keptChildren(children);
+      if (kids.length) next.children = kids;
       if (cover) next.cover = cover;
       await data.save('profile', next, current ? { id: current.id } : {});
       // The old cover's ciphertext is no longer needed by anyone.
@@ -456,6 +464,75 @@ function ProfileSheet({
               />
             </Field>
           ))}
+          <fieldset className="space-y-2 rounded-xl border border-white/10 p-3" data-testid="beloved-children">
+            <legend className="flex items-center gap-1.5 px-1 text-xs font-semibold text-slate-300">
+              <Cake size={13} aria-hidden /> Our children's birthdays
+            </legend>
+            {children.map((row, index) => (
+              <div key={index} className="space-y-1" data-testid="beloved-child">
+                <div className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="text"
+                    value={row.name}
+                    maxLength={60}
+                    onChange={(e) => editChild(index, { name: e.target.value })}
+                    placeholder="Name"
+                    aria-label={`Child ${index + 1} name`}
+                    data-testid="beloved-child-name"
+                    className="glass-input min-h-11 min-w-0 flex-1 text-base sm:text-sm"
+                  />
+                  <input
+                    type="date"
+                    value={row.birthday}
+                    onChange={(e) => editChild(index, { birthday: e.target.value })}
+                    aria-label={`${row.name.trim() || `Child ${index + 1}`}'s birthday`}
+                    data-testid="beloved-child-birthday"
+                    className="glass-input min-h-11 w-[9.5rem] shrink-0 text-base sm:text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setChildren((rows) => rows.filter((_, i) => i !== index))}
+                    aria-label={`Remove ${row.name.trim() || 'this child'}`}
+                    data-testid="beloved-child-remove"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+                {isIncomplete(row) && (
+                  <p className="text-xs text-amber-200" data-testid="beloved-child-incomplete">
+                    {row.name.trim() ? 'Add the birthday to keep this one.' : 'Add a name to keep this one.'}
+                  </p>
+                )}
+              </div>
+            ))}
+            {children.length < MAX_CHILDREN && (
+              <div className="flex flex-wrap gap-1.5">
+                {unlisted.map((child) => (
+                  <button
+                    key={child.username}
+                    type="button"
+                    onClick={() => setChildren((rows) => [...rows, rowFor(child)])}
+                    data-testid="beloved-child-from-family"
+                    className="flex min-h-11 items-center gap-1 rounded-full border border-rose-300/25 bg-rose-500/10 px-3 text-sm text-rose-100"
+                  >
+                    <Plus size={14} aria-hidden /> {child.display_name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setChildren((rows) => [...rows, { name: '', birthday: '' }])}
+                  data-testid="beloved-child-add"
+                  className="flex min-h-11 items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-3 text-sm text-slate-200"
+                >
+                  <Plus size={14} aria-hidden /> {unlisted.length ? 'Someone else' : 'Add a child'}
+                </button>
+              </div>
+            )}
+            {unlisted.length > 0 && (
+              <p className="text-xs text-slate-400">Birthdays Jarvis already knows are filled in for you.</p>
+            )}
+          </fieldset>
           <Field label="What we call ourselves (optional)">
             <input type="text" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="The two of us" data-testid="beloved-title" className="glass-input min-h-11 w-full text-base sm:text-sm" />
           </Field>
@@ -511,7 +588,7 @@ function ProfileSheet({
                 : 'Reminders for your special days come on the Jarvis Android app.'}
           </p>
         </div>
-        <div className="shrink-0 border-t border-white/5 p-3">
+        <div className="shrink-0 border-t border-white/5 p-3 pb-[max(0.75rem,var(--safe-bottom))]">
           <button type="submit" disabled={busy} data-testid="beloved-settings-save"
             className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-rose-600 text-sm font-semibold text-white disabled:opacity-50">
             {busy && <Loader2 size={15} className="animate-spin" />} Save

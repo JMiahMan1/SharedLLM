@@ -23,7 +23,7 @@ export default function InterlinearPanel({
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={`Interlinear for ${data.ref}`}>
       <button type="button" aria-label="Close interlinear" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative w-full sm:max-w-2xl bg-slate-950/97 border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
+        className="relative w-full sm:max-w-2xl bg-slate-950/97 border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] overflow-y-auto"
         data-testid="bible-interlinear-panel"
       >
         <div className="flex items-center justify-between gap-3 mb-3">

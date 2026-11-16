@@ -19,7 +19,7 @@ const BUTTON = 'flex min-h-11 min-w-11 items-center justify-center rounded-full 
 
 const POSITION = {
   // Clear of the app's bottom bar, or of the system's gesture bar where there is none.
-  fixed: 'fixed right-3 bottom-[calc(max(var(--bottom-bar),env(safe-area-inset-bottom,0px))+0.75rem)] sm:right-5',
+  fixed: 'fixed right-3 bottom-[calc(max(var(--bottom-bar),var(--safe-bottom))+0.75rem)] sm:right-5',
   absolute: 'absolute right-3 bottom-3',
 } as const;
 

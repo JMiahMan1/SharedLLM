@@ -1,6 +1,7 @@
 /**
  * The couple's special days, all in one list with a countdown each: the
- * wedding anniversary, both birthdays, the first date, their own days, and
+ * wedding anniversary, both birthdays, their children's birthdays, the first
+ * date, their own days, and
  * the marriage's milestones (1,000 days, the 10th anniversary).
  */
 import {
@@ -18,7 +19,7 @@ export interface SpecialDay {
   /** Stable across days, for keys and reminder ids. */
   key: string;
   name: string;
-  kind: 'wedding' | 'birthday' | 'first-date' | 'custom' | 'milestone';
+  kind: 'wedding' | 'birthday' | 'child-birthday' | 'first-date' | 'custom' | 'milestone';
   date: Ymd;
   inDays: number;
   /** The record behind a day the couple added (to edit or remove it). */
@@ -60,6 +61,14 @@ export function specialDays(view: BelovedView, couple: Person[], today: Ymd, mil
     if (!birthday) continue;
     const next = nextYearly(birthday, today);
     out.push({ key: `birthday:${person.username}:${next.date.y}`, name: `${person.display_name}'s birthday`, kind: 'birthday', date: next.date, inDays: next.inDays });
+  }
+  for (const [index, child] of (profile?.children ?? []).entries()) {
+    const birthday = parseDay(child.birthday);
+    if (!birthday) continue;
+    const next = nextYearly(birthday, today);
+    // The day they are born is still to come: a due date, not an age.
+    const name = next.nth && next.nth > 0 ? `${child.name}'s ${ordinal(next.nth)} birthday` : `${child.name}'s birthday`;
+    out.push({ key: `child:${index}:${child.name}:${next.date.y}`, name, kind: 'child-birthday', date: next.date, inDays: next.inDays });
   }
   for (const day of view.days) {
     const when = parseDay(day.record.date);

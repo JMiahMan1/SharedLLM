@@ -271,6 +271,33 @@ async def _tell_spouse(token: str, chat: dict[str, Any], user: str, people: dict
 # --- Routes -------------------------------------------------------------------
 
 
+async def _children_of(user: str) -> list[dict[str, Any]]:
+    """The caller's own children and the birth dates their parents keep in
+    Jarvis, for filling in the children's birthdays. Not secret between the two
+    parents; the couple's own list is sealed in their profile. When identity
+    cannot say, the list is empty and the couple types them in."""
+    from services.gateway.app_vetting_routes import identity_call
+
+    try:
+        status, body = await identity_call("GET", "/api/internal/guardian/children")
+    except Exception as exc:  # a convenience: Beloved opens without it
+        log.warning("beloved: could not list the children: %s", exc)
+        return []
+    if status != 200:
+        log.warning("beloved: could not list the children: identity answered HTTP %s", status)
+        return []
+    out = []
+    for child in (body or {}).get("children") or []:
+        if user not in (child.get("parents") or []) or not child.get("username"):
+            continue
+        out.append({
+            "username": child["username"],
+            "display_name": child.get("display_name") or child["username"],
+            "birth_date": child.get("birth_date") or None,
+        })
+    return sorted(out, key=lambda c: (c["birth_date"] or "9999", c["display_name"]))
+
+
 @router.get("")
 async def overview(token: str, request: Request):
     """The couple (names and pictures, which are not secret in the family) and every sealed record."""
@@ -289,6 +316,7 @@ async def overview(token: str, request: Request):
     return {
         "me": user,
         "couple": couple,
+        "children": await _children_of(user),
         "records": [_public(r, user, people) for r in records
                     if isinstance(r.get("id"), str) and isinstance(r.get("sealed"), str) and r.get("kind") in KINDS],
     }

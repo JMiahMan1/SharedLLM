@@ -117,7 +117,7 @@ export default function AvatarCropper({ src, width, height, initial, saving = fa
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Crop your photo" data-testid="avatar-cropper">
       <button type="button" aria-label="Cancel" onClick={onCancel} className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative flex max-h-[100dvh] w-full flex-col overflow-y-auto rounded-t-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg sm:rounded-2xl sm:p-5">
+      <div className="relative flex max-h-[100dvh] w-full flex-col overflow-y-auto rounded-t-2xl border border-white/10 bg-slate-950 p-4 pb-[max(1rem,var(--safe-bottom))] sm:max-w-lg sm:rounded-2xl sm:p-5">
         <h2 className="text-base font-bold text-white">Crop your photo</h2>
         <p className="text-xs text-slate-400">Drag to move it. Pinch, scroll or use the slider to zoom. The circle is what everyone sees.</p>
 

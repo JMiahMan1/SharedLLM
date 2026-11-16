@@ -12,12 +12,12 @@ chat is unlocked.
 | Section | What it does |
 |---|---|
 | **Us** (home) | Both spouses' profile pictures side by side, their names, how many days they have been married (and the years and months), a cover photo they choose, the next milestone and the next special day, today's verse, the latest love note, and a **Thinking of you** button that sends a heart to the other phone. |
-| **Days** | The wedding anniversary, both birthdays, the first date, and any days of their own (yearly or once), each with a countdown. Milestones are added automatically: every 100 days to 1,000, every 500 to 10,000, then every 1,000, plus every yearly anniversary. A 29 February date is kept on 28 February in other years. |
+| **Days** | The wedding anniversary, both birthdays, their children's birthdays ("Sky's 9th birthday"), the first date, and any days of their own (yearly or once), each with a countdown and, for the coming week, that day's weather. Milestones are added automatically: every 100 days to 1,000, every 500 to 10,000, then every 1,000, plus every yearly anniversary. A 29 February date is kept on 28 February in other years. |
 | **Today** | A verse (fetched from the family's Bible service), a short devotion and prayer, and a question to talk about together. Each spouse can mark it done and write an answer the other can read. The same content shows on both phones for a given calendar day. |
 | **Notes** | Love notes (the other spouse is told one arrived) and prayer requests for each other, with "Prayed for this" counts and answered-prayer tracking (with how it was answered). |
 | **Dates** | 54 date night ideas (at home, out, outdoors, serving together, faith), a fresh handful each day; tap one to suggest it to your spouse, mark it done, or suggest your own. |
 | **Just us** | The couple's own private calendar (a moon on the tab). See below. |
-| **Our details** | Wedding date, first date, both birthdays, what the couple calls themselves, the cover photo, and this phone's reminder setting. |
+| **Our details** | Wedding date, first date, both birthdays, their children's birthdays, what the couple calls themselves, the cover photo, and this phone's reminder setting. |
 
 Content (`services/ui/src/lib/beloved/content.ts`): 64 devotions (so the
 devotion does not repeat for two months), 66 discussion questions, 54 date
@@ -159,6 +159,34 @@ Privacy, on top of everything above:
   `components/chat/beloved/JustUsSection.tsx`; the e2e test in
   `e2e/layout/beloved.spec.ts` checks that nothing typed or picked, and no
   revealing word, reaches the server or a reminder in clear.
+
+## Children's birthdays
+
+Our details keeps a list of the children's birthdays (name and date, up to 20),
+sealed in the profile record like every other date. The overview
+(`GET .../beloved`) also lists the caller's own children as Jarvis knows them
+(`children`: username, name, and the birth date the parents set for app
+ratings, from identity's internal guardian list, only children the caller is a
+parent of). The sheet offers each one not yet listed as a one-tap button that
+fills the row in; the couple can add anyone else by hand (an adult child, a
+godchild). Editing the list changes nothing in Jarvis. A name is never cut: a
+row with a name and no date (or the reverse) says so and is not kept
+(`lib/beloved/children.ts`).
+
+## Weather and the night sky
+
+Days in the coming week show their weather beside the countdown, and in Just us
+the selected day, each plan, and the plan form (as soon as a day is picked) show
+the day's weather. An evening plan (no time, or 5 PM on) or a stargazing one
+also shows the night: the forecast's mean cloud cover from 9 PM to 2 AM
+(`night_cloud`, docs/WEATHER.md) with a plain verdict ("Clear skies, good for
+stars", "Clear, but a bright moon hides the faint stars", "Some clouds, stars
+in the gaps", "Cloudy, the stars will be hidden") and the moon's phase. The
+moon is worked out on the phone from the mean synodic month, so it shows for
+any date; the clouds only exist for the week the forecast covers
+(`lib/beloved/sky.ts`, `components/chat/beloved/BelovedWeather.tsx`). The
+weather comes from the same `/api/weather` request every page makes, which
+carries no day or plan.
 
 ## Android
 

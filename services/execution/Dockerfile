@@ -81,7 +81,12 @@ ENV XDG_CACHE_HOME=/home/sharedllm/.cache
 # Build camoufox browser cache at build time, then make it world-writable so uid 1000 can create files at runtime
 # camoufox downloads its browser and fingerprint model from GitHub releases,
 # which time out (504) now and then on CI: try a few times before failing.
-RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && \
+# camoufox authenticates its GitHub API calls with GITHUB_TOKEN when it is set
+# (pkgman.py): CI passes the workflow token as an optional build secret, so it is
+# never stored in the image; a build without it (a laptop) is anonymous as before.
+RUN --mount=type=secret,id=github_token,required=false \
+    if [ -s /run/secrets/github_token ]; then export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; \
+    mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && \
     for attempt in 1 2 3 4 5; do \
       python -m camoufox sync && python -m camoufox fetch && break; \
       if [ "$attempt" = 5 ]; then exit 1; fi; \

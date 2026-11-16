@@ -81,7 +81,7 @@ export default function ShareToChatSheet({
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={sheetTitle}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full sm:max-w-md bg-slate-950/97 border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] flex flex-col" data-testid="bible-share-chat-sheet">
+      <div className="relative w-full sm:max-w-md bg-slate-950/97 border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] flex flex-col" data-testid="bible-share-chat-sheet">
         <div className="flex items-center justify-between gap-3 mb-3">
           <p className="text-sm font-semibold text-white flex items-center gap-2">
             <MessageCircle size={16} className="text-sky-300" /> {sheetTitle}

@@ -71,7 +71,7 @@ export default function VerseContextPanel({ verse, onClose, onOpenRef }: VerseCo
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         data-testid="bible-context-scrim"
       />
-      <div className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto">
+      <div className="relative w-full sm:max-w-lg bg-slate-950/97 backdrop-blur-xl border border-white/10 border-b-0 sm:border-b sm:rounded-2xl p-4 pb-[max(1rem,var(--safe-bottom))] max-h-[85vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-xs font-semibold text-sky-300">

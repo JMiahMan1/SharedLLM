@@ -29,7 +29,8 @@ async function busyDay(page: Page, count = 150) {
         start: new Date(at).toISOString(),
         end: new Date(at + seconds * 1000).toISOString(),
         duration: seconds,
-        triggers: TYPES[i % TYPES.length],
+        // Clips come in runs (someone in the yard sets off several in a row), 30 of each type.
+        triggers: TYPES[Math.floor(i / 10) % TYPES.length],
       };
     });
     return route.fulfill({ json: { recordings } });
@@ -99,6 +100,21 @@ test.describe('camera recordings timeline', () => {
     }));
     const pick = candidates.find((c) => c.x > trackBox.x + 20 && c.x < trackBox.x + trackBox.width / 2 - 30);
     expect(pick, 'a clip left of the playhead').toBeTruthy();
+    // Every clip the player loads from here on, in order: the 2 s test clips run on into each other,
+    // so a slow screenshot below can let several go by before a poll of the current one would see them.
+    await viewer.evaluate((dialog) => {
+      const played: string[] = [];
+      (window as unknown as { __played: string[] }).__played = played;
+      const note = (video: Element | null) => {
+        const src = video?.getAttribute('src');
+        const file = src ? new URL(src, location.href).searchParams.get('file') : null;
+        if (file && played.at(-1) !== file) played.push(file);
+      };
+      new MutationObserver(() => note(dialog.querySelector('video'))).observe(dialog, {
+        subtree: true, childList: true, attributes: true, attributeFilter: ['src'],
+      });
+    });
+    const played = () => page.evaluate(() => (window as unknown as { __played: string[] }).__played);
     await page.mouse.click(pick!.x, pick!.y);
     await expect.poll(() => playingFile(page)).toBe(pick!.file);
     await expect(viewer.locator('video')).toBeVisible();
@@ -107,7 +123,9 @@ test.describe('camera recordings timeline', () => {
     // The test video is 2 s long: when it ends the next clip plays on its own.
     const n = Number(pick!.file!.slice(5, 8));
     const following = `clip-${String(n + 1).padStart(3, '0')}.mp4`;
-    await expect.poll(() => playingFile(page), { timeout: 15_000 }).toBe(following);
+    await expect.poll(played, { timeout: 15_000 }).toContain(following);
+    const order = await played();
+    expect(order.indexOf(following), `the clip after ${pick!.file} came next: ${order.join(', ')}`).toBe(order.indexOf(pick!.file!) + 1);
     await expectNoHorizontalOverflow(page);
   });
 
@@ -125,7 +143,7 @@ test.describe('camera recordings timeline', () => {
     // Previous jumps to a vehicle clip only.
     await viewer.getByRole('button', { name: 'Previous recording' }).click();
     const file = await (async () => { await expect.poll(() => playingFile(page)).not.toBeNull(); return playingFile(page); })();
-    expect(Number(file!.slice(5, 8)) % 5).toBe(1);
+    expect(Math.floor(Number(file!.slice(5, 8)) / 10) % 5, 'a vehicle clip (the second run of each five)').toBe(1);
     await snap(page, info, 'camera-timeline-filtered');
     // The list (opened) holds the same 30.
     await viewer.getByText('List (30)').click();

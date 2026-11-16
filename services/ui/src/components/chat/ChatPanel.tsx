@@ -750,7 +750,7 @@ export default function ChatPanel({ className = '', onOpenTab }: ChatPanelProps)
         // header and tab bar, the way every messaging app shows one.
         className={`relative min-h-0 min-w-0 flex-col lg:flex ${
           showThread
-            ? 'flex max-lg:fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-[70] max-lg:h-[100dvh] max-lg:bg-slate-950 max-lg:pt-[env(safe-area-inset-top)] max-lg:pb-[env(safe-area-inset-bottom)]'
+            ? 'flex max-lg:fixed max-lg:inset-x-0 max-lg:top-0 max-lg:z-[70] max-lg:h-[100dvh] max-lg:bg-slate-950 max-lg:pt-[var(--safe-top)] max-lg:pb-[var(--safe-bottom)]'
             : 'hidden'
         }`}
         data-testid="chat-thread"

@@ -19,11 +19,23 @@ export interface ProfileRecord {
   firstDate?: string;
   /** Birthdays by username. */
   birthdays?: Record<string, string>;
+  /** Their children's birthdays, in the order the couple listed them. */
+  children?: ChildBirthday[];
   /** The cover photo: an encrypted blob in the chat's blob store. */
   cover?: { blob: string; mime: string };
   /** What the couple calls themselves on the page ("Sam and Alex"), optional. */
   title?: string;
 }
+
+/** A child's birthday in the couple's list (a Jarvis username when it came from the family). */
+export interface ChildBirthday {
+  name: string;
+  birthday: string;
+  username?: string;
+}
+
+/** At most this many children's birthdays are kept. */
+export const MAX_CHILDREN = 20;
 
 export interface DayRecord {
   b: 'day';
@@ -118,9 +130,18 @@ export interface CoupleMember {
   me: boolean;
 }
 
+/** One of the caller's children as Jarvis knows them, to fill in the birthdays list. */
+export interface FamilyChild {
+  username: string;
+  display_name: string;
+  birth_date: string | null;
+}
+
 export interface BelovedOverview {
   me: string;
   couple: CoupleMember[];
+  /** The caller's own children (older servers leave it out). */
+  children?: FamilyChild[];
   records: SealedRecord[];
 }
 
@@ -174,12 +195,24 @@ export function readRecord(kind: BelovedKind, raw: unknown): BelovedRecord | nul
           if (ok && /^[A-Za-z0-9_.@-]{1,64}$/.test(who)) birthdays[who] = ok;
         }
       }
+      const children: ChildBirthday[] = [];
+      if (Array.isArray(r.children)) {
+        for (const raw of r.children.slice(0, MAX_CHILDREN)) {
+          const c = (raw ?? {}) as Record<string, unknown>;
+          const name = text(c.name, 60);
+          const birthday = day(c.birthday);
+          if (!name || !birthday) continue;
+          const username = typeof c.username === 'string' && /^[A-Za-z0-9_.@-]{1,64}$/.test(c.username) ? c.username : undefined;
+          children.push(username ? { name, birthday, username } : { name, birthday });
+        }
+      }
       const cover = r.cover as Record<string, unknown> | undefined;
       return clean<ProfileRecord>({
         b: 'profile',
         wedding: day(r.wedding),
         firstDate: day(r.firstDate),
         birthdays: Object.keys(birthdays).length ? birthdays : undefined,
+        children: children.length ? children : undefined,
         cover: cover && typeof cover.blob === 'string' && /^[0-9a-f]{32}$/.test(cover.blob) && typeof cover.mime === 'string'
           ? { blob: cover.blob, mime: cover.mime } : undefined,
         title: text(r.title, 120),

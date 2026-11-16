@@ -163,6 +163,13 @@ phone's month grid, and Day as a full line ("Clear 78° / 57°", plus the rain
 chance when it is 20% or more). The forecast reaches about a week ahead; other
 days show nothing (`components/calendar/DayWeather.tsx`).
 
+Each day also carries `cloud` (mean cloud cover, %) and `night_cloud`: the
+mean cloud cover from 9 PM that evening to 2 AM the next morning, worked out
+from the whole hourly answer (seven days, not just the 48 hours kept), or null
+when fewer than half of those hours are in the forecast. Each hour carries
+`cloud` too. Beloved uses `night_cloud` to say whether a planned night is good
+for stargazing (docs/BELOVED.md).
+
 ## Dashboard
 
 The **Weather** widget (`components/widgets/WeatherWidget.tsx`, shown to

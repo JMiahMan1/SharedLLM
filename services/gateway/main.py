@@ -31,7 +31,6 @@ from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
 from services.common import active_minutes as _active_minutes
-from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common import device_noun as _device_noun
 from services.common import guardian_recap as _recap
 from services.common import health_coach as _health_coach
@@ -46,29 +45,57 @@ from services.common.circuit_breaker import breaker_snapshots
 from services.common.entity_ids import usable_entity_id
 from services.common.game_recommendations import recommend_game
 from services.common.guidance import guidance as _guidance
+from services.common.http import INTERNAL_KEEPALIVE_S
 from services.common.music_recommendations import recommend_music
 from services.common.podcast_recommendations import podcast_events, recommend_podcast
 from services.common.relay import until_either_ends
 from services.common.screen_time import (
     carried_over as carried_over_screen_time,
+)
+from services.common.screen_time import (
     chore_answer_tag,
     chore_answer_words,
+)
+from services.common.screen_time import (
     evaluate as evaluate_screen_time,
+)
+from services.common.screen_time import (
     wants_progress as screen_time_wants_progress,
+)
+from services.common.screen_time import (
     week_start as screen_time_week_start,
+)
+from services.common.screen_time import (
     weekly_report as weekly_screen_time,
 )
 from services.common.secrets import secret_matches
 from services.common.sleep_estimate import estimate_night
 from services.common.video_recommendations import recommend_video
-from services.gateway import calls, camera_live_routes, camera_routes, cookbook, discovery_routes, drawing, recipe_images, family_safety, mdm, network_routes, notices, push_routes, weather_routes
-from services.gateway import hub_registry_routes
-from services.gateway import app_vetting_routes, phone_routes, room_presence
-from services.gateway import automation_routes
-from services.gateway import helper_routes
-from services.gateway import dashboard_routes
-from services.gateway import todo_routes
-from services.gateway import private_chat
+from services.common.weather import weather_question
+from services.gateway import (
+    app_vetting_routes,
+    automation_routes,
+    calls,
+    camera_live_routes,
+    camera_routes,
+    cookbook,
+    dashboard_routes,
+    discovery_routes,
+    drawing,
+    family_safety,
+    helper_routes,
+    hub_registry_routes,
+    mdm,
+    network_routes,
+    notices,
+    phone_routes,
+    private_chat,
+    push_routes,
+    recipe_images,
+    room_presence,
+    todo_routes,
+    weather_routes,
+)
 from services.gateway import beloved as beloved_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
@@ -3288,6 +3315,25 @@ def _chat_system_prompt(body: dict) -> str | None:
     return None
 
 
+async def _weather_answer(query: str, user_id: str) -> str:
+    """Execution's spoken answer from the forecast, or "" (then the model answers)."""
+    try:
+        resp = await get_http_client().get(
+            f"{EXECUTION_SVC}/weather/answer",
+            params={"q": query, "user": user_id or ""},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[FastPath] weather answer: execution answered HTTP {resp.status}")
+            return ""
+        data = await resp.json()
+        return str((data or {}).get("text") or "").strip()
+    except Exception as e:  # the model still answers, as before this path existed
+        log.warning(f"[FastPath] weather answer unavailable: {type(e).__name__}: {e}")
+        return ""
+
+
 def _voice_context_from(request: Request, body: dict) -> dict | None:
     """The room a voice satellite speaks from, trusted only from an internal caller (homehub).
 
@@ -3710,6 +3756,18 @@ async def chat_handler(request: Request, background_tasks=None):
             if is_openai:
                 return _make_openai_response(ans, selected_model, intent)
             return _make_ollama_response(ans, selected_model, intent)
+
+    # 4b. A plain question about the weather here is answered from the cached
+    # forecast, without the model (which searched the web for it, docs/WEATHER.md).
+    if not grounded and weather_question(query):
+        weather_text = await _weather_answer(query, user_id)
+        if weather_text:
+            log.info("[FastPath] MATCHED: intent='weather' (answered from the forecast)")
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", weather_text)
+            if is_openai:
+                return _make_openai_response(weather_text, selected_model, "weather")
+            return _make_ollama_response(weather_text, selected_model, "weather")
 
     # 5. Retrieve Tiered Memory
     if grounded:

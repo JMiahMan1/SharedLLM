@@ -68,6 +68,7 @@ public class ChatShortcutPickerActivity extends Activity {
         cancel.setOnClickListener(v -> finish());
         root.addView(cancel);
         setContentView(root);
+        SystemBarPadding.apply(this, 0xFF0F172A);
     }
 
     private LinearLayout row(ChatShortcutStore.Entry entry) {

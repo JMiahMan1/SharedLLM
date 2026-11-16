@@ -90,7 +90,7 @@ function ReaderSheet({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
       />
       <div
-        className={`relative flex max-h-[86dvh] w-full flex-col border border-white/10 border-b-0 bg-slate-950/97 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:border-b ${
+        className={`relative flex max-h-[86dvh] w-full flex-col border border-white/10 border-b-0 bg-slate-950/97 p-4 pb-[max(1rem,var(--safe-bottom))] shadow-2xl sm:rounded-2xl sm:border-b ${
           wide ? 'sm:max-w-lg' : 'sm:max-w-md'
         }`}
       >
@@ -303,7 +303,7 @@ export default function ImportedBookReader({
       aria-modal="true"
       aria-label={`Read ${book.title}`}
     >
-      <header className="shrink-0 border-b border-[var(--page-rule)] bg-[var(--page-paper)] pt-[max(0.25rem,env(safe-area-inset-top))]">
+      <header className="shrink-0 border-b border-[var(--page-rule)] bg-[var(--page-paper)] pt-[max(0.25rem,var(--safe-top))]">
         <div className="mx-auto flex max-w-4xl items-center gap-1 px-2 py-1">
           <button
             type="button"
@@ -478,7 +478,7 @@ export default function ImportedBookReader({
       />
       </div>
 
-      <footer className="shrink-0 border-t border-[var(--page-rule)] bg-[var(--page-paper)] pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+      <footer className="shrink-0 border-t border-[var(--page-rule)] bg-[var(--page-paper)] pb-[max(0.25rem,var(--safe-bottom))]">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-2 px-2 py-1">
           <button
             type="button"
@@ -524,7 +524,7 @@ export default function ImportedBookReader({
             onClick={() => setContentsOpen(false)}
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
-          <div className="relative flex max-h-[86dvh] w-full flex-col border border-white/10 border-b-0 bg-slate-950/97 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg sm:rounded-2xl sm:border-b">
+          <div className="relative flex max-h-[86dvh] w-full flex-col border border-white/10 border-b-0 bg-slate-950/97 p-4 pb-[max(1rem,var(--safe-bottom))] sm:max-w-lg sm:rounded-2xl sm:border-b">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Contents</p>
