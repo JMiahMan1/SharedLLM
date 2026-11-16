@@ -228,3 +228,104 @@ def test_the_verdict_line_names_the_rating_concerns_and_facts():
     assert "Watch for: Contact with strangers or chat" in line
     assert "Has in-app purchases; Users Interact" in line
     assert chr(0x2014) not in line and chr(0x2013) not in line
+
+
+# --- Common Sense Media next to the Play rating ------------------------------
+
+
+def _cs(age):
+    return {"status": "found", "review": {"age": age, "age_label": f"age {age}+", "name": "Example",
+                                          "parents_need_to_know": "Parents need to know that it is fine."}}
+
+
+def test_common_sense_decides_when_it_is_stricter_and_says_so():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)  # 10, Everyone 10+
+    verdict = av.assess({"package": "com.example.game"}, {**_found("Everyone 10+"), "common_sense": _cs(13)}, policy)
+    assert verdict["age_source"] == "common_sense" and verdict["over_age"] is True
+    assert verdict["play_over_age"] is False and verdict["common_sense_limit"] == 10
+    flag = next(f for f in verdict["flags"] if f["reason"] == "over_age")
+    assert flag["source"] == "common_sense" and flag["text"] == "Common Sense Media says age 13+, above the limit of 10"
+    assert verdict["common_sense"]["age"] == 13 and verdict["common_sense"]["status"] == "found"
+    assert "Common Sense Media says age 13+" in av.verdict_line(verdict)
+
+
+def test_play_decides_when_it_is_stricter():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    verdict = av.assess({"package": "com.example.game"}, {**_found("Teen"), "common_sense": _cs(9)}, policy)
+    assert verdict["age_source"] == "play" and verdict["over_age"] is True
+    assert verdict["common_sense_over_age"] is False
+    assert next(f for f in verdict["flags"] if f["reason"] == "over_age")["text"] == "Rated Teen, above the Everyone 10+ limit"
+    line = av.verdict_line(verdict)
+    assert "Rated Teen, above the Everyone 10+ limit" in line and "Common Sense Media says age 9+" in line
+
+
+def test_a_tie_is_play_and_a_parents_limit_covers_its_whole_band():
+    # A parent allowed Teen for a ten-year-old: Common Sense ages up to 16 are within it.
+    policy = av.effective_policy({"max_rating": "Teen"}, "2016-01-01", TODAY)
+    within = av.age_assessment("Teen", {"age": 15}, policy)
+    assert within["source"] == "common_sense" and within["over_age"] is False and within["common_sense_limit"] == 16
+    tie = av.age_assessment("Teen", {"age": 13}, policy)
+    assert tie["source"] == "play"
+
+
+def test_common_sense_alone_still_judges_an_app_without_a_play_rating():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    verdict = av.assess({"package": "com.example.web"}, {"listing": {"status": "not_on_play"}, "common_sense": _cs(12)},
+                        policy)
+    assert verdict["age_source"] == "common_sense" and verdict["over_age"] is True
+
+
+def test_without_a_birth_date_common_sense_cannot_be_compared():
+    policy = av.effective_policy({}, None, TODAY)
+    out = av.age_assessment("Everyone", {"age": 13}, policy)
+    assert out["source"] == "common_sense" and out["over_age"] is None
+
+
+@pytest.mark.parametrize("status", ["off", "not_found", "error", "checking"])
+def test_a_common_sense_lookup_without_a_review_changes_nothing(status):
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    verdict = av.assess({"package": "com.example.game"},
+                        {**_found("Everyone"), "common_sense": {"status": status, "reason": "why"}}, policy)
+    assert verdict["age_source"] == "play" and verdict["over_age"] is False
+    assert verdict["common_sense"] == {"status": status, "reason": "why"}
+
+
+# --- the security scan in the verdict ---------------------------------------
+
+
+def test_a_sideloaded_app_with_risky_access_notifies_at_severe():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    app = av.clean_inventory_app({"package": "com.example.helper", "installer": None, "permissions": ["location"],
+                                  "capabilities": ["accessibility"], "special_access": ["accessibility"]})
+    verdict = av.assess(app, {"listing": {"status": "not_on_play"}}, policy)
+    reasons = [f["reason"] for f in verdict["flags"]]
+    assert "sideloaded_risky" in reasons and "sideloaded" not in reasons  # one flag for where it came from
+    assert verdict["level"] == "severe" and verdict["security_level"] == "severe"
+    assert [f["reason"] for f in av.notifies(verdict, "severe")] == ["sideloaded_risky"]
+    assert {f["check"] for f in verdict["security"]} == {"sideloaded", "risky_access"}
+
+
+def test_a_malware_hit_from_the_check_flags_the_app():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    app = {**av.clean_inventory_app({"package": "com.example.game", "installer": "com.android.vending"}),
+           "malware_check": {"state": "malware", "signature": "ExampleFamily", "reason": None}}
+    verdict = av.assess(app, _found("Everyone"), policy)
+    assert verdict["level"] == "severe" and verdict["flags"][0]["reason"] == "malware"
+    assert verdict["malware_check"]["state"] == "malware"
+    assert "known malware sample" in av.verdict_line(verdict)
+
+
+def test_review_excerpts_and_reviews_read_reach_the_verdict():
+    policy = av.effective_policy({}, "2016-01-01", TODAY)
+    catalog = _found("Everyone")
+    catalog["listing"]["listing"]["reviews_read"] = {"relevant": 40, "newest": 40, "lowest": 12, "state": "done",
+                                                     "errors": {}}
+    catalog["review"] = {"status": "ready", "listing_hash": "h1", "summary": "Fine.", "concerns": [],
+                         "excerpts": [{"category": "ads", "stars": 2, "at": "2026-11-01", "text": "Ads.",
+                                       "source": "lowest"}]}
+    verdict = av.assess({"package": "com.example.game"}, catalog, policy)
+    assert verdict["review_excerpts"][0]["text"] == "Ads." and verdict["reviews_read"]["lowest"] == 12
+
+
+def _found(rating):
+    return _entry(rating)

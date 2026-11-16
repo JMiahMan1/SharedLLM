@@ -27,7 +27,7 @@ import re
 from datetime import UTC, date, datetime
 from typing import Any
 
-from services.common import concern_monitor
+from services.common import app_security, concern_monitor
 from services.common.screen_time import PERMISSION_GROUPS
 
 #: Google Play's content ratings in the United States (IARC / ESRB labels),
@@ -37,6 +37,15 @@ RATINGS = ("Everyone", "Everyone 10+", "Teen", "Mature 17+", "Adults only 18+")
 
 #: The rating a child of each age may use by default (inclusive upper ages).
 _AGE_BANDS = ((9, "Everyone"), (12, "Everyone 10+"), (16, "Teen"), (17, "Mature 17+"))
+#: The youngest age each Play rating is for, to compare it with a Common Sense
+#: Media age ("age 13+") and say which of the two is stricter.
+RATING_MIN_AGE = {"Everyone": 0, "Everyone 10+": 10, "Teen": 13, "Mature 17+": 17, "Adults only 18+": 18}
+#: The oldest Common Sense age a rating limit a parent chose allows (a parent
+#: who allows Teen allows "age 16+").
+RATING_MAX_AGE = {"Everyone": 9, "Everyone 10+": 12, "Teen": 16, "Mature 17+": 17, "Adults only 18+": 99}
+#: Values of the device's ``apk_hash_state``.
+APK_HASH_STATES = ("ok", "too_large", "unreadable", "deferred")
+MAX_CERTS = 4
 
 #: A parent's per-app choice: never flag it, or always flag it.
 APP_OVERRIDES = ("allow", "flag")
@@ -63,14 +72,8 @@ CONCERNS: dict[str, str] = {
 }
 
 #: Installers that are app stores (anything else, or none, is a sideload).
-PLAY_INSTALLER = "com.android.vending"
-STORE_INSTALLERS = {
-    PLAY_INSTALLER: "Google Play",
-    "com.sec.android.app.samsungapps": "Galaxy Store",
-    "com.amazon.venezia": "Amazon Appstore",
-    "org.fdroid.fdroid": "F-Droid",
-    "com.huawei.appmarket": "AppGallery",
-}
+PLAY_INSTALLER = app_security.PLAY_INSTALLER
+STORE_INSTALLERS = app_security.STORE_NAMES
 
 #: Permissions that matter for an app nobody can look up: each group's level
 #: and plain words. Contacts, texts and calls are about other people too.
@@ -189,6 +192,15 @@ def clean_inventory_app(raw: Any) -> dict[str, Any] | None:
     perms = raw.get("permissions") if isinstance(raw.get("permissions"), list) else []
     size = raw.get("size_bytes")
     installer = raw.get("installer")
+
+    def words(key: str, allowed: tuple[str, ...]) -> list[str]:
+        given = raw.get(key) if isinstance(raw.get(key), list) else []
+        return sorted({w for w in given if w in allowed})
+
+    certs = raw.get("cert_sha1") if isinstance(raw.get("cert_sha1"), list) else []
+    apk_hash = app_security.clean_sha256(raw.get("apk_sha256"))
+    hash_state = "ok" if apk_hash else (raw.get("apk_hash_state") if raw.get("apk_hash_state") in APK_HASH_STATES[1:]
+                                        else None)
     return {
         "package": raw["package"],
         "label": str(raw.get("label") or "")[:120],
@@ -199,6 +211,12 @@ def clean_inventory_app(raw: Any) -> dict[str, Any] | None:
         "launchable": bool(raw.get("launchable", True)),
         "permissions": sorted({p for p in perms if p in PERMISSION_GROUPS}),
         "size_bytes": int(size) if isinstance(size, (int, float)) and not isinstance(size, bool) and size > 0 else None,
+        # The security scan's inputs (app_security); absent from older APKs.
+        "capabilities": words("capabilities", app_security.CAPABILITIES),
+        "special_access": words("special_access", app_security.SPECIAL_ACCESS),
+        "cert_sha1": sorted({c for c in (app_security.clean_sha1(x) for x in certs) if c})[:MAX_CERTS],
+        "apk_sha256": apk_hash,
+        "apk_hash_state": hash_state,
     }
 
 
@@ -211,7 +229,8 @@ def merge_inventories(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for app in device.get("apps") or []:
             row = merged.get(app["package"])
             if row is None:
-                merged[app["package"]] = {**app, "devices": [key], "usage_access": bool(device.get("usage_access"))}
+                merged[app["package"]] = {**app, "devices": [key], "usage_access": bool(device.get("usage_access")),
+                                          "apk_hashes": [app["apk_sha256"]] if app.get("apk_sha256") else []}
                 continue
             row["devices"].append(key)
             row["label"] = row["label"] or app.get("label") or ""
@@ -219,6 +238,12 @@ def merge_inventories(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["launchable"] = row["launchable"] or app.get("launchable", False)
             row["permissions"] = sorted(set(row["permissions"]) | set(app.get("permissions") or []))
             row["usage_access"] = row["usage_access"] or bool(device.get("usage_access"))
+            for list_key in ("capabilities", "special_access", "cert_sha1"):
+                row[list_key] = sorted(set(row.get(list_key) or []) | set(app.get(list_key) or []))
+            if app.get("apk_sha256"):
+                row["apk_hashes"] = sorted(set(row["apk_hashes"]) | {app["apk_sha256"]})
+                row["apk_sha256"] = row.get("apk_sha256") or app["apk_sha256"]
+            row["apk_hash_state"] = "ok" if row["apk_hashes"] else (row.get("apk_hash_state") or app.get("apk_hash_state"))
             for key_name, pick in (("first_install", min), ("last_update", max), ("last_used", max), ("size_bytes", max)):
                 values = [v for v in (row.get(key_name), app.get(key_name)) if v is not None]
                 row[key_name] = pick(values) if values else None
@@ -245,10 +270,58 @@ def installer_name(installer: str | None) -> str | None:
     return STORE_INSTALLERS.get(installer or "")
 
 
+def age_assessment(rating: str | None, common_sense: dict[str, Any] | None,
+                   policy: dict[str, Any]) -> dict[str, Any]:
+    """Whether the app is over the child's age limit, by the Play (IARC)
+    rating and by Common Sense Media's age, the stricter of the two deciding.
+
+    Play's rating is compared with the rating limit. Common Sense's age is
+    compared with the child's age, or, when a parent chose a rating limit,
+    with the oldest age that limit covers (``RATING_MAX_AGE``). The stricter
+    source is the one that puts the app at the older age; on a tie Play's
+    rating speaks. ``source`` names it; ``over_age`` is None when the
+    deciding source cannot be compared (no birth date and no limit).
+    """
+    limit = policy.get("effective_max_rating")
+    rank, limit_rank = rating_rank(rating), rating_rank(limit)
+    play_over = None if rank is None or limit_rank is None else rank > limit_rank
+    cs_age = (common_sense or {}).get("age") if isinstance((common_sense or {}).get("age"), int) else None
+    if policy.get("max_rating") in RATING_MAX_AGE:
+        cs_limit: int | None = RATING_MAX_AGE[policy["max_rating"]]
+    else:
+        cs_limit = policy.get("age") if isinstance(policy.get("age"), int) else None
+    cs_over = None if cs_age is None or cs_limit is None else cs_age > cs_limit
+    play_age = RATING_MIN_AGE.get(rating or "")
+    if cs_age is not None and (play_age is None or cs_age > play_age):
+        source, over = "common_sense", cs_over
+        text = f"Common Sense Media says age {cs_age}+, above the limit of {cs_limit}" if cs_over else None
+    elif play_age is not None:
+        source, over = "play", play_over
+        text = f"Rated {rating}, above the {limit} limit" if play_over else None
+    else:
+        source, over, text = None, None, None
+    return {
+        "over_age": over, "source": source, "text": text,
+        "play_over_age": play_over, "common_sense_age": cs_age, "common_sense_limit": cs_limit,
+        "common_sense_over_age": cs_over,
+    }
+
+
+def _common_sense_view(entry: dict[str, Any]) -> dict[str, Any]:
+    """What the card shows of the Common Sense lookup: its state and, when a
+    review was found, the review."""
+    status = entry.get("status") or "checking"
+    out: dict[str, Any] = {"status": status, "reason": entry.get("reason")}
+    if status == "found":
+        out.update(entry.get("review") or {})
+    return out
+
+
 def assess(
     app: dict[str, Any],
     catalog: dict[str, Any] | None,
     policy: dict[str, Any],
+    own_package: str | None = None,
 ) -> dict[str, Any]:
     """One app's verdict for one child.
 
@@ -257,6 +330,9 @@ def assess(
     (``{"listing": {...}, "review": {...}}``) or None when it was never looked
     up; ``policy`` is :func:`effective_policy`. The verdict carries every flag
     with its level; who it reaches is decided per parent (:func:`flagged_for`).
+    The app's ``malware_check`` (telemetry's MalwareBazaar state) and the
+    device's report feed the security scan (``app_security``); Jarvis itself
+    (``own_package``) is never scanned.
     """
     package = app["package"]
     listing_entry = (catalog or {}).get("listing") or {}
@@ -268,15 +344,17 @@ def assess(
 
     rating = (listing or {}).get("content_rating")
     limit = policy.get("effective_max_rating")
-    rank, limit_rank = rating_rank(rating), rating_rank(limit)
-    over_age = None if rank is None or limit_rank is None else rank > limit_rank
+    cs_entry = (catalog or {}).get("common_sense") or {}
+    common_sense = _common_sense_view(cs_entry) if cs_entry else None
+    age = age_assessment(rating, cs_entry.get("review") if cs_entry.get("status") == "found" else None, policy)
+    over_age = age["over_age"]
     override = (policy.get("apps") or {}).get(package)
 
     flags: list[dict[str, Any]] = []
     if over_age:
         flags.append({
-            "reason": "over_age", "category": "rating", "level": "high",
-            "text": f"Rated {rating}, above the {limit} limit",
+            "reason": "over_age", "category": "rating", "level": "high", "source": age["source"],
+            "text": age["text"],
         })
     if override == "flag":
         flags.append({"reason": "parent_flag", "category": "parent", "level": "high", "text": "A parent marked it to watch"})
@@ -290,6 +368,9 @@ def assess(
             "reason": "concern", "category": concern["category"], "level": concern["severity"],
             "text": concern.get("why") or label,
         })
+    findings = app_security.scan(app, app.get("malware_check"), own_package)
+    security_flags = app_security.flags(app, findings)
+    flags.extend(security_flags)
     if lookup == "not_on_play":
         held = [g for g in app.get("permissions") or [] if g in PERMISSION_LEVELS]
         if held:
@@ -301,7 +382,8 @@ def assess(
             })
         # Only an installed app says where it came from ("installer" absent:
         # an app asked for, not on the device yet).
-        if "installer" in app and installer_name(app.get("installer")) is None:
+        if "installer" in app and installer_name(app.get("installer")) is None \
+                and not any(f["reason"] == "sideloaded_risky" for f in security_flags):
             flags.append({
                 "reason": "sideloaded", "category": "data", "level": "medium",
                 "text": "Installed from outside an app store",
@@ -345,6 +427,18 @@ def assess(
         "fingerprint": fingerprint,
         "dismissed": dismissed,
         "store": installer_name(app.get("installer")),
+        "age_source": age["source"],
+        "common_sense": common_sense,
+        "common_sense_over_age": age["common_sense_over_age"],
+        "common_sense_limit": age["common_sense_limit"],
+        "play_over_age": age["play_over_age"],
+        "review_excerpts": (review or {}).get("excerpts") or [],
+        "reviews_read": (listing or {}).get("reviews_read") or {},
+        "security": findings,
+        # The worst of the findings and of the flags they make (a sideloaded
+        # app with switched-on access is severe though each finding is not).
+        "security_level": max_level([f["severity"] for f in findings] + [f["level"] for f in security_flags]),
+        "malware_check": app.get("malware_check") if own_package is None or package != own_package else None,
     }
 
 
@@ -371,7 +465,10 @@ def verdict_line(verdict: dict[str, Any]) -> str:
         parts.append("Not on Google Play, so judged on its permissions")
     elif verdict.get("lookup") in ("error", "off"):
         parts.append("Its Play listing could not be checked")
-    if verdict.get("rating"):
+    cs = verdict.get("common_sense") or {}
+    if verdict.get("age_source") == "common_sense" and verdict.get("over_age"):
+        parts.append(f"Common Sense Media says age {cs.get('age')}+, above the limit of {verdict.get('common_sense_limit')}")
+    elif verdict.get("rating"):
         limit = verdict.get("limit")
         if verdict.get("over_age"):
             parts.append(f"Rated {verdict['rating']}, above the {limit} limit")
@@ -379,6 +476,11 @@ def verdict_line(verdict: dict[str, Any]) -> str:
             parts.append(f"Rated {verdict['rating']}, within the {limit} limit")
         else:
             parts.append(f"Rated {verdict['rating']} (set a birth date to compare)")
+    if cs.get("status") == "found" and verdict.get("age_source") != "common_sense":
+        parts.append(f"Common Sense Media says age {cs.get('age')}+")
+    security = [f for f in verdict.get("security") or [] if f.get("severity") == "severe"]
+    if security:
+        parts.append(security[0]["text"])
     concerns = [c["label"] for c in verdict.get("concerns") or []][:3]
     if concerns:
         parts.append("Watch for: " + ", ".join(concerns))

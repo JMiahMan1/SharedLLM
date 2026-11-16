@@ -15,7 +15,9 @@ parent of a child know about it? The answer must be this JSON::
 the caller keeps the review as failed with that reason: a model's malformed
 answer is never patched up into a verdict. A quote that does not appear in
 the reviews it was given is not evidence and is dropped (counted in
-``dropped_quotes``), so a parent is never shown words nobody wrote.
+``dropped_quotes``), so a parent is never shown words nobody wrote. The
+reviews a kept quote came from are returned as ``excerpts`` (stars, date and
+the review's words) for the card.
 
 Pure: building the request and reading the answer are here; telemetry makes
 the call (``services/telemetry/app_catalog.py``).
@@ -34,13 +36,21 @@ MAX_WHY = 240
 MAX_CONCERNS = 8
 MAX_EVIDENCE = 3
 MAX_QUOTE = 240
-#: Reviews sent to the model: the page Play shows first, trimmed.
+#: Reviews sent to the model: the page Play shows first, then the newest and
+#: the lowest rated (``play_listing.REVIEW_BATCHES``), each trimmed, never the
+#: same review twice.
 PROMPT_REVIEWS = 20
+PROMPT_NEWEST = 15
+PROMPT_LOWEST = 15
+#: Review excerpts kept for the card: the reviews a concern quoted.
+MAX_EXCERPTS = 6
 
 SYSTEM_PROMPT = (
     "You help Christian parents decide whether an Android app is right for their child. You are given the app's "
     "public Google Play listing (its content rating, rating descriptors, interactive elements, ads, in-app "
-    "purchases, data-safety summary and description) and recent user reviews. Say what a parent should know. "
+    "purchases, data-safety summary and description) and user reviews: the ones Play shows first, the newest, "
+    "and the lowest rated (one and two stars, where complaints about strangers, scams and content show up). "
+    "Say what a parent should know. "
     "Raise a concern only when the listing or the reviews support it; never invent one. Categories: "
     + ", ".join(f"{key} ({label})" for key, label in CONCERNS.items())
     + ". Severity uses this scale: severe = a real danger to a child (strangers seeking out children, sexual "
@@ -69,19 +79,81 @@ def messages(listing: dict[str, Any]) -> list[dict[str, str]]:
         ) or "not given"),
         f"Stars: {listing.get('score')} from {listing.get('ratings_count')} ratings; installs {listing.get('installs')}",
     ]
-    reviews = [
-        f"[{i + 1}] {r.get('stars')} stars ({r.get('at') or 'date unknown'}): {r.get('text')}"
-        for i, r in enumerate((listing.get("reviews") or [])[:PROMPT_REVIEWS])
-    ]
+    sections = review_sections(listing)
+    lines: list[str] = []
+    n = 0
+    for title, rows in sections:
+        if not rows:
+            continue
+        lines.append(f"{title}:")
+        for r in rows:
+            n += 1
+            lines.append(f"[{n}] {r.get('stars')} stars ({r.get('at') or 'date unknown'}): {r.get('text')}")
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": "\n".join(facts)
             + f"\n\nDescription:\n\"\"\"\n{listing.get('description') or ''}\n\"\"\""
-            + "\n\nReviews:\n" + ("\n".join(reviews) if reviews else "(none)"),
+            + "\n\nReviews:\n" + ("\n".join(lines) if lines else "(none)"),
         },
     ]
+
+
+def _more(listing: dict[str, Any], batch: str) -> list[dict[str, Any]]:
+    return list(((listing.get("more_reviews") or {}).get(batch) or {}).get("reviews") or [])
+
+
+def review_sections(listing: dict[str, Any]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """The reviews the model reads, by where they came from: Play's first page,
+    the newest, and the lowest rated, each review once."""
+    seen: set[str] = set()
+
+    def fresh(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        out = []
+        for r in rows:
+            key = _norm(r.get("text") or "")
+            if key and key not in seen:
+                seen.add(key)
+                out.append(r)
+            if len(out) >= limit:
+                break
+        return out
+
+    first = fresh(listing.get("reviews") or [], PROMPT_REVIEWS)
+    newest = fresh(_more(listing, "newest"), PROMPT_NEWEST)
+    lowest = fresh(sorted(_more(listing, "one_star") + _more(listing, "two_star"),
+                          key=lambda r: r.get("at") or "", reverse=True), PROMPT_LOWEST)
+    return [("Reviews Play shows first", first), ("Newest reviews", newest),
+            ("Lowest-rated reviews (1 and 2 stars)", lowest)]
+
+
+def _sourced_reviews(listing: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every review the model was given, tagged with where it came from."""
+    names = {"Reviews Play shows first": "relevant", "Newest reviews": "newest",
+             "Lowest-rated reviews (1 and 2 stars)": "lowest"}
+    return [(names[title], r) for title, rows in review_sections(listing) for r in rows]
+
+
+def excerpts(concerns: list[dict[str, Any]], listing: dict[str, Any]) -> list[dict[str, Any]]:
+    """The reviews a concern quoted, word for word with their stars and date,
+    for the card (never the reviewer). At most ``MAX_EXCERPTS``."""
+    reviews = _sourced_reviews(listing)
+    out: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for concern in concerns:
+        for quote in concern.get("evidence") or []:
+            needle = _norm(quote)
+            for source, review in reviews:
+                text = review.get("text") or ""
+                if needle and needle in _norm(text) and text not in used:
+                    used.add(text)
+                    out.append({"category": concern["category"], "stars": review.get("stars"),
+                                "at": review.get("at"), "text": text, "source": source})
+                    break
+            if len(out) >= MAX_EXCERPTS:
+                return out
+    return out
 
 
 #: Curly quotes read as straight ones when a quote is matched to a review.
@@ -117,7 +189,7 @@ def parse(content: str, listing: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("the model's concerns were not a list")
     if len(concerns) > MAX_CONCERNS:
         raise ValueError(f"the model raised more than {MAX_CONCERNS} concerns")
-    sources = [_norm(r.get("text") or "") for r in listing.get("reviews") or []]
+    sources = [_norm(r.get("text") or "") for _source, r in _sourced_reviews(listing)]
     dropped = 0
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -157,4 +229,5 @@ def parse(content: str, listing: dict[str, Any]) -> dict[str, Any]:
             "why": why.strip()[:MAX_WHY],
             "evidence": quotes[:MAX_EVIDENCE],
         })
-    return {"summary": summary.strip()[:MAX_SUMMARY], "concerns": out, "dropped_quotes": dropped}
+    return {"summary": summary.strip()[:MAX_SUMMARY], "concerns": out, "dropped_quotes": dropped,
+            "excerpts": excerpts(out, listing)}

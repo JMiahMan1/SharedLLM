@@ -105,23 +105,24 @@ def _is_review(row: Any) -> bool:
     )
 
 
+def _review(row: list[Any]) -> dict[str, Any]:
+    seconds = _at(row, 5, 0)
+    version = row[10] if len(row) > 10 and isinstance(row[10], str) else None
+    return {
+        # Never the reviewer's name or picture: the words, the stars and when.
+        "stars": row[2],
+        "text": row[4][:MAX_REVIEW_TEXT],
+        "at": datetime.fromtimestamp(seconds, UTC).date().isoformat() if isinstance(seconds, int) else None,
+        "thumbs_up": row[6] if isinstance(row[6], int) else 0,
+        "version": version,
+    }
+
+
 def _reviews(blocks: list[Any]) -> list[dict[str, Any]]:
     for block in blocks:
         rows = _at(block, 0)
         if isinstance(rows, list) and rows and all(_is_review(r) for r in rows):
-            out = []
-            for row in rows[:MAX_REVIEWS]:
-                seconds = _at(row, 5, 0)
-                version = row[10] if len(row) > 10 and isinstance(row[10], str) else None
-                out.append({
-                    # Never the reviewer's name or picture: the words, the stars and when.
-                    "stars": row[2],
-                    "text": row[4][:MAX_REVIEW_TEXT],
-                    "at": datetime.fromtimestamp(seconds, UTC).date().isoformat() if isinstance(seconds, int) else None,
-                    "thumbs_up": row[6] if isinstance(row[6], int) else 0,
-                    "version": version,
-                })
-            return out
+            return [_review(row) for row in rows[:MAX_REVIEWS]]
     return []
 
 
@@ -189,6 +190,76 @@ def parse(page: str, package: str) -> dict[str, Any]:
     }
     listing["hash"] = listing_hash(listing)
     return listing
+
+
+# --- more reviews: the newest and the lowest rated ---------------------------
+#
+# The page itself loads more reviews, and re-sorts or filters them by stars,
+# with one POST to Play's ``batchexecute`` endpoint (RPC id ``UsvDTd``). Its
+# form holds the package, the sort (1 most relevant, 2 newest, 3 rating), how
+# many, and an optional star filter; nothing else. The answer carries rows in
+# the same shape as the page's own review block.
+
+REVIEWS_URL = "https://play.google.com/_/PlayStoreUi/data/batchexecute"
+REVIEWS_RPC = "UsvDTd"
+SORT_NEWEST = 2
+#: The extra review pages read per app per refresh: (sort, star filter).
+REVIEW_BATCHES: dict[str, tuple[int, int | None]] = {
+    "newest": (SORT_NEWEST, None),
+    "one_star": (SORT_NEWEST, 1),
+    "two_star": (SORT_NEWEST, 2),
+}
+REVIEWS_PER_BATCH = 40
+
+
+def reviews_request(package: str, batch: str) -> tuple[str, dict[str, str], dict[str, str]]:
+    """(url, form, headers) for one extra page of reviews. Only the package
+    name, the sort and the star filter are in it."""
+    sort, stars = REVIEW_BATCHES[batch]
+    inner = json.dumps([None, None, [2, sort, [REVIEWS_PER_BATCH, None, None], None, [None, stars]], [package, 7]],
+                       separators=(",", ":"))
+    form = {"f.req": json.dumps([[[REVIEWS_RPC, inner, None, "generic"]]])}
+    url = f"{REVIEWS_URL}?{urlencode({'rpcids': REVIEWS_RPC, **LISTING_LOCALE})}"
+    headers = {**REQUEST_HEADERS, "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}
+    return url, form, headers
+
+
+def parse_reviews(body: str, batch: str | None = None) -> list[dict[str, Any]]:
+    """The reviews in one ``batchexecute`` answer. An app with no reviews of
+    that kind is an empty list; an answer this parser cannot read raises
+    ListingError."""
+    text = (body or "").lstrip()
+    if text.startswith(")]}'"):
+        text = text[4:].lstrip()
+    try:
+        outer, _end = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError as exc:
+        raise ListingError("the reviews answer is not readable") from exc
+    entry = next((e for e in outer if isinstance(e, list) and len(e) > 2 and e[0] == "wrb.fr"
+                  and e[1] == REVIEWS_RPC), None) if isinstance(outer, list) else None
+    if entry is None or not isinstance(entry[2], str):
+        raise ListingError("the reviews answer carries no reviews data")
+    try:
+        data = json.loads(entry[2])
+    except json.JSONDecodeError as exc:
+        raise ListingError("the reviews data is not readable") from exc
+    rows = _at(data, 0)
+    if rows is None:
+        return []
+    if not isinstance(rows, list) or not all(_is_review(r) for r in rows):
+        raise ListingError("the reviews data is not in the expected shape")
+    out = [_review(row) for row in rows[:REVIEWS_PER_BATCH]]
+    stars = REVIEW_BATCHES.get(batch or "", (0, None))[1]
+    if stars and any(r["stars"] != stars for r in out):
+        raise ListingError(f"the {stars}-star reviews answer held other ratings")
+    return out
+
+
+def more_reviews_hash(more: dict[str, Any]) -> str:
+    """What the extra reviews add to what the local model reads."""
+    keyed = {batch: [r.get("text") for r in (more.get(batch) or {}).get("reviews") or []]
+             for batch in REVIEW_BATCHES}
+    return hashlib.sha256(json.dumps(keyed, sort_keys=True).encode()).hexdigest()[:24]
 
 
 def listing_hash(listing: dict[str, Any]) -> str:
