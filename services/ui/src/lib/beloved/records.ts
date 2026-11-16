@@ -10,7 +10,7 @@
  */
 import { parseDay } from './dates';
 
-export type BelovedKind = 'profile' | 'day' | 'note' | 'heart' | 'prayer' | 'devotion' | 'idea';
+export type BelovedKind = 'profile' | 'day' | 'note' | 'heart' | 'prayer' | 'devotion' | 'idea' | 'together' | 'plan';
 
 /** The couple's shared settings: wedding and first-date days, birthdays, cover photo. */
 export interface ProfileRecord {
@@ -73,7 +73,29 @@ export interface IdeaRecord {
   doneAt?: number;
 }
 
-export type BelovedRecord = ProfileRecord | DayRecord | NoteRecord | HeartRecord | PrayerRecord | DevotionRecord | IdeaRecord;
+/** "Just us": a day the couple marked on their private calendar. */
+export interface TogetherRecord {
+  b: 'together';
+  /** The calendar day (`YYYY-MM-DD`). */
+  day: string;
+  note?: string;
+}
+
+/** "Just us": an evening one of them planned for the two of them. */
+export interface PlanRecord {
+  b: 'plan';
+  day: string;
+  /** Optional local time, `HH:MM`. */
+  time?: string;
+  /** A suggestion's id (lib/beloved/justus.ts), if one was picked. */
+  idea?: string;
+  note?: string;
+  /** When it was marked done (seconds); a done plan also marks its day. */
+  doneAt?: number;
+}
+
+export type BelovedRecord =
+  | ProfileRecord | DayRecord | NoteRecord | HeartRecord | PrayerRecord | DevotionRecord | IdeaRecord | TogetherRecord | PlanRecord;
 
 /** What the server lists: one sealed record and who wrote it when. */
 export interface SealedRecord {
@@ -121,6 +143,12 @@ function text(value: unknown, max = MAX_TEXT): string | undefined {
 
 function day(value: unknown): string | undefined {
   return parseDay(value) ? (value as string) : undefined;
+}
+
+function clock(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? value : undefined;
 }
 
 function stamp(value: unknown): number | undefined {
@@ -199,6 +227,16 @@ export function readRecord(kind: BelovedKind, raw: unknown): BelovedRecord | nul
       if (!idea && !custom) return null;
       return clean<IdeaRecord>({ b: 'idea', idea, custom, on: day(r.on), doneAt: stamp(r.doneAt) });
     }
+    case 'together': {
+      const when = day(r.day);
+      return when ? clean<TogetherRecord>({ b: 'together', day: when, note: text(r.note, 1000) }) : null;
+    }
+    case 'plan': {
+      const when = day(r.day);
+      return when
+        ? clean<PlanRecord>({ b: 'plan', day: when, time: clock(r.time), idea: text(r.idea, 16), note: text(r.note, 1000), doneAt: stamp(r.doneAt) })
+        : null;
+    }
     default:
       return null;
   }
@@ -213,6 +251,9 @@ export interface BelovedView {
   prayers: Opened<PrayerRecord>[];
   devotions: Opened<DevotionRecord>[];
   ideas: Opened<IdeaRecord>[];
+  /** "Just us": only ever shown on its own tab, never previewed anywhere else. */
+  together: Opened<TogetherRecord>[];
+  plans: Opened<PlanRecord>[];
 }
 
 /** Every opened record in one view, newest first within each list. */
@@ -228,6 +269,8 @@ export function buildView(opened: Opened[]): BelovedView {
     prayers: newest<PrayerRecord>('prayer'),
     devotions: newest<DevotionRecord>('devotion'),
     ideas: newest<IdeaRecord>('idea'),
+    together: newest<TogetherRecord>('together'),
+    plans: newest<PlanRecord>('plan'),
   };
 }
 
@@ -242,7 +285,10 @@ export function prayedCount(record: PrayerRecord): number {
   return Object.values(record.prayed ?? {}).reduce((sum, times) => sum + times.length, 0);
 }
 
-/** What the bar's heart counts: a heart or a love note. */
+/**
+ * What the bar's heart counts: a heart or a love note. Never the "Just us"
+ * kinds: the heart is seen outside Beloved, so it must not hint at them.
+ */
 const LOVE_KINDS: ReadonlySet<BelovedKind> = new Set(['heart', 'note']);
 
 type Stamped = Pick<SealedRecord, 'kind' | 'own' | 'at'>;

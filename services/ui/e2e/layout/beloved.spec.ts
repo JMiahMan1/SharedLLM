@@ -58,7 +58,8 @@ async function serve(page: Page, server: Server): Promise<void> {
       }
       if (req.method() === 'POST' && kind) {
         const body = req.postDataJSON() as { sealed: string; notify?: boolean };
-        const row: SealedRow = { id: (server.records.length + 1).toString(16).padStart(32, 'b'), kind, at: Math.floor(Date.now() / 1000),
+        // Numbered by what was sent, so an id is never reused after a delete.
+        const row: SealedRow = { id: (server.sent.length + 1).toString(16).padStart(32, 'b'), kind, at: Math.floor(Date.now() / 1000),
           updated_at: Math.floor(Date.now() / 1000), by: 'parent', own: true, by_name: 'Parent', sealed: body.sealed };
         server.records.push(row);
         return route.fulfill({ json: { ...row, notified: Boolean(body.notify) } });
@@ -279,6 +280,149 @@ test.describe('Beloved on every form factor', () => {
       await expect(page.getByText(text)).toHaveCount(0);
     }
     expect(await page.locator('img[src^="blob:"]').count()).toBe(0);
+    done(run);
+  });
+
+  test('Just us: the private calendar, a plan and its reminders; sealed, generic outside its tab, gone on lock', async ({ page }, info) => {
+    const { server, key } = await setup();
+    const local = (offset: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, month: d.getMonth() };
+    };
+    const [today, earlier, later] = [local(0), local(-3), local(5)];
+    const seeded = async (id: string, kind: string, record: object): Promise<SealedRow> => ({
+      id, kind, at: SEC - 60, updated_at: SEC - 60, by: 'robin', own: false, by_name: 'Robin', sealed: await sealRecord(key, record),
+    });
+    // Robin marked a day three days ago and planned this evening; both arrived after the note.
+    server.records.push(
+      await seeded('e'.repeat(32), 'together', { b: 'together', day: earlier.key, note: 'A made-up note about a walk' }),
+      await seeded('f'.repeat(32), 'plan', { b: 'plan', day: today.key, idea: 'hotel' }),
+    );
+    // The phone's alarm scheduler, as the Android app has it: every list the page asks for is kept here.
+    await page.addInitScript(() => {
+      const synced: unknown[] = [];
+      (window as unknown as { __synced: unknown[] }).__synced = synced;
+      window.__jarvisBelovedRemindersMock = {
+        sync: async ({ reminders }) => {
+          synced.push(reminders);
+          return { scheduled: reminders.length };
+        },
+        clear: async () => ({ scheduled: 0 }),
+      };
+    });
+    const run = await open(page, server);
+
+    // The bar's heart counts Robin's note only: the calendar's records never light it.
+    await expect(page.getByTestId('private-love-indicator')).toHaveText('1');
+    await page.getByTestId('private-beloved-open').click();
+    const beloved = page.getByTestId('beloved');
+    const home = beloved.getByTestId('beloved-home');
+    await expect(home).toBeVisible();
+    // The home page previews nothing from the tab.
+    for (const text of ['A made-up note', 'days since', 'Last time', 'Planned', 'A night away']) await expect(home.getByText(text)).toHaveCount(0);
+
+    await beloved.getByTestId('beloved-tab-justus').click();
+    await expect(beloved.getByTestId('beloved-tab-justus')).toHaveText('Just us');
+    const tab = beloved.getByTestId('beloved-justus');
+    await expect(tab.getByTestId('justus-since-days')).toHaveText('3');
+    await expect(tab.getByTestId('justus-counts')).toContainText('This year:');
+    const calendar = tab.getByTestId('justus-calendar');
+    // Today has Robin's plan; the marked day three days ago may be last month.
+    await expect(calendar.locator(`[data-day="${today.key}"]`)).toHaveAttribute('data-planned', 'true');
+    if (earlier.month !== new Date().getMonth()) await calendar.getByTestId('justus-prev').click();
+    await expect(calendar.locator(`[data-day="${earlier.key}"]`)).toHaveAttribute('data-marked', 'true');
+    await calendar.locator(`[data-day="${earlier.key}"]`).click();
+    await expect(tab.getByTestId('justus-selected')).toContainText('A made-up note about a walk');
+    await expect(tab.getByTestId('justus-selected')).toContainText('Robin marked it');
+    // Robin's entry is Robin's: there is nothing to delete it with.
+    await expect(tab.getByTestId('justus-entry-delete')).toHaveCount(0);
+    const monthName = await calendar.getByTestId('justus-month').textContent();
+    await calendar.getByTestId('justus-next').click();
+    await expect(calendar.getByTestId('justus-month')).not.toHaveText(monthName ?? '');
+    if (earlier.month === new Date().getMonth()) await calendar.getByTestId('justus-prev').click();
+    await expect(calendar.locator(`[data-day="${today.key}"]`)).toBeVisible();
+    await check(page, info, run, 'just us', beloved);
+
+    // One tap for today.
+    await tab.getByTestId('justus-today').click();
+    await expect(tab.getByTestId('justus-since-days')).toHaveText('0');
+    await expect(tab.getByTestId('justus-today')).toHaveText('Today is marked');
+    await expect(tab.getByTestId('justus-today')).toBeDisabled();
+    expect(JSON.parse(server.sent.find((s) => s.path.endsWith('/together'))!.body).notify).toBe(false);
+    // Remove your own, then mark it again with a private note.
+    await calendar.locator(`[data-day="${today.key}"]`).click();
+    const selected = tab.getByTestId('justus-selected');
+    await expect(selected).toContainText('You marked it');
+    await selected.getByTestId('justus-entry-delete').click();
+    await expect(tab.getByTestId('justus-since-days')).toHaveText('3');
+    await selected.getByTestId('justus-note').fill('Our quiet evening by the fire');
+    await selected.getByTestId('justus-mark').click();
+    await expect(selected).toContainText('Our quiet evening by the fire');
+    await expect(tab.getByTestId('justus-since-days')).toHaveText('0');
+
+    // Robin's plan for today: either of them can mark it done.
+    const robinsPlan = tab.getByTestId('justus-plan').filter({ hasText: 'A night away at a hotel' });
+    await expect(robinsPlan).toContainText('Robin planned it');
+    await robinsPlan.getByTestId('justus-plan-done').click();
+    await expect(robinsPlan).toHaveCount(0);
+
+    // Plan an evening: Robin is told only that something is waiting.
+    const form = tab.getByTestId('justus-plan-form');
+    await form.getByTestId('justus-plan-day').fill(later.key);
+    await form.getByTestId('justus-plan-time').fill('19:30');
+    await form.getByTestId('justus-idea').filter({ hasText: 'Candlelit dinner at home' }).click();
+    await form.getByTestId('justus-plan-note').fill('Book the sitter early');
+    await check(page, info, run, 'just us plan form', beloved);
+    await form.getByTestId('justus-plan-add').click();
+    const mine = tab.getByTestId('justus-plan').filter({ hasText: 'Candlelit dinner at home' });
+    await expect(mine).toContainText('at 19:30');
+    await expect(mine).toContainText('Book the sitter early');
+    // Not until the day comes.
+    await expect(mine.getByTestId('justus-plan-done')).toBeDisabled();
+    expect(JSON.parse(server.sent.filter((s) => s.path.endsWith('/plan')).at(-1)!.body).notify).toBe(true);
+
+    // This phone's gentle reminder, off by default.
+    const nudge = tab.getByTestId('justus-nudge');
+    await expect(nudge).toHaveValue('0');
+    await nudge.selectOption('7');
+    await check(page, info, run, 'just us planned and reminder', beloved);
+    type Synced = Array<{ id: number; at: number; title: string; body: string }>;
+    const lastSync = async () => ((await page.evaluate(() => (window as unknown as { __synced: Synced[] }).__synced)).at(-1) ?? []);
+    await expect.poll(async () => (await lastSync()).filter((r) => r.body === 'A little reminder for the two of you.').length).toBe(2);
+    // Every reminder the phone holds is generic: no tab, no idea, no note, no word that says what it is.
+    const reminderText = JSON.stringify(await lastSync());
+    for (const word of [/intima/i, /\bsex/i, /night/i, /together/i, /\bbed\b/i, /romanc/i, /candle/i, /hotel/i, /sitter/i, /fire/i, /just us/i]) {
+      expect(reminderText).not.toMatch(word);
+    }
+
+    // Cancel it.
+    await mine.getByTestId('justus-plan-cancel').click();
+    await expect(mine).toHaveCount(0);
+    expect(server.records.filter((r) => r.kind === 'plan' && r.own)).toEqual([]);
+
+    // The server only received sealed records: nothing typed or picked, and no revealing word, in what was sent.
+    expect(server.sent.length).toBeGreaterThanOrEqual(6);
+    const bodies = JSON.stringify(server.sent.map((s) => s.body));
+    for (const secret of ['Our quiet evening', 'by the fire', 'Book the sitter', 'sitter', '19:30', 'candles', 'Candlelit', 'hotel', later.key, today.key,
+      earlier.key, 'together', 'night', 'intima', 'Just us']) {
+      expect(bodies, secret).not.toContain(secret);
+    }
+    for (const s of server.sent.filter((x) => x.method !== 'DELETE')) expect(JSON.parse(s.body).sealed).toContain('```jarvis-envelope');
+    // And the records open with the chat's key to exactly what was written.
+    const marked = server.records.filter((r) => r.kind === 'together' && r.own);
+    expect(await openRecord(key, marked[0].sealed)).toEqual({ b: 'together', day: today.key, note: 'Our quiet evening by the fire' });
+    const finished = server.records.find((r) => r.id === 'f'.repeat(32))!;
+    expect(await openRecord(key, finished.sealed)).toMatchObject({ b: 'plan', day: today.key, idea: 'hotel', doneAt: expect.any(Number) });
+
+    // A lock takes it all away.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(page.getByTestId('private-lock')).toBeVisible();
+    await expect(page.getByTestId('beloved')).toHaveCount(0);
+    for (const text of ['Our quiet evening', 'A made-up note', 'Just us', 'days since']) await expect(page.getByText(text)).toHaveCount(0);
     done(run);
   });
 

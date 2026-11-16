@@ -31,6 +31,10 @@ Who may see it:
 
 Reminders for special days are scheduled on the phone itself (the server
 cannot read the dates); see docs/BELOVED.md.
+
+The "Just us" tab keeps two more kinds, ``together`` (a day the couple marked)
+and ``plan`` (a planned evening). Their names were chosen to say nothing in
+clear, and the only notice they make, for a plan, names no content at all.
 """
 from __future__ import annotations
 
@@ -58,9 +62,9 @@ log = logging.getLogger("gateway.beloved")
 router = APIRouter(prefix="/api/private-chat/chats/{token}/beloved")
 
 #: The kinds of record a couple keeps. The kind is not secret (the notices name it); what is in it is.
-KINDS = frozenset({"profile", "day", "note", "heart", "prayer", "devotion", "idea"})
+KINDS = frozenset({"profile", "day", "note", "heart", "prayer", "devotion", "idea", "together", "plan"})
 #: Kinds only their author may change or remove (what someone wrote or felt is theirs).
-AUTHOR_ONLY = frozenset({"note", "heart", "devotion"})
+AUTHOR_ONLY = frozenset({"note", "heart", "devotion", "together"})
 #: One sealed record: room for a long note or prayer, never a picture (those are blobs).
 MAX_RECORD_BYTES = 16 * 1024
 #: Records per kind per couple, so a runaway client cannot fill the disk.
@@ -71,9 +75,12 @@ NOTICES = {
     "note": "{name} left you a love note",
     "prayer": "{name} shared a prayer request with you",
     "idea": "{name} has a date night idea for you",
+    # The "Just us" tab: a notice that could be read over a shoulder or by a child
+    # holding the phone, so it says nothing at all about what is waiting.
+    "plan": "Something from {name} is waiting",
 }
 #: One notice per kind per sender in this many seconds; a record sent sooner is kept, just not announced.
-NOTICE_INTERVAL_S = {"heart": 60, "note": 30, "prayer": 30, "idea": 30}
+NOTICE_INTERVAL_S = {"heart": 60, "note": 30, "prayer": 30, "idea": 30, "plan": 30}
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _FENCE = "```jarvis-envelope"
@@ -137,7 +144,7 @@ class BelovedStore:
                 try:
                     out.append(json.loads(path.read_text()))
                 except (OSError, ValueError):
-                    log.warning("[beloved] unreadable record %s/%s", kind, path.name)
+                    log.warning("[beloved] unreadable record %s", path.name)
         return sorted(out, key=lambda r: (r.get("at", 0), r.get("id", "")))
 
     def remove_all(self, token: str) -> None:
