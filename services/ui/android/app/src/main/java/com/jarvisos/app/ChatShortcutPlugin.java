@@ -251,19 +251,20 @@ public class ChatShortcutPlugin extends Plugin {
     }
 
     /**
-     * The adaptive icon: the colour across the whole canvas, then the picture
-     * filling the part the launcher shows (or the initials in white).
+     * The adaptive icon: the picture across the whole canvas, so whatever part
+     * a launcher shows is the picture with no coloured ring around it (One UI
+     * shows more than the 72dp minimum); with no picture, the colour with the
+     * initials in white, sized to the part every launcher shows.
      */
     private static Bitmap iconBitmap(Bitmap picture, int colour, String monogram, String label) {
         Bitmap out = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(out);
         canvas.drawColor(colour);
-        int inset = (ICON_PX - VISIBLE_PX) / 2;
         if (picture != null && picture.getWidth() > 0 && picture.getHeight() > 0) {
             int side = Math.min(picture.getWidth(), picture.getHeight());
             Rect src = new Rect((picture.getWidth() - side) / 2, (picture.getHeight() - side) / 2,
                     (picture.getWidth() + side) / 2, (picture.getHeight() + side) / 2);
-            Rect dst = new Rect(inset, inset, ICON_PX - inset, ICON_PX - inset);
+            Rect dst = new Rect(0, 0, ICON_PX, ICON_PX);
             canvas.drawBitmap(picture, src, dst, new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
             return out;
         }

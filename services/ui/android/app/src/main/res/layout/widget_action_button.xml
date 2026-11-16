@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Action button: one device as a single big control. The circle fills with the
-  accent while the device is on. Filled by ActionButtonWidget.
+  Action button: one device as a single big control, like an app icon. The
+  circle fills most of the cell (ActionButtonWidget sizes it per widget size)
+  and fills with the accent while the device is on. The name sits under it
+  on up to two lines, never cut. With the "None" background there is no card
+  at all; the shadow keeps the name readable on any wallpaper.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/action_root"
@@ -10,13 +13,13 @@
     android:gravity="center"
     android:orientation="vertical"
     android:background="@drawable/wg_card"
-        android:clipToOutline="true"
-        android:padding="8dp">
+    android:clipToOutline="true"
+    android:padding="3dp">
 
     <FrameLayout
         android:id="@+id/action_button"
-        android:layout_width="48dp"
-        android:layout_height="48dp">
+        android:layout_width="52dp"
+        android:layout_height="52dp">
 
         <ImageView
             android:id="@+id/action_icon"
@@ -24,7 +27,7 @@
             android:layout_height="match_parent"
             android:background="@drawable/wg_circle"
             android:importantForAccessibility="no"
-            android:padding="12dp"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             android:src="@drawable/mi_power" />
     </FrameLayout>
@@ -33,17 +36,19 @@
         android:id="@+id/action_label"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:ellipsize="end"
         android:fontFamily="sans-serif-medium"
         android:gravity="center"
-        android:maxLines="1"
-        android:singleLine="true"
+        android:maxLines="2"
         android:includeFontPadding="false"
+        android:lineSpacingMultiplier="0.95"
         android:text=""
         android:textColor="#F1F5F9"
         android:textSize="12sp"
         android:textStyle="bold"
-        android:layout_marginTop="5dp" />
+        android:shadowColor="#99000000"
+        android:shadowDy="1"
+        android:shadowRadius="3"
+        android:layout_marginTop="3dp" />
 
     <TextView
         android:id="@+id/action_state"
@@ -57,5 +62,8 @@
         android:text=""
         android:textColor="#94A3B8"
         android:textSize="10sp"
-        android:layout_marginTop="2dp" />
+        android:shadowColor="#99000000"
+        android:shadowDy="1"
+        android:shadowRadius="3"
+        android:layout_marginTop="1dp" />
 </LinearLayout>
