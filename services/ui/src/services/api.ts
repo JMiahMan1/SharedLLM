@@ -13,6 +13,7 @@ import type { PasswordChangeBody, WrappedRecord } from '../lib/privateChatCrypto
 import type { FreshPosition } from '../lib/freshPosition';
 import type { HouseholdTimezone, HouseholdTimezoneUpdate } from '../lib/householdTimezone';
 import { Capacitor } from '@capacitor/core';
+import { nativeBinaryAdapter, wantsNativeBinary } from '../lib/nativeBinary';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type { ActiveCall, DropInSettings, ArcadeCastResult, ArcadeScreen, PartyRoomSummary, SavedPlace, SavedPlaceInput, VisitSuggestion } from '../types/api';
 import type {
@@ -547,6 +548,11 @@ apiClient.interceptors.request.use((config) => {
   const token = storageGetSync('jarvis_api_key');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // In the Android app a binary download must come through the native plugin as bytes
+  // (see lib/nativeBinary.ts); the WebView's own requests hand it back as corrupted text.
+  if (wantsNativeBinary(config)) {
+    config.adapter = nativeBinaryAdapter;
   }
 
   return config;
@@ -3620,10 +3626,6 @@ export const api = {
     const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs/${encodeURIComponent(id)}`, {
       responseType: 'arraybuffer',
       timeout: 180_000,
-      // fetch, not XMLHttpRequest: in the Android app CapacitorHttp hands an XHR's binary
-      // response back as text, which corrupts ciphertext; a GET through fetch goes via
-      // Capacitor's local proxy and arrives byte for byte.
-      adapter: 'fetch',
     });
     return new Uint8Array(resp.data as ArrayBuffer);
   },
