@@ -3605,7 +3605,11 @@ export const api = {
 
   /** Keep one encrypted picture (IV then ciphertext); returns its id. */
   async uploadPrivateBlob(token: string, bytes: Uint8Array<ArrayBuffer>): Promise<{ id: string }> {
-    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs`, bytes, {
+    // Sent as a File: in the Android app CapacitorHttp carries a File as base64 and writes the
+    // exact bytes, while a typed array reached the server as "{}" (axios turned it into an
+    // ArrayBuffer, which the native bridge serialised as JSON) and every picture was refused.
+    const body = new File([bytes], 'sealed.bin', { type: 'application/octet-stream' });
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs`, body, {
       headers: { 'Content-Type': 'application/octet-stream' },
       timeout: 180_000,
     });
@@ -3616,6 +3620,10 @@ export const api = {
     const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs/${encodeURIComponent(id)}`, {
       responseType: 'arraybuffer',
       timeout: 180_000,
+      // fetch, not XMLHttpRequest: in the Android app CapacitorHttp hands an XHR's binary
+      // response back as text, which corrupts ciphertext; a GET through fetch goes via
+      // Capacitor's local proxy and arrives byte for byte.
+      adapter: 'fetch',
     });
     return new Uint8Array(resp.data as ArrayBuffer);
   },
