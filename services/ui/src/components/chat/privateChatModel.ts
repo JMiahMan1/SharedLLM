@@ -1,6 +1,7 @@
 // The private chat's shapes and the small rules its screens follow, kept free
 // of React so they can be tested directly.
 import { isMine, type TalkMessage } from './chatModel';
+import type { PrivatePayload } from '../../lib/privateChatCrypto';
 
 export interface PrivateChatInfo {
   token: string;
@@ -64,4 +65,18 @@ export function errorText(error: unknown, fallback: string): string {
     return (data as { detail: string }).detail;
   }
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/**
+ * The messages the thread shows. A picture added straight to the gallery is a
+ * gallery entry, never a Talk message; should one ever arrive as a message
+ * (an old or a misbehaving client) it still stays out of the thread, so the
+ * thread only ever shows what was said in it.
+ */
+export function threadMessages(messages: TalkMessage[], opened: Record<string, PrivatePayload | 'unreadable'>): TalkMessage[] {
+  return messages.filter((m) => {
+    if (m.deleted) return false;
+    const payload = opened[String(m.id)];
+    return !(payload && payload !== 'unreadable' && payload.t === 'added');
+  });
 }

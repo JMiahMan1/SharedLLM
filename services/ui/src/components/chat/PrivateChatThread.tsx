@@ -7,7 +7,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
-import { chatLeft, chatShown, lockNow, vaultFor } from '../../lib/privateChatSession';
+import { chatLeft, chatShown, lockNow, pickerDone, pickerOpening, vaultFor } from '../../lib/privateChatSession';
+import { sha256Hex } from '../../lib/galleryImport';
 import { secureWindowOff, secureWindowOn, type SecureState } from '../../plugins/secureWindow';
 import { deviceUnlockEnabled, deviceUnlockError, deviceUnlockPlugin } from '../../plugins/deviceUnlock';
 import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
@@ -27,7 +28,7 @@ import {
   type TalkConversation,
   type TalkMessage,
 } from './chatModel';
-import { canNudge, errorText, type PrivateChatInfo } from './privateChatModel';
+import { canNudge, errorText, threadMessages, type PrivateChatInfo } from './privateChatModel';
 import { isImeKey } from '../../lib/keyboard';
 
 interface PrivateChatThreadProps {
@@ -353,7 +354,8 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
 
-  const visible = messages.filter((m) => !m.deleted);
+  // Only what was said in the chat: a picture added straight to the gallery is never part of the thread.
+  const visible = threadMessages(messages, opened);
   const mine = visible.filter((m) => !isSystemMessage(m) && isMine(m, myActorIds));
   const myLatest = mine[mine.length - 1];
   const nudgeable = canNudge(visible.filter((m) => !isSystemMessage(m)), myActorIds, conversation.last_common_read);
@@ -396,14 +398,17 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
     let blob = '';
     try {
       let sealed: Uint8Array<ArrayBuffer>;
+      let sha256 = '';
       try {
+        // A fingerprint of the original, inside the encryption, so an import into the gallery skips it.
+        sha256 = await sha256Hex(plain);
         sealed = await vault.encrypt(plain);
       } finally {
         plain.fill(0);
       }
       blob = (await api.uploadPrivateBlob(token, sealed)).id;
       // When it was sent (and taken) travels inside the encryption, for the gallery.
-      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}) });
+      await post({ t: 'image', blob, mime, ...(name ? { name } : {}), sent_at: Math.floor(Date.now() / 1000), ...(takenAt ? { taken_at: takenAt } : {}), sha256 });
       onChanged();
     } catch (error) {
       if (blob) void api.deletePrivateBlob(token, blob).catch(() => {});
@@ -611,14 +616,14 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
                       </span>
                       {payload.text}
                     </button>
-                  ) : (
+                  ) : payload.t === 'image' ? (
                     <PrivatePicture
                       token={token}
                       payload={payload}
                       vault={vault}
                       onOpen={(url) => setViewing({ url, name: payload.name || 'Picture', message: own ? message : undefined })}
                     />
-                  )}
+                  ) : null}
                 </div>
                 {isSelected && (
                   <button
@@ -646,6 +651,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           accept={[...IMAGE_TYPES].join(',')}
           className="hidden"
           onChange={(event) => {
+            pickerDone(token);
             const file = event.target.files?.[0];
             event.target.value = '';
             if (file) void sendPicture(file);
@@ -653,7 +659,11 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
         />
         <button
           type="button"
-          onClick={() => fileRef.current?.click()}
+          onClick={() => {
+            // On Android the picker sends the app to the background: keep the key until the picture is back.
+            pickerOpening(token);
+            fileRef.current?.click();
+          }}
           disabled={sending}
           aria-label="Send an encrypted photo"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-slate-200 disabled:opacity-50"

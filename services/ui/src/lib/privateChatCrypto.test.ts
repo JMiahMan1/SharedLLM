@@ -256,4 +256,23 @@ describe('picture and comment payloads', () => {
     expect(await openMessage(key, odd)).toEqual({ t: 'image', blob: 'b2', mime: 'image/png' });
     expect(await openMessage(key, await sealMessage(key, { t: 'comment', blob: 'b1', text: '  ' }))).toBeNull();
   }, 30_000);
+
+  it('an added picture keeps its metadata inside the encryption, and only fields of the right shape survive', async () => {
+    const { key } = await v1Chat('payload payload');
+    const sha = 'f'.repeat(64);
+    const sealed = await sealMessage(key, {
+      t: 'added', blob: 'b9', mime: 'image/jpeg', name: 'IMG_20160512.jpg', taken_at: 1_463_000_000, taken_from: 'exif', added_at: 1_800_000_000,
+      sha256: sha, size: 1234, source: 'between', camera: 'Acme', gps: { lat: 12.5, lon: -3.25, alt: 7 }, width: 4000, height: 3000,
+    });
+    // Nothing of it is readable outside: not the name, the place, the camera or the fingerprint.
+    for (const secret of ['IMG_2016', '12.5', 'Acme', sha, 'between']) expect(sealed).not.toContain(secret);
+    expect(await openMessage(key, sealed)).toEqual({
+      t: 'added', blob: 'b9', mime: 'image/jpeg', name: 'IMG_20160512.jpg', taken_at: 1_463_000_000, taken_from: 'exif', added_at: 1_800_000_000,
+      sha256: sha, size: 1234, source: 'between', camera: 'Acme', gps: { lat: 12.5, lon: -3.25, alt: 7 }, width: 4000, height: 3000,
+    });
+    const odd = await sealMessage(key, { t: 'added', blob: 'b8', mime: 'image/png', sha256: 'nothex', taken_from: 'guess', gps: { lat: 'x' } } as never);
+    expect(await openMessage(key, odd)).toEqual({ t: 'added', blob: 'b8', mime: 'image/png' });
+    // A sent picture can carry the fingerprint too, so an import skips it.
+    expect(await openMessage(key, await sealMessage(key, { t: 'image', blob: 'b1', mime: 'image/jpeg', sha256: sha }))).toEqual({ t: 'image', blob: 'b1', mime: 'image/jpeg', sha256: sha });
+  }, 30_000);
 });

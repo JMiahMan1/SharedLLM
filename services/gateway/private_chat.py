@@ -43,6 +43,11 @@ one, and only they can read it:
 * **Pictures never touch Nextcloud.** They are encrypted on the device and kept
   here as opaque blobs (``PRIVATE_CHAT_DIR``), served only to the chat's
   members, so Nextcloud never makes a preview and nothing scans them.
+* **Pictures added straight to the gallery** (an import, never a chat
+  message) are sealed entries kept here (``gallery/<token>/<id>.json``): the
+  same envelope as a message, so the server sees ciphertext and who added it
+  when, nothing else. They are not Talk messages, so they make no unread
+  count, no notice and no nudge, and they never appear in the thread.
 * **Notices carry no content**: "New private message from Sam" (chat_notify),
   "Sam nudged you in your private chat" (``nudge``) and "Sam changed the
   private chat password" (``change_password``).
@@ -103,6 +108,10 @@ PASSWORD_CHANGE_WINDOW_S = 3600
 PASSWORD_HISTORY_KEEP = 5
 #: The record fields a password change replaces (and ``history`` keeps).
 _KEY_FIELDS = ("version", "salt", "iterations", "kdf", "wrapped_key", "auth_hash", "verifier")
+#: One gallery entry (a sealed envelope): a picture's name, times and camera details fit with room to spare.
+MAX_GALLERY_ENTRY_BYTES = 16 * 1024
+#: Gallery entries per chat, so a runaway client cannot fill the disk with records.
+MAX_GALLERY_ENTRIES = 50_000
 #: One nudge per chat per sender in this many seconds.
 NUDGE_INTERVAL_S = 300
 #: The Talk room's name, which is all Nextcloud ever shows about the chat.
@@ -172,6 +181,39 @@ class Store:
         path = self._chat_path(token)
         path.unlink(missing_ok=True)
         shutil.rmtree(self._blob_dir(token), ignore_errors=True)
+        shutil.rmtree(self._gallery_dir(token), ignore_errors=True)
+
+    def _gallery_dir(self, token: str) -> Path:
+        self._chat_path(token)  # validates the token
+        return self.root / "gallery" / token
+
+    def add_entry(self, token: str, by: str, sealed: str) -> dict[str, Any]:
+        folder = self._gallery_dir(token)
+        folder.mkdir(parents=True, exist_ok=True)
+        if sum(1 for _ in folder.glob("*.json")) >= MAX_GALLERY_ENTRIES:
+            raise HTTPException(status_code=413, detail="The gallery is full.")
+        entry = {"id": secrets.token_hex(16), "by": by, "at": int(time.time()), "sealed": sealed}
+        tmp = folder / f"{entry['id']}.tmp"
+        tmp.write_text(json.dumps(entry))
+        os.replace(tmp, folder / f"{entry['id']}.json")
+        return entry
+
+    def entries(self, token: str) -> list[dict[str, Any]]:
+        folder = self._gallery_dir(token)
+        if not folder.is_dir():
+            return []
+        out = []
+        for path in folder.glob("*.json"):
+            try:
+                out.append(json.loads(path.read_text()))
+            except (OSError, ValueError):
+                log.warning("[private-chat] unreadable gallery entry %s", path.name)
+        return sorted(out, key=lambda e: (e.get("at", 0), e.get("id", "")))
+
+    def entry_path(self, token: str, entry_id: str) -> Path:
+        if not _BLOB_ID.match(entry_id or ""):
+            raise HTTPException(status_code=404, detail="No such picture.")
+        return self._gallery_dir(token) / f"{entry_id}.json"
 
     def put_blob(self, token: str, data: bytes) -> str:
         folder = self._blob_dir(token)
@@ -568,6 +610,49 @@ async def delete_blob(token: str, blob_id: str, request: Request):
     await _member_chat(request, token)
     get_store().blob_path(token, blob_id).unlink(missing_ok=True)
     return {"deleted": blob_id}
+
+
+@router.get("/chats/{token}/gallery")
+async def list_gallery(token: str, request: Request):
+    """Pictures added to the gallery without a chat message: sealed entries, oldest first."""
+    user, _chat, people = await _member_chat(request, token)
+    entries = await asyncio.to_thread(get_store().entries, token)
+    return {"entries": [
+        {"id": e["id"], "at": e.get("at", 0), "own": e.get("by") == user,
+         "by_name": _display(people.get(str(e.get("by")), {"username": e.get("by")})), "sealed": e["sealed"]}
+        for e in entries if isinstance(e.get("id"), str) and isinstance(e.get("sealed"), str)
+    ]}
+
+
+@router.post("/chats/{token}/gallery")
+async def add_gallery(token: str, request: Request):
+    """Add one sealed gallery entry. Not a Talk message: no unread count, no notice."""
+    user, _chat, _ = await _member_chat(request, token)
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Send a JSON body with the sealed entry.") from exc
+    sealed = body.get("sealed") if isinstance(body, dict) else None
+    if not isinstance(sealed, str) or not is_sealed(sealed):
+        raise HTTPException(status_code=422, detail="Only an encrypted entry can be added.")
+    if len(sealed.encode()) > MAX_GALLERY_ENTRY_BYTES:
+        raise HTTPException(status_code=413, detail="That entry is too large.")
+    entry = await asyncio.to_thread(get_store().add_entry, token, user, sealed)
+    return {"id": entry["id"], "at": entry["at"]}
+
+
+@router.delete("/chats/{token}/gallery/{entry_id}")
+async def delete_gallery(token: str, entry_id: str, request: Request):
+    """Remove a gallery entry; only the parent who added it may (like deleting a message)."""
+    user, _chat, _ = await _member_chat(request, token)
+    path = get_store().entry_path(token, entry_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No such picture.")
+    entry = json.loads(path.read_text())
+    if entry.get("by") != user:
+        raise HTTPException(status_code=403, detail="Only the parent who added it can remove it.")
+    path.unlink(missing_ok=True)
+    return {"deleted": entry_id}
 
 
 def _claim_nudge(key: str) -> int:

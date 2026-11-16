@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, Images, Loader2, MessageSquare, SendHorizontal, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ImagePlus, Images, Loader2, MapPin, MessageSquare, SendHorizontal, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { isSealedMessage, type PrivateVault } from '../../lib/privateChatCrypto';
 import { timeLabel, type TalkMessage } from './chatModel';
-import { buildGallery, groupByDay, stampLabel, type GalleryItem, type Opened } from './privateGalleryModel';
+import { buildGallery, groupByDay, stampLabel, type GalleryItem, type Opened, type OpenedEntry } from './privateGalleryModel';
+import { knownFrom } from '../../lib/galleryImport';
+import PrivateGalleryImport from './PrivateGalleryImport';
 import { errorText } from './privateChatModel';
-import { noSave, usePrivatePicture } from './usePrivatePicture';
+import { noSave, useNearScreen, usePrivatePicture } from './usePrivatePicture';
 
 /** Talk answers at most this many messages a page; the gallery reads one page. */
 const GALLERY_HISTORY = 200;
@@ -18,8 +20,10 @@ function detailMessages(response: unknown): TalkMessage[] {
 }
 
 /**
- * The private chat's encrypted gallery: every picture sent in the chat, newest
- * first and grouped by day, each with when it was sent. Either parent can open
+ * The private chat's encrypted gallery: every picture sent in the chat and
+ * every picture added straight to it (Add pictures, an import from Between),
+ * newest first and grouped by day: a sent picture by when it was sent, an
+ * added one by when it was taken. Either parent can open
  * one full screen and comment on it; a comment is a sealed message naming the
  * picture, so the server sees only ciphertext (not even how many comments a
  * picture has). Built from the chat's own messages and dropped on lock.
@@ -58,6 +62,32 @@ export default function PrivateGallery({
     return [...byId.values()].sort((a, b) => Number(a.id) - Number(b.id));
   }, [history.data, messages]);
 
+  const entries = useQuery({
+    queryKey: ['private-gallery-entries', token],
+    queryFn: () => api.getPrivateGallery(token),
+    staleTime: 0,
+  });
+  const [openedEntries, setOpenedEntries] = useState<Record<string, Opened>>({});
+  useEffect(() => {
+    const todo = (entries.data?.entries ?? []).filter((e) => !(e.id in openedEntries));
+    if (!todo.length) return;
+    let live = true;
+    void Promise.all(todo.map(async (e) => [e.id, (await vault.open(e.sealed).catch(() => null)) ?? 'unreadable'] as const)).then((pairs) => {
+      if (live && vault.unlocked) setOpenedEntries((current) => ({ ...current, ...Object.fromEntries(pairs) }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [entries.data, openedEntries, vault]);
+  const added = useMemo<OpenedEntry[]>(
+    () =>
+      (entries.data?.entries ?? [])
+        .filter((e) => e.id in openedEntries)
+        .map((e) => ({ id: e.id, at: e.at, own: e.own, byName: e.by_name, payload: openedEntries[e.id] })),
+    [entries.data, openedEntries],
+  );
+  const [importing, setImporting] = useState(false);
+
   const [opened, setOpened] = useState<Record<string, Opened>>({});
   useEffect(() => {
     const todo = all.filter((m) => !(String(m.id) in opened) && isSealedMessage(m.message));
@@ -73,24 +103,41 @@ export default function PrivateGallery({
     };
   }, [all, opened, vault]);
 
-  const items = useMemo(() => buildGallery(all, opened, myActorIds), [all, opened, myActorIds]);
+  const items = useMemo(() => buildGallery(all, opened, myActorIds, added), [all, opened, myActorIds, added]);
   const days = useMemo(() => groupByDay(items), [items]);
   const [chosen, setChosen] = useState<string | undefined>(initialBlob);
   const viewing = chosen ? items.find((item) => item.blob === chosen) : undefined;
-  const decrypting = history.isLoading || all.some((m) => isSealedMessage(m.message) && !(String(m.id) in opened));
+  const decrypting =
+    history.isLoading ||
+    entries.isLoading ||
+    all.some((m) => isSealedMessage(m.message) && !(String(m.id) in opened)) ||
+    (entries.data?.entries ?? []).some((e) => !(e.id in openedEntries));
 
   const refresh = () => {
     onChanged();
     void history.refetch();
   };
 
+  /** Remove a picture that was added to the gallery: its entry, then its encrypted blob. */
+  const removeEntry = async (item: GalleryItem) => {
+    if (!item.entryId) return;
+    try {
+      await api.deletePrivateGalleryEntry(token, item.entryId);
+      await api.deletePrivateBlob(token, item.blob).catch(() => {});
+      setChosen(undefined);
+      void entries.refetch();
+    } catch (error) {
+      toast.error(errorText(error, 'Could not remove the picture'));
+    }
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !chosen) onClose();
+      if (event.key === 'Escape' && !chosen && !importing) onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [chosen, onClose]);
+  }, [chosen, importing, onClose]);
 
   return (
     <div className="fixed inset-0 z-[85] flex flex-col bg-slate-950" role="dialog" aria-modal="true" aria-label="Gallery" data-testid="private-gallery">
@@ -99,11 +146,24 @@ export default function PrivateGallery({
           <X size={20} />
         </button>
         <h2 className="min-w-0 flex-1 truncate text-base font-bold text-white">Gallery</h2>
-        <span className="shrink-0 pr-2 text-xs text-slate-400" data-testid="private-gallery-count">
+        <span className="shrink-0 text-xs text-slate-400" data-testid="private-gallery-count">
           {items.length} {items.length === 1 ? 'photo' : 'photos'}
         </span>
+        <button
+          type="button"
+          onClick={() => setImporting(true)}
+          data-testid="private-gallery-add"
+          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold text-rose-100 hover:bg-white/10"
+        >
+          <ImagePlus size={16} aria-hidden /> Add pictures
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-4">
+        {entries.isError && (
+          <p className="mb-2 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100" role="alert">
+            {errorText(entries.error, 'Could not load the pictures added to the gallery.')}
+          </p>
+        )}
         {history.isError && (
           <p className="mb-2 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100" role="alert">
             {errorText(history.error, 'Could not load older pictures; showing the newest.')}
@@ -116,7 +176,8 @@ export default function PrivateGallery({
         )}
         {!items.length && !decrypting && (
           <p className="flex flex-col items-center gap-2 py-12 text-center text-sm text-slate-400">
-            <Images size={28} aria-hidden /> No photos yet. Every photo sent in this chat appears here, encrypted.
+            <Images size={28} aria-hidden /> No photos yet. Every photo sent in this chat appears here, encrypted, and you can add pictures without
+            sending them.
           </p>
         )}
         {days.map((day) => (
@@ -142,6 +203,16 @@ export default function PrivateGallery({
             if (blob) setChosen(undefined);
             void history.refetch();
           }}
+          onRemoveEntry={() => void removeEntry(viewing)}
+        />
+      )}
+      {importing && (
+        <PrivateGalleryImport
+          token={token}
+          vault={vault}
+          known={knownFrom(items)}
+          onClose={() => setImporting(false)}
+          onAdded={() => void entries.refetch()}
         />
       )}
       {chosen && !viewing && !decrypting && (
@@ -159,12 +230,16 @@ export default function PrivateGallery({
 }
 
 function Tile({ token, vault, item, onOpen }: { token: string; vault: PrivateVault; item: GalleryItem; onOpen: () => void }) {
-  const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault);
+  // A gallery can hold years of pictures: only the ones near the screen are fetched and decrypted.
+  const [ref, near] = useNearScreen<HTMLButtonElement>();
+  const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault, near);
+  const when = item.entryId ? `taken ${stampLabel(item.when)}` : stampLabel(item.at);
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onOpen}
-      aria-label={`Photo from ${item.actorName || 'the chat'}, ${stampLabel(item.at)}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
+      aria-label={`Photo from ${item.actorName || 'the chat'}, ${when}${item.comments.length ? `, ${item.comments.length} comments` : ''}`}
       className="relative block aspect-square overflow-hidden rounded-lg bg-white/5"
       data-testid="private-gallery-tile"
     >
@@ -177,7 +252,7 @@ function Tile({ token, vault, item, onOpen }: { token: string; vault: PrivateVau
           <Loader2 size={16} className="animate-spin text-slate-500" />
         </span>
       )}
-      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{timeLabel(item.at)}</span>
+      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[10px] font-medium text-white">{timeLabel(item.when)}</span>
       {item.comments.length > 0 && (
         <span className="absolute right-1 top-1 flex items-center gap-0.5 rounded bg-black/60 px-1 text-[10px] font-medium text-white">
           <MessageSquare size={10} aria-hidden /> {item.comments.length}
@@ -194,6 +269,7 @@ function Viewer({
   onClose,
   onChanged,
   onDelete,
+  onRemoveEntry,
 }: {
   token: string;
   vault: PrivateVault;
@@ -201,6 +277,7 @@ function Viewer({
   onClose: () => void;
   onChanged: () => void;
   onDelete: (messageId: number, blob?: string) => Promise<void>;
+  onRemoveEntry: () => void;
 }) {
   const { url, failed } = usePrivatePicture(token, item.blob, item.mime, vault);
   const [text, setText] = useState('');
@@ -240,17 +317,42 @@ function Viewer({
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-white">{item.own ? 'You' : item.actorName || 'Your partner'}</p>
-          <p className="truncate text-xs text-slate-300" data-testid="private-gallery-stamp">
-            Sent {stampLabel(item.at)}
-          </p>
-          {item.takenAt && Math.abs(item.takenAt - item.at) > 60 && (
-            <p className="truncate text-xs text-slate-400">Taken {stampLabel(item.takenAt)}</p>
+          {item.entryId ? (
+            <>
+              <p className="truncate text-xs text-slate-300" data-testid="private-gallery-stamp">
+                {item.takenAt ? `Taken ${stampLabel(item.takenAt)}` : `Added ${stampLabel(item.at)}`}
+              </p>
+              <p className="truncate text-xs text-slate-400" data-testid="private-gallery-details">
+                {[
+                  item.details?.source === 'between' ? 'From Between' : 'Added to the gallery',
+                  item.name,
+                  item.details?.camera,
+                  item.details?.width && item.details?.height ? `${item.details.width}×${item.details.height}` : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              {item.details?.gps && (
+                <p className="flex items-center gap-1 truncate text-xs text-slate-400" data-testid="private-gallery-place">
+                  <MapPin size={11} aria-hidden /> {item.details.gps.lat.toFixed(4)}, {item.details.gps.lon.toFixed(4)}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="truncate text-xs text-slate-300" data-testid="private-gallery-stamp">
+                Sent {stampLabel(item.at)}
+              </p>
+              {item.takenAt && Math.abs(item.takenAt - item.at) > 60 && (
+                <p className="truncate text-xs text-slate-400">Taken {stampLabel(item.takenAt)}</p>
+              )}
+            </>
           )}
         </div>
         {item.own && (
           <button
             type="button"
-            onClick={() => void onDelete(item.messageId, item.blob)}
+            onClick={() => (item.entryId ? onRemoveEntry() : void onDelete(item.messageId, item.blob))}
             aria-label="Delete this photo for both of you"
             data-testid="private-gallery-delete"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-rose-100"

@@ -52,6 +52,27 @@ export function forgetLockAfter(token: string): void {
 
 const vaults = new Map<string, PrivateVault>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Until when (ms) leaving a chat is the phone's own file picker opening over it. */
+const pickers = new Map<string, number>();
+
+/** How long the phone's picker may cover the chat before it locks anyway. */
+export const PICKER_GRACE_MS = 3 * 60_000;
+
+/**
+ * The phone's file picker is about to open over the chat. On Android that
+ * sends the app to the background, which would lock the chat at once and
+ * leave the chosen pictures with no key to encrypt them. The next leave
+ * within the grace only releases pictures and locks when the grace ends
+ * (or later, by this device's choice), unless the chat is shown again first.
+ */
+export function pickerOpening(token: string, graceMs: number = PICKER_GRACE_MS): void {
+  pickers.set(token, Date.now() + graceMs);
+  // The window has focus again when the picker closes (chosen or cancelled): from then on leaving locks as chosen.
+  // On Android that is after the app came back, which already cleared the hold.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('blur', () => window.addEventListener('focus', () => pickerDone(token), { once: true }), { once: true });
+  }
+}
 
 /** The one vault for a chat in this app's memory (it outlives the chat screen, never the app). */
 export function vaultFor(token: string): PrivateVault {
@@ -72,6 +93,7 @@ function cancel(token: string): void {
 /** The chat is on screen again: a pending lock is cancelled. */
 export function chatShown(token: string): void {
   cancel(token);
+  pickers.delete(token);
 }
 
 /**
@@ -85,7 +107,10 @@ export function chatLeft(token: string, lockAfter: LockAfter = getLockAfter(toke
   vault.releasePictures();
   cancel(token);
   const option = LOCK_OPTIONS.find((o) => o.value === lockAfter) ?? LOCK_OPTIONS[0];
-  const ms = option.ms;
+  const until = pickers.get(token);
+  pickers.delete(token);
+  const grace = until !== undefined ? until - Date.now() : 0;
+  const ms = option.ms === null ? null : Math.max(option.ms, grace);
   if (ms === null || !vault.unlocked) return;
   if (ms === 0) {
     vault.lock();
@@ -103,6 +128,7 @@ export function chatLeft(token: string, lockAfter: LockAfter = getLockAfter(toke
 /** Lock a chat now (the Lock button, a deleted chat). */
 export function lockNow(token: string): void {
   cancel(token);
+  pickers.delete(token);
   vaults.get(token)?.lock();
 }
 
@@ -114,4 +140,9 @@ export function lockAll(): void {
 /** Whether a chat has a lock waiting to fire (for tests and the settings copy). */
 export function lockPending(token: string): boolean {
   return timers.has(token);
+}
+
+/** The picker closed (something was chosen, or it was cancelled): leaving locks as chosen again. */
+export function pickerDone(token: string): void {
+  pickers.delete(token);
 }

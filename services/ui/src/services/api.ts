@@ -3624,6 +3624,21 @@ export const api = {
     await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/blobs/${encodeURIComponent(id)}`);
   },
 
+  /** Pictures added straight to the gallery (sealed entries, not chat messages), oldest first. */
+  async getPrivateGallery(token: string): Promise<{ entries: Array<{ id: string; at: number; own: boolean; by_name: string; sealed: string }> }> {
+    const resp = await apiClient.get(`/api/private-chat/chats/${encodeURIComponent(token)}/gallery`);
+    return resp.data;
+  },
+
+  async addPrivateGalleryEntry(token: string, sealed: string): Promise<{ id: string; at: number }> {
+    const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/gallery`, { sealed });
+    return resp.data;
+  },
+
+  async deletePrivateGalleryEntry(token: string, id: string): Promise<void> {
+    await apiClient.delete(`/api/private-chat/chats/${encodeURIComponent(token)}/gallery/${encodeURIComponent(id)}`);
+  },
+
   async nudgePrivateChat(token: string): Promise<{ nudged: string[]; next_in: number }> {
     const resp = await apiClient.post(`/api/private-chat/chats/${encodeURIComponent(token)}/nudge`);
     return resp.data;
