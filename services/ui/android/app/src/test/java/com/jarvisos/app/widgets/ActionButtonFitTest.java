@@ -17,7 +17,7 @@ public class ActionButtonFitTest {
         // share of it, and with no tile the glyph is the whole icon.
         assertTrue(f.button >= 0.7f * 72);
         assertEquals(Math.round(f.button * 0.2f), f.glyphPad, 0.01f);
-        assertEquals(0f, f.bareGlyphPad, 0.01f);
+        assertEquals(Math.round(f.button * 0.06f), f.bareGlyphPad, 0.01f);
     }
 
     @Test

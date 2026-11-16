@@ -188,19 +188,16 @@ public class ActionButtonWidget extends AppWidgetProvider {
     }
 
     /**
-     * The glyph: white while off and the theme's accent while on. On a tile it
-     * is the plain icon; on the bare wallpaper it is drawn with a soft shadow
-     * (as launchers draw icon labels), since a white glyph alone disappears on a
-     * light wallpaper and RemoteViews cannot give an ImageView a shadow.
+     * The glyph: white while off and the theme's accent while on. It is always
+     * drawn as a bitmap centred on what the icon actually draws, because many
+     * Material icons do not sit in the middle of their own 24dp box (the garage
+     * sat 6% low in its tile). On the bare wallpaper it also gets a soft shadow,
+     * as launchers give icon labels, since a white glyph alone vanishes on a light
+     * wallpaper and RemoteViews cannot give an ImageView a shadow.
      */
     private static void paintGlyph(Context context, RemoteViews views, WidgetStyle st, String icon, int iconBg, boolean on) {
         int color = on ? st.accent : 0xFFFFFFFF;
-        if (iconBg != 0) {
-            views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(icon));
-            st.icon(views, R.id.action_icon, color);
-            return;
-        }
-        android.graphics.Bitmap glyph = shadowedGlyph(context, icon, color);
+        android.graphics.Bitmap glyph = centredGlyph(context, icon, color, iconBg == 0);
         if (glyph == null) {
             views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes(icon));
             st.icon(views, R.id.action_icon, color);
@@ -213,17 +210,33 @@ public class ActionButtonWidget extends AppWidgetProvider {
     /** The bitmap side, in px; fitCenter scales it to the icon's size. */
     private static final int GLYPH_PX = 192;
 
-    static android.graphics.Bitmap shadowedGlyph(Context context, String icon, int color) {
+    /**
+     * ``icon`` in ``color``, scaled to fill a square (less a margin for the
+     * shadow) and centred on its drawn pixels, not on its artwork box.
+     */
+    static android.graphics.Bitmap centredGlyph(Context context, String icon, int color, boolean shadowed) {
         android.graphics.drawable.Drawable d = MaterialIcons.drawable(context, icon);
         if (d == null) return null;
         d = d.mutate();
         d.setTint(color);
-        // A margin all round so the shadow is not cut off; the glyph stays centred.
-        int margin = Math.round(GLYPH_PX * 0.08f);
+        // 1. Draw the icon as it comes, then find what it really covers.
+        android.graphics.Bitmap raw = android.graphics.Bitmap.createBitmap(GLYPH_PX, GLYPH_PX, android.graphics.Bitmap.Config.ARGB_8888);
+        d.setBounds(0, 0, GLYPH_PX, GLYPH_PX);
+        d.draw(new android.graphics.Canvas(raw));
+        android.graphics.Rect ink = GlyphBounds.of(raw);
+        if (ink == null) {
+            raw.recycle();
+            return null;
+        }
+        // 2. Redraw that ink, centred and as large as fits, leaving room for a shadow.
+        int margin = shadowed ? Math.round(GLYPH_PX * 0.08f) : Math.round(GLYPH_PX * 0.02f);
+        android.graphics.RectF box = GlyphBounds.fit(ink.width(), ink.height(), GLYPH_PX, margin);
         android.graphics.Bitmap glyph = android.graphics.Bitmap.createBitmap(GLYPH_PX, GLYPH_PX, android.graphics.Bitmap.Config.ARGB_8888);
-        android.graphics.Canvas c = new android.graphics.Canvas(glyph);
-        d.setBounds(margin, margin, GLYPH_PX - margin, GLYPH_PX - margin);
-        d.draw(c);
+        android.graphics.Paint smooth = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG | android.graphics.Paint.FILTER_BITMAP_FLAG);
+        new android.graphics.Canvas(glyph).drawBitmap(raw, ink, box, smooth);
+        raw.recycle();
+        if (!shadowed) return glyph;
+        // 3. A soft shadow under it, a little below.
         android.graphics.Paint blur = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         blur.setMaskFilter(new android.graphics.BlurMaskFilter(GLYPH_PX * 0.035f, android.graphics.BlurMaskFilter.Blur.NORMAL));
         int[] offset = new int[2];

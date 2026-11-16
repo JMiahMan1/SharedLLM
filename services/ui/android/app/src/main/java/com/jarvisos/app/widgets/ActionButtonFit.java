@@ -37,7 +37,7 @@ final class ActionButtonFit {
      * shadow, and Material icons a little inside their 24dp square).
      */
     static final float GLYPH = 0.6f;
-    static final float BARE_GLYPH = 1.0f;
+    static final float BARE_GLYPH = 0.88f;
     static final float MAX_BUTTON = 132f;
 
     final float button;
