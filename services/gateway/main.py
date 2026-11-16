@@ -17,6 +17,7 @@ import traceback
 import uuid
 import zipfile
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -226,6 +227,12 @@ def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | Non
     return (content or message), (extracted or None)
 
 
+#: The voice a spoken reply should use (voice satellites only): the person's own,
+#: chosen in their settings, set by the chat handler for the request in hand
+#: and added to the response by the two builders below.
+_REPLY_VOICE: ContextVar[str | None] = ContextVar("reply_voice", default=None)
+
+
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
     if not stream:
@@ -240,6 +247,8 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
             "done": True,
             "status": "SUCCESS"
         }
+        if _REPLY_VOICE.get():
+            res["voice"] = _REPLY_VOICE.get()
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -288,6 +297,8 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
             "choices": [{"message": msg, "finish_reason": "stop", "index": 0}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
+        if _REPLY_VOICE.get():
+            res["voice"] = _REPLY_VOICE.get()
         if intent:
             res["intent"] = intent
         if debug_context:
@@ -3315,6 +3326,30 @@ def _chat_system_prompt(body: dict) -> str | None:
     return None
 
 
+async def _voice_for_reply(speaker: str | None, satellite: str | None) -> str | None:
+    """Identity's choice of voice for a spoken reply (docs/VOICE.md); None is Jarvis's."""
+    if not speaker and not satellite:
+        return None
+    try:
+        resp = await get_http_client().get(
+            f"{IDENTITY_SVC}/api/internal/voice-for",
+            params={k: v for k, v in (("speaker", speaker), ("entity_id", satellite)) if v},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status != 200:
+            log.warning(f"[ChatHandler] reply voice: identity answered HTTP {resp.status}; Jarvis's voice")
+            return None
+        data = await resp.json()
+        voice = (data or {}).get("voice")
+        if voice:
+            log.info(f"[ChatHandler] Replying in {data.get('person')}'s voice ({data.get('why')})")
+        return voice or None
+    except Exception as e:  # the reply is still spoken, in Jarvis's voice
+        log.warning(f"[ChatHandler] reply voice unavailable: {type(e).__name__}: {e}")
+        return None
+
+
 async def _weather_answer(query: str, user_id: str) -> str:
     """Execution's spoken answer from the forecast, or "" (then the model answers)."""
     try:
@@ -3493,6 +3528,13 @@ async def chat_handler(request: Request, background_tasks=None):
             log.info(f"[ChatHandler] Answering as {user_id}, recognised by voice")
         if voice_context and voice_context.get("satellite"):
             creds.voice_satellite = voice_context["satellite"]
+        if voice_context:
+            # The voice the satellite should answer in: whoever it recognised,
+            # else whoever the satellite is assigned to, else Jarvis's (None).
+            _REPLY_VOICE.set(await _voice_for_reply(
+                voice_speaker_name if creds.identified_by == "voice" else None,
+                voice_context.get("satellite"),
+            ))
     except HTTPException as he:
         if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
@@ -11318,6 +11360,7 @@ async def get_raven_config(request: Request):
         "raven_max_total_seconds": int(settings.get("raven_max_total_seconds", "1800") or 0),
         "active_coding_model": settings.get("coding_model") or settings.get("ollama_coding_model"),
         "system_default_tts_voice": settings.get("system_default_tts_voice", "af_heart"),
+        "speech_server_url": settings.get("speech_server_url", ""),
         "system_default_tts_engine": settings.get("system_default_tts_engine", "kokoro")
     }
 
@@ -11327,10 +11370,14 @@ async def update_raven_config(request: Request):
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     body = await request.json()
+    url = str(body.get("speech_server_url") or "").strip()
+    if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?/?", url):
+        # Checked before anything is saved, so a typo never becomes the setting.
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
 
     async with borrow_http_client() as client:
         for k, v in body.items():
-            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine", "coding_model", "ollama_coding_model", "assistant_model", "librarian_model", "telemetry_model"]:
+            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine", "speech_server_url", "coding_model", "ollama_coding_model", "assistant_model", "librarian_model", "telemetry_model"]:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/settings/{k}",
                     json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
@@ -11346,6 +11393,17 @@ async def update_raven_config(request: Request):
                 taken = resp.status == 200
             if not taken:
                 raise HTTPException(status_code=502, detail="The voice was saved but the speech engine did not take it; it applies at its next restart")
+        if "speech_server_url" in body:
+            # Like the voice: execution resolved it at start, so it is told now.
+            async with client.post(
+                f"{EXECUTION_SVC}/execute/tts/server",
+                json={"url": str(body.get("speech_server_url") or "")},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            ) as resp:
+                if resp.status == 400:
+                    raise HTTPException(status_code=400, detail=(await resp.json(content_type=None)).get("detail"))
+                if resp.status != 200:
+                    raise HTTPException(status_code=502, detail="The address was saved but the speech engine did not take it; it applies at its next restart")
     return {"status": "SUCCESS"}
 @app.get("/api/admin/raven/tts/voices")
 async def get_raven_tts_voices(request: Request):
@@ -11357,6 +11415,39 @@ async def get_raven_tts_voices(request: Request):
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/tts/voices",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/tts/voices")
+async def get_tts_voices(request: Request):
+    """The voices anyone signed in may choose for themselves (Settings > My voice),
+    with Jarvis's own: the same list the admin picker shows."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("user"):
+        raise HTTPException(status_code=401, detail="Sign in first")
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/tts/voices",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/tts/sample")
+async def post_tts_sample(request: Request):
+    """Hear a voice before choosing it (Settings > Voice). Signed-in people only."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("user"):
+        raise HTTPException(status_code=401, detail="Sign in first")
+    body = await request.json() if (request.headers.get("content-length") or "0") != "0" else {}
+    voice = str((body or {}).get("voice") or "").strip()[:120]
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/tts/sample",
+            json={"voice": voice},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=60.0),
         )
         return await _proxy_json_response(resp)
 

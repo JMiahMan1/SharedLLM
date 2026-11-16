@@ -1,7 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import type { InternetOutage, NetworkStatus, NetworkUsage, RouterLogLine } from '../lib/network';
 import type { CameraInfo, CameraRecordings } from '../lib/cameras';
-import type { AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel } from '../types/api';
+import type { AppAction, AppPolicy, AppRating, GuardianApps, NotifyLevel, TtsVoices } from '../types/api';
 import type {
   MyWeatherPrefs, WeatherCorrelations, WeatherEnergyReport, WeatherIntegrations, WeatherReminder, WeatherResponse,
 } from '../lib/weather';
@@ -865,6 +865,25 @@ export const api = {
   async login(username: string, password: string): Promise<{ api_key: string; username: string; is_admin: boolean }> {
     const resp = await apiClient.post('/api/auth/login', { username, password });
     return resp.data;
+  },
+
+  /** Voices anyone may choose for themselves, and Jarvis's own (the default). */
+  async getTtsVoices(): Promise<TtsVoices> {
+    const resp = await apiClient.get('/api/tts/voices');
+    return resp.data;
+  },
+
+  /** A short sample in ``voice`` (none: Jarvis's own), as a playable data URL. */
+  async ttsSample(voice: string | null): Promise<string> {
+    const resp = await apiClient.post('/api/tts/sample', { voice: voice || '' }, { timeout: 60_000 });
+    return `data:${resp.data.mime_type || 'audio/wav'};base64,${resp.data.audio_base64}`;
+  },
+
+  /** Choose the voice Jarvis uses with me; null goes back to Jarvis's own. */
+  async setMyVoice(voice: string | null): Promise<UserProfile> {
+    const body = voice ? { preferred_tts_voice: voice } : { clear_fields: ['preferred_tts_voice'] };
+    const resp = await apiClient.patch('/api/users/me', body);
+    return normalizeUser(resp.data);
   },
 
   async getMe(): Promise<UserProfile> {

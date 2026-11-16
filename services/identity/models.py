@@ -87,7 +87,8 @@ class User(SQLModel, table=True):  # type: ignore
     # Label of the enrolled voice signature (``VoiceSignature``), set only by
     # enrollment: "ge2e:<hash of the profile>", or None until enrolled.
     voice_fingerprint: str | None = None
-    preferred_tts_voice: str | None = Field(default="af_heart")
+    # The voice Jarvis speaks to this person with; None is Jarvis's own (Settings).
+    preferred_tts_voice: str | None = Field(default=None)
 
     # Relationships
     devices: list["DeviceAssignment"] = Relationship(back_populates="user")
@@ -614,6 +615,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     # --- LOCAL TTS HARDWARE ---
     {"key": "system_default_tts_engine", "value": "kokoro", "description": "Global default local TTS engine (kokoro, piper)"},
     {"key": "system_default_tts_voice", "value": "af_heart", "description": "Global default voice style for local TTS"},
+    {"key": "speech_server_url", "value": "", "description": "alpaca's audio server (http://<gpu-host>:8082) that speaks every voice Jarvis uses, Kokoro and Piper; empty uses KOKORO_GPU_URL from .env. Edit in Admin > Raven > Spoken replies."},
+
+    # --- VOICE SATELLITES ---
+    {"key": "household_device_access", "value": "unlocked", "description": "What a voice satellite or kiosk may control when it does not recognise who is speaking: unlocked (every device that is not locked) or none. Edit in Admin > Users & Devices > Voice satellites."},
 
     # --- GATEWAY & ROUTING ---
     {"key": "fast_path_threshold", "value": "0.85", "description": "Confidence threshold to skip full intent parsing"},

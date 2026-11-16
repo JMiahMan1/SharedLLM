@@ -35,7 +35,9 @@ SAMPLE_RATE_HZ = 24000
 #: and voices, about 0.5 s for a reply that takes this host's CPU 12 s. Read once, at start;
 #: unset, everything is spoken here. A reply the card cannot take (down, too long, an error) is
 #: spoken here instead, and the log says why.
-KOKORO_GPU_URL = os.getenv("KOKORO_GPU_URL", "").strip().rstrip("/")
+def speech_server() -> str:
+    """alpaca's audio server (the speech_server_url setting, else .env), or "" to speak here."""
+    return str(_config.SPEECH_SERVER_URL or "").strip().rstrip("/")
 #: The audio server refuses more than 4000 characters; a longer passage (the reader) stays here.
 GPU_MAX_CHARS = 3800
 #: A cold card loads Kokoro in ~15 s; past this the reply is spoken here.
@@ -573,14 +575,18 @@ async def text_to_speech(text: str, voice: str | None = None, storybook: bool = 
     chosen = voice or _config.DEFAULT_TTS_VOICE
     if piper_tts.is_piper_voice(chosen):
         if not storybook:
-            # Piper is its own server, so Kokoro's lock is not needed. Our pause marks and SSMD
-            # are not Piper's: a break becomes a comma, and numbers and scripture are worded
-            # the same way they are for Kokoro.
+            # Our pause marks and SSMD are not Piper's: a break becomes a comma, and numbers
+            # and scripture are worded the same way they are for Kokoro. alpaca speaks it
+            # when it is set (every voice goes there); the Piper here is the fallback.
             spoken = engine._normalize_text(_translate_ssmd(text).replace(_PAUSE_MARK, ", "))
+            if speech_server():
+                audio = await _speak_on_alpaca(spoken, str(chosen))
+                if audio:
+                    return audio
             return await piper_tts.synthesize(spoken, str(chosen))
         # A storybook casts several Kokoro voices; with a Piper default it narrates in Kokoro's.
         voice = KOKORO_FALLBACK_NARRATOR
-    if KOKORO_GPU_URL and not storybook:
+    if speech_server() and not storybook:
         spoken = await _kokoro_on_gpu(engine, text, chosen or "af_heart")
         if spoken:
             return spoken
@@ -590,28 +596,35 @@ async def text_to_speech(text: str, voice: str | None = None, storybook: bool = 
 
 async def _kokoro_on_gpu(engine, text: str, voice: str) -> bytes | None:
     """``text`` spoken by Kokoro on alpaca's graphics card, or None (with a warning) when it cannot."""
-    import base64
-
-    import aiohttp
-
     prepared = engine._normalize_text(engine._mark_structure_pauses(_translate_ssmd(text)))
     if len(prepared) > GPU_MAX_CHARS:
         return None
     # Our structure beats are paragraph breaks there, paid out as the same silence.
-    body = {"text": prepared.replace(_PAUSE_MARK, "\n\n"), "voice": voice, "normalize": False,
-            "paragraph_pause_s": PAUSE_STRUCTURE}
+    return await _speak_on_alpaca(prepared.replace(_PAUSE_MARK, "\n\n"), voice, paragraph_pause_s=PAUSE_STRUCTURE)
+
+
+async def _speak_on_alpaca(text: str, voice: str, **extra) -> bytes | None:
+    """``text`` (already worded for speech) spoken by alpaca's audio server in ``voice``
+    (Kokoro, a blend or ``piper:<name>``), or None (with a warning) when it cannot."""
+    import base64
+
+    import aiohttp
+
+    if len(text) > GPU_MAX_CHARS:
+        return None
+    body = {"text": text, "voice": voice, "normalize": False, **extra}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=GPU_TIMEOUT_S)) as client, \
-                client.post(f"{KOKORO_GPU_URL}/api/tts", json=body) as resp:
+                client.post(f"{speech_server()}/api/tts", json=body) as resp:
             data = await resp.json(content_type=None)
             status = resp.status
     except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-        log.warning("[tts] the graphics card did not speak (%s); speaking here", exc or type(exc).__name__)
+        log.warning("[tts] alpaca's audio server did not speak (%s); speaking here", exc or type(exc).__name__)
         return None
     audio = data.get("audio_b64") if isinstance(data, dict) else None
     if status != 200 or not audio:
         detail = data.get("error") if isinstance(data, dict) else data
-        log.warning("[tts] the graphics card refused (%s: %s); speaking here", status, detail)
+        log.warning("[tts] alpaca's audio server refused (%s: %s); speaking here", status, detail)
         return None
     return base64.b64decode(audio)
 

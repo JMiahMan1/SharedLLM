@@ -2132,6 +2132,36 @@ async def set_tts_default_voice(body: dict):
     return {"status": "SUCCESS", "default": voice}
 
 
+#: What a voice says when someone tries it in Settings > Voice.
+VOICE_SAMPLE = "Hi, I'm Jarvis. This is how I'll sound when I talk to you."
+
+
+@app.post("/execute/tts/sample")
+async def tts_sample(body: dict):
+    """A short sample in ``voice`` (or Jarvis's own), for trying a voice before
+    choosing it. Unlike /execute/tts it keeps nothing: no artifact is saved."""
+    import base64
+
+    voice = str(body.get("voice") or "").strip() or None
+    audio = await text_to_speech(VOICE_SAMPLE, voice=voice)
+    if not audio:
+        raise HTTPException(status_code=502, detail="That voice did not speak")
+    return {"audio_base64": base64.b64encode(audio).decode(), "mime_type": "audio/wav"}
+
+
+@app.post("/execute/tts/server")
+async def set_speech_server(body: dict):
+    """alpaca's audio server changed in Settings (speech_server_url, saved in identity):
+    send speech there from now on, without a restart. Empty speaks here."""
+    from services import config
+    url = str(body.get("url") or "").strip().rstrip("/")
+    if url and not re.fullmatch(r"https?://[^\s/]+(:\d+)?", url):
+        raise HTTPException(status_code=400, detail="Give the address as http://<host>:<port>, e.g. http://192.168.2.43:8082")
+    config.SPEECH_SERVER_URL = url
+    log.info("[tts] speech is now spoken %s", f"by {url}" if url else "here")
+    return {"status": "SUCCESS", "url": url}
+
+
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""

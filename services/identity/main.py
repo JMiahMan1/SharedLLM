@@ -242,7 +242,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "router_pass_enc", "ALTER TABLE user ADD COLUMN router_pass_enc VARCHAR")
         _add_column("user", "router_cert_sha256", "ALTER TABLE user ADD COLUMN router_cert_sha256 VARCHAR")
         _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
-        _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR DEFAULT 'af_heart'")
+        _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR")
 
     if _table_exists("apikey"):
         _add_column("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR")
@@ -358,6 +358,20 @@ SHARED_CREDENTIAL_SERVICES = (
 #: The identity a kiosk or voice satellite acts as when it names no person
 #: (resolve_credentials' household mode). It has no User row.
 HOUSEHOLD_IDENTITY = "household"
+
+#: household_device_access values (Admin > Users & Devices > Voice satellites).
+HOUSEHOLD_ACCESS_CHOICES = ("unlocked", "none")
+
+
+def household_device_access(session: Session) -> str:
+    """The admin's choice for the household; an unknown value is refused, not guessed."""
+    row = session.exec(select(GlobalSetting).where(GlobalSetting.key == "household_device_access")).first()
+    value = (row.value if row else "unlocked").strip().lower()
+    if value not in HOUSEHOLD_ACCESS_CHOICES:
+        log.error("household_device_access is %r, not one of %s: the household may use nothing", value,
+                  ", ".join(HOUSEHOLD_ACCESS_CHOICES))
+        return "none"
+    return value
 
 
 def _is_system_default_user(user: User | None) -> bool:
@@ -565,6 +579,7 @@ async def lifespan(app: FastAPI):
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
         _migrate_device_kinds(session)
+        _migrate_unchosen_voices(session)
         roles.seed_default_roles(session)
         family_synced = False
         for existing in session.exec(select(User)).all():
@@ -1016,7 +1031,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             else None
         ),
         skylight_enabled=user.skylight_enabled,
-        preferred_tts_voice=user.preferred_tts_voice or "af_heart",
+        # None is Jarvis's own voice; the household has none of its own.
+        preferred_tts_voice=None if household else (user.preferred_tts_voice or None),
         calendar_settings={} if household else _load_calendar_settings(session, user.username),
         credential_sources=credential_sources,
         shared_credential_owner=user.username if household else shared_owner,
@@ -2671,16 +2687,18 @@ def internal_user_device_assignments(
     if not user and username == HOUSEHOLD_IDENTITY:
         # The household is who a kiosk or a voice satellite acts as when no
         # speaker is recognised (resolve_credentials' household mode): no
-        # account of its own, the shared home credentials, never an admin. It
-        # may use every device that is not locked, as anyone at home could by
-        # hand; a locked one (a door lock, the garage) still needs a person it
-        # recognises. Before, the missing account answered "nothing", and
-        # "turn off the piano lamp" by voice got "Access denied".
+        # account of its own, the shared home credentials, never an admin.
+        # What it may use is an admin's choice (household_device_access):
+        # "unlocked" is every device that is not locked, as anyone at home could
+        # by hand, and a locked one (a door lock, the garage) still needs a
+        # person it recognises; "none" is nothing. Before, the missing account
+        # answered "nothing" whatever was wanted, and "turn off the piano lamp"
+        # by voice got "Access denied".
         return {
             "device_ids": [],
             "protected_entity_ids": [p.entity_id for p in _entity_protection_rows(session)],
             "permitted_entity_ids": [],
-            "all_unprotected": True,
+            "all_unprotected": household_device_access(session) == "unlocked",
         }
     if not user:
         return {
@@ -2702,6 +2720,41 @@ def internal_user_device_assignments(
         # Every unlocked entity, assigned or not (role permission).
         "all_unprotected": roles.has_permission(session, user, "devices.use_all"),
     }
+
+
+@app.get("/api/internal/voice-for")
+def internal_voice_for(
+    speaker: str | None = None,
+    entity_id: str | None = None,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: whose voice a spoken reply uses, and which.
+
+    The recognised speaker's chosen voice first; else the one person the
+    device (a voice satellite) is assigned to; else none, which means Jarvis's
+    own voice. A device shared by several people speaks as Jarvis.
+    """
+    def chosen(user: User | None) -> str | None:
+        return (user.preferred_tts_voice or None) if user else None
+
+    if speaker:
+        person = session.exec(select(User).where(User.username == speaker.strip().lower())).first()
+        if chosen(person):
+            return {"voice": chosen(person), "person": person.username, "why": "speaker"}
+    if entity_id:
+        rows = session.exec(
+            select(DeviceAssignment).where(
+                DeviceAssignment.device_id == entity_id.strip(),
+                DeviceAssignment.revoked == False,  # noqa: E712
+            )
+        ).all()
+        owners = {r.user_id for r in rows}
+        if len(owners) == 1:
+            owner = session.get(User, next(iter(owners)))
+            if chosen(owner):
+                return {"voice": chosen(owner), "person": owner.username, "why": "device"}
+    return {"voice": None, "person": None, "why": "jarvis"}
 
 
 @app.get("/api/internal/validate-api-key")
@@ -8136,6 +8189,25 @@ def infer_mobile_kind(form_factor: str | None, model: str | None) -> str:
     if m and _TABLET_MODEL_RE.search(m):
         return "tablet"
     return "phone"
+
+
+#: Set once the voices nobody chose have been cleared (see below).
+_VOICE_MIGRATION_KEY = "migration_unchosen_voices_v1"
+
+
+def _migrate_unchosen_voices(session: Session) -> None:
+    """Every account was stored with "af_heart" as its voice before anyone could
+    choose one (there was no picker), which is not a choice: clear it once so
+    those people hear Jarvis's own voice. Runs one time only, so a person who
+    later picks af_heart keeps it."""
+    if session.exec(select(GlobalSetting).where(GlobalSetting.key == _VOICE_MIGRATION_KEY)).first():
+        return
+    for user in session.exec(select(User).where(User.preferred_tts_voice == "af_heart")).all():
+        user.preferred_tts_voice = None
+        session.add(user)
+    session.add(GlobalSetting(key=_VOICE_MIGRATION_KEY, value="done",
+                              description="Voices stored before people could choose one were cleared"))
+    session.commit()
 
 
 def _migrate_device_kinds(session: Session) -> None:
