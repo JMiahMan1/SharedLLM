@@ -37,6 +37,7 @@ public class MainActivity extends BridgeActivity {
         // "plugin is not implemented on android".
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(StepSyncPlugin.class);
+        registerPlugin(BelovedRemindersPlugin.class);
         registerPlugin(TokenBridgePlugin.class);
         registerPlugin(ApkInstallPlugin.class);
         registerPlugin(LocationTrackingPlugin.class);

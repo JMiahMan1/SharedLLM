@@ -69,6 +69,7 @@ from services.gateway import helper_routes
 from services.gateway import dashboard_routes
 from services.gateway import todo_routes
 from services.gateway import private_chat
+from services.gateway import beloved as beloved_routes
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
 )
@@ -953,6 +954,7 @@ app.include_router(phone_routes.router)  # Phones: companion app and Jarvis sens
 app.include_router(room_presence.router)  # Room detection: phone beacons and the room map
 app.include_router(dashboard_routes.router)  # Rooms, Energy, History, Climate pages
 app.include_router(todo_routes.router)
+app.include_router(beloved_routes.router)  # Beloved: the couple's page inside the private chat (one father, one mother)
 app.include_router(private_chat.router)  # Private chat: the parents' end-to-end encrypted conversation  # Lists: the hub's to-do lists for every member
 app.include_router(automation_routes.router)  # Automations and schedules
 app.include_router(helper_routes.router)  # Helpers (toggles, numbers, timers...) kept by the hub

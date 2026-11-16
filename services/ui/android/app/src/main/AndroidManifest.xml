@@ -408,6 +408,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- Beloved's special-day reminders, set on the phone (the server cannot read the dates). -->
+        <receiver
+            android:name=".BelovedReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

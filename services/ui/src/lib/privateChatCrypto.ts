@@ -342,6 +342,27 @@ export async function sealMessage(key: CryptoKey, payload: PrivatePayload): Prom
   return `${SEALED_LINE}\n\n${FENCE}\n${JSON.stringify(envelope)}\n${FENCE}`;
 }
 
+/**
+ * Any JSON record sealed in the same envelope as a message (Beloved's records,
+ * services/gateway/beloved.py). The server can only check its shape.
+ */
+export async function sealRecord(key: CryptoKey, record: object): Promise<string> {
+  const { iv, ct } = await encrypt(key, encoder.encode(JSON.stringify(record)));
+  const envelope = { kind: 'sealed', title: 'Encrypted message', v: SEALED_VERSION, iv: toBase64(iv), ct: toBase64(ct) };
+  return `${SEALED_LINE}\n\n${FENCE}\n${JSON.stringify(envelope)}\n${FENCE}`;
+}
+
+/** A sealed record's JSON, or null when it is not sealed, was made with another key, or was tampered with. */
+export async function openRecord(key: CryptoKey, raw: string | null | undefined): Promise<unknown> {
+  const sealed = readSealed(raw);
+  if (!sealed) return null;
+  try {
+    return JSON.parse(decoder.decode(await decrypt(key, fromBase64(sealed.iv), fromBase64(sealed.ct)))) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /** The sealed envelope in a raw Talk message, or null when it carries none. */
 export function readSealed(raw: string | null | undefined): Sealed | null {
   const message = String(raw ?? '');
@@ -484,6 +505,15 @@ export class PrivateVault {
 
   async open(raw: string | null | undefined): Promise<PrivatePayload | null> {
     return openMessage(this.need(), raw);
+  }
+
+  /** Seal any record (Beloved) with the chat's key. */
+  async sealRecord(record: object): Promise<string> {
+    return sealRecord(this.need(), record);
+  }
+
+  async openRecord(raw: string | null | undefined): Promise<unknown> {
+    return openRecord(this.need(), raw);
   }
 
   async encrypt(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {

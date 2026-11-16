@@ -3,7 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Camera, Heart, Check, CheckCheck, Fingerprint, Images, MessageSquare, ImageIcon, KeyRound, Loader2, Lock, SendHorizontal, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useHaptics } from '../../hooks/useHaptics';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import { IMAGE_TYPES, PrivateVault, isSealedMessage, type PrivatePayload } from '../../lib/privateChatCrypto';
@@ -15,6 +15,9 @@ import { keyFromDevice } from '../../lib/privateChatDeviceUnlock';
 import PrivateChatSecurity from './PrivateChatSecurity';
 import PrivateCamera from './PrivateCamera';
 import PrivateGallery from './PrivateGallery';
+import BelovedPage from './beloved/BelovedPage';
+import { Lily } from './beloved/BelovedArt';
+import { canSeeBeloved } from '../../lib/beloved/access';
 import { noSave, usePrivatePicture } from './usePrivatePicture';
 import EnvelopeBody from './EnvelopeBody';
 import {
@@ -77,6 +80,9 @@ export default function PrivateChatThread({
   const [opened, setOpened] = useState<Record<string, Opened>>({});
   const [secure, setSecure] = useState<SecureState | 'pending'>('pending');
   const token = conversation.token;
+  // Beloved, the couple's page: only for the father and mother of this chat (the server checks again).
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000, enabled: info?.beloved === true });
+  const belovedAllowed = canSeeBeloved(me, info);
   // The phone's lock is offered by itself once per opening of the chat, never again after a lock.
   const autoPrompted = useRef(false);
 
@@ -162,6 +168,7 @@ export default function PrivateChatThread({
       myActorIds={myActorIds}
       vault={vault}
       secure={secure}
+      belovedAllowed={belovedAllowed}
       onChanged={onChanged}
     />
   );
@@ -335,15 +342,19 @@ interface UnlockedChatProps {
   myActorIds: ReadonlySet<string>;
   vault: PrivateVault;
   secure: SecureState | 'pending';
+  /** Whether the signed-in parent may open Beloved here (one father and one mother). */
+  belovedAllowed: boolean;
   onChanged: () => void;
 }
 
-function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, onChanged }: UnlockedChatProps) {
+function UnlockedChat({ partnerName, token, conversation, messages, opened, myActorIds, vault, secure, belovedAllowed, onChanged }: UnlockedChatProps) {
   const queryClient = useQueryClient();
   const [securityOpen, setSecurityOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   // The gallery, opened on one picture (a comment's) or on the grid.
   const [gallery, setGallery] = useState<{ blob?: string } | null>(null);
+  // A heart or love note notice opens the chat with ?beloved=1: straight to Beloved once unlocked.
+  const [beloved, setBeloved] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('beloved') === '1');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [nudging, setNudging] = useState(false);
@@ -507,6 +518,18 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
               <BellRing size={14} aria-hidden />
             )}{' '}
             {nudgeSent ? 'Nudged' : 'Nudge'}
+          </button>
+        )}
+        {belovedAllowed && (
+          <button
+            type="button"
+            onClick={() => setBeloved(true)}
+            aria-label="Beloved"
+            title="Beloved"
+            data-testid="private-beloved-open"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/10"
+          >
+            <Lily size={15} /> <span className="hidden sm:inline">Beloved</span>
           </button>
         )}
         <button
@@ -725,6 +748,7 @@ function UnlockedChat({ partnerName, token, conversation, messages, opened, myAc
           onDelete={removeById}
         />
       )}
+      {beloved && belovedAllowed && <BelovedPage token={token} vault={vault} onClose={() => setBeloved(false)} />}
       {cameraOpen && (
         <PrivateCamera
           onClose={() => setCameraOpen(false)}

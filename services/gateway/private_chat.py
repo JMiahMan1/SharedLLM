@@ -182,6 +182,8 @@ class Store:
         path.unlink(missing_ok=True)
         shutil.rmtree(self._blob_dir(token), ignore_errors=True)
         shutil.rmtree(self._gallery_dir(token), ignore_errors=True)
+        # Beloved, the couple's page (services/gateway/beloved.py), goes with the chat.
+        shutil.rmtree(self.root / "beloved" / token, ignore_errors=True)
 
     def _gallery_dir(self, token: str) -> Path:
         self._chat_path(token)  # validates the token
@@ -287,6 +289,21 @@ def is_parent(person: dict[str, Any] | None) -> bool:
         and not person.get("is_system_default")
         and person.get("nextcloud_user")
     )
+
+
+#: The two family roles a married couple is made of (Beloved, services/gateway/beloved.py).
+COUPLE_ROLES = ("father", "mother")
+
+
+def is_couple(chat: dict[str, Any], people: dict[str, dict[str, Any]]) -> bool:
+    """Whether a private chat is between one father and one mother, both still parents."""
+    members = [str(m) for m in chat.get("members", [])]
+    if len(members) != 2 or len(set(members)) != 2:
+        return False
+    found = [people.get(m) for m in members]
+    if not all(is_parent(p) for p in found):
+        return False
+    return sorted(str((p or {}).get("family_role")) for p in found) == sorted(COUPLE_ROLES)
 
 
 def _display(person: dict[str, Any]) -> str:
@@ -399,6 +416,8 @@ def _public(chat: dict[str, Any], me: str, people: dict[str, dict[str, Any]]) ->
         "partner_name": _display(people.get(partner) or {"username": partner}),
         "created_by": chat["created_by"],
         "created_at": chat["created_at"],
+        # Whether this chat may open Beloved (one father and one mother); the routes check it again.
+        "beloved": is_couple(chat, people),
         **_public_key(chat),
     }
 

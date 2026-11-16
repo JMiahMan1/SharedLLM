@@ -15,6 +15,8 @@ export interface PrivateChatInfo {
   kdf: { name: 'PBKDF2-SHA256'; salt: string; iterations: number };
   wrapped_key?: { iv: string; ct: string };
   verifier: { iv: string; ct: string };
+  /** The chat is one father and one mother, so it has Beloved, the couple's page (the server checks again). */
+  beloved?: boolean;
 }
 
 export interface PrivateChatStatus {
