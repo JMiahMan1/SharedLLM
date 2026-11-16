@@ -142,7 +142,7 @@ fingerprint of a public file, goes out. At most one lookup per
 `MALWAREBAZAAR_TTL_DAYS` (7), a hit is kept.
 
 The key is the `malwarebazaar_auth_key` global setting (free at
-auth.abuse.ch; Admin > Database & Audit > Global Settings). It is a secret:
+auth.abuse.ch; Admin > Users & Devices > App checks). It is a secret:
 identity shows it to the UI only as `***`, saving `***` back keeps it, it is
 never logged and never in any card. With no key nothing is asked and every
 app's `malware_check` says `not_set_up` ("add an abuse.ch Auth-Key"); a
@@ -157,7 +157,7 @@ is older than the check).
 
 | Setting | Default | Where | What |
 |---|---|---|---|
-| `app_vetting_common_sense_enabled` | `true` | identity global setting (Admin > Database & Audit > Global Settings) | Common Sense Media lookups on or off |
+| `app_vetting_common_sense_enabled` | `true` | identity global setting (Admin > Users & Devices > App checks) | Common Sense Media lookups on or off |
 | `malwarebazaar_auth_key` | empty | identity global setting (same place), secret | abuse.ch Auth-Key for the malware check |
 | `COMMON_SENSE_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 20, 30, 900, 86400 | telemetry environment, read at start | Common Sense pacing |
 | `MALWAREBAZAAR_MIN_INTERVAL_S`, `_TTL_DAYS`, `_BACKOFF_BASE_S`, `_BACKOFF_MAX_S` | 5, 7, 600, 86400 | telemetry environment, read at start | MalwareBazaar pacing |

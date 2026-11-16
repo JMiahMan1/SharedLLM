@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AppWindow, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
+import { AppWindow, ChevronDown, ChevronUp, ExternalLink, Settings2, Star } from 'lucide-react';
 import { api } from '../../services/api';
 import { errorText } from '../../lib/errorText';
 import {
   LEVEL_STYLES,
   LEVEL_WORDS,
+  commonSenseChip,
   factChips,
+  malwareWords,
+  reviewsReadWords,
   lookupWords,
   sinceWords,
   sizeWords,
@@ -60,6 +63,103 @@ function Chips({ words }: { words: string[] }) {
 
 type Run = (label: string, fn: () => Promise<unknown>) => void;
 
+const SOURCE_WORDS: Record<string, string> = { relevant: 'Most relevant', newest: 'Newest', lowest: 'Low rated' };
+
+/** The security scan: stalkerware, malware, and risky access, most serious first. */
+function SecurityFindings({ app }: { app: AppVerdict }) {
+  const malware = malwareWords(app.malware_check);
+  if (!(app.security || []).length && !malware) return null;
+  return (
+    <section className="min-w-0 space-y-1.5" aria-label="Security" data-testid={`app-security-${app.package}`}>
+      <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Security</h5>
+      {(app.security || []).length > 0 && (
+        <ul className="space-y-1">
+          {(app.security || []).map((f) => (
+            <li key={`${f.check}-${f.key}`} className="flex min-w-0 items-start gap-1.5">
+              <LevelBadge level={f.severity} />
+              <span className="min-w-0 break-words text-slate-300">{f.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {malware && (
+        <p className={`break-words ${app.malware_check?.state === 'malware' ? 'font-semibold text-red-200' : 'text-slate-400'}`}>
+          {malware}
+          {app.malware_check?.link && (
+            <> · <a href={app.malware_check.link} target="_blank" rel="noreferrer" className="underline decoration-dotted">details</a></>
+          )}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Common Sense Media's review: its age, what parents need to know, and what parents and kids say. */
+function CommonSenseReview({ app }: { app: AppVerdict }) {
+  const cs = app.common_sense;
+  if (!cs || cs.status !== 'found') return null;
+  const over = app.common_sense_over_age;
+  return (
+    <section className="min-w-0 space-y-1.5 rounded-lg border border-white/5 bg-white/[0.02] p-2" aria-label="Common Sense Media" data-testid={`app-common-sense-${app.package}`}>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="font-semibold text-slate-100">Common Sense Media</span>
+        {cs.age_label && (
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${over ? 'border-amber-400/40 text-amber-100' : 'border-white/10 text-slate-300'}`}>
+            {cs.age_label}{over && app.common_sense_limit != null ? ` (limit ${app.common_sense_limit})` : ''}
+          </span>
+        )}
+        {cs.quality_stars != null && (
+          <span className="inline-flex items-center gap-0.5 text-[11px] text-slate-400" aria-label={`${cs.quality_stars} of 5 for quality`}>
+            <Star size={11} aria-hidden /> {cs.quality_stars}/5
+          </span>
+        )}
+      </div>
+      {cs.parents_need_to_know && <p className="break-words leading-relaxed text-slate-300">{cs.parents_need_to_know}</p>}
+      {(cs.parents_say || cs.kids_say) && (
+        <p className="text-slate-400">
+          {cs.parents_say && `Parents say age ${cs.parents_say.age}+ (${cs.parents_say.reviews} reviews)`}
+          {cs.parents_say && cs.kids_say && ' · '}
+          {cs.kids_say && `Kids say age ${cs.kids_say.age}+ (${cs.kids_say.reviews} reviews)`}
+        </p>
+      )}
+      {cs.url && (
+        <a href={cs.url} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 text-sky-300 underline decoration-dotted pointer-coarse:min-h-11">
+          Read the full review <ExternalLink size={12} aria-hidden />
+        </a>
+      )}
+    </section>
+  );
+}
+
+/** The Play reviews the household model's concerns rest on, word for word (never who wrote them). */
+function ReviewExcerpts({ app }: { app: AppVerdict }) {
+  const read = reviewsReadWords(app.reviews_read);
+  // A quote a concern already shows is not repeated here.
+  const quoted = new Set(app.concerns.flatMap((c) => c.evidence || []).map((q) => q.trim().toLowerCase()));
+  const excerpts = (app.review_excerpts || []).filter((r) => !quoted.has(r.text.trim().toLowerCase()));
+  if (!excerpts.length && !read) return null;
+  return (
+    <section className="min-w-0 space-y-1.5" aria-label="What reviewers said" data-testid={`app-reviews-${app.package}`}>
+      {excerpts.length > 0 && (
+        <>
+          <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">More from the reviews</h5>
+          <ul className="space-y-1.5">
+            {excerpts.map((r) => (
+              <li key={`${r.source}-${r.at}-${r.text.slice(0, 40)}`} className="min-w-0 border-l-2 border-white/10 pl-2">
+                <p className="break-words italic text-slate-300">&ldquo;{r.text}&rdquo;</p>
+                <p className="text-[11px] text-slate-500">
+                  {r.stars} star{r.stars === 1 ? '' : 's'}{r.at ? ` · ${r.at}` : ''} · {SOURCE_WORDS[r.source] || r.source}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {read && <p className="text-[11px] text-slate-500">{read}</p>}
+    </section>
+  );
+}
+
 /** One app's detail: why, the review, the listing's facts, and what a parent can do. */
 function AppDetail({ app, policy, name, run, busy }: { app: AppVerdict; policy: AppPolicy; name: string; run: Run; busy: boolean }) {
   const username = policy.username;
@@ -87,6 +187,9 @@ function AppDetail({ app, policy, name, run, busy }: { app: AppVerdict; policy: 
           ))}
         </ul>
       )}
+      <SecurityFindings app={app} />
+      <CommonSenseReview app={app} />
+      <ReviewExcerpts app={app} />
       <dl className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-slate-400 sm:grid-cols-2">
         {app.developer && <div className="min-w-0 break-words"><dt className="inline">By </dt><dd className="inline text-slate-300">{app.developer}</dd></div>}
         {app.stars != null && <div><dt className="inline">Stars </dt><dd className="inline text-slate-300">{app.stars.toFixed(1)}{app.installs ? ` · ${app.installs} installs` : ''}</dd></div>}
@@ -193,7 +296,7 @@ function AppRow({ app, policy, name, run, busy, open, onToggle }: {
             </span>
           )}
           {!flagged && status && <span className="block text-[11px] text-slate-400">{status}</span>}
-          <Chips words={factChips(app)} />
+          <Chips words={[...factChips(app), commonSenseChip(app.common_sense)].filter((w): w is string => !!w)} />
         </span>
         {open ? <ChevronUp size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden /> : <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden />}
       </button>
@@ -358,6 +461,13 @@ export default function AppsCard({ username, name }: { username: string; name: s
               Google Play lookups are paused until {new Date(data.lookups.paused_until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} after Google did not answer. Apps already checked are shown.
             </p>
           )}
+          {(data.lookups.malware?.state === 'not_set_up' || data.lookups.malware?.state === 'key_rejected') && (
+            <p className="rounded-xl border border-white/10 bg-white/[0.02] p-2.5 text-[11px] text-slate-400" data-testid="apps-malware-setup">
+              {data.lookups.malware.state === 'key_rejected'
+                ? 'abuse.ch refused the malware check key. An admin can replace it in Admin > Users & Devices > App checks.'
+                : 'The malware check is not set up. An admin adds an abuse.ch key in Admin > Users & Devices > App checks.'}
+            </p>
+          )}
           {data.devices.length === 0 ? (
             <p className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs text-slate-400" data-testid="apps-card-none">
               No apps reported yet. {name}&apos;s Android device sends its list once it runs a Jarvis update with app checks.
@@ -391,6 +501,15 @@ export default function AppsCard({ username, name }: { username: string; name: s
               </section>
               {data.unused.length > 0 && <UnusedList unused={data.unused} policy={policy} name={name} run={run} busy={busy} />}
             </>
+          )}
+          {data.stalkerware_list && (
+            <p className="break-words text-[10px] leading-relaxed text-slate-500" data-testid="apps-attribution">
+              Stalkerware matches use{' '}
+              <a href={data.stalkerware_list.source} target="_blank" rel="noreferrer" className="underline decoration-dotted">
+                {(data.stalkerware_list.attribution || 'Stalkerware Indicators').split(', http')[0]}
+              </a>{' '}
+              ({(data.stalkerware_list.license || '').split(' (')[0]}).
+            </p>
           )}
         </div>
       )}

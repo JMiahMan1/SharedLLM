@@ -58,6 +58,7 @@ import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard
 import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import { RolesPanel } from '../components/admin/RolesPanel';
 import FamilyPanel from '../components/settings/FamilyPanel';
+import AppChecksPanel from '../components/admin/AppChecksPanel';
 import { HomeAlertsPanel } from '../components/admin/HomeAlertsPanel';
 import { WeatherRemindersPanel } from '../components/admin/WeatherRemindersPanel';
 import { WeatherIntegrationsPanel } from '../components/admin/WeatherIntegrationsPanel';
@@ -958,6 +959,8 @@ const Admin = () => {
           <RolesPanel users={users} />
 
           <FamilyPanel />
+
+          <AppChecksPanel />
 
           <section className="glass-panel p-4 sm:p-6 min-w-0 overflow-hidden" data-testid="admin-stars">
             <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">

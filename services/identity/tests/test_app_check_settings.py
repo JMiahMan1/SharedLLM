@@ -30,7 +30,7 @@ def test_both_settings_are_seeded_with_where_to_edit_them():
     assert seeded[KEY]["value"] == ""
     assert seeded["app_vetting_common_sense_enabled"]["value"] == "true"
     for key in (KEY, "app_vetting_common_sense_enabled"):
-        assert "Admin > Database & Audit > Global Settings" in seeded[key]["description"]
+        assert "Admin > Users & Devices > App checks" in seeded[key]["description"]
         assert "\u2014" not in seeded[key]["description"] and "\u2013" not in seeded[key]["description"]
 
 

@@ -130,3 +130,46 @@ export function shouldSendInventory(
   if (!last || last.user !== user) return true;
   return last.fingerprint !== fingerprint || now - last.at >= INVENTORY_REFRESH_MS;
 }
+
+/** One line for the MalwareBazaar check of an app, or null when there is nothing to say. */
+export function malwareWords(check: AppVerdict['malware_check']): string | null {
+  if (!check) return null;
+  switch (check.state) {
+    case 'malware':
+      return `Known malware on abuse.ch MalwareBazaar${check.signature ? ` (${check.signature})` : ''}`;
+    case 'not_known':
+      return 'Not a known malware file (abuse.ch MalwareBazaar)';
+    case 'checking':
+      return 'Malware check queued';
+    case 'not_set_up':
+      // Said once for the whole card, not under every app.
+      return null;
+    case 'skipped':
+      return check.reason || 'The device could not fingerprint this app, so it was not checked for malware';
+    case 'no_hash':
+      return 'Not checked for malware yet: the device needs the latest Jarvis update';
+    case 'error':
+      return `Malware check failed${check.reason ? `: ${check.reason}` : ''}`;
+    default:
+      return null;
+  }
+}
+
+/** "Read 47 reviews: 20 most relevant, 15 newest, 12 one and two star", or null before any were read. */
+export function reviewsReadWords(read: AppVerdict['reviews_read']): string | null {
+  if (!read || !('state' in read)) return null;
+  const total = read.relevant + read.newest + read.lowest;
+  if (!total) return read.state === 'reading' ? 'Reading reviews' : null;
+  const parts = [
+    read.relevant ? `${read.relevant} most relevant` : '',
+    read.newest ? `${read.newest} newest` : '',
+    read.lowest ? `${read.lowest} one and two star` : '',
+  ].filter(Boolean);
+  const more = read.state === 'reading' ? '; reading more' : '';
+  return `Read ${total} review${total === 1 ? '' : 's'}: ${parts.join(', ')}${more}`;
+}
+
+/** "Common Sense age 13+" as a chip when Common Sense Media reviewed the app. */
+export function commonSenseChip(cs: AppVerdict['common_sense']): string | null {
+  return cs?.status === 'found' && cs.age != null ? `Common Sense ${cs.age_label || `age ${cs.age}+`}` : null;
+}

@@ -565,8 +565,8 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "image_edit_steps", "value": "", "description": "Sampling steps for image edits (1-100). Empty uses the model default (20). The rapid edit models are made for about 4 to 8 steps."},
 
     # --- APP VETTING CHECKS (docs/APP_VETTING.md) ---
-    {"key": "malwarebazaar_auth_key", "value": "", "description": "abuse.ch Auth-Key (free at auth.abuse.ch) for the app malware check: the SHA-256 of each app file on a child's device is looked up on MalwareBazaar. Empty: the Apps card says the check is not set up. A secret: kept server-side, never shown to the UI. Edit in Admin > Database & Audit > Global Settings."},
-    {"key": "app_vetting_common_sense_enabled", "value": "true", "description": "Look each app on a child's device up on Common Sense Media (only the app's name is sent) and use its age rating next to the Play rating, the stricter one deciding. false turns it off. Edit in Admin > Database & Audit > Global Settings."},
+    {"key": "malwarebazaar_auth_key", "value": "", "description": "abuse.ch Auth-Key (free at auth.abuse.ch) for the app malware check: the SHA-256 of each app file on a child's device is looked up on MalwareBazaar. Empty: the Apps card says the check is not set up. A secret: kept server-side, never shown to the UI. Edit in Admin > Users & Devices > App checks."},
+    {"key": "app_vetting_common_sense_enabled", "value": "true", "description": "Look each app on a child's device up on Common Sense Media (only the app's name is sent) and use its age rating next to the Play rating, the stricter one deciding. false turns it off. Edit in Admin > Users & Devices > App checks."},
 
     # --- SPOTIFY LINKING (Phase 11, music everywhere; docs/HEALTH_HUB.md) ---
     # The household's own app at developer.spotify.com. All three empty: linking says "not configured".

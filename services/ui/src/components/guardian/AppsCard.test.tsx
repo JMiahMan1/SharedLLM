@@ -43,7 +43,7 @@ describe('AppsCard', () => {
     const all = screen.getByTestId('apps-all');
     expect(within(all).getByText('Example')).toBeInTheDocument();
     expect(within(all).getByText('Checking its Play listing and reviews')).toBeInTheDocument();
-    expect(screen.getByText('1 need a look')).toBeInTheDocument();
+    expect(screen.getByText('2 need a look')).toBeInTheDocument();
   });
 
   it('opens an app to show the review and keeps it once reviewed', async () => {
@@ -69,6 +69,25 @@ describe('AppsCard', () => {
     await waitFor(() => expect(posted).toContainEqual({ path: 'action', body: { package: 'com.example.blockworld', action: 'remove' } }));
     fireEvent.click(within(detail).getByRole('button', { name: 'Always allow' }));
     await waitFor(() => expect(posted).toContainEqual({ path: 'override:com.example.blockworld', body: { mode: 'allow' } }));
+  });
+
+  it('shows the security scan, Common Sense Media and the reviews behind a concern', async () => {
+    renderWithProviders(<AppsCard username="kid" name="Sam" />);
+    expect(await screen.findByTestId('apps-malware-setup')).toHaveTextContent('Admin > Users & Devices > App checks');
+    fireEvent.click(await screen.findByRole('button', { name: /^Helper/ }));
+    const sec = screen.getByTestId('app-security-com.example.helper');
+    expect(sec).toHaveTextContent('and it is switched on');
+    expect(sec).not.toHaveTextContent('Malware check');
+    fireEvent.click(screen.getByRole('button', { name: /Block World/ }));
+    const cs = screen.getByTestId('app-common-sense-com.example.blockworld');
+    expect(cs).toHaveTextContent('age 13+ (limit 10)');
+    expect(cs).toHaveTextContent('Kids say age 11+ (25 reviews)');
+    expect(within(cs).getByRole('link', { name: /Read the full review/ })).toHaveAttribute('href', expect.stringContaining('commonsensemedia.org'));
+    // The quote the concern shows is not repeated; the count of what was read is.
+    const reviews = screen.getByTestId('app-reviews-com.example.blockworld');
+    expect(reviews).not.toHaveTextContent('More from the reviews');
+    expect(reviews).toHaveTextContent('Read 47 reviews');
+    expect(screen.getByTestId('apps-attribution')).toHaveTextContent('Echap');
   });
 
   it('lists apps not used lately with what each button does', async () => {

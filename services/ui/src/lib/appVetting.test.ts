@@ -81,3 +81,30 @@ describe('when the device sends its app list', () => {
     expect(shouldSendInventory(last, 'x', 'sib', NOW + 60_000)).toBe(true);
   });
 });
+
+describe('the outside checks in words', () => {
+  it('says what MalwareBazaar found, and nothing per app when the key is missing (the card says it once)', async () => {
+    const { malwareWords } = await import('./appVetting');
+    expect(malwareWords({ state: 'malware', reason: null, signature: 'SpyNote' })).toBe('Known malware on abuse.ch MalwareBazaar (SpyNote)');
+    expect(malwareWords({ state: 'not_known', reason: null })).toBe('Not a known malware file (abuse.ch MalwareBazaar)');
+    expect(malwareWords({ state: 'not_set_up', reason: 'x' })).toBeNull();
+    expect(malwareWords({ state: 'no_hash', reason: null })).toMatch(/latest Jarvis update/);
+    expect(malwareWords(null)).toBeNull();
+  });
+
+  it('counts the reviews read by kind', async () => {
+    const { reviewsReadWords } = await import('./appVetting');
+    expect(reviewsReadWords({ relevant: 20, newest: 15, lowest: 12, state: 'done', errors: {} }))
+      .toBe('Read 47 reviews: 20 most relevant, 15 newest, 12 one and two star');
+    expect(reviewsReadWords({ relevant: 1, newest: 0, lowest: 0, state: 'reading', errors: {} }))
+      .toBe('Read 1 review: 1 most relevant; reading more');
+    expect(reviewsReadWords({})).toBeNull();
+  });
+
+  it("shows Common Sense's age as a chip only when it reviewed the app", async () => {
+    const { commonSenseChip } = await import('./appVetting');
+    expect(commonSenseChip({ status: 'found', reason: null, age: 13, age_label: 'age 13+' })).toBe('Common Sense age 13+');
+    expect(commonSenseChip({ status: 'not_found', reason: null })).toBeNull();
+    expect(commonSenseChip(null)).toBeNull();
+  });
+});
