@@ -29,9 +29,13 @@ final class ActionButtonFit {
     static final int MAX_LINES = 2;
     static final int MAX_SMALL_LINES = 3;
     /** The on/off line shows only while the button still fills this share of the cell. */
-    static final float STATE_SHARE = 0.7f;
-    /** The glyph's share of the button. */
-    static final float GLYPH = 0.62f;
+    static final float STATE_SHARE = 0.8f;
+    /**
+     * The glyph's share of the button. Material icons keep a margin inside
+     * their own 24dp box (the shape is about 20dp), so this leaves the drawn
+     * shape at about 60% of the circle.
+     */
+    static final float GLYPH = 0.72f;
     static final float MAX_BUTTON = 132f;
 
     final float button;

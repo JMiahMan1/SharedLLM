@@ -56,9 +56,15 @@ public class ActionButtonWidget extends AppWidgetProvider {
             state.isEmpty() ? label : label + ": " + state);
     }
 
-    /** The widget sizes (dp) a layout is made for: a 1x1 cell on small and large launchers up to 3x3. */
+    /**
+     * The widget sizes (dp) a layout is made for. Launchers pick the largest
+     * that fits, so one-cell sizes are close together (the Pixel launcher's
+     * 1x1 is 82x96, One UI's about 80x100): a coarse step left a third of the
+     * cell unused. Android allows at most 16.
+     */
     private static final float[][] SIZES = {
-        {40, 40}, {56, 64}, {64, 76}, {72, 88}, {84, 100}, {100, 120}, {124, 150}, {160, 190}, {200, 240},
+        {40, 40}, {56, 64}, {64, 76}, {72, 88}, {76, 90}, {80, 94}, {82, 96}, {86, 100}, {90, 106},
+        {96, 114}, {100, 120}, {124, 150}, {160, 190}, {200, 240},
     };
 
     static RemoteViews build(Context context, int appWidgetId) {

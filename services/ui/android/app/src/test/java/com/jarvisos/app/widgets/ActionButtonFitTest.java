@@ -19,6 +19,16 @@ public class ActionButtonFitTest {
     }
 
     @Test
+    public void onThePixelLaunchersOneCellTheButtonIsAppIconSized() {
+        // Measured on the Pixel launcher: a 1x1 widget is 82x96dp.
+        ActionButtonFit f = ActionButtonFit.of(82, 96, "Garage door", "Closed");
+        assertTrue(f.label);
+        assertEquals(1, f.lines);
+        assertFalse(f.state);
+        assertTrue(f.button >= 70f);
+    }
+
+    @Test
     public void theNameIsNeverCutItWrapsThenShrinks() {
         // At a one-cell size every name shows: two lines at 12sp, else up to three at 10sp.
         for (String name : new String[] {"Office lamp", "Living room ceiling fan", "Christmas lights outside"}) {

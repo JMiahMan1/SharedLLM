@@ -16,6 +16,15 @@ const source = readFileSync(
   'utf8',
 );
 
+/**
+ * What runs when a stored session is restored: `initAuth`, and the
+ * `signedIn` step it calls once the server confirms the key (declared just
+ * before it). Both, so moving a call between them keeps the pin honest.
+ */
+const initAuth = source.slice(source.indexOf('const initAuth = async'), source.indexOf('const logout'));
+const signedInStep = source.slice(source.indexOf('const signedIn = async'), source.indexOf('const initAuth = async'));
+const restore = initAuth.includes('await signedIn(') ? signedInStep + initAuth : initAuth;
+
 describe('device registration is wired into both ways of having a session', () => {
   it('registers on an explicit login', () => {
     // `logout` is declared *before* `login`, so anchor the slice from login
@@ -25,11 +34,7 @@ describe('device registration is wired into both ways of having a session', () =
   });
 
   it('registers when a stored session is restored', () => {
-    const init = source.slice(
-      source.indexOf('const initAuth = async'),
-      source.indexOf('const logout'),
-    );
-    expect(init).toMatch(/void registerThisDevice\(\)/);
+    expect(restore).toMatch(/void registerThisDevice\(\)/);
   });
 
   it('never awaits registration, so it cannot block or fail a session', () => {
@@ -44,13 +49,15 @@ describe('the native location service gets credentials on a restored session too
   // The background location service reads the key, server and username from
   // TokenBridge. Only an explicit login used to fill it, so a phone signed in
   // from before the service existed tracked nothing while the app was closed.
-  const init = source.slice(source.indexOf('const initAuth = async'), source.indexOf('const logout'));
-
   it('mirrors the stored credentials on restore', () => {
-    expect(init).toMatch(/void mirrorNativeCredentials\(\)/);
+    expect(restore).toMatch(/void mirrorNativeCredentials\(\)/);
   });
 
   it('mirrors the username on restore', () => {
-    expect(init).toMatch(/void mirrorIdentity\(profile\.username\)/);
+    expect(restore).toMatch(/void mirrorIdentity\(profile\.username\)/);
+  });
+
+  it('restoring a session really goes through that step', () => {
+    expect(initAuth).toMatch(/await signedIn\(storedToken, profile\)/);
   });
 });

@@ -206,6 +206,9 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
   // The call list is also asked for with ?device_key= (CallContext); a glob without a query misses that.
   await page.route((url: URL) => url.pathname === '/api/communication/calls', (route) => route.fulfill({ json: { calls: [] } }));
 
+  // The deploy banner asks every page whether a deploy is running; no file means none (as homeMocks answers).
+  await page.route((url: URL) => url.pathname === '/api/deploy-status', (route) => route.fulfill({ status: 404, body: '' }));
+
   await page.route('**/api/raven/missions', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/admin/services/updates', (route) =>
     route.fulfill({ json: { checked: 0, updates_available: 0, services: [] } }),
