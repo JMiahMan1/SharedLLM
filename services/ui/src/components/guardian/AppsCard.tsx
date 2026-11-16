@@ -505,7 +505,7 @@ export default function AppsCard({ username, name }: { username: string; name: s
           {data.stalkerware_list && (
             <p className="break-words text-[10px] leading-relaxed text-slate-500" data-testid="apps-attribution">
               Stalkerware matches use{' '}
-              <a href={data.stalkerware_list.source} target="_blank" rel="noreferrer" className="underline decoration-dotted">
+              <a href={data.stalkerware_list.source} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline decoration-dotted">
                 {(data.stalkerware_list.attribution || 'Stalkerware Indicators').split(', http')[0]}
               </a>{' '}
               ({(data.stalkerware_list.license || '').split(' (')[0]}).
