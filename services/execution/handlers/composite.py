@@ -201,8 +201,16 @@ async def handle_night_mode(req) -> ExecutionResult:
     if media_entity and media_query:
         try:
             from services.execution.schemas import MediaPlayRequest
+
+            # The caller's own hub login, else the hub's once the player is theirs to use.
+            media_ctx = hardware_router.with_hub_login(ctx)
+            if media_ctx is None:
+                raise RuntimeError(hardware_router.NO_HUB_MESSAGE)
+            if media_ctx is not ctx and not await verify_entity_access(
+                    ctx, ha_client.sanitize_entity_id("media_player", media_entity)):
+                raise PermissionError(f"you may not use {media_entity}")
             media_req = MediaPlayRequest(
-                user_context=ctx,
+                user_context=media_ctx,
                 entity_id=media_entity,
                 device_name=None,
                 query=media_query,
